@@ -1,0 +1,390 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Oniks — Strike</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=block">
+<link rel="stylesheet" href="common/pc.css">
+<style>
+  .logo { left: 88px; top: 70px; }
+  .kick { left: 90px; top: 112px; }
+  .menu { left: 88px; top: 352px; display: flex; flex-direction: column; gap: 20px; }
+  .menu .it { font-size: 46px; font-weight: 500; letter-spacing: -.035em; height: 54px; }
+  .blurb { left: 128px; top: 740px; width: 400px; }
+  .keys { left: 88px; bottom: 56px; }
+  .stat { right: 88px; top: 70px; text-align: right; }
+  .stat .big { font: 400 13px var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--dim); display: flex; gap: 10px; align-items: center; justify-content: flex-end; }
+  .stat .big i { width: 8px; height: 8px; background: var(--lime); }
+  .stat .n { font: 300 56px var(--sans); letter-spacing: -.04em; margin-top: 10px; font-variant-numeric: tabular-nums; }
+  .stat .u { font: 400 11.5px var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); margin-top: 2px; }
+  .foot { right: 88px; bottom: 60px; }
+</style></head>
+<body><div id="stage">
+  <canvas id="c" class="px" width="1920" height="1080"></canvas>
+  <canvas id="o" width="1920" height="1080"></canvas>
+  <div class="ui" id="ui">
+    <div class="logo abs"><svg viewBox="0 0 24 24"><path d="M12 2 20.5 22h-4.1L12 11.4 7.6 22H3.5z" fill="#fff"/><circle cx="12" cy="18.2" r="1.7" fill="#C6F432"/></svg>Oniks</div>
+    <div class="kick abs"><i></i>Krasnaya Kosa / Coastal Defense Command</div>
+    <div class="menu abs" id="menu"></div>
+    <div class="blurb abs" id="blurb"></div>
+    <div class="keys abs"><span><b>↑↓</b>Select</span><span><b>Enter</b>Open</span><span><b>G</b>Graphics</span><span><b>Esc</b>Quit</span></div>
+    <div class="stat abs"><div class="big"><i></i><span id="scanid">Scan 01</span></div><div class="n" id="ret">0</div><div class="u">returns · <span id="objs">0</span> objects</div></div>
+    <div class="foot abs">Proto v0.5.0</div>
+  </div>
+  <div class="veil" id="veil"><div class="msg"><i></i>Standing the battery down</div></div>
+</div>
+<script src="common/m3.js"></script><script src="common/geo.js"></script><script src="common/dots.js"></script><script src="common/stage.js"></script>
+<script>
+(() => {
+const { V, R, X, E, Cam, rng, fbm } = M3;
+STAGE.fit(); STAGE.SFX.kind = 'pc';
+
+/* ---------- menu ---------- */
+const menuEl = document.getElementById('menu');
+menuEl.innerHTML = STAGE.ITEMS.map((t, i) => `<div class="it" data-item><span class="n">0${i + 1}</span><i class="sq"></i><span class="lab">${t}</span></div>`).join('');
+const veil = document.getElementById('veil');
+STAGE.menu({
+  el: menuEl, blurb: document.getElementById('blurb'),
+  onEnter(i) {
+    if (i === 4) { veil.classList.add('on'); setTimeout(() => veil.classList.remove('on'), 1900); return 2600; }
+    requestStrike(); return 1900;
+  },
+});
+
+/* ---------- scene ---------- */
+const cv = document.getElementById('c'), ov = document.getElementById('o'), octx = ov.getContext('2d');
+const pb = new PointBuf(cv, [11, 12, 10], { vignette: .6 });
+const cam = new Cam(); cam.fov = 38 * Math.PI / 180; cam.cx = 960 + 250; cam.cy = 540 + 30;
+const r0 = rng(1337);
+const TEL = GEO.tel(), RAD = GEO.radarTruck();
+const OBJ = [
+  { id: 'tel', model: TEL, st: { elev: 0, dep: 1 }, W: X.make(R.y(-1.62), [0, 0, 0]), s: .1, tag: ['OBJ 01', 'TEL · Bastion-P'], fp: [3.3, 8.6],
+    parts: { cab: ['01.1', 'Cab · crew 3'], launcher: ['01.2', 'TLC ×2 · 3M55'], chassis: ['01.3', 'Chassis 8×8'], jacks: ['01.4', 'Jacks ×4'] } },
+  { id: 'rad', model: RAD, st: { ant: 0 }, W: X.make(R.y(-2.2), [28, 0, 22]), s: .12, tag: ['OBJ 02', 'Radar · Monolith-B'], fp: [3.2, 8.4],
+    parts: { array: ['02.1', 'Array · 11 rpm'] } },
+];
+
+/* point arrays: world pos, normal, object, part, local z (for the sweep) */
+const P = [], NR = [], OB = [], PT = [], LZ = [], BR = [], DYN = [];
+const L = V.norm([-.45, .8, -.35]);
+OBJ.forEach((o, oi) => {
+  o.samp = GEO.sample(o.model, o.s, 11 + oi);
+  o.partList = [];
+  o.samp.forEach((sp, pi) => {
+    const part = sp.part, T = GEO.partXf(o.W, part, o.st), Tm = part.xf ? part.xf(o.st) : X.make();
+    const i0 = OB.length, pts = sp.pts, n = pts.length / 6;
+    for (let k = 0; k < n; k++) {
+      const lp = [pts[k * 6], pts[k * 6 + 1], pts[k * 6 + 2]], ln = [pts[k * 6 + 3], pts[k * 6 + 4], pts[k * 6 + 5]];
+      const w = X.ap(T, lp), wn = (ln[0] || ln[1] || ln[2]) ? X.dir(T, ln) : [0, 0, 0];
+      P.push(w[0], w[1], w[2]); NR.push(wn[0], wn[1], wn[2]); OB.push(oi); PT.push(pi); LZ.push(X.ap(Tm, lp)[2]);
+      BR.push((wn[0] || wn[1] || wn[2]) ? .34 + .6 * Math.max(0, V.dot(V.norm(wn), L)) : .6);
+    }
+    const info = { name: part.name, i0, i1: OB.length, part };
+    if (o.id === 'rad' && part.name === 'array') { info.local = pts; DYN.push({ o, info }); }
+    o.partList.push(info);
+  });
+});
+const NV = OB.length;
+/* ground: scan rings around the TEL plus sparse returns, gentle undulation */
+const GX = [], GZ = [], GR = [];
+for (let r = 3.4, k = 0; r < 95; r *= 1.12, k++) {
+  const step = Math.min(1.4, .22 + r * .012), n = Math.floor(2 * Math.PI * r / step), ph = r0() * 6.28;
+  for (let i = 0; i < n; i++) { const a = ph + i / n * 6.283, rr = r + (r0() - .5) * .08 * r * .1; GX.push(Math.sin(a) * rr); GZ.push(Math.cos(a) * rr); GR.push(rr); }
+}
+for (let i = 0; i < 9000; i++) { const rr = 6 + Math.pow(r0(), 1.6) * 90, a = r0() * 6.283; GX.push(Math.sin(a) * rr); GZ.push(Math.cos(a) * rr); GR.push(rr); }
+for (let i = 0; i < GX.length; i++) {
+  // skip returns under the vehicles (their bodies shadow the ground)
+  let hide = false;
+  for (const o of OBJ) { const d = [GX[i] - o.W.T[0], 0, GZ[i] - o.W.T[2]], l = R.ap([o.W.R[0], o.W.R[3], o.W.R[6], o.W.R[1], o.W.R[4], o.W.R[7], o.W.R[2], o.W.R[5], o.W.R[8]], d); if (Math.abs(l[0]) < 1.5 && Math.abs(l[2] + .4) < 6.4) hide = true; }
+  if (hide) continue;
+  const y = .12 * M3.noise(GX[i] * .08, GZ[i] * .08);
+  P.push(GX[i], y, GZ[i]); NR.push(0, 1, 0); OB.push(-1); PT.push(0); LZ.push(0);
+  BR.push(.1 + .5 * Math.exp(-GR[i] / 16) + .08 * r0());
+}
+const N = OB.length;
+const Pf = new Float32Array(P), Nf = new Float32Array(NR), OBf = new Int8Array(OB), LZf = new Float32Array(LZ), BRf = new Float32Array(BR);
+const RT = new Float32Array(N).fill(1e9), JT = new Float32Array(N); for (let i = 0; i < N; i++) JT[i] = r0();
+
+/* ---------- reveal graph: voxels per vehicle, random-weight shortest paths = branching fronts ---------- */
+const H = .3;
+function buildGraph(oi) {
+  const map = new Map(), nodes = [];
+  for (let i = 0; i < NV; i++) {
+    if (OBf[i] !== oi) continue;
+    const ix = Math.floor(Pf[i * 3] / H), iy = Math.floor(Pf[i * 3 + 1] / H), iz = Math.floor(Pf[i * 3 + 2] / H), key = ix + ',' + iy + ',' + iz;
+    let nd = map.get(key);
+    if (!nd) { nd = { id: nodes.length, ix, iy, iz, p: [0, 0, 0], m: [] }; map.set(key, nd); nodes.push(nd); }
+    nd.m.push(i); nd.p[0] += Pf[i * 3]; nd.p[1] += Pf[i * 3 + 1]; nd.p[2] += Pf[i * 3 + 2];
+  }
+  for (const nd of nodes) nd.p = nd.p.map(v => v / nd.m.length);
+  for (const nd of nodes) {
+    nd.nb = [];
+    for (let dx = -2; dx <= 2; dx++) for (let dy = -2; dy <= 2; dy++) for (let dz = -2; dz <= 2; dz++) {
+      if (!dx && !dy && !dz) continue;
+      const q = map.get((nd.ix + dx) + ',' + (nd.iy + dy) + ',' + (nd.iz + dz));
+      if (q) nd.nb.push(q.id);
+    }
+  }
+  return nodes;
+}
+OBJ.forEach((o, oi) => o.g = buildGraph(oi));
+function dijkstra(nodes, seeds, seed) {
+  const rr = rng(seed), t = new Float64Array(nodes.length).fill(1e9), par = new Int32Array(nodes.length).fill(-1);
+  const heap = [];
+  const push = (d, i) => { heap.push([d, i]); let k = heap.length - 1; while (k) { const p = (k - 1) >> 1; if (heap[p][0] <= heap[k][0]) break; [heap[p], heap[k]] = [heap[k], heap[p]]; k = p; } };
+  const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let k = 0; for (;;) { const l = 2 * k + 1, r = l + 1; let m = k; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === k) break; [heap[m], heap[k]] = [heap[k], heap[m]]; k = m; } } return top; };
+  for (const [i, d] of seeds) { if (d < t[i]) { t[i] = d; push(d, i); } }
+  // heavy-tailed edge costs: most steps cheap, a few very expensive -> the front forks into tendrils
+  const cost = new Float32Array(nodes.length); for (let i = 0; i < nodes.length; i++) cost[i] = .35 + 5 * Math.pow(rr(), 4);
+  while (heap.length) {
+    const [d, i] = pop(); if (d > t[i]) continue;
+    const a = nodes[i];
+    for (const j of a.nb) {
+      const b = nodes[j], nd = d + V.dist(a.p, b.p) * cost[j] / 17;
+      if (nd < t[j]) { t[j] = nd; par[j] = i; push(nd, j); }
+    }
+  }
+  return { t, par };
+}
+
+/* ---------- strike cycle ---------- */
+const TARGETS = [{ o: 0, p: [.66, 3.45, 1.2] }, { o: 1, p: [2.3, 11.6, -5.4] }, { o: 0, p: [-.4, 3.3, 5.1] }];
+const CYCLE = 17;
+let cyc = { start: 0, n: 0 }, forceAt = 0.6, bolt = null, sparks = [], boxes = [], nodeT = [], parT = [];
+const ui = document.getElementById('ui');
+function mkTag(cls, a, b) { const d = document.createElement('div'); d.className = 'tag off ' + cls; d.innerHTML = `<b>${a}</b><i>${b}</i>`; ui.appendChild(d); return d; }
+// boxes: model-space AABB of each part / whole vehicle, drawn oriented with the vehicle
+OBJ.forEach((o, oi) => {
+  const all = [[1e9, 1e9, 1e9], [-1e9, -1e9, -1e9]];
+  for (const pl of o.partList) {
+    const mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
+    const Tm = pl.part.xf ? pl.part.xf(o.st) : X.make();
+    const sp = o.samp.find(s => s.part === pl.part).pts;
+    for (let k = 0; k < sp.length; k += 6) { const q = X.ap(Tm, [sp[k], sp[k + 1], sp[k + 2]]); for (let c = 0; c < 3; c++) { mn[c] = Math.min(mn[c], q[c]); mx[c] = Math.max(mx[c], q[c]); all[0][c] = Math.min(all[0][c], q[c]); all[1][c] = Math.max(all[1][c], q[c]); } }
+    const lab = o.parts[pl.name];
+    if (lab) boxes.push({ oi, pl, kind: 'part', mn, mx, el: mkTag('lime', lab[0], lab[1]), dyn: pl.name === 'array' });
+  }
+  boxes.push({ oi, kind: 'obj', mn: all[0].map(v => v - .25), mx: all[1].map(v => v + .25), el: mkTag('', o.tag[0], o.tag[1]) });
+});
+
+function requestStrike() { if (cyc.start > -50 && STAGE.time - cyc.start < 3) return; forceAt = STAGE.time + .7; cyc.fadeFast = STAGE.time; }
+function makeBolt(hit, rr) {
+  const disp = (a, b, depth, rough) => {
+    let pts = [a, b];
+    for (let d = 0; d < depth; d++) {
+      const out = [pts[0]];
+      for (let i = 0; i < pts.length - 1; i++) {
+        const p = pts[i], q = pts[i + 1], l = V.dist(p, q), m = V.lerp(p, q, .5);
+        out.push([m[0] + (rr() - .5) * l * rough, m[1] + (rr() - .5) * l * rough * .4, m[2] + (rr() - .5) * l * rough], q);
+      }
+      pts = out;
+    }
+    return pts;
+  };
+  const top = [hit[0] + (rr() - .5) * 16, hit[1] + 70, hit[2] + (rr() - .5) * 16];
+  const main = disp(top, hit, 7, .72);
+  const cum = [0]; for (let i = 1; i < main.length; i++) cum.push(cum[i - 1] + V.dist(main[i - 1], main[i]));
+  const at = s => { const L = s * cum[cum.length - 1]; let i = 1; while (i < cum.length - 1 && cum[i] < L) i++; const k = (L - cum[i - 1]) / (cum[i] - cum[i - 1] || 1); return V.lerp(main[i - 1], main[i], k); };
+  const rain = []; for (let k = 0; k < 420; k++) rain.push({ s0: -rr() * .9, sp: 2.6 + rr() * 2.2, off: [(rr() - .5) * 3, (rr() - .5) * 1, (rr() - .5) * 3] });
+  const br = [];
+  for (let k = 0; k < 7; k++) {
+    const i = 8 + Math.floor(rr() * main.length * .7), s = main[i];
+    const dir = V.norm(V.add(V.sub(main[Math.min(main.length - 1, i + 3)], s), [(rr() - .5) * 9, -rr() * 2, (rr() - .5) * 9]));
+    br.push({ at: i / main.length, pts: disp(s, V.mad(s, dir, 5 + rr() * 13), 5, .55) });
+  }
+  return { main, br, at, rain };
+}
+function startCycle(t) {
+  cyc = { start: t, n: cyc.n + 1 };
+  const tg = TARGETS[(cyc.n - 1) % TARGETS.length], o = OBJ[tg.o], hit = X.ap(o.W, tg.p);
+  const rr = rng(100 + cyc.n);
+  bolt = makeBolt(hit, rr); bolt.hit = hit; bolt.tHit = .75; bolt.lead = .3;
+  const hitT = bolt.tHit + bolt.lead;
+  RT.fill(1e9);
+  // struck vehicle
+  const g = o.g; let best = 0, bd = 1e9;
+  g.forEach((nd, i) => { const d = V.dist(nd.p, hit); if (d < bd) { bd = d; best = i; } });
+  const res = dijkstra(g, [[best, hitT]], 7 + cyc.n);
+  nodeT[tg.o] = res.t; parT[tg.o] = res.par;
+  let tContact = 1e9; g.forEach((nd, i) => { if (nd.p[1] < .5) tContact = Math.min(tContact, res.t[i]); });
+  const c0 = [o.W.T[0], 0, o.W.T[2]];
+  const gph = rr() * 10;
+  const groundT = (x, z) => { const dx = x - c0[0], dz = z - c0[2], d = Math.hypot(dx, dz), a = Math.atan2(dx, dz);
+    const w = .5 + 1.9 * Math.pow(.5 + .5 * fbm(Math.cos(a) * 1.8 + gph, Math.sin(a) * 1.8, d * .025, 4), 2.2); return tContact + d / 46 * w; };
+  // other vehicle: seeded from its wheels when the ground front reaches them
+  OBJ.forEach((ob, oi) => {
+    if (oi === tg.o) return;
+    const seeds = []; ob.g.forEach((nd, i) => { if (nd.p[1] < .6) seeds.push([i, groundT(nd.p[0], nd.p[2])]); });
+    const rs = dijkstra(ob.g, seeds, 31 + cyc.n); nodeT[oi] = rs.t; parT[oi] = rs.par;
+  });
+  OBJ.forEach((ob, oi) => ob.g.forEach((nd, i) => { for (const m of nd.m) RT[m] = t + nodeT[oi][i] + JT[m] * .05; }));
+  for (let i = NV; i < N; i++) RT[i] = t + groundT(Pf[i * 3], Pf[i * 3 + 2]) + JT[i] * .04;
+  // identification: each part is boxed once 85% of its returns are in
+  for (const b of boxes) {
+    const o2 = OBJ[b.oi], idx = b.kind === 'obj' ? [o2.partList[0].i0, o2.partList[o2.partList.length - 1].i1] : [b.pl.i0, b.pl.i1];
+    const ts = []; for (let i = idx[0]; i < idx[1]; i++) ts.push(RT[i] - t); ts.sort((a, c) => a - c);
+    b.tIn = ts[Math.floor(ts.length * .85)] + .2;
+  }
+  let k = 0; boxes.filter(b => b.kind === 'part').sort((a, c) => a.tIn - c.tIn).forEach(b => { b.tIn = Math.max(b.tIn, 1.4 + k * .28); k++; });
+  OBJ.forEach((ob, oi) => { const pb2 = boxes.filter(b => b.oi === oi && b.kind === 'part'); const ob2 = boxes.find(b => b.oi === oi && b.kind === 'obj'); ob2.tIn = Math.max(ob2.tIn, ...pb2.map(b => b.tIn)) + .35; });
+  document.getElementById('scanid').textContent = 'Scan ' + String(cyc.n).padStart(2, '0');
+  sparks = [];
+}
+
+let ant = 0;
+function update(dt, t) {
+  if (t >= forceAt) { forceAt = 1e9; startCycle(t); }
+  else if (cyc.n && t - cyc.start > CYCLE) startCycle(t);
+  const c = t - cyc.start;
+  if (bolt && !bolt.fired && c >= bolt.tHit + bolt.lead) {
+    bolt.fired = true; STAGE.SFX.crack();
+    const rr = rng(cyc.n * 3);
+    for (let i = 0; i < 520; i++) { const a = rr() * 6.283, u = rr() * 2 - 1, s = 4 + rr() * 16, h = Math.sqrt(1 - u * u);
+      sparks.push({ p: bolt.hit.slice(), v: [Math.cos(a) * h * s, Math.abs(u) * s * .8 + 2, Math.sin(a) * h * s], age: 0, life: .5 + rr() * .9 }); }
+  }
+  for (const s of sparks) { s.age += dt; s.v[1] -= 22 * dt; s.p = V.mad(s.p, s.v, dt); if (s.p[1] < 0) { s.p[1] = 0; s.v[1] *= -.35; s.v[0] *= .7; s.v[2] *= .7; } }
+  sparks = sparks.filter(s => s.age < s.life);
+  // the array keeps turning
+  ant += dt * 1.15;
+  for (const { o, info } of DYN) {
+    const st = { ant }, T = GEO.partXf(o.W, info.part, st), lp = info.local;
+    for (let k = 0, i = info.i0; i < info.i1; i++, k += 6) { const w = X.ap(T, [lp[k], lp[k + 1], lp[k + 2]]); Pf[i * 3] = w[0]; Pf[i * 3 + 1] = w[1]; Pf[i * 3 + 2] = w[2];
+      const n = X.dir(T, [lp[k + 3], lp[k + 4], lp[k + 5]]); Nf[i * 3] = n[0]; Nf[i * 3 + 1] = n[1]; Nf[i * 3 + 2] = n[2]; }
+  }
+}
+
+/* ---------- render ---------- */
+const LIME = [198, 244, 50], WH = [238, 238, 228];
+let retShown = 0, lastUi = 0;
+function boxCorners(b, grow) {
+  const o = OBJ[b.oi], T = b.dyn ? GEO.partXf(o.W, b.pl.part, { ant }) : o.W;
+  let mn = b.mn, mx = b.mx;
+  if (b.dyn) { const Tm = b.pl.part.xf(o.st); /* array box in its own frame */ }
+  const c = V.mul(V.add(mn, mx), .5), h = V.mul(V.sub(mx, mn), .5 * grow);
+  const cs = [];
+  for (const sx of [-1, 1]) for (const sy of [-1, 1]) for (const sz of [-1, 1]) cs.push(X.ap(T, [c[0] + sx * h[0], c[1] + sy * h[1], c[2] + sz * h[2]]));
+  return cs;
+}
+const BEDGES = [[0, 1], [2, 3], [4, 5], [6, 7], [0, 2], [1, 3], [4, 6], [5, 7], [0, 4], [1, 5], [2, 6], [3, 7]];
+function render(t) {
+  const c = t - cyc.start;
+  const yaw = .62 + .26 * Math.sin(t * .045), pitch = .29 + .035 * Math.sin(t * .06);
+  // TEL sits right of the menu, the radar truck ~30 m behind and further right
+  cam.orbit([3.9, 3.2, 2.1], yaw, pitch, 35);
+  const fl = bolt && bolt.fired ? Math.max(0, 1 - (c - bolt.tHit - bolt.lead) / .12) : 0;
+  cam.shake = [(Math.random() - .5) * 8 * fl, (Math.random() - .5) * 8 * fl]; cam.update();
+  pb.clear();
+
+  // decay of the whole scan at the end of the cycle (or faster when Enter asks for a new one)
+  const fadeStart = cyc.fadeFast ? cyc.fadeFast - cyc.start : CYCLE - 3.2, fadeLen = cyc.fadeFast ? .6 : 2.6;
+  const e = cam.eye, f = cam.f, rr = cam.r, u = cam.u, F = cam.fl, cx = cam.cx + cam.shake[0], cy = cam.cy + cam.shake[1];
+  const sweepOn = c > 7 && c < 12.5, sweepZ = -9 + ((c - 7) % 2.75) / 2.75 * 18;
+  let shown = 0;
+  for (let i = 0; i < N; i++) {
+    const rt = RT[i]; if (t < rt) continue;
+    const x = Pf[i * 3], y = Pf[i * 3 + 1], z = Pf[i * 3 + 2];
+    const dx = x - e[0], dy = y - e[1], dz = z - e[2], zc = dx * f[0] + dy * f[1] + dz * f[2];
+    if (zc < .5) continue;
+    const sx = cx + F * (dx * rr[0] + dy * rr[1] + dz * rr[2]) / zc, sy = cy - F * (dx * u[0] + dy * u[1] + dz * u[2]) / zc;
+    if (sx < 0 || sy < 0 || sx >= 1920 || sy >= 1080) continue;
+    const ob = OBf[i];
+    let b = BRf[i];
+    if (ob >= 0) { const nx = Nf[i * 3], ny = Nf[i * 3 + 1], nz = Nf[i * 3 + 2]; if ((nx || ny || nz) && nx * dx + ny * dy + nz * dz > 0) b *= .26; }
+    const fade = 1 - E.ss(fadeStart + JT[i] * fadeLen * .6, fadeStart + JT[i] * fadeLen * .6 + .4, c);
+    if (fade <= 0) continue;
+    b *= fade * Math.max(.25, 1 - zc / 220);
+    const age = t - rt, k = Math.exp(-age * 7);
+    let cr = WH[0], cg = WH[1], cb = WH[2];
+    if (k > .02) { b = Math.max(b, k * 1.15); cr += (LIME[0] - cr) * k; cg += (LIME[1] - cg) * k; cb += (LIME[2] - cb) * k; }
+    if (sweepOn && ob === 0) { const d = sweepZ - LZf[i]; if (d > -.15 && d < 1.4) { const s = d < 0 ? 1 + d / .15 : Math.pow(1 - d / 1.4, 3); b = Math.max(b, .95 * s); cr += (LIME[0] - cr) * s; cg += (LIME[1] - cg) * s; cb += (LIME[2] - cb) * s; } }
+    pb.dot(sx, sy, zc < 48 ? 2 : 1, cr, cg, cb, Math.min(1, b));
+    shown++;
+  }
+  // sparks: the splash where the channel met the metal
+  for (const s of sparks) { const p = cam.project(s.p); if (!p) continue; const a = 1 - s.age / s.life; pb.dot(p[0], p[1], 2, 230, 255, 170, a); pb.add(p[0], p[1], 4, LIME[0], LIME[1], LIME[2], a * .08); }
+  // the bolt
+  if (bolt && c > bolt.tHit - .05 && c < bolt.tHit + bolt.lead + .7) {
+    const tr = c - bolt.tHit - bolt.lead, leading = tr < 0;
+    const reach = leading ? E.sat((c - bolt.tHit) / bolt.lead) : 1;
+    const I = leading ? .55 : Math.max(0, Math.exp(-tr * 5.5) + .7 * Math.exp(-Math.pow((tr - .11) * 30, 2)) + .5 * Math.exp(-Math.pow((tr - .24) * 26, 2)));
+    const drawPath = (pts, from, to, inten, core) => {
+      for (let i = Math.floor(from); i < Math.min(pts.length - 1, to); i++) {
+        const a = pts[i], bq = pts[i + 1], n = Math.max(1, Math.ceil(V.dist(a, bq) / .07));
+        for (let k = 0; k < n; k++) {
+          const p = cam.project(V.lerp(a, bq, k / n)); if (!p) continue;
+          pb.dot(p[0], p[1], core || 2, 248, 255, 232, Math.min(1, inten));
+          if (k % 3 === 0) { pb.add(p[0], p[1], 9, LIME[0], LIME[1], LIME[2], .035 * inten); pb.add(p[0], p[1], 21, LIME[0] * .6, LIME[1] * .6, LIME[2] * .6, .012 * inten); }
+        }
+      }
+    };
+    // the pour: a stream of dots running down the channel ahead of and with the leader
+    if (tr < .12) for (const d of bolt.rain) {
+      const s = d.s0 + (c - bolt.tHit + .35) * d.sp; if (s < 0 || s > 1) continue;
+      const q = V.mad(bolt.at(s), d.off, (1 - s) * .8), p = cam.project(q); if (!p) continue;
+      pb.dot(p[0], p[1], 2, 230, 255, 190, .9);
+      const q2 = cam.project(V.mad(bolt.at(Math.max(0, s - .03)), d.off, (1 - s) * .8)); if (q2) pb.dline(q2[0], q2[1], p[0], p[1], 3, 1, 198, 244, 50, .5);
+    }
+    const m = bolt.main, vis = reach * m.length;
+    drawPath(m, 0, vis, I * 1.1, leading ? 2 : 3);
+    for (const b of bolt.br) { const s = b.at * m.length; if (vis > s) drawPath(b.pts, 0, (vis - s) / (m.length * .25) * b.pts.length, I * .6); }
+    if (leading) { const tip = cam.project(m[Math.min(m.length - 1, Math.floor(vis))]); if (tip) pb.add(tip[0], tip[1], 10, 255, 255, 255, .25); }
+    if (!leading) pb.lift(26 * Math.min(1, I));
+  }
+  // footprints: the dotted underline once a vehicle is identified
+  OBJ.forEach((o, oi) => {
+    const bx = boxes.find(b => b.oi === oi && b.kind === 'obj'), a = E.sat((c - bx.tIn) / .4) * (1 - E.sat((c - fadeStart) / .6));
+    if (a <= 0) return;
+    const [ra, rb] = o.fp, n = 150;
+    for (let k = 0; k < n; k++) { const th = k / n * 6.283, p = cam.project(X.ap(o.W, [Math.sin(th) * ra, .05, Math.cos(th) * rb - .4])); if (p) pb.dot(p[0], p[1], 2, LIME[0], LIME[1], LIME[2], a * .9); }
+  });
+  // identification boxes
+  const tagsAt = [];
+  for (const b of boxes) {
+    const tOut = b.kind === 'part' ? Math.min(10, fadeStart) : fadeStart;
+    const a = E.sat((c - b.tIn) / .25) * (1 - E.sat((c - tOut) / .5));
+    if (a <= 0 || c < 0) { b.el.classList.add('off'); continue; }
+    const g = 1 + .35 * (1 - E.outExpo(E.sat((c - b.tIn) / .45)));
+    const cs = boxCorners(b, g), col = b.kind === 'part' ? LIME : WH;
+    for (const [i, j] of BEDGES) {
+      const n = Math.max(2, Math.ceil(V.dist(cs[i], cs[j]) / .16));
+      for (let k = 0; k <= n; k++) { const p = cam.project(V.lerp(cs[i], cs[j], k / n)); if (p) pb.dot(p[0], p[1], 2, col[0], col[1], col[2], a * (k === 0 || k === n ? 1 : .8)); }
+    }
+    // tag on the top-most projected corner
+    let best = null; for (const q of cs) { const p = cam.project(q); if (p && (!best || p[1] < best[1])) best = p; }
+    if (best) { b.el.classList.remove('off'); tagsAt.push({ el: b.el, x: best[0] + 8, y: best[1] - 30, obj: b.kind === 'obj' }); }
+  }
+  // stack tags that would overlap: objects first, then parts in screen order
+  tagsAt.sort((a, b) => (b.obj - a.obj) || (a.y - b.y));
+  const placed = [];
+  for (const tg of tagsAt) {
+    const w = tg.el.offsetWidth || 160;
+    for (let guard = 0; guard < 12; guard++) {
+      const hit = placed.find(p => tg.x < p.x + p.w + 6 && p.x < tg.x + w + 6 && Math.abs(tg.y - p.y) < 24);
+      if (!hit) break; tg.y = hit.y + 25;
+    }
+    placed.push({ x: tg.x, y: tg.y, w });
+    tg.el.style.transform = `translate(${tg.x.toFixed(0)}px, ${tg.y.toFixed(0)}px)`;
+  }
+  pb.blit();
+  // live lightning branches on the vehicles: parent->child links whose child just lit
+  octx.clearRect(0, 0, 1920, 1080);
+  octx.globalCompositeOperation = 'lighter'; octx.lineWidth = 1.2;
+  OBJ.forEach((o, oi) => {
+    const T = nodeT[oi], Pa = parT[oi]; if (!T) return;
+    octx.beginPath();
+    for (let i = 0; i < o.g.length; i++) {
+      const tn = cyc.start + T[i]; if (t < tn || t > tn + .16 || Pa[i] < 0) continue;
+      const p = cam.project(o.g[i].p), q = cam.project(o.g[Pa[i]].p); if (!p || !q) continue;
+      octx.moveTo(q[0], q[1]); octx.lineTo(p[0], p[1]);
+    }
+    octx.strokeStyle = 'rgba(210,255,120,.85)'; octx.stroke();
+  });
+  octx.globalCompositeOperation = 'source-over';
+  // readouts
+  if (t - lastUi > .08) {
+    lastUi = t; retShown = E.damp(retShown, shown, 14, .08);
+    document.getElementById('ret').textContent = Math.round(retShown).toLocaleString('en-US').replace(/,/g, ' ');
+    document.getElementById('objs').textContent = boxes.filter(b => b.kind === 'obj' && c > b.tIn && c < fadeStart).length + boxes.filter(b => b.kind === 'part' && c > b.tIn && c < Math.min(10, fadeStart)).length;
+  }
+}
+STAGE.run({ update, render });
+})();
+</script>
+</body></html>

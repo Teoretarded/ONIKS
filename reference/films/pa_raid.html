@@ -1,0 +1,435 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Oniks — The Picture</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=block">
+<link rel="stylesheet" href="../menus/common/pc.css">
+<style>
+  .logo { left: 88px; top: 70px; }
+  .kick { left: 90px; top: 112px; transition: opacity .35s; }
+  .kick.out { opacity: 0; }
+  .menu { left: 88px; bottom: 214px; display: flex; flex-direction: column; gap: 4px; }
+  .menu .it { font-size: 36px; font-weight: 500; letter-spacing: -.03em; height: 48px; }
+  .blurb { left: 128px; bottom: 132px; width: 420px; font-size: 15px; }
+  .keys { right: 88px; bottom: 56px; }
+  .foot { left: 88px; bottom: 60px; }
+  .read { right: 88px; top: 74px; display: flex; gap: 12px; align-items: center; font: 400 13px var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); font-variant-numeric: tabular-nums; transition: opacity .35s; }
+  .read.out { opacity: 0; }
+  .read i { width: 8px; height: 8px; background: var(--lime); flex: none; }
+  .read b { font-weight: 400; color: #fff; }
+  .read em { font-style: normal; text-transform: none; }
+  .tag.drop b { background: transparent; color: rgba(255,255,255,.6); box-shadow: inset 0 0 0 1px rgba(255,255,255,.4); }
+  .tag.drop i { background: transparent; color: rgba(255,255,255,.6); }
+  .tag.sm { font-size: 10.5px; }
+  .tag.sm b, .tag.sm i, .tag.sm .v { padding: 4px 6px 3px; }
+  .bars { position: absolute; left: 0; top: 0; display: grid; grid-template-columns: auto 64px 34px; column-gap: 9px; row-gap: 6px; align-items: center; padding: 8px 10px 8px 9px; background: rgba(11,12,10,.72);
+    font: 500 10.5px/1 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); will-change: transform; }
+  .bars .b { height: 4px; background: rgba(255,255,255,.12); position: relative; }
+  .bars .b i { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(255,255,255,.75); }
+  .bars .v { text-align: right; color: rgba(255,255,255,.75); font-variant-numeric: tabular-nums; }
+  .bars .top { color: #fff; }
+  .bars .top.b i { background: var(--lime); }
+  .bars .top.v { color: var(--lime); }
+  .ctag { position: absolute; left: 0; top: 0; will-change: transform; }
+  .ctag .tag { position: relative; display: inline-flex; }
+  .inset { position: absolute; right: 88px; top: 150px; width: 480px; height: 270px; outline: 1px solid rgba(255,255,255,.28); transition: opacity .3s; }
+  .inset.off { opacity: 0; }
+  .inset .l { position: absolute; left: 0; top: -24px; font: 500 11px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--dim); display: flex; gap: 10px; white-space: nowrap; }
+  .inset .l i { font-style: normal; color: var(--lime); }
+  .rate { color: var(--lime); }
+  .tag.coral b { background: var(--coral); }
+  .read .co { color: var(--coral); }
+</style></head>
+<body><div id="stage">
+  <canvas id="c" class="px" width="1920" height="1080"></canvas>
+  <canvas id="o" width="1920" height="1080"></canvas>
+  <div class="ui" id="ui">
+    <div class="logo abs"><svg viewBox="0 0 24 24"><path d="M12 2 20.5 22h-4.1L12 11.4 7.6 22H3.5z" fill="#fff"/><circle cx="12" cy="18.2" r="1.7" fill="#C6F432"/></svg>Oniks</div>
+    <div class="kick abs" id="kick"><i></i><span id="kickt">Monolith-B / Coastal surface search</span></div>
+    <div class="read abs" id="read"></div>
+    <div class="menu abs" id="menu"></div>
+    <div class="blurb abs" id="blurb"></div>
+    <div class="keys abs"><span><b>↑↓</b>Select</span><span><b>Enter</b>Open</span><span><b>G</b>Graphics</span><span><b>Esc</b>Quit</span></div>
+    <div class="foot abs">Proto v0.5.0</div>
+    <div class="ctag" id="ctag"><div class="tag" id="c21"><b>TRK 21</b><i id="c21t">Unknown</i></div><div class="bars" id="bars" style="position:relative;margin-top:6px"></div></div>
+    <div class="inset off" id="inset"><div class="l"><span id="insl">NFOV</span><i id="insr"></i></div></div>
+  </div>
+  <div class="veil" id="veil"><div class="msg"><i></i>Standing the battery down</div></div>
+</div>
+<script src="../menus/common/m3.js"></script>
+<script src="../menus/common/dots.js"></script>
+<script src="../menus/common/geo.js"></script>
+<script src="common/hd_land.js"></script>
+<script src="common/hd_sea_air.js"></script>
+<script src="../menus/common/theatre.js"></script>
+<script src="../menus/common/stage.js"></script>
+<script src="common/film.js"></script>
+<script src="pa_raid_models.js"></script>
+<script src="pa_raid_core.js"></script>
+<script src="pa_raid_scope.js"></script>
+<script src="pa_raid_ship.js"></script>
+<script src="pa_raid_coast.js"></script>
+<script src="pa_raid_site.js"></script>
+<script src="pa_raid_hit.js"></script>
+<script src="pa_raid_salvo.js"></script>
+<script>
+(() => {
+const { V, R, X, E, Cam } = M3;
+const DEG = Math.PI / 180, TAU = Math.PI * 2, D = PA.D;
+STAGE.fit(); STAGE.SFX.kind = 'pc';
+
+/* ---------- menu ---------- */
+const menuEl = document.getElementById('menu');
+menuEl.innerHTML = STAGE.ITEMS.map((t, i) => `<div class="it" data-item><span class="n">0${i + 1}</span><i class="sq"></i><span class="lab">${t}</span></div>`).join('');
+const veil = document.getElementById('veil');
+STAGE.menu({ el: menuEl, blurb: document.getElementById('blurb'),
+  onEnter(i) { if (i === 4) { veil.classList.add('on'); setTimeout(() => veil.classList.remove('on'), 1900); return 2600; } return 1900; } });
+const MENU_BOX = [70, 560, 600, 960];
+
+/* ---------- canvases ---------- */
+const cv = document.getElementById('c'), ov = document.getElementById('o'), octx = ov.getContext('2d');
+const pb = new PointBuf(cv, [11, 12, 10], { vignette: .5 });
+const cam = new Cam(); cam.near = .3;
+const ic = document.createElement('canvas'); ic.width = 480; ic.height = 270; ic.className = 'px';
+ic.style.cssText = 'position:absolute;left:0;top:0;width:480px;height:270px';
+document.getElementById('inset').appendChild(ic);
+const pb2 = new PointBuf(ic, [11, 12, 10], { vignette: .3 });
+const cam2 = new Cam(480, 270); cam2.near = 1;
+const uiEl = document.getElementById('ui');
+
+/* ---------- camera path: one take, keyed on the world's own truths ---------- */
+const S = [PA.SITE.x, PA.PADY, PA.SITE.z], BR = 16 * DEG, BD = [Math.sin(BR), 0, Math.cos(BR)];
+const along = (r, y) => [S[0] + BD[0] * r, y, S[2] + BD[2] * r];
+const shipW = T => { const p = PA.shipKm(0, T), w = PA.kmW(p[0], p[1]); return [w[0], 0, w[1]]; };
+const orbitEye = (tgt, yaw, pitch, dist) => [tgt[0] - Math.sin(yaw) * Math.cos(pitch) * dist, tgt[1] + Math.sin(pitch) * dist, tgt[2] - Math.cos(yaw) * Math.cos(pitch) * dist];
+const K = [];
+const key = (t, eye, target, fov) => K.push({ t, eye, target, fov });
+const K0 = { eye: [30, 7080, -16530], target: [1700, 0, 16800], fov: 32 };
+key(0, K0.eye, K0.target, 32);
+key(6, [-600, 6950, -16200], [1600, 0, 16900], 32);
+/* the dive onto the array: distance falls ~2.7x per key so the spline cannot overshoot */
+const A0 = PA.ARRAY;
+const aim = (d, bD, eD) => { const b = bD * DEG, e = eD * DEG; return [A0[0] + Math.sin(b) * Math.cos(e) * d, A0[1] + Math.sin(e) * d, A0[2] + Math.cos(b) * Math.cos(e) * d]; };
+const ahead = (r, dy) => [A0[0] + BD[0] * r, A0[1] + dy, A0[2] + BD[2] * r];
+key(11.5, aim(15200, 181, 23), [1500, 0, 15800], 33);
+key(13.8, aim(6400, 184, 21), ahead(6000, -A0[1]), 35);
+key(15.6, aim(2500, 188, 19), ahead(2300, -A0[1] + 40), 38);
+key(17.1, aim(930, 192, 16), ahead(700, -70), 41);
+key(18.3, aim(330, 195, 12), ahead(220, -28), 43);
+key(19.4, aim(118, 198, 8.5), ahead(40, -6), 45);
+key(20.6, aim(50, 206, 6), ahead(10, -3), 46);
+key(21.8, aim(31, 218, 8), ahead(8, -2), 46);
+key(22.9, aim(16, 200, 42), ahead(700, -80), 48);
+key(24.4, along(320, S[1] + 60), along(2300, 0), 50);
+key(28, along(3000, 300), along(5200, 0), 50);
+key(33, along(8200, 300), along(10400, 0), 50);
+key(38, along(13400, 290), along(15600, 0), 49);
+key(41.5, along(16800, 260), V.add(shipW(41.5), [0, 30, 0]), 44);
+for (let t = 45; t <= 75; t += 2.5) {
+  // swing round to the destroyer's north-west side: the squall and the transport lie south-east
+  const u = E.sat((t - 46) / 33), yaw = (18 + 110 * E.ss(45, 59, t) + 22 * E.ss(59, 80, t)) * DEG, pitch = .11 + .03 * u, dist = 720 - 250 * E.ss(46, 76, t);
+  const tgt = V.add(shipW(t), [0, 14, 0]);
+  key(t, orbitEye(tgt, yaw, pitch, dist), tgt, 35 - 2 * u);
+}
+/* identified, it starts shooting: ease back and down, tilt up into the sky the salvo climbs into,
+   then crane up behind the ship and look out along the shots toward the coast */
+const lookFrom = (eye, yawD, pitchD) => [eye[0] + Math.sin(yawD * DEG) * Math.cos(pitchD * DEG) * 1000, eye[1] + Math.sin(pitchD * DEG) * 1000, eye[2] + Math.cos(yawD * DEG) * Math.cos(pitchD * DEG) * 1000];
+{ const e1 = orbitEye(V.add(shipW(77.6), [0, 14, 0]), 151 * DEG, .085, 640); key(77.6, e1, lookFrom(e1, 152, 1), 37); }
+{ const e2 = orbitEye(V.add(shipW(80.2), [0, 14, 0]), 158 * DEG, .055, 860); key(80.2, e2, lookFrom(e2, 162, 5), 40); }
+{ const e3 = V.add(shipW(82.3), [150, 380, 1000]); key(82.3, e3, lookFrom(e3, 186, 4), 40); }
+{ const e4 = V.add(shipW(84.6), [800, 1050, 800]); key(84.6, e4, lookFrom(e4, 197, -1), 40); }
+key(88.5, [3000, 1900, 11000], [300, 60, 1500], 40);
+key(92, [1900, 1500, 5600], [-100, 150, -300], 38);
+key(95, [1300, 1050, 2200], [0, S[1], -700], 38);
+key(97.5, [600, S[1] + 380, -500], [0, S[1], -640], 40);
+{ // settle into an orbit south of the battery, looking north
+  // in on the TEL as the bolt lands, then back to frame all three vehicles
+  const C5 = V.add(S, [1, 4, 0]), CT = V.add(PA.VEH.tel.W.T, [2, 2.5, 0]);
+  const orb = (t, yawD, pitch, dist, fov, c) => { c = c || C5; key(t, orbitEye(c, yawD * DEG, pitch, dist), c, fov); };
+  orb(99.5, -38, .34, 118, 40, V.lerp(C5, CT, .5)); orb(101.8, -24, .28, 58, 38, CT); orb(104.2, -14, .26, 62, 38, V.lerp(CT, C5, .35));
+  orb(107.5, -2, .25, 80, 38); orb(111.5, 8, .23, 78, 37);
+  orb(113, -4, .22, 62, 36);
+}
+/* behind the EO window, backed off along its line of sight */
+const eoBack = (t, d, up, side) => { const e = PA.eoEye(t), dir = V.norm(V.sub(PA.eoAim(t), e)), rt = V.norm(V.cross([0, 1, 0], dir)); return V.add(V.add(V.mad(e, dir, -d), [0, up, 0]), V.mul(rt, side || 0)); };
+// round the turret's right front (EO director, missile pack, gun), then in behind the window
+const eoSide = (t, fwd, right, up) => { const e = PA.eoEye(t), dir = V.norm(V.sub(PA.eoAim(t), e)), rt = V.norm(V.cross([0, 1, 0], dir)); return V.add(V.add(V.mad(e, dir, fwd), V.mul(rt, right)), [0, up, 0]); };
+key(115.6, eoSide(115.6, -14, 1.5, 4.5), PA.eoEye(115.6), 32);
+key(117.9, eoBack(117.9, .9, .15, -.05), PA.eoAim(117.9), 11);
+key(120, PA.eoEye(120), PA.eoAim(120), PA.eoFov(120) / DEG);
+key(138, PA.eoEye(138), PA.eoAim(138), PA.eoFov(138) / DEG);
+key(141.6, eoBack(141.6, 7, 3.5, -1.5), PA.eoAim(141.6), 18);
+key(143.4, V.add(PA.VEH.pantsir.W.T, [6, 26, -48]), V.add(S, [-4, 0, 10]), 38);
+key(146, V.add(S, [-30, 190, -560]), V.add(S, [300, -140, 2200]), 36);
+key(149, [-120, 1100, -3700], [900, 0, 5200], 34);
+// the raid: the pull-back slows and the lens closes on the group for the hits, then opens to the scope
+key(152.4, [-200, 2450, -7300], [1800, 0, 12800], 30);
+key(155.8, [-250, 3150, -9500], [2150, 450, 17300], 18);
+key(158.4, [-320, 4500, -12300], [2150, 350, 17200], 23);
+key(161.3, [-280, 6300, -15400], [1750, 0, 16500], 30.5);
+key(D, K0.eye, K0.target, 32);
+// keys carry a direction, not a point: with every target at the same distance ahead of its eye
+// the spline blends view directions and never swings early towards a far target
+for (const k of K) k.target = V.mad(k.eye, V.norm(V.sub(k.target, k.eye)), 600);
+const path = FILM.path(K, { loop: true });
+/* projection centre (menu on the left: the action sits right of centre) */
+const CXY = [[0, 1060, 565], [12, 1060, 565], [20, 1000, 540], [44, 1040, 530], [49, 1080, 520], [80, 1080, 520], [86, 1060, 520], [96, 1060, 540], [100, 1240, 560], [112, 1240, 560], [118, 1100, 500], [140, 1100, 500], [147, 1060, 540], [156, 1060, 565], [D, 1060, 565]];
+function cxcy(T) { let i = 0; while (i < CXY.length - 2 && CXY[i + 1][0] <= T) i++; const a = CXY[i], b = CXY[i + 1], u = E.ss(a[0], b[0], T); return [a[1] + (b[1] - a[1]) * u, a[2] + (b[2] - a[2]) * u]; }
+/* the tracker holds the camera inside ch.6: eye on the EO window, aim lagging the helicopter */
+const wEO = T => E.ss(116.8, 119.4, T) * (1 - E.ss(139.2, 141.8, T));
+const slerpDir = (a, b, u) => { const d = E.clamp(V.dot(a, b), -1, 1), th = Math.acos(d); if (th < 1e-4) return V.norm(V.lerp(a, b, u)); const s = Math.sin(th); return V.add(V.mul(a, Math.sin((1 - u) * th) / s), V.mul(b, Math.sin(u * th) / s)); };
+function camAt(T) {
+  const p = path(T);
+  let eye = p.eye, dir = V.norm(V.sub(p.target, p.eye)), fov = E.clamp(p.fov, .4 * DEG, 80 * DEG);
+  // into the EO window: position first, then the line of sight, then the zoom (and back out in reverse)
+  const wE = E.ss(115.8, 118.4, T) * (1 - E.ss(140.2, 143.8, T)), wD = E.ss(116.2, 118.8, T) * (1 - E.ss(139.6, 142.6, T)), wF = E.ss(116.8, 119.4, T) * (1 - E.ss(139.2, 141.8, T));
+  if (wE > 0) {
+    const ee = PA.eoEye(T), ed = V.norm(V.sub(PA.eoAim(T), ee)), ef = PA.eoFov(T);
+    eye = V.lerp(eye, ee, wE); dir = slerpDir(dir, ed, wD); fov = Math.exp(Math.log(fov) + (Math.log(ef) - Math.log(fov)) * wF);
+  }
+  // never under the ground (the spline is keyed well above it; this is only a guard)
+  const gmin = PA.gy(eye[0], eye[2]) + 3;
+  if (eye[1] < gmin) eye = [eye[0], gmin, eye[2]];
+  cam.eye = eye; cam.target = V.add(eye, V.mul(dir, 100)); cam.fov = fov; cam.roll = 0;
+  PA.cam = cam;
+  const c = cxcy(T); cam.cx = c[0]; cam.cy = c[1];
+  cam.near = T > 112 && T < 146 ? .35 : 1;
+  cam.shake = [0, 0];
+  cam.update();
+}
+
+/* ---------- layer envelopes ---------- */
+const lerpK = (T, ks) => { if (T <= ks[0][0]) return ks[0][1]; for (let i = 0; i < ks.length - 1; i++) if (T < ks[i + 1][0]) { const u = E.ss(ks[i][0], ks[i + 1][0], T); return ks[i][1] + (ks[i + 1][1] - ks[i][1]) * u; } return ks[ks.length - 1][1]; };
+const logK = (T, ks) => Math.exp(lerpK(T, ks.map(k => [k[0], Math.log(k[1])])));
+const win = (T, a, b, c, d) => E.ss(a, b, T) * (1 - E.ss(c, d, T));
+function scopeParams(T) {
+  const a = T < 100 ? lerpK(T, [[0, 1], [43, 1], [50, .8], [80, .8], [86, .7], [95, 0]]) : lerpK(T, [[143, 0], [152, 1]]);
+  return {
+    a, hk: logK(T, [[0, 20], [11, 20], [20.5, 2.4], [44, 3.2], [50, 1.1], [80, 1.1], [88, 3.5], [96, 3.5], [140, 3], [152, 20], [D, 20]]),
+    land: T < 100 ? 1 - E.ss(42, 48, T) : E.ss(144, 152, T), map: T < 100 ? lerpK(T, [[0, 1], [44, 1], [50, .55]]) : 1,
+    fine: win(T, 16, 22, 42, 48), beam: 1, tracks: T < 100 ? 1 : E.ss(148, 154, T), ships: T < 100 ? 1 - .75 * E.ss(44, 50, T) : 1,
+    lod: T > 15 && T < 44.5 ? 1 : T > 140 && T < 147.5 ? 1 : 0, sea: T < 100 ? lerpK(T, [[0, 1], [44, 1], [50, .35], [80, .35], [87, 1]]) : 1,
+    near: T > 15 && T < 30 ? 3 : 5, arrayBeam: win(T, 15.5, 18.5, 25, 29), skip: T > 47.5 && T < 87 ? [0, 1] : null,
+  };
+}
+
+/* ---------- UI: kick caption, readout, class bars, inset ---------- */
+const CH = [
+  { t: 0, title: 'Search', kick: 'Monolith-B / Coastal surface search' },
+  { t: 22, title: 'Ride the beam', kick: 'Monolith-B / Beam · 016° · TRK 21' },
+  { t: 45, title: 'Confidence', kick: 'TRK 21 / Range-profile classification' },
+  { t: 80, title: 'Coast', kick: 'Krasnaya Kosa / LiDAR coastal survey' },
+  { t: 98, title: 'Strike', kick: 'Krasnaya Kosa / Battery scan' },
+  { t: 118, title: 'Track', kick: 'Pantsir-S1 / EO tracker' },
+  { t: 140, title: 'Picture', kick: 'Monolith-B / Surface picture' },
+];
+const kickEl = document.getElementById('kick'), kickT = document.getElementById('kickt'), readEl = document.getElementById('read');
+let kickCur = '', readHTML = '', lastUi = -1;
+const ctagEl = document.getElementById('ctag'), c21 = document.getElementById('c21'), c21t = document.getElementById('c21t'), barsEl = document.getElementById('bars');
+barsEl.innerHTML = PA.NAMES.map((n, c) => `<span class="l" id="bl${c}">${n}</span><span class="b" id="bb${c}"><i id="bi${c}"></i></span><span class="v" id="bv${c}">0.00</span>`).join('');
+const BI = [0, 1, 2, 3].map(c => document.getElementById('bi' + c)), BV = [0, 1, 2, 3].map(c => document.getElementById('bv' + c)), BL = [0, 1, 2, 3].map(c => [document.getElementById('bl' + c), document.getElementById('bb' + c), document.getElementById('bv' + c)]);
+const insetEl = document.getElementById('inset'), insl = document.getElementById('insl'), insr = document.getElementById('insr');
+const fmt = n => Math.round(n).toLocaleString('en-US').replace(/,/g, ' ');
+
+/* ---------- render ---------- */
+let retShown = 0;
+function render(T, info) {
+  const tau = PA.tau(T);
+  camAt(T);
+  pb.clear();
+  octx.clearRect(0, 0, 1920, 1080);
+  const tags = [];
+  // the scope
+  const sp = scopeParams(T);
+  const sc = PA.scope(pb, cam, tau, sp);
+  for (const tg of sc.tags) {
+    if (T > 44 && T < 87 && (tg.ship === 0 || tg.ship === 1)) continue;   // at the track the belief carries these
+    tags.push(tg);
+  }
+  // own site (the radar at the scope's centre)
+  const ownA = win(T, 15.8, 17.6, 26, 30);
+  if (ownA > .01) PA.site(pb, cam, T, { a: 1, ownA, radarOnly: true });
+  // the track: belief clouds, rain, pulses
+  const shA = win(T, 39.5, 45, 82, 90);
+  let sh = null;
+  if (shA > .01) {
+    sh = PA.shipLayer(pb, cam, T, { a: shA, sea: 1, rain: 1, tag: win(T, 46, 49, 80, 83) });
+    tags.push(...sh.tags);
+  }
+  // identified, the destroyer shoots at the sky
+  const sv = PA.salvo(pb, cam, T, 1 - E.ss(90, 95, T));
+  tags.push(...sv.tags);
+  // the coast
+  const coA = T > 70 && T < 160 ? win(T, 79, 85, 144.5, 150.5) : 0;
+  let co = null;
+  if (coA > .01) { co = PA.coast(pb, cam, T, { a: coA, chart: win(T, 79, 85, 96, 100), site: 1 - E.ss(97, 99, T), near: cam.near * 30 }); tags.push(...co.tags); }
+  // the battery, revealed by the strike
+  const stA = T > 95 && T < 160 ? 1 - E.ss(148, 155, T) : 0;
+  let st = null;
+  if (stA > .01 && T > PA.T_HIT - 1.2 && wEO(T) < .98) { st = PA.site(pb, cam, T, { a: stA, reveal: true, boxes: win(T, 98, 99, 113, 115.5) }); tags.push(...st.tags); }
+  // the helicopter
+  const heA = T > 95 && T < 160 ? win(T, 97, 100, 150, 156) : 0;
+  const eoW = wEO(T);
+  if (eoW > .01) PA.eoGround(pb, cam, T, eoW);
+  if (heA > .01) { PA.heloDraw(pb, cam, T, heA); PA.heloDisc(pb, cam, T, heA * (1 - eoW) * .6); }
+  // the closing beat: OWN 01 away to TRK 21
+  const hb = PA.beat(pb, cam, T, sp);
+  tags.push(...hb.tags);
+  if (st && st.flash) pb.lift(st.flash);
+  pb.blit();
+
+  // overlay: calm the menu corner
+  if (!FILM.uiHidden) {
+    const g = octx.createRadialGradient(120, 1080, 0, 120, 1080, 900);
+    g.addColorStop(0, 'rgba(11,12,10,.86)'); g.addColorStop(.55, 'rgba(11,12,10,.55)'); g.addColorStop(1, 'rgba(11,12,10,0)');
+    octx.fillStyle = g; octx.fillRect(0, 180, 1100, 900);
+  }
+  if (st) PA.siteBranches(octx, cam, T, 1);
+  // range labels on the scope rings
+  if (sp.a > .2 && (T < 30 || T > 146)) {
+    octx.font = '400 11px "Geist Mono", monospace'; octx.fillStyle = `rgba(255,255,255,${(.34 * sp.a * sp.map).toFixed(2)})`; octx.textAlign = 'left';
+    for (const rr of PA.RINGS) { const w = PA.kmW(Math.sin(62 * DEG) * rr, Math.cos(62 * DEG) * rr), p = cam.project([w[0], 0, w[1]]); if (p && p[2] > 2000) octx.fillText(rr + (rr === 64 ? ' KM' : ''), p[0] + 6, p[1] - 5); }
+  }
+  if (T > 16 && T < 48) {
+    // the ride: rings rolling past, labelled where they cross the beam's bearing
+    octx.font = '400 11px "Geist Mono", monospace'; octx.textAlign = 'left';
+    for (let rr = 2; rr < 32; rr += 2) {
+      const w = PA.kmW(Math.sin(BR + 3 * DEG) * rr, Math.cos(BR + 3 * DEG) * rr), p = cam.project([w[0], 0, w[1]]);
+      if (!p || p[2] < 150 || p[2] > 9000) continue;
+      const al = sp.fine * E.sat((9000 - p[2]) / 3000) * E.sat((p[2] - 150) / 300) * (rr % 16 ? .5 : .8);
+      octx.fillStyle = `rgba(255,255,255,${al.toFixed(2)})`; octx.fillText(rr + ' KM', p[0] + 6, p[1] - 6);
+    }
+  }
+  // EO tracker overlay
+  const eoA = win(T, 117.2, 119, 139, 141);
+  if (eoA > .01) {
+    const bracket = (b, col, a, pad, len) => {
+      const [x0, y0, x1, y1] = [b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad], c = Math.min(len, (x1 - x0) * .35, (y1 - y0) * .35);
+      octx.strokeStyle = col; octx.globalAlpha = a; octx.lineWidth = 1.5; octx.beginPath();
+      for (const [px, py, sx, sy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x1, y1, -1, -1], [x0, y1, 1, -1]]) { octx.moveTo(px + sx * c, py); octx.lineTo(px, py); octx.lineTo(px, py + sy * c); }
+      octx.stroke(); octx.lineWidth = 1; octx.setLineDash([2, 4]); octx.globalAlpha = a * .45; octx.strokeRect(x0, y0, x1 - x0, y1 - y0); octx.setLineDash([]); octx.globalAlpha = 1;
+      return [x0, y0, x1, y1];
+    };
+    const all = PA.heloBox(cam, T, 'all');
+    if (all) {
+      const b = bracket(all, '#C6F432', eoA, 8, 14);
+      const h = PA.helo(T), rng = V.dist(cam.eye, h.p);
+      tags.push({ key: 'eoTrk', id: 'TRK 18', txt: 'MH-60R Seahawk', v: `${Math.round(h.p[1] - PA.gy(h.p[0], h.p[2]))} m AGL · ${Math.round(PA.HELO_V * 1.944)} kn · ${(rng / 1000).toFixed(2)} km`, cls: 'lime', x: b[0], y: b[1] - 30, a: eoA, pri: 9 });
+      const mx = (b[0] + b[2]) / 2, my = (b[1] + b[3]) / 2;
+      octx.strokeStyle = '#C6F432'; octx.globalAlpha = .5 * eoA; octx.setLineDash([2, 3]); octx.beginPath(); octx.moveTo(cam.cx, cam.cy); octx.lineTo(mx, my); octx.stroke(); octx.setLineDash([]); octx.globalAlpha = 1;
+      for (const [which, id, txt] of [['fuselage', '18.1', 'Fuselage'], ['head', '18.2', 'Rotor head'], ['tailrotor', '18.3', 'Tail rotor']]) {
+        const bb = PA.heloBox(cam, T, which); if (!bb || bb[2] - bb[0] < 6) continue;
+        const q = bracket(bb, '#ffffff', .75 * eoA, 3, 7);
+        tags.push({ key: 'eo' + which, id, txt, cls: 'sm', x: q[2] + 6, y: q[1] - 2, a: eoA * .95, pri: 8, down: true });
+      }
+    }
+    octx.strokeStyle = '#fff'; octx.globalAlpha = .55 * eoA; octx.lineWidth = 1; octx.beginPath();
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { octx.moveTo(cam.cx + dx * 9, cam.cy + dy * 9); octx.lineTo(cam.cx + dx * 26, cam.cy + dy * 26); }
+    octx.stroke(); octx.globalAlpha = 1;
+  }
+  // inset: a second, narrow field of view on the same mount, slaved to the track
+  const inA = win(T, 119, 120.5, 138.5, 140);
+  insetEl.classList.toggle('off', inA < .5);
+  if (inA > .01) {
+    // narrow field, slaved to the track's centre; its pixels are 3x finer than the main view's
+    const h = PA.helo(T);
+    cam2.eye = cam.eye.slice(); cam2.target = V.add(h.p, R.ap(h.R, [0, 2.2, -1.5])); cam2.fov = cam.fov / 12; cam2.update();
+    pb2.clear();
+    PA.eoGround(pb2, cam2, T, 1, 11);
+    PA.heloDraw(pb2, cam2, T, 1, { size: 2, gain: 1.1 });
+    pb2.blit();
+    insl.textContent = `NFOV ${(cam2.fov / DEG).toFixed(2)}° · TRK 18`;
+    insr.textContent = `×${(cam.fov / cam2.fov * 270 / 1080).toFixed(0)}`;
+  }
+
+  // TRK 21 tag + class bars, at the track
+  let blocks = null;
+  if (sh && sh.bars && sh.bars.a > .02) {
+    const bs = sh.bars;
+    blocks = [{ x: bs.x - 4, y: bs.y - 4, w: (ctagEl.offsetWidth || 330) + 8, h: (ctagEl.offsetHeight || 120) + 8 }];
+    ctagEl.style.opacity = bs.a.toFixed(2);
+    ctagEl.style.transform = `translate(${bs.x.toFixed(0)}px, ${bs.y.toFixed(0)}px)`;
+    octx.strokeStyle = 'rgba(238,238,228,.7)'; octx.globalAlpha = bs.a; octx.setLineDash([1, 2.5]); octx.beginPath(); octx.moveTo(bs.ax, bs.ay); octx.lineTo(bs.x - 3, bs.y + 20); octx.stroke(); octx.setLineDash([]); octx.globalAlpha = 1;
+    if (c21t.textContent !== bs.label) c21t.textContent = bs.label;
+    c21.className = 'tag' + (bs.conf ? ' lime' : '');
+    for (let c = 0; c < 4; c++) { BI[c].style.width = (bs.probs[c] * 100).toFixed(1) + '%'; BV[c].textContent = bs.probs[c].toFixed(2); const on = c === bs.top && c > 0; for (const el of BL[c]) el.classList.toggle('top', on); }
+  } else ctagEl.style.opacity = 0;
+
+  for (const tg of tags) PA.tag(tg);
+  PA.flushTags(octx, uiEl, MENU_BOX, blocks);
+
+  // readout, 10 Hz
+  if (Math.abs(T - lastUi) > .1) {
+    lastUi = T;
+    const ch = FILM.chapter || CH[0];
+    let html = '';
+    const trs = PA.tracksAt(tau);
+    if (ch.t === 140 && hb.read) html = hb.read;
+    else if (ch.t === 0 || ch.t === 140) {
+      const sw = PA.sweepNo(tau), nt = trs.filter(q => q.st === 'conf').length, nf = PA.faBySweep.get(Math.floor(PA.phase(tau) / TAU)) || 0;
+      html = `<i></i><span>Sweep <b>${sw}</b></span><span>·</span><span><b>${nt}</b> tracks</span><span>·</span><span><b>${nf}</b> false</span>`;
+    } else if (ch.t === 22) {
+      const r = V.dist([cam.eye[0], 0, cam.eye[2]], [S[0], 0, S[2]]) / 1000;
+      html = `<i></i><span>Range <b>${r.toFixed(1)}</b> km</span><span>·</span><span>Brg <b>016°</b></span><span>·</span><span>Sweep <b>${PA.sweepNo(tau)}</b></span>`;
+    } else if (ch.t === 45) {
+      html = `<i></i><span>TRK 21</span><span>·</span><span><b>${sh ? sh.looks : 0}</b> looks</span><span>·</span><span><em>σ</em> <b>${sh ? sh.sig.toFixed(1) : '—'}</b> m</span>`;
+      if (sv.up) html += `<span>·</span><span class="co"><b style="color:inherit">${sv.up}</b> SAM up</span>`;
+    } else if (ch.t === 80) {
+      const p = E.sat((PA.SCAN.zA - PA.frontZ(T)) / (PA.SCAN.zA - PA.SCAN.zB)), km2 = p * 18.8 * (PA.SCAN.zA - PA.SCAN.zB) / 1000;
+      html = `<i></i><span>Survey <b>${Math.round(p * 100)} %</b></span><span>·</span><span><b>${fmt(km2)}</b> km²</span><span>·</span><span><b>${fmt(PA.coastCount(T))}</b> returns</span>`;
+    } else if (ch.t === 98) {
+      retShown = st ? st.returns : 0;
+      html = `<i></i><span>Scan <b>01</b></span><span>·</span><span><b>${fmt(retShown)}</b> returns</span><span>·</span><span><b>${st ? st.objects : 0}</b> objects</span>`;
+    } else if (ch.t === 118) {
+      const h = PA.helo(T);
+      html = `<i></i><span>EO <b>TRK 18</b></span><span>·</span><span>FOV <b>${(cam.fov / DEG).toFixed(2)}°</b></span><span>·</span><span><b>${(V.dist(cam.eye, h.p) / 1000).toFixed(2)}</b> km</span>`;
+    }
+    if (html !== readHTML) { readHTML = html; readEl.innerHTML = html; }
+  }
+  STAGE.dbg = { T: +T.toFixed(2), tau: +tau.toFixed(2), scope: PA.scopeInfo, coast: PA.coastInfo, site: PA.siteInfo };
+}
+
+/* ---------- sound: synthesized, fired only while playing in real time ---------- */
+const SFX = STAGE.SFX, cues = [];
+const cue = (t, fn) => { if (t >= 0 && t < D) cues.push([t, fn]); };
+// the antenna turn: a tick each time the beam passes north, while the scope is on screen
+for (let k = 0; k < 42; k++) { const t = (TAU * k - PA.PH0) / PA.OMEGA; if ((t > 0 && t < 47) || (t > 146 && t < D)) cue(t, () => SFX.tone(2100, 2100, .012, 'square', t > 22 && t < 47 ? .006 : .01)); }
+// the beam sweeping past the camera on the ride
+for (let t = 0; t < 47; t += .02) { const b = PA.phase(t) / TAU - BR / TAU; if (t > 22 && Math.floor(b) !== Math.floor(PA.phase(t - .02) / TAU - BR / TAU)) cue(t, () => { SFX.noise(.35, 2600, .7, .025, .004); SFX.tone(820, 620, .12, 'sine', .018); }); }
+// TRK 21: born at frame 0, confirmed a few sweeps later
+{ const tr = PA.TRACKS.find(q => q.id === 21 && q.t0 > -6 && q.t0 < 6);
+  if (tr) { cue(tr.t0, () => SFX.tone(900, 900, .03, 'square', .01)); const c = tr.ev.find(e => e.st === 'conf'); if (c) cue(c.t, () => { SFX.tone(1250, 1250, .05, 'square', .012); SFX.tone(1875, 1875, .04, 'square', .008, .06); }); } }
+// looks at the track: each beam pass is a burst of pulses
+for (const t of PA.DDGB.looks) cue(t + .3, () => SFX.tone(1650, 1650, .012, 'square', .007));
+cue(PA.T22 + .1, () => SFX.tone(900, 900, .03, 'square', .008));
+cue(PA.DDGB.looks[6] + .45, () => { SFX.tone(420, 840, .09, 'square', .02); SFX.tone(1260, 1260, .05, 'square', .015, .07); });
+// the destroyer's salvo: a hot launch roar per shot, a flat crack as each bursts high up
+for (const s of PA.SALVO) {
+  cue(s.t, () => { SFX.noise(1.4, 900, .7, .05, .01); SFX.tone(120, 60, .9, 'sine', .05); SFX.noise(.25, 3200, .5, .03, .002); });
+  cue(s.T1, () => { SFX.noise(.35, 2600, .6, .03, .004); SFX.tone(420, 160, .4, 'sine', .02); });
+}
+// the coast: the survey line starts, the battery is found
+cue(PA.SCAN.t0, () => { SFX.tone(160, 90, 1.4, 'sine', .07); SFX.noise(1.2, 260, .8, .04, .02); });
+cue(PA.SCAN.t0 + (PA.SCAN.zA - PA.SITE.z) / (PA.SCAN.zA - PA.SCAN.zB) * (PA.SCAN.t1 - PA.SCAN.t0) + .3, () => SFX.tone(1900, 1900, .05, 'square', .012));
+// the strike
+cue(PA.T_HIT - .3, () => SFX.noise(.3, 5200, .5, .03, .25));
+cue(PA.T_HIT, () => { SFX.crack(); SFX.rumble(2.4, .12); });
+for (let k = 0; k < 9; k++) cue(PA.T_HIT + 1.3 + k * .3, () => SFX.tone(1500, 1500, .018, 'square', .014));
+// the EO lock, then the rotor chop while tracking
+cue(118.8, () => { SFX.tone(1250, 1250, .05, 'square', .012); SFX.tone(1875, 1875, .05, 'square', .01, .07); });
+for (let t = 119.2, k = 0; t < 139.5; t += 1 / 8.6, k++) cue(t, () => SFX.noise(.07, 210, 1.1, k % 2 ? .012 : .022, .004));
+cue(146, () => SFX.tone(160, 110, 1.2, 'sine', .05));
+// the raid: six rounds away, interceptors met, three hits, the tracks dropped
+for (const r of PA.BEAT.RD) cue(r.tl, () => { SFX.noise(1.6, 700, .7, r.n === 1 ? .07 : .045, .03); SFX.tone(150, 70, 1.3, 'sine', r.n === 1 ? .06 : .035); });
+for (const c of PA.BEAT.IC) cue(c.te, () => { SFX.noise(.5, 2400, .6, c.partner ? .02 : .035, .01); SFX.tone(700, 380, .14, 'square', .007); });
+for (const s of PA.BEAT.CW) cue(s.t0, () => { for (let k = 0; k < 14; k++) SFX.noise(.05, 1800, 1.2, .012, .002, k * .1); });
+for (const g of PA.BEAT.TG) { cue(g.TX, () => { SFX.crack(); SFX.rumble(2.6, g.id === 21 ? .1 : .075); }); cue(g.DROP, () => SFX.tone(900, 600, .12, 'square', .008)); }
+
+FILM.run({
+  duration: D,
+  chapters: CH.map(c => ({ t: c.t, title: c.title })),
+  cues,
+  render,
+  onChapter(ch) { const c = CH.find(q => q.t === ch.t); if (c && c.kick !== kickCur) { kickCur = c.kick; kickT.textContent = c.kick; } },
+});
+})();
+</script>
+</body></html>

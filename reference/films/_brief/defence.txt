@@ -1,0 +1,79 @@
+SHIP DEFENCE SERIES: long menu cinematics after the user's favourite of the original ten menus
+============================================================================================
+
+These are video-game menu cinematics for the ONIKS strategy game. Combat is shown the way a game trailer shows it: as
+spectacle (motion, light, flashes, tracer, smoke, debris, short labels). Never as tactics: no guidance or targeting
+logic, no countermeasure or counter-countermeasure reasoning, no damage mechanics, no weapon internals.
+
+The favourite ("Terminal", Orbital style) in words, so nobody needs to open its source: the fight at a destroyer seen
+from low on the sea past the ship toward the horizon. Three rounds come in low from the horizon; two interceptors leave
+the ship's deck on smoke-ring trails; one round is stopped ~7 km out with a far flash; another weaves past its
+interceptor; the ship's close-in gun (Phalanx) stops the third at ~480 m with a burst of tracer; the weaving one reaches
+the hull: a yellow flash marks the breach. The camera looks up after the launches and settles back on the horizon. A
+short engagement log on the right, newest line in yellow. Menu column on the left. Black, white hairlines, one yellow.
+
+Every film in the series keeps those elements (the destroyer as the hero; rounds coming in low from the horizon;
+interceptors off the deck with trails; far flashes; the close-in gun turning and firing tracer; an engagement log or tags;
+a hit or a near miss) and adds its own big idea. Each is one continuous take of 150-180 s that loops seamlessly, with
+the menu on screen, pure function of film time T, HD models, <= 16 ms/frame, sound via FILM.cue. Common rules:
+_brief/films.txt. Models: common/hd_sea_air.js (HD.destroyer + HD.destroyer.A anchors: vls(i), ciws, ciwsDir, gun,
+gunDir, spy, stacks, deckY...; states vlsOpen, ciwsYaw/ciwsPitch/ciwsSpin, gunYaw/gunPitch, sps; HD.carrier, HD.helo,
+HD.fighter; HD.wire(model)), common/hd_land.js (HD.sm6, HD.mk72, HD.oniks, HD.oniksBooster). Never open ../menus/*.html.
+Copy drawing code freely from the finished films in this folder: oc_underway_world.js / oc_underway_fast.js (wire sea,
+wake, ship, radar arcs, climbing plumes, tracer streams, smoke, flashes), oa_scale_main.js, ob_long_exposure_core.js,
+pa_picture_*.js / pa_picture_hit.js (scope, tracks, dot bursts), pb_survey_film.js (dot ship, tracer dots, dot burst,
+smoke), pc_anatomy_*.js (X-ray scan, exploded view, tags).
+
+Built in two stages by separate builders; the files carry over:
+ A  Everything except the fighting: timeline, one-take camera path, chapters, menu/log/captions, sea, ships, the rounds
+    flying their paths, the interceptors' flight paths as plain lines, the loop seam, performance. Clearly named empty
+    hooks for the combat effects (e.g. launchFx(T), interceptFx(T), ciwsFx(T), hitFx(T)).
+ B  The combat effects into those hooks, then polish every chapter, verify the seam and performance, pick 4 gallery
+    moments.
+
+-------------------------------------------------------------------------------------------------------------
+ORBITAL (black, white hairline wireframe, one yellow accent, Inter + DM Mono, catalog labels, "Fig. N" captions)
+-------------------------------------------------------------------------------------------------------------
+OD  od_salvo.html       Salvo        (separate brief: _brief/combat.txt)
+OE  oe_ring.html        Ring         The camera never leaves the destroyer: one slow continuous orbit around it (40-250 m,
+    rising and falling), closing in on each system as it acts. Three raids, each bigger: two rounds (both stopped far
+    out, flashes on the horizon); four (interceptors rippling out of the fore and aft cells, the 5-inch gun firing, a
+    Phalanx kill close in); six from two bearings (everything firing, decoy rockets blooming into hairline clouds, both
+    Phalanx mounts, one hit aft: fire, and the ship keeps fighting). Loop: the smoke drifts across the lens and the orbit
+    comes out on a sister ship, calm, identical to frame 0 (like Underway's loop).
+OF  of_task_force.html  Task Force   The whole group: carrier in the middle, cruiser and two destroyers around it. A raid
+    of twelve from three bearings; the sky fills with a lattice of interceptor trails from every ship; the camera starts
+    high over the formation, dives down through the lattice between the ships at mast height, rides along a destroyer's
+    side as its Phalanx fires, and sees the destroyer on the threat axis take the hit meant for the carrier. The carrier
+    turns and launches fighters through the drifting smoke. Pull back high; the formation re-forms calm = frame 0.
+OG  og_bullet_time.html Bullet Time  The last twenty seconds of a defence stretched across the whole film with a variable
+    clock (x0.02 .. x1, always shown): the camera moves freely through the nearly frozen fight: interceptor plumes as
+    hanging cones, tracer streams as dashed lines in the air, fragments suspended, the last round a few metres from the
+    hull with the Phalanx's tracer reaching for it. Near the end time ramps to real speed: bursts, a flash, and then the
+    whole thing rewinds (like Long Exposure) back to the calm first frame.
+OH  oh_storm.html       Storm        Night, a storm at sea: heavy swell (sea lines heaving), rain streaks, spray over the
+    bow as the destroyer pitches, low cloud; lightning flashes that light every hairline at once for a moment. The raid
+    comes in low through the rain; interceptor plumes glow inside the cloud layer; Phalanx tracer through the rain; a
+    hit forward; the next lightning shows the damage; the storm rolls on and the loop returns to the calm-before.
+
+-------------------------------------------------------------------------------------------------------------
+POINT CLOUD (graphite, white LiDAR dots, lime = own / scans, coral = hostile, Geist + Geist Mono, tags, dotted boxes)
+-------------------------------------------------------------------------------------------------------------
+PD  pd_engagement.html  Engagement   (separate brief: _brief/combat.txt)
+PE  pe_aegis.html       Aegis        The ship's own radar picture: the camera starts at a SPY array face; a 360° dot scope
+    centred on the destroyer (sea clutter, the group, aircraft), the raid condensing out of uncertainty clouds on the
+    horizon (coral), lime interceptor tracks leaving the ship, bursts of dots where they meet, the Phalanx's own radar as
+    a dense dot cone for the last one; the camera rises to see the whole picture, then dives back to the array face.
+PF  pf_gun_camera.html  Gun Camera   The close-in gun's own camera: framed through its sight (reticle, range, lag), dot sea
+    and sky; tracking boxes on each incoming round on its true bounds, tracer dots streaming out from the bottom of the
+    frame, rounds bursting into debris dots; between engagements the camera pulls back to show the Phalanx mount itself
+    (HD.destroyer ciws sampled, barrels spinning) on the deck; four engagements, each different (single, pair, very low,
+    weaving); the last one gets through on the far side and the camera turns to see the flash aft.
+PG  pg_thermal.html     Thermal      A thermal imager's view in dots: white-hot stacks, plumes and muzzles; a warm hull; a
+    cold speckled sea; interceptor launches that bloom and blind; barrel heat glow; the hit as a saturating bloom and
+    debris glowing as it cools. Mid-film the view switches from white-hot to black-hot and back. Lime/coral overlays.
+PH  ph_damage_scan.html Damage Scan  Combat meets Anatomy (pc_anatomy.html is the user's favourite film): the destroyer
+    defends and takes a hit; then a lightning scan (dots pour down, the strike branches through the hull) sweeps the ship
+    and the damaged section's systems float apart in an exploded view (superstructure blocks, a radar face, a VLS module,
+    a Phalanx mount, a boat, mast sections), each tagged; they glide back together as the ship steams on, smoke thinning;
+    the loop returns to the calm ship before the raid.

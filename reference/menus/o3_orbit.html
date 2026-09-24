@@ -1,0 +1,512 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Oniks — From Orbit</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=DM+Mono:wght@400;500&display=block">
+<link rel="stylesheet" href="common/orbital.css">
+<style>
+  .logo { left: 72px; top: 58px; font-size: 19px; gap: 11px; }
+  .logo svg { width: 22px; height: 22px; }
+  .sub { left: 105px; top: 88px; font: 400 11.5px var(--mono); color: var(--w3); letter-spacing: 0; }
+  .fig { right: 96px; top: 60px; text-align: right; font-size: 13px; }
+  .foot { right: 96px; top: 84px; }
+  .menu { right: 96px; top: 380px; width: 480px; }
+  .menu .it { grid-template-columns: 1fr auto 58px; height: 64px; font-size: 36px; letter-spacing: -.03em; }
+  .menu .it .go { grid-area: 1 / 1; justify-self: end; margin-right: 22px; }
+  .menu .it .lab { grid-area: 1 / 2; justify-self: end; }
+  .menu .it .n { grid-area: 1 / 3; justify-self: end; }
+  .menu .it .bar { transform-origin: 100% 50%; right: 58px; }
+  .blurb { right: 154px; top: 718px; width: 330px; text-align: right; }
+  .keys { right: 96px; bottom: 52px; gap: 18px; font-size: 12.5px; }
+  .keys b { font-size: 11.5px; margin-right: 6px; }
+  .alt { left: 72px; top: 872px; }
+  .alt .v { font: 300 44px var(--sans); letter-spacing: -.035em; font-variant-numeric: tabular-nums; display: flex; align-items: baseline; gap: 12px; }
+  .alt .v i { font: 400 12px var(--mono); font-style: normal; color: var(--w3); letter-spacing: 0; }
+  .alt .v u { text-decoration: none; font-size: 22px; color: var(--w2); letter-spacing: -.01em; }
+  .alt .s { font: 400 12.5px var(--mono); color: var(--w2); margin-top: 8px; letter-spacing: 0; white-space: nowrap; }
+  .alt .s b { font-weight: 400; color: var(--w); }
+  .call { opacity: 0; }
+</style></head>
+<body><div id="stage">
+  <canvas id="c"></canvas>
+  <div class="ui" id="ui">
+    <div class="logo abs"><svg viewBox="0 0 24 24" fill="none" stroke="#F6F5F2" stroke-width="1.2"><circle cx="11" cy="13" r="8.2"/><path d="M1.5 22.5 22 2"/><rect x="19.2" y="1.4" width="3.8" height="3.8" fill="#F6F5F2" stroke="none"/></svg>Oniks</div>
+    <div class="sub abs">Coastal Defense Command</div>
+    <div class="fig abs"><b>Fig. 3</b>From orbit — theatre 1337</div>
+    <div class="foot abs">Proto v0.5.0</div>
+    <div class="menu abs" id="menu"></div>
+    <div class="blurb abs" id="blurb"></div>
+    <div class="alt abs"><div class="v"><i>Alt</i><span id="altv">21 000</span><u>km</u></div><div class="s"><b id="scl">1 : 40 000 000</b> · <span id="ll">24.00° N 9.60° E</span></div></div>
+    <div class="keys abs"><span><b>↑↓</b>Select</span><span><b>Enter</b>Open</span><span><b>G</b>Graphics</span><span><b>Esc</b>Quit</span></div>
+  </div>
+  <div class="veil" id="veil"><div class="msg">Stand the battery down.</div></div>
+</div>
+<script src="common/m3.js"></script><script src="common/orb.js"></script><script src="common/wire.js"></script><script src="common/stage.js"></script><script src="common/theatre.js"></script>
+<script>
+(() => {
+const { V, E, Cam } = M3;
+STAGE.fit();
+STAGE.SFX.kind = 'orb';
+const TH = window.THEATRE;
+const D2R = Math.PI / 180;
+
+/* ---------- menu ---------- */
+const menuEl = document.getElementById('menu');
+menuEl.innerHTML = STAGE.ITEMS.map((t, i) => `<div class="it" data-item><span class="go">↵</span><span class="lab">${ORB.swipe('o3' + t, { a: 1 })}<span class="tx">${t}</span></span><span class="n">0${i + 1}</span><i class="bar"></i></div>`).join('');
+const veil = document.getElementById('veil');
+const LOOP = 40, ARRIVE = 30.5;
+let seq = 0, rush = 0, refire = -1;
+STAGE.menu({
+  el: menuEl, blurb: document.getElementById('blurb'),
+  onEnter(i) {
+    if (i === 4) { veil.classList.add('on'); setTimeout(() => veil.classList.remove('on'), 1900); return 2600; }
+    // over the battery already: fire the salvo again; anywhere else: dive straight to it
+    if (seq > ARRIVE - 1.5 && seq < ARRIVE + 3.2) { refire = seq; STAGE.SFX.rumble(2.5, .16); return 1900; }
+    let rem = ARRIVE - seq; if (rem < 0) rem += LOOP;
+    rush = Math.max(3, rem / 1.1); STAGE.SFX.noise(2.2, 520, .8, .11, .5);
+    return 1900;
+  },
+});
+
+/* ---------- canvas ---------- */
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let K = 1;
+function size() { K = Math.min(2, Math.max(1, (devicePixelRatio || 1) * STAGE.scale)); cv.width = 1920 * K; cv.height = 1080 * K; }
+size(); addEventListener('resize', () => { STAGE.fit(); size(); });
+
+/* ---------- the globe: km, local frame at the battery (X east, Y up, Z north), Earth centre below ---------- */
+const RE = 6371, C = [0, -RE, 0];
+const LAT0 = 45.21 * D2R, LON0 = 36.6;
+const cL = Math.cos(LAT0), sL = Math.sin(LAT0);
+// unit vector for (lat, lon offset from the battery meridian); the battery is (LAT0, 0) -> +Y
+const dirLL = (la, dl) => { const c = Math.cos(la); return [c * Math.sin(dl), c * Math.cos(dl) * cL + Math.sin(la) * sL, -c * Math.cos(dl) * sL + Math.sin(la) * cL]; };
+const llOf = d => [Math.asin(E.clamp(d[1] * sL + d[2] * cL, -1, 1)), Math.atan2(d[0], d[1] * cL - d[2] * sL)];
+// map km -> sphere: gnomonic about the battery, <0.3 % distortion across the theatre
+function mapP(x, z, alt) { const l = Math.hypot(x, RE, z), r = (RE + (alt || 0)) / l; return [x * r, RE * r - RE, z * r]; }
+
+const cam = new Cam(); cam.fov = 38 * D2R; cam.near = .02;
+const W = new Wire(cam, { fog: [1e12, 2e12] });
+
+/* fast world->screen segment with near clipping; camera basis cached per frame */
+let ex, ey, ez, fx, fy, fz, rx, ry, rz, ux, uy, uz, FL, CX, CY, NEAR = .02;
+let EX, EY, EZ, EL;          // eye relative to Earth centre
+function camSync() {
+  [ex, ey, ez] = cam.eye; [fx, fy, fz] = cam.f; [rx, ry, rz] = cam.r; [ux, uy, uz] = cam.u;
+  FL = cam.fl; CX = cam.cx + cam.shake[0]; CY = cam.cy + cam.shake[1];
+  EX = ex - C[0]; EY = ey - C[1]; EZ = ez - C[2]; EL = Math.hypot(EX, EY, EZ);
+}
+function segW(ax, ay, az, bx, by, bz, al) {
+  if (al <= .004) return;
+  let dx = ax - ex, dy = ay - ey, dz = az - ez;
+  let Az = dx * fx + dy * fy + dz * fz, Ax = dx * rx + dy * ry + dz * rz, Ay = dx * ux + dy * uy + dz * uz;
+  dx = bx - ex; dy = by - ey; dz = bz - ez;
+  let Bz = dx * fx + dy * fy + dz * fz, Bx = dx * rx + dy * ry + dz * rz, By = dx * ux + dy * uy + dz * uz;
+  if (Az < NEAR && Bz < NEAR) return;
+  if (Az < NEAR) { const t = (NEAR - Az) / (Bz - Az); Ax += (Bx - Ax) * t; Ay += (By - Ay) * t; Az = NEAR; }
+  else if (Bz < NEAR) { const t = (NEAR - Bz) / (Az - Bz); Bx += (Ax - Bx) * t; By += (Ay - By) * t; Bz = NEAR; }
+  const x0 = CX + FL * Ax / Az, y0 = CY - FL * Ay / Az, x1 = CX + FL * Bx / Bz, y1 = CY - FL * By / Bz;
+  if ((x0 < -40 && x1 < -40) || (x0 > 1960 && x1 > 1960) || (y0 < -40 && y1 < -40) || (y0 > 1120 && y1 > 1120)) return;
+  W.seg2(x0, y0, x1, y1, al);
+}
+function proj(p) { return cam.project(p); }
+/* horizon coordinate of a surface point: 1 at the nadir, 0 on the horizon, <0 hidden */
+const kvOf = (x, y, z) => (((x - C[0]) * EX + (y - C[1]) * EY + (z - C[2]) * EZ) / RE - RE) / (EL - RE);
+/* line of sight from the eye to an elevated point clears the Earth */
+function clear(p) {
+  const dx = p[0] - ex, dy = p[1] - ey, dz = p[2] - ez, a = dx * dx + dy * dy + dz * dz;
+  const b = dx * EX + dy * EY + dz * EZ, c = EX * EX + EY * EY + EZ * EZ - RE * RE, disc = b * b - a * c;
+  if (disc < 0) return true;
+  const t = (-b - Math.sqrt(disc)) / a;
+  return !(t > 0 && t < 1);
+}
+
+/* surface polyline stored flat [x,y,z,...]; hidden past the horizon, faded toward it */
+function surfPath(P, i0, i1, al, fw, back, night) {
+  let px = 0, py = 0, pz = 0, pk = 0;
+  for (let i = i0; i < i1; i++) {
+    const x = P[i * 3], y = P[i * 3 + 1], z = P[i * 3 + 2], k = kvOf(x, y, z);
+    if (i > i0) {
+      let a = 0;
+      if (pk > 0 && k > 0) a = al * E.ss(0, fw, Math.min(pk, k));
+      else if (pk > 0 || k > 0) {
+        // clip the chord at the horizon so long graticule segments do not pop
+        const t = pk / (pk - k), hx = px + (x - px) * t, hy = py + (y - py) * t, hz = pz + (z - pz) * t;
+        if (pk > 0) segW(px, py, pz, hx, hy, hz, al * E.ss(0, fw, pk * .5)); else segW(hx, hy, hz, x, y, z, al * E.ss(0, fw, k * .5));
+        if (back) { if (pk > 0) segW(hx, hy, hz, x, y, z, back); else segW(px, py, pz, hx, hy, hz, back); }
+      } else if (back) segW(px, py, pz, x, y, z, back);
+      if (a > 0) {
+        if (night) { const d = ((px + x) * .5 - C[0]) * SUN[0] + ((py + y) * .5 - C[1]) * SUN[1] + ((pz + z) * .5 - C[2]) * SUN[2]; if (d < 0) a *= .3; }
+        segW(px, py, pz, x, y, z, a);
+      }
+    }
+    px = x; py = y; pz = z; pk = k;
+  }
+}
+
+/* ---------- static geometry ---------- */
+const SUN = dirLL(9 * D2R, -74 * D2R);
+function flat(list) { let n = 0; for (const l of list) n += l.length; const P = new Float64Array(n * 3), runs = []; let o = 0; for (const l of list) { runs.push(o, o + l.length); for (const p of l) { P[o * 3] = p[0]; P[o * 3 + 1] = p[1]; P[o * 3 + 2] = p[2]; o++; } } return { P, runs }; }
+// graticule every 10 degrees
+const grat = [];
+for (let la = -80; la <= 80; la += 10) { const l = []; for (let lo = 0; lo <= 360; lo += 2.5) { const d = dirLL(la * D2R, (lo - LON0) * D2R); l.push([C[0] + d[0] * RE, C[1] + d[1] * RE, C[2] + d[2] * RE]); } grat.push(l); }
+for (let lo = 0; lo < 360; lo += 10) { const l = []; for (let la = -90; la <= 90; la += 2.5) { const d = dirLL(la * D2R, (lo - LON0) * D2R); l.push([C[0] + d[0] * RE, C[1] + d[1] * RE, C[2] + d[2] * RE]); } grat.push(l); }
+const GRAT = flat(grat);
+// terminator: great circle normal to the sun
+const TERM = (() => { const U = V.norm(V.cross(SUN, [0, 1, 0])), Vv = V.cross(SUN, U), l = []; for (let i = 0; i <= 180; i++) { const a = i / 180 * Math.PI * 2; l.push(V.add(C, V.mul(V.add(V.mul(U, Math.cos(a)), V.mul(Vv, Math.sin(a))), RE))); } return flat([l]); })();
+
+/* theatre: the real seed-1337 map clipped to a 600 km square around the strait */
+const SQ = [-300, 300, -40, 560];
+function clipSeg(a, b) {
+  let t0 = 0, t1 = 1; const dx = b[0] - a[0], dz = b[1] - a[1];
+  for (const [p, q] of [[-dx, a[0] - SQ[0]], [dx, SQ[1] - a[0]], [-dz, a[1] - SQ[2]], [dz, SQ[3] - a[1]]]) {
+    if (p === 0) { if (q < 0) return null; continue; }
+    const r = q / p; if (p < 0) { if (r > t1) return null; if (r > t0) t0 = r; } else { if (r < t0) return null; if (r < t1) t1 = r; }
+  }
+  return [t0, t1];
+}
+function clipPoly(poly) {
+  const out = []; let run = null;
+  for (let i = 0; i < poly.length - 1; i++) {
+    const a = poly[i], b = poly[i + 1], c = clipSeg(a, b);
+    if (!c) { if (run && run.length > 1) out.push(run); run = null; continue; }
+    const p = [a[0] + (b[0] - a[0]) * c[0], a[1] + (b[1] - a[1]) * c[0]], q = [a[0] + (b[0] - a[0]) * c[1], a[1] + (b[1] - a[1]) * c[1]];
+    if (!run || c[0] > 0) { if (run && run.length > 1) out.push(run); run = [p]; }
+    run.push(q);
+    if (c[1] < 1) { out.push(run); run = null; }
+  }
+  if (run && run.length > 1) out.push(run);
+  return out;
+}
+const toSphere = (runs, alt) => flat(runs.map(r => r.map(p => mapP(p[0], p[1], alt || 0))));
+const decim = (poly, k) => poly.filter((_, i) => i % k === 0 || i === poly.length - 1);
+// the coast gets sub-kilometre relief below the heightmap's 1 km cells, only resolvable low down
+function detail(poly) {
+  const out = [];
+  for (let i = 0; i < poly.length - 1; i++) {
+    const a = poly[i], b = poly[i + 1], L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const near = Math.abs(a[0]) < 70 && a[1] < 40, n = Math.max(1, Math.ceil(L / (near ? .07 : .45)));
+    const nx = -(b[1] - a[1]) / (L || 1), nz = (b[0] - a[0]) / (L || 1);
+    for (let k = 0; k < n; k++) {
+      const t = k / n, x = a[0] + (b[0] - a[0]) * t, z = a[1] + (b[1] - a[1]) * t;
+      const d = .3 * M3.fbm(x * .42, z * .42, 3.7, 6);
+      out.push([x + nx * d, z + nz * d]);
+    }
+  }
+  out.push(poly[poly.length - 1]);
+  return out;
+}
+// marching-squares contours are 1 km staircases; corner-cutting reads as terrain when seen from 20 km
+function chaikin(p, it) { for (let k = 0; k < it; k++) { const o = [p[0]]; for (let i = 0; i < p.length - 1; i++) { const a = p[i], b = p[i + 1]; o.push([a[0] * .75 + b[0] * .25, a[1] * .75 + b[1] * .25], [a[0] * .25 + b[0] * .75, a[1] * .25 + b[1] * .75]); } o.push(p[p.length - 1]); p = o; } return p; }
+const lay = (lvl, dk, it) => TH.contours[lvl].map(p => chaikin(dk ? decim(p, dk) : p, it || 0)).flatMap(clipPoly);
+const COAST = toSphere(lay('0', 0, 1).map(detail));
+const B40 = toSphere(lay('-40', 0, 2)), B100 = toSphere(lay('-100', 2, 1));
+const T60 = toSphere(lay('60', 0, 2)), T140 = toSphere(lay('140', 2, 2)), T220 = toSphere(lay('220', 0, 2));
+const sqLine = (a, b, st) => { const l = [], n = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / st); for (let i = 0; i <= n; i++) l.push([a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n]); return l; };
+const SQP = [[SQ[0], SQ[2]], [SQ[1], SQ[2]], [SQ[1], SQ[3]], [SQ[0], SQ[3]]];
+const SQUARE = toSphere([0, 1, 2, 3].map(i => sqLine(SQP[i], SQP[(i + 1) % 4], 5)));
+const GRID50 = toSphere([...[-250, -200, -150, -100, -50, 0, 50, 100, 150, 200, 250].map(x => sqLine([x, SQ[2]], [x, SQ[3]], 5)),
+  ...[0, 50, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550].map(z => sqLine([SQ[0], z], [SQ[1], z], 5))]);
+const g10 = []; for (let x = -150; x <= 150; x += 10) if (x % 50) g10.push(sqLine([x, -40], [x, 200], 4));
+for (let z = 10; z <= 200; z += 10) if (z % 50) g10.push(sqLine([-150, z], [150, z], 4));
+const GRID10 = toSphere(g10);
+
+const BASE = TH.base_km;
+const SHIPS = TH.ships.map(s => ({ ...s, p: mapP(s.pos_km[0], s.pos_km[1]), tip: mapP(s.pos_km[0] + s.vel[0] * 1.8, s.pos_km[1] + s.vel[1] * 1.8), big: s.cls === 'Carrier' }));
+const TGT = [4, 2, 3].map(i => SHIPS[i]);           // transport, west DDG, carrier
+// hi-lo 3M55: climb to 14 km inside 40 km, then a long shallow descent to the 12 m skim at the target.
+// A flat cruise near the camera's own altitude would hook above the horizon from 30 km up.
+const FLIGHTS = TGT.map(s => {
+  const [x1, z1] = s.pos_km, L = Math.hypot(x1 - BASE[0], z1 - BASE[1]), n = 260, pts = [];
+  for (let i = 0; i < n; i++) {
+    const u = i / (n - 1), d = u * L;
+    const alt = 14 * E.ss(0, 40, d) * (1 - E.ss(75, L - 6, d)) + .012 * E.ss(0, 3, d);
+    pts.push(mapP(BASE[0] + (x1 - BASE[0]) * u, BASE[1] + (z1 - BASE[1]) * u, alt));
+  }
+  return { s, L, pts };
+});
+const ARCS = [120, 300].map(r => { const l = []; for (let a = -96; a <= 96; a += 1) l.push(mapP(BASE[0] + r * Math.sin(a * D2R), BASE[1] + r * Math.cos(a * D2R), 0)); return { r, l }; });
+const BAT = mapP(BASE[0], BASE[1]);
+const UNITS = [[-.34, -.78], [-.12, -.64], [.12, -.62], [.34, -.76], [.62, -1.3], [1.2, -.6]].map(p => mapP(p[0], p[1]));
+const AIRF = [mapP(TH.airfield_km[0] - 1.6, TH.airfield_km[1] - .6), mapP(TH.airfield_km[0] + 1.6, TH.airfield_km[1] + .6)];
+const ERAD = TH.enemy_radars_km.map(p => mapP(p[0], p[1]));
+const THC = mapP(0, 260);
+
+/* satellite: Lotos-S1 class ELINT, 900 km orbit, passes over the theatre at t = 5 s */
+const SAT_R = RE + 900;
+// orbit plane through the theatre, opened toward the opening camera so it reads as an ellipse, not a line
+const SAT_A = V.norm(V.sub(THC, C)), SAT_V = dirLL(24 * D2R, -27 * D2R);
+const SAT_N = V.norm(V.add(V.mul(V.norm(V.sub(SAT_V, V.mul(SAT_A, V.dot(SAT_V, SAT_A)))), .82), V.mul(V.norm(V.cross(SAT_A, SAT_V)), .57))), SAT_B = V.cross(SAT_N, SAT_A);
+const satAt = s => { const a = (s - 1.2) / LOOP * Math.PI * 2; return V.add(C, V.mul(V.add(V.mul(SAT_A, Math.cos(a)), V.mul(SAT_B, Math.sin(a))), SAT_R)); };
+
+/* ---------- camera path: a powers-of-ten dive, [t, distance to the look point km, look lat, lon offset, tilt from vertical, heading] ---------- */
+const KEYS = [
+  [0, 21000, 24, -27, 0, 0],
+  [6.4, 20000, 27.5, -21, 0, 0],
+  [10.2, 10500, 37, -9, 5, -12],
+  [13.6, 2800, 45.8, -1.2, 16, -24],
+  [17, 1400, 47.3, .1, 29, -15],
+  [21.6, 1000, 46.9, .1, 37, -7],
+  [25.1, 380, 45.95, .05, 52, -4],
+  [28.4, 150, 45.55, 0, 68, -6],
+  [30.5, 103, 45.5, 0, 72.5, -8],
+  [33.2, 106, 45.51, -.03, 73.5, -11],
+  [35.2, 440, 45.7, -.4, 48, -8],
+  [37.6, 6500, 36, -13, 6, -2],
+];
+const CH = KEYS.map(k => [k[0], Math.log10(k[1]), k[2], k[3], k[4], k[5]]);
+// monotone cubic per channel, periodic: holds stay holds, no altitude overshoot
+function track(s) {
+  const n = CH.length, out = [];
+  let i = n - 1; for (let k = 0; k < n; k++) if (CH[k][0] <= s) i = k;
+  const key = j => { const m = ((j % n) + n) % n, w = Math.floor(j / n); return [CH[m][0] + w * LOOP, CH[m]]; };
+  const [t0, k0] = key(i - 1), [t1, k1] = key(i), [t2, k2] = key(i + 1), [t3, k3] = key(i + 2);
+  const h = t2 - t1, u = (s - t1) / h, u2 = u * u, u3 = u2 * u;
+  for (let c = 1; c < 6; c++) {
+    const d0 = (k1[c] - k0[c]) / (t1 - t0), d1 = (k2[c] - k1[c]) / h, d2 = (k3[c] - k2[c]) / (t3 - t2);
+    const m1 = d0 * d1 <= 0 ? 0 : 2 / (1 / d0 + 1 / d1), m2 = d1 * d2 <= 0 ? 0 : 2 / (1 / d1 + 1 / d2);
+    out.push((2 * u3 - 3 * u2 + 1) * k1[c] + (u3 - 2 * u2 + u) * h * m1 + (-2 * u3 + 3 * u2) * k2[c] + (u3 - u2) * h * m2);
+  }
+  return { dist: Math.pow(10, out[0]), lat: out[1] * D2R, dl: out[2] * D2R, pitch: out[3] * D2R, hd: out[4] * D2R };
+}
+function placeCam(s) {
+  const k = track(s), n = dirLL(k.lat, k.dl);
+  const sa = Math.sin(k.lat), ca = Math.cos(k.lat), sd = Math.sin(k.dl), cd = Math.cos(k.dl);
+  const M0 = [0, cL, -sL], NA = [0, sL, cL];
+  const nt = V.add(V.add(V.mul(M0, -sa * cd), V.mul([1, 0, 0], -sa * sd)), V.mul(NA, ca));
+  const et = V.add(V.mul(M0, -sd), V.mul([1, 0, 0], cd));
+  const hdir = V.add(V.mul(nt, Math.cos(k.hd)), V.mul(et, Math.sin(k.hd)));
+  const back = V.add(V.mul(n, Math.cos(k.pitch)), V.mul(hdir, -Math.sin(k.pitch)));
+  const T = V.add(C, V.mul(n, RE));
+  cam.eye = V.add(T, V.mul(back, k.dist)); cam.target = T;
+  cam.up = V.add(V.mul(hdir, Math.cos(k.pitch)), V.mul(n, Math.sin(k.pitch)));
+  k.alt = V.len(V.sub(cam.eye, C)) - RE;
+  const lg = Math.log10(k.alt);
+  cam.cx = 960 - 150 - 80 * E.ss(2, 4, lg); cam.cy = 540 + 10 * E.ss(2, 4, lg);
+  cam.update();
+  return k;
+}
+
+/* ---------- update ---------- */
+function update(dt) {
+  let sp = 1;
+  if (rush) {
+    let rem = ARRIVE - seq; if (rem < 0) rem += LOOP;
+    sp = 1 + (rush - 1) * E.ss(0, 2.6, rem);
+    if (rem < dt * sp) { seq = ARRIVE; rush = 0; sp = 0; }
+  }
+  seq += dt * sp;
+  if (seq >= LOOP) { seq -= LOOP; refire = -1; }
+  STAGE.dbg = { seq: +seq.toFixed(2) };
+}
+
+/* ---------- callouts ---------- */
+const ui = document.getElementById('ui');
+function callout(html) { const d = document.createElement('div'); d.className = 'call'; d.innerHTML = html; ui.appendChild(d); return d; }
+const cSat = callout(ORB.cat('Lotos-S1', { code: '14F145' }) + '<span class="s2">ELINT · 900 km orbit</span>');
+const cThe = callout(ORB.cat('Theatre · 600 × 600 km', { code: 'TH1337' }) + '<span class="s2">47.5° N · 36.6° E</span>');
+const cBat = callout(ORB.cat('Bastion-P · Krasnaya Kosa', { code: 'K300P', sq: 'y' }) + '<span class="s2">4 TEL · 3M55 · reach <b>300 km</b></span>');
+const cFlt = callout(ORB.cat('Strike group', { code: 'CSG' }) + `<span class="s2">5 tracks · <b>${Math.round(Math.hypot(81.94, 296.56))} km</b> · 015°</span>`);
+const leaders = [];
+// screen furniture the labels must never sit on: menu + blurb, caption, wordmark, readout, keys
+const KEEP = [[1380, 360, 1920, 780], [1540, 40, 1920, 112], [40, 40, 300, 112], [40, 850, 540, 1040], [1480, 990, 1920, 1045]];
+function place(el, anchor, dx, dy, a) {
+  if (!anchor || a <= .01) { el.style.opacity = 0; return; }
+  const w = el.offsetWidth, h = 34, [ax, ay] = anchor;
+  const box = sx => { const d = dx * sx, ex2 = ax + d, hx = ex2 + (d >= 0 ? 18 : -18), x0 = d >= 0 ? hx + 8 : hx - 8 - w, y0 = ay + dy - 6; return { ex2, hx, x0, y0, bad: x0 < 20 || x0 + w > 1900 || y0 < 20 || y0 + h > 1060 || KEEP.some(r => x0 < r[2] && x0 + w > r[0] && y0 < r[3] && y0 + h > r[1]) }; };
+  let b = box(1); if (b.bad) { const b2 = box(-1); if (!b2.bad) b = b2; }
+  if (b.bad || KEEP.some(r => ax > r[0] && ax < r[2] && ay > r[1] && ay < r[3])) { el.style.opacity = 0; return; }
+  leaders.push([ax, ay, b.ex2, ay + dy, b.hx, a]);
+  el.style.opacity = a;
+  el.style.transform = `translate(${b.x0.toFixed(1)}px, ${b.y0.toFixed(1)}px)`;
+}
+const onScreen = (p, m) => p && p[0] > m && p[0] < 1920 - m && p[1] > m && p[1] < 1080 - m;
+const win = (s, a, b, f) => E.ss(a, a + (f || .6), s) * (1 - E.ss(b - (f || .6), b, s));
+
+/* ---------- render ---------- */
+const altEl = document.getElementById('altv'), sclEl = document.getElementById('scl'), llEl = document.getElementById('ll');
+const grp = n => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+function nice(n) { const p = Math.pow(10, Math.floor(Math.log10(n)) - 1); return Math.round(n / p) * p; }
+
+function render() {
+  const s = seq, k = placeCam(s);
+  camSync();
+  const alt = k.alt, lg = Math.log10(alt);
+  ctx.setTransform(K, 0, 0, K, 0, 0);
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, 1920, 1080);
+  W.reset(); W.style('#F6F5F2', 1);
+
+  const hiA = E.ss(2.3, 3.4, lg);            // the whole-globe look
+  const fw = .1 + .08 * hiA;
+
+  // limb + Karman shell
+  const eh = [EX / EL, EY / EL, EZ / EL], [U, Vv] = GEO_perp(eh);
+  { const rs = RE * Math.sqrt(1 - (RE / EL) ** 2), c = V.add(C, V.mul(eh, RE * RE / EL)); ringW(c, U, Vv, rs, 400, .85, true); }
+  if (hiA > 0) { const RA = RE + 100, rs = RA * Math.sqrt(1 - (RA / EL) ** 2), c = V.add(C, V.mul(eh, RA * RA / EL)); ringW(c, U, Vv, rs, 300, .16 * hiA, false); }
+
+  // graticule (day/night), terminator
+  const gA = .17 * (.35 + .65 * hiA) * E.ss(1.4, 2.4, lg);
+  for (let r = 0; r < GRAT.runs.length; r += 2) surfPath(GRAT.P, GRAT.runs[r], GRAT.runs[r + 1], gA, fw, .03 * hiA, true);
+  dashPath(TERM.P, 0, TERM.P.length / 3, .3 * E.ss(2.2, 3.2, lg), fw);
+
+  // theatre square + corner brackets
+  const sqA = E.mix(.34, .9, E.ss(5.6, 7.4, s) * (1 - E.ss(15, 18, s)));
+  traceSquare(sqA, s);
+
+  // map layers, fine detail fading in with altitude
+  const mid = E.ss(3.95, 3.3, lg), low = E.ss(3.2, 2.5, lg);
+  runs(COAST, .82, fw);
+  runs(B40, .15 * mid, fw); runs(B100, .075 * mid, fw);
+  runs(T60, .15 * low, fw); runs(T140, .09 * low, fw); runs(T220, .25 * low, fw);
+  runs(GRID50, .05 * E.ss(3.6, 3.0, lg), fw);
+  runs(GRID10, .065 * E.ss(2.5, 1.9, lg), fw);
+
+  // range arcs + flights
+  const arcA = E.ss(3.55, 3.1, lg);
+  ARCS.forEach((a, i) => {
+    const u = E.inOut(E.sat((s - 16.6 - i * .6) / 1.6));
+    const n = Math.floor(u * (a.l.length - 1)); if (n < 1 || arcA <= 0) return;
+    for (let j = 0; j < n; j++) { const p = a.l[j], q = a.l[j + 1]; const k1 = kvOf(p[0], p[1], p[2]); if (k1 > 0) segW(p[0], p[1], p[2], q[0], q[1], q[2], (i ? .5 : .34) * arcA * E.ss(0, fw, k1) * (j % 4 === 3 && i === 0 ? 0 : 1)); }
+  });
+  const flA = E.ss(3.5, 3.05, lg);
+  // aerial perspective: trajectories thin out toward the geometric horizon when low
+  const dh = Math.sqrt(2 * RE * alt), fogA = (p, q) => 1 - .75 * E.ss(.35 * dh, .9 * dh, Math.hypot(q[0] - ex, q[1] - ey, q[2] - ez));
+  const heads = [];
+  FLIGHTS.forEach((F, i) => {
+    const t0 = (refire > 0 && s >= refire ? refire : 18.4) + i * .55, u = E.inOut(E.sat((s - t0) / 5));
+    F.hit = s - t0 - 5;
+    if (flA <= 0 || u <= 0) return;
+    const m = u * (F.pts.length - 1), n = Math.floor(m);
+    for (let j = 0; j < Math.min(n, F.pts.length - 1); j++) { const p = F.pts[j], q = F.pts[j + 1]; if (clear(q)) segW(p[0], p[1], p[2], q[0], q[1], q[2], .62 * flA * fogA(p, q)); }
+    if (u < 1) {
+      const p = F.pts[n], q = F.pts[Math.min(F.pts.length - 1, n + 1)], h = V.lerp(p, q, m - n);
+      segW(p[0], p[1], p[2], h[0], h[1], h[2], .62 * flA);
+      if (clear(h)) heads.push([proj(h), flA]);
+    } else {
+      // a round in flight, looping along the finished trajectory during the hold
+      const v = ((s - t0 - 5.6 - i * .75) / 6.5) % 1;
+      if (v >= 0 && s > t0 + 5.6) { const m2 = v * (F.pts.length - 1), n2 = Math.floor(m2), h = V.lerp(F.pts[n2], F.pts[Math.min(F.pts.length - 1, n2 + 1)], m2 - n2); if (clear(h)) heads.push([proj(h), flA * .8]); }
+    }
+  });
+
+  // ships, airfield, enemy radars, the battery
+  const tA = E.ss(3.75, 3.3, lg);
+  for (const sh of SHIPS) {
+    const p = proj(sh.p), q = proj(sh.tip); if (!p || kvOf(...sh.p) <= 0 || tA <= 0) continue;
+    segW(...sh.p, ...sh.tip, .35 * tA);
+    if (q) { let dx = q[0] - p[0], dy = q[1] - p[1]; const l = Math.hypot(dx, dy) || 1; dx /= l; dy /= l; const L2 = sh.big ? 7 : 5, B2 = sh.big ? 2.6 : 2;
+      const P0 = [p[0] + dx * L2, p[1] + dy * L2], P1 = [p[0] - dy * B2, p[1] + dx * B2], P2 = [p[0] - dx * L2, p[1] - dy * L2], P3 = [p[0] + dy * B2, p[1] - dx * B2];
+      W.seg2(...P0, ...P1, .95 * tA); W.seg2(...P1, ...P2, .95 * tA); W.seg2(...P2, ...P3, .95 * tA); W.seg2(...P3, ...P0, .95 * tA); }
+  }
+  // arrival: two rings open on the target when its trajectory completes
+  for (const F of FLIGHTS) {
+    if (F.hit < 0 || F.hit > 1.8 || flA <= 0) continue;
+    const p = proj(F.s.p); if (!p) continue;
+    for (let r = 0; r < 2; r++) { const u = E.sat((F.hit - r * .25) / 1.4); if (u > 0) circ2(p[0], p[1], 6 + 30 * E.outCubic(u), .8 * (1 - u) * flA); }
+  }
+  if (tA > 0) {
+    segW(...AIRF[0], ...AIRF[1], .5 * tA);
+    for (const r of ERAD) { const p = proj(r); if (p && kvOf(...r) > 0) circ2(p[0], p[1], 3, .5 * tA); }
+  }
+  const uA = E.ss(2.6, 1.9, lg);
+  if (uA > 0) for (const u2 of UNITS) { const p = proj(u2); if (p) { W.seg2(p[0] - 2.5, p[1], p[0] + 2.5, p[1], .8 * uA); W.seg2(p[0], p[1] - 2.5, p[0], p[1] + 2.5, .8 * uA); } }
+  for (const [p, a] of heads) if (p) { W.seg2(p[0] - 3, p[1] - 3, p[0] + 3, p[1] + 3, a); W.seg2(p[0] - 3, p[1] + 3, p[0] + 3, p[1] - 3, a); circ2(p[0], p[1], 5, a * .5); }
+
+  // satellite + its orbit
+  const sA = E.ss(3.4, 3.9, lg);
+  let satP = null;
+  if (sA > 0) {
+    const n = 240;
+    let prev = satAt(0), pc = clear(prev);
+    for (let i = 1; i <= n; i++) { const q = satAt(i / n * LOOP), qc = clear(q); segW(...prev, ...q, (pc && qc ? .22 : .035) * sA); prev = q; pc = qc; }
+    const sp = satAt(s), sp2 = satAt(s + .05);
+    if (clear(sp)) {
+      const p = proj(sp), q = proj(sp2);
+      if (p && q) { satP = p; let dx = q[0] - p[0], dy = q[1] - p[1]; const l = Math.hypot(dx, dy) || 1; dx /= l; dy /= l;
+        W.style('#F6F5F2', 1.3);
+        box2(p[0], p[1], 2.4, sA); for (const sg of [-1, 1]) { const cx2 = p[0] - dy * sg * 9, cy2 = p[1] + dx * sg * 9; W.seg2(p[0] - dy * sg * 3, p[1] + dx * sg * 3, cx2, cy2, .7 * sA); W.seg2(cx2 - dx * 3, cy2 - dy * 3, cx2 + dx * 3, cy2 + dy * 3, sA); }
+        W.style('#F6F5F2', 1);
+      }
+    }
+  }
+  W.flush(ctx);
+  // calm the menu side
+  const lgr = ctx.createLinearGradient(1180, 0, 1920, 0); lgr.addColorStop(0, 'rgba(0,0,0,0)'); lgr.addColorStop(.4, 'rgba(0,0,0,.72)'); lgr.addColorStop(1, 'rgba(0,0,0,.86)');
+  ctx.fillStyle = lgr; ctx.fillRect(1180, 0, 740, 1080);
+
+  // yellow: our own battery, the one lock on the map
+  const bp = proj(BAT), bs = E.mix(3, 2, E.ss(3, 4, lg));
+  if (bp && kvOf(...BAT) > 0) { ctx.fillStyle = '#F4D23C'; ctx.fillRect(bp[0] - bs, bp[1] - bs, bs * 2, bs * 2); }
+
+  // range labels
+  if (arcA > .02) {
+    ctx.font = '400 11px "DM Mono", monospace'; ctx.fillStyle = '#F6F5F2';
+    ARCS.forEach((a, i) => { const u = E.sat((s - 17.6 - i * .6) / .5); const q = a.l[62]; const p = proj(q); if (p && u > 0 && kvOf(...q) > .02 && onScreen(p, 30) && !KEEP.some(r => p[0] + 60 > r[0] && p[0] < r[2] && p[1] > r[1] && p[1] - 16 < r[3])) { ctx.globalAlpha = .55 * arcA * u; ctx.fillText(a.r + ' km', p[0] + 6, p[1] - 6); } });
+    ctx.globalAlpha = 1;
+  }
+
+  // callouts
+  leaders.length = 0;
+  place(cSat, satP, 84, -74, onScreen(satP, 60) ? (s < 20 ? 1 - E.ss(5.6, 6.2, s) : E.ss(36.8, 37.4, s)) * sA : 0);
+  const thP = proj(mapP(SQ[1], SQ[3]));
+  place(cThe, thP, 64, -58, onScreen(thP, 40) ? win(s, 6.4, 15.6) : 0);
+  const lo = E.ss(2.6, 1.6, lg);
+  place(cBat, bp, E.mix(110, 150, lo), E.mix(96, 70, lo), onScreen(bp, 40) ? win(s, 19.6, 34.2) : 0);
+  const cp = proj(SHIPS[3].p);
+  place(cFlt, cp, 70, -80, onScreen(cp, 40) && kvOf(...SHIPS[3].p) > .03 ? win(s, 21.4, 33.9) : 0);
+  ctx.strokeStyle = '#F6F5F2'; ctx.fillStyle = '#F6F5F2'; ctx.lineWidth = 1;
+  for (const [ax, ay, ex2, ey2, hx, a] of leaders) { ctx.globalAlpha = .7 * a; ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ex2, ey2); ctx.lineTo(hx, ey2); ctx.stroke(); }
+  ctx.globalAlpha = 1;
+
+  // readout + log-altitude ruler
+  const mpp = alt * 1000 / FL, scale = nice(mpp / .000265);
+  altEl.textContent = grp(alt >= 100 ? Math.round(alt / 10) * 10 : Math.round(alt));
+  sclEl.textContent = '1 : ' + grp(scale);
+  const [la, dl] = llOf(V.norm(V.sub(cam.eye, C)));
+  llEl.textContent = `${(la / D2R).toFixed(2)}° N ${(LON0 + dl / D2R).toFixed(2)}° E`;
+  ruler(lg);
+}
+
+/* ---------- small drawing helpers ---------- */
+function GEO_perp(d) { const a = Math.abs(d[1]) < .9 ? [0, 1, 0] : [1, 0, 0]; const U = V.norm(V.cross(a, d)); return [U, V.cross(d, U)]; }
+function ringW(c, U, Vv, r, n, al) {
+  let p = V.add(c, V.mul(U, r));
+  for (let i = 1; i <= n; i++) { const a = i / n * Math.PI * 2, q = V.add(c, V.add(V.mul(U, Math.cos(a) * r), V.mul(Vv, Math.sin(a) * r))); segW(p[0], p[1], p[2], q[0], q[1], q[2], al); p = q; }
+}
+function runs(L, al, fw) { if (al <= .004) return; for (let r = 0; r < L.runs.length; r += 2) surfPath(L.P, L.runs[r], L.runs[r + 1], al, fw); }
+function dashPath(P, i0, i1, al, fw) { if (al <= .004) return; for (let i = i0; i < i1 - 1; i += 2) surfPath(P, i, i + 2, al, fw); }
+function circ2(x, y, r, a) { const n = Math.max(10, Math.min(48, Math.round(r))); for (let i = 0; i < n; i++) { const a0 = i / n * 6.2832, a1 = (i + 1) / n * 6.2832; W.seg2(x + Math.cos(a0) * r, y + Math.sin(a0) * r, x + Math.cos(a1) * r, y + Math.sin(a1) * r, a); } }
+function box2(x, y, r, a) { W.seg2(x - r, y - r, x + r, y - r, a); W.seg2(x + r, y - r, x + r, y + r, a); W.seg2(x + r, y + r, x - r, y + r, a); W.seg2(x - r, y + r, x - r, y - r, a); }
+function traceSquare(al, s) {
+  // the square draws itself around once when the theatre is called out
+  const u = s > 5.6 && s < 12 ? E.inOut(E.sat((s - 5.6) / 1.6)) : 1;
+  const tot = SQUARE.P.length / 3;
+  let drawn = 0;
+  for (let r = 0; r < SQUARE.runs.length; r += 2) {
+    const i0 = SQUARE.runs[r], i1 = SQUARE.runs[r + 1], lim = Math.min(i1, i0 + Math.max(0, Math.round(u * tot - drawn)));
+    if (lim - i0 > 1) surfPath(SQUARE.P, i0, lim, al, .12);
+    if (u < 1) surfPath(SQUARE.P, i0, i1, .2, .12);
+    drawn += i1 - i0;
+  }
+  // brackets just outside the corners
+  const bk = 22, g = 10;
+  [[SQ[0] - g, SQ[2] - g, 1, 1], [SQ[1] + g, SQ[2] - g, -1, 1], [SQ[1] + g, SQ[3] + g, -1, -1], [SQ[0] - g, SQ[3] + g, 1, -1]].forEach(([x, z, sx, sz]) => {
+    const a = mapP(x, z), b = mapP(x + sx * bk, z), c = mapP(x, z + sz * bk);
+    segW(...a, ...b, al * .9); segW(...a, ...c, al * .9);
+  });
+}
+function ruler(lg) {
+  const x0 = 72, w = 330, y = 1004, L0 = 1, L1 = 4.6, X = v => x0 + (v - L0) / (L1 - L0) * w;
+  ctx.strokeStyle = '#F6F5F2'; ctx.lineWidth = 1;
+  ctx.globalAlpha = .28; ctx.beginPath(); ctx.moveTo(x0, y + .5); ctx.lineTo(x0 + w, y + .5);
+  for (let d = 1; d <= 4; d++) for (let m = 2; m <= 9; m++) { const v = d + Math.log10(m); if (v > L1) break; ctx.moveTo(Math.round(X(v)) + .5, y); ctx.lineTo(Math.round(X(v)) + .5, y - 3); }
+  ctx.stroke();
+  ctx.globalAlpha = .6; ctx.beginPath(); for (let d = 1; d <= 4; d++) { ctx.moveTo(Math.round(X(d)) + .5, y); ctx.lineTo(Math.round(X(d)) + .5, y - 7); } ctx.stroke();
+  ctx.font = '400 10.5px "DM Mono", monospace'; ctx.fillStyle = '#F6F5F2'; ctx.globalAlpha = .38;
+  ['10', '100', '1 000', '10 000 km'].forEach((t, i) => ctx.fillText(t, X(i + 1) - 3, y + 17));
+  const mx = X(E.clamp(lg, L0, L1));
+  ctx.globalAlpha = 1; ctx.beginPath(); ctx.moveTo(mx, y - 3); ctx.lineTo(mx - 4, y - 10); ctx.lineTo(mx + 4, y - 10); ctx.closePath(); ctx.fill();
+  ctx.fillRect(Math.round(mx) - .5, y - 3, 1, 7);
+}
+
+STAGE.run({ update, render });
+})();
+</script>
+</body></html>

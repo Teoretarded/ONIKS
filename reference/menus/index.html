@@ -1,0 +1,135 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Oniks — main menu, round 2</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=DM+Mono:wght@400;500&display=swap">
+<style>
+  :root { --w: #F2F1EC; --w2: rgba(242,241,236,.62); --w3: rgba(242,241,236,.36); --hair: rgba(242,241,236,.12); --hi: #F4D23C; --lime: #C6F432; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { background: #070707; }
+  body { color: var(--w); font-family: Inter, 'Segoe UI', sans-serif; -webkit-font-smoothing: antialiased; padding: 48px clamp(20px, 4vw, 64px) 80px; }
+  header { border-bottom: 1px solid var(--hair); padding-bottom: 22px; }
+  h1 { font-weight: 300; font-size: clamp(28px, 3vw, 40px); letter-spacing: -.03em; }
+  h1 b { font-weight: 500; }
+  .how { margin-top: 12px; font: 400 12.5px/1.8 'DM Mono', monospace; color: var(--w3); }
+  .how b { color: var(--w2); font-weight: 400; }
+  section { margin-top: 40px; }
+  h2 { display: flex; align-items: center; gap: 12px; font: 500 12.5px 'DM Mono', monospace; letter-spacing: .08em; text-transform: uppercase; color: var(--w2); margin-bottom: 18px; }
+  h2 i { width: 8px; height: 8px; flex: none; }
+  .o h2 i { background: var(--hi); } .p h2 i { background: var(--lime); }
+  h2 span { color: var(--w3); letter-spacing: 0; text-transform: none; font-weight: 400; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(520px, 100%), 1fr)); gap: 32px 28px; }
+  .tile { cursor: pointer; }
+  .tile.pending { cursor: default; }
+  .shot { position: relative; aspect-ratio: 16/9; background: #111; overflow: hidden; outline: 1px solid var(--hair); }
+  .shot img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .5s cubic-bezier(.2,.7,.2,1); }
+  .tile:not(.pending):hover .hero img { transform: scale(1.025); }
+  .hero .zoom { position: absolute; right: 12px; bottom: 12px; font: 400 12px 'DM Mono', monospace; color: #fff; background: rgba(0,0,0,.72); padding: 6px 9px; opacity: 0; transition: opacity .2s; }
+  .tile:not(.pending):hover .hero .zoom { opacity: 1; }
+  .strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 6px; }
+  .pend { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; font: 400 12.5px 'DM Mono', monospace; color: var(--w3); }
+  .pend i { width: 7px; height: 7px; background: var(--w3); animation: bl 1s steps(2) infinite; }
+  @keyframes bl { 50% { opacity: 0; } }
+  .meta { display: grid; grid-template-columns: 44px 1fr auto; gap: 0 12px; align-items: baseline; margin-top: 14px; }
+  .meta .n { font: 400 13px 'DM Mono', monospace; color: var(--w3); }
+  .meta .t { font-size: 24px; letter-spacing: -.02em; }
+  .meta .go { font: 400 12px 'DM Mono', monospace; color: var(--w3); text-decoration: none; }
+  .meta .go:hover { color: var(--w); }
+  .meta .d { grid-column: 2 / 4; margin-top: 6px; font-size: 14.5px; line-height: 1.45; color: var(--w2); max-width: 680px; }
+
+  /* big view */
+  #lb { position: fixed; inset: 0; z-index: 10; background: rgba(4,4,4,.96); display: none; flex-direction: column; padding: 18px clamp(12px, 2.5vw, 36px); }
+  #lb.on { display: flex; }
+  #lb .bar { display: flex; align-items: baseline; gap: 16px; padding-bottom: 12px; }
+  #lb .bar .n { font: 400 13px 'DM Mono', monospace; color: var(--w3); }
+  #lb .bar .t { font-size: 22px; letter-spacing: -.02em; }
+  #lb .bar .sp { flex: 1; }
+  #lb .btn { font: 400 12.5px 'DM Mono', monospace; color: var(--w2); background: none; border: 1px solid var(--hair); padding: 7px 11px; cursor: pointer; text-decoration: none; }
+  #lb .btn:hover { color: #fff; border-color: var(--w3); }
+  #lb .btn.play { color: #0b0b0b; background: var(--w); border-color: var(--w); }
+  #lb .stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
+  #lb .frame { position: relative; aspect-ratio: 16/9; max-width: 100%; max-height: 100%; width: 100%; background: #000; outline: 1px solid var(--hair); }
+  @supports (aspect-ratio: 1) { #lb .frame { width: min(100%, calc((100vh - 230px) * 16 / 9)); } }
+  #lb .frame img, #lb .frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; object-fit: contain; }
+  #lb .foot { display: grid; grid-template-columns: auto 1fr; gap: 18px; align-items: center; padding-top: 12px; }
+  #lb .moms { display: flex; gap: 6px; }
+  #lb .moms img { width: 128px; aspect-ratio: 16/9; object-fit: cover; cursor: pointer; outline: 1px solid var(--hair); opacity: .55; transition: opacity .15s; }
+  #lb .moms img.on, #lb .moms img:hover { opacity: 1; outline-color: var(--w2); }
+  #lb .d { font-size: 14px; line-height: 1.45; color: var(--w2); max-width: 900px; }
+  #lb .keys { font: 400 11.5px 'DM Mono', monospace; color: var(--w3); margin-top: 6px; }
+</style></head>
+<body>
+<header>
+  <h1><b>Oniks</b> main menu · round 2</h1>
+  <div class="how">10 live menus, each a running simulation behind the game's real five entries.
+    Click a tile to open it big · <b>← →</b> next / previous · <b>Play</b> runs the live menu · <b>Esc</b> close.
+    Inside a live menu: <b>↑↓ Enter</b> as in game · <b>[ ]</b> flip versions · <b>M</b> sound · <b>P</b> pause.</div>
+</header>
+<div id="g"></div>
+
+<div id="lb">
+  <div class="bar"><span class="n" id="lbn"></span><span class="t" id="lbt"></span><span class="sp"></span>
+    <button class="btn" id="lbprev">← prev</button><button class="btn" id="lbnext">next →</button>
+    <button class="btn play" id="lbplay">▶ Play live</button><a class="btn" id="lbopen" target="_blank">open full screen ↗</a><button class="btn" id="lbx">close ✕</button></div>
+  <div class="stage"><div class="frame" id="lbf"></div></div>
+  <div class="foot"><div class="moms" id="lbm"></div><div><div class="d" id="lbd"></div><div class="keys">click a moment to see it big · Play to run the menu here (click into it, then ↑↓ Enter) · ← → versions · Esc close</div></div></div>
+</div>
+
+<script>
+const V = [
+  ['o', 'o1_ignition', 'O1', 'Ignition', 'The full cold launch: jacks down, tube erects, gas ejection pops the cap, booster lights, hard pitch-over and a dive to sea-skim. Smoke-ring trail hangs over the battery; the radar array spins; labels ride the missile.'],
+  ['o', 'o2_seaskim', 'O2', 'Sea Skimmer', 'Chasing the round at Mach 2, 14 m over a wireframe sea: the Mach cone and its shock footprint on the water, the seeker fan sweeping the horizon for ships.'],
+  ['o', 'o3_orbit', 'O3', 'From Orbit', 'One continuous dive from a wireframe Earth (satellite on its orbit, day/night line) down onto the real game map: coastline, depth lines, Oniks 120 and 300 km range arcs, flight paths out to the strike group, then low over the battery and back out. Enter dives straight in.'],
+  ['o', 'o4_chronograph', 'O4', 'Chronograph', 'One round as a multiple-exposure figure, side-on through a long lens: a wireframe copy every 0.35 s from gas ejection to the hit on the destroyer, each phase labelled as it happens, then the whole trajectory on one plate. Menu is a row along the bottom.'],
+  ['o', 'o5_terminal', 'O5', 'Terminal', 'The fight at the ship: three rounds low from the horizon, two SM-6s off the VLS on smoke rings, a kill 7 km out, a miss, CIWS kills one at 480 m, the last round hits the hull. Engagement log on the right.'],
+  ['p', 'p1_strike', 'P1', 'Strike', 'Your lightning idea: dots pour down, the bolt hits the TEL, the scan crawls over it in branching fingers, jumps to the ground and the radar truck; cab, TLCs, chassis and jacks get boxed and named.'],
+  ['p', 'p2_clutter', 'P2', 'Clutter', 'The coastal radar\'s view of the sea: every 4 s sweep pops up clutter, sea spikes and ship returns. Tracks start white and tentative, earn their confidence and type hit by hit (and can get it wrong), false tracks get dropped. Enter = burst mode.'],
+  ['p', 'p3_coastline', 'P3', 'Coastline', 'A LiDAR survey flight along the real game coastline: a scan line materialises cliffs, coves and the waterline, and tags the radar, the Pantsir and the battery as it reaches them. Enter fires a 360° ping that reveals everything at once.'],
+  ['p', 'p4_track', 'P4', 'Track', 'A telephoto tracker 1.5 km out watches a launch: TELs, tube cap and plume get boxed; the missile is boxed on its true 3D bounds while the mount lags and catches up, zooming as the range opens; a narrow-FOV sight shows it in full detail.'],
+  ['p', 'p5_confidence', 'P5', 'Confidence', 'A ship as probability: radar pulses pull a cloud of dots onto the hull while the class bars move Unknown → Frigate? → DDG · Arleigh Burke 0.89. Then jamming walks the track off and it dissolves back into a blob. Centred layout.'],
+];
+const src = (id, k) => `thumbs/${id}_${k}.jpg`;
+const ready = {};
+const pendHTML = '<div class="pend"><i></i>being built — reload in a bit</div>';
+function tile([, id, n, t, d], idx) {
+  return `<div class="tile pending" data-i="${idx}" id="tile-${id}">
+    <div class="shot hero"><img src="${src(id, 0)}" alt="" onload="mark('${id}')" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'pend',innerHTML:'<i></i>being built — reload in a bit'}))"><span class="zoom">click to view big</span></div>
+    <div class="strip">${[1, 2, 3].map(k => `<div class="shot"><img src="${src(id, k)}" alt="" data-k="${k}" onerror="this.style.visibility='hidden'"></div>`).join('')}</div>
+    <div class="meta"><span class="n">${n}</span><span class="t">${t}</span><a class="go" href="${id}.html" onclick="event.stopPropagation()">play ↗</a><span class="d">${d}</span></div></div>`;
+}
+function mark(id) { ready[id] = true; document.getElementById('tile-' + id).classList.remove('pending'); }
+const sec = (cls, title, sub) => `<section class="${cls}"><h2><i></i>${title}<span>${sub}</span></h2><div class="grid">` +
+  V.map((v, i) => [v, i]).filter(([v]) => v[0] === cls).map(([v, i]) => tile(v, i)).join('') + '</div></section>';
+document.getElementById('g').innerHTML = sec('o', 'Orbital', ' — black, white hairline wireframe, yellow highlighter') + sec('p', 'Point Cloud', ' — graphite, LiDAR dots, lime identification');
+
+/* big view */
+const lb = document.getElementById('lb'), lbf = document.getElementById('lbf'), lbm = document.getElementById('lbm');
+let cur = -1, mom = 0;
+function show(i, k) {
+  const [, id, n, t, d] = V[i]; cur = i; mom = k || 0;
+  document.getElementById('lbn').textContent = n;
+  document.getElementById('lbt').textContent = t;
+  document.getElementById('lbd').textContent = d;
+  document.getElementById('lbopen').href = id + '.html';
+  lbf.innerHTML = ready[id] ? `<img src="${src(id, mom)}" alt="">` : pendHTML;
+  lbm.innerHTML = ready[id] ? [0, 1, 2, 3].map(q => `<img src="${src(id, q)}" data-q="${q}" class="${q === mom ? 'on' : ''}" onerror="this.remove()">`).join('') : '';
+  lb.classList.add('on'); document.body.style.overflow = 'hidden';
+}
+function close() { lb.classList.remove('on'); lbf.innerHTML = ''; document.body.style.overflow = ''; cur = -1; }
+function step(d) { if (cur < 0) return; show((cur + d + V.length) % V.length, 0); }
+document.getElementById('g').addEventListener('click', e => {
+  const t = e.target.closest('.tile'); if (!t || t.classList.contains('pending')) return;
+  const im = e.target.closest('.strip img'); show(+t.dataset.i, im ? +im.dataset.k : 0);
+});
+lbm.addEventListener('click', e => { const im = e.target.closest('img'); if (!im) return; mom = +im.dataset.q; lbf.innerHTML = `<img src="${im.src}" alt="">`; lbm.querySelectorAll('img').forEach(x => x.classList.toggle('on', x === im)); });
+document.getElementById('lbplay').onclick = () => { if (cur < 0) return; const id = V[cur][1]; lbf.innerHTML = `<iframe src="${id}.html?embed" allow="autoplay"></iframe>`; lbf.querySelector('iframe').focus(); };
+document.getElementById('lbprev').onclick = () => step(-1);
+document.getElementById('lbnext').onclick = () => step(1);
+document.getElementById('lbx').onclick = close;
+lb.addEventListener('click', e => { if (e.target === lb || e.target.classList.contains('stage')) close(); });
+addEventListener('keydown', e => {
+  if (cur < 0) return;
+  if (e.key === 'Escape') close(); else if (e.key === 'ArrowRight') step(1); else if (e.key === 'ArrowLeft') step(-1);
+});
+// a live menu inside the big view asks us to flip or close
+addEventListener('message', e => { const m = e.data && e.data.oniks; if (m === 'next') step(1); else if (m === 'prev') step(-1); else if (m === 'close') close(); });
+</script>
+</body></html>

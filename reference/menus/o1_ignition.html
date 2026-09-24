@@ -1,0 +1,293 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Oniks — Ignition</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=DM+Mono:wght@400;500&display=block">
+<link rel="stylesheet" href="common/orbital.css">
+<style>
+  .logo { left: 96px; top: 66px; }
+  .sub { left: 96px; top: 104px; font-size: 14px; color: var(--w3); }
+  .menu { left: 96px; top: 318px; width: 430px; }
+  .menu .it { height: 66px; padding-top: 15px; border-top: 1px solid var(--wr); font-size: 34px; letter-spacing: -.028em; }
+  .menu .it:last-child { border-bottom: 1px solid var(--wr); }
+  .blurb { left: 146px; top: 668px; width: 380px; }
+  .keys { left: 96px; bottom: 58px; }
+  .clock { right: 96px; top: 58px; text-align: right; }
+  .clock .t { font: 300 46px var(--sans); letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+  .clock .l { font: 400 12px var(--mono); color: var(--w3); margin-top: 6px; }
+  .log { right: 96px; bottom: 104px; width: 300px; font: 400 12.5px var(--mono); }
+  .log .r { display: grid; grid-template-columns: 86px 1fr; padding: 7px 0 6px; border-top: 1px solid var(--wr); color: var(--w2); animation: fadein .3s ease-out; }
+  .log .r b { font-weight: 400; color: var(--w); }
+  .log .r.now b { color: var(--hi); }
+  .fig { right: 96px; bottom: 56px; text-align: right; }
+  .foot { left: 50%; bottom: 58px; transform: translateX(-50%); }
+  .call { opacity: 0; }
+</style></head>
+<body><div id="stage">
+  <canvas id="c"></canvas>
+  <div class="ui" id="ui">
+    <div class="logo abs"><svg viewBox="0 0 24 24" fill="none" stroke="#F6F5F2" stroke-width="1.2"><circle cx="11" cy="13" r="8.2"/><path d="M1.5 22.5 22 2"/><rect x="19.2" y="1.4" width="3.8" height="3.8" fill="#F6F5F2" stroke="none"/></svg>Oniks</div>
+    <div class="sub abs">Krasnaya Kosa — Coastal Defense Command</div>
+    <div class="menu abs" id="menu"></div>
+    <div class="blurb abs" id="blurb"></div>
+    <div class="keys abs"><span><b>↑↓</b>Select</span><span><b>Enter</b>Open</span><span><b>G</b>Graphics</span><span><b>Esc</b>Quit</span></div>
+    <div class="clock abs"><div class="t" id="clk">T−00:10.0</div><div class="l" id="clkl">Launch sequence · TEL 1</div></div>
+    <div class="log abs" id="log"></div>
+    <div class="fig abs"><b>Fig. 1</b>Cold launch — Bastion-P, 3M55 Oniks</div>
+    <div class="foot abs">Proto v0.5.0</div>
+  </div>
+  <div class="veil" id="veil"><div class="msg">Stand the battery down.</div></div>
+</div>
+<script src="common/m3.js"></script><script src="common/orb.js"></script><script src="common/wire.js"></script><script src="common/geo.js"></script><script src="common/stage.js"></script>
+<script>
+(() => {
+const { V, R, X, E, Cam, rng } = M3;
+STAGE.fit();
+STAGE.SFX.kind = 'orb';
+
+/* ---------- menu ---------- */
+const menuEl = document.getElementById('menu');
+menuEl.innerHTML = STAGE.ITEMS.map((t, i) => `<div class="it" data-item><span class="n">0${i + 1}</span><span class="lab">${ORB.swipe('o1' + t, { a: 1 })}<span class="tx">${t}</span></span><span class="go">↵</span><i class="bar"></i></div>`).join('');
+const veil = document.getElementById('veil');
+let rush = false;
+STAGE.menu({
+  el: menuEl, blurb: document.getElementById('blurb'),
+  onEnter(i) {
+    if (i === 4) { veil.classList.add('on'); setTimeout(() => veil.classList.remove('on'), 1900); return 2600; }
+    if (seq < LAUNCH - .2) rush = true;
+    return 1900;
+  },
+});
+
+/* ---------- canvas ---------- */
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let K = 1;
+function size() { K = Math.min(2, Math.max(1, (devicePixelRatio || 1) * STAGE.scale)); cv.width = 1920 * K; cv.height = 1080 * K; }
+size(); addEventListener('resize', () => { STAGE.fit(); size(); });
+
+const cam = new Cam(); cam.fov = 38 * Math.PI / 180; cam.cx = 960 + 200; cam.cy = 540 + 70;
+const W = new Wire(cam, { fog: [70, 1400] });
+const TEL = GEO.tel(), RAD = GEO.radarTruck(), MIS = GEO.oniks(), MIS_T = GEO.oniks({ wings: false, gen: 8 });
+const telW = X.make(R.y(-Math.PI / 2), [0, 0, 0]);          // nose west, launcher toward the sea (east)
+const tel2W = X.make(R.y(-Math.PI / 2 + .12), [20, 0, 40]);
+const radW = X.make(R.y(-Math.PI / 2 - .6), [26, 0, 96]);
+
+/* coast: bluff edge east of the battery, sea 24 m below */
+const r0 = rng(11);
+const coast = [];
+for (let z = -260; z <= 420; z += 6) coast.push([46 + 7 * M3.fbm(z * .012, 3.1, 0, 3) + 3 * M3.noise(z * .08, 1), 0, z]);
+const SEA = -24;
+const crosses = [];
+for (let x = -160; x <= 40; x += 10) for (let z = -120; z <= 260; z += 10) if (Math.hypot(x, z) > 9) crosses.push([x + (r0() - .5) * 1.5, z + (r0() - .5) * 1.5]);
+
+/* ---------- sequence ---------- */
+const LOOP = 27, LAUNCH = 10;
+let seq = 0, tel = { elev: 0, dep: 0 }, ant = 0, shake = 0, glow = 0;
+const G = [0, -9.81, 0];
+let mis, cap, puffs = [], logged = new Set(), emitAcc = 0;
+function resetMissile() { mis = { phase: 'tube', pos: null, vel: [0, 0, 0], axis: [0, 1, 0], speed: 0 }; cap = { on: true }; logged.clear(); document.getElementById('log').innerHTML = ''; }
+resetMissile();
+const logEl = document.getElementById('log');
+function log(key, t, txt) {
+  if (logged.has(key)) return; logged.add(key);
+  logEl.querySelectorAll('.r').forEach(r => r.classList.remove('now'));
+  logEl.insertAdjacentHTML('beforeend', `<div class="r now"><b>T+${t.toFixed(2).padStart(5, '0')}</b><span>${txt}</span></div>`);
+  while (logEl.children.length > 5) logEl.firstChild.remove();
+}
+const tubeW = () => { const f = GEO.tubeFrame(TEL, tel, 1); return { base: X.ap(telW, f.base), mouth: X.ap(telW, f.mouth), dir: X.dir(telW, f.dir) }; };
+
+function puff(p, o) { puffs.push(Object.assign({ p: p.slice(), v: [0, 0, 0], age: 0, life: 6, r0: .5, gr: 2, a: .5, U: null, Vv: null }, o)); if (puffs.length > 760) puffs.shift(); }
+
+function update(dt) {
+  seq += dt * (rush ? 3.2 : 1);
+  if (rush && seq >= LAUNCH - .15) rush = false;
+  if (seq >= LOOP) { seq -= LOOP; resetMissile(); }
+  ant += dt * 1.15;
+  // TEL choreography
+  tel.dep = E.ss(2.2, 3.8, seq) * (1 - E.ss(22.5, 24, seq));
+  tel.elev = (E.inOut(E.sat((seq - 4) / 4.6)) * (1 - E.inOut(E.sat((seq - 17.5) / 4.6)))) * 88 * Math.PI / 180;
+  const tb = tubeW();
+  const tl = seq - LAUNCH;
+  if (mis.phase === 'tube') {
+    mis.pos = V.mad(tb.mouth, tb.dir, -4.95 - .12); mis.axis = tb.dir;
+    if (tl >= 0) {
+      mis.phase = 'eject'; mis.vel = V.mul(tb.dir, 19); log('ej', 0, 'Gas ejection');
+      cap = { on: false, p: tb.mouth.slice(), v: V.add(V.mul(tb.dir, 11), [5.5, 1, -4]), ax: tb.dir, spin: 0, w: 9 };
+      for (let i = 0; i < 16; i++) { const a = r0() * 6.283, s = 3 + r0() * 6; puff(tb.mouth, { v: [Math.cos(a) * s, 1 + r0() * 3, Math.sin(a) * s], life: 2.6 + r0() * 1.4, r0: .7, gr: 2.6, a: .45 }); }
+      STAGE.SFX.noise(.7, 700, .8, .14, .005);
+    }
+  } else {
+    if (mis.phase === 'eject') {
+      mis.vel = V.mad(mis.vel, G, dt); mis.pos = V.mad(mis.pos, mis.vel, dt);
+      if (tl >= .55) {
+        mis.phase = 'boost'; mis.speed = V.len(mis.vel); log('ig', .55, 'Booster ignition');
+        glow = 1; shake = 7; STAGE.SFX.rumble(5, .22);
+        for (let i = 0; i < 12; i++) { const a = i / 12 * 6.283; puff([mis.pos[0] + Math.cos(a) * 3, .3, mis.pos[2] + Math.sin(a) * 3], { v: [Math.cos(a) * 7, .4, Math.sin(a) * 7], U: [1, 0, 0], Vv: [0, 0, 1], life: 6, r0: 2, gr: 5, a: .4 }); }
+      }
+    } else {
+      // anti-ship profile: hard pitch-over right after ignition, dive past the bluff, level off over the sea
+      const deg = tl < 1.8 ? E.mix(88, 16, E.inOut(E.sat((tl - .6) / 1.2)))
+                : tl < 3 ? E.mix(16, -20, E.inOut((tl - 1.8) / 1.2))
+                : E.mix(-20, 0, E.inOut(E.sat((tl - 3) / 2.4)));
+      const th = deg * Math.PI / 180, hd = 62 * Math.PI / 180;
+      mis.axis = V.norm([Math.sin(hd) * Math.cos(th), Math.sin(th), Math.cos(hd) * Math.cos(th)]);
+      const acc = tl < 5.5 ? 34 : 45;
+      mis.speed = Math.min(720, mis.speed + acc * dt);
+      mis.vel = V.mul(mis.axis, mis.speed); mis.pos = V.mad(mis.pos, mis.vel, dt);
+      if (tl > .6) log('po', .6, 'Pitch-over, heading 062');
+      if (tl > 3) log('dv', 3, 'Descent to sea-skim');
+      if (tl > 5.5) log('bo', 5.5, `Booster sep · ${Math.round(mis.speed)} m/s`);
+      if (tl > 5.7) log('rj', 5.7, 'Ramjet light · 14 m');
+      if (tl < 5.5) {
+        // one ring per ~1.1 m flown: even spacing whether the round is crawling out of the tube or at 200 m/s
+        emitAcc += mis.speed * dt;
+        while (emitAcc > 1.1) {
+          emitAcc -= 1.1;
+          // tilted, squashed, jittered rings so the trail reads as billowing smoke, not a coil
+          const ax = V.norm(V.add(mis.axis, [(r0() - .5) * .5, (r0() - .5) * .5, (r0() - .5) * .5]));
+          let [U, Vv] = GEO.perp(ax); const sq = .7 + r0() * .5, rot = r0() * 6.283;
+          const U2 = V.add(V.mul(U, Math.cos(rot)), V.mul(Vv, Math.sin(rot))), V2 = V.mul(V.add(V.mul(Vv, Math.cos(rot)), V.mul(U, -Math.sin(rot))), sq);
+          const at = V.add(V.mad(mis.pos, mis.axis, -4.7 - r0() * 1.1), [(r0() - .5) * .8, (r0() - .5) * .8, (r0() - .5) * .8]);
+          puff(at, { U: U2, Vv: V2, v: [1.2 + (r0() - .5) * 1.6, .4 + (r0() - .5) * 1.2, .8 + (r0() - .5) * 1.6], life: 13 + r0() * 5, r0: .3 + r0() * .3, gr: 1.1 + r0() * 1.1, a: .4 });
+          if (r0() < .18) puff(at, { v: [1.2 + (r0() - .5) * 2, .5, .8 + (r0() - .5) * 2], life: 9 + r0() * 4, r0: .5, gr: 2.4 + r0() * 1.5, a: .24 });
+        }
+      }
+    }
+  }
+  if (!cap.on && cap.p) {
+    if (cap.p[1] > .25) { cap.v = V.mad(cap.v, G, dt); cap.p = V.mad(cap.p, cap.v, dt); cap.spin += cap.w * dt; }
+    else { cap.p[1] = .25; cap.v = [0, 0, 0]; cap.w = 0; }
+  }
+  for (const p of puffs) { p.age += dt; p.p = V.mad(p.p, p.v, dt); p.v = V.mul(p.v, Math.exp(-dt * (p.U ? .15 : 1.4))); }
+  puffs = puffs.filter(p => p.age < p.life);
+  glow = Math.max(0, glow - dt * 1.4); shake *= Math.exp(-dt * 3.2);
+  STAGE.dbg = { seq, phase: mis.phase, pos: mis.pos && mis.pos.map(v => +v.toFixed(1)), speed: +mis.speed.toFixed(0), puffs: puffs.length };
+}
+
+/* ---------- callouts ---------- */
+const ui = document.getElementById('ui');
+function callout(html) { const d = document.createElement('div'); d.className = 'call'; d.innerHTML = html; ui.appendChild(d); return d; }
+const cTel = callout(ORB.cat('Bastion-P · TEL 1', { code: 'K340P' }) + '<span class="s2" id="telS"></span>');
+const cRad = callout(ORB.cat('Monolith-B', { code: 'MB-1' }) + '<span class="s2">search · 11 rpm</span>');
+const cMis = callout(ORB.cat('3M55 · P-800', { code: '3M55' }) + '<span class="s2" id="misS"></span>');
+const telS = cTel.querySelector('.s2'), misS = cMis.querySelector('.s2');
+const leaders = [];
+function place(el, anchor, dx, dy, show) {
+  if (!anchor || !show) { el.style.opacity = 0; return; }
+  const [ax, ay] = anchor, ex = ax + dx, ey = ay + dy, right = dx >= 0, hx = ex + (right ? 18 : -18);
+  leaders.push([ax, ay, ex, ey, hx]);
+  const w = el.offsetWidth;
+  el.style.opacity = 1;
+  el.style.transform = `translate(${(right ? hx + 8 : hx - 8 - w).toFixed(1)}px, ${(ey - 6).toFixed(1)}px)`;
+}
+
+/* ---------- render ---------- */
+function render(t) {
+  // camera: slow drift around the battery, follows the missile up and away
+  const tl = seq - LAUNCH;
+  const follow = E.ss(.25, 2.4, tl) * (1 - E.ss(6.5, 10, tl));
+  const base = [3, 6.5, 2];
+  let tgt = base;
+  if (mis.phase !== 'tube' && follow > 0) {
+    let d = V.sub(mis.pos, base); const L = V.len(d); if (L > 20) d = V.mul(d, 20 / L);
+    tgt = V.mad(base, d, follow * .6);
+  }
+  const yaw = .34 + .1 * Math.sin(t * .055), pitch = .035 + .012 * Math.sin(t * .09);
+  cam.orbit(base, yaw, pitch, 37 + 16 * follow);
+  cam.target = tgt; cam.shake = [(Math.random() - .5) * shake, (Math.random() - .5) * shake]; cam.update();
+
+  ctx.setTransform(K, 0, 0, K, 0, 0);
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, 1920, 1080);
+  W.reset(); W.style('#F6F5F2', 1);
+
+  // horizon (sea plane vanishing line)
+  const hz = [], fl = V.norm([cam.f[0], 0, cam.f[2]]), rt = V.norm(V.cross([0, 1, 0], fl));
+  for (const s of [-1, 1]) { const p = cam.project(V.add(cam.eye, V.add(V.mul(fl, 1e5), V.mul(rt, s * 1.6e5)))); if (p) hz.push(p); }
+  if (hz.length === 2) W.seg2(hz[0][0], hz[0][1], hz[1][0], hz[1][1], .3);
+
+  // ground survey crosses
+  for (const [x, z] of crosses) { W.seg([x - .45, 0, z], [x + .45, 0, z], .2); W.seg([x, 0, z - .45], [x, 0, z + .45], .2); }
+  // bluff edge + face + sea swell lines
+  W.poly(coast, .55, false);
+  for (let i = 0; i < coast.length; i += 5) { const c = coast[i]; W.seg(c, [c[0] + 6, SEA, c[2]], .07); }
+  W.poly(coast.map(c => [c[0] + 6, SEA, c[2]]), .3, false);
+  for (let k = 0; k < 9; k++) {
+    const off = 18 + Math.pow(k, 2.1) * 12, row = [];
+    for (let z = -260; z <= 420; z += 10) row.push([coast[0][0] + 6 + off + 1.4 * Math.sin(z * .05 + t * .7 + k), SEA, z]);
+    W.poly(row, .14 * (1 - k / 11), false);
+  }
+  // ground range rings around TEL 1
+  for (const rr of [14, 26]) W.ring([0, .02, 0], [1, 0, 0], [0, 0, 1], rr, 96, .12);
+
+  // vehicles
+  GEO.draw(W, RAD, radW, { ant }, { a: .7 });
+  GEO.draw(W, TEL, tel2W, { elev: 0, dep: 0 }, { a: .6 });
+  GEO.draw(W, TEL, telW, tel, { a: .92 });
+
+  // missile + cap
+  if (mis.pos) {
+    const Mx = X.make(R.look(mis.axis, [0, 1, 0]), mis.pos);
+    if (mis.phase === 'tube') GEO.draw(W, MIS_T, Mx, {}, { a: .5, sil: .8 });
+    else GEO.draw(W, MIS, Mx, {}, { a: 1 });
+  }
+  const tb = tubeW();
+  const capP = cap.on ? tb.mouth : cap.p, capAx = cap.on ? tb.dir : V.norm(V.add(R.ap(R.x(cap.spin), [0, 0, 1]), [0, 0, 0]));
+  if (capP) { const [U, Vv] = GEO.perp(capAx); W.ring(capP, U, Vv, .5, 20, .85, .3); W.seg(V.mad(capP, U, -.5), V.mad(capP, U, .5), .5); W.seg(V.mad(capP, Vv, -.5), V.mad(capP, Vv, .5), .5); }
+
+  // smoke: rings along the boost path, camera-facing puffs at the tube, ground ring cloud
+  for (const p of puffs) {
+    const k = p.age / p.life, r = p.r0 + p.gr * Math.sqrt(p.age), a = p.a * Math.pow(1 - k, 1.3) * E.ss(0, .08, p.age);
+    if (p.U) W.ring(p.p, p.U, p.Vv, r, 14, a); else W.disc(p.p, r, 16, a);
+  }
+
+  // exhaust
+  if (mis.phase === 'boost' && tl < 5.5) {
+    W.style('#FFFFFF', 1.4);
+    const nz = V.mad(mis.pos, mis.axis, -4.5), [U, Vv] = GEO.perp(mis.axis);
+    const L = 5 + 2.5 * Math.random() + 4 * glow, tip = V.mad(nz, mis.axis, -L);
+    for (let i = 0; i < 12; i++) { const a = i / 12 * 6.283; W.seg(V.add(nz, V.add(V.mul(U, Math.cos(a) * .3), V.mul(Vv, Math.sin(a) * .3))), V.add(tip, V.mul(V.add(V.mul(U, Math.cos(a)), V.mul(Vv, Math.sin(a))), .15 * Math.random())), .85); }
+    W.seg(nz, V.mad(nz, mis.axis, -L * 1.25), 1);
+    W.style('#F6F5F2', 1);
+  }
+  W.flush(ctx);
+  // calm the menu side
+  const lg = ctx.createLinearGradient(0, 0, 760, 0); lg.addColorStop(0, 'rgba(0,0,0,.9)'); lg.addColorStop(.62, 'rgba(0,0,0,.55)'); lg.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = lg; ctx.fillRect(0, 0, 760, 1080);
+
+  // ignition bloom
+  if (mis.phase === 'boost' && tl < 5.8) {
+    const p = cam.project(V.mad(mis.pos, mis.axis, -5.5));
+    if (p) {
+      const rad = Math.min(420, 30 + 5200 / p[2]) * (1 + glow * 1.5), a = .16 + .5 * glow;
+      ctx.globalCompositeOperation = 'lighter';
+      const g = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], rad);
+      g.addColorStop(0, `rgba(255,255,255,${a})`); g.addColorStop(.25, `rgba(255,250,235,${a * .35})`); g.addColorStop(1, 'rgba(255,250,235,0)');
+      ctx.fillStyle = g; ctx.fillRect(p[0] - rad, p[1] - rad, rad * 2, rad * 2);
+      ctx.globalCompositeOperation = 'source-over';
+    }
+  }
+  if (glow > .6) { ctx.fillStyle = `rgba(255,255,255,${(glow - .6) * .18})`; ctx.fillRect(0, 0, 1920, 1080); }
+
+  // callouts
+  leaders.length = 0;
+  const telA = cam.project(X.ap(telW, [0, 3.3, 5]));
+  const st = mis.phase !== 'tube' ? 'launched' : tel.elev > 1.5 ? 'vertical · 88°' : tel.elev > .02 ? `erecting · ${Math.round(tel.elev * 57.3)}°` : tel.dep > .9 ? 'jacks down' : tel.dep > .02 ? 'lowering jacks' : 'stowed · ready';
+  telS.textContent = st;
+  place(cTel, telA, -70, 130, true);
+  const radA = cam.project(X.ap(radW, [0, 11.4, -5.1]));
+  place(cRad, radA, 50, -60, true);
+  const mA = mis.pos && mis.phase !== 'tube' ? cam.project(mis.pos) : null;
+  if (mA) misS.innerHTML = `alt <b>${Math.max(0, mis.pos[1]).toFixed(0)} m</b> · <b>${(mis.phase === 'eject' ? V.len(mis.vel) : mis.speed).toFixed(0)} m/s</b>`;
+  place(cMis, mA, mA && mA[0] > 1420 ? -90 : 90, -70, !!mA && mA[0] > 40 && mA[0] < 1900 && mA[1] > 20 && mA[1] < 1060 && tl < 12);
+  ctx.strokeStyle = '#F6F5F2'; ctx.fillStyle = '#F6F5F2'; ctx.lineWidth = 1; ctx.globalAlpha = .75;
+  ctx.beginPath(); for (const [ax, ay, ex, ey, hx] of leaders) { ctx.moveTo(ax, ay); ctx.lineTo(ex, ey); ctx.lineTo(hx, ey); } ctx.stroke();
+  ctx.globalAlpha = 1; for (const [ax, ay] of leaders) ctx.fillRect(ax - 2.5, ay - 2.5, 5, 5);
+
+  // clock
+  const clk = document.getElementById('clk');
+  const tt = seq - LAUNCH, s = Math.abs(tt);
+  clk.textContent = `T${tt < 0 ? '−' : '+'}${String(Math.floor(s / 60)).padStart(2, '0')}:${(s % 60).toFixed(1).padStart(4, '0')}`;
+}
+
+STAGE.run({ update, render });
+})();
+</script>
+</body></html>

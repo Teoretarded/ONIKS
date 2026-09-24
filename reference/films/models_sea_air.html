@@ -1,0 +1,162 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>HD sea / air models</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=block">
+<style>
+html,body{margin:0;background:#000;overflow:hidden}
+#stage{position:absolute;left:0;top:0;width:1920px;height:1080px;transform-origin:0 0;background:#000}
+canvas{position:absolute;top:0}
+#w{left:0;width:960px;height:1080px}
+#d{left:960px;width:960px;height:1080px}
+.l{position:absolute;font:400 11.5px/1.45 'DM Mono',monospace;color:rgba(246,245,242,.62);white-space:pre;pointer-events:none;letter-spacing:.02em}
+.l b{font-weight:500;color:#F6F5F2}
+.l.d{color:rgba(238,238,228,.6)}
+</style></head>
+<body><div id="stage"><canvas id="w" width="960" height="1080"></canvas><canvas id="d" width="960" height="1080"></canvas><div id="labels"></div></div>
+<script src="../menus/common/m3.js"></script><script src="../menus/common/wire.js"></script><script src="../menus/common/dots.js"></script>
+<script src="../menus/common/geo.js"></script><script src="common/hd_sea_air.js"></script><script src="../menus/common/stage.js"></script>
+<script>
+/* ?m=<preset> (default grid) · ?yaw ?pitch ?dist ?spin overrides · ?fine=0 · ?ps=2 dot size
+   wire (GEO.draw) on the left half on black, dots (GEO.sample) on the right half on graphite */
+(() => {
+const { V, R, X, E, Cam } = M3;
+const Q = STAGE.Q, PI = Math.PI;
+STAGE.fit();
+const RAIL = HD.catapult.RAIL;
+const MK = { destroyer: () => HD.destroyer(), helo: () => HD.helo(), fighter: () => HD.fighter(), fighterS: () => HD.fighter({ stores: true }),
+  drone: () => HD.drone(), catapult: () => HD.catapult(), satellite: () => HD.satellite(), carrier: () => HD.carrier() };
+const I = () => X.make();
+const onRail = st => X.make(R.x(-RAIL.pitch), RAIL.at(st.carriage || 0));
+const PRE = {
+  destroyer: { items: [['destroyer']], tgt: [0, 14, 0], dist: 285, yaw: .75, pitch: .3, sp: .35 },
+  ddside: { items: [['destroyer']], tgt: [0, 16, 0], dist: 290, yaw: 1.5708, pitch: .02, sp: .35, spin: 0 },
+  ddtop: { items: [['destroyer']], tgt: [0, 8, 0], dist: 300, yaw: 1.5708, pitch: 1.35, sp: .35, spin: 0 },
+  bow: { items: [['destroyer']], tgt: [0, 14, 30], dist: 75, yaw: 2.5, pitch: .2, sp: .15, parts: { hull: .15, super: .12, spy: .1, gun: .06, vlsF: .06, ciwsF: .05, mast: .1, sps: .06, rails: .15 } },
+  ciws: { items: [['destroyer']], tgt: [0, 12.9, 33.3], dist: 8.5, yaw: 2.4, pitch: .18, sp: .02, spin: .2, parts: { ciwsF: .012, super: .16 } },
+  gun: { items: [['destroyer']], tgt: [0, 9.3, 51], dist: 17, yaw: 2.2, pitch: .25, sp: .03, spin: .2, parts: { gun: .025, hull: .12, vlsF: .06 } },
+  vls: { items: [['destroyer']], tgt: [0, 7.6, 38.9], dist: 13, yaw: 2.0, pitch: .75, sp: .03, spin: .2, parts: { vlsF: .025, hull: .1 } },
+  vlsa: { items: [['destroyer']], tgt: [0, 7.0, -29.4], dist: 17, yaw: 1.0, pitch: .7, sp: .03, spin: .2, parts: { vlsA: .03, hull: .1, arms: .05 } },
+  mast: { items: [['destroyer']], tgt: [0, 30, 19], dist: 32, yaw: 2.3, pitch: .1, sp: .06, spin: .2, parts: { mast: .05, sps: .03, super: .12 } },
+  stack: { items: [['destroyer']], tgt: [0, 18, 1.0], dist: 26, yaw: 1.1, pitch: .25, sp: .05, spin: .2, parts: { stacks: .05, super: .16, decoys: .04, boats: .05 } },
+  stern: { items: [['destroyer'], ['helo', st => X.make(R.I(), HD.destroyer.A.heloSpot)]], tgt: [0, 9, -60], dist: 48, yaw: .5, pitch: .3, sp: .1, spin: .2,
+    parts: { deck: .1, hangar: .05, super: .12, hull: .15, ciwsA: .04, rails: .1, fuselage: .05, rotor: .05, tail: .05, tailrotor: .05, gear: .05, sensors: .05, pylons: .05 } },
+  heloside: { items: [['helo']], tgt: [0, 2.6, -2.4], dist: 34, yaw: 1.5708, pitch: .0, sp: .05, spin: 0 },
+  helo: { items: [['helo']], tgt: [0, 2.8, -2.4], dist: 33, yaw: .9, pitch: .25, sp: .05 },
+  rotorhead: { items: [['helo']], tgt: [0, 4.0, 0], dist: 3.4, yaw: .9, pitch: .3, sp: .01, spin: .2, parts: { rotor: .008, fuselage: .03 } },
+  fighter: { items: [['fighter']], tgt: [0, .6, -.3], dist: 31, yaw: 2.4, pitch: .32, sp: .045 },
+  fightertop: { items: [['fighterS']], tgt: [0, 0, -.3], dist: 30, yaw: 0, pitch: 1.45, sp: .045, spin: 0 },
+  cvtop: { items: [['carrier']], tgt: [0, 20, 0], dist: 560, yaw: 0, pitch: 1.45, sp: 1.0, spin: 0 },
+  fighterS: { items: [['fighterS']], tgt: [0, .6, -.3], dist: 31, yaw: 2.4, pitch: .32, sp: .045 },
+  intake: { items: [['fighter']], tgt: [1.25, -.3, 1.7], dist: 4.4, yaw: 3.45, pitch: .06, sp: .01, spin: .06, parts: { intakes: .008, fuselage: .025, lex: .025, canopy: .03, wings: .04 } },
+  nozzle: { items: [['fighter']], tgt: [0, -.1, -8.4], dist: 5.2, yaw: .35, pitch: .1, sp: .01, spin: .1, parts: { nozzles: .008, fuselage: .03, tails: .04, stabs: .04 } },
+  drone: { items: [['drone']], tgt: [0, 0, 0], dist: 4.6, yaw: 2.3, pitch: .3, sp: .008 },
+  prop: { items: [['drone']], tgt: [0, -.05, .7], dist: 1.1, yaw: 2.5, pitch: .15, sp: .003, spin: .15 },
+  catapult: { items: [['catapult'], ['drone', onRail]], tgt: [0, 1.4, .3], dist: 10, yaw: 2.2, pitch: .22, sp: .012 },
+  satellite: { items: [['satellite']], tgt: [0, -1.4, 0], dist: 17, yaw: .8, pitch: .15, sp: .025 },
+  carrier: { items: [['carrier']], tgt: [0, 22, 0], dist: 440, yaw: .75, pitch: .38, sp: 1.0 },
+};
+const GRID = ['destroyer', 'helo', 'fighter', 'catapult', 'satellite', 'carrier', 'ciws', 'intake'];
+const mode = Q.get('m') || 'grid';
+const fine = Q.get('fine') !== '0';
+const PS = +(Q.get('ps') || 1);
+const views = [];
+function view(key, rect) {
+  const p = Object.assign({}, PRE[key]);
+  for (const k of ['yaw', 'pitch', 'dist', 'spin']) if (Q.has(k) && mode !== 'grid') p[k] = +Q.get(k);
+  const items = p.items.map(([m, xf]) => ({ m, model: MK[m](), xf: xf || I, cache: new Map() }));
+  return { key, p, rect, items, cw: new Cam(rect[2], rect[3]), cd: new Cam(rect[2], rect[3]) };
+}
+if (mode === 'grid') GRID.forEach((k, i) => views.push(view(k, [(i % 2) * 480, Math.floor(i / 2) * 270, 480, 270])));
+else views.push(view(mode, [0, 0, 960, 1080]));
+
+const cw = document.getElementById('w'), ctx = cw.getContext('2d');
+const pb = new PointBuf(document.getElementById('d'), [11, 12, 10], { vignette: 0 });
+const W = new Wire(views[0].cw, { fog: [1e6, 2e6], cull: 5000 });
+const lab = document.getElementById('labels');
+views.forEach((v, i) => {
+  const a = document.createElement('div'), b = document.createElement('div');
+  a.className = 'l'; b.className = 'l d';
+  a.style.left = (v.rect[0] + 14) + 'px'; a.style.top = (v.rect[1] + 10) + 'px';
+  b.style.left = (960 + v.rect[0] + 14) + 'px'; b.style.top = (v.rect[1] + 10) + 'px';
+  lab.appendChild(a); lab.appendChild(b); v.la = a; v.lb = b;
+});
+
+function stAt(t) {
+  const vo = [];
+  const w = (t * 9) % 110 - 7;
+  for (let i = 0; i < 96; i++) { const f = E.sat(1 - Math.abs(i - w) / 7) * 1.3; if (f > 0) vo.push([i, Math.min(1, f)]); }
+  return {
+    sps: t * 2.2, ciwsYaw: [Math.sin(t * .7) * 1.1, PI + Math.sin(t * .5) * .9], ciwsPitch: [.3 + .35 * Math.sin(t * .9), .2 + .3 * Math.sin(t * .6 + 1)], ciwsSpin: t * 7,
+    vlsOpen: vo, gunYaw: Math.sin(t * .4) * .8, gunPitch: .3 + .28 * Math.sin(t * .6), hangar: .5 + .5 * Math.sin(t * .35),
+    rotor: t * 3.2, trotor: t * 15, droop: .5 + .5 * Math.sin(t * .3),
+    fan: t * 3.5, nozzle: .5 + .5 * Math.sin(t * .5), ab: 0,
+    prop: t * 18, gimYaw: Math.sin(t * .6) * 1.2, gimPitch: .45 + .35 * Math.sin(t * .8),
+    carriage: E.inOut((t * .25) % 1), solar: Math.sin(t * .3) * .5, radar: t * 1.3,
+  };
+}
+function segCount() { let n = 0; for (const s of W.styles.values()) for (const b of s.b) n += b.length / 4; return n; }
+const tmp = { buf: new Float32Array(4 * 200000) };
+function dotsFor(v, it, part, st) {
+  let sp = v.p.parts ? v.p.parts[part.name] : v.p.sp;
+  if (!sp) return null;
+  if (mode === 'grid') sp *= 2.2;
+  const dyn = !!part.dyn;
+  if (!dyn && it.cache.has(part.name)) return it.cache.get(part.name);
+  const s = GEO.sample({ parts: [part] }, sp, 7, st, { fine })[0].pts;
+  if (!dyn) it.cache.set(part.name, s);
+  return s;
+}
+function render(t) {
+  const st = stAt(t);
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#000'; ctx.fillRect(0, 0, 960, 1080);
+  pb.clear();
+  for (const v of views) {
+    const [x0, y0, w, h] = v.rect, p = v.p, yaw = p.yaw + t * (p.spin === undefined ? .22 : p.spin);
+    for (const c of [v.cw, v.cd]) { c.orbit(p.tgt, yaw, p.pitch, p.dist); c.cx = x0 + w / 2; c.cy = y0 + h / 2; }
+    W.cam = v.cw; W.fog = [p.dist * 1.2, p.dist * 4]; W.reset();
+    let pts = 0;
+    for (const it of v.items) GEO.draw(W, it.model, it.xf(st), st, { fine });
+    if (Q.has('anchors')) {
+      W.style('#F4D23C', 1);
+      const cross = (p, r) => { W.seg([p[0] - r, p[1], p[2]], [p[0] + r, p[1], p[2]], 1); W.seg([p[0], p[1] - r, p[2]], [p[0], p[1] + r, p[2]], 1); W.seg([p[0], p[1], p[2] - r], [p[0], p[1], p[2] + r], 1); };
+      for (const it of v.items) {
+        const T = it.xf(st), r = p.dist * .012, pts = [];
+        if (it.m === 'destroyer') { const A = HD.destroyer.A; pts.push(...A.stacks, ...A.spy, A.heloSpot, A.bow, A.stern, A.sps, A.gun(st), A.ciws(st, 0), A.ciws(st, 1), A.mastTop, A.bridge, A.hangar); for (const e of st.vlsOpen) pts.push(A.vls(e[0])); }
+        if (it.m === 'fighter' || it.m === 'fighterS') pts.push(...HD.fighter.NOZZLES, ...HD.fighter.INTAKES, ...HD.fighter.FANS);
+        if (it.m === 'drone') pts.push(HD.drone.PROP, HD.drone.GIMBAL);
+        if (it.m === 'catapult') pts.push(HD.catapult.RAIL[0], HD.catapult.RAIL[1]);
+        if (it.m === 'helo') pts.push(HD.helo.HUB, HD.helo.TAIL_HUB);
+        if (it.m === 'satellite') pts.push(HD.satellite.FEED, HD.satellite.REFLECTOR);
+        for (const q of pts) cross(X.ap(T, q), r);
+      }
+      W.style('#F6F5F2', 1);
+    }
+    const segs = segCount();
+    ctx.save(); ctx.beginPath(); ctx.rect(x0, y0, w, h); ctx.clip(); W.flush(ctx); ctx.restore();
+    if (mode === 'grid') { ctx.strokeStyle = 'rgba(255,255,255,.12)'; ctx.lineWidth = 1; ctx.strokeRect(x0 + .5, y0 + .5, w - 1, h - 1); }
+    for (const it of v.items) {
+      const base = it.xf(st);
+      for (const part of it.model.parts) {
+        if (part.show && !part.show(st)) continue;
+        const P = dotsFor(v, it, part, st); if (!P || !P.length) continue;
+        const n = P.length / 6; pts += n;
+        const out = n * 4 <= tmp.buf.length ? tmp.buf : (tmp.buf = new Float32Array(n * 4));
+        DOTS.project(v.cd, GEO.partXf(base, part, st), P, out);
+        for (let i = 0; i < n; i++) {
+          const o = i * 4, z = out[o + 2]; if (z <= 0) continue;
+          const sx = out[o], sy = out[o + 1];
+          if (sx < x0 || sy < y0 || sx >= x0 + w || sy >= y0 + h) continue;
+          const f = out[o + 3], b = f === 2 ? .62 : f > 0 ? .3 + .66 * f : .13;
+          pb.dot(sx, sy, PS, 238, 238, 228, b);
+        }
+      }
+    }
+    if (mode === 'grid') for (let x = x0; x < x0 + w; x += 2) { pb.dot(x, y0, 1, 60, 62, 58, 1); pb.dot(x, y0 + h - 1, 1, 60, 62, 58, 1); }
+    v.la.innerHTML = `<b>${v.key}</b>  ${segs} seg${fine ? '' : ' · fine off'}`;
+    v.lb.innerHTML = `<b>${v.key}</b>  ${pts} pts`;
+  }
+  pb.blit();
+  STAGE.info = views.map(v => [v.key, v.la.textContent, v.lb.textContent]);
+}
+STAGE.run({ update() {}, render });
+})();
+</script></body></html>

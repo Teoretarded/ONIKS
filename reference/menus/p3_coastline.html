@@ -1,0 +1,421 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Oniks — Coastline</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=block">
+<link rel="stylesheet" href="common/pc.css">
+<style>
+  .logo { left: 88px; top: 70px; }
+  .kick { left: 90px; top: 112px; }
+  .ver { right: 96px; top: 76px; }
+  .menu { right: 96px; top: 318px; display: flex; flex-direction: column; align-items: flex-end; gap: 16px; }
+  .menu .it { flex-direction: row-reverse; font-size: 44px; font-weight: 500; letter-spacing: -.035em; height: 54px; }
+  .menu .it .n { text-align: right; }
+  .blurb { right: 136px; top: 690px; width: 360px; text-align: right; }
+  .keys { right: 96px; bottom: 56px; }
+  .survey { left: 88px; bottom: 54px; font: 400 12.5px var(--mono); letter-spacing: .04em; color: var(--dim); }
+  .survey .row { display: flex; align-items: center; gap: 12px; }
+  .survey .row i { width: 7px; height: 7px; background: var(--lime); flex: none; }
+  .survey b { font-weight: 400; color: #fff; font-variant-numeric: tabular-nums; }
+  .survey .bar { width: 264px; height: 3px; margin: 0 0 12px 19px;
+    background-image: radial-gradient(circle, rgba(255,255,255,.28) .9px, transparent 1.2px); background-size: 6px 3px; background-repeat: repeat-x; position: relative; }
+  .survey .bar s { position: absolute; left: 0; top: 0; bottom: 0; width: 0;
+    background-image: radial-gradient(circle, #C6F432 1px, transparent 1.3px); background-size: 6px 3px; background-repeat: repeat-x; }
+</style></head>
+<body><div id="stage">
+  <canvas id="c" class="px" width="1920" height="1080"></canvas>
+  <canvas id="o" width="1920" height="1080"></canvas>
+  <div class="ui" id="ui">
+    <div class="logo abs"><svg viewBox="0 0 24 24"><path d="M12 2 20.5 22h-4.1L12 11.4 7.6 22H3.5z" fill="#fff"/><circle cx="12" cy="18.2" r="1.7" fill="#C6F432"/></svg>Oniks</div>
+    <div class="kick abs"><i></i>Krasnaya Kosa / Coastal Defense Command</div>
+    <div class="foot ver abs">Proto v0.5.0</div>
+    <div class="menu abs" id="menu"></div>
+    <div class="blurb abs" id="blurb"></div>
+    <div class="keys abs"><span><b>↑↓</b>Select</span><span><b>Enter</b>Open</span><span><b>G</b>Graphics</span><span><b>Esc</b>Quit</span></div>
+    <div class="survey abs"><div class="bar"><s id="sbar"></s></div><div class="row"><i></i><span>Survey <b id="spct">0 %</b> · <b id="sarea">0</b> km² · <b id="spts">0</b> pts</span></div></div>
+  </div>
+  <div class="veil" id="veil"><div class="msg"><i></i>Standing the battery down</div></div>
+</div>
+<script src="common/m3.js"></script><script src="common/dots.js"></script><script src="common/theatre.js"></script><script src="common/stage.js"></script>
+<script>
+(() => {
+const { V, E, Cam, rng, fbm, noise } = M3;
+const T = THEATRE;
+STAGE.fit(); STAGE.SFX.kind = 'pc';
+
+/* ---------- menu ---------- */
+const menuEl = document.getElementById('menu');
+menuEl.innerHTML = STAGE.ITEMS.map((t, i) => `<div class="it" data-item><span class="n">0${i + 1}</span><i class="sq"></i><span class="lab">${t}</span></div>`).join('');
+const veil = document.getElementById('veil');
+STAGE.menu({
+  el: menuEl, blurb: document.getElementById('blurb'),
+  onEnter(i) {
+    if (i === 4) { veil.classList.add('on'); setTimeout(() => veil.classList.remove('on'), 1900); return 2600; }
+    requestPing(STAGE.time + .25); return 1900;
+  },
+});
+
+/* ---------- terrain: the real seed-1337 DEM, detailed and exaggerated ---------- */
+const VE = 7;
+// the 1 km DEM smears the coastal bluff into a ramp: the first tens of metres climb fast
+const shape = h => h <= 0 ? h : 56 * (1 - Math.exp(-h / 4.5)) + .62 * h;
+const hash = n => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
+// graded pads under our positions: launch sites are levelled, not left on a ravine lip
+const PADS = [[T.base_km[0], T.base_km[1], .56], [T.pantsirs_km[0][0], T.pantsirs_km[0][1], .24], [T.player_radars_km[0][0], T.player_radars_km[0][1], .34]]
+  .map(([x, z, r]) => ({ x: x * 1000, z: z * 1000, r0: r * 1000, r1: r * 2100 }));
+for (const p of PADS) p.h = hBase(p.x, p.z);
+function hTrue(x, z) {
+  let h = hBase(x, z);
+  for (const p of PADS) { const d = Math.hypot(x - p.x, z - p.z); if (d < p.r1) h += (p.h - h) * E.ss(p.r1, p.r0, d); }
+  return h;
+}
+function hBase(x, z) {
+  const xk = x / 1000, zk = z / 1000;
+  let h = T.h(xk, zk) + 14 * fbm(xk * .5 + 11.3, zk * .5 - 3.7, .5, 3) + 4 * noise(xk * 2.1 + 5, zk * 2.1, 2.2);
+  // ravines draining north to the sea, with side gullies; their mouths notch the bluff
+  const w = xk + 1.7 * fbm(zk * .3 + 2, xk * .05, 4.2, 2), per = 4.7, q = w / per, id = Math.floor(q);
+  const dxv = Math.abs(q - id - .5) * per, wid = .55 + .35 * hash(id);
+  const cut = Math.max(0, 1 - dxv / wid);
+  const deep = (45 + 45 * hash(id + 9)) * E.ss(-12, -1.2, zk) * (hash(id + 3) < .85 ? 1 : 0);
+  const gul = Math.max(0, 1 - Math.abs(fbm(xk * 1.9 + 7, zk * .7, 5.5, 2)) * 9) * E.ss(-9, -2, zk);
+  h -= (deep * cut * Math.sqrt(cut) + 22 * gul * gul) * E.ss(4, 40, h + 20);
+  if (h <= 0) return h;
+  const land = E.ss(0, 26, h);
+  const rg = Math.max(0, 1 - Math.abs(fbm(xk * .45 + 3.1, zk * .45 + 9.4, 1.7, 3) * 2.2));
+  return shape(h) + land * (30 * rg * rg * rg + 5 * fbm(xk * 3.6, zk * 3.6, 3.3, 2));
+}
+
+/* survey grid: cross-track scan lines (N-S) every DX along the westward track */
+const DX = 110, DZ = 38, GX0 = 58000, GX1 = -12000, GZ0 = -9800, GZ1 = 6600;
+const NL = Math.round((GX0 - GX1) / DX) + 1, NJ = Math.round((GZ1 - GZ0) / DZ) + 1;
+const HT = new Float32Array(NL * NJ);
+for (let i = 0; i < NL; i++) { const x = GX0 - i * DX; for (let j = 0; j < NJ; j++) HT[i * NJ + j] = hTrue(x, GZ0 + j * DZ); }
+const Yg = (i, j) => { i = i < 0 ? 0 : i >= NL ? NL - 1 : i; j = j < 0 ? 0 : j >= NJ ? NJ - 1 : j; const h = HT[i * NJ + j]; return h > 0 ? h * VE : 0; };
+function Yat(x, z) {
+  const fi = (GX0 - x) / DX, fj = (z - GZ0) / DZ;
+  if (fi < 0 || fj < 0 || fi >= NL - 1 || fj >= NJ - 1) return Math.max(0, shape(T.h(x / 1000, z / 1000))) * VE;
+  const i = Math.floor(fi), j = Math.floor(fj), a = fi - i, b = fj - j;
+  return (Yg(i, j) * (1 - b) + Yg(i, j + 1) * b) * (1 - a) + (Yg(i + 1, j) * (1 - b) + Yg(i + 1, j + 1) * b) * a;
+}
+
+const OBJS = [
+  { id: 'OBJ 04', name: 'Radar · Monolith-B', x: T.player_radars_km[0][0] * 1000, z: T.player_radars_km[0][1] * 1000, r: 300, stem: 96, marks: [[0, 0, 1]] },
+  { id: 'OBJ 03', name: 'Pantsir-S1', x: T.pantsirs_km[0][0] * 1000, z: T.pantsirs_km[0][1] * 1000, r: 190, stem: 64, marks: [[0, 0, 1]] },
+  { id: 'OBJ 01', name: 'Battery · Krasnaya Kosa', x: T.base_km[0] * 1000, z: T.base_km[1] * 1000, r: 470, stem: 128,
+    marks: [[-260, -120, 1], [-90, -230, 1], [95, -225, 1], [255, -110, 1], [-40, 150, 0], [150, 170, 0]] },
+];
+const BASE = OBJS[2];
+
+/* points: every land node plus fill down steep faces, a sparse speckle of sea returns
+   (water swallows most of a NIR pulse) */
+const r0 = rng(1337);
+const PX = [], PY = [], PZ = [], PB = [], PS = [], PJ = [], LS = new Int32Array(NL + 1);
+// key light low from the north-east, roughly behind the drone, so the faces it sees are the lit ones
+const L = V.norm([.5, .62, .62]);
+const shade = (i, j) => {
+  const y = Yg(i, j), gx = (Yg(i - 1, j) - Yg(i + 1, j)) / (2 * DX), gz = (Yg(i, j + 1) - Yg(i, j - 1)) / (2 * DZ);
+  const n = V.norm([-gx, 1, -gz]), sh = Math.max(0, V.dot(n, L));
+  const lap = (Yg(i - 1, j) + Yg(i + 1, j) - 2 * y) / (DX * DX) + (Yg(i, j + 1) + Yg(i, j - 1) - 2 * y) / (DZ * DZ);
+  // every 25 m of true height prints a little brighter: contour banding
+  const hv = y / VE / 25, band = hv - Math.floor(hv) < .13 ? .22 : 0;
+  return .04 + .82 * Math.pow(sh, 2.2) + .12 * Math.min(1, y / 1300) + E.clamp(-lap * 900, 0, .35) + band;
+};
+for (let i = 0; i < NL; i++) {
+  LS[i] = PX.length;
+  const x = GX0 - i * DX;
+  for (let j = 0; j < NJ; j++) {
+    const h = HT[i * NJ + j], jx = (r0() - .5) * 22, jz = (r0() - .5) * DZ * .6, z = GZ0 + j * DZ + jz;
+    if (h > 0) {
+      const y = h * VE, b = shade(i, j) + .05 * r0();
+      PX.push(x + jx); PY.push(y); PZ.push(z); PB.push(Math.min(1.1, b)); PS.push(0); PJ.push(r0());
+      // steep step to the next node: hang returns down the face so bluffs read as walls
+      const y2 = Yg(i, j + 1), dy = y - y2;
+      if (Math.abs(dy) > 60) {
+        const n = Math.min(16, Math.floor(Math.abs(dy) / 42)), faceN = dy > 0 ? 1 : -1;
+        const lit = Math.max(0, faceN * L[2]) * .9 + .12;
+        for (let m = 1; m <= n; m++) { const f = m / (n + 1); PX.push(x + (r0() - .5) * 30); PY.push(y + (y2 - y) * f); PZ.push(z + DZ * f); PB.push(Math.min(1.1, lit + .15 * r0())); PS.push(0); PJ.push(r0()); }
+      }
+    } else if (r0() < .27) {
+      PX.push(x + (r0() - .5) * DX); PY.push(0); PZ.push(z + (r0() - .5) * 40); PB.push(.3 + .22 * r0()); PS.push(1); PJ.push(r0());
+    }
+  }
+}
+LS[NL] = PX.length;
+const NP = PX.length;
+const Px = new Float32Array(PX), Py = new Float32Array(PY), Pz = new Float32Array(PZ), Pb = new Float32Array(PB), Ps = new Uint8Array(PS), Pj = new Float32Array(PJ);
+const Pd = new Float32Array(NP); for (let k = 0; k < NP; k++) Pd[k] = Math.hypot(Px[k] - BASE.x, Pz[k] - BASE.z);
+
+/* waterline: sign changes along each scan line, stitched to the neighbouring line */
+const cross = [];
+for (let i = 0; i < NL; i++) {
+  const cs = [];
+  for (let j = 0; j < NJ - 1; j++) { const a = HT[i * NJ + j], b = HT[i * NJ + j + 1]; if ((a > 0) !== (b > 0)) cs.push(GZ0 + (j + a / (a - b)) * DZ); }
+  cross.push(cs);
+}
+const CXa = [], CZa = [], CLS = new Int32Array(NL + 1);
+for (let i = 0; i < NL; i++) {
+  CLS[i] = CXa.length;
+  if (i === NL - 1) continue;
+  const x0 = GX0 - i * DX, x1 = x0 - DX;
+  for (const za of cross[i]) {
+    let best = null; for (const zb of cross[i + 1]) if (Math.abs(zb - za) < 420 && (best === null || Math.abs(zb - za) < Math.abs(best - za))) best = zb;
+    if (best === null) continue;
+    const n = Math.max(2, Math.round(Math.hypot(DX, best - za) / 30));
+    for (let k = 0; k < n; k++) { CXa.push(x0 + (x1 - x0) * k / n); CZa.push(za + (best - za) * k / n); }
+  }
+}
+CLS[NL] = CXa.length;
+const Cx = new Float32Array(CXa), Cz = new Float32Array(CZa);
+const Cd = new Float32Array(Cx.length); for (let k = 0; k < Cx.length; k++) Cd[k] = Math.hypot(Cx[k] - BASE.x, Cz[k] - BASE.z);
+
+/* the chart we already had: the game map's own contours (1 km DEM), dotted, out to the horizon.
+   Land levels ride at their exaggerated height, isobaths lie on the water. */
+const PRa = [];
+for (const [lv, al, step] of [['0', .8, 140], ['60', .5, 170], ['140', .5, 170], ['-40', .3, 200], ['-100', .16, 260]]) {
+  const y = +lv > 0 ? shape(+lv) * VE : 0;
+  for (const poly of T.contours[lv]) for (let k = 0; k < poly.length - 1; k++) {
+    const a = poly[k], b = poly[k + 1];
+    if (a[0] < -130 || a[0] > 110 || a[1] < -45 || a[1] > 110) continue;
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]) * 1000, n = Math.max(1, Math.round(len / step));
+    if (len > 6000) continue;   // polylines close along the map border: not a real contour
+    for (let m = 0; m < n; m++) PRa.push((a[0] + (b[0] - a[0]) * m / n) * 1000, y, (a[1] + (b[1] - a[1]) * m / n) * 1000, al);
+  }
+}
+const PR = new Float32Array(PRa);
+/* open water outside the survey: a faint speckle riding the swell, out to the horizon */
+const SFa = [];
+{ const rs = rng(4242);
+  for (let k = 0; k < 9000; k++) {
+    const x = -70000 + rs() * 170000, z = 1500 + Math.pow(rs(), .8) * 80000;
+    if (T.h(x / 1000, z / 1000) > -8) continue;
+    SFa.push(x, z, .5 + .5 * rs());
+  } }
+const SF = new Float32Array(SFa);
+
+/* footprints, draped */
+for (const o of OBJS) {
+  o.gy = Yat(o.x, o.z); o.elev = Math.max(0, hTrue(o.x, o.z));
+  o.ring = []; const n = Math.round(o.r * 6.2832 / 14);
+  for (let k = 0; k < n; k++) { const a = k / n * 6.2832, x = o.x + Math.sin(a) * o.r, z = o.z + Math.cos(a) * o.r; o.ring.push([x, Yat(x, z) + 6, z]); }
+  o.mk = o.marks.map(([dx, dz, l]) => [o.x + dx, Yat(o.x + dx, o.z + dz) + 8, o.z + dz, l]);
+}
+
+/* ---------- timeline ---------- */
+const CYC = 36, CS = .7, CE = 26.7, XS = 50500, XE = -8000, VS = (XS - XE) / (CE - CS);
+const frontX = c => XS - VS * E.clamp(c - CS, 0, CE - CS);
+const LT = new Float32Array(NL);
+for (let i = 0; i < NL; i++) { const x = GX0 - i * DX; LT[i] = x > XS || x < XE ? 1e9 : CS + (XS - x) / VS; }
+for (const o of OBJS) o.lt = CS + (XS - o.x) / VS;
+const PSPD = 21000;
+let cyc = { start: 0, n: 1, len: CYC }, pingT = null, pingPlayed = true;
+const autoPing = STAGE.Q.has('ping') ? parseFloat(STAGE.Q.get('ping')) : null;
+function requestPing(at) {
+  pingT = at; pingPlayed = false;
+  cyc.len = Math.max(cyc.len, at - cyc.start + 7.5);
+}
+function update(dt, t) {
+  if (autoPing !== null && t >= autoPing && pingT === null) requestPing(t);
+  if (t - cyc.start >= cyc.len) { cyc = { start: t, n: cyc.n + 1, len: CYC }; pingT = null; }
+  if (!pingPlayed && pingT !== null && t >= pingT) { pingPlayed = true; STAGE.SFX.tone(160, 90, 1.4, 'sine', .09); STAGE.SFX.tone(1900, 1900, .05, 'square', .012); STAGE.SFX.noise(1.2, 260, .8, .05, .02); }
+}
+
+/* ---------- camera: a drone gliding west over the water, a few km off the bluff ---------- */
+const KF = [ // c, eye x, y, z, yaw deg, pitch deg
+  [-6, 76000, 6600, 5600, 248, 24],
+  [0, 66000, 6400, 5700, 248, 24],
+  [6, 57000, 6000, 5900, 250, 23],
+  [14, 40000, 5400, 6000, 252, 22],
+  [22, 19000, 4300, 5700, 249, 21],
+  [28, 8400, 3100, 4700, 240, 19.5],
+  [34, 4600, 2300, 3900, 229, 18.5],
+  [40, 3600, 2100, 3600, 225, 18],
+];
+function camAt(c) {
+  let k = 1; while (k < KF.length - 2 && KF[k + 1][0] < c) k++;
+  const a = KF[k - 1], b = KF[k], p = KF[k + 1], d = KF[k + 2] || KF[k + 1];
+  const u = E.clamp((c - b[0]) / (p[0] - b[0]), 0, 1), u2 = u * u, u3 = u2 * u;
+  const cr = n => .5 * ((2 * b[n]) + (-a[n] + p[n]) * u + (2 * a[n] - 5 * b[n] + 4 * p[n] - d[n]) * u2 + (-a[n] + 3 * b[n] - 3 * p[n] + d[n]) * u3);
+  const eye = [cr(1), cr(2), cr(3)], yaw = cr(4) * Math.PI / 180, pit = cr(5) * Math.PI / 180;
+  // a slow drift so the glide never looks rail-mounted
+  cam.eye = [eye[0], eye[1] + 60 * Math.sin(c * .31), eye[2] + 90 * Math.sin(c * .17)];
+  const yw = yaw + .006 * Math.sin(c * .23), pt = pit + .004 * Math.sin(c * .29 + 1);
+  cam.target = V.add(cam.eye, [Math.sin(yw) * Math.cos(pt), -Math.sin(pt), Math.cos(yw) * Math.cos(pt)]);
+  cam.update();
+}
+
+/* ---------- render ---------- */
+const cv = document.getElementById('c'), ov = document.getElementById('o'), octx = ov.getContext('2d');
+const pb = new PointBuf(cv, [11, 12, 10], { vignette: .55 });
+const cam = new Cam(); cam.fov = 38 * Math.PI / 180; cam.near = 40;
+cam.cx = 960 - 120; cam.cy = 540;
+const LIME = [198, 244, 50], WH = [238, 238, 228];
+/* overlay dot that replaces what is under it (the kit's max blend lets bright terrain swallow lime) */
+function dset(x, y, s, r, g, b, a) {
+  const d = pb.d; let x0 = (x - s * .5 + .5) | 0, y0 = (y - s * .5 + .5) | 0;
+  if (x0 < 0 || y0 < 0 || x0 + s > 1920 || y0 + s > 1080) return;
+  for (let j = 0; j < s; j++) { let i = ((y0 + j) * 1920 + x0) * 4; for (let k = 0; k < s; k++, i += 4) { d[i] += (r - d[i]) * a; d[i + 1] += (g - d[i + 1]) * a; d[i + 2] += (b - d[i + 2]) * a; } }
+}
+const ui = document.getElementById('ui');
+for (const o of OBJS) {
+  o.el = document.createElement('div'); o.el.className = 'tag lime off';
+  o.el.innerHTML = `<b>${o.id}</b><i>${o.name}</i><span class="v">+${Math.round(o.elev)} m</span>`;
+  ui.appendChild(o.el);
+}
+let lastUi = -1;
+function render(t) {
+  const c = t - cyc.start;
+  camAt(c);
+  pb.clear();
+  const e = cam.eye, f = cam.f, rr = cam.r, u = cam.u, F = cam.fl, cx = cam.cx, cy = cam.cy;
+  const f0 = f[0], f1 = f[1], f2 = f[2], r0x = rr[0], r1 = rr[1], r2 = rr[2], u0 = u[0], u1 = u[1], u2 = u[2];
+  const fadeStart = cyc.len - 3.9, fading = c > fadeStart;
+  const gIn = E.ss(0, .8, c), gOut = 1 - E.ss(cyc.len - 1.6, cyc.len - .15, c);
+  const pingOn = pingT !== null && t >= pingT, pAge = pingOn ? t - pingT : 0, pr = pAge * PSPD;
+  const fx = frontX(c), scanning = c >= CS && c <= CE;
+  const sw = t * .9;
+
+  // the chart, wherever the survey has not replaced it yet
+  const pa = gIn * gOut * .5, done0 = c > CS ? fx : 1e9;
+  if (pa > 0) for (let k = 0; k < PR.length; k += 4) {
+    const x = PR[k], z = PR[k + 2];
+    if (z > GZ0 && z < GZ1 && x > done0 && x < XS) continue;
+    if (pingOn && Math.hypot(x - BASE.x, z - BASE.z) < pr) continue;
+    const dx = x - e[0], dy = PR[k + 1] - e[1], dz = z - e[2], zc = dx * f0 + dy * f1 + dz * f2;
+    if (zc < 300) continue;
+    const sx = cx + F * (dx * r0x + dy * r1 + dz * r2) / zc, sy = cy - F * (dx * u0 + dy * u1 + dz * u2) / zc;
+    if (sx < 0 || sy < 0 || sx >= 1920 || sy >= 1080) continue;
+    pb.dot(sx, sy, 1, 238, 238, 228, pa * PR[k + 3] * (zc < 120000 ? 1 - zc / 180000 : .33));
+  }
+  const sfa = gIn * gOut * .3;
+  if (sfa > 0) for (let k = 0; k < SF.length; k += 3) {
+    const x = SF[k], z = SF[k + 1];
+    if (z < GZ1 && x > done0 && x < XS) continue;
+    if (pingOn && Math.hypot(x - BASE.x, z - BASE.z) < pr) continue;
+    const y = 11 * VE * (Math.sin(x * .0021 + z * .0013 + sw) * .6 + Math.sin(x * .0009 - z * .0031 + sw * .7) * .4);
+    const dx = x - e[0], dy = y - e[1], dz = z - e[2], zc = dx * f0 + dy * f1 + dz * f2;
+    if (zc < 300) continue;
+    const sx = cx + F * (dx * r0x + dy * r1 + dz * r2) / zc, sy = cy - F * (dx * u0 + dy * u1 + dz * u2) / zc;
+    if (sx < 0 || sy < 0 || sx >= 1920 || sy >= 1080) continue;
+    pb.dot(sx, sy, 1, 238, 238, 228, sfa * SF[k + 2] * (.7 + .5 * Math.sin(x * .004 + z * .002 - sw * 1.7)));
+  }
+
+  // survey lines, nearest first; distant lines thinned
+  const iEye = Math.max(0, Math.floor((GX0 - e[0] - 2500) / DX));
+  const iEnd = pingOn ? NL : Math.min(NL, Math.floor((GX0 - fx) / DX) + 1);
+  let shown = 0;
+  for (let i = iEye; i < iEnd; i++) {
+    const lx = GX0 - i * DX, along = e[0] - lx;
+    const s = along < 15000 ? 1 : along < 27000 ? 2 : along < 42000 ? 3 : 4;
+    if (i % s) continue;
+    const lineAge = c - LT[i], bs = s > 1 ? 1.12 : 1, big = along < 9000;
+    for (let k = LS[i], k1 = LS[i + 1]; k < k1; k += s) {
+      let age = lineAge - Pj[k] * .05;
+      if (pingOn) { const pg = pAge - Pd[k] / PSPD; if (pg >= 0 && (age < 0 || pg < age)) age = pg; }
+      if (age < 0) continue;
+      const x = Px[k], z = Pz[k], sea = Ps[k] === 1;
+      const y = sea ? 11 * VE * (Math.sin(x * .0021 + z * .0013 + sw) * .6 + Math.sin(x * .0009 - z * .0031 + sw * .7) * .4) : Py[k];
+      const dx = x - e[0], dy = y - e[1], dz = z - e[2], zc = dx * f0 + dy * f1 + dz * f2;
+      if (zc < 200) continue;
+      const sx = cx + F * (dx * r0x + dy * r1 + dz * r2) / zc, sy = cy - F * (dx * u0 + dy * u1 + dz * u2) / zc;
+      if (sx < 0 || sy < 0 || sx >= 1920 || sy >= 1080) continue;
+      let b = Pb[k] * bs * (zc < 20000 ? 1.1 - zc / 200000 : 1.2 - zc / 40000 < .35 ? .35 : 1.2 - zc / 40000);
+      if (fading) { const fd = (c - fadeStart - Pj[k] * 2.4) / .6; if (fd >= 1) continue; if (fd > 0) b *= 1 - fd; }
+      if (sea) b *= .75 + .45 * Math.sin(x * .004 + z * .002 - sw * 1.7);
+      if (age < 1.8) {
+        const kf = Math.exp(-age * 2);
+        if (b < kf) b = kf;
+        pb.dot(sx, sy, big || age < .06 ? 2 : 1, 238 - 40 * kf, 238 + 6 * kf, 228 - 178 * kf, b > 1 ? 1 : b);
+      } else pb.dot(sx, sy, big ? 2 : 1, 238, 238, 228, b > 1 ? 1 : b);
+      shown++;
+    }
+  }
+  // waterline contour
+  for (let i = iEye; i < Math.min(iEnd, NL - 1); i++) {
+    const lineAge = c - LT[i];
+    for (let k = CLS[i]; k < CLS[i + 1]; k++) {
+      let age = lineAge;
+      if (pingOn) { const pg = pAge - Cd[k] / PSPD; if (pg >= 0 && (age < 0 || pg < age)) age = pg; }
+      if (age < 0) continue;
+      const dx = Cx[k] - e[0], dy = 3 - e[1], dz = Cz[k] - e[2], zc = dx * f0 + dy * f1 + dz * f2;
+      if (zc < 200) continue;
+      const sx = cx + F * (dx * r0x + dy * r1 + dz * r2) / zc, sy = cy - F * (dx * u0 + dy * u1 + dz * u2) / zc;
+      if (sx < 0 || sy < 0 || sx >= 1920 || sy >= 1080) continue;
+      const fade = fading ? 1 - E.ss(fadeStart + .4, fadeStart + 1.6, c) : 1;
+      const kf = age < 2 ? Math.exp(-age * 2) : 0;
+      pb.dot(sx, sy, zc < 32000 ? 2 : 1, 245 - 47 * kf, 245 - 1 * kf, 236 - 186 * kf, fade * (zc < 70000 ? 1 - zc / 110000 : .36));
+    }
+  }
+
+  // the scan line: a lit profile and a thin light sheet standing on it
+  if (scanning) {
+    const sA = gIn * E.ss(CS, CS + .4, c) * (1 - E.ss(CE - .4, CE, c));
+    for (let z = GZ0; z <= GZ1; z += 34) {
+      const y = Yat(fx, z), g = cam.project([fx, y + 4, z]); if (!g) continue;
+      dset(g[0], g[1], 2, 226, 255, 150, sA);
+      pb.add(g[0], g[1], 7, LIME[0], LIME[1], LIME[2], .045 * sA);
+      if ((z - GZ0) % 204 < 34) for (let hh = 50; hh < 1500; hh += 50) { const q = cam.project([fx, y + hh, z]); if (q) pb.dot(q[0], q[1], 1, LIME[0], LIME[1], LIME[2], sA * .5 * Math.pow(1 - hh / 1500, 2)); }
+    }
+  }
+
+  // ping ring
+  if (pingOn && pr < 150000) {
+    const pa2 = 1 - E.ss(70000, 150000, pr);
+    for (const [rad, al, sz] of [[pr, 1, 2], [pr - 700, .3, 1], [pr - 1600, .12, 1]]) {
+      if (rad <= 0) continue;
+      const n = Math.min(4000, Math.max(60, Math.round(rad * 6.2832 / 50)));
+      for (let k = 0; k < n; k++) {
+        const a = k / n * 6.2832, x = BASE.x + Math.sin(a) * rad, z = BASE.z + Math.cos(a) * rad;
+        const g = cam.project([x, Yat(x, z) + 10, z]); if (!g || g[0] < 0 || g[1] < 0 || g[0] >= 1920 || g[1] >= 1080) continue;
+        dset(g[0], g[1], sz, LIME[0], LIME[1], LIME[2], al * pa2);
+      }
+    }
+    const fl = Math.max(0, 1 - pAge / .3); if (fl > 0) pb.lift(16 * fl);
+  }
+
+  // identified positions: footprint, returns, stem
+  const tags = [];
+  for (const o of OBJS) {
+    let tIn = c - o.lt - .25;
+    if (pingOn) { const pg = pAge - Math.hypot(o.x - BASE.x, o.z - BASE.z) / PSPD; if (pg > 0 && (tIn < 0 || pg < tIn)) tIn = pg; }
+    const a = tIn < 0 ? 0 : E.sat(tIn / .3) * (1 - E.ss(fadeStart, fadeStart + 1.2, c));
+    const g = cam.project([o.x, o.gy, o.z]);
+    if (a <= 0 || !g || g[0] < 20 || g[0] > 1900 || g[1] < 20 || g[1] > 1070) { o.el.classList.add('off'); continue; }
+    const grow = E.outCubic(E.sat(tIn / .6));
+    const nR = o.ring.length, shownR = Math.floor(nR * grow);
+    for (let k = 0; k < shownR; k++) { const q = cam.project(o.ring[k]); if (q) dset(q[0], q[1], 2, LIME[0], LIME[1], LIME[2], a); }
+    for (const m of o.mk) { const q = cam.project(m); if (q) { const col = m[3] ? LIME : WH; dset(q[0], q[1], 7, 11, 12, 10, a * .85); dset(q[0], q[1], 4, col[0], col[1], col[2], a); } }
+    const hStem = o.stem * E.outCubic(E.sat(tIn / .45));
+    for (let yy = 6; yy <= hStem; yy += 3) { dset(g[0], g[1] - yy, 3, 11, 12, 10, a * .7); dset(g[0], g[1] - yy, 1, LIME[0], LIME[1], LIME[2], a); }
+    if (tIn > .3) { o.el.classList.remove('off'); tags.push({ o, x: g[0] - 1, y: g[1] - hStem - 21 }); } else o.el.classList.add('off');
+  }
+  const placed = [];
+  tags.sort((a, b) => a.y - b.y);
+  for (const tg of tags) {
+    const w = tg.o.el.offsetWidth || 220;
+    for (let guard = 0; guard < 8; guard++) { const hit = placed.find(p => tg.x < p.x + p.w + 6 && p.x < tg.x + w + 6 && Math.abs(tg.y - p.y) < 24); if (!hit) break; tg.y = hit.y - 25; }
+    placed.push({ x: tg.x, y: tg.y, w });
+    tg.o.el.style.transform = `translate(${tg.x.toFixed(0)}px, ${tg.y.toFixed(0)}px)`;
+  }
+  pb.blit();
+
+  // menu side: keep the right edge calm
+  octx.clearRect(0, 0, 1920, 1080);
+  const lg = octx.createLinearGradient(1920, 0, 1200, 0); lg.addColorStop(0, 'rgba(11,12,10,.8)'); lg.addColorStop(.5, 'rgba(11,12,10,.45)'); lg.addColorStop(1, 'rgba(11,12,10,0)');
+  octx.fillStyle = lg; octx.fillRect(1200, 0, 720, 1080);
+
+  // readout
+  if (t - lastUi > .1 || t < lastUi) {
+    lastUi = t;
+    let p = E.sat((XS - fx) / (XS - XE));
+    if (pingOn) p = Math.max(p, E.sat(pr / 60000));
+    const km2 = p * (XS - XE) / 1000 * (GZ1 - GZ0) / 1000;
+    document.getElementById('spct').textContent = Math.round(p * 100) + ' %';
+    document.getElementById('sarea').textContent = Math.round(km2).toLocaleString('en-US').replace(/,/g, ' ');
+    const pts = km2 * 1760;
+    document.getElementById('spts').textContent = pts >= 1e6 ? (pts / 1e6).toFixed(1) + ' M' : Math.round(pts / 1000) + ' k';
+    document.getElementById('sbar').style.width = (Math.round(p * 44) * 6) + 'px';
+  }
+  STAGE.dbg = { shown, NP, cont: Cx.length, prior: PR.length / 4 };
+}
+STAGE.run({ update, render });
+})();
+</script>
+</body></html>

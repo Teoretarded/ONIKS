@@ -1,0 +1,516 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Oniks — Sea Skimmer</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=DM+Mono:wght@400;500&display=block">
+<link rel="stylesheet" href="common/orbital.css">
+<style>
+  .logo { left: 92px; top: 62px; }
+  .ro { right: 92px; top: 60px; text-align: right; font: 400 17px var(--mono); letter-spacing: 0; color: var(--w3); font-variant-numeric: tabular-nums; white-space: pre; }
+  .ro b { font-weight: 400; color: var(--w); }
+  .ro .l { font-size: 11.5px; margin-top: 10px; color: var(--w3); }
+  .ro .l.lk { color: var(--hi); }
+  .menu { left: 92px; top: 548px; width: 560px; }
+  .menu .it { display: flex; align-items: baseline; height: 68px; font-size: 55px; font-weight: 300; letter-spacing: -.042em; }
+  .menu .it .n { width: 48px; flex: none; font-size: 12px; }
+  .menu .it .go { margin-left: 22px; font-size: 14px; }
+  .menu .it .bar { bottom: 8px; }
+  .blurb { left: 140px; top: 902px; width: 430px; font-size: 14.5px; }
+  .keys { left: 92px; bottom: 50px; font-size: 12.5px; gap: 18px; }
+  .fig { right: 92px; bottom: 74px; text-align: right; }
+  .foot { right: 92px; bottom: 50px; }
+  .call { opacity: 0; }
+  .call .cat .t { font-variant-numeric: tabular-nums; }
+</style></head>
+<body><div id="stage">
+  <canvas id="c"></canvas>
+  <div class="ui" id="ui">
+    <div class="logo abs"><svg viewBox="0 0 24 24" fill="none" stroke="#F6F5F2" stroke-width="1.2"><circle cx="11" cy="13" r="8.2"/><path d="M1.5 22.5 22 2"/><rect x="19.2" y="1.4" width="3.8" height="3.8" fill="#F6F5F2" stroke="none"/></svg>Oniks</div>
+    <div class="ro abs"><div id="ro"></div><div class="l" id="rol">Seeker · search</div></div>
+    <div class="menu abs" id="menu"></div>
+    <div class="blurb abs" id="blurb"></div>
+    <div class="keys abs"><span><b>↑↓</b>Select</span><span><b>Enter</b>Open</span><span><b>G</b>Graphics</span><span><b>Esc</b>Quit</span></div>
+    <div class="fig abs"><b>Fig. 2</b>Sea-skim, terminal leg</div>
+    <div class="foot abs">Proto v0.5.0</div>
+  </div>
+  <div class="veil" id="veil"><div class="msg">Stand the battery down.</div></div>
+</div>
+<script src="common/m3.js"></script><script src="common/orb.js"></script><script src="common/wire.js"></script><script src="common/geo.js"></script><script src="common/stage.js"></script>
+<script>
+(() => {
+const { V, R, X, E, Cam } = M3;
+STAGE.fit();
+STAGE.SFX.kind = 'orb';
+const DEG = Math.PI / 180;
+
+/* ---------- menu ---------- */
+const menuEl = document.getElementById('menu');
+menuEl.innerHTML = STAGE.ITEMS.map((t, i) => `<div class="it" data-item><span class="n">0${i + 1}</span><span class="lab">${ORB.swipe('o2' + t, { a: 1 })}<span class="tx">${t}</span></span><span class="go">↵</span><i class="bar"></i></div>`).join('');
+const veil = document.getElementById('veil');
+let enterReq = false;
+STAGE.menu({
+  el: menuEl, blurb: document.getElementById('blurb'),
+  onEnter(i) {
+    if (i === 4) { veil.classList.add('on'); setTimeout(() => veil.classList.remove('on'), 1900); return 2600; }
+    enterReq = true;
+    return 1900;
+  },
+});
+
+/* ---------- canvas ---------- */
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let K = 1;
+function size() { K = Math.min(2, Math.max(1, (devicePixelRatio || 1) * STAGE.scale)); cv.width = 1920 * K; cv.height = 1080 * K; }
+size(); addEventListener('resize', () => { STAGE.fit(); size(); });
+
+const cam = new Cam();
+const W = new Wire(cam, { fog: [80, 3000] });
+const WC = new Wire(cam, { fog: [2500, 17000] });   // ships beyond the horizon, clipped to the sky
+const WN = new Wire(cam, { fog: [2500, 17000] });   // ships inside the horizon
+const MIS = GEO.oniks(), DDG = GEO.destroyer();
+
+/* ---------- world ---------- */
+// The scene is drawn in a frame that rides with the round: missile near the origin, nose +Z,
+// the sea streams past at the true Mach 2.05 speed so the parallax reads as speed.
+const MACH = 2.05, VM = 700, MU = Math.asin(1 / MACH), TMU = Math.tan(MU);
+const NOSE = 4.95;
+const REFF = 450e3;          // shrunken planet: the horizon sits a few km out and ships rise over it
+const KR = 7;                // contact ranges are drawn 7x compressed (label shows the true range)
+const CLOSE = VM / KR;
+const LOOP = 30, S_ROW = 40;
+
+const WAVES = [
+  { A: 1.3, L: 150, d: .25, ph: 0 },
+  { A: .75, L: 84, d: -.7, ph: 1.7 },
+  { A: .42, L: 46, d: 1.1, ph: 4.1 },
+  { A: .22, L: 29, d: -.3, ph: 2.2 },
+].map(w => { const k = 2 * Math.PI / w.L; return { A: w.A, kx: k * Math.sin(w.d), kz: k * Math.cos(w.d), w: Math.sqrt(9.81 * k), ph: w.ph }; });
+function swell(x, zw, t) { let h = 0; for (let i = 0; i < 4; i++) { const w = WAVES[i]; h += w.A * Math.sin(w.kx * x + w.kz * zw - w.w * t + w.ph); } return h; }
+
+// weave + altitude hold; all periods divide the loop so the path is seamless at the wrap
+const TAU = Math.PI * 2;
+function misXY(s, te) {
+  let x = 3.2 * Math.sin(TAU * s / 6) + .45 * Math.sin(TAU * s / 3 + 1.3);
+  let y = 14 + .35 * Math.sin(TAU * s / 3 + .4) + .14 * Math.sin(TAU * s / 1.25);
+  const u = s - te;
+  if (u > 0 && u < 4.4) {
+    const env = Math.sin(Math.PI * u / 4.4);
+    x += 11 * env * Math.sin(TAU * u / 1.8);
+    y += 58 * E.ss(.05, 1.35, u) * (1 - E.ss(2.1, 4.1, u));
+  }
+  return [x, y];
+}
+
+const CT = [
+  { b: -8.5 * DEG, r0: 5400, hdg: 1.32, cls: 'DDG', code: 'K-DDG-71', dx: -64, dy: -86 },
+  { b: 12.5 * DEG, r0: 6150, hdg: 1.47, cls: 'DDG', code: 'K-DDG-58', dx: 70, dy: -62 },
+  { b: 2.2 * DEG, r0: 7250, hdg: 1.40, cls: 'CG', code: 'K-CG-62', dx: 40, dy: -128 },
+];
+const SEEK_R = 5600;
+const rangeOf = (c, s) => c.r0 - CLOSE * s;
+
+function sweep(s) {
+  const p = (s / 4.4) % 1, tri = p < .5 ? p * 4 - 1 : 3 - p * 4;
+  return 30 * DEG * (.45 * tri + .55 * Math.sin(tri * Math.PI / 2));
+}
+
+/* ---------- sim ---------- */
+let T = 0, sq = 0, te = -1e9, fan = 0, lockI = -1, lockT = -1e9, snap = 0;
+function resetLoop() { CT.forEach(c => { c.det = -1; }); lockI = -1; lockT = -1e9; te = -1e9; }
+resetLoop();
+function lockNearest(fast) {
+  let bi = 0; CT.forEach((c, i) => { if (rangeOf(c, sq) < rangeOf(CT[bi], sq)) bi = i; });
+  if (CT[bi].det < 0) CT[bi].det = sq;
+  if (lockI !== bi) { lockI = bi; lockT = sq; STAGE.SFX.tone(1320, 1320, .1, 'sine', .04); STAGE.SFX.tone(1760, 1760, .18, 'sine', .035, .09); }
+  snap = fast ? 1 : 0;
+}
+
+function update(dt) {
+  T += dt; sq += dt;
+  if (sq >= LOOP) { sq -= LOOP; resetLoop(); }
+  if (enterReq) {
+    enterReq = false;
+    if (sq > .8 && sq < LOOP - 4.6) { te = sq; lockNearest(true); STAGE.SFX.rumble(2.4, .16); }
+  }
+  for (const c of CT) if (c.det < 0 && sq > 2.6 && rangeOf(c, sq) < SEEK_R && Math.abs(fan - c.b) < 2.4 * DEG) { c.det = sq; STAGE.SFX.tone(1900, 1900, .05, 'sine', .03); }
+  if (lockI < 0 && sq > 20.6) lockNearest(false);
+  if (lockI >= 0) fan = E.damp(fan, CT[lockI].b, snap ? 16 : 5, dt); else fan = sweep(sq);
+  STAGE.dbg = { sq: +sq.toFixed(2), fan: +(fan / DEG).toFixed(1), det: CT.map(c => +c.det.toFixed(2)), lockI };
+}
+
+/* ---------- camera: four shots on a Catmull-Rom path around the round ---------- */
+// yaw: where the camera sits, degrees clockwise from the nose; h: height above sea;
+// lead: where it looks along the flight line (negative = back along the body)
+const KEYS = [
+  { yaw: 90, dist: 30, h: 12.2, lead: 1, tx: 0, th: -.6, fov: 30, cx: 1190, cy: 430 },        // low side
+  { yaw: 200, dist: 20, h: 12.6, lead: 60, tx: 2, th: -1.5, fov: 32, cx: 820, cy: 440 },      // low rear quarter
+  { yaw: 386, dist: 14, h: 16.5, lead: -40, tx: -14, th: -4.5, fov: 44, cx: 1100, cy: 430 },  // close front quarter, looking back
+  { yaw: 554, dist: 48, h: 32, lead: 120, tx: -18, th: -12, fov: 40, cx: 980, cy: 470 },     // high follow
+];
+const FIXK = STAGE.Q.has('key') ? +STAGE.Q.get('key') : -1;
+function camKey(sv) {
+  const n = KEYS.length, f = sv / (LOOP / n), i = Math.floor(f), u = f - i;
+  const ue = u + (E.ss(0, 1, u) - u) * .55;
+  if (FIXK >= 0) return Object.assign({}, KEYS[FIXK]);
+  const P = k => { const kk = ((k % n) + n) % n, cyc = Math.floor(k / n), Kk = KEYS[kk]; return Object.assign({}, Kk, { yaw: Kk.yaw + 360 * cyc }); };
+  const a = P(i - 1), b = P(i), c = P(i + 1), d = P(i + 2), o = {};
+  for (const k in b) { const p0 = a[k], p1 = b[k], p2 = c[k], p3 = d[k]; o[k] = .5 * (2 * p1 + (-p0 + p2) * ue + (2 * p0 - 5 * p1 + 4 * p2 - p3) * ue * ue + (-p0 + 3 * p1 - 3 * p2 + p3) * ue * ue * ue); }
+  return o;
+}
+
+/* ---------- callouts ---------- */
+const ui = document.getElementById('ui');
+CT.forEach(c => {
+  const d = document.createElement('div'); d.className = 'call';
+  d.innerHTML = `<span class="cat"><i class="sq"></i><span class="t"></span>${ORB.bars(c.code, { h: 9, n: 10 })}</span>`;
+  ui.appendChild(d); c.el = d; c.tEl = d.querySelector('.t'); c.sqEl = d.querySelector('.sq'); c.txt = '';
+});
+const leaders = [];
+function place(el, anchor, dx, dy, a) {
+  if (!anchor || a <= .01) { el.style.opacity = 0; return; }
+  const [ax, ay] = anchor, ex = ax + dx, ey = ay + dy, right = dx >= 0, hx = ex + (right ? 18 : -18);
+  leaders.push([ax, ay, ex, ey, hx, a]);
+  const w = el.offsetWidth;
+  el.style.opacity = a.toFixed(3);
+  el.style.transform = `translate(${(right ? hx + 8 : hx - 8 - w).toFixed(1)}px, ${(ey - 6).toFixed(1)}px)`;
+}
+const roEl = document.getElementById('ro'), rolEl = document.getElementById('rol');
+let roTxt = '', rolTxt = '';
+
+/* ---------- helpers ---------- */
+function hash(i, j) { let h = (i * 374761393 + j * 668265263) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); h ^= h >>> 16; return (h >>> 0) / 4294967296; }
+function wedge() {
+  const f = cam.f; let gx = f[0], gz = f[2]; const gl = Math.hypot(gx, gz) || 1; gx /= gl; gz /= gl;
+  const half = Math.min(1.45, Math.atan(Math.tan(cam.fov / 2) * 1920 / 1080 * 1.35) + .22);
+  const planes = [];
+  for (const s of [-1, 1]) {
+    const a = s * half, ex = gx * Math.cos(a) + gz * Math.sin(a), ez = -gx * Math.sin(a) + gz * Math.cos(a);
+    let nx = ez, nz = -ex; if (nx * gx + nz * gz < 0) { nx = -nx; nz = -nz; }
+    planes.push([nx, nz]);
+  }
+  const back = 4 + cam.eye[1] * 1.6;
+  return { planes, cx: cam.eye[0] - gx * back, cz: cam.eye[2] - gz * back, gx, gz };
+}
+function spanOn(z, wd, lo, hi) {
+  for (const [nx, nz] of wd.planes) {
+    const k = nz * (z - wd.cz);
+    if (Math.abs(nx) < 1e-6) { if (k < 0) return null; continue; }
+    const xb = wd.cx - k / nx;
+    if (nx > 0) lo = Math.max(lo, xb); else hi = Math.min(hi, xb);
+  }
+  return lo < hi ? [lo, hi] : null;
+}
+
+/* ---------- render ---------- */
+let MX = 0, MY = 14;
+const fanLab = [];
+const xsR = [], xsL = [];
+function render(t) {
+  const [mx, my] = misXY(sq, te); MX = mx; MY = my;
+  const eps = 1 / 120, p1 = misXY(sq + eps, te), p0 = misXY(sq - eps, te);
+  const vx = (p1[0] - p0[0]) / (2 * eps), vy = (p1[1] - p0[1]) / (2 * eps), ax = (p1[0] - 2 * mx + p0[0]) / (eps * eps);
+  const axis = V.norm([vx, vy, VM]);
+  const bank = .85 * Math.atan(E.clamp(ax, -40, 40) / 9.81);
+  const D = VM * T;
+
+  // camera
+  const k = camKey(sq), yaw = k.yaw * DEG;
+  const drift = [.35 * Math.sin(t * .37), .22 * Math.sin(t * .53 + 1), .3 * Math.sin(t * .29 + 2)];
+  cam.fov = k.fov * DEG; cam.cx = k.cx; cam.cy = k.cy;
+  cam.eye = [mx * .7 + Math.sin(yaw) * k.dist + drift[0], Math.max(2.2, k.h + (my - 14) * .85) + drift[1], Math.cos(yaw) * k.dist + drift[2]];
+  cam.target = [mx * .85 + k.tx, my + k.th, k.lead];
+  const pop = te > -1e8 ? Math.max(0, 1 - (sq - te) / 1.2) : 0;
+  const sh = .7 + 5 * pop;
+  cam.shake = [(Math.random() - .5) * sh, (Math.random() - .5) * sh];
+  cam.roll = -bank * .05;
+  cam.update();
+  const e = cam.eye, hE = Math.max(1, e[1]), Rh = Math.sqrt(2 * REFF * hE);
+  const fl = cam.fl;
+
+  ctx.setTransform(K, 0, 0, K, 0, 0);
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, 1920, 1080);
+  W.reset(); WC.reset(); WN.reset();
+  W.fog = [80, Rh * 1.05];
+  W.style('#F6F5F2', 1);
+
+  /* horizon */
+  const wd = wedge();
+  const hz = [];
+  for (let i = -24; i <= 24; i++) {
+    const a = i / 24 * 1.5, dx = wd.gx * Math.cos(a) + wd.gz * Math.sin(a), dz = -wd.gx * Math.sin(a) + wd.gz * Math.cos(a);
+    const p = cam.project([e[0] + dx * Rh, -hE, e[2] + dz * Rh]);
+    if (p) hz.push(p);
+  }
+  hz.sort((a, b) => a[0] - b[0]);
+  for (let i = 0; i < hz.length - 1; i++) W.seg2(hz[i][0], hz[i][1], hz[i + 1][0], hz[i + 1][1], .5);
+
+  /* sea: cross-track swell lines, fixed to the water, streaming past */
+  const ridge = (x, z) => {
+    const s = NOSE - z, r = s * TMU; if (r <= MY) return 0;
+    const w = Math.sqrt(r * r - MY * MY), d = Math.abs(Math.abs(x - MX) - w);
+    return d < 7 ? .7 * Math.exp(-d * d / 5) * Math.exp(-s / 420) : 0;
+  };
+  // A point on the water sweeps across the frame at VM; how many pixels it smears in one 60 Hz
+  // frame decides how much of it survives: near water blurs out, far water stays crisp.
+  const mbK = fl * VM / 60;
+  const blurAt = (dx, dy, dz) => { const L = Math.sqrt(dx * dx + dy * dy + dz * dz), cz = dz / L; return mbK * Math.sqrt(Math.max(0, 1 - cz * cz)) / L; };
+  // cross-track rows ride with the water
+  const kmin = Math.ceil((e[2] - Rh + D) / S_ROW), kmax = Math.floor((e[2] + Rh + D) / S_ROW);
+  for (let kk = kmin; kk <= kmax; kk++) {
+    const zw = kk * S_ROW, z = zw - D, dz = z - e[2], adz = Math.abs(dz);
+    let lod = 1;
+    if (kk % 4 !== 0) { lod = 1 - E.ss(700, 1000, adz); if (lod <= 0) continue; }
+    const half = Math.sqrt(Math.max(0, Rh * Rh - dz * dz));
+    const sp = spanOn(z, wd, e[0] - half, e[0] + half); if (!sp) continue;
+    const x0 = E.clamp(e[0], sp[0], sp[1]);
+    xsR.length = 0; xsL.length = 0;
+    for (let x = x0; x < sp[1];) { xsR.push(x); const dd = Math.hypot(x - e[0], dz); x += Math.max(4, dd * .05); }
+    xsR.push(sp[1]);
+    for (let x = x0; x > sp[0];) { const dd = Math.hypot(x - e[0], dz); x -= Math.max(4, dd * .05); xsL.push(Math.max(sp[0], x)); }
+    const xs = xsL.reverse().concat(xsR);
+    let pa = null, aa = 0;
+    for (let i = 0; i < xs.length; i++) {
+      const x = xs[i], ddx = x - e[0], d2 = ddx * ddx + dz * dz, dd = Math.sqrt(d2);
+      const y = swell(x, zw, T) + ridge(x, z) - d2 / (2 * REFF);
+      const al = .42 * lod * E.clamp(30 / blurAt(ddx, y - e[1], dz), .03, 1) * (1 - E.ss(Rh * .72, Rh, dd));
+      const p = [x, y, z];
+      if (pa) W.seg(pa, p, (al + aa) * .5);
+      pa = p; aa = al;
+    }
+  }
+  // along-track lines stay put; only the swell running along them smears
+  {
+    const SX = 10, i0 = Math.ceil((e[0] - Rh) / SX), i1 = Math.floor((e[0] + Rh) / SX);
+    for (let i = i0; i <= i1; i++) {
+      const x = i * SX, dx = x - e[0], adx = Math.abs(dx);
+      const lod = i % 9 === 0 ? 1 : i % 3 === 0 ? 1 - E.ss(380, 520, adx) : 1 - E.ss(90, 130, adx);
+      if (lod <= 0) continue;
+      const half = Math.sqrt(Math.max(0, Rh * Rh - dx * dx));
+      let lo = e[2] - half, hi = e[2] + half, ok = true;
+      for (const [nx, nz] of wd.planes) {
+        const k = nx * (x - wd.cx);
+        if (Math.abs(nz) < 1e-6) { if (k < 0) ok = false; continue; }
+        const zb = wd.cz - k / nz;
+        if (nz > 0) lo = Math.max(lo, zb); else hi = Math.min(hi, zb);
+      }
+      if (!ok || lo >= hi) continue;
+      const z0 = E.clamp(e[2], lo, hi);
+      xsR.length = 0; xsL.length = 0;
+      for (let z = z0; z < hi;) { xsR.push(z); z += Math.max(4, Math.hypot(dx, z - e[2]) * .045); }
+      xsR.push(hi);
+      for (let z = z0; z > lo;) { z -= Math.max(4, Math.hypot(dx, z - e[2]) * .045); xsL.push(Math.max(lo, z)); }
+      const zs = xsL.reverse().concat(xsR);
+      let pa = null, aa = 0;
+      for (let j = 0; j < zs.length; j++) {
+        const z = zs[j], dz = z - e[2], d2 = dx * dx + dz * dz, dd = Math.sqrt(d2);
+        const drop = d2 / (2 * REFF), bl = blurAt(dx, -e[1] - drop, dz), keep = E.clamp(22 / bl, 0, 1);
+        const y = (swell(x, z + D, T) + ridge(x, z)) * keep - drop;
+        const al = .34 * lod * (1 - E.ss(Rh * .7, Rh, dd)) * (.45 + .55 * keep);
+        const p = [x, y, z];
+        if (pa) W.seg(pa, p, (al + aa) * .5);
+        pa = p; aa = al;
+      }
+    }
+  }
+
+  /* whitecaps: foam on the crests, each smeared by one frame of motion */
+  {
+    const C = 11, rad = 170, streak = VM / 60 * .35;
+    const i0 = Math.floor((e[0] - rad) / C), i1 = Math.floor((e[0] + rad) / C);
+    const j0 = Math.floor((e[2] - rad + D) / C), j1 = Math.floor((e[2] + rad + D) / C);
+    for (let j = j0; j <= j1; j++) {
+      const zc = j * C - D;
+      for (let i = i0; i <= i1; i++) {
+        const h = hash(i, j); if (h > .3) continue;
+        const x = (i + hash(i + 7, j)) * C, zw = (j + hash(i, j + 5)) * C, z = zw - D;
+        const ddx = x - e[0], ddz = z - e[2], d2 = ddx * ddx + ddz * ddz; if (d2 > rad * rad || d2 < 64) continue;
+        if (wd.planes.some(([nx, nz]) => nx * (x - wd.cx) + nz * (z - wd.cz) < 0)) continue;
+        const sw = swell(x, zw, T), crest = E.sat((sw + .1) / 1.3);
+        if (crest <= .02) continue;
+        const y = sw + .05 + ridge(x, z) * .6 - d2 / (2 * REFF), d = Math.sqrt(d2);
+        W.seg([x, y, z], [x, y, z + streak * (.5 + hash(j, i))], .42 * crest * (1 - E.ss(rad * .55, rad, d)) * E.ss(8, 30, d));
+      }
+    }
+  }
+
+  /* seeker fan projected onto the water */
+  const lockA = lockI >= 0 ? E.outExpo(E.sat((sq - lockT) / .35)) : 0;
+  {
+    const ax0 = [MX, 0, NOSE + 1], Rf = Math.min(6100, Rh * .985);
+    fanLab.length = 0;
+    const onSea = (ang, r) => { const x = ax0[0] + Math.sin(ang) * r, z = ax0[2] + Math.cos(ang) * r, ddx = x - e[0], ddz = z - e[2]; return [x, .15 - (ddx * ddx + ddz * ddz) / (2 * REFF), z]; };
+    const radial = (ang, r0, r1, al) => { let p = onSea(ang, r0); for (let i = 1; i <= 14; i++) { const r = r0 * Math.pow(r1 / r0, i / 14), q = onSea(ang, r); W.seg(p, q, al * (1 - .5 * i / 14)); p = q; } };
+    const arc = (r, a0, a1, al, n) => { let p = onSea(a0, r); for (let i = 1; i <= n; i++) { const q = onSea(a0 + (a1 - a0) * i / n, r); W.seg(p, q, al); p = q; } };
+    radial(-30 * DEG, 40, Rf, .6); radial(30 * DEG, 40, Rf, .6);
+    for (const rk of [10, 20, 30, 40]) {
+      const r = rk * 1000 / KR; if (r > Rf) break;
+      arc(r, -30 * DEG, 30 * DEG, .36, 48);
+      for (let d = -30; d <= 30; d += 5) { const a = d * DEG; W.seg(onSea(a, r), onSea(a, r * (d % 15 === 0 ? 1.04 : 1.02)), .55); }
+      fanLab.push([onSea(30 * DEG, r * 1.02), rk]);
+    }
+    // the live beam and its afterglow
+    const bw = (lockI >= 0 ? 1.6 : 2.6) * DEG * (1 - .4 * lockA);
+    for (let i = -3; i <= 3; i++) radial(fan + i / 3 * bw, 60, Rf, i === -3 || i === 3 ? .7 : .38);
+    if (lockI < 0) {
+      const dir = Math.sign(sweep(sq + .05) - sweep(sq)) || 1;
+      for (let i = 1; i <= 12; i++) { const a = fan - dir * (bw + i * 1.1 * DEG); if (Math.abs(a) < 30 * DEG) radial(a, 80, Rf, .3 * Math.pow(1 - i / 13, 1.5)); }
+    }
+    arc(Math.min(Rf, 900), fan - bw, fan + bw, .7, 6);
+  }
+
+  /* Mach cone and its footprint on the sea */
+  const apex = V.add([mx, my, 0], V.mul(axis, NOSE));
+  {
+    const back = V.mul(axis, -1), [U, Vv] = GEO.perp(axis), cm = Math.cos(MU), sm = Math.sin(MU);
+    // from inside the cone every generator radiates from the apex into the lens: hide it there
+    const rel = V.sub(e, apex), sc = -V.dot(rel, axis), rad = V.len(V.sub(rel, V.mul(axis, -sc)));
+    const outside = sc <= 0 ? 1 : E.ss(.95, 1.35, rad / (sc * TMU));
+    const NG = 20;
+    for (let g = 0; g < NG; g++) {
+      const th = (g + .5) / NG * TAU, gd = V.add(V.mul(back, cm), V.mul(V.add(V.mul(U, Math.cos(th)), V.mul(Vv, Math.sin(th))), sm));
+      let sEnd = 44; if (gd[1] < 0) sEnd = Math.min(sEnd, (apex[1] - .3) / -gd[1]);
+      const seg = [[0, 10, .2], [10, 22, .12], [22, 44, .05]];
+      for (const [s0, s1, al] of seg) { if (s0 >= sEnd) break; W.seg(V.mad(apex, gd, s0), V.mad(apex, gd, Math.min(s1, sEnd)), al * outside); }
+    }
+    for (const s of [6, 14, 26]) {
+      const r = s * Math.tan(MU), c = V.mad(apex, back, s), n = 48;
+      let prev = null;
+      for (let i = 0; i <= n; i++) {
+        const th = i / n * TAU, p = V.add(c, V.add(V.mul(U, Math.cos(th) * r), V.mul(Vv, Math.sin(th) * r)));
+        if (prev && prev[1] > .2 && p[1] > .2) W.seg(prev, p, .12 * (1 - s / 40) * outside);
+        prev = p;
+      }
+    }
+    // V-shaped shock footprint: the cone cut by the sea plane, a hyperbola opening at the Mach angle
+    const s0 = MY / TMU;
+    for (const side of [-1, 1]) {
+      let prev = null, pa = 0;
+      for (let s = s0, i = 0; s < s0 + 900; i++) {
+        const r = s * TMU, w = Math.sqrt(Math.max(0, r * r - MY * MY)), x = MX + side * w, z = NOSE - s, zw = z + D;
+        const ddx = x - e[0], ddz = z - e[2];
+        const p = [x, swell(x, zw, T) + .75 - (ddx * ddx + ddz * ddz) / (2 * REFF), z];
+        const al = .8 * Math.exp(-(s - s0) / 380);
+        if (prev) W.seg(prev, p, (al + pa) * .5);
+        prev = p; pa = al;
+        s += Math.min(14, 1.2 + (s - s0) * .05);
+      }
+      // spray thrown where the shock slaps the water
+      for (let s = s0 + .5; s < s0 + 240; s += 2.2) {
+        const r = s * TMU, w = Math.sqrt(Math.max(0, r * r - MY * MY)), x = MX + side * w, z = NOSE - s, zw = z + D;
+        if (Math.random() > .35 + .6 * Math.exp(-(s - s0) / 60)) continue;
+        const kf = Math.exp(-(s - s0) / 70), base = [x + side * Math.random() * 1.5, swell(x, zw, T) + .6, z - Math.random() * 2];
+        const hgt = (.15 + Math.random() * .7) * (.5 + kf * 1.4), out = side * (.1 + Math.random() * .5);
+        W.seg(base, [base[0] + out, base[1] + hgt, base[2] - 2 - Math.random() * 6], (.18 + .4 * kf) * (.4 + .6 * Math.random()));
+      }
+    }
+    for (let i = 0; i < 16; i++) { // the first touch: a burst of fine spray at the V's apex
+      const z = NOSE - s0 - Math.random() * 6, x = MX + (Math.random() - .5) * 3, zw = z + D, y = swell(x, zw, T) + .6;
+      W.seg([x, y, z], [x + (Math.random() - .5) * 2, y + .3 + Math.random() * 1.3, z - 3 - Math.random() * 7], .3 * Math.random() + .12);
+    }
+  }
+
+  /* the round */
+  {
+    const right = V.norm(V.cross([0, 1, 0], axis)), up0 = V.cross(axis, right);
+    const up = V.add(V.mul(up0, Math.cos(bank)), V.mul(right, Math.sin(bank)));
+    const Mx = X.make(R.look(axis, up), [mx, my, 0]);
+    GEO.draw(W, MIS, Mx, {}, { a: 1 });
+    // ramjet plume: faint cone with standing shock rings
+    W.style('#FFFFFF', 1);
+    const nz = X.ap(Mx, [0, 0, -4.55]), [U, Vv] = GEO.perp(axis);
+    const L = 6 + 1.6 * Math.random();
+    for (let i = 0; i < 10; i++) { const a = i / 10 * TAU; W.seg(V.add(nz, V.add(V.mul(U, Math.cos(a) * .27), V.mul(Vv, Math.sin(a) * .27))), V.mad(nz, axis, -L), .28); }
+    for (const s of [1.1, 2.3, 3.5]) W.ring(V.mad(nz, axis, -s), U, Vv, .22 - s * .03, 14, .3 * (1 - s / 5));
+    W.seg(nz, V.mad(nz, axis, -L * 1.5), .45);
+    W.style('#F6F5F2', 1);
+  }
+
+  /* contacts: destroyers on the rim of the world */
+  const boxes = [];
+  CT.forEach((c, i) => {
+    const r = rangeOf(c, sq), x = MX * 0 + Math.sin(c.b) * r, z = Math.cos(c.b) * r;
+    const ddx = x - e[0], ddz = z - e[2], d = Math.hypot(ddx, ddz);
+    const drop = d * d / (2 * REFF);
+    const Tw = X.make(R.y(c.hdg), [x, -drop, z]);
+    const beyond = d > Rh;
+    GEO.draw(beyond ? WC : WN, DDG, Tw, {}, { a: .85, back: .1, hatch: .22 });
+    c.pos = [x, -drop, z]; c.Tw = Tw; c.dist = d;
+    const hidden = beyond ? (d - Rh) * (d - Rh) / (2 * REFF) : 0;
+    c.vis = E.sat((44 - hidden) / 8);
+    c.anchor = cam.project(X.ap(Tw, [0, 44, 21]));
+    if (i === lockI) {
+      const ps = [];
+      for (const q of [[-10, Math.max(hidden, 0), -77], [10, Math.max(hidden, 0), 77], [10, 23, -77], [-10, 23, 77], [0, 50, 21], [0, Math.max(hidden, 0), 77], [0, Math.max(hidden, 0), -77]]) { const p = cam.project(X.ap(Tw, q)); if (p) ps.push(p); }
+      if (ps.length) boxes.push(ps);
+    }
+  });
+
+  W.flush(ctx);
+  WN.flush(ctx);
+  if (hz.length > 1) {
+    ctx.save(); ctx.beginPath();
+    ctx.moveTo(-60, -60); ctx.lineTo(hz[0][0] - 1, -60);
+    for (const p of hz) ctx.lineTo(p[0], p[1]);
+    ctx.lineTo(1980, hz[hz.length - 1][1]); ctx.lineTo(1980, -60); ctx.closePath(); ctx.clip();
+    WC.flush(ctx);
+    ctx.restore();
+  }
+
+  // fan range numerals (true km)
+  ctx.font = '400 11px "DM Mono", monospace'; ctx.fillStyle = '#F6F5F2';
+  for (const [p, rk] of fanLab) { const q = cam.project(p); if (!q || q[2] > Rh * 1.02) continue; ctx.globalAlpha = .5 * W.fogK(q[2]) + .15; ctx.fillText(rk + (rk === 40 ? ' km' : ''), q[0] + 6, q[1] - 5); }
+  ctx.globalAlpha = 1;
+
+  // quiet the menu corner
+  const g = ctx.createRadialGradient(40, 1080, 60, 40, 1080, 900);
+  g.addColorStop(0, 'rgba(0,0,0,.9)'); g.addColorStop(.55, 'rgba(0,0,0,.62)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 180, 1100, 900);
+
+  /* lock bracket */
+  if (lockI >= 0 && boxes.length) {
+    const ps = boxes[0];
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (const p of ps) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); }
+    const pad = 9 + 70 * (1 - lockA), c = 11 + 6 * (1 - lockA);
+    x0 -= pad; y0 -= pad; x1 += pad; y1 += pad;
+    const flick = sq - lockT < .45 ? (Math.floor((sq - lockT) * 22) % 2 ? .35 : 1) : 1;
+    ctx.strokeStyle = '#F4D23C'; ctx.lineWidth = 1.5; ctx.globalAlpha = flick * CT[lockI].vis;
+    ctx.beginPath();
+    for (const [px, py, sx, sy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x1, y1, -1, -1], [x0, y1, 1, -1]]) { ctx.moveTo(px + sx * c, py); ctx.lineTo(px, py); ctx.lineTo(px, py + sy * c); }
+    ctx.stroke(); ctx.globalAlpha = 1;
+  }
+
+  /* callouts */
+  leaders.length = 0;
+  const dip = Math.min(E.ss(0, .8, sq), 1 - E.ss(29.15, 29.9, sq));
+  CT.forEach((c, i) => {
+    const on = c.det >= 0 && sq >= c.det;
+    const a = on ? E.sat((sq - c.det) / .25) * c.vis * dip : 0;
+    const locked = i === lockI;
+    const tr = rangeOf(c, sq) * KR / 1000;
+    const txt = `${locked ? 'Lock' : 'Contact'} · ${c.cls} · ${tr.toFixed(0)} km`;
+    if (txt !== c.txt) { c.txt = txt; c.tEl.textContent = txt; c.sqEl.classList.toggle('y', locked); }
+    let dx = c.dx, dy = c.dy;
+    if (c.anchor && c.anchor[0] + dx > 1560) dx = -Math.abs(dx);
+    const blink = on && sq - c.det < .4 ? (Math.floor((sq - c.det) * 20) % 2 ? .3 : 1) : 1;
+    place(c.el, c.anchor && c.anchor[1] > 0 ? c.anchor : null, dx, dy, a * blink);
+  });
+  ctx.strokeStyle = '#F6F5F2'; ctx.fillStyle = '#F6F5F2'; ctx.lineWidth = 1;
+  for (const [ax, ay, ex, ey, hx, a] of leaders) {
+    ctx.globalAlpha = .7 * a; ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ex, ey); ctx.lineTo(hx, ey); ctx.stroke();
+    ctx.globalAlpha = a; ctx.fillRect(ax - 2, ay - 2, 4, 4);
+  }
+  ctx.globalAlpha = 1;
+
+  if (dip < 1) { ctx.fillStyle = `rgba(0,0,0,${1 - dip})`; ctx.fillRect(0, 0, 1920, 1080); }
+
+  /* readout */
+  const togo = 188 - .7 * sq;
+  const txt = `M <b>${MACH.toFixed(2)}</b>  ·  <b>${Math.round(my)}</b> m  ·  <b>${togo.toFixed(1)}</b> km to go`;
+  if (txt !== roTxt) { roTxt = txt; roEl.innerHTML = txt; }
+  const lt = lockI >= 0 ? `Seeker · lock · ${CT[lockI].cls}` : `Seeker · search · ${CT.filter(c => c.det >= 0).length} contacts`;
+  if (lt !== rolTxt) { rolTxt = lt; rolEl.textContent = lt; rolEl.classList.toggle('lk', lockI >= 0); }
+}
+
+STAGE.run({ update, render });
+})();
+</script>
+</body></html>

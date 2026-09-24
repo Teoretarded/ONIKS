@@ -1,0 +1,321 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Oniks — Track</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=block">
+<link rel="stylesheet" href="common/pc.css">
+<style>
+  .logo { left: 72px; top: 58px; }
+  .kick { left: 74px; top: 98px; }
+  .bar { position: absolute; left: 72px; right: 72px; bottom: 44px; height: 96px; border-top: 1px solid var(--hair); }
+  .menu { left: 72px; bottom: 52px; display: flex; gap: 64px; }
+  .menu .it { font-size: 34px; font-weight: 500; letter-spacing: -.03em; gap: 12px; height: 60px; }
+  .blurb { left: 74px; bottom: 150px; width: 640px; font-size: 15px; }
+  .keys { right: 72px; bottom: 66px; }
+  .foot { right: 72px; top: 62px; }
+  .ro { left: 74px; top: 150px; font: 400 11.5px/1.9 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); }
+  .ro b { font-weight: 400; color: #fff; }
+  .ro .st { color: var(--lime); }
+  .inset { position: absolute; right: 72px; top: 110px; width: 480px; height: 270px; outline: 1px solid rgba(255,255,255,.28); }
+  .inset .l { position: absolute; left: 0; top: -24px; font: 500 11px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--dim); display: flex; gap: 10px; }
+  .inset .l i { font-style: normal; color: var(--lime); }
+</style></head>
+<body><div id="stage">
+  <canvas id="c" class="px" width="1920" height="1080"></canvas>
+  <canvas id="o" width="1920" height="1080"></canvas>
+  <div class="ui" id="ui">
+    <div class="logo abs"><svg viewBox="0 0 24 24"><path d="M12 2 20.5 22h-4.1L12 11.4 7.6 22H3.5z" fill="#fff"/><circle cx="12" cy="18.2" r="1.7" fill="#C6F432"/></svg>Oniks</div>
+    <div class="kick abs"><i></i>EO tracker · Cape Kosa · 1.5 km</div>
+    <div class="ro abs" id="ro"></div>
+    <div class="inset" id="inset"><div class="l"><span id="insl">×4 · no track</span><i id="insr"></i></div></div>
+    <div class="bar"></div>
+    <div class="blurb abs" id="blurb"></div>
+    <div class="menu abs" id="menu"></div>
+    <div class="keys abs"><span><b>←→</b>Select</span><span><b>Enter</b>Open</span><span><b>Esc</b>Quit</span></div>
+    <div class="foot abs">Proto v0.5.0</div>
+  </div>
+  <div class="veil" id="veil"><div class="msg"><i></i>Standing the battery down</div></div>
+</div>
+<script src="common/m3.js"></script><script src="common/geo.js"></script><script src="common/dots.js"></script><script src="common/stage.js"></script>
+<script>
+(() => {
+const { V, R, X, E, Cam, rng, noise } = M3;
+STAGE.fit(); STAGE.SFX.kind = 'pc';
+
+/* ---------- menu ---------- */
+const menuEl = document.getElementById('menu');
+menuEl.innerHTML = STAGE.ITEMS.map((t, i) => `<div class="it" data-item><span class="n">0${i + 1}</span><i class="sq"></i><span class="lab">${t}</span></div>`).join('');
+const veil = document.getElementById('veil');
+let rush = false;
+STAGE.menu({
+  el: menuEl, blurb: document.getElementById('blurb'), axis: 'h',
+  onEnter(i) {
+    if (i === 4) { veil.classList.add('on'); setTimeout(() => veil.classList.remove('on'), 1900); return 2600; }
+    if (seq < LAUNCH - .1) rush = true; else if (seq > HANDOFF) { seq = LOOP; rush = true; }
+    return 1900;
+  },
+});
+
+/* ---------- scene ---------- */
+const cv = document.getElementById('c'), ov = document.getElementById('o'), octx = ov.getContext('2d');
+const pb = new PointBuf(cv, [11, 12, 10], { vignette: .75 });
+const cam = new Cam(); cam.cy = 470;
+const EYE = [-820, 118, -1250];
+const r0 = rng(404);
+const TEL = GEO.tel(), RAD = GEO.radarTruck(), MIS = GEO.oniks();
+const TELS = [X.make(R.y(-.35), [0, 0, 0]), X.make(R.y(-.2), [26, 0, 12])];
+const radW = X.make(R.y(.9), [-30, 0, 22]);
+
+/* static clouds, pre-transformed to world: vehicles, ground rows, sea */
+function bake(model, W, st, s, seed) {
+  const out = [];
+  for (const sp of GEO.sample(model, s, seed)) { const T = GEO.partXf(W, sp.part, st), p = sp.pts; for (let k = 0; k < p.length; k += 6) { const w = X.ap(T, [p[k], p[k + 1], p[k + 2]]); out.push(w[0], w[1], w[2], sp.part.name === 'launcher' ? 1 : 0); } }
+  return out;
+}
+// TEL bodies without the launcher (it moves), launcher parts separately in part space
+const telBody = [], telLauncher = [];
+const telSamp = GEO.sample(TEL, .2, 5);
+for (let ti = 0; ti < 2; ti++) {
+  const body = [];
+  for (const sp of telSamp) { if (sp.part.name === 'launcher') continue; const T = GEO.partXf(TELS[ti], sp.part, { elev: 0, dep: 1 }), p = sp.pts; for (let k = 0; k < p.length; k += 6) { const w = X.ap(T, [p[k], p[k + 1], p[k + 2]]); body.push(w[0], w[1], w[2]); } }
+  telBody.push(new Float32Array(body));
+}
+{ const sp = telSamp.find(s => s.part.name === 'launcher'); const p = []; for (let k = 0; k < sp.pts.length; k += 6) p.push(sp.pts[k], sp.pts[k + 1], sp.pts[k + 2]); telLauncher.push(new Float32Array(p), sp.part); }
+const radPts = new Float32Array(bake(RAD, radW, { ant: .6 }, .22, 9).filter((_, i) => i % 4 !== 3));
+const misPts = []; for (const sp of GEO.sample(MIS, .13, 3)) { const p = sp.pts; for (let k = 0; k < p.length; k += 6) misPts.push(p[k], p[k + 1], p[k + 2]); }
+const MISP = new Float32Array(misPts);
+const ground = [];
+for (let z = -240; z < 118; z += 4.2) for (let x = -170 + (r0() - .5) * 2; x < 190; x += 1.7 + r0() * .8) {
+  if (Math.abs(x) < 3 && Math.abs(z) < 8) continue;
+  const y = .8 * noise(x * .02, z * .02) + (z > 90 ? -(z - 90) * .15 : 0);
+  ground.push(x, y, z + (r0() - .5) * .6, .26 + .14 * r0());
+}
+for (let x = -170; x < 190; x += .9) { const z = 118 + 3 * noise(x * .03, 2); for (let k = 0; k < 6; k++) ground.push(x + r0() * .9, -k * 3.2 - r0() * 2, z + k * .6, .3); }
+const GRD = new Float32Array(ground);
+const sea = [];
+for (let i = 0; i < 9000; i++) { const d = 150 + Math.pow(r0(), 1.8) * 9000, a = (.35 + (r0() - .5) * 1.1); sea.push(Math.sin(a) * d, -20, 118 + Math.cos(a) * d - 60, r0() * 6.28); }
+const SEA = new Float32Array(sea);
+const capPts = []; for (let k = 0; k < 110; k++) { const a = r0() * 6.283, rr = Math.sqrt(r0()) * .5; capPts.push(Math.cos(a) * rr, Math.sin(a) * rr, 0); }
+
+/* ---------- timeline ---------- */
+const LOOP = 30, ERECT0 = 2.4, LAUNCH = 6.4, IGN = LAUNCH + .55, HANDOFF = LAUNCH + 10.2;
+let seq = 0, n = 0, which = 0, elev = [0, 0];
+let mis = null, cap = null, parts = [], emitAcc = 0;
+let aim = [2, 6, 10], fov = 2.7 * Math.PI / 180, conf = 0;
+const G = [0, -9.81, 0];
+function tubeWorld(ti) { const f = GEO.tubeFrame(TEL, { elev: elev[ti] }, 1); return { mouth: X.ap(TELS[ti], f.mouth), dir: X.dir(TELS[ti], f.dir) }; }
+function puff(p, v, o) { parts.push(Object.assign({ p: p.slice(), v: v.slice(), age: 0, life: 9, heat: 1, sz: .5, gr: 1.6, o: [r0() * 6.28, r0(), r0() * 6.28, r0()] }, o)); }
+function update(dt) {
+  seq += dt * (rush ? 3.5 : 1);
+  if (rush && seq >= LAUNCH - .12) rush = false;
+  if (seq >= LOOP) { seq -= LOOP; n++; which = n % 2; mis = null; cap = null; conf = 0; }
+  const ti = which;
+  // the firing TEL erects, then lowers after the shot; the other stays stowed
+  elev[ti] = 88 * Math.PI / 180 * E.inOut(E.sat((seq - ERECT0) / 3.4)) * (1 - E.inOut(E.sat((seq - (LAUNCH + 14)) / 4)));
+  elev[1 - ti] = 0;
+  const tb = tubeWorld(ti);
+  const tl = seq - LAUNCH;
+  if (!mis && tl >= 0 && tl < 1) {
+    mis = { pos: V.mad(tb.mouth, tb.dir, -5.2), vel: V.mul(tb.dir, 19), axis: tb.dir, speed: 19, phase: 'eject' };
+    cap = { p: tb.mouth.slice(), v: V.add(V.mul(tb.dir, 10), [6, 1.5, -3]), rot: 0, w: 11 };
+    for (let i = 0; i < 380; i++) { const a = r0() * 6.283, s = 2 + r0() * 7; puff(tb.mouth, [Math.cos(a) * s, 1 + r0() * 4, Math.sin(a) * s], { life: 3 + r0() * 3, heat: .15, sz: .5, gr: 1.4 }); }
+    STAGE.SFX.noise(.6, 700, .8, .12, .005);
+  }
+  if (mis) {
+    if (mis.phase === 'eject') {
+      mis.vel = V.mad(mis.vel, G, dt); mis.pos = V.mad(mis.pos, mis.vel, dt);
+      if (tl >= .55) {
+        mis.phase = 'boost'; mis.speed = V.len(mis.vel); STAGE.SFX.rumble(4, .2);
+        for (let i = 0; i < 1400; i++) { const a = r0() * 6.283, s = 6 + r0() * 22, base = [mis.pos[0], .4, mis.pos[2]]; puff(base, [Math.cos(a) * s, .5 + r0() * 2.5, Math.sin(a) * s], { life: 14 + r0() * 8, heat: .5, sz: 1, gr: 2.4 }); }
+      }
+    } else {
+      const u = tl - .55;
+      const deg = u < .7 ? 88 : u < 3.2 ? E.mix(88, 24, E.inOut((u - .7) / 2.5)) : E.mix(24, 3, E.inOut(E.sat((u - 3.2) / 3)));
+      const th = deg * Math.PI / 180, hd = 74 * Math.PI / 180;
+      mis.axis = V.norm([Math.sin(hd) * Math.cos(th), Math.sin(th), Math.cos(hd) * Math.cos(th)]);
+      mis.speed = Math.min(680, mis.speed + (u < 5 ? 105 : 25) * dt);
+      mis.vel = V.mul(mis.axis, mis.speed); mis.pos = V.mad(mis.pos, mis.vel, dt);
+      if (u < 5) {
+        emitAcc += mis.speed * dt * (mis.pos[1] < 180 ? 2.8 : .7);
+        const nz = V.mad(mis.pos, mis.axis, -4.6);
+        while (emitAcc > 1) { emitAcc -= 1;
+          const j = [(r0() - .5) * 8, (r0() - .5) * 8, (r0() - .5) * 8];
+          puff(V.mad(nz, mis.axis, -r0() * mis.speed * dt), V.add(V.mul(mis.axis, -(35 + r0() * 30)), j), { life: 13 + r0() * 8, heat: 1, sz: .6, gr: 3 + r0() * 2.2 });
+        }
+      }
+    }
+  }
+  if (cap) { if (cap.p[1] > .3) { cap.v = V.mad(cap.v, G, dt); cap.p = V.mad(cap.p, cap.v, dt); cap.rot += cap.w * dt; } else { cap.p[1] = .3; cap.w = 0; } }
+  // plume physics: exhaust momentum dies in drag, hot gas rises, wind shears it, noise curls it
+  for (const q of parts) {
+    q.age += dt; q.heat *= Math.exp(-dt / 1.6);
+    const k = Math.exp(-dt * 2.4);
+    const tx = noise(q.p[0] * .05, q.p[1] * .05, q.age * .3) , tz = noise(q.p[2] * .05 + 7, q.p[1] * .05, q.age * .3);
+    q.v = [q.v[0] * k + (2.4 + tx * 5) * dt * 2.4, q.v[1] * k + (1.2 + 5 * q.heat) * dt, q.v[2] * k + (1.1 + tz * 5) * dt * 2.4];
+    q.p = V.mad(q.p, q.v, dt); if (q.p[1] < .2) { q.p[1] = .2; q.v[1] = Math.abs(q.v[1]) * .2; }
+  }
+  parts = parts.filter(q => q.age < q.life);
+  if (parts.length > 7000) parts.splice(0, parts.length - 7000);
+  // the tracker: aims at a led, lagged estimate of the round; zoom holds its size in frame
+  const trk = mis && tl > .35 && seq < HANDOFF;
+  let ta = [2, 6, 10], tf = 2.7;
+  if (seq > ERECT0 - .5 && !mis) { ta = V.add(tb.mouth, [0, -4.5, 0]); tf = 2.2; }
+  if (trk) { ta = V.mad(mis.pos, mis.vel, .12); const rng = V.dist(EYE, mis.pos); tf = E.clamp(2 * Math.atan(60 / rng) * 180 / Math.PI, 1.05, 3.6); }
+  if (seq >= HANDOFF) { ta = [8, 10, 10]; tf = 3.6; }
+  const rate = trk ? 3.6 : seq >= HANDOFF ? 2.6 : 1.8;
+  aim = E.dampV(aim, ta, rate, dt); fov = E.damp(fov, tf * Math.PI / 180, trk ? 2.2 : 1.2, dt);
+  conf = trk ? Math.min(.99, conf + dt * .45) : Math.max(0, conf - dt);
+}
+
+/* ---------- tags + readouts ---------- */
+const ui = document.getElementById('ui');
+const tag = (cls, a, b) => { const d = document.createElement('div'); d.className = 'tag off ' + cls; d.innerHTML = `<b>${a}</b><i>${b}</i>`; ui.appendChild(d); return d; };
+const tTrk = tag('lime', 'TRK 02', '3M55 · P-800'), tTel = [tag('', 'OBJ 01', 'TEL 1 · Bastion-P'), tag('', 'OBJ 02', 'TEL 2 · Bastion-P')];
+const tRad = tag('', 'OBJ 05', 'Radar · Monolith-B'), tPlume = tag('', 'OBJ 03', 'Plume · ignored'), tCap = tag('', 'OBJ 04', 'Debris · tube cap');
+tTrk.insertAdjacentHTML('beforeend', '<span class="v" id="trkv"></span>');
+const trkv = tTrk.querySelector('.v');
+const roEl = document.getElementById('ro'), insl = document.getElementById('insl'), insr = document.getElementById('insr');
+let roTxt = '';
+
+/* ---------- render ---------- */
+const LIME = [198, 244, 50];
+function aabb2(T, mn, mx) {
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9, ok = false;
+  for (const sx of [mn[0], mx[0]]) for (const sy of [mn[1], mx[1]]) for (const sz of [mn[2], mx[2]]) { const p = cam.project(X.ap(T, [sx, sy, sz])); if (!p) continue; ok = true; x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); }
+  return ok ? [x0, y0, x1, y1] : null;
+}
+// one scene, two sensors: the main view and the x4 inset both draw through drawScene(C, P)
+let C = cam, P = pb;
+function cloud(pts, stride, T, bright, sz) {
+  const e = C.eye, f = C.f, r = C.r, u = C.u, F = C.fl, cx = C.cx + C.shake[0], cy = C.cy + C.shake[1], Wd = C.W, Hd = C.H;
+  const M = T ? T.R : null, t = T ? T.T : null;
+  for (let i = 0; i < pts.length; i += stride) {
+    let x = pts[i], y = pts[i + 1], z = pts[i + 2];
+    if (M) { const X0 = M[0] * x + M[1] * y + M[2] * z + t[0], Y0 = M[3] * x + M[4] * y + M[5] * z + t[1], Z0 = M[6] * x + M[7] * y + M[8] * z + t[2]; x = X0; y = Y0; z = Z0; }
+    const dx = x - e[0], dy = y - e[1], dz = z - e[2], zc = dx * f[0] + dy * f[1] + dz * f[2]; if (zc < 1) continue;
+    const sx = cx + F * (dx * r[0] + dy * r[1] + dz * r[2]) / zc, sy = cy - F * (dx * u[0] + dy * u[1] + dz * u[2]) / zc;
+    if (sx < 0 || sy < 0 || sx >= Wd || sy >= Hd) continue;
+    const b = typeof bright === 'function' ? bright(i, y) : bright;
+    P.dot(sx, sy, sz, 238, 238, 228, b);
+  }
+}
+function drawScene(Cm, Pb, t, zoom) {
+  C = Cm; P = Pb;
+  const tl = seq - LAUNCH, Wd = C.W, Hd = C.H, big = zoom > 1 ? 2 : 1;
+  { const e = C.eye, f = C.f, r = C.r, u = C.u, F = C.fl, cx = C.cx, cy = C.cy;
+    for (let i = 0; i < SEA.length; i += 4) {
+      const x = SEA[i], z = SEA[i + 2], y = SEA[i + 1] + .6 * Math.sin(SEA[i + 3] + t * 1.3);
+      const dx = x - e[0], dy = y - e[1], dz = z - e[2], zc = dx * f[0] + dy * f[1] + dz * f[2]; if (zc < 1) continue;
+      const sx = cx + F * (dx * r[0] + dy * r[1] + dz * r[2]) / zc, sy = cy - F * (dx * u[0] + dy * u[1] + dz * u[2]) / zc;
+      if (sx < 0 || sy < 0 || sx >= Wd || sy >= Hd) continue;
+      P.dot(sx, sy, 1, 200, 205, 196, .18 + .24 * (.5 + .5 * Math.sin(SEA[i + 3] * 3 + t * 2)));
+    } }
+  cloud(GRD, 4, null, i => GRD[i + 3], big);
+  cloud(radPts, 3, null, .55, big);
+  for (let k = 0; k < 2; k++) {
+    cloud(telBody[k], 3, null, .62, 2);
+    cloud(telLauncher[0], 3, X.mul(TELS[k], X.pivotX(TEL.PIV, -elev[k])), .72, 2);
+  }
+  // plume: each puff is a small cluster of dots spread over its current size; hot gas glows lime
+  { const e = C.eye, f = C.f, r = C.r, u = C.u, F = C.fl, cx = C.cx + C.shake[0], cy = C.cy + C.shake[1];
+    for (const q of parts) {
+      const dx = q.p[0] - e[0], dy = q.p[1] - e[1], dz = q.p[2] - e[2], zc = dx * f[0] + dy * f[1] + dz * f[2]; if (zc < 1) continue;
+      const sx = cx + F * (dx * r[0] + dy * r[1] + dz * r[2]) / zc, sy = cy - F * (dx * u[0] + dy * u[1] + dz * u[2]) / zc;
+      const rad = (q.sz + q.gr * Math.sqrt(q.age)) * F / zc;
+      if (sx < -rad || sy < -rad || sx > Wd + rad || sy > Hd + rad) continue;
+      const life = 1 - q.age / q.life, a = Math.min(1, q.age * 6) * Math.pow(life, .6) * (.42 + .5 * q.heat), h = q.heat;
+      const cr = 200 + (LIME[0] + 40 - 200) * h, cg = 200 + (LIME[1] + 11 - 200) * h, cb = 196 + (LIME[2] + 150 - 196) * h;
+      const nd = Math.min(26, 3 + Math.floor(rad * .5));
+      for (let k = 0; k < nd; k++) {
+        const ang = q.o[0] + k * 2.399, rr = rad * Math.sqrt(((q.o[1] + k * .618) % 1));
+        P.dot(sx + Math.cos(ang) * rr, sy + Math.sin(ang) * rr * .85, h > .5 ? 2 : 1, cr, cg, cb, a * (1 - .35 * rr / (rad + 1e-6)));
+      }
+    } }
+  if (cap) cloud(capPts, 3, X.make(R.mul(R.x(cap.rot), R.y(cap.rot * .6)), cap.p), .9, 2);
+  if (mis) {
+    const T = X.make(R.look(mis.axis, [0, 1, 0]), mis.pos);
+    cloud(MISP, 3, T, .95, 1);
+    if (mis.phase === 'boost' && tl < 5.6) { const nz = C.project(V.mad(mis.pos, mis.axis, -4.8)); if (nz) { P.add(nz[0], nz[1], 3 + 2 * zoom, 255, 255, 230, .7); P.add(nz[0], nz[1], 9 + 4 * zoom, LIME[0], LIME[1], LIME[2], .12); } }
+  }
+}
+const ic = document.createElement('canvas'); ic.width = 480; ic.height = 270; ic.className = 'px';
+ic.style.cssText = 'position:absolute;left:0;top:0;width:480px;height:270px';
+document.getElementById('inset').appendChild(ic);
+const pb2 = new PointBuf(ic, [11, 12, 10], { vignette: .35 });
+const cam2 = new Cam(480, 270);
+function render(t) {
+  cam.eye = EYE.slice(); cam.target = aim; cam.fov = fov;
+  const shk = mis && mis.phase === 'boost' && seq - LAUNCH < 1.4 ? (1.4 - (seq - LAUNCH)) * 2.2 : 0;
+  cam.shake = [(Math.random() - .5) * shk, (Math.random() - .5) * shk]; cam.update();
+  const ti = which, tl = seq - LAUNCH;
+  pb.clear(); drawScene(cam, pb, t, 1); pb.blit();
+  C = cam; P = pb;
+  let capBox = null, misBox = null;
+  if (cap) capBox = aabb2(X.make(R.mul(R.x(cap.rot), R.y(cap.rot * .6)), cap.p), [-.55, -.55, -.2], [.55, .55, .2]);
+  if (mis) misBox = aabb2(X.make(R.look(mis.axis, [0, 1, 0]), mis.pos), [-.9, -.9, -4.6], [.9, .9, 5]);
+
+  /* overlay: boxes, reticle, inset */
+  octx.clearRect(0, 0, 1920, 1080);
+  const bracket = (b, col, a, pad, len) => {
+    const [x0, y0, x1, y1] = [b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad], c = Math.min(len, (x1 - x0) * .35, (y1 - y0) * .35);
+    octx.strokeStyle = col; octx.globalAlpha = a; octx.lineWidth = 1.5; octx.beginPath();
+    for (const [px, py, sx, sy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x1, y1, -1, -1], [x0, y1, 1, -1]]) { octx.moveTo(px + sx * c, py); octx.lineTo(px, py); octx.lineTo(px, py + sy * c); }
+    octx.stroke();
+    octx.lineWidth = 1; octx.setLineDash([2, 4]); octx.globalAlpha = a * .45; octx.strokeRect(x0, y0, x1 - x0, y1 - y0); octx.setLineDash([]); octx.globalAlpha = 1;
+    return [x0, y0, x1, y1];
+  };
+  const place = (el, b, show, dy) => { if (!b || !show) { el.classList.add('off'); return; } el.classList.remove('off'); el.style.transform = `translate(${Math.round(b[0])}px, ${Math.round(b[1] - (dy || 26))}px)`; };
+  // vehicles
+  for (let k = 0; k < 2; k++) {
+    const T = TELS[k], b = aabb2(T, [-1.95, 0, -6.8 - (elev[k] > .1 ? 2 : 0)], [1.95, 3.5 + 8.2 * Math.sin(elev[k]), 6.3]);
+    const show = !!b && b[2] - b[0] > 14 && b[0] > 0 && b[2] < 1920 && !(mis && tl > .6 && seq < HANDOFF);
+    place(tTel[k], show ? bracket(b, '#ffffff', .7, 4, 10) : null, show);
+  }
+  { const b = aabb2(radW, [-1.8, 0, -6.8], [1.8, 11.8, 5.8]); const show = !!b && b[0] > 0 && b[2] < 1920 && !(mis && tl > .6 && seq < HANDOFF); place(tRad, show ? bracket(b, '#ffffff', .55, 4, 10) : null, show); }
+  // plume: robust screen bounds (5-95 %) of the gas, tracked but ignored
+  if (parts.length > 200) {
+    const xs = [], ys = [];
+    for (let i = 0; i < parts.length; i += 7) { const q = parts[i]; if (q.age > q.life * .8) continue; const p = cam.project(q.p); if (p) { xs.push(p[0]); ys.push(p[1]); } }
+    if (xs.length > 20) { xs.sort((a, b) => a - b); ys.sort((a, b) => a - b); const q = k => Math.floor(xs.length * k);
+      const b = [xs[q(.05)], ys[q(.05)], xs[q(.95)], ys[q(.95)]], mx = (b[0] + b[2]) / 2, my = (b[1] + b[3]) / 2;
+      const vis = mx > 80 && mx < 1840 && my > 80 && my < 1000 && b[2] - b[0] < 1400;
+      if (vis) { octx.strokeStyle = '#fff'; octx.globalAlpha = .35; octx.setLineDash([6, 6]); octx.strokeRect(b[0], b[1], b[2] - b[0], b[3] - b[1]); octx.setLineDash([]); octx.globalAlpha = 1; }
+      place(tPlume, [Math.max(8, b[0]), Math.max(40, b[1])], vis);
+    } else place(tPlume, null, false);
+  } else place(tPlume, null, false);
+  place(tCap, capBox ? bracket(capBox, '#ffffff', .8, 6, 7) : null, !!capBox && tl < 6 && capBox[2] - capBox[0] < 400);
+  // the track: brackets on the round's true projected bounds, reticle at the tracker's aim
+  const trk = mis && tl > .35 && seq < HANDOFF;
+  if (misBox && trk) {
+    const b = bracket(misBox, '#C6F432', 1, 6, 12);
+    place(tTrk, b, true, 30);
+    const rng = V.dist(EYE, mis.pos);
+    trkv.textContent = `${Math.round(Math.max(0, mis.pos[1]))} m · ${Math.round(mis.phase === 'eject' ? V.len(mis.vel) : mis.speed)} m/s · ${(rng / 1000).toFixed(2)} km`;
+    // lag line from reticle (screen centre) to the round
+    const cx = cam.cx, cy = cam.cy, mx = (b[0] + b[2]) / 2, my = (b[1] + b[3]) / 2;
+    octx.strokeStyle = '#C6F432'; octx.globalAlpha = .5; octx.setLineDash([2, 3]); octx.beginPath(); octx.moveTo(cx, cy); octx.lineTo(mx, my); octx.stroke(); octx.setLineDash([]); octx.globalAlpha = 1;
+  } else place(tTrk, null, false);
+  // fixed reticle
+  { const cx = cam.cx, cy = cam.cy; octx.strokeStyle = '#fff'; octx.globalAlpha = .55; octx.lineWidth = 1; octx.beginPath();
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { octx.moveTo(cx + dx * 9, cy + dy * 9); octx.lineTo(cx + dx * 26, cy + dy * 26); }
+    octx.stroke(); octx.globalAlpha = 1; }
+  // zoom inset: a second sensor at x4 on the same mount, slaved to the track (or the reticle)
+  // the inset has a quarter of the main view's pixels, so fov/8 is a true 2x magnification of it
+  { cam2.eye = EYE.slice(); cam2.target = trk ? mis.pos.slice() : aim; cam2.fov = fov / 8; cam2.update();
+    pb2.clear(); drawScene(cam2, pb2, t, 4); pb2.blit(); C = cam; P = pb;
+    const dx = 1920 - 72 - 480, dy = 110;
+    octx.strokeStyle = trk ? '#C6F432' : '#fff'; octx.globalAlpha = .7; octx.beginPath();
+    octx.moveTo(dx + 240, dy + 110); octx.lineTo(dx + 240, dy + 125); octx.moveTo(dx + 240, dy + 145); octx.lineTo(dx + 240, dy + 160);
+    octx.moveTo(dx + 200, dy + 135); octx.lineTo(dx + 225, dy + 135); octx.moveTo(dx + 255, dy + 135); octx.lineTo(dx + 280, dy + 135); octx.stroke(); octx.globalAlpha = 1;
+    if (!trk) { octx.fillStyle = 'rgba(11,12,10,.55)'; octx.fillRect(dx, dy, 480, 270); }
+  }
+  // readouts
+  const fovd = fov * 180 / Math.PI;
+  const state = trk ? `<span class="st">tracking</span>` : mis && seq >= HANDOFF ? 'handed off → Monolith-B' : seq > ERECT0 - .5 ? `TEL ${which + 1} erecting · ${Math.round(elev[which] * 57.3)}°` : 'watching battery';
+  const ro = `Track <b>${trk ? 'TRK 02' : '—'}</b> · ${state}<br>FOV <b>${fovd.toFixed(2)}°</b> · zoom <b>×${(4.6 / fovd).toFixed(1)}</b><br>T <b>${tl < 0 ? '−' : '+'}${Math.abs(tl).toFixed(1)} s</b>`;
+  if (ro !== roTxt) { roTxt = ro; roEl.innerHTML = ro; }
+  insl.textContent = `NFOV ${(fovd / 8).toFixed(2)}° · ${trk ? 'TRK 02' : 'no track'}`;
+  insr.textContent = trk ? `conf ${conf.toFixed(2)}` : '';
+}
+STAGE.run({ update, render });
+})();
+</script>
+</body></html>

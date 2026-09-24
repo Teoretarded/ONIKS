@@ -1,0 +1,700 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Oniks · Underway</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=DM+Mono:wght@400;500&display=block">
+<link rel="stylesheet" href="../menus/common/orbital.css">
+<style>
+  #menu { position: absolute; left: 96px; top: 392px; width: 452px; }
+  #menu .it { padding: 11px 0 12px; font-size: 36px; line-height: 1.12; letter-spacing: -.03em; border-top: 1px solid rgba(246,245,242,.1); }
+  #menu .it:last-child { border-bottom: 1px solid rgba(246,245,242,.1); }
+  #menu .it .n { font-size: 12.5px; transform: translateY(-9px); }
+  #menu .it .go { font-size: 14px; }
+  #blurb { position: absolute; left: 146px; top: 742px; width: 360px; min-height: 64px; }
+  #keys { position: absolute; left: 96px; bottom: 64px; }
+  #logo { position: absolute; left: 96px; top: 70px; }
+  #tag { position: absolute; left: 96px; top: 116px; font: 400 12px var(--mono); color: var(--w3); letter-spacing: 0; }
+  #log { position: absolute; right: 96px; top: 70px; width: 318px; font: 400 12px/1 var(--mono); color: var(--w3); letter-spacing: 0; }
+  #log .h { display: flex; justify-content: space-between; padding-bottom: 10px; margin-bottom: 9px; border-bottom: 1px solid rgba(246,245,242,.14); color: var(--w3); }
+  #log .h b { font-weight: 400; color: var(--w2); }
+  #log .r { display: grid; grid-template-columns: 58px 1fr; padding: 4.5px 0; white-space: nowrap; overflow: hidden; }
+  #log .r .t { color: rgba(246,245,242,.26); }
+  #log .r.new { color: var(--w); }
+  #log .r.new .t { color: var(--w3); }
+  #fig { position: absolute; right: 96px; bottom: 64px; text-align: right; }
+  #fig .fig { font-size: 14px; }
+  #fig .sub { margin-top: 7px; font-size: 13px; color: var(--w3); letter-spacing: -.004em; }
+  #ro { position: absolute; right: 96px; bottom: 124px; font: 400 12.5px var(--mono); color: var(--w2); letter-spacing: 0; text-align: right; white-space: nowrap; }
+  #ro .k { color: var(--w3); margin-right: 10px; }
+  #ro .rate { color: var(--w); margin-left: 12px; }
+  .call { opacity: 0; }
+  .call .cat { gap: 6px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="c" width="1920" height="1080"></canvas>
+  <div class="ui">
+    <div id="logo" class="logo"><svg viewBox="0 0 25 25" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="12.5" cy="12.5" r="10.5"/><path d="M2 12.5h21M12.5 2c-3.2 3-4.6 6.5-4.6 10.5s1.4 7.5 4.6 10.5M12.5 2c3.2 3 4.6 6.5 4.6 10.5s-1.4 7.5-4.6 10.5"/><rect x="11.3" y="11.3" width="2.4" height="2.4" fill="#F4D23C" stroke="none"/></svg><span>Oniks</span></div>
+    <div id="tag">Bastion · coastal defence simulator</div>
+    <div id="menu" class="menu"></div>
+    <div id="blurb" class="blurb"></div>
+    <div id="keys" class="keys"><span><b>↑↓</b>Select</span><span><b>Enter</b>Open</span><span><b>Esc</b>Quit</span></div>
+    <div id="log"><div class="h"><span>Deck log</span><b id="logShip">DDG · Flight IIA</b></div><div id="logRows"></div></div>
+    <div id="ro"></div>
+    <div id="fig"><div class="fig" id="figT"></div><div class="sub" id="figS"></div></div>
+    <div id="calls"></div>
+  </div>
+</div>
+<script src="../menus/common/m3.js"></script>
+<script src="../menus/common/orb.js"></script>
+<script src="../menus/common/wire.js"></script>
+<script src="../menus/common/geo.js"></script>
+<script src="common/hd_land.js"></script>
+<script src="common/hd_sea_air.js"></script>
+<script src="../menus/common/stage.js"></script>
+<script src="common/film.js"></script>
+<script src="oc_underway_world.js"></script>
+<script src="oc_underway_fast.js"></script>
+<script>
+(() => {
+  'use strict';
+  const { V, R, X, E, Cam } = M3;
+  const { D, VK, SID, D2R, PI, TAU } = OC;
+  const sat = E.sat, ss = E.ss, mix = E.mix, clamp = E.clamp;
+  const sm = t => { t = sat(t); return t * t * t * (t * (t * 6 - 15) + 10); };
+  const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+  const cam = new Cam(1920, 1080), W = new Wire(cam, { fog: [1e8, 2e8], color: '#F6F5F2' });
+  const HI = '#F4D23C', WH = '#F6F5F2';
+
+  /* ---------------- menu ---------------- */
+  const menuEl = document.getElementById('menu');
+  menuEl.innerHTML = STAGE.ITEMS.map((it, i) => `<div class="it" data-item><span class="n">0${i + 1}</span><span class="lab">${ORB.swipe('oc' + i)}<span class="tx">${it}</span></span><span class="go">→</span><div class="bar"></div></div>`).join('');
+  STAGE.menu({ el: menuEl, blurb: document.getElementById('blurb') });
+
+  /* ---------------- models (compiled once for the fast hairline path) ---------------- */
+  const M = {
+    ddg: OC.MOD.ddg(), helo: OC.MOD.helo(), jet: OC.MOD.fighter(), cv: OC.MOD.carrier(), cg: OC.cruiser(),
+  };
+  const sub = (m, keep) => ({ parts: m.parts.filter(p => keep(p.name)) });
+  // carrier: our own parked aircraft (the kit's deck park sits on the bow catapults we launch from)
+  const CV_MODEL = sub(M.cv, n => n !== 'air');
+  if (window.HD && HD.seaAir && HD.seaAir.jetLow) {
+    const DY = OC.CV_DECK, air = [];
+    for (const [x, z, h] of [[27, 118, -118], [27, 104, -118], [27, 90, -118], [29, 30, -95], [30, -60, -92], [30, -72, -92], [-30, -100, 32], [-28, -88, 32], [24, -128, -100], [24, -142, -100]])
+      air.push(...HD.seaAir.jetLow(X.make(R.y(h * D2R), [x, DY + 1.3, z]), { fold: true }));
+    CV_MODEL.parts.push({ name: 'air', label: 'Air wing · F/A-18E', prims: air });
+  }
+  const C = {
+    ddg: FAST.compile(M.ddg, { fine: true }), ddgF: FAST.compile(M.ddg, { fine: false }),
+    ddgFar: FAST.compile(sub(M.ddg, n => ['hull', 'super', 'mast', 'spy', 'stacks', 'sps', 'gun', 'hangar', 'deck'].includes(n)), { fine: false }),
+    cg: FAST.compile(M.cg, { fine: true }), cgF: FAST.compile(M.cg, { fine: false }),
+    cv: FAST.compile(CV_MODEL, { fine: true, dyn: ['radars'] }), cvF: FAST.compile(sub(CV_MODEL, n => n !== 'elevators'), { fine: false, dyn: ['radars'] }),
+    heloBody: FAST.compile(sub(M.helo, n => n !== 'rotor' && n !== 'tailrotor'), { fine: true }),
+    heloBodyF: FAST.compile(sub(M.helo, n => n !== 'rotor' && n !== 'tailrotor'), { fine: false }),
+    heloRot: FAST.compile(sub(M.helo, n => n === 'rotor'), { dyn: ['rotor'] }),
+    heloTR: FAST.compile(sub(M.helo, n => n === 'tailrotor'), { fine: true }),
+    jet: FAST.compile(M.jet, { fine: true, dyn: ['intakes', 'nozzles'] }), jetF: FAST.compile(M.jet, { fine: false, dyn: ['intakes', 'nozzles'] }),
+  };
+  // state-quantised caches for the moving parts: blade droop, fan angle (22 blades), nozzle opening
+  const CACHE = new Map();
+  function dynCache(fine) {
+    return (name, st) => {
+      let key, s2;
+      if (name === 'rotor') { const q = Math.round((st.droop || 0) * 24); key = 'r' + q; s2 = { droop: q / 24 }; }
+      else if (name === 'intakes') { const step = TAU / 22, q = Math.round(OC.modp(st.fan || 0, step) / step * 6) % 6; key = 'i' + q; s2 = { fan: q / 6 * step }; }
+      else if (name === 'nozzles') { const q = Math.round(sat(Math.max(st.nozzle || 0, st.ab || 0)) * 16); key = 'n' + q; s2 = { nozzle: q / 16, ab: 0 }; }
+      else return null;
+      key += fine ? 'f' : 'c';
+      let c = CACHE.get(key);
+      if (!c) {
+        const src = name === 'rotor' ? M.helo : M.jet, part = src.parts.find(p => p.name === name);
+        c = FAST.compilePrims(part.dyn(s2), fine); CACHE.set(key, c);
+      }
+      return c;
+    };
+  }
+  const DYN = dynCache(true), DYNC = dynCache(false);
+  // landing gear + launch bar for the fighter (the kit's model is gear-up)
+  function gearPrims(g) {
+    const P = [], yb = -2.05;
+    if (g <= .01) return P;
+    const a = g;
+    const nose = [0, -.72, 5.3], nw = [0, mix(-.9, yb + .28, a), mix(4.2, 5.5, a)];
+    P.push(GEO.cyl(nose, nw, .07, { n: 6, gen: 0, al: a }));
+    for (const s of [-1, 1]) P.push(GEO.lathe([s * .05, nw[1], nw[2]], [s, 0, 0], [[0, .28], [.18, .28]], { n: 12, gen: 0, al: a }));
+    for (const s of [-1, 1]) {
+      const top = [s * 1.25, -.72, -.9], wh = [s * mix(1.1, 1.62, a), mix(-.85, yb + .38, a), mix(-2.1, -1.1, a)];
+      P.push(GEO.cyl(top, wh, .08, { n: 6, gen: 0, al: a }));
+      P.push(GEO.lathe(wh, [s, 0, 0], [[0, .38], [.26, .38]], { n: 14, gen: 0, al: a }));
+    }
+    return P;
+  }
+  const GEAR = g => ({ parts: [{ name: 'gear', label: 'Gear', prims: gearPrims(g) }] });
+
+  /* ---------------- frames ---------------- */
+  const A = SID.A, B = SID.B, CG = SID.CG, CVs = SID.CV, C3 = SID.C;
+  const fA = T => OC.shipFrame(A, T), fB = T => OC.shipFrame(B, T), fCV = T => OC.shipFrame(CVs, T);
+  const heloPose = T => OC.helo(A, T);
+  const heloYawX = T => { const p = heloPose(T).X.T, y = OC.heloYaw(clamp(T, 0, D)); return X.make(R.y(y), p); };
+  const J1 = OC.JT[0], J2 = OC.JT[1];
+  const jetYawX = (J, T) => { const j = OC.jet(J, T), f = X.dir(j.X, [0, 0, 1]); return X.make(R.y(Math.atan2(f[0], f[2])), j.X.T); };
+
+  /* ---------------- camera: shots in moving frames, blended ---------------- */
+  const inF = (F, s) => ({ eye: X.ap(F, s.eye), target: X.ap(F, s.target), fov: s.fov, roll: s.roll });
+  function rel(frame, keys) { const P = FILM.path(keys); return T => inF(frame(T), P(T)); }
+  // eye path in a frame, the lens held on a moving point
+  // bias (deg): aim left of the tracked point so it sits right of centre, clear of the menu column
+  function look(frame, keys, tgt, bias) {
+    const P = FILM.path(keys), cb = Math.cos((bias || 0) * D2R), sb = Math.sin((bias || 0) * D2R);
+    return T => {
+      const s = P(T), F = frame(T), e = X.ap(F, s.eye), t0 = X.ap(F, s.target), tt = tgt(T), wt = tt.w === undefined ? 1 : tt.w;
+      let d = V.sub(V.lerp(t0, tt.p, wt), e);
+      if (bias) d = [d[0] * cb - d[2] * sb, d[1], d[2] * cb + d[0] * sb];
+      return { eye: e, target: V.add(e, d), fov: s.fov, roll: 0 };
+    };
+  }
+  const K = (t, eye, target, fov, roll) => ({ t, eye, target, fov: fov || 40, roll: roll || 0 });
+
+  // 1  the dolly along the destroyer, bow to stern (ship-relative time tau); B runs it at T - D.
+  //    Near tau = 0 the lens looks SE, away from the rest of the group (see the loop note in the world file).
+  const DOLLY = FILM.path([
+    K(-12, [-230, 88, 400], [36, 8, 50], 30),
+    K(-6, [-150, 50, 250], [40, 9, 48], 31),
+    K(0, [-104, 32, 150], [29, 11, 33], 32),
+    K(6, [-70, 33, 88], [20, 14, 18], 35),
+    K(11, [-54, 38, 48], [10, 21, 4], 38),
+    K(15.5, [-48, 44, 12], [4, 20, -6], 39),
+    K(20, [-44, 34, -22], [3, 11, -36], 39),
+    K(24.5, [-38, 21, -46], [2, 8, -58], 38),
+    K(28.5, [-36, 18.5, -53], [2, 8.5, -60], 38),
+  ]);
+  const dolly = (S, frame, t0) => T => inF(frame(T), DOLLY(T - t0));
+  const dollyA = dolly(A, fA, 0), dollyB = dolly(B, fB, D);
+
+  // 2  lift-off: beside the deck, then rising with the helicopter off the stern
+  const hp = (T, off) => V.add(heloPose(T).X.T, off || [0, 0, 0]);
+  const liftA = look(fA, [
+    K(26, [-38, 20, -48], [2, 8, -58], 38), K(30, [-40, 17, -58], [0, 10, -60], 40),
+    K(34, [-54, 22, -80], [-20, 16, -62], 42), K(38.5, [-72, 36, -104], [-48, 30, -86], 44),
+  ], T => ({ p: hp(T, [0, 2.4, 0]), w: ss(26.5, 29.5, T) }), 7);
+  // rotor head close-up, up over the tail boom, then the canted tail rotor (helicopter heading frame)
+  const rotorCU = rel(heloYawX, [
+    K(38.5, [-18, 10, -16], [0, 3.4, -1], 44), K(40.2, [3, 14, -24], [0, 3.6, -2], 42),
+    K(42, [21, 9, 5], [0, 3.9, -.5], 40), K(44.8, [18, 8, -6], [0, 3.8, -3], 38),
+    K(47.6, [12, 6, -17], [.3, 4, -9.85], 32), K(50, [14, 7.5, -20], [0, 3.6, -7], 36),
+    K(52.5, [8, 18, -22], [-10, -2, 0], 40),
+  ]);
+  // 3  along the formation beside the helicopter; the cruiser beyond it, then over its tail toward the carrier
+  const alongside = rel(heloYawX, [
+    K(52.5, [8, 18, -22], [-10, -2, 0], 40), K(55, [30, 16, -52], [-150, -63, 200], 42),
+    K(58.5, [30, 16, -52], [-150, -63, 160], 42), K(60.6, [4, 22, -50], [-20, -20, 100], 41),
+    K(62.5, [-24, 16, -28], [14, -16, 80], 40), K(64, [-20, 18, -32], [10, -22, 120], 40),
+    K(66, [-14, 22, -42], [4, -28, 180], 40), K(68.5, [-10, 26, -52], [0, -30, 240], 40),
+  ]);
+  // 4  the carrier's bow: 25 m ahead of it, beside catapult 1's line, lens on the jets as they come at it
+  const V1 = [20, 28, 190];
+  const jetPos = (J, T, off) => X.ap(OC.jet(J, T).X, off || [0, 0, 0]);
+  const bow = look(fCV, [
+    K(65, [300, 110, 420], [0, 21, 110], 40), K(70, [110, 70, 300], [0, 21, 95], 38),
+    K(73.5, [36, 36, 222], [4, 21.5, 88], 30), K(76.2, V1, [5, 21.5, 88], 18),
+    K(77.6, V1, [5, 21.5, 110], 24), K(78.5, [20.1, 28.1, 190], [5, 21.5, 150], 40),
+    K(79.1, [20.3, 28.2, 190.5], [4, 22, 210], 58), K(80.4, [20.5, 28.4, 191], [0, 24, 250], 50),
+    K(83, [20.4, 28.6, 190], [-6, 21.5, 88], 30), K(86.4, [20.2, 28.6, 189], [-6, 21.5, 88], 20),
+    K(88.1, [20.2, 28.6, 189], [-6, 21.5, 120], 30), K(89.3, [20.4, 29, 190], [-6, 23, 230], 56),
+    K(90.6, [21, 31, 195], [-8, 30, 320], 50),
+  ], T => {
+    if (T < 82.5) return { p: jetPos(J1, T - .05, [0, .5, 3]), w: ss(73, 75.5, T) * (1 - ss(80.2, 82.5, T)) };
+    return { p: jetPos(J2, T - .05, [0, .5, 3]), w: ss(83.2, 85.5, T) };
+  }, 6);
+  // 5  after jet 2: in close behind it as it climbs out, then fall back and climb through the pair's turn
+  //    to a hold NE of the group looking SSW
+  const J2F = T => jetYawX(J2, T);
+  const chaseJ = look(J2F, [
+    K(89.6, [26, 5.5, -70], [0, 0, 20], 56), K(91.6, [11, 4.5, -36], [0, 0, 20], 50),
+    K(94, [8, 4, -30], [0, 1, 20], 46), K(96.5, [0, 12, -46], [0, 2, 30], 46),
+    K(100, [14, 20, -48], [0, 4, 40], 46), K(103, [16, 24, -52], [0, 6, 60], 46),
+    K(106, [10, 32, -64], [0, 10, 80], 48), K(109, [-30, 90, -200], [0, 15, 100], 50),
+    K(112, [-110, 175, -420], [0, 20, 120], 50),
+  ], T => ({ p: jetPos(J2, T, [0, 1, 8]), w: 1 }), 7);
+  const HOLD = [1200, 620, 1900], HOLD_T = [650, 0, -250];
+  const climb = look(fCV, [
+    K(108, [900, 600, 1830], HOLD_T, 50), K(111.5, [1150, 615, 1890], HOLD_T, 52), K(115, HOLD, HOLD_T, 52),
+  ], T => ({ p: jetPos(J2, T), w: .3 * (1 - ss(112, 116, T)) }), 0);
+  // 6  down to the returning helicopter, around it, and in with it: approach, flare, hover, touchdown
+  const meet = look(fA, [
+    K(113, [380, 620, 900], [-170, 0, -1250], 52), K(117, [330, 520, 700], [-180, 0, -1100], 50),
+    K(121.5, [180, 280, 250], [-230, 40, -480], 48), K(125.5, [-20, 120, -110], [-160, 48, -400], 46),
+    K(128.5, [-150, 64, -240], [-105, 45, -345], 44), K(131, [-175, 50, -330], [-72, 36, -270], 42),
+    K(133.5, [-130, 38, -335], [-50, 26, -200], 42), K(136, [-88, 27, -215], [-30, 17, -110], 42),
+    K(138.5, [-62, 20, -118], [-20, 12.5, -66], 40), K(141, [-48, 16.5, -84], [-18, 11, -56], 40),
+    K(145, [-34, 13.5, -74], [-6, 8.5, -58], 38), K(148.4, [-21, 11, -70], [-2, 8, -60], 40),
+  ], T => ({ p: hp(T, [0, 2.4, 0]), w: ss(116.5, 121, T) * (1 - ss(145.8, 149, T)) }), 6);
+  // 7  off the deck and aft along the wakes to the next destroyer, arriving in the opening dolly
+  const glide = look(fA, [
+    K(146.5, [-21, 11, -70], [-2, 8, -60], 40), K(150.3, [12, 30, -52], [0, 6, -78], 42),
+    K(153, [10, 58, -130], [0, 0, -380], 42), K(157, [-30, 80, -560], [0, 5, -1250], 38),
+    K(161, [-110, 72, -930], [10, 9, -1310], 32), K(165, [-150, 52, -1110], [22, 10, -1310], 31),
+  ], T => {
+    // the lens runs from A's deck down its wake to the next destroyer (held right of centre)
+    const u = ss(150.5, 154.8, T), a = X.ap(fA(T), [0, 5, -70]), b = X.ap(fB(T), [70, 9, 40]);
+    return { p: V.lerp(a, b, u), w: ss(149, 151, T) };
+  }, 0);
+
+  const SEQ = [
+    { f: dollyA, end: 27.5, bl: 3 },
+    { f: liftA, end: 39, bl: 3 },
+    { f: rotorCU, end: 52.5, bl: 2.6 },
+    { f: alongside, end: 67.5, bl: 5 },
+    { f: bow, end: 90.4, bl: 2 },
+    { f: chaseJ, end: 111, bl: 3.5 },
+    { f: climb, end: 114.5, bl: 3.5 },
+    { f: meet, end: 148.4, bl: 3 },
+    { f: glide, end: 163, bl: 6 },
+    { f: dollyB, end: 1e9, bl: 0 },
+  ];
+  function mixShot(a, b, w) {
+    if (w <= 0) return a; if (w >= 1) return b;
+    const da = V.sub(a.target, a.eye), db = V.sub(b.target, b.eye), la = V.len(da), lb = V.len(db);
+    const dir = V.norm(V.lerp(V.mul(da, 1 / la), V.mul(db, 1 / lb), w)), eye = V.lerp(a.eye, b.eye, w);
+    return { eye, target: V.mad(eye, dir, mix(la, lb, w)), fov: mix(a.fov, b.fov, w), roll: mix(a.roll || 0, b.roll || 0, w) };
+  }
+  function shotAt(T) {
+    T = ((T % D) + D) % D;
+    for (let i = 0; i < SEQ.length; i++) {
+      const s = SEQ[i], w0 = s.end - s.bl / 2, w1 = s.end + s.bl / 2;
+      if (T < w0 || i === SEQ.length - 1) return s.f(T);
+      if (T < w1) return mixShot(s.f(T), SEQ[i + 1].f(T), sm((T - w0) / s.bl));
+    }
+    return SEQ[SEQ.length - 1].f(T);
+  }
+
+  /* sea row phases: the camera's travel along / across its view, integrated once (the rows then stream
+     past exactly as the lens moves over the water); the residual mod 1024 m is spread over the loop */
+  const PH_N = D * 60, PHF = new Float64Array(PH_N + 1), PHR = new Float64Array(PH_N + 1), PSP = new Float32Array(PH_N + 1);
+  {
+    let prev = null;
+    for (let i = 0; i <= PH_N; i++) {
+      const s = shotAt(i / 60 % D + (i === PH_N ? D - 1e-6 : 0)), f = V.norm(V.sub(s.target, s.eye));
+      const up0 = [0, 1, 0], r = V.norm(V.cross(up0, f)), u = V.cross(f, r);
+      let fx = f[0] + u[0] * .8, fz = f[2] + u[2] * .8; const fl = Math.hypot(fx, fz) || 1; fx /= fl; fz /= fl;
+      if (prev) { const dx = s.eye[0] - prev[0], dz = s.eye[2] - prev[2]; PHF[i] = PHF[i - 1] + dx * fx + dz * fz; PHR[i] = PHR[i - 1] + dx * fz - dz * fx; PSP[i] = Math.hypot(dx, dz) * 60; }
+      prev = s.eye;
+    }
+    const res = v => { const m = OC.modp(v + 512, 1024) - 512; return m; };
+    const rF = res(PHF[PH_N]), rR = res(PHR[PH_N]);
+    for (let i = 0; i <= PH_N; i++) { PHF[i] -= rF * i / PH_N; PHR[i] -= rR * i / PH_N; }
+    PSP[0] = PSP[1];
+  }
+  const phaseAt = T => { const x = clamp(T * 60, 0, PH_N - .001), i = Math.floor(x), f = x - i; return [PHF[i] + (PHF[i + 1] - PHF[i]) * f, PHR[i] + (PHR[i + 1] - PHR[i]) * f, PSP[i]]; };
+
+  /* ---------------- drawing ---------------- */
+  const DDG_ST = S => { const tau = T0 - S.tau; return { sps: tau * (PI / 2) + 1.1, hangar: 0 }; };
+  let T0 = 0;
+  function objFog(dist) { W.fog = [Math.max(30, dist * .55), dist * 2.4 + 700]; }
+  function drawShipModel(S, T, dist) {
+    const Xs = OC.shipXf(S, T), far = dist > 1500, veryFar = dist > 4200;
+    const a = clamp(1.25 - dist / 9000, .3, 1);
+    objFog(dist);
+    if (S.kind === 'ddg') FAST.draw(W, veryFar ? C.ddgFar : far ? C.ddgF : C.ddg, Xs, DDG_ST(S), { fine: !far, a });
+    else if (S.kind === 'cg') FAST.draw(W, far ? C.cgF : C.cg, Xs, {}, { fine: !far, a });
+    else FAST.draw(W, dist < 900 ? C.cv : C.cvF, Xs, { radar: (T - S.tau) * 1.26 }, { fine: dist < 900, a });
+    return Xs;
+  }
+  // SPY faces in world coordinates (DDG from the kit anchors, CG from the local model)
+  function facesW(S, Xs) {
+    if (S.kind === 'ddg') return OC.DA.spy.map((c, i) => ({ c: X.ap(Xs, c), n: X.dir(Xs, OC.DA.spyN[i]), h: null }));
+    if (S.kind === 'cg') return M.cg.FACES.map(f => ({ c: X.ap(Xs, f.c), n: X.dir(Xs, f.n) }));
+    return [];
+  }
+  function drawFaceFlash(Fw, k) {
+    const n = Fw.n, h = V.norm(V.cross([0, 1, 0], n)), u = V.cross(n, h), p = [];
+    for (let i = 0; i <= 8; i++) { const a = (i + .5) / 8 * TAU; p.push(V.add(V.mad(Fw.c, n, .12), V.add(V.mul(h, Math.cos(a) * 2.05), V.mul(u, Math.sin(a) * 2.05)))); }
+    for (let i = 0; i < 8; i++) W.seg(p[i], p[i + 1], .75 * k);
+  }
+  function drawHelo(S, T, dist) {
+    const H = heloPose(T), om = H.omega / OC.OMAX;
+    objFog(Math.max(20, dist));
+    const a = clamp(1.3 - dist / 5000, .35, 1), fine = dist < 500;
+    if (!FAST.visible(cam, X.ap(H.X, [0, 2.5, -2]), 13)) return H;
+    FAST.draw(W, fine ? C.heloBody : C.heloBodyF, H.X, H.st, { fine, a });
+    // rotor: the blades plus a shutter-smear of trailing copies; a faint tip-path disc once turning
+    FAST.draw(W, C.heloRot, H.X, H.st, { fine, a, dynCache: fine ? DYN : DYNC, noCull: true });
+    FAST.draw(W, C.heloTR, H.X, H.st, { fine, a: a * (1 - .5 * om) });
+    if (om > .05) {
+      for (let k = 1; k <= 3; k++) {
+        const st = Object.assign({}, H.st, { rotor: H.st.rotor - k * .045 * H.omega * .1, trotor: H.st.trotor - k * .2 });
+        FAST.draw(W, C.heloRot, H.X, st, { fine: false, a: a * .42 * om / (k + .4), dynCache: DYNC, noCull: true });
+      }
+      const hubW = X.ap(H.X, OC.HUB), up = X.dir(H.X, [0, 1, 0]), [U, Vv] = GEO.perp(up);
+      W.ring(V.mad(hubW, up, .14 + .05 * 8), U, Vv, OC.ROTR, 72, .16 * om * a, .07 * om * a);
+      const th = X.ap(H.X, OC.TAILHUB), ta = X.dir(H.X, OC.TAILAX), [U2, V2] = GEO.perp(ta);
+      W.ring(th, U2, V2, 1.675, 28, .3 * om * a, .15 * om * a);
+    }
+    return H;
+  }
+  function drawAB(Xj, st, T, seed) {
+    const ab = st.ab; if (ab < .02) return;
+    const d = X.dir(Xj, [0, 0, -1]), [U, Vv] = GEO.perp(d);
+    for (let n = 0; n < 2; n++) {
+      const c = X.ap(Xj, HD.fighter.NOZZLES[n]), fl = .85 + .15 * M3.noise(T * 23 + n * 7, seed);
+      const Lp = (5.2 + 2.2 * ab) * fl;
+      const eye = W.cam.eye; let w = V.sub(eye, V.mad(c, d, Lp * .4)); w = V.norm(V.sub(w, V.mul(d, V.dot(w, d)))); const sd = V.cross(d, w);
+      for (const sg of [-1, 1]) { let pv = null; for (let k = 0; k <= 10; k++) { const s = k / 10 * Lp, r = .44 * (1 - Math.pow(s / Lp, 1.4)) + .04; const q = V.mad(V.mad(c, d, s), sd, sg * r); if (pv) W.seg(pv, q, .7 * ab); pv = q; } }
+      for (let k = 0; k < 5; k++) {                        // shock diamonds
+        const s = (.75 + k * .95) * fl, r = .3 * (1 - k / 6.5);
+        W.ring(V.mad(c, d, s), U, Vv, r, 16, ab * .75 * (1 - k / 6));
+        W.seg(V.mad(V.mad(c, d, s - .45), sd, r * .9), V.mad(c, d, s), ab * .45 * (1 - k / 6));
+        W.seg(V.mad(V.mad(c, d, s - .45), sd, -r * .9), V.mad(c, d, s), ab * .45 * (1 - k / 6));
+      }
+    }
+  }
+  // wingtip vortices: condensation traces from the tips (and the LEX roots) once the turn pulls g;
+  // traced back along the jet's own integrated path, so they hang in the air where it has been
+  function drawVortices(J, T, dist) {
+    const tl = T - J.tL - J.tS; if (tl < 2 || !J.P) return;
+    const i0 = Math.floor(tl * 120); if (i0 >= J.P.length) return;
+    W.fog = [Math.max(30, dist * .6), dist * 3 + 800];
+    for (const tip of [[6.3, .02, -2.2], [-6.3, .02, -2.2], [1.9, .12, 1.6], [-1.9, .12, 1.6]]) {
+      const lex = Math.abs(tip[0]) < 3;
+      let pv = null;
+      for (let k = 0; k <= 30; k++) {
+        const i = i0 - k * 5; if (i < 0) break;
+        const up = [J.R[i][1], J.R[i][4], J.R[i][7]], g = Math.max(0, 1 / Math.max(.2, up[1]) - 1.25);
+        const q = V.add(J.P[i], R.ap(J.R[i], tip)); q[1] -= k * .05;
+        const a = sat(g * (lex ? .55 : .8)) * .5 * Math.pow(1 - k / 31, 1.6);
+        if (pv && a > .01) W.seg(pv, q, a);
+        pv = q;
+      }
+    }
+  }
+  function drawJet(J, T) {
+    const j = OC.jet(J, T), dist = V.dist(j.X.T, cam.eye);
+    objFog(Math.max(15, dist));
+    const a = clamp(1.35 - dist / 4000, .3, 1), fine = dist < 260;
+    FAST.draw(W, fine ? C.jet : C.jetF, j.X, j.st, { fine, a, dynCache: fine ? DYN : DYNC });
+    if (j.gear > .01) GEO.draw(W, GEAR(j.gear), j.X, {}, { a });
+    drawAB(j.X, j.st, T, J.cat * 3.3);
+    drawVortices(J, T, dist);
+    return j;
+  }
+  // catapult hardware: shuttle, launch bar, steam off the track after the stroke
+  function drawCat(J, T, Xcv) {
+    const tl = T - J.tL, d = J.dir, s0 = V.add(J.s0, [0, -2.05, 0]), shuttle0 = V.mad(s0, d, 5.35);
+    let s = 0;
+    if (tl > 0) s = tl < J.tS ? .5 * J.acc * tl * tl : J.stroke;
+    const back = ss(J.tS + 4, J.tS + 9, tl);          // retraction (grab) after the water brake
+    s = s * (1 - back);
+    const sp = X.ap(Xcv, V.mad(shuttle0, d, s));
+    W.seg(X.ap(Xcv, V.mad(V.add(shuttle0, [-.35, .12, 0]), d, s)), X.ap(Xcv, V.mad(V.add(shuttle0, [.35, .12, 0]), d, s)), .9);
+    W.seg(X.ap(Xcv, V.mad(V.add(shuttle0, [0, .12, -.5]), d, s)), X.ap(Xcv, V.mad(V.add(shuttle0, [0, .12, .5]), d, s)), .9);
+    if (tl < J.tS) W.seg(sp, X.ap(Xcv, V.add(V.mad(shuttle0, d, s), [0, .75, -.3])), .8);
+    // steam: puffs leave the slot where the shuttle has passed, blown aft by ~13 m/s of wind over the deck
+    if (tl > 0 && tl < J.tS + 6) {
+      for (let k = 0; k < 18; k++) {
+        const sk = (k + .5) / 18 * J.stroke, tp = Math.sqrt(2 * sk / J.acc), age = tl - tp;
+        if (age < 0 || age > 3.2) continue;
+        const p = V.add(V.mad(shuttle0, d, sk - age * 9), [.4 * Math.sin(k * 2.1), .2 + age * 1.3, 0]);
+        W.disc(X.ap(Xcv, p), .3 + age * 1.1, 10, .3 * (1 - age / 3.2));
+      }
+    }
+  }
+
+  /* ---------------- labels ---------------- */
+  const callsEl = document.getElementById('calls'), POOL = [];
+  for (let i = 0; i < 6; i++) { const d = document.createElement('div'); d.className = 'call'; callsEl.appendChild(d); POOL.push({ el: d, html: '', on: false }); }
+  let LEAD = [];
+  function setLabels(list) {
+    LEAD = [];
+    const placed = [];
+    for (let i = 0; i < POOL.length; i++) {
+      const L = list[i], P = POOL[i];
+      if (!L || L.a <= .01) { if (P.on) { P.el.style.opacity = 0; P.on = false; } continue; }
+      const p = cam.project(L.at);
+      if (!p || p[0] < 700 || p[0] > 1880 || p[1] < 40 || p[1] > 1060) { if (P.on) { P.el.style.opacity = 0; P.on = false; } continue; }
+      const dx = L.dx === undefined ? 70 : L.dx, dy = L.dy === undefined ? -64 : L.dy;
+      const html = ORB.cat(L.id, { sq: L.y ? 'y' : '', code: L.id }) + (L.sub ? `<span class="s2">${L.sub}</span>` : '');
+      if (html !== P.html) { P.el.innerHTML = html; P.html = html; P.w = P.el.offsetWidth; }
+      const left = dx < 0, wv = P.w || 200;
+      // keep labels clear of the menu, the log (top right) and the caption block (bottom right)
+      let lx = p[0] + dx, ly = p[1] + dy;
+      ly = clamp(ly, 262, 870);
+      let x0 = left ? lx - wv - 6 : lx + 6;
+      x0 = clamp(x0, 720, 1810 - wv);
+      lx = left ? x0 + wv + 6 : x0 - 6;
+      // step clear of labels already placed this frame (heavier labels were placed first)
+      for (let k = 0; k < 6; k++) {
+        const hit = placed.find(b => x0 < b[2] + 12 && x0 + wv > b[0] - 12 && ly - 10 < b[3] && ly + 34 > b[1]);
+        if (!hit) break;
+        ly = clamp(hit[1] - 48, 262, 870) === ly ? ly + 48 : hit[1] - 48;
+      }
+      placed.push([x0, ly - 10, x0 + wv, ly + 34]);
+      P.el.style.transform = `translate(${x0.toFixed(1)}px, ${(ly - 7).toFixed(1)}px)`;
+      P.el.style.opacity = L.a.toFixed(3); P.on = true;
+      LEAD.push({ p, q: [lx, ly], a: L.a, y: L.y });
+    }
+  }
+  function drawLeaders() {
+    ctx.lineWidth = 1;
+    for (const l of LEAD) {
+      ctx.strokeStyle = WH; ctx.globalAlpha = .55 * l.a;
+      ctx.beginPath(); ctx.moveTo(l.p[0], l.p[1]); ctx.lineTo(l.q[0], l.q[1]); ctx.stroke();
+      ctx.globalAlpha = .9 * l.a; ctx.strokeStyle = l.y ? HI : WH;
+      ctx.beginPath(); ctx.arc(l.p[0], l.p[1], 2.6, 0, TAU); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+  const win = (T, a, b, f) => ss(a, a + (f || .8), T) * (1 - ss(b - (f || .8), b, T));
+
+  /* ---------------- log, readout, captions ---------------- */
+  const LOG = [
+    [1, 'SHIP', 'Darken ship · 15.6 kn · 000'], [5, 'SPY', 'Volume search · 4 faces'], [9, 'HELO', 'Engines start'],
+    [12.5, 'HELO', 'Rotor engage'], [21.5, 'SPS', 'Surface search · 15 rpm'], [24, 'HELO', 'Nr 100 % · 258 rpm'], [28.4, 'HELO', 'Lift-off · spot 1'],
+    [37, 'HELO', 'Departs · heading 220'], [55, 'HELO', 'CG abeam to port · 100 m'], [71, 'HELO', 'Starboard delta · plane guard'],
+    [73, 'CAT 1', 'Tension · burner'], [76.6, 'CAT 1', 'Launch · 140 kn'], [83.5, 'CAT 2', 'Tension · burner'],
+    [86.9, 'CAT 2', 'Launch · 140 kn'], [101, 'PAIR', 'Climbing · right-hand turn'], [114.6, 'AAW', 'Raid far off · screen engaging'], [116, 'PAIR', 'Overhead · departs SSW'], [118, 'HELO', 'Inbound · deck green'],
+    [141.5, 'HELO', 'Over the deck'], [146, 'HELO', 'Touchdown · secured'], [150.5, 'HELO', 'Engines off · rotor brake'], [158, 'SHIP', 'Next ship · DDG · astern'],
+  ];
+  const logRows = document.getElementById('logRows');
+  let logKey = '';
+  function updateLog(T) {
+    const all = LOG.map(([t, c, x]) => [t <= T ? t : t - D, c, x]).sort((a, b) => a[0] - b[0]).slice(-6);
+    const key = all.map(r => r[2]).join('|');
+    if (key === logKey) return; logKey = key;
+    logRows.innerHTML = all.map(([t, c, x], i) => `<div class="r${i === all.length - 1 ? ' new' : ''}"><span class="t">${c}</span><span>${x}</span></div>`).join('');
+  }
+  const roEl = document.getElementById('ro'); let roKey = '';
+  function readout(T) {
+    let k = 'SOG', v = '15.6 kn · 000', extra = '';
+    const H = heloPose(T), om = H.omega;
+    if (T >= 9 && T < 50) { k = 'Rotor'; v = `${(om / TAU * 60).toFixed(0).padStart(3, ' ')} rpm`; if (T > 28.4) { const alt = X.ap(H.X, [0, 0, 0])[1]; v += ` · ${Math.max(0, alt - OC.DA.heloSpot[1] * (T < 40 ? 1 : 0)).toFixed(0)} m ${T < 40 ? 'above deck' : 'alt'}`; } }
+    else if (T >= 50 && T < 70) { const p = H.X.T; k = 'MH-60R'; const v1 = V.sub(heloPose(T + .1).X.T, p); v = `${(Math.hypot(v1[0], v1[1], v1[2]) * 10 / .5144).toFixed(0)} kn · ${p[1].toFixed(0)} m`; }
+    else if (T >= 70 && T < 95) { const J = T < 83 ? J1 : J2, j = OC.jet(J, T), rel = Math.max(0, j.spd - VK); k = `Cat ${J.cat + 1}`; v = j.tl < 0 ? `tension · T−${(-j.tl).toFixed(1)} s` : `${(rel / .5144).toFixed(0)} kn${j.tl < J.tS ? ' · stroke ' + (j.tl).toFixed(2) + ' s' : ''}`; }
+    else if (T >= 95 && T < 125) { k = 'Alt'; v = `${cam.eye[1].toFixed(0)} m`; }
+    else if (T >= 125 && T < 149) { k = 'MH-60R'; const alt = H.X.T[1] - OC.DA.heloSpot[1]; v = T < OC.HT.touch ? `${Math.max(0, alt).toFixed(1)} m above deck` : `rotor ${(om / TAU * 60).toFixed(0)} rpm`; }
+    const key = k + v + extra; if (key === roKey) return; roKey = key;
+    roEl.innerHTML = `<span class="k">${k}</span>${v}${extra}`;
+  }
+  const CH = [
+    { t: 0, title: 'Watch', sub: 'DDG Flight IIA underway at night · 15.6 kn' },
+    { t: 25, title: 'Lift', sub: 'MH-60R Seahawk · lift-off from spot 1' },
+    { t: 49, title: 'Formation', sub: 'Along the task group · cruiser to port' },
+    { t: 67, title: 'Catapult', sub: 'CVN · two F/A-18E on the bow catapults' },
+    { t: 97, title: 'High', sub: 'The pair climbs out over the task group' },
+    { t: 124, title: 'Return', sub: 'Approach, hover, touchdown' },
+    { t: 148, title: 'Next ship', sub: 'Aft along the wakes to the next destroyer' },
+  ];
+  const figT = document.getElementById('figT'), figS = document.getElementById('figS');
+
+  /* ---------------- sound ---------------- */
+  const SND = { on: false };
+  function sndInit() {
+    const S = STAGE.SFX; if (!S.ac || SND.on) return !!SND.on;
+    const ac = S.ac, out = S.master;
+    const noiseBuf = (sec) => { const b = ac.createBuffer(1, ac.sampleRate * sec, ac.sampleRate), d = b.getChannelData(0); let l = 0; for (let i = 0; i < d.length; i++) { const w = Math.random() * 2 - 1; l = l * .97 + w * .03; d[i] = w * .5 + l * 3; } return b; };
+    const nb = noiseBuf(4);
+    const src = () => { const s = ac.createBufferSource(); s.buffer = nb; s.loop = true; s.start(); return s; };
+    const gain = v => { const g = ac.createGain(); g.gain.value = v; return g; };
+    const filt = (type, f, q) => { const b = ac.createBiquadFilter(); b.type = type; b.frequency.value = f; b.Q.value = q || .7; return b; };
+    // sea wash + gas-turbine hum bed
+    const bed = gain(0); src().connect(filt('lowpass', 380)).connect(bed).connect(out);
+    const hum = gain(0), ho = ac.createOscillator(); ho.type = 'triangle'; ho.frequency.value = 61; ho.connect(filt('lowpass', 200)).connect(hum).connect(out); ho.start();
+    // helicopter: turbine whine + rotor chop (noise amplitude-modulated at blade-passage frequency)
+    const whine = gain(0), wo = ac.createOscillator(); wo.type = 'sawtooth'; wo.frequency.value = 900; wo.connect(filt('bandpass', 2200, 3)).connect(whine).connect(out); wo.start();
+    const chop = gain(0), lfo = ac.createOscillator(), lfoG = gain(.5); lfo.type = 'sawtooth'; lfo.frequency.value = 17; const chopAmp = gain(.5);
+    lfo.connect(lfoG).connect(chopAmp.gain); lfo.start();
+    src().connect(filt('bandpass', 170, 1.4)).connect(chopAmp).connect(chop).connect(out);
+    // jets: burner roar
+    const roar = gain(0); src().connect(filt('lowpass', 520, .5)).connect(roar).connect(out);
+    Object.assign(SND, { on: true, bed, hum, whine, wo, chop, lfo, roar });
+    return true;
+  }
+  function sndUpdate(T, playing) {
+    if (!sndInit()) return;
+    const ac = STAGE.SFX.ac, t = ac.currentTime, set = (p, v) => p.setTargetAtTime(STAGE.SFX.on && playing ? v : 0, t, .12);
+    const e = cam.eye, H = heloPose(T), dh = V.dist(H.X.T, e), om = H.omega / OC.OMAX, hK = 1 / (1 + dh / 60);
+    const nearA = 1 / (1 + V.dist(X.ap(fA(T), [0, 10, 0]), e) / 120) + 1 / (1 + V.dist(X.ap(fB(T), [0, 10, 0]), e) / 120);
+    set(SND.bed.gain, .05 + .05 * (1 - sat(e[1] / 400)));
+    set(SND.hum.gain, .05 * nearA);
+    const eng = ss(9, 13, T) * (1 - ss(150.5, 159, T));
+    set(SND.whine.gain, .012 * eng * hK);
+    SND.wo.frequency.setTargetAtTime(700 + 900 * eng + 250 * om, t, .3);
+    set(SND.chop.gain, .22 * om * hK);
+    SND.lfo.frequency.setTargetAtTime(Math.max(1, 4 * H.omega / TAU), t, .2);
+    let r = 0;
+    for (const J of OC.JT) { const j = OC.jet(J, T), dj = V.dist(j.X.T, e); r += (j.st.ab * .8 + .15 * ss(-8, -6, j.tl)) / (1 + dj / 90) * (1 - ss(20, 30, j.tl)); }
+    set(SND.roar.gain, .3 * r);
+  }
+  // one-shot cues (real time only)
+  const S = STAGE.SFX, CUES = [];
+  for (const J of OC.JT) {
+    CUES.push([J.tL - 3, () => S.noise(1.2, 900, .6, .06, .4)]);
+    CUES.push([J.tL, () => { S.tone(52, 38, .7, 'sine', .22); S.noise(2.2, 3200, .5, .09, .02); S.noise(.4, 300, 1, .2, .005); }]);
+    CUES.push([J.tL + J.tS, () => { S.tone(180, 90, .25, 'square', .03); S.noise(.35, 1800, 1, .12, .002); }]);
+  }
+  CUES.push([OC.HT.touch, () => { S.tone(70, 45, .35, 'sine', .16); S.noise(.25, 600, 1, .08, .003); }]);
+  CUES.push([12.5, () => S.tone(420, 220, 1.4, 'sine', .015)]);
+  // the raid, heard from far off: launches, the intercept, the Phalanx, the hit
+  for (const M of OC.RAID.sams) CUES.push([M.tL + .4, () => S.noise(2.6, 180, .7, .03, .25)]);
+  CUES.push([OC.RAID.tI + .3, () => { S.tone(48, 34, .9, 'sine', .05); S.noise(1.8, 150, .8, .035, .04); }]);
+  for (const [b0, b1] of OC.RAID.bursts) CUES.push([b0, () => S.noise(b1 - b0, 1500, 2.2, .012, .02)]);
+  CUES.push([OC.RAID.tH + .2, () => { S.tone(44, 30, 1.2, 'sine', .07); S.noise(2.6, 130, .8, .05, .04); }]);
+
+  /* ---------------- render ---------------- */
+  const shipsForSea = [];
+  let lastT = -1;
+  function render(T, info) {
+    T0 = T;
+    const shot = shotAt(T);
+    const dv = V.norm(V.sub(shot.target, shot.eye));
+    cam.up = Math.abs(dv[1]) > .985 ? [0, 0, 1] : [0, 1, 0];
+    FILM.apply(cam, shot);
+    ctx.globalAlpha = 1; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, 1920, 1080);
+    W.reset(); W.style(WH, 1); W.fog = [1e8, 2e8];
+    const e = cam.eye;
+    // sea, caps, island
+    shipsForSea.length = 0;
+    for (const Sx of OC.SHIPS) { const p = OC.shipPos(Sx, T); shipsForSea.push({ S: Sx, x: p[0], z: p[2], L: Sx.L, r2: Math.pow(Sx.L / 2 + 25, 2) }); }
+    const ph = phaseAt(T);
+    OC.drawSea(W, cam, T, ph, { ships: shipsForSea, speed: ph[2] });
+    OC.drawCaps(W, cam, T, { ships: shipsForSea });
+    OC.drawIsland(W, cam, {});
+    // wakes
+    for (const Sx of OC.SHIPS) { const d = V.dist(OC.shipPos(Sx, T), e); W.fog = [1e8, 2e8]; OC.drawWake(W, Sx, T, { alpha: clamp(1.4 - d / 7000, .35, 1) }); }
+    // ships, pulses, shimmer
+    const labels = [];
+    for (const Sx of OC.SHIPS) {
+      const p = OC.shipPos(Sx, T), dist = V.dist([p[0], 10, p[2]], e);
+      const Xs = drawShipModel(Sx, T, dist);
+      W.fog = [1e8, 2e8];
+      const Fw = facesW(Sx, Xs);
+      if (Fw.length) {
+        const fired = OC.drawPulses(W, Sx, T, Fw, { alpha: clamp(1.3 - dist / 8000, .4, 1) });
+        for (const f of fired) drawFaceFlash(Fw[f.f], f.k * clamp(1 - dist / 2500, 0, 1));
+      } else if (Sx.kind === 'cvn') {
+        const c48 = X.ap(Xs, [31.6, OC.CV_DECK + 36, -28.5]);
+        OC.drawSweep(W, c48, T, t => (t - Sx.tau) * 1.26, { alpha: clamp(1.3 - dist / 8000, .4, 1) });
+      }
+      if (dist < 2500 && Sx.kind !== 'cvn') {
+        const tau = T - Sx.tau, up = X.dir(Xs, [0, 1, 0]), aft = X.dir(Xs, [0, 0, -1]), side = X.dir(Xs, [1, 0, 0]);
+        const mouths = Sx.kind === 'ddg' ? OC.DA.stacks : [[0, 21.5, 2], [0, 20.5, -12.5]];
+        for (const m of mouths) OC.drawShimmer(W, X.ap(Xs, m), up, aft, side, tau, { alpha: clamp(1.2 - dist / 1800, 0, 1), w: Sx.kind === 'ddg' ? 3.4 : 2.4 });
+      }
+    }
+    // the raid, far off: the screen cruiser SSW, the picket NE (each only inside its own window)
+    const RD = OC.RAID;
+    if (RD.inWin(RD.L, T) || RD.inWin(RD.P, T)) {
+      for (const Sx of [RD.L, RD.P]) {
+        if (!RD.inWin(Sx, T)) continue;
+        const dist = V.dist(OC.shipPos(Sx, T), e);
+        W.fog = [1e8, 2e8]; OC.drawWake(W, Sx, T, { alpha: .35 });
+        drawShipModel(Sx, T, dist);
+      }
+      W.fog = [1e8, 2e8]; OC.drawRaid(W, cam, T);
+    }
+    // helicopters (A flies, B's stays chained on deck)
+    const HA = drawHelo(A, T, V.dist(heloPose(T).X.T, e));
+    { const hb = OC.helo(B, T), d = V.dist(hb.X.T, e); objFog(d); FAST.draw(W, C.heloBody, hb.X, hb.st, { a: clamp(1.3 - d / 5000, .35, 1) }); FAST.draw(W, C.heloRot, hb.X, hb.st, { a: clamp(1.3 - d / 5000, .35, 1), dynCache: DYN }); FAST.draw(W, C.heloTR, hb.X, hb.st, { a: clamp(1.3 - d / 5000, .35, 1) }); }
+    // downwash on the water under a low helicopter
+    {
+      const hpW = HA.X.T, alt = hpW[1];
+      if (alt > 12 && alt < 60 && HA.omega > 5) {
+        W.fog = [1e8, 2e8];
+        // rotor downwash on the water: ripple rings and spray streaks thrown outward
+        const k0 = 1 - sat((alt - 12) / 48);
+        for (let k = 0; k < 3; k++) {
+          const age = OC.modp(T * .9 + k / 3, 1) * 1.8, r = 3 + age * 7;
+          W.ring([hpW[0], .15, hpW[2]], [1, 0, 0], [0, 0, 1], r, 36, .12 * (1 - age / 1.8) * k0);
+        }
+        for (let k = 0; k < 14; k++) {
+          const a0 = k / 14 * TAU + OC.hash(k, 3) * .4, f = OC.modp(T * .8 + OC.hash(k, 9), 1), r0 = 2 + f * 9;
+          W.seg([hpW[0] + Math.cos(a0) * r0, .2, hpW[2] + Math.sin(a0) * r0], [hpW[0] + Math.cos(a0) * (r0 + 2.5), .15, hpW[2] + Math.sin(a0) * (r0 + 2.5)], .2 * (1 - f) * k0);
+        }
+      }
+    }
+    // carrier deck: jets, catapults
+    const Xcv = OC.shipXf(CVs, T), dcv = V.dist(Xcv.T, e);
+    if (dcv < 6000) for (const J of OC.JT) { W.fog = [1e8, 2e8]; drawCat(J, T, Xcv); }
+    for (const J of OC.JT) drawJet(J, T);
+
+    W.flush(ctx);
+    // restrained bloom at the burners
+    for (const J of OC.JT) {
+      const j = OC.jet(J, T); if (j.st.ab < .05) continue;
+      for (const n of HD.fighter.NOZZLES) {
+        const p = cam.project(X.ap(j.X, V.add(n, [0, 0, -1.2]))); if (!p) continue;
+        const r = clamp(900 / p[2], 6, 90), g = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], r);
+        g.addColorStop(0, `rgba(255,250,235,${(.28 * j.st.ab).toFixed(3)})`); g.addColorStop(1, 'rgba(255,250,235,0)');
+        ctx.fillStyle = g; ctx.fillRect(p[0] - r, p[1] - r, 2 * r, 2 * r);
+      }
+    }
+    // the raid's flashes, plumes and fire (additive, restrained)
+    const RG = OC.raidGlows(T);
+    if (RG.length) {
+      ctx.globalCompositeOperation = 'lighter';
+      for (const gl of RG) {
+        const p = cam.project(gl.p); if (!p || gl.a <= .004) continue;
+        const r = Math.min(gl.max || 90, gl.px + gl.m * cam.fl / p[2]);
+        const g = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], r);
+        g.addColorStop(0, `rgba(255,255,255,${Math.min(1, gl.a).toFixed(3)})`); g.addColorStop(.22, `rgba(255,250,235,${(gl.a * .3).toFixed(3)})`); g.addColorStop(1, 'rgba(255,250,235,0)');
+        ctx.fillStyle = g; ctx.fillRect(p[0] - r, p[1] - r, 2 * r, 2 * r);
+      }
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    // menu-side calm (off with the UI: H gives the clean film)
+    if (!FILM.uiHidden) {
+      const lg = ctx.createLinearGradient(0, 0, 760, 0);
+      lg.addColorStop(0, 'rgba(0,0,0,.9)'); lg.addColorStop(.62, 'rgba(0,0,0,.55)'); lg.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = lg; ctx.fillRect(0, 0, 760, 1080);
+    }
+
+    // labels (true designations, leaders to the parts)
+    const tauA = T, tauB = T - D, dl = (tau, S) => {
+      const Xs = OC.shipXf(S, T), st = DDG_ST(S);
+      labels.push({ id: 'Mk 45 5"/62', sub: 'Mod 4 gun', at: X.ap(Xs, OC.DA.gun(st)), a: win(tau, .4, 5.2), dx: 60, dy: -70 });
+      labels.push({ id: 'AN/SPY-1D', sub: 'phased array ×4', at: OC.DA.spy.length > 1 ? X.ap(Xs, OC.DA.spy[1]) : Xs.T, a: win(tau, 3.2, 9.5), dx: 80, dy: -90 });
+      labels.push({ id: 'AN/SPS-67', sub: 'surface search · 15 rpm', at: X.ap(Xs, OC.DA.sps), a: win(tau, 8.6, 14.4), dx: 70, dy: -60 });
+      labels.push({ id: 'LM2500 ×4', sub: 'uptakes · exhaust', at: X.ap(Xs, OC.DA.stacks[0]), a: win(tau, 13.4, 18.6), dx: 70, dy: -80 });
+      labels.push({ id: 'Phalanx 1B', sub: 'CIWS · at rest', at: X.ap(Xs, [0, 15.4, -47.5]), a: win(tau, 17.2, 21.4), dx: 60, dy: -56 });
+    };
+    if (T < 30) dl(tauA, A);
+    if (T > D - 16) dl(tauB, B);
+    if (T > D - 16) labels.push({ id: 'DDG · Arleigh Burke IIA', sub: '155 m · the next ship', at: X.ap(OC.shipXf(B, T), [0, 20, 20]), a: win(T, D - 12.5, D - 3.4), dx: 80, dy: -110 });
+    labels.push({ id: 'MH-60R', sub: 'Seahawk · rotor ⌀ 16.36 m', y: true, at: X.ap(HA.X, [0, 2.2, 0]), a: win(T, 19.5, 33) + win(T, 50.5, 60) + win(T, 129.5, 142.8), dx: 90, dy: -84 });
+    labels.push({ id: 'Main rotor', sub: '4 blades · 258 rpm', at: X.ap(HA.X, OC.HUB), a: win(T, 40.5, 44.2), dx: 120, dy: -100 });
+    labels.push({ id: 'Tail rotor', sub: 'canted 20° · 1 190 rpm', at: X.ap(HA.X, OC.TAILHUB), a: win(T, 45.6, 49.2), dx: 110, dy: -90 });
+    labels.push({ id: 'CG · Ticonderoga', sub: '173 m · AN/SPY-1B', at: X.ap(OC.shipXf(CG, T), [0, 20, 10]), a: win(T, 52.5, 62), dx: 60, dy: -90 });
+    labels.push({ id: 'CVN · Nimitz class', sub: '333 m · 4 catapults', at: X.ap(Xcv, [31.6, OC.CV_DECK + 22, -28]), a: win(T, 63.5, 71.5), dx: 70, dy: -80 });
+    labels.push({ id: 'F/A-18E', sub: 'cat 1 · burner', y: true, at: jetPos(J1, T, [0, 1.2, 0]), a: win(T, 72.5, 77.4), dx: -80, dy: -90 });
+    labels.push({ id: 'F/A-18E', sub: 'cat 2 · burner', y: true, at: jetPos(J2, T, [0, 1.2, 0]), a: win(T, 83.6, 87.6), dx: -80, dy: -90 });
+    if (RD.inWin(RD.P, T)) labels.push({ id: 'DDG · hit', sub: 'picket · 9 km NE', y: true, at: RD.hitAt(T), a: win(T, RD.tH + .15, 140.4, 1), dx: 64, dy: -72 });
+    if (T > 108 && T < 126) {
+      for (const [Sx, id, sub2] of [[CVs, 'CVN', 'Nimitz'], [CG, 'CG', 'Ticonderoga'], [A, 'DDG', 'ours · helo spot'], [B, 'DDG', 'Arleigh Burke'], [C3, 'DDG', 'Arleigh Burke']])
+        labels.push({ id, sub: sub2, at: X.ap(OC.shipXf(Sx, T), [0, 12, 0]), a: win(T, 109, 125.5, 1.5) * .9, dx: 36, dy: -40 });
+    }
+    setLabels(FILM.uiHidden ? [] : labels.filter(l => l.a > .01).sort((a, b) => b.a - a.a).slice(0, 6));
+    drawLeaders();
+
+    updateLog(T); readout(T);
+    if (info && (info.playing || info.seeking === false)) sndUpdate(T, !!info.playing);
+    lastT = T;
+  }
+
+  FILM.run({
+    duration: D,
+    chapters: CH,
+    cues: CUES,
+    onChapter(c) { const i = CH.indexOf(c); figT.innerHTML = `<b>Fig. ${i + 1}</b>${c.title}`; figS.textContent = c.sub; },
+    render,
+  });
+  // probe: screen positions of the main objects at film time T (tuning aid)
+  function proj(T) {
+    const c = new Cam(1920, 1080), sh = shotAt(T); FILM.apply(c, sh);
+    const P = p => { const q = c.project(p); return q ? [Math.round(q[0]), Math.round(q[1]), Math.round(q[2])] : null; };
+    const o = { eye: sh.eye.map(Math.round), fov: +(sh.fov / D2R).toFixed(1) };
+    for (const Sx of OC.SHIPS) o[Sx.id] = P(X.ap(OC.shipXf(Sx, T), [0, 10, 0]));
+    o.helo = P(heloPose(T).X.T); o.j1 = P(OC.jet(J1, T).X.T); o.j2 = P(OC.jet(J2, T).X.T); o.isl = P(OC.ISLAND.summit);
+    return o;
+  }
+  window.OCX = { shotAt, cam, phaseAt, SEQ, proj };
+})();
+</script>
+</body></html>

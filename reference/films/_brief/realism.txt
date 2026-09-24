@@ -1,0 +1,14 @@
+INTERCEPTOR LAUNCH LOOK (visual smoothing only)
+==============================================
+
+The user flagged that the interceptors in the films leave the deck and swing over almost at once, which looks wrong.
+This is an animation fix, done by eye, like an animator would: no speeds, turn loads, guidance or intercept geometry are
+worked out.
+
+1 Off the deck: a longer straight rise out of the cell, clearly vertical for the first second or so, slow at first and
+  visibly accelerating (ease-in), so it reads as heavy.
+2 The turn: a gentle, round bend over several seconds into the existing path; a long smooth arc (the classic rainbow smoke
+  trail), never a hook or an elbow. Blend into the film's existing downstream path rather than re-deriving it.
+3 Keep every meeting point and time as it is. If the smoother rise needs more time, start the launch a little earlier and
+  shift its log line / tag / cue with it.
+4 Smoke trails are laid along the path, so smoothing the path smooths the trail.

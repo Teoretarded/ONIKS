@@ -1,0 +1,396 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Oniks — Confidence</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=block">
+<link rel="stylesheet" href="common/pc.css">
+<style>
+  .logo { left: 50%; top: 60px; transform: translateX(-50%); }
+  .sub { left: 0; right: 0; top: 102px; display: flex; justify-content: center; gap: 10px; font: 400 12px var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .sub b { font-weight: 400; color: #fff; }
+  .menu { left: 0; right: 0; bottom: 160px; display: flex; justify-content: center; gap: 50px; }
+  .menu .it { font-size: 30px; font-weight: 500; letter-spacing: -.03em; gap: 12px; }
+  .menu .it .n { width: auto; }
+  .blurb { left: 0; right: 0; bottom: 110px; text-align: center; font-size: 15px; }
+  .keys { left: 50%; bottom: 50px; transform: translateX(-50%); }
+  .foot { right: 88px; bottom: 56px; }
+  .bars { position: absolute; left: 0; top: 0; display: grid; grid-template-columns: auto 64px 34px; column-gap: 9px; row-gap: 6px; align-items: center; padding: 8px 10px 8px 9px; background: rgba(11,12,10,.72);
+    font: 500 10.5px/1 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); will-change: transform; transition: opacity .25s; }
+  .bars .b { height: 4px; background: rgba(255,255,255,.12); position: relative; }
+  .bars .b i { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(255,255,255,.75); }
+  .bars .v { text-align: right; color: rgba(255,255,255,.75); font-variant-numeric: tabular-nums; }
+  .bars .top { color: #fff; }
+  .bars .top.b i { background: var(--lime); }
+  .bars .top.v { color: var(--lime); }
+  .tag.lost b { background: transparent; color: rgba(255,255,255,.7); box-shadow: inset 0 0 0 1px rgba(255,255,255,.45); }
+  .tag.lost i { color: rgba(255,255,255,.7); }
+</style></head>
+<body><div id="stage">
+  <canvas id="c" class="px" width="1920" height="1080"></canvas>
+  <canvas id="o" width="1920" height="1080"></canvas>
+  <div class="ui" id="ui">
+    <div class="logo abs"><svg viewBox="0 0 24 24"><path d="M12 2 20.5 22h-4.1L12 11.4 7.6 22H3.5z" fill="#fff"/><circle cx="12" cy="18.2" r="1.7" fill="#C6F432"/></svg>Oniks</div>
+    <div class="sub abs"><span id="trk">TRK 21</span><span>·</span><span><b id="ret">0</b> returns</span><span>·</span><span><em style="font-style:normal;text-transform:none">σ</em> <b id="sig">0</b> m</span></div>
+    <div class="tag" id="tag"><b id="tagid">TRK 21</b><i id="tagtx">Unknown · 0.12</i></div>
+    <div class="bars" id="bars"></div>
+    <div class="menu abs" id="menu"></div>
+    <div class="blurb abs" id="blurb"></div>
+    <div class="keys abs"><span><b>←→</b>Select</span><span><b>Enter</b>Open</span><span><b>G</b>Graphics</span><span><b>Esc</b>Quit</span></div>
+    <div class="foot abs">Proto v0.5.0</div>
+  </div>
+  <div class="veil" id="veil"><div class="msg"><i></i>Standing the battery down</div></div>
+</div>
+<script src="common/m3.js"></script><script src="common/geo.js"></script><script src="common/dots.js"></script><script src="common/stage.js"></script>
+<script>
+(() => {
+const { V, R, X, E, Cam } = M3;
+STAGE.fit(); STAGE.SFX.kind = 'pc';
+const DEG = Math.PI / 180, TAU = Math.PI * 2;
+
+/* ---------- menu (centred row) ---------- */
+const menuEl = document.getElementById('menu');
+menuEl.innerHTML = STAGE.ITEMS.map((t, i) => `<div class="it" data-item><span class="n">0${i + 1}</span><i class="sq"></i><span class="lab">${t}</span></div>`).join('');
+const veil = document.getElementById('veil');
+STAGE.menu({
+  el: menuEl, blurb: document.getElementById('blurb'), axis: 'h',
+  onEnter(i) {
+    if (i === 4) { veil.classList.add('on'); setTimeout(() => veil.classList.remove('on'), 1900); return 2600; }
+    reacquire(); return 1900;
+  },
+});
+
+/* ---------- timeline (one cycle) ---------- */
+const CYC = 30, TA = 2.5, TB = 13.5, TC = 22, TD = 26;
+const HDG = 32 * DEG, SPEED = 9;                      // ship heading and speed (m/s)
+const LOS = V.norm([Math.sin(-58 * DEG), 0, Math.cos(-58 * DEG)]);   // radar -> ship, pulses travel along it
+const CRS = [LOS[2], 0, -LOS[0]], UP = [0, 1, 0];
+const VW = 700, S0 = 330;                            // wavefront speed (visual) and start distance
+function pulsesOf(k) {
+  const p = [];
+  for (let j = 0; j < 12; j++) p.push(TA + j * .9);
+  for (let j = 0; j < 4; j++) p.push(TB + .6 + j * 1.8);
+  return p.map(v => v + k * CYC);
+}
+/* classification hypotheses [unknown, frigate, ddg, cruiser] against evidence e in [0,1]; three paths */
+const PATHS = [
+  [[0, [.64, .12, .12, .12]], [.3, [.40, .30, .18, .12]], [.55, [.18, .44, .28, .10]], [.8, [.08, .22, .62, .08]], [1, [.03, .04, .91, .02]]],
+  [[0, [.64, .12, .12, .12]], [.3, [.42, .14, .16, .28]], [.55, [.20, .12, .27, .41]], [.8, [.07, .08, .66, .19]], [1, [.03, .03, .88, .06]]],
+  [[0, [.64, .12, .12, .12]], [.3, [.38, .16, .34, .12]], [.5, [.16, .22, .52, .10]], [.7, [.14, .47, .30, .09]], [.86, [.06, .15, .74, .05]], [1, [.02, .03, .93, .02]]],
+];
+const UNK = [.7, .1, .1, .1];
+function probsAt(k, e) {
+  const P = PATHS[k % 3];
+  for (let i = 1; i < P.length; i++) if (e <= P[i][0]) { const u = E.ss(0, 1, (e - P[i - 1][0]) / (P[i][0] - P[i - 1][0])); return P[i - 1][1].map((v, c) => v + (P[i][1][c] - v) * u); }
+  return P[P.length - 1][1];
+}
+const NAMES = ['Unknown', 'Frigate', 'DDG', 'Cruiser'];
+
+/* ---------- ship: sampled hull, stored in model space ---------- */
+const SH = GEO.destroyer(), SAMP = GEO.sample(SH, .85, 21);
+const PROPS = { hull: [1, .5], super: [.75, .72], mast: [.6, .85], arms: [.85, .62] };   // sigma factor, update probability
+let cnt = 0; SAMP.forEach(s => cnt += s.pts.length / 6);
+const NP = cnt, PM = new Float32Array(NP * 3), PNm = new Float32Array(NP * 3), RHO = new Float32Array(NP), PDU = new Float32Array(NP), LAM = new Float32Array(NP);
+const RSH = R.y(HDG);
+{
+  let i = 0;
+  for (const s of SAMP) { const [rho, pd] = PROPS[s.name]; for (let k = 0; k < s.pts.length; k += 6, i++) {
+    PM[i * 3] = s.pts[k]; PM[i * 3 + 1] = s.pts[k + 1]; PM[i * 3 + 2] = s.pts[k + 2];
+    PNm[i * 3] = s.pts[k + 3]; PNm[i * 3 + 1] = s.pts[k + 4]; PNm[i * 3 + 2] = s.pts[k + 5];
+    RHO[i] = rho; PDU[i] = pd; LAM[i] = V.dot(R.ap(RSH, [s.pts[k], s.pts[k + 1], s.pts[k + 2]]), LOS);
+  } }
+}
+const ORD = Array.from({ length: NP }, (_, i) => i).sort((a, b) => LAM[a] - LAM[b]);
+const LAMS = Float32Array.from(ORD.map(i => LAM[i]));
+const lowerBound = v => { let lo = 0, hi = NP; while (lo < hi) { const m = (lo + hi) >> 1; if (LAMS[m] < v) lo = m + 1; else hi = m; } return lo; };
+const BMN = [1e9, 1e9, 1e9], BMX = [-1e9, -1e9, -1e9];
+for (let i = 0; i < NP; i++) for (let c = 0; c < 3; c++) { BMN[c] = Math.min(BMN[c], PM[i * 3 + c]); BMX[c] = Math.max(BMX[c], PM[i * 3 + c]); }
+
+/* per-point belief: displayed offset eases from OP to ON after each update at clock TU */
+const OP = new Float32Array(NP * 3), ON = new Float32Array(NP * 3), TU = new Float32Array(NP).fill(-9), FL = new Float32Array(NP).fill(-9), SG = new Float32Array(NP);
+function hsh(a, b) {
+  let h = Math.imul(a ^ 0x5bd1e995, 0x9E3779B1) ^ Math.imul(b + 0x7f4a7c15, 0x85EBCA77);
+  h ^= h >>> 15; h = Math.imul(h, 0x2C1B3C6D); h ^= h >>> 12; h = Math.imul(h, 0x297A2D39); h ^= h >>> 15;
+  return ((h >>> 0) + .5) / 4294967296;
+}
+const gH = (i, k) => Math.sqrt(-2 * Math.log(hsh(i, k))) * Math.cos(TAU * hsh(i, k + 1));
+const easeK = (i, c) => { const u = (c - TU[i]) / .38; return u >= 1 ? 1 : u <= 0 ? 0 : 1 - (1 - u) * (1 - u) * (1 - u); };
+/* redraw point i from its uncertainty: range error small, cross-range large (bearing error), some height error */
+function resample(i, sig, key, flash) {
+  const k = easeK(i, clk), j = i * 3;
+  for (let c = 0; c < 3; c++) OP[j + c] += (ON[j + c] - OP[j + c]) * k;
+  const a = gH(i, key) * sig * .42, b = gH(i, key + 2) * sig, h = gH(i, key + 4) * sig * .38;
+  ON[j] = LOS[0] * a + CRS[0] * b; ON[j + 1] = h; ON[j + 2] = LOS[2] * a + CRS[2] * b;
+  TU[i] = clk; SG[i] = sig; if (flash) FL[i] = clk;
+}
+
+/* ---------- belief state ---------- */
+const SIG0 = 68, sigOf = n => SIG0 * Math.exp(-.38 * n) + .06;
+let clk = 0, sq = 0, cyc = -1, extra = [], rushTo = -1, dStart = null, nEv = 0, sigT = SIG0, sigD = SIG0, lastJam = -1;
+const dOf = k => { const r = M3.rng(500 + k), a = (r() - .5) * 1.4; return V.add(V.mul(LOS, 40 * Math.cos(a) * (r() < .5 ? -1 : 1)), V.mul(CRS, 70 * Math.sin(a) + (r() - .5) * 40)); };
+function deltaAt(k, s) {
+  // where the tracker believes the ship is, relative to where it is
+  const d0 = dOf(k);
+  if (s < TA) return V.lerp(dStart || d0, d0, E.inOut(s / TA));
+  if (s < TD - 4) { const n = Math.max(0, (s - TA) / .9); return V.mul(d0, Math.exp(-.42 * n)); }
+  // range-gate pull-off: the jammer walks the gate away down range, then the track coasts
+  const pull = 190 * Math.pow(E.ss(TC + .4, TD, s), 1.4) + (s > TD ? 16 * (s - TD) : 0);
+  return V.add(V.mul(LOS, -pull), V.mul(CRS, 12 * E.ss(TC, CYC, s)));
+}
+const Cs = () => [0, 0, 0];                                  // the ship sits at the origin; the sea flows past it
+let Cest = V.add(Cs(), dOf(0)), Ccam = Cest.slice();
+for (let i = 0; i < NP; i++) resample(i, SIG0, 7 + i % 5, false);
+for (let i = 0; i < NP; i++) { const j = i * 3; OP[j] = ON[j]; OP[j + 1] = ON[j + 1]; OP[j + 2] = ON[j + 2]; }
+
+function reacquire() {
+  const k = Math.floor(sq / CYC), s = sq - k * CYC;
+  if (s < TB) { rushTo = k * CYC + TB; return; }
+  if (s < TC) { for (let j = 0; j < 4; j++) extra.push(sq + .05 + j * .22); return; }
+  sq = (k + 1) * CYC; rushTo = sq + TB;
+}
+function startCycle(k) {
+  cyc = k; dStart = V.sub(Cest, Cs()); nEv = 0; lastJam = -1;
+  extra = extra.filter(v => v >= k * CYC);
+}
+function update(dt) {
+  const rush = sq < rushTo ? 6 : 1;
+  const sq0 = sq; sq += dt * rush; clk += dt;
+  if (rushTo >= 0 && sq >= rushTo) rushTo = -1;
+  const k = Math.floor(sq / CYC), s = sq - k * CYC;
+  if (k !== cyc) startCycle(k);
+  // radar pulses: each wavefront updates the points it crosses
+  for (const tp of pulsesOf(k).concat(extra)) {
+    const a0 = (sq0 - tp) * VW - S0, a1 = (sq - tp) * VW - S0;
+    if (a1 < -S0 - 200 || a0 > S0) continue;
+    if (a0 < 0 && a1 >= 0) { nEv++; STAGE.SFX.tone(1650, 1650, .012, 'square', .007); }
+    const i0 = lowerBound(a0), i1 = lowerBound(a1);
+    for (let q = i0; q < i1; q++) {
+      const i = ORD[q];
+      if (s < TB && hsh(i, Math.round(tp * 100)) > PDU[i]) continue;
+      resample(i, sigOf(nEv + 1) * RHO[i], Math.round(tp * 1000) + 11, true);
+    }
+  }
+  // before the first return the cloud only wanders inside its prior
+  if (s < TA) {
+    const w = Math.floor(s / .2);
+    if (w !== lastJam) { lastJam = w; for (let i = 0; i < NP; i++) if (hsh(i, 7000 + w * 29 + k * 311) < .08) resample(i, sigD, 20000 + w * 23 + k * 97, false); }
+  }
+  // jamming: noise strobes redraw a random third of the points from a growing spread
+  if (s >= TC) {
+    const strobe = 1000 + Math.floor((s - TC) / (s < TD ? .12 : .3));
+    if (strobe !== lastJam) {
+      lastJam = strobe;
+      const sj = sigOf(nEv) + 88 * E.ss(TC, TC + 3.2, s), pr = s < TD ? .3 : .12;
+      for (let i = 0; i < NP; i++) if (hsh(i, 9000 + strobe * 13 + k * 977) < pr) resample(i, sj * (.8 + .2 * RHO[i]), 40000 + strobe * 17 + k * 131, false);
+      if (s < TD && strobe % 4 === 0) STAGE.SFX.noise(.12, 2400, .6, .025, .003);
+    }
+  }
+  sigT = s < TC ? (s < TA ? SIG0 : sigOf(nEv)) : sigOf(nEv) + 88 * E.ss(TC, TC + 3.2, s);
+  sigD = E.damp(sigD, sigT, 3.2, dt);
+  Cest = V.add(Cs(), deltaAt(k, s));
+  Ccam = E.dampV(Ccam, Cest, 1.1, dt);
+}
+
+/* ---------- render ---------- */
+const cv = document.getElementById('c'), ov = document.getElementById('o'), octx = ov.getContext('2d');
+const pb = new PointBuf(cv, [11, 12, 10], { vignette: .62 });
+const cam = new Cam(); cam.fov = 30 * DEG; cam.cx = 960; cam.cy = 520;
+const LIME = [198, 244, 50], WH = [238, 238, 228], LI = V.norm([-.45, .8, -.35]);
+/* sea: a wrapped dot grid in the ship frame, flowing aft */
+const SEA_SP = 12, SEA_N = 124, SEA_SPAN = SEA_SP * SEA_N;
+const SJ = new Float32Array(SEA_N * SEA_N * 2); { const r = M3.rng(77); for (let i = 0; i < SJ.length; i++) SJ[i] = (r() - .5) * SEA_SP * .7; }
+const FWD = [Math.sin(HDG), 0, Math.cos(HDG)], RGT = [Math.cos(HDG), 0, -Math.sin(HDG)];
+/* waterline half-breadth of GEO.destroyer's hull, s in [-1 stern, 1 bow] */
+const hullB = s => s > .3 ? 10 * Math.max(0, 1 - Math.pow((s - .3) / .7, 1.75)) : s < -.82 ? 10 * (.84 + .16 * (1 - (-.82 - s) / .18)) : 10;
+const BEDGES = [[0, 1], [2, 3], [4, 5], [6, 7], [0, 2], [1, 3], [4, 6], [5, 7], [0, 4], [1, 5], [2, 6], [3, 7]];
+const ui = document.getElementById('ui'), tagEl = document.getElementById('tag'), barsEl = document.getElementById('bars');
+barsEl.innerHTML = NAMES.map((n, c) => `<span class="l" id="bl${c}">${n}</span><span class="b" id="bb${c}"><i id="bi${c}"></i></span><span class="v" id="bv${c}">0.00</span>`).join('');
+const BI = [0, 1, 2, 3].map(c => document.getElementById('bi' + c)), BV = [0, 1, 2, 3].map(c => document.getElementById('bv' + c)), BL = [0, 1, 2, 3].map(c => [document.getElementById('bl' + c), document.getElementById('bb' + c), document.getElementById('bv' + c)]);
+const els = { trk: document.getElementById('trk'), ret: document.getElementById('ret'), sig: document.getElementById('sig'), tagid: document.getElementById('tagid'), tagtx: document.getElementById('tagtx') };
+let shown = [.64, .12, .12, .12], txtKey = '', lastUi = -1;
+
+function render(t) {
+  const k = Math.floor(sq / CYC), s = sq - k * CYC;
+  const ev = 1 - Math.exp(-nEv / 4.2);
+  const jam = s >= TC ? E.ss(TC, TC + 2.2, s) : 0;
+  let probs = probsAt(k, s < TA ? 0 : ev);
+  probs = probs.map((v, c) => v + (UNK[c] - v) * (s >= TD ? 1 : jam));
+  const real = [1, 2, 3], best = real.reduce((a, c) => probs[c] > probs[a] ? c : a, 1), pb_ = probs[best];
+  const conf = s < TC ? E.ss(.7, .86, pb_) : 0;
+  // camera: slow orbit around the belief, closer as the picture firms up
+  const yaw = 2.35 + t * .021, pitch = .2 + .035 * Math.sin(t * .05), dist = 560 - 140 * E.ss(0, 1, 1 - sigD / SIG0);
+  cam.orbit(V.add(Ccam, [0, 14, 0]), yaw, pitch, dist);
+  const e = cam.eye, f = cam.f, ru = cam.r, u = cam.u, F = cam.fl, cx = cam.cx, cy = cam.cy;
+  const e0 = e[0], e1 = e[1], e2 = e[2], f0 = f[0], f1 = f[1], f2 = f[2], r0 = ru[0], r1 = ru[1], r2 = ru[2], u0 = u[0], u1 = u[1], u2 = u[2];
+  pb.clear();
+
+  // sea
+  const flow = (clk * SPEED) % SEA_SP;
+  for (let a = 0; a < SEA_N; a++) for (let b = 0; b < SEA_N; b++) {
+    const q = (a * SEA_N + b) * 2;
+    const lx = (a - SEA_N / 2) * SEA_SP + SJ[q], lz = ((b - SEA_N / 2) * SEA_SP - flow) + SJ[q + 1];
+    const x = RGT[0] * lx + FWD[0] * lz, z = RGT[2] * lx + FWD[2] * lz;
+    const wz = lz + clk * SPEED;
+    const y = 1.3 * Math.sin(x * .021 + clk * .9) + .7 * Math.sin(wz * .034 - clk * 1.3 + lx * .012);
+    const dx = x - e0, dy = y - e1, dz = z - e2, zc = dx * f0 + dy * f1 + dz * f2;
+    if (zc < 5) continue;
+    const sx = cx + F * (dx * r0 + dy * r1 + dz * r2) / zc, sy = cy - F * (dx * u0 + dy * u1 + dz * u2) / zc;
+    if (sx < 0 || sy < 0 || sx >= 1920 || sy >= 1080) continue;
+    const dd = Math.hypot(lx, lz), fade = Math.max(0, 1 - dd / (SEA_SPAN * .48));
+    pb.dot(sx, sy, zc < 340 ? 2 : 1, WH[0], WH[1], WH[2], (.3 + .22 * (y + 2) / 4) * fade);
+  }
+
+  // the belief cloud
+  const T = X.make(RSH, Cest), M = T.R, tx = Cest[0], ty = Cest[1], tz = Cest[2];
+  for (let i = 0; i < NP; i++) {
+    const j = i * 3, kk = easeK(i, clk);
+    const ox = OP[j] + (ON[j] - OP[j]) * kk, oy = OP[j + 1] + (ON[j + 1] - OP[j + 1]) * kk, oz = OP[j + 2] + (ON[j + 2] - OP[j + 2]) * kk;
+    const px = PM[j], py = PM[j + 1], pz = PM[j + 2];
+    const x = M[0] * px + M[1] * py + M[2] * pz + tx + ox, y = M[3] * px + M[4] * py + M[5] * pz + ty + oy, z = M[6] * px + M[7] * py + M[8] * pz + tz + oz;
+    const dx = x - e0, dy = y - e1, dz = z - e2, zc = dx * f0 + dy * f1 + dz * f2;
+    if (zc < 5) continue;
+    const sx = cx + F * (dx * r0 + dy * r1 + dz * r2) / zc, sy = cy - F * (dx * u0 + dy * u1 + dz * u2) / zc;
+    if (sx < 0 || sy < 0 || sx >= 1920 || sy >= 1080) continue;
+    const sgn = Math.min(1, SG[i] / 18);
+    // resolved points are lit like a surface; unresolved ones are a soft cloud
+    const nx = PNm[j], ny = PNm[j + 1], nz = PNm[j + 2];
+    let lit = .62;
+    if (nx || ny || nz) {
+      const wx = M[0] * nx + M[1] * ny + M[2] * nz, wy = M[3] * nx + M[4] * ny + M[5] * nz, wz = M[6] * nx + M[7] * ny + M[8] * nz;
+      lit = (wx * dx + wy * dy + wz * dz > 0 ? .28 : .45) + .55 * Math.max(0, wx * LI[0] + wy * LI[1] + wz * LI[2]);
+    }
+    let bb = lit + (.62 - lit) * sgn;
+    bb *= (1 - .28 * sgn) * (y < 0 ? .45 : 1);
+    let cr = WH[0], cg = WH[1], cb = WH[2];
+    const fk = clk - FL[i];
+    if (fk < .5) { const w = Math.exp(-fk * 7); cr += (LIME[0] - cr) * w; cg += (LIME[1] - cg) * w; cb += (LIME[2] - cb) * w; bb = Math.max(bb, .9 * w); }
+    pb.dot(sx, sy, zc < 330 && (sgn < .5 || (i & 3) === 0) ? 2 : 1, cr, cg, cb, Math.min(1, bb));
+  }
+
+  // uncertainty ellipsoid: 2-sigma, three principal rings plus two latitudes
+  const ea = E.sat((sigD - 5) / 10) * (1 - .5 * jam * (s < TD ? 1 : 0));
+  if (ea > .01) {
+    const A = [LOS, CRS, UP], rad = [sigD * .42 * 2, sigD * 2, sigD * .38 * 2];
+    const ctr = V.add(Cest, [0, 8, 0]), pxm = F / Math.max(50, cam.depth(ctr));
+    const ring = (i1, i2, off, sc) => {
+      const n = Math.round(E.clamp(TAU * Math.max(rad[i1], rad[i2]) * sc * pxm / 6, 40, 420));
+      for (let q = 0; q < n; q++) {
+        const th = q / n * TAU, p = V.add(V.add(V.add(ctr, V.mul(A[i1], Math.cos(th) * rad[i1] * sc)), V.mul(A[i2], Math.sin(th) * rad[i2] * sc)), off);
+        const pp = cam.project(p); if (pp) pb.dot(pp[0], pp[1], q % 2 ? 1 : 2, WH[0], WH[1], WH[2], ea * (p[1] < 0 ? .3 : .9));
+      }
+    };
+    ring(0, 1, [0, 0, 0], 1); ring(1, 2, [0, 0, 0], 1); ring(0, 2, [0, 0, 0], 1);
+    for (const h of [-.55, .55]) ring(0, 1, V.mul(UP, h * rad[2]), Math.sqrt(1 - h * h));
+  }
+
+  // radar pulses: wavefronts sweeping in along the line of sight
+  for (const tp of pulsesOf(k).concat(extra)) {
+    const w = (sq - tp) * VW - S0; if (w < -S0 || w > S0 + 60) continue;
+    const a = E.sat((w + S0) / 80) * (1 - E.sat((w - S0 + 40) / 100));
+    // a thin lit slab: bright leading face, fading trail
+    for (const [lag, la] of [[0, 1], [-5, .5], [-11, .25]]) {
+      const base = V.add(Cs(), V.mul(LOS, w + lag));
+      for (let c = -300; c <= 300; c += 6) for (let h = 0; h <= 70; h += 7) {
+        if (h > 0 && hsh((c + 300) * 11 + h + lag * 7, Math.round(tp * 10)) > .62 - h / 160) continue;
+        const p = cam.project(V.add(base, V.add(V.mul(CRS, c), [0, h, 0]))); if (!p) continue;
+        const edge = 1 - Math.pow(Math.abs(c) / 305, 2);
+        pb.dot(p[0], p[1], h && lag ? 1 : 2, LIME[0], LIME[1], LIME[2], a * la * edge * (h ? .5 * (1 - h / 90) : .95));
+      }
+    }
+  }
+
+  // identified: lime waterline underline, Kelvin wake, accurate box
+  const idA = conf * E.sat((10 - sigD) / 4) * (1 - E.ss(TC, TC + .8, s));
+  if (idA > .01) {
+    for (let q = 0; q <= 180; q++) {
+      const sN = -1 + 2 * q / 180, b = hullB(sN) + 2.5;
+      for (const sd of [-1, 1]) { const p = cam.project(X.ap(T, [sd * b, .3, sN * 79])); if (p) pb.dot(p[0], p[1], 2, LIME[0], LIME[1], LIME[2], idA * .95); }
+    }
+    const flow2 = (clk * SPEED) % 7;
+    for (let d = 0; d < 560; d += 7) {
+      const dd = d + flow2, fa = idA * Math.pow(1 - dd / 560, 1.6);
+      for (const sd of [-1, 1]) {
+        const lat = sd * (6 + dd * Math.tan(19.5 * DEG)), p = cam.project(X.ap(T, [lat, .4, -78 - dd]));
+        if (p) pb.dot(p[0], p[1], 2, LIME[0], LIME[1], LIME[2], fa * .8);
+      }
+      for (let m = 0; m < 3; m++) {
+        const r = hsh(d * 3 + m, Math.floor(clk * SPEED / 7) - (d / 7 | 0)), lat = (r - .5) * (14 + dd * .08);
+        const p = cam.project(X.ap(T, [lat, .3, -78 - dd])); if (p) pb.dot(p[0], p[1], 1, WH[0], WH[1], WH[2], fa * .5);
+      }
+    }
+    const cs = [];
+    for (const sx of [BMN[0] - 2, BMX[0] + 2]) for (const sy of [BMN[1], BMX[1] + 2]) for (const sz of [BMN[2] - 2, BMX[2] + 2]) cs.push(X.ap(T, [sx, sy, sz]));
+    for (const [a, b] of BEDGES) {
+      const n = Math.max(2, Math.ceil(V.dist(cs[a], cs[b]) / 2.2));
+      for (let q = 0; q <= n; q++) { const p = cam.project(V.lerp(cs[a], cs[b], q / n)); if (p) pb.dot(p[0], p[1], 2, WH[0], WH[1], WH[2], idA * (q === 0 || q === n ? 1 : .7)); }
+    }
+  }
+
+  // jamming: a strobe of noise along the bearing, flickering every frame
+  if (s >= TC && s < TD + 1.5) {
+    const ja = E.ss(TC, TC + .8, s) * (1 - E.ss(TD, TD + 1.5, s));
+    // barrage noise fills every range cell on the jammer's bearing
+    for (let q = 0; q < 3600; q++) {
+      const d = Math.random() * 1300 - 150, c = (Math.random() - .5) * (14 + Math.abs(d) * .025), h = Math.pow(Math.random(), 1.4) * 55;
+      const p = cam.project(V.add(V.add(Cest, V.mul(LOS, -d)), V.add(V.mul(CRS, c), [0, h, 0]))); if (!p) continue;
+      const r = Math.random();
+      pb.dot(p[0], p[1], r > .93 ? 2 : 1, WH[0], WH[1], WH[2], ja * (.25 + .75 * r) * (1 - Math.abs(d) / 1400));
+    }
+    if (ja > .2 && Math.random() < .25) pb.lift(6 * ja);
+  }
+
+  // tag + class bars, locked to the top corner of the belief (box when identified, ellipsoid before)
+  let anc = null;
+  if (idA > .3) {
+    for (const sx of [BMN[0] - 2, BMX[0] + 2]) for (const sz of [BMN[2] - 2, BMX[2] + 2]) { const p = cam.project(X.ap(T, [sx, BMX[1] + 2, sz])); if (p && (!anc || p[0] - p[1] * .3 > anc[0] - anc[1] * .3)) anc = p; }
+  } else {
+    const rad = [sigD * .84, sigD * 2, sigD * .76], ctr = V.add(Cest, [0, 8, 0]);
+    for (let q = 0; q < 48; q++) {
+      const th = q / 48 * TAU;
+      for (const [a1, a2] of [[1, 2], [0, 2], [0, 1]]) {
+        const A = [LOS, CRS, UP], p = cam.project(V.add(V.add(ctr, V.mul(A[a1], Math.cos(th) * Math.max(rad[a1], a1 === 1 ? 80 : 0))), V.mul(A[a2], Math.sin(th) * Math.max(rad[a2], a2 === 2 ? 45 : 0))));
+        if (p && (!anc || p[0] - p[1] * .3 > anc[0] - anc[1] * .3)) anc = p;
+      }
+    }
+  }
+  let tx2 = 0, ty2 = 0;
+  if (anc) {
+    tx2 = Math.min(1920 - 260, anc[0] + 26); ty2 = Math.max(150, anc[1] - 44);
+    pb.dline(anc[0], anc[1], tx2 - 4, ty2 + 20, 3, 1, 238, 238, 228, .7);
+    tagEl.style.transform = `translate(${tx2.toFixed(0)}px, ${ty2.toFixed(0)}px)`;
+    barsEl.style.transform = `translate(${tx2.toFixed(0)}px, ${(ty2 + 28).toFixed(0)}px)`;
+  }
+  pb.blit();
+  octx.clearRect(0, 0, 1920, 1080);
+
+  // readouts
+  let label, val = pb_;
+  if (s >= TC + 2.8) { label = s >= TD + 1 ? 'Track lost · coasting' : 'Track lost'; }
+  else if (s >= TC) label = 'Jammed';
+  else if (pb_ < .3) { label = 'Unknown'; }
+  else if (pb_ < .75) label = NAMES[best] + '?';
+  else label = best === 2 ? 'DDG · Arleigh Burke' : NAMES[best];
+  const lost = s >= TC;
+  const txt = lost ? (s >= TC + 2.8 ? label : `${label} · ${val.toFixed(2)}`) : `${label} · ${val.toFixed(2)}`;
+  const key = txt + (conf > .5) + lost + k;
+  if (key !== txtKey) {
+    txtKey = key; els.tagtx.textContent = txt; els.tagid.textContent = 'TRK ' + (21 + k);
+    tagEl.className = 'tag' + (conf > .5 && !lost ? ' lime' : '') + (s >= TC + 2.8 ? ' lost' : '');
+  }
+  const dt = STAGE.Q.has('t') ? 1 : .12;
+  shown = shown.map((v, c) => v + (probs[c] - v) * dt);
+  const top = shown.reduce((a, v, c) => v > shown[a] ? c : a, 0);
+  for (let c = 0; c < 4; c++) {
+    // under barrage noise the readout itself stops being trustworthy
+    const jit = s >= TC && s < TD ? (Math.random() - .5) * .3 * jam : 0;
+    BI[c].style.width = (E.sat(shown[c] + jit * .5) * 100).toFixed(1) + '%'; BV[c].textContent = E.sat(shown[c] + jit).toFixed(2);
+    const on = c === top && c > 0 && !lost; for (const el of BL[c]) el.classList.toggle('top', on);
+  }
+  barsEl.style.opacity = s >= TD + 1 ? .35 : 1;
+  if (t - lastUi > .1 || t < lastUi) {
+    lastUi = t;
+    els.trk.textContent = 'TRK ' + (21 + k); els.ret.textContent = nEv; els.sig.textContent = sigD.toFixed(1);
+  }
+  STAGE.dbg = { s: +s.toFixed(2), k, nEv, sigD: +sigD.toFixed(1), probs: probs.map(v => +v.toFixed(2)), conf: +conf.toFixed(2) };
+}
+STAGE.run({ update, render });
+})();
+</script>
+</body></html>

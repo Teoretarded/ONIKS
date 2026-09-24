@@ -1,0 +1,51 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Oniks — Aegis</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=block">
+<link rel="stylesheet" href="../menus/common/pc.css">
+<style>
+  .logo { left: 88px; top: 70px; }
+  .kick { left: 90px; top: 112px; transition: opacity .35s; }
+  .menu { left: 88px; bottom: 214px; display: flex; flex-direction: column; gap: 4px; }
+  .menu .it { font-size: 36px; font-weight: 500; letter-spacing: -.03em; height: 48px; }
+  .blurb { left: 128px; bottom: 132px; width: 420px; font-size: 15px; }
+  .keys { right: 88px; bottom: 56px; }
+  .foot { left: 88px; bottom: 60px; }
+  .read { right: 88px; top: 74px; display: flex; gap: 12px; align-items: center; font: 400 13px var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .read i { width: 8px; height: 8px; background: var(--lime); flex: none; }
+  .read i.coral { background: var(--coral); }
+  .read b { font-weight: 400; color: #fff; }
+  .tag.drop b { background: transparent; color: rgba(255,255,255,.6); box-shadow: inset 0 0 0 1px rgba(255,255,255,.4); }
+  .tag.drop i { background: transparent; color: rgba(255,255,255,.6); }
+  .tag.sm { font-size: 10.5px; }
+  .tag.sm b, .tag.sm i, .tag.sm .v { padding: 4px 6px 3px; }
+  .tag.coral b { background: var(--coral); }
+  .tag.coral .v { color: var(--coral); }
+  .tag.sm .v { color: rgba(255,255,255,.72); }
+</style></head>
+<body><div id="stage">
+  <canvas id="c" class="px" width="1920" height="1080"></canvas>
+  <canvas id="o" width="1920" height="1080"></canvas>
+  <div class="ui" id="ui">
+    <div class="logo abs"><svg viewBox="0 0 24 24"><path d="M12 2 20.5 22h-4.1L12 11.4 7.6 22H3.5z" fill="#fff"/><circle cx="12" cy="18.2" r="1.7" fill="#C6F432"/></svg>Oniks</div>
+    <div class="kick abs" id="kick"><i></i><span id="kickt">AN/SPY-1D(V) / Array face</span></div>
+    <div class="read abs" id="read"></div>
+    <div class="menu abs" id="menu"></div>
+    <div class="blurb abs" id="blurb"></div>
+    <div class="keys abs"><span><b>↑↓</b>Select</span><span><b>Enter</b>Open</span><span><b>G</b>Graphics</span><span><b>Esc</b>Quit</span></div>
+    <div class="foot abs">Proto v0.5.0</div>
+  </div>
+  <div class="veil" id="veil"><div class="msg"><i></i>Standing the battery down</div></div>
+</div>
+<script src="../menus/common/m3.js"></script>
+<script src="../menus/common/dots.js"></script>
+<script src="../menus/common/geo.js"></script>
+<script src="common/hd_land.js"></script>
+<script src="common/hd_sea_air.js"></script>
+<script src="../menus/common/stage.js"></script>
+<script src="common/film.js"></script>
+<script src="pe_aegis_world.js"></script>
+<script src="pe_aegis_scope.js"></script>
+<script src="pe_aegis_ship.js"></script>
+<script src="pe_aegis_fx.js"></script>
+<script src="pe_aegis_film.js"></script>
+</body></html>

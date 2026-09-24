@@ -1,0 +1,142 @@
+TREATMENTS: six films, three per style. Timings are guides; the story order, the one-take rule and the signature are not.
+Each builder: read your block, and skim the others so yours stays distinct.
+
+=====================================================================================================
+OA  oa_scale.html   ORBITAL A: SCALE                  (~165 s)   sources: o3_orbit, o1_ignition, o2_seaskim, o4_chronograph
+=====================================================================================================
+Signature: POWERS OF TEN. One unbroken take from 900 km up down to a metre from the missile's skin, and back up. The
+subject is scale and machinery: a globe, a map, a coastline, a battery, a launch, a flight over the sea. No engagement,
+no target, no strike: the round simply flies away over the horizon while the camera climbs home to orbit.
+ 1 Orbit (0-15): wireframe Earth limb, graticule, terminator (o3). A satellite (HD.satellite) glides past close to the
+   lens, solar wings and mesh reflector in full hairline detail, its ground track sweeping over the theatre.
+ 2 Theatre (15-35): the o3 dive onto the real seed-1337 map: coast, depth contours, place names, the battery at
+   Krasnaya Kosa marked in yellow. Altitude/scale readout (log ruler).
+ 3 Battery (35-55): the map's contour lines become the bluff and the sea swell of o1 (match-move, no cut). Low fly-in
+   past the Monolith-B (HD.radar, array turning), the Pantsir (HD.pantsir, search radar spinning) to TEL 1: jacks down,
+   erecting on its hydraulic ram. Clock T-.
+ 4 Launch (55-78): o1 cold launch (gas ejection, cap tumbling, ignition, pitch-over); the camera cranes up and swings
+   alongside; booster ejected out of the nozzle (HD.oniksBooster tumbling away), wings and fins unfold, ramjet lights
+   with shock diamonds. Macro details: intake lip, wing hinge, nozzle.
+ 5 Over the sea (78-110): o2 chase at low level over the wire sea: Mach cone, V-shock on the water, spray; a pair of
+   F/A-18Es (HD.fighter, fan faces and nozzles visible) crosses high overhead the other way; the camera slows and lets
+   the round pull away toward the horizon until it is a point.
+ 6 Climb (110-165): the camera rises straight up through the layers: the sea, the coast, the map returns with the
+   round's track as one yellow line off toward the horizon, the theatre square, the globe, back to orbit where the
+   satellite comes round again = frame 0.
+Layout: o1/o3-like: menu column left, readouts top right, Fig. caption bottom right.
+
+=====================================================================================================
+OB  ob_long_exposure.html   ORBITAL B: LONG EXPOSURE   (~160 s)   sources: o4_chronograph, o1_ignition, o2_seaskim
+=====================================================================================================
+Signature: TIME MADE VISIBLE. A Marey chronophotograph that is also a film: a long-lens, near-orthographic camera
+running side-on on a virtual rail; every 0.35 s (simulated time) a hairline ghost of every moving thing is stamped
+onto the plate and stays. The plate grows into one enormous figure of motion, then rewinds. It is about motion itself:
+no engagement, no target; the rounds simply fly out of the plate over the horizon.
+ 1 Cap (0-15): extreme macro on a TLC end cap (bolt ring, seal, hairline detail); the lens pulls back through the
+   launcher to reveal the battery side-on: three TELs (HD.tel) erecting on their rams at staggered phases, the rams'
+   telescoping stages stamped as they extend.
+ 2 Ripple (15-42): four rounds leave 2.5 s apart (TEL 1 R/L, TEL 2 R/L). Each ejection, tumbling cap, gas puff,
+   ignition, pitch-over and booster ejection is stamped: overlapping strobe arcs. A chronograph clock with hundredths.
+ 3 Cruise (42-85): the rail camera accelerates and paces the four rounds in line abreast low over the sea; exposures
+   string out as pearls; wings unfolding caught frame by frame; the compressed-range ruler (honestly labelled, as in
+   o4) ticks km; time-warp shown. A patrolling MH-60R (HD.helo) crosses the lens low over the water and its rotor is
+   stamped too: a disc of ghost blades. Later a pair of F/A-18Es (HD.fighter) high above, fan faces and nozzles strobed.
+ 4 Horizon (85-108): the rounds shrink over the curve of the sea; the last exposures are points; the rail slows.
+ 5 The plate (108-130): the lens pulls back to show the entire figure at once, labelled like a scientific plate
+   ("Fig. 4 · 4 rounds · N exposures · 0.35 s"), rulers, time marks, one yellow highlighter on TEL 1's first ejection.
+ 6 Rewind (130-160): the plate un-stamps in reverse while the rail runs back to the battery at speed (clock running
+   backwards, "-x40"), rounds fly back into their tubes, caps return, TELs lower... ending on the macro cap = frame 0.
+Layout: o4-like: big "Oniks" wordmark top-left, menu as a row along the bottom.
+
+=====================================================================================================
+OC  oc_underway.html   ORBITAL C: UNDERWAY           (~170 s)   sources: o5_terminal, o2_seaskim, o3_orbit
+=====================================================================================================
+Signature: THE SHIP AS A MACHINE. A night at sea with the strike group, in full hairline detail: radar arcs (SPY-1
+search pulses as expanding shell arcs, as in o5), the SPS radar turning, heat shimmer off the stacks, flight
+operations. Peaceful, vast, mechanical. No engagement.
+ 1 Watch (0-24): night, a slow dolly along HD.destroyer underway from bow to stern: Kelvin wake, bow wave, SPY pulses
+   sweeping out as shell arcs, SPS turning, heat shimmer (wavy hairlines) from the stacks, Phalanx mounts at rest,
+   lifelines, boats, the 5" gun. On the flight deck the MH-60R (HD.helo) starts: blades droop, then spin up.
+ 2 Lift (24-50): the helo lifts off; the camera rises with it off the stern, the destroyer shrinking below; the helo
+   banks out over the dark sea, its rotor disc and tail rotor in close-up.
+ 3 The group (50-95): the camera flies with the helo along the formation: a cruiser, then the carrier (HD.carrier):
+   deck lines in hairline, a pair of F/A-18Es (HD.fighter) on the catapults; one launches (catapult stroke,
+   afterburner, fan faces visible as it passes the lens) and climbs away; the second follows.
+ 4 High (95-125): the camera climbs with the fighters to altitude: the whole group below as small wire shapes with
+   their wakes, radar arcs pulsing from each ship, the coastline far off; the fighters peel away.
+ 5 Return (125-150): descending again, the camera meets the helo on its way back and follows it to the destroyer's
+   flight deck: approach, flare, touchdown, blades slowing.
+ 6 Next ship (150-170): the camera lifts off the deck and glides across the formation to another destroyer of the
+   group, arriving in exactly the opening dolly = frame 0.
+Layout: o5-like: menu column left, a small quiet log right, Fig. caption bottom right.
+
+=====================================================================================================
+PA  pa_picture.html   POINT CLOUD A: THE PICTURE     (~165 s)   sources: p2_clutter, p5_confidence, p3_coastline, p1_strike, p4_track
+=====================================================================================================
+Signature: THE RADAR PICTURE. The film is about building belief from returns: the whole sensor picture around the
+coast as spectacle. It starts and ends on the Monolith-B 3D clutter scope; everything in between is the camera flying
+inside the sensors' own data. The most "radar scans" film. No engagement.
+ 1 Search (0-22): p2 scope around the site: sea-clutter height field, the rotating beam with its lime edge, false
+   tracks dropped, TRK 21 firming up hit by hit ("? 0.31 -> DDG? 0.64"). HD.radar array turning at the centre.
+ 2 Ride the beam (22-45): the camera lifts off and rides the beam outward along TRK 21's bearing, clutter streaming
+   under it, range rings rolling past, a true range readout climbing; clutter thins with range.
+ 3 Confidence (45-80): p5 at the track: an uncertainty cloud pulled onto a hull by each pulse (HD.destroyer sampled),
+   class bars Unknown -> Frigate? -> DDG · Arleigh Burke 0.89; a second contact forms nearby into a different class;
+   a rain squall passes as a patch of clutter that never becomes a track.
+ 4 Coast (80-98): the camera turns back along the radar horizon toward land; p3's LiDAR scan line materialises the
+   real seed-1337 coastline as it passes over.
+ 5 Strike (98-118): at the battery, p1's lightning-strike scan reveals TEL (HD.tel), radar and Pantsir (HD.pantsir)
+   with part boxes (ram, caps, wheels, TLCs, guns, radars).
+ 6 Track (118-140): the EO tracker on the bluff (p4 reticle, lag, boxes on true bounds, magnified inset) follows an
+   MH-60R (HD.helo) crossing the coast: boxes on rotor head, tail rotor, fuselage; the inset shows the blades.
+ 7 Picture (140-165): the camera climbs back into the scope; the helicopter is now a track on it; the sweep goes on and
+   a new contact begins to form exactly as at frame 0.
+Layout: p1/p2-like: menu column left, kick label top-left, one stat top-right.
+
+=====================================================================================================
+PB  pb_survey.html   POINT CLOUD B: SURVEY          (~165 s)   sources: p3_coastline, p2_clutter, p5_confidence, p4_track, p1_strike
+=====================================================================================================
+Signature: THE DRONE'S EYE. A chase camera rides behind an Orlan-10-class survey drone (HD.drone; its prop disc in
+the foreground, control surfaces, the EO ball turning); everything is revealed by the drone's own sensors: LiDAR over
+land, a radar swath over the sea, the EO tracker box. Dawn: a faint lime-grey horizon band on graphite. A survey
+flight, start to finish; no engagement.
+ 1 Catapult (0-18): at the battery, the drone on its pneumatic rail (HD.catapult), prop spinning up (blades as a dot
+   disc), launch: the camera rides the carriage then lifts away with the drone; a mini lightning-strike scan (p1)
+   tags the battery below as it passes.
+ 2 Coastline (18-58): p3's LiDAR survey along the real coast: scan line builds cliffs, ravines, the waterline; tags the
+   radar, the Pantsir, the battery, landmarks; the 360° ping reveals the whole coast as the drone turns seaward.
+ 3 Over water (58-88): its radar paints a moving swath of sea clutter below (p2 texture seen from above): wind rows,
+   sea spikes, a rain squall, false alarms rejected; a contact emerges at the edge of the swath.
+ 4 Contact (88-118): a wide standoff orbit; the contact forms from an uncertainty cloud into HD.destroyer (p5 class
+   bars); the EO ball turns to it: p4's tracking box and magnified inset show its detail (radar turning, helo on
+   deck, wake).
+ 5 Squall (118-138): the drone turns home through a rain squall: the radar and LiDAR returns fill with rain speckle,
+   the picture degrades and recovers, the coast reappears ahead.
+ 6 Home (138-165): over the surveyed terrain, the drone deploys its recovery parachute near the battery, airbag,
+   settles; the camera drifts to the catapult where the next drone waits, prop starting = frame 0.
+Layout: p3-like: menu column right, the chase composed left-of-centre.
+
+=====================================================================================================
+PC  pc_anatomy.html   POINT CLOUD C: ANATOMY       (~160 s)   sources: p1_strike, p4_track, p3_coastline, p2_clutter, p5_confidence
+=====================================================================================================
+Signature: X-RAY. LiDAR that sees through things: the scan passes through steel and shows what is inside, like a
+museum cutaway in dots. The film is the life of one round from its container to over the horizon, and the reload that
+puts the next one in the tube. No engagement, no target, no guidance or countermeasure logic: it is about the machine
+and the battery, shown in the most beautiful dots of the six films.
+ 1 Inside (0-20): close on a TEL at night; p1's lightning-strike scan passes THROUGH the TLC walls: the dots reveal the
+   Oniks inside (HD.oniks: folded wings, booster, intake cover) and its tags condense as the evidence builds (p5-style
+   confidence: "OBJ in TLC 2 · 3M55 · 0.97").
+ 2 Exploded view (20-45): the round's parts float apart along its axis in a slow museum cutaway (intake + radome,
+   body sections, ramjet chamber, booster, wings, fins), each tagged with its public designation and size, then glide
+   back together. Keep it at the level of a museum placard or a public reference book.
+ 3 Erect (45-62): back out through the container wall; the TEL deploys: jacks down, the hydraulic ram extends (tagged,
+   dots flowing along the telescoping stages), the launcher rises to vertical, the cap line flickers.
+ 4 Launch (62-82): p4's EO tracker takes over: reticle, lag, boxes on the cap, gas cloud, plume and the round on its true
+   bounds, magnified inset; booster ejected from the nozzle, wings unfold (all visible in the inset).
+ 5 Coast (82-112): the camera follows the round's plume out over the edge of the bluff; p3's scan line materialises the
+   real seed-1337 coastline beneath as it passes; the round shrinks toward the horizon over p2's sea texture seen from
+   above; its plume dots drift and fade.
+ 6 Reload (112-160): the camera sinks back to the battery; a transloader crane truck (build it from GEO primitives in
+   your page, or stub from HD.tel's chassis) swings a fresh TLC onto the TEL; the X-ray scan passes through it and the
+   next round appears inside = frame 0.
+Layout: p4/p5-like: menu as a centred row along the bottom, compact readout top-left.

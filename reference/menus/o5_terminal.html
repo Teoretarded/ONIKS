@@ -1,0 +1,510 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Oniks — Terminal</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=DM+Mono:wght@400;500&display=block">
+<link rel="stylesheet" href="common/orbital.css">
+<style>
+  .logo { left: 50%; top: 54px; transform: translateX(-50%); font-size: 20px; }
+  .sub { left: 50%; top: 88px; transform: translateX(-50%); font: 400 11.5px var(--mono); color: var(--w3); letter-spacing: 0; white-space: nowrap; }
+  .menu { left: 96px; top: 672px; width: 330px; padding-left: 22px; }
+  .menu::before { content: ''; position: absolute; left: 0; top: 6px; bottom: 6px; width: 1px; background: var(--wr); }
+  .menu .it { grid-template-columns: 36px 1fr auto; height: 44px; font-size: 28px; letter-spacing: -.025em; }
+  .menu .it::before { content: ''; position: absolute; left: -26px; top: 50%; width: 9px; height: 1px; background: var(--w); transform: scaleX(0); transform-origin: 0 50%; transition: transform .2s; }
+  .menu .it.on::before { transform: scaleX(1); }
+  .menu .it .n { font-size: 12px; }
+  .menu .it .go { font-size: 12px; }
+  .menu .it .bar { bottom: 4px; }
+  .blurb { left: 154px; top: 904px; width: 380px; font-size: 14px; }
+  .keys { left: 50%; bottom: 52px; transform: translateX(-50%); gap: 20px; font-size: 12.5px; }
+  .keys b { font-size: 11.5px; margin-right: 6px; }
+  .fig { right: 96px; bottom: 52px; text-align: right; font-size: 13px; }
+  .foot { right: 96px; top: 62px; }
+  .log { right: 96px; top: 676px; width: 350px; font: 400 12.5px var(--mono); letter-spacing: 0; }
+  .log .r { display: grid; grid-template-columns: 70px 1fr; padding: 5px 0; color: var(--w3); animation: fadein .3s ease-out; white-space: nowrap; }
+  .log .r b { font-weight: 400; color: var(--w2); }
+  .log .r.now, .log .r.now b { color: var(--hi); }
+  .call { opacity: 0; }
+</style></head>
+<body><div id="stage">
+  <canvas id="c"></canvas>
+  <div class="ui" id="ui">
+    <div class="logo abs"><svg viewBox="0 0 24 24" fill="none" stroke="#F6F5F2" stroke-width="1.2"><circle cx="11" cy="13" r="8.2"/><path d="M1.5 22.5 22 2"/><rect x="19.2" y="1.4" width="3.8" height="3.8" fill="#F6F5F2" stroke="none"/></svg>Oniks</div>
+    <div class="sub abs">Coastal Defense Command</div>
+    <div class="foot abs">Proto v0.5.0</div>
+    <div class="menu abs" id="menu"></div>
+    <div class="blurb abs" id="blurb"></div>
+    <div class="log abs" id="log"></div>
+    <div class="keys abs"><span><b>↑↓</b>Select</span><span><b>Enter</b>Open</span><span><b>G</b>Graphics</span><span><b>Esc</b>Quit</span></div>
+    <div class="fig abs"><b>Fig. 5</b>Terminal — 3M55 salvo on a destroyer</div>
+  </div>
+  <div class="veil" id="veil"><div class="msg">Stand the battery down.</div></div>
+</div>
+<script src="common/m3.js"></script><script src="common/orb.js"></script><script src="common/wire.js"></script><script src="common/geo.js"></script><script src="common/stage.js"></script>
+<script>
+(() => {
+const { V, R, X, E, Cam, rng } = M3;
+STAGE.fit();
+STAGE.SFX.kind = 'orb';
+const D2R = Math.PI / 180;
+
+/* ---------- timeline ---------- */
+const LOOP = 34, T_DET = 4, VOX = 690;      // 3M55 terminal speed, Mach 2 at sea level
+const G = [0, -9.81, 0];
+const WIND = [1.6, .35, -8];                // relative wind: the destroyer is making ~16 kn north
+
+/* ---------- menu ---------- */
+const menuEl = document.getElementById('menu');
+menuEl.innerHTML = STAGE.ITEMS.map((t, i) => `<div class="it" data-item><span class="n">0${i + 1}</span><span class="lab">${ORB.swipe('o5' + t, { a: 1 })}<span class="tx">${t}</span></span><span class="go">↵</span><i class="bar"></i></div>`).join('');
+const veil = document.getElementById('veil');
+let seq = 0, rush = 0;
+STAGE.menu({
+  el: menuEl, blurb: document.getElementById('blurb'),
+  onEnter(i) {
+    if (i === 4) { veil.classList.add('on'); setTimeout(() => veil.classList.remove('on'), 1900); return 2600; }
+    // next salvo now: time runs fast (through whatever is left of this engagement) up to the next detection
+    if (seq < T_DET - .4 || seq > T_DET + .5) rush = 1;
+    return 1900;
+  },
+});
+
+/* ---------- canvas ---------- */
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let K = 1;
+function size() { K = Math.min(2, Math.max(1, (devicePixelRatio || 1) * STAGE.scale)); cv.width = 1920 * K; cv.height = 1080 * K; }
+size(); addEventListener('resize', () => { STAGE.fit(); size(); });
+
+const cam = new Cam(); cam.fov = 40 * D2R; cam.cx = 905; cam.cy = 690; cam.near = .5;
+const W = new Wire(cam, { fog: [400, 17500] });
+const DDG = GEO.destroyer(), OX = GEO.oniks(), SM = GEO.interceptor();
+// Phalanx mounts: forward superstructure roof and aft deckhouse
+const CIWS = [[0, 17, 19], [0, 14.5, -44]];
+const CIWS_M = { parts: [{ name: 'ciws', prims: [GEO.cyl([0, 0, 0], [0, .9, 0], 1.25, { n: 14, gen: 0 }), GEO.lathe([0, .9, 0], [0, 1, 0], [[0, 1.05], [1.3, .98], [2.1, .62], [2.45, 0]], { n: 14, gen: 6 })] }] };
+const CELLS = [[-1.2, 8.5, 41.5], [1.3, 8.5, 44.6]];
+const SPY = [6.35, 12.4, 22];
+
+/* ---------- sea: swell lines laid across the mean view, spacing growing with range ---------- */
+const MEAN = 46 * D2R, FW = [Math.sin(MEAN), 0, Math.cos(MEAN)], RT = [Math.cos(MEAN), 0, -Math.sin(MEAN)];
+const PC = V.mad([0, 0, 0], FW, -310);
+const SEA = [];
+for (let k = 0; k < 54; k++) {
+  const d = 22 + 8.5 * Math.pow(k, 1.95), half = d * .85 + 160, n = 60, row = [];
+  for (let i = 0; i <= n; i++) { const u = -1 + 2 * i / n; row.push(V.add(V.mad(PC, FW, d), V.mul(RT, u * half))); }
+  SEA.push({ d, row });
+}
+const swell = (x, z, t) => .75 * Math.sin(.042 * (x * .8 + (z + t * 8) * .6) - 1.05 * t) + .38 * Math.sin(.083 * (-x * .3 + (z + t * 8) * .95) - 1.6 * t + 1.3);
+
+/* ---------- a cycle: three rounds, two SM-6, CIWS, one hit ---------- */
+const sm6S = tau => 1150 * (tau - 1.8 * (1 - Math.exp(-tau / 1.8)));   // boost to ~Mach 3.4
+const sm6V = tau => 1150 * (1 - Math.exp(-tau / 1.8));
+function rPos(Rd, s, nominal) {
+  const r = Rd.r0 - VOX * (s - T_DET);
+  let lat = 0;
+  if (!nominal && Rd.jink) lat = Rd.jink * E.ss(C.sm[1].tHit - 1.1, C.sm[1].tHit - .2, s) * E.ss(40, 1500, r);
+  if (Rd.weave) lat += Rd.weave * Math.sin((s - T_DET) * 2.6 + Rd.ph) * E.ss(5200, 3600, r) * E.ss(60, 700, r);
+  const h = (11 - Rd.aim[1]) * E.ss(0, 520, r) + .7 * Math.sin(s * 1.9 + Rd.ph) * E.ss(150, 1200, r);
+  return [Rd.aim[0] + Rd.dir[0] * r + Rd.side[0] * lat, Rd.aim[1] + h, Rd.aim[2] + Rd.dir[2] * r + Rd.side[2] * lat];
+}
+function bez(P0, P3) {
+  const hx = P3[0] - P0[0], hz = P3[2] - P0[2], D = Math.hypot(hx, hz), tx = hx / D, tz = hz / D;
+  const P1 = [P0[0], P0[1] + .15 * D + 160, P0[2]], P2 = [P3[0] - tx * .38 * D, P3[1] + .07 * D, P3[2] - tz * .38 * D];
+  const n = 320, pts = [], cum = [0];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n, a = (1 - t) ** 3, b = 3 * (1 - t) ** 2 * t, c = 3 * (1 - t) * t * t, d = t ** 3;
+    pts.push([a * P0[0] + b * P1[0] + c * P2[0] + d * P3[0], a * P0[1] + b * P1[1] + c * P2[1] + d * P3[1], a * P0[2] + b * P1[2] + c * P2[2] + d * P3[2]]);
+    if (i) cum.push(cum[i - 1] + V.dist(pts[i - 1], pts[i]));
+  }
+  return { pts, cum, L: cum[n] };
+}
+function planSM6(cell, tL, Rd) {
+  // fixed point on the time of flight: the round closes at 690 m/s, so each pass contracts the error ~0.6x
+  let T = 8, path;
+  for (let it = 0; it < 28; it++) {
+    path = bez(cell, rPos(Rd, tL + T, true));
+    let lo = .5, hi = 25; for (let k = 0; k < 40; k++) { const m = (lo + hi) / 2; if (sm6S(m) < path.L) lo = m; else hi = m; }
+    T = (lo + hi) / 2;
+  }
+  // when the round passed each path sample, for the smoke line drawn along the flown path
+  const sEnd = sm6S(T), tau = path.cum.map(c => { let lo = 0, hi = T; for (let k = 0; k < 30; k++) { const m = (lo + hi) / 2; if (sm6S(m) / sEnd * path.L < c) lo = m; else hi = m; } return (lo + hi) / 2; });
+  return { cell, tL, T, tHit: tL + T, path, Rd, sEnd, tau };
+}
+function smAt(m, s) {
+  const tau = s - m.tL;
+  if (tau <= 0) return { p: m.cell.slice(), dir: [0, 1, 0], v: 0 };
+  const P = m.path;
+  if (tau >= m.T) {
+    const a = P.pts[P.pts.length - 2], b = P.pts[P.pts.length - 1], d = V.norm(V.sub(b, a)), v = sm6V(m.T) * P.L / m.sEnd;
+    return { p: V.mad(b, d, v * (tau - m.T)), dir: d, v };
+  }
+  const L = sm6S(tau) / m.sEnd * P.L;
+  let lo = 0, hi = P.cum.length - 1; while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (P.cum[mid] < L) lo = mid; else hi = mid; }
+  const k = (L - P.cum[lo]) / (P.cum[hi] - P.cum[lo] || 1);
+  return { p: V.lerp(P.pts[lo], P.pts[hi], k), dir: V.norm(V.sub(P.pts[hi], P.pts[lo])), v: sm6V(tau) * P.L / m.sEnd };
+}
+let C = null;
+function setup(n) {
+  const r = rng(500 + n * 17), j = () => (r() - .5) * 3;
+  const mk = (id, b, r0, aim, o) => { const a = (b + j()) * D2R; return Object.assign({ id, b: a, r0, aim, dir: [Math.sin(a), 0, Math.cos(a)], side: [Math.cos(a), 0, -Math.sin(a)], ph: r() * 6.28, alive: true, done: 0 }, o || {}); };
+  // multi-axis salvo: the rounds were programmed to arrive from three bearings
+  const rounds = [mk(1, 20, 13500, [2, 7, 40]), mk(2, 82, 14400, [8, 7, 30]), mk(3, 68, 15600, [9.8, 4.2, -6], { jink: 30, weave: 14 })];
+  C = { n, rounds, t3: T_DET + rounds[2].r0 / VOX };
+  C.sm = [planSM6(CELLS[0], 5.4, rounds[0])];
+  C.sm.push(planSM6(CELLS[1], 6.3, rounds[2]));
+  const R2 = rounds[1];
+  C.k2 = T_DET + (R2.r0 - 480) / VOX;                  // CIWS kill of round 2 at 480 m
+  C.ciws = [{ Rd: R2, t0: T_DET + (R2.r0 - 2300) / VOX, t1: C.k2 }, { Rd: rounds[2], t0: C.k2 + .3, t1: C.t3 - .04 }];
+  C.fired = new Set(); C.frag = []; C.puffs = []; C.splash = []; C.plates = [];
+  C.body2 = null; C.miss2 = null; C.emit = [0, 0];
+  logEl.innerHTML = ''; logged.clear();
+  log('srch', 0, 'Surface search · clear', -1);
+}
+
+/* ---------- log ---------- */
+const logEl = document.getElementById('log'), logged = new Set();
+function log(key, t, txt, neg) {
+  if (logged.has(key)) return; logged.add(key);
+  logEl.querySelectorAll('.r').forEach(r => r.classList.remove('now'));
+  const ts = neg ? '——' : 'T+' + t.toFixed(1).padStart(4, '0');
+  logEl.insertAdjacentHTML('beforeend', `<div class="r now"><b>${ts}</b><span>${txt}</span></div>`);
+  while (logEl.children.length > 5) logEl.firstChild.remove();
+}
+
+/* ---------- effects ---------- */
+function puff(p, o) { C.puffs.push(Object.assign({ p: p.slice(), v: [0, 0, 0], age: 0, life: 6, r0: .5, gr: 2, a: .5, U: null, Vv: null }, o)); if (C.puffs.length > 900) C.puffs.shift(); }
+function burst(at, vel, n, sp, seed, big) {
+  const r = rng(seed);
+  for (let i = 0; i < n; i++) {
+    const u = r() * 2 - 1, a = r() * 6.283, h = Math.sqrt(1 - u * u), s = sp * (.25 + r());
+    C.frag.push({ p: at.slice(), v: V.add(V.mul(vel, .2 + r() * .5), [Math.cos(a) * h * s, Math.abs(u) * s * .7 + 8, Math.sin(a) * h * s]), age: 0, life: 2 + r() * 2.5, k: .5 + r() * .8 });
+  }
+  C.splash.push({ kind: 'burst', p: at.slice(), age: 0, big });
+}
+function splashAt(p, big) { C.splash.push({ kind: 'water', p: [p[0], 0, p[2]], age: 0, big: big || 1 }); }
+
+/* ---------- update ---------- */
+const r0 = rng(77);
+let shake = 0, flash = 0, jolt = -99;
+setup(0);
+function update(dt) {
+  let sp = 1;
+  if (rush) {
+    const target = T_DET - .3, rem = seq < target ? target - seq : LOOP - seq + target;
+    sp = Math.max(1, Math.min(9, rem / .35));
+    if (rem < dt * sp + .01) { rush = 0; sp = 1; }
+  }
+  const dts = dt * sp;
+  const prev = seq;
+  seq += dts;
+  if (seq >= LOOP) { seq -= LOOP; setup(C.n + 1); }
+  const s = seq, fire = (key, t) => { if (C.fired.has(key) || s < t) return false; C.fired.add(key); return true; };
+  const [R1, R2, R3] = C.rounds;
+  const brg = Rd => String(Math.round(Rd.b / D2R)).padStart(3, '0');
+
+  if (fire('det', T_DET)) { log('det', 0, `3 inbound · ${brg(R1)}–${brg(R3)}° · 13.5 km`); STAGE.SFX.tone(1200, 1200, .12, 'sine', .04); STAGE.SFX.tone(1200, 1200, .12, 'sine', .04, .18); }
+  // SM-6 launches: hot gas out of the Mk 41 uptakes, then the boost
+  C.sm.forEach((m, i) => {
+    if (fire('L' + i, m.tL)) {
+      log('L' + i, m.tL - T_DET, `SM-6 away · cell ${i ? 24 : 11}`);
+      STAGE.SFX.rumble(3.2, .2); shake = Math.max(shake, 3);
+      for (let k = 0; k < 16; k++) { const a = r0() * 6.283, v = 3 + r0() * 7; puff(V.add(m.cell, [0, .5, 0]), { v: [Math.cos(a) * v, 2 + r0() * 4, Math.sin(a) * v], life: 3 + r0() * 2, r0: 1, gr: 3.2, a: .42 }); }
+    }
+    const tau = s - m.tL;
+    if (tau > 0 && tau < 5.2 && s < m.tHit) {
+      const st = smAt(m, s);
+      C.emit[i] += st.v * dts;
+      const spacing = 1.2 + .045 * st.v;
+      let guard = 0;
+      while (C.emit[i] > spacing && guard++ < 40) {
+        C.emit[i] -= spacing;
+        const back = C.emit[i] / Math.max(1, st.v);
+        const ax = V.norm(V.add(st.dir, [(r0() - .5) * .5, (r0() - .5) * .5, (r0() - .5) * .5]));
+        const [U, Vv] = GEO.perp(ax), sq = .7 + r0() * .5, rot = r0() * 6.283;
+        const U2 = V.add(V.mul(U, Math.cos(rot)), V.mul(Vv, Math.sin(rot))), V2 = V.mul(V.add(V.mul(Vv, Math.cos(rot)), V.mul(U, -Math.sin(rot))), sq);
+        const at = V.add(V.mad(st.p, st.dir, -4 - st.v * back), [(r0() - .5) * 1.2, (r0() - .5) * 1.2, (r0() - .5) * 1.2]);
+        puff(at, { U: U2, Vv: V2, v: V.add(WIND, [(r0() - .5) * 2, (r0() - .5) * 1.4, (r0() - .5) * 2]), life: 11 + r0() * 5, r0: .6 + r0() * .5, gr: 1.8 + r0() * 1.6, a: .4 });
+      }
+    }
+  });
+  // round 1: intercepted
+  const m1 = C.sm[0];
+  if (fire('K1', m1.tHit)) {
+    R1.alive = false; R1.deadAt = s; const p = rPos(R1, m1.tHit);
+    burst(p, V.mul(R1.dir, -VOX), 70, 190, 9 + C.n, 1.4);
+    log('K1', s - T_DET, `Splash one · ${(V.len([p[0], 0, p[2]]) / 1000).toFixed(1)} km`);
+    STAGE.SFX.crack(); shake = Math.max(shake, 2.5); flash = Math.max(flash, .25);
+  }
+  // round 3 sidesteps under SM-6 #2; round 2 falls to the CIWS at 480 m
+  const m2 = C.sm[1];
+  if (fire('M2', m2.tHit)) {
+    const miss = V.dist(rPos(R3, m2.tHit), smAt(m2, m2.tHit).p);
+    C.miss2 = miss; log('M2', s - T_DET, `Miss · ${Math.round(miss)} m · round 3 leaking`);
+  }
+  if (fire('SD2', m2.tHit + 2.6)) { const p = smAt(m2, m2.tHit + 2.6).p; burst(p, [0, 0, 0], 26, 70, 31 + C.n, .6); m2.gone = true; }
+  C.ciws.forEach((c, i) => { if (fire('C' + i, c.t0)) { log('C' + i, s - T_DET, i ? 'CIWS · shift to round 3' : `CIWS · engage · ${(V.len(rPos(c.Rd, s)) / 1000).toFixed(1)} km`); STAGE.SFX.noise(c.t1 - c.t0, 2400, .6, .045, .02); } });
+  if (fire('K2', C.k2)) {
+    R2.alive = false; const p = rPos(R2, C.k2), v = V.mul(V.sub(rPos(R2, C.k2 + .01), p), 100);
+    burst(p, v, 36, 90, 17 + C.n, .8);
+    C.body2 = { p, v: V.add(v, [0, -7, 0]), spin: 0 };
+    log('K2', s - T_DET, 'Splash two · 480 m'); STAGE.SFX.crack();
+  }
+  if (C.body2 && !C.body2.wet) {
+    const b = C.body2; b.v = V.add(V.mul(b.v, Math.exp(-2.3 * dts)), V.mul(G, dts)); b.p = V.mad(b.p, b.v, dts); b.spin += 14 * dts;
+    if (b.p[1] <= 0) { b.wet = true; splashAt(b.p, 1.6); log('NM', s - T_DET, `Near miss · ${Math.round(Math.hypot(b.p[0], b.p[2]))} m to starboard`); }
+  }
+  // round 3: the leaker
+  if (fire('HIT', C.t3)) {
+    R3.alive = false; const p = rPos(R3, C.t3);
+    C.hit = { p, t: s };
+    flash = 1; shake = 14; jolt = s; STAGE.SFX.crack(); STAGE.SFX.rumble(4, .3);
+    burst(p, [120, 20, 0], 110, 150, 23 + C.n, 0);
+    const rr = rng(40 + C.n);
+    for (let i = 0; i < 14; i++) C.plates.push({ p: V.add(p, [(rr() - .5) * 3, (rr() - .5) * 4, (rr() - .5) * 8]), v: [8 + rr() * 30, 6 + rr() * 22, (rr() - .5) * 30], ax: V.norm([rr() - .5, rr() - .5, rr() - .5]), L: 2 + rr() * 4, w: (rr() - .5) * 9, a: rr() * 6, age: 0 });
+    log('HIT', s - T_DET, 'Hit · starboard, frame 118');
+  }
+  if (C.hit && s - C.hit.t < 4.2 && r0() < dts * 7) puff(V.add(C.hit.p, [1.5 + r0() * 2, 3 + r0() * 3, (r0() - .5) * 6]), { v: V.add(WIND, [0, 4 + r0() * 3, 0]), life: 3.5 + r0() * 1.5, r0: 1.5, gr: 3.2, a: .34 });
+  if (fire('DC', C.t3 + 4.5)) log('DC', C.t3 + 4.5 - T_DET, 'Damage control · fire amidships');
+
+  // integrate
+  for (const p of C.puffs) { p.age += dts; p.v = V.add(WIND, V.mul(V.sub(p.v, WIND), Math.exp(-dts * (p.U ? .4 : 1.2)))); p.p = V.mad(p.p, p.v, dts); }
+  C.puffs = C.puffs.filter(p => p.age < p.life);
+  for (const f of C.frag) {
+    f.age += dts; f.v = V.add(V.mul(f.v, Math.exp(-f.k * dts)), V.mul(G, dts)); f.p = V.mad(f.p, f.v, dts);
+    if (f.p[1] < 0 && !f.wet) { f.wet = true; f.life = Math.min(f.life, f.age + .05); if (r0() < .12) splashAt(f.p, .2); }
+  }
+  C.frag = C.frag.filter(f => f.age < f.life);
+  for (const q of C.plates) { q.age += dts; q.v = V.add(V.mul(q.v, Math.exp(-.3 * dts)), V.mul(G, dts)); q.p = V.mad(q.p, q.v, dts); q.a += q.w * dts; if (q.p[1] < 0 && !q.wet) { q.wet = true; splashAt(q.p, .35); } }
+  C.plates = C.plates.filter(q => !q.wet);
+  for (const w of C.splash) w.age += dts;
+  C.splash = C.splash.filter(w => w.age < 4.5);
+  shake *= Math.exp(-dts * 4); flash = Math.max(0, flash - dts * 2.6);
+  STAGE.dbg = { seq: +s.toFixed(2), puffs: C.puffs.length, frag: C.frag.length, t3: +C.t3.toFixed(2), m1: +m1.tHit.toFixed(2), m2: +m2.tHit.toFixed(2) };
+}
+
+/* ---------- callouts ---------- */
+const ui = document.getElementById('ui');
+function callout(html) { const d = document.createElement('div'); d.className = 'call'; d.innerHTML = html; ui.appendChild(d); return d; }
+const cR = [1, 2, 3].map(i => callout(ORB.cat(`3M55 · ${i}`, { code: 'R' + i }) + '<span class="s2"></span>'));
+const cS = [1, 2].map(i => callout(ORB.cat(`SM-6 · ${i}`, { code: 'SM6' + i, sq: 'o' }) + '<span class="s2"></span>'));
+const KEEP = [[720, 36, 1200, 128], [60, 650, 560, 960], [1440, 650, 1900, 900], [600, 1000, 1320, 1045], [1500, 1010, 1900, 1045], [1680, 50, 1900, 90]];
+const leaders = [];
+function place(el, anchor, dx, dy, a) {
+  if (!anchor || a <= .01) { el.style.opacity = 0; return; }
+  const w = el.offsetWidth, h = 34, [ax, ay] = anchor;
+  const box = sx => { const d = dx * sx, ex2 = ax + d, hx = ex2 + (d >= 0 ? 18 : -18), x0 = d >= 0 ? hx + 8 : hx - 8 - w, y0 = ay + dy - 6; return { ex2, hx, x0, y0, bad: x0 < 20 || x0 + w > 1900 || y0 < 20 || y0 + h > 1060 || KEEP.some(r => x0 < r[2] && x0 + w > r[0] && y0 < r[3] && y0 + h > r[1]) }; };
+  let b = box(1); if (b.bad) { const b2 = box(-1); if (!b2.bad) b = b2; }
+  if (b.bad) { el.style.opacity = 0; return; }
+  leaders.push([ax, ay, b.ex2, ay + dy, b.hx, a]);
+  el.style.opacity = a;
+  el.style.transform = `translate(${b.x0.toFixed(1)}px, ${b.y0.toFixed(1)}px)`;
+}
+
+/* ---------- render ---------- */
+function shipXf(t) {
+  let roll = 1.1 * D2R * Math.sin(t * .7), pitch = .35 * D2R * Math.sin(t * .9 + 1), heave = .3 * Math.sin(t * .8 + .4);
+  const a = seq - jolt;
+  if (a > 0 && a < 6) { roll += 2.6 * D2R * Math.exp(-1.3 * a) * Math.sin(5 * a); heave -= .6 * Math.exp(-3 * a) * Math.sin(9 * a); }
+  return X.make(R.mul(R.z(roll), R.x(pitch)), [0, heave, 0]);
+}
+function yawAt(s) { const w = s < 28.5 ? -1 + 2 * E.ss(0, 28.5, s) : 1 - 2 * E.ss(28.5, LOOP, s); return (46 + 5 * w) * D2R; }
+
+function render(t) {
+  const s = seq;
+  const yaw = yawAt(s), dist = 300 - 45 * E.ss(17, 26, s) * (1 - E.ss(28, 33.5, s));
+  // the camera looks up after the launches, then settles back on the horizon
+  const look = E.ss(5.5, 7.4, s) * (1 - E.ss(9.5, 12.5, s));
+  cam.orbit([0, 10 + 30 * look, 4], yaw, (4.6 - 9 * look) * D2R, dist);
+  cam.shake = [(Math.random() - .5) * shake, (Math.random() - .5) * shake]; cam.update();
+  ctx.setTransform(K, 0, 0, K, 0, 0);
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, 1920, 1080);
+  W.reset(); W.style('#F6F5F2', 1);
+
+  // horizon
+  const fl = V.norm([cam.f[0], 0, cam.f[2]]), rt = V.norm(V.cross([0, 1, 0], fl)), hz = [];
+  for (const sg of [-1, 1]) { const p = cam.project(V.add(cam.eye, V.add(V.mul(fl, 1e5), V.mul(rt, sg * 1.6e5)))); if (p) hz.push(p); }
+  if (hz.length === 2) W.seg2(hz[0][0], hz[0][1], hz[1][0], hz[1][1], .34);
+
+  // swell, broken around the hull
+  for (const { d, row } of SEA) {
+    const a = .22 * Math.pow(1 - d / 26000, 3) * (d < 60 ? d / 60 : 1);
+    let prev = null;
+    for (const q of row) {
+      const inHull = Math.abs(q[0]) < 11.5 && Math.abs(q[2]) < 80;
+      const p = inHull ? null : [q[0], swell(q[0], q[2], t) * Math.min(1, 300 / d + .15), q[2]];
+      if (prev && p) W.seg(prev, p, a);
+      prev = p;
+    }
+  }
+  // wake: Kelvin arms off the stern, a churned centreline, bow wave
+  for (const sg of [-1, 1]) {
+    let pv = [sg * 5, 0, -76];
+    for (let i = 1; i <= 24; i++) { const L = i * 30, q = [sg * (5 + L * Math.sin(19.5 * D2R)) + 1.2 * Math.sin(i * 1.7 + t * 2), 0, -76 - L * Math.cos(19.5 * D2R)]; W.seg(pv, q, .26 * (1 - i / 26)); pv = q; }
+    W.seg([sg * 3, 0, 74], [sg * 13, 0, 44], .3); W.seg([sg * 13, 0, 44], [sg * 17, 0, 20], .14);
+  }
+  for (let i = 0; i < 30; i++) { const z0 = -80 - i * 18 - (t * 8) % 18, x0 = 2.5 * M3.noise(i * .7, t * .3); W.seg([x0, 0, z0], [x0 + .6, 0, z0 - 9], .2 * (1 - i / 32)); }
+
+  // the destroyer, CIWS mounts, radar arcs
+  const SX = shipXf(t);
+  const ja = s - jolt, jit = ja > 0 && ja < .35 ? (1 - ja / .35) * .9 : 0;
+  const SXd = jit ? X.make(SX.R, V.add(SX.T, [(Math.random() - .5) * jit, (Math.random() - .5) * jit, (Math.random() - .5) * jit])) : SX;
+  GEO.draw(W, DDG, SXd, {}, { a: .92 });
+  const [R1, R2, R3] = C.rounds;
+  const act = C.ciws.find(c => s > c.t0 && s < c.t1 && c.Rd.alive);
+  CIWS.forEach(mp => {
+    const w = X.ap(SXd, mp);
+    GEO.draw(W, CIWS_M, X.make(SXd.R, w), {}, { a: .85 });
+    const aimP = act ? rPos(act.Rd, s + V.dist(w, rPos(act.Rd, s)) / 1100) : V.add(w, [Math.sin(1.1), .1, Math.cos(1.1)]);
+    const dir = V.norm(V.sub(aimP, V.add(w, [0, 1.7, 0])));
+    W.seg(V.add(w, [0, 1.7, 0]), V.mad(V.add(w, [0, 1.7, 0]), dir, 2.6), .95);
+  });
+  if (s > T_DET && s < C.t3 + .5) {
+    const live = C.rounds.filter(r => r.alive);
+    const spy = X.ap(SX, SPY);
+    // each pulse is a patch of expanding spherical shell: wide search sector first, then narrow track beams
+    for (let k = Math.floor((s - T_DET) / .7); k >= 0; k--) {
+      const age = s - T_DET - k * .7; if (age > 1.8) break;
+      const rad = 30 + 950 * age, al = .34 * Math.pow(1 - age / 1.8, 1.5);
+      let b0, b1, e1;
+      if (s < 7.5 || !live.length) { b0 = 16 * D2R; b1 = 78 * D2R; e1 = 12 * D2R; }
+      else { const tr = live[k % live.length]; b0 = tr.b - 5 * D2R; b1 = tr.b + 5 * D2R; e1 = 7 * D2R; }
+      const at = (b, e) => [spy[0] + Math.sin(b) * Math.cos(e) * rad, spy[1] + Math.sin(e) * rad, spy[2] + Math.cos(b) * Math.cos(e) * rad];
+      const n = 22;
+      // arcs only, tapered to nothing at the ends so a pulse reads as a wavefront, not a frame
+      for (const [e, w] of [[0, 1], [e1 * .4, .4]]) { let pv = null; for (let i = 0; i <= n; i++) { const q = at(b0 + (b1 - b0) * i / n, e); if (pv) W.seg(pv, q, al * w * Math.sin(Math.PI * (i - .5) / n)); pv = q; } }
+    }
+  }
+
+  // rounds
+  const anchors = [];
+  C.rounds.forEach((Rd, i) => {
+    if (s < T_DET || !Rd.alive) { anchors[i] = null; return; }
+    const p = rPos(Rd, s), q = rPos(Rd, s + .02), dir = V.norm(V.sub(q, p)), dc = V.dist(p, cam.eye);
+    if (dc < 3000) GEO.draw(W, OX, X.make(R.look(dir, [0, 1, 0]), p), {}, { a: 1 });
+    W.seg(V.mad(p, dir, -4.6), V.mad(p, dir, -4.6 - 5 - 3 * Math.random()), .5);
+    const sp2 = cam.project(p);
+    if (sp2) { const fade = E.ss(T_DET, T_DET + .6, s); W.seg2(sp2[0] - 3, sp2[1], sp2[0] + 3, sp2[1], fade); W.seg2(sp2[0], sp2[1] - 3, sp2[0], sp2[1] + 3, fade); }
+    anchors[i] = sp2;
+  });
+
+  // SM-6s: a drifting smoke line along the flown path under the rings
+  const sAnch = [];
+  C.sm.forEach((m, i) => {
+    sAnch[i] = null;
+    if (s < m.tL) return;
+    {
+      const P = m.path.pts, drift = (p, tp) => V.mad(p, WIND, s - tp);
+      let pv = null;
+      for (let j = 0; j < P.length; j += 2) {
+        const tp = m.tL + m.tau[j]; if (tp > s) break;
+        const q = drift(P[j], tp), age = s - tp, a = .5 * Math.pow(1 - E.sat(age / 15), 1.4) * (m.tau[j] < 5.2 ? 1 : .45);
+        if (pv) W.seg(pv, q, a); pv = q;
+      }
+      if (i === 1 && s > m.tHit && pv) { const e = smAt(m, Math.min(s, m.tHit + 2.6)).p; W.seg(pv, drift(e, Math.min(s, m.tHit + 2.6)), .25 * (1 - E.sat((s - m.tHit) / 12))); }
+    }
+    if (m.gone) return;
+    if (i === 0 && s >= m.tHit) return;
+    const st = smAt(m, s), dc = V.dist(st.p, cam.eye);
+    if (dc < 2500) GEO.draw(W, SM, X.make(R.look(st.dir, [0, 1, 0]), st.p), {}, { a: 1 });
+    const tau = s - m.tL;
+    if (tau < 5.2) {
+      W.style('#FFFFFF', 1.4);
+      const nz = V.mad(st.p, st.dir, -3.3), L = 4 + 2 * Math.random() + st.v * .012;
+      W.seg(nz, V.mad(nz, st.dir, -L), 1); W.seg(nz, V.mad(nz, st.dir, -L * .6), .8);
+      W.style('#F6F5F2', 1);
+    }
+    const p = cam.project(st.p);
+    if (p) { W.seg2(p[0] - 3, p[1] - 3, p[0] + 3, p[1] + 3, .9); W.seg2(p[0] - 3, p[1] + 3, p[0] + 3, p[1] - 3, .9); }
+    sAnch[i] = p;
+  });
+
+  // CIWS tracers: every third round of 75 rds/s is a tracer; each dash is a pure function of its firing time
+  C.ciws.forEach((c, ci) => {
+    if (s < c.t0 || s > c.t1 + 2.4) return;
+    CIWS.forEach((mp, mi) => {
+      const w = V.add(X.ap(SX, mp), [0, 1.7, 0]);
+      const k0 = Math.max(0, Math.floor((s - 2.2 - c.t0) * 25)), k1 = Math.floor((Math.min(s, c.t1) - c.t0) * 25);
+      for (let k = k0; k <= k1; k++) {
+        const tf = c.t0 + k / 25, age = s - tf; if (age < 0 || age > 2.2) continue;
+        const rr = rng(1000 * ci + 97 * mi + k + 7);
+        const tgt = rPos(c.Rd, tf + V.dist(w, rPos(c.Rd, tf)) / 1100);
+        let d = V.norm(V.sub(tgt, w));
+        const [U, Vv] = GEO.perp(d), e1 = M3.gauss(rr) * .0045 + .006 * Math.sin(tf * 9 + mi), e2 = M3.gauss(rr) * .0045 + .004 * Math.cos(tf * 7);
+        d = V.norm(V.add(d, V.add(V.mul(U, e1), V.mul(Vv, e2))));
+        const pos = a => V.add(V.mad(w, d, 1100 * a), [0, -4.9 * a * a, 0]);
+        W.seg(pos(Math.max(0, age - .011)), pos(age), .9 * (1 - age / 2.4));
+      }
+      if (s < c.t1 && c.Rd.alive && Math.random() < .8) { const fx = V.mad(w, V.norm(V.sub(rPos(c.Rd, s), w)), 3); W.disc(fx, .6 + Math.random() * .7, 8, .9); }
+    });
+  });
+
+  // smoke: rings on the boost paths, camera-facing puffs elsewhere
+  for (const p of C.puffs) {
+    const k = p.age / p.life, r = p.r0 + p.gr * Math.sqrt(p.age), a = p.a * Math.pow(1 - k, 1.3) * E.ss(0, .08, p.age);
+    if (p.U) W.ring(p.p, p.U, p.Vv, r, 12, a); else W.disc(p.p, r, 14, a);
+  }
+  // fragments, plates, bursts, splashes
+  for (const f of C.frag) W.seg(f.p, V.mad(f.p, f.v, -.025), .85 * (1 - f.age / f.life));
+  for (const q of C.plates) { const [U, Vv] = GEO.perp(q.ax), d = V.add(V.mul(U, Math.cos(q.a)), V.mul(Vv, Math.sin(q.a))); W.seg(V.mad(q.p, d, -q.L / 2), V.mad(q.p, d, q.L / 2), .9); }
+  for (const w of C.splash) {
+    if (w.kind === 'burst') {
+      for (const [U, Vv, k] of [[cam.r, cam.u, 0], [[1, 0, 0], [0, 0, 1], .12], [V.norm([1, 1, 0]), [0, 0, 1], .24]]) {
+        const u = E.sat((w.age - k) / 1.3); if (u <= 0 || u >= 1) continue;
+        W.ring(w.p, U, Vv, 8 + 150 * w.big * E.outCubic(u), 40, .85 * (1 - u));
+      }
+      if (w.age < .25) W.disc(w.p, 6 + 60 * w.age * w.big, 18, 1);
+    } else {
+      const u = E.sat(w.age / 3.4);
+      for (let r = 0; r < 3; r++) { const v = E.sat((w.age - r * .35) / 3); if (v > 0 && v < 1) W.ring(w.p, [1, 0, 0], [0, 0, 1], 2 + 40 * w.big * E.outCubic(v), 36, .5 * (1 - v)); }
+      const H = 28 * w.big * Math.sin(Math.PI * E.sat(w.age / 2.4));
+      if (H > .5) { const rr = rng(Math.round(w.p[0] * 13 + w.p[2])); for (let i = 0; i < 14; i++) { const a = rr() * 6.283, rad = (1 + rr() * 3) * w.big, h = H * (.5 + rr() * .6); W.seg([w.p[0] + Math.cos(a) * rad, 0, w.p[2] + Math.sin(a) * rad], [w.p[0] + Math.cos(a) * rad * 2.2, h, w.p[2] + Math.sin(a) * rad * 2.2], .55 * (1 - u)); } }
+    }
+  }
+  // body of round 2 tumbling in
+  if (C.body2 && !C.body2.wet) { const b = C.body2, d = V.norm(V.add(V.norm(b.v), [Math.sin(b.spin) * .8, Math.cos(b.spin) * .8, 0])); GEO.draw(W, OX, X.make(R.look(d, [0, 1, 0]), b.p), {}, { a: .9 }); }
+
+  // the hit: yellow marks the breach
+  let hitP = null;
+  if (C.hit) {
+    const a = s - C.hit.t, al = E.ss(0, .08, a) * (1 - E.ss(5, 7, a));
+    if (al > 0) {
+      const hp = X.ap(SX, [9.9, 4.2, -6]);
+      W.style('#F4D23C', 1.3);
+      W.ring(hp, [0, 1, 0], [0, 0, 1], 2.4 + 3 * E.outCubic(E.sat(a / .6)), 24, al);
+      W.ring(hp, [0, 1, 0], [0, 0, 1], 7.5 + 20 * E.outCubic(E.sat(a / 1.4)), 36, al * (1 - E.sat(a / 1.4)));
+      W.style('#F6F5F2', 1);
+      hitP = cam.project(hp);
+      if (a < 4) for (let i = 0; i < 5; i++) { const q = V.add(hp, [.5 + Math.random() * 2, Math.random() * 4, (Math.random() - .5) * 5]); W.seg(q, V.add(q, [Math.random() * .6, 1 + Math.random() * 2.5, 0]), .7 * (1 - a / 4)); }
+    }
+  }
+  W.flush(ctx);
+
+  // bloom on the burst / hit, full-frame flash
+  const bloom = (p3, rad, a) => { const p = cam.project(p3); if (!p) return; ctx.globalCompositeOperation = 'lighter'; const g = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], rad); g.addColorStop(0, `rgba(255,255,255,${a})`); g.addColorStop(.3, `rgba(255,250,235,${a * .3})`); g.addColorStop(1, 'rgba(255,250,235,0)'); ctx.fillStyle = g; ctx.fillRect(p[0] - rad, p[1] - rad, rad * 2, rad * 2); ctx.globalCompositeOperation = 'source-over'; };
+  for (const w of C.splash) if (w.kind === 'burst' && w.age < .6) bloom(w.p, 60 + 140 * w.big, .5 * (1 - w.age / .6));
+  if (C.hit && s - C.hit.t < 1.2) bloom(C.hit.p, 380, .7 * (1 - (s - C.hit.t) / 1.2));
+  C.sm.forEach(m => { const tau = s - m.tL; if (tau > 0 && tau < 1.2) bloom(smAt(m, s).p, 160, .45 * (1 - tau / 1.2)); });
+  if (flash > .3) { ctx.fillStyle = `rgba(255,255,255,${(flash - .3) * .42})`; ctx.fillRect(0, 0, 1920, 1080); }
+  if (hitP) { ctx.globalAlpha = 1 - E.ss(5, 7, s - C.hit.t); ctx.fillStyle = '#F4D23C'; ctx.fillRect(hitP[0] - 3, hitP[1] - 3, 6, 6); ctx.globalAlpha = 1; }
+
+  // callouts
+  leaders.length = 0;
+  C.rounds.forEach((Rd, i) => {
+    const el = cR[i], p = anchors[i];
+    if (!p) { place(el, null); return; }
+    const rng2 = V.len(rPos(Rd, s));
+    el.querySelector('.s2').innerHTML = `<b>${rng2 >= 1000 ? (rng2 / 1000).toFixed(1) + ' km' : Math.round(rng2) + ' m'}</b> · ${VOX} m/s`;
+    place(el, p, 44 + i * 6, -70 - (i % 2) * 44, E.ss(T_DET + .2, T_DET + .8, s) * (rng2 > 160 ? 1 : 0));
+  });
+  C.sm.forEach((m, i) => {
+    const el = cS[i], p = sAnch[i];
+    if (!p || s - m.tL < 1.4) { place(el, null); return; }
+    const tg = m.tHit - s;
+    el.querySelector('.s2').innerHTML = tg > 0 ? `intercept <b>${tg.toFixed(1)} s</b>` : `miss <b>${Math.round(C.miss2 || 0)} m</b>`;
+    place(el, p, -60, -56 + i * 30, 1 - E.ss(m.tHit + (i ? 1.8 : 0), m.tHit + (i ? 2.4 : .3), s));
+  });
+  ctx.strokeStyle = '#F6F5F2'; ctx.fillStyle = '#F6F5F2'; ctx.lineWidth = 1;
+  for (const [ax, ay, ex2, ey2, hx, a] of leaders) { ctx.globalAlpha = .7 * a; ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ex2, ey2); ctx.lineTo(hx, ey2); ctx.stroke(); }
+  ctx.globalAlpha = 1;
+}
+
+STAGE.run({ update, render });
+})();
+</script>
+</body></html>

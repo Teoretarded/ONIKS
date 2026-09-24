@@ -1,0 +1,70 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Oniks — Survey · Battle</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=block">
+<link rel="stylesheet" href="../menus/common/pc.css">
+<style>
+  .logo { left: 88px; top: 70px; }
+  .kick { left: 90px; top: 112px; }
+  .ver { right: 96px; top: 76px; }
+  .menu { right: 96px; top: 318px; display: flex; flex-direction: column; align-items: flex-end; gap: 16px; }
+  .menu .it { flex-direction: row-reverse; font-size: 44px; font-weight: 500; letter-spacing: -.035em; height: 54px; }
+  .menu .it .n { text-align: right; }
+  .blurb { right: 136px; top: 690px; width: 360px; text-align: right; }
+  .keys { right: 96px; bottom: 56px; }
+  .ro { left: 88px; bottom: 54px; font: 400 12.5px var(--mono); letter-spacing: .04em; color: var(--dim); }
+  .ro .row { display: flex; align-items: center; gap: 12px; white-space: nowrap; }
+  .ro .row i { width: 7px; height: 7px; background: var(--lime); flex: none; }
+  .ro b { font-weight: 400; color: #fff; font-variant-numeric: tabular-nums; }
+  .ro .rate { color: var(--lime); }
+  .ro .bar { width: 264px; height: 3px; margin: 0 0 12px 19px; position: relative;
+    background-image: radial-gradient(circle, rgba(255,255,255,.28) .9px, transparent 1.2px); background-size: 6px 3px; background-repeat: repeat-x; }
+  .ro .bar s { position: absolute; left: 0; top: 0; bottom: 0; width: 0;
+    background-image: radial-gradient(circle, #C6F432 1px, transparent 1.3px); background-size: 6px 3px; background-repeat: repeat-x; }
+  .ro .sub { margin: 7px 0 0 19px; color: var(--faint); font-size: 11.5px; }
+  .tag.drop b { background: transparent; color: rgba(255,255,255,.6); box-shadow: inset 0 0 0 1px rgba(255,255,255,.4); }
+  .tag.drop i { background: transparent; color: rgba(255,255,255,.6); }
+  .tag.sm { font-size: 10.5px; }
+  .tag.sm b, .tag.sm i, .tag.sm .v { padding: 4px 6px 3px; }
+  .tag.warn b { background: var(--coral); }
+  .inset { position: absolute; left: 88px; top: 168px; width: 544px; height: 306px; outline: 1px solid rgba(255,255,255,.28); transition: opacity .35s; }
+  #stage .inset canvas { position: absolute; left: 0; top: 0; width: 544px; height: 306px; }
+  .inset .l { position: absolute; left: 0; top: -24px; font: 500 11px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--dim); display: flex; gap: 10px; white-space: nowrap; }
+  .inset .l i { font-style: normal; color: var(--lime); }
+  .inset.off { opacity: 0; }
+  .bars { position: absolute; left: 0; top: 0; display: grid; grid-template-columns: auto 64px 34px; column-gap: 9px; row-gap: 6px; align-items: center; padding: 8px 10px 8px 9px; background: rgba(11,12,10,.72);
+    font: 500 10.5px/1 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); will-change: transform; transition: opacity .25s; }
+  .bars .b { height: 4px; background: rgba(255,255,255,.12); position: relative; }
+  .bars .b i { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(255,255,255,.75); }
+  .bars .v { text-align: right; color: rgba(255,255,255,.75); font-variant-numeric: tabular-nums; }
+  .bars .top { color: #fff; }
+  .bars .top.b i { background: var(--lime); }
+  .bars .top.v { color: var(--lime); }
+  .bars.off { opacity: 0; }
+</style></head>
+<body><div id="stage">
+  <canvas id="c" class="px" width="1920" height="1080"></canvas>
+  <canvas id="o" width="1920" height="1080"></canvas>
+  <div class="ui" id="ui">
+    <div class="logo abs"><svg viewBox="0 0 24 24"><path d="M12 2 20.5 22h-4.1L12 11.4 7.6 22H3.5z" fill="#fff"/><circle cx="12" cy="18.2" r="1.7" fill="#C6F432"/></svg>Oniks</div>
+    <div class="kick abs"><i></i><span id="kick">Orlan-10 / Catapult launch</span></div>
+    <div class="foot ver abs">Proto v0.5.0</div>
+    <div class="inset off" id="inset"><div class="l"><span id="insl">EO · NFOV</span><i id="insr"></i></div></div>
+    <div class="bars off" id="bars"></div>
+    <div class="menu abs" id="menu"></div>
+    <div class="blurb abs" id="blurb"></div>
+    <div class="keys abs"><span><b>↑↓</b>Select</span><span><b>Enter</b>Open</span><span><b>G</b>Graphics</span><span><b>Esc</b>Quit</span></div>
+    <div class="ro abs" id="ro"><div class="bar"><s id="rbar"></s></div><div class="row"><i></i><span id="rtxt"></span></div><div class="sub" id="rsub"></div></div>
+  </div>
+  <div class="veil" id="veil"><div class="msg"><i></i>Standing the battery down</div></div>
+</div>
+<script src="../menus/common/m3.js"></script>
+<script src="../menus/common/dots.js"></script>
+<script src="../menus/common/geo.js"></script>
+<script src="common/hd_land.js"></script>
+<script src="common/hd_sea_air.js"></script>
+<script src="../menus/common/theatre.js"></script>
+<script src="../menus/common/stage.js"></script>
+<script src="common/film.js"></script>
+<script src="pb_battle_world.js"></script>
+<script src="pb_battle_film.js"></script>
+</body></html>

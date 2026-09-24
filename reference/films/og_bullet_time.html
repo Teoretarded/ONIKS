@@ -1,0 +1,69 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Oniks · Bullet Time</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=DM+Mono:wght@400;500&display=block">
+<link rel="stylesheet" href="../menus/common/orbital.css">
+<style>
+  #menu { position: absolute; left: 96px; top: 392px; width: 452px; }
+  #menu .it { padding: 11px 0 12px; font-size: 36px; line-height: 1.12; letter-spacing: -.03em; border-top: 1px solid rgba(246,245,242,.1); }
+  #menu .it:last-child { border-bottom: 1px solid rgba(246,245,242,.1); }
+  #menu .it .n { font-size: 12.5px; transform: translateY(-9px); }
+  #menu .it .go { font-size: 14px; }
+  #blurb { position: absolute; left: 146px; top: 742px; width: 360px; min-height: 64px; }
+  #keys { position: absolute; left: 96px; bottom: 64px; }
+  #logo { position: absolute; left: 96px; top: 70px; }
+  #tag { position: absolute; left: 96px; top: 116px; font: 400 12px var(--mono); color: var(--w3); letter-spacing: 0; }
+  #clk { position: absolute; right: 96px; top: 58px; width: 334px; text-align: right; }
+  #clk .r { font: 300 58px/1 var(--sans); letter-spacing: -.045em; font-variant-numeric: tabular-nums; color: var(--w); }
+  #clk .r i { font-style: normal; color: var(--w3); margin-right: 1px; }
+  #clk .l { margin-top: 12px; font: 400 12.5px var(--mono); letter-spacing: 0; color: var(--w3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #clk .l b { font-weight: 400; color: var(--w); }
+  #clk .l .y { color: var(--hi); }
+  #clk .bar { position: relative; height: 1px; margin-top: 12px; background: rgba(246,245,242,.14); }
+  #clk .bar .k { position: absolute; top: -3px; width: 1px; height: 7px; background: rgba(246,245,242,.3); }
+  #clk .bar .h { position: absolute; top: -4px; width: 3px; height: 9px; margin-left: -1px; background: var(--hi); }
+  #log { position: absolute; right: 96px; top: 192px; width: 334px; font: 400 12px/1 var(--mono); color: var(--w3); letter-spacing: 0; }
+  #log .h { display: flex; justify-content: space-between; padding-bottom: 10px; margin-bottom: 9px; border-bottom: 1px solid rgba(246,245,242,.14); color: var(--w3); }
+  #log .h b { font-weight: 400; color: var(--w2); }
+  #log .r { display: grid; grid-template-columns: 74px 50px 1fr; padding: 4.5px 0; white-space: nowrap; overflow: hidden; }
+  #log .r .c { color: rgba(246,245,242,.26); font-variant-numeric: tabular-nums; }
+  #log .r .t { color: rgba(246,245,242,.26); }
+  #log .r.new { color: var(--hi); }
+  #log .r.new .t, #log .r.new .c { color: var(--w3); }
+  #fig { position: absolute; right: 96px; bottom: 64px; text-align: right; }
+  #fig .fig { font-size: 14px; }
+  #fig .sub { margin-top: 7px; font-size: 13px; color: var(--w3); letter-spacing: -.004em; }
+  #ro { position: absolute; right: 96px; bottom: 124px; font: 400 12.5px var(--mono); color: var(--w2); letter-spacing: 0; text-align: right; white-space: nowrap; }
+  #ro .k { color: var(--w3); margin-right: 10px; }
+  .call { opacity: 0; }
+  .call .cat { gap: 6px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="c" width="1920" height="1080"></canvas>
+  <div class="ui">
+    <div id="logo" class="logo"><svg viewBox="0 0 25 25" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="12.5" cy="12.5" r="10.5"/><path d="M2 12.5h21M12.5 2c-3.2 3-4.6 6.5-4.6 10.5s1.4 7.5 4.6 10.5M12.5 2c3.2 3 4.6 6.5 4.6 10.5s-1.4 7.5-4.6 10.5"/><rect x="11.3" y="11.3" width="2.4" height="2.4" fill="#F4D23C" stroke="none"/></svg><span>Oniks</span></div>
+    <div id="tag">Bastion · coastal defence simulator</div>
+    <div id="menu" class="menu"></div>
+    <div id="blurb" class="blurb"></div>
+    <div id="keys" class="keys"><span><b>↑↓</b>Select</span><span><b>Enter</b>Open</span><span><b>Esc</b>Quit</span></div>
+    <div id="clk"><div class="r" id="clkR"></div><div class="l" id="clkL"></div><div class="bar" id="clkBar"></div></div>
+    <div id="log"><div class="h"><span>Engagement log</span><b>DDG · Flight IIA</b></div><div id="logRows"></div></div>
+    <div id="ro"></div>
+    <div id="fig"><div class="fig" id="figT"></div><div class="sub" id="figS"></div></div>
+    <div id="calls"></div>
+  </div>
+</div>
+<script src="../menus/common/m3.js"></script>
+<script src="../menus/common/orb.js"></script>
+<script src="../menus/common/wire.js"></script>
+<script src="../menus/common/geo.js"></script>
+<script src="common/hd_land.js"></script>
+<script src="common/hd_sea_air.js"></script>
+<script src="../menus/common/stage.js"></script>
+<script src="common/film.js"></script>
+<script src="og_bullet_time_fast.js"></script>
+<script src="og_bullet_time_world.js"></script>
+<script src="og_bullet_time_fx.js"></script>
+<script src="og_bullet_time_film.js"></script>
+</body></html>

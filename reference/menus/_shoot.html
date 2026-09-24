@@ -1,0 +1,33 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>shoot</title>
+<style>body{margin:0;background:#111;color:#ccc;font:13px Consolas,monospace}iframe{width:1920px;height:1080px;border:0;position:absolute;left:0;top:0}#log{position:fixed;right:10px;top:10px;z-index:9;white-space:pre}</style></head>
+<body><div id="log"></div>
+<script>
+/* ?s=page@t1,t2;page2@t3 -> saves menus/shots/<page>_<tag>.png for each moment */
+(async () => {
+  const spec = new URLSearchParams(location.search).get('s') || '';
+  const jobs = [];
+  for (const part of spec.split(';').filter(Boolean)) {
+    const [page, ts] = part.split('@');
+    for (const t of (ts || '0').split(',')) jobs.push([page, t]);
+  }
+  const log = document.getElementById('log');
+  const done = [];
+  for (const [page, t] of jobs) {
+    const f = document.createElement('iframe');
+    const tag = 't' + t.replace('.', '_');
+    f.src = `${page}.html?t=${t}&capture=1&tag=${tag}`;
+    document.body.appendChild(f);
+    const t0 = performance.now();
+    await new Promise(res => {
+      const iv = setInterval(() => {
+        let ti = ''; try { ti = f.contentDocument.title; } catch (e) {}
+        if (/^CAPTURE/.test(ti) || performance.now() - t0 > 20000) { clearInterval(iv); done.push(`${page}@${t}: ${ti || 'timeout'}`); res(); }
+      }, 150);
+    });
+    f.remove();
+    log.textContent = done.join('\n');
+  }
+  document.title = 'SHOT ' + done.length + '/' + jobs.length + (done.some(d => /FAILED|timeout/.test(d)) ? ' WITH ERRORS' : '');
+})();
+</script></body></html>

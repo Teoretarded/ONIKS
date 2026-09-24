@@ -1,0 +1,100 @@
+EXTENDED MENU CUTSCENES: common brief for every film builder
+=============================================================
+
+Context
+-------
+ONIKS is a strategy sim set on a coast: a Bastion battery (Oniks TELs, Monolith-B radar, Pantsir, drones) faces a
+naval strike group offshore. For the main-menu overhaul the user reviewed ten animated menu prototypes in
+renders/ui_overhaul/menus/: five ORBITAL (o1_ignition, o2_seaskim, o3_orbit, o4_chronograph, o5_terminal) and five
+POINT CLOUD (p1_strike, p2_clutter, p3_coastline, p4_track, p5_confidence). They loved them, especially the radar scans.
+Now they want, per style, THREE extended "menu cutscenes": each a long, continuous film stitched from that style's
+concepts in a logical order, with invented filler that bridges the gaps, smooth with no cuts, cinematic, realistic,
+"fucking epic", with much more detail on the models (thrusters, fan blades, rotors...). Each of the three must be
+special and have its own unique idea. Each film keeps its style's look.
+
+Where
+-----
+Your page: renders/ui_overhaul/films/<id>.html (optional helpers <id>_*.js next to it).
+Served at http://localhost:8770/films/<id>.html (server root = renders/ui_overhaul; it is running,
+do not start servers).
+Load order:
+  fonts (copy the <link> from a source menu of your style)
+  <link rel="stylesheet" href="../menus/common/orbital.css">   or pc.css
+  <script src="../menus/common/m3.js"></script>
+  <script src="../menus/common/orb.js"></script>                (Orbital catalog labels)
+  <script src="../menus/common/wire.js"></script>               (Orbital)   or   dots.js (Point Cloud)
+  <script src="../menus/common/geo.js"></script>
+  <script src="common/hd_land.js"></script><script src="common/hd_sea_air.js"></script>   (HD models, see below)
+  <script src="../menus/common/theatre.js"></script>            (only if you need the real seed-1337 map/DEM)
+  <script src="../menus/common/stage.js"></script>
+  <script src="common/film.js"></script>
+Read first: common/film.js (runtime + camera/time helpers, API in its header comments), menus/common/*.js (the kit),
+and every source menu your treatment names, in full: reuse their techniques and code freely (copy into your page).
+kit/ and _models.html in this folder are an abandoned earlier attempt: mine for ideas, never load them.
+
+Rules
+-----
+1. ONE CONTINUOUS TAKE. No cuts, no fades to black, no cross-dissolves between unrelated shots. Every transition is a
+   camera move or an in-world match-move (follow an object from one place to the next, fly through a display into the
+   world it shows, the map's lines becoming the terrain, a pull-back that reveals the next scene...). The film LOOPS
+   seamlessly: design the ending so it flows back into the opening state (check T = duration-0.5 against T = 0.5).
+2. Duration 150-180 s. 6-8 chapters in FILM.run({chapters}), short titles.
+3. PURE FUNCTION OF FILM TIME. render(T) depends only on T: no Math.random, no accumulated state. Precompute
+   trajectories at load (integrate the physics once into tables and look them up); particles (smoke rings, puffs,
+   sparks, debris, tracers, spray) are analytic in their spawn time + a seeded per-particle rng index. Camera shake via
+   FILM.shake / FILM.drift. This makes scrubbing, ?t= stills and the loop exact. FILM.path gives keyframed Hermite
+   camera paths (loopable), FILM.warp gives eased time-warp ramps (film time -> sim time).
+4. REALISM (visual). Real dimensions, speeds and timings so motion reads true. P-800 Oniks: 8.9 m, Ø 0.7 m; cold gas
+   ejection from the vertical TLC, booster lights ~0.5 s after ejection, pitch-over, booster burns ~4-5 s then is
+   ejected out of the ramjet nozzle, wings and fins unfold, ramjet cruise (shock diamonds in the plume); about Mach 2
+   low over the sea. Arleigh Burke 155 m. Whenever the film runs faster than real time, show the rate on screen
+   (e.g. "x8"). Labels must be true, and tracked boxes/brackets must actually fit their objects (the user checks this).
+   Keep it a cinematic game backdrop: machinery, motion, light and sensors as spectacle, not tactics.
+5. DETAIL. Use the HD models: shock-diamond exhaust, fan blades, spinning rotors and props, gatling barrels, hydraulic
+   rams, folding wings, VLS hatches, turning radars. Bring the camera close enough, often enough, that it shows.
+6. STYLE (non-negotiable; match the source menus exactly):
+   ORBITAL: black, white hairline wireframe (facing-aware, depth-faded, the Wire renderer), exactly one accent: yellow
+     highlighter #F4D23C used sparingly (our battery, one key object at a time, the selected menu row). Inter + DM Mono,
+     catalog labels (ORB.cat: square + designation + barcode), "Fig. N" captions, thin leaders. No filled shapes and
+     no glow blobs, except restrained bloom at ignitions and impacts.
+   POINT CLOUD: graphite #0B0C0A, white LiDAR dots (PointBuf, max blend), one accent: lime #C6F432 for scans and
+     identification. Geist + Geist Mono, tags (white/lime id chip + dark label), dotted boxes and underlines. Coral
+     #FF6A3D only for hostile/warning, sparingly.
+   The user hates anything that looks like a website template or "vibe coded", and never wants bright/white UI.
+7. IT IS A MENU CUTSCENE: the game's five entries (STAGE.ITEMS through STAGE.menu, with blurbs) stay on screen, laid out
+   like your style's menus; compose the film around them (keep the action out from under the menu, calm the menu side
+   with a gradient like the source menus). H hides the UI (film.js) for a clean film. Keep other text minimal and
+   diegetic: chapter caption ("Fig. N ..." / kick label), one live readout, tracked labels.
+8. SOUND: synthesized via STAGE.SFX (tone / noise / rumble / crack), fired by FILM.cue(t, fn) so it only plays in real
+   time (never on seeks).
+9. PERFORMANCE: <= 16 ms per frame at 1920x1080. Measure FILM.bench(120, T) in the page (javascript) at the heaviest
+   moments. Use {fine:false} for distant models, cache static geometry and samples, no allocations in hot loops.
+10. OWNERSHIP: you edit only your <id>.html (and <id>_*.js). Never edit menus/**, common/*.js, _brief/*, other films.
+   If you need a kit change, extend locally in your page and mention it in your report.
+
+HD models
+---------
+common/hd_land.js (HD.tel, HD.telTube, HD.oniks, HD.oniksBooster, HD.radar, HD.pantsir, HD.sm6, HD.mk72) and
+common/hd_sea_air.js (HD.destroyer, HD.helo, HD.fighter, HD.drone, HD.catapult, HD.satellite, HD.carrier) are being built
+right now by two other agents, to the API in _brief/models.txt (read it). They are drop-in supersets of GEO.tel,
+GEO.tubeFrame, GEO.oniks, GEO.radarTruck, GEO.interceptor, GEO.destroyer. Build your choreography against the GEO models
+through a small adapter in your page, e.g.
+  const MOD = { tel: () => (window.HD && HD.tel ? HD.tel() : GEO.tel()), ... };
+and switch to HD as soon as the files exist (ls common/hd_*.js; HD.READY_LAND / HD.READY_SEA_AIR). Models that have no
+GEO equivalent (helo, fighter, drone, satellite, pantsir...): stub them simply until the HD file lands. Before you
+finish, every model in your film must be the HD one. They should land well before you finish; if not, keep polishing
+and check again.
+
+Review loop (mandatory)
+-----------------------
+Look at your frames, repeatedly. Use the built-in browser tools (mcp__Claude_Browser__*): open your OWN tab
+(tabs_create), navigate it to
+  http://localhost:8770/films/_shoot.html?s=<id>@t1,t2,t3
+which writes films/shots/<id>_t<sec>.png (a '.' in t becomes '_') and sets the tab title to
+"SHOT n/n" when done; then Read the PNGs. Load your page with ?t=SEC to check STAGE.err and console errors, and run
+FILM.bench. Check every chapter (start, middle), every transition, and the loop seam. Iterate until every frame is one
+you'd be proud to show. If the browser tools are not available to you, stop and report that immediately.
+
+Final report (your last message, concise)
+-----------------------------------------
+Beat-by-beat with timestamps; the 4 best moments (T values: hero + 3) for the gallery; known rough edges; bench ms.

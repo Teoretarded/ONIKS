@@ -1,0 +1,511 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Oniks — Clutter</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=block">
+<link rel="stylesheet" href="common/pc.css">
+<style>
+  .logo { left: 88px; top: 70px; }
+  .kick { left: 90px; top: 112px; }
+  .menu { left: 88px; bottom: 214px; display: flex; flex-direction: column; gap: 4px; }
+  .menu .it { font-size: 36px; font-weight: 500; letter-spacing: -.03em; height: 48px; }
+  .blurb { left: 128px; bottom: 132px; width: 420px; font-size: 15px; }
+  .keys { right: 88px; bottom: 56px; }
+  .foot { left: 88px; bottom: 60px; }
+  .read { right: 88px; top: 74px; display: flex; gap: 12px; align-items: center; font: 400 13px var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .read i { width: 8px; height: 8px; background: var(--lime); }
+  .read b { font-weight: 400; color: #fff; }
+  .read .bu { color: var(--lime); opacity: 0; transition: opacity .2s; }
+  .read .bu.on { opacity: 1; }
+  .tag.drop b { background: transparent; color: rgba(255,255,255,.6); box-shadow: inset 0 0 0 1px rgba(255,255,255,.4); }
+  .tag.drop i { background: transparent; color: rgba(255,255,255,.6); }
+  .tag.rdr { font-size: 10.5px; }
+  .tag.rdr b, .tag.rdr i { padding: 4px 6px 3px; }
+  .tag.sm { font-size: 10.5px; }
+  .tag.sm b, .tag.sm i { padding: 4px 6px 3px; }
+</style></head>
+<body><div id="stage">
+  <canvas id="c" class="px" width="1920" height="1080"></canvas>
+  <canvas id="o" width="1920" height="1080"></canvas>
+  <div class="ui" id="ui">
+    <div class="logo abs"><svg viewBox="0 0 24 24"><path d="M12 2 20.5 22h-4.1L12 11.4 7.6 22H3.5z" fill="#fff"/><circle cx="12" cy="18.2" r="1.7" fill="#C6F432"/></svg>Oniks</div>
+    <div class="kick abs"><i></i>Monolith-B / Coastal surface search</div>
+    <div class="read abs"><span class="bu" id="bu">Burst</span><i></i><span>Sweep <b id="sw">0</b></span><span>·</span><span><b id="nt">0</b> tracks</span><span>·</span><span><b id="nf">0</b> false</span></div>
+    <div class="menu abs" id="menu"></div>
+    <div class="blurb abs" id="blurb"></div>
+    <div class="keys abs"><span><b>↑↓</b>Select</span><span><b>Enter</b>Open</span><span><b>G</b>Graphics</span><span><b>Esc</b>Quit</span></div>
+    <div class="foot abs">Proto v0.5.0</div>
+    <div class="tag lime rdr" id="rdr"><b>RDR</b><i>Monolith-B · 15 rpm</i></div>
+  </div>
+  <div class="veil" id="veil"><div class="msg"><i></i>Standing the battery down</div></div>
+</div>
+<script src="common/m3.js"></script><script src="common/dots.js"></script><script src="common/theatre.js"></script><script src="common/stage.js"></script>
+<script>
+(() => {
+const { E, Cam, rng, fbm } = M3;
+STAGE.fit(); STAGE.SFX.kind = 'pc';
+const DEG = Math.PI / 180, TAU = Math.PI * 2;
+
+/* ---------- menu ---------- */
+const menuEl = document.getElementById('menu');
+menuEl.innerHTML = STAGE.ITEMS.map((t, i) => `<div class="it" data-item><span class="n">0${i + 1}</span><i class="sq"></i><span class="lab">${t}</span></div>`).join('');
+const veil = document.getElementById('veil');
+STAGE.menu({
+  el: menuEl, blurb: document.getElementById('blurb'),
+  onEnter(i) {
+    if (i === 4) { veil.classList.add('on'); setTimeout(() => veil.classList.remove('on'), 1900); return 2600; }
+    burstUntil = simT + 2.1; return 1900;
+  },
+});
+
+/* ---------- world: km, radar at the origin; X east, Y up, Z north ---------- */
+const TH = THEATRE, RX = 40, RZ = .25;          // the search radar on the coastal bluff, 70 m up
+const hM = (x, z) => TH.h(x + RX, z + RZ);
+const EXAG = 4, yOf = m => Math.max(0, m) / 1000 * EXAG;
+const RMAX = 64, ROT = 4, OMEGA = TAU / ROT;
+const RHOR = 18;                 // clutter critical range for a 70 m site: R^-3 inside, R^-7 beyond
+const WIND = -28 * DEG;          // wind from NNW
+const ALPHA = 8.2;               // CFAR multiplier: Pfa = e^-8.2 per cell per sweep
+const BW = 1.1 * DEG, SR = .22, SB = .6 * DEG;
+const HK = .02;                  // display: km of height per dB of return above noise
+const r0 = rng(2402);
+
+function hsh(a, b) {
+  let h = Math.imul(a ^ 0x5bd1e995, 0x9E3779B1) ^ Math.imul(b + 0x7f4a7c15, 0x85EBCA77);
+  h ^= h >>> 15; h = Math.imul(h, 0x2C1B3C6D); h ^= h >>> 12; h = Math.imul(h, 0x297A2D39); h ^= h >>> 15;
+  return ((h >>> 0) + .5) / 4294967296;
+}
+/* sea clutter power / receiver noise: ~R^-3 inside the critical range, ~R^-7 beyond; brighter looking upwind */
+function clutMean(r, az) {
+  const g = r < RHOR ? Math.pow(RHOR / r, 3) : Math.pow(RHOR / r, 7);
+  return 6.3 * g * (.3 + .7 * Math.pow(.5 + .5 * Math.cos(az - WIND), 2));
+}
+function surfAt(x, z) {
+  for (const d of [.8, 1.8, 3.5]) for (let k = 0; k < 8; k++) { const a = k / 8 * TAU; if (hM(x + Math.sin(a) * d, z + Math.cos(a) * d) > 0) return 420 * Math.exp(-d / 1.2); }
+  return 0;
+}
+
+/* ---------- sea lattice: range x azimuth resolution cells ---------- */
+const AZA = -94 * DEG, DAZ = .8 * DEG, NAZ = Math.round(188 / .8);
+const rstep = r => .07 + r * .022;
+const LXa = [], LZa = [], LAa = [], LRa = [], LCa = [], LKa = [], LOa = [], LPa = [], BIN = [];
+for (let k = 0; k < NAZ; k++) {
+  const azc = AZA + (k + .5) * DAZ, i0 = LXa.length;
+  for (let r = .5; r < RMAX; r += rstep(r)) {
+    const az = azc + (r0() - .5) * DAZ * .7, rr = r + (r0() - .5) * rstep(r) * .6;
+    const x = Math.sin(az) * rr, z = Math.cos(az) * rr, hh = hM(x, z);
+    if (hh > -3) continue;
+    // wind rows: texture stretched along the wind
+    const u = x * Math.sin(WIND) + z * Math.cos(WIND), v = x * Math.cos(WIND) - z * Math.sin(WIND);
+    const tex = Math.exp(1.4 * fbm(u * .14, v * .7, 3.7, 3) - .25);
+    const c = (clutMean(rr, az) + (hh > -40 ? surfAt(x, z) : 0)) * tex;
+    LXa.push(x); LZa.push(z); LAa.push(az); LRa.push(rr); LCa.push(c);
+    LKa.push(TAU * u / 2.2); LOa.push(Math.floor(r0() * 3)); LPa.push(.00008 * Math.min(1, c / 20));
+  }
+  BIN.push([i0, LXa.length, azc - DAZ / 2, azc + DAZ / 2]);
+}
+const NL = LXa.length;
+const LX = new Float32Array(LXa), LZ = new Float32Array(LZa), LA = new Float32Array(LAa), LR = new Float32Array(LRa), LC = new Float32Array(LCa), LK = new Float32Array(LKa), LO = new Int8Array(LOa), LP = new Float32Array(LPa);
+const LS = new Int32Array(NL).fill(-99999), LB = new Float32Array(NL), LY = new Float32Array(NL), LD = new Uint8Array(NL);
+/* one cell's return power (noise units) for sweep s; negative = over the CFAR threshold */
+function cellP(i, s) {
+  const c = LC[i] * (1 + .45 * Math.sin(LK[i] + s * 1.3));
+  const spike = hsh(i, Math.floor((s + LO[i]) / 3) * 7 + 3) < LP[i] ? 14 : 1;
+  const P = -Math.log(hsh(i, s * 2 + 1)) + c * spike * -Math.log(hsh(i, s * 2 + 2));
+  return P / (1 + c) > ALPHA ? -P : P;
+}
+const bright = P => E.clamp((4.343 * Math.log(P) + 14) / 40, .16, 1);
+const hOf = P => HK * Math.max(0, 4.343 * Math.log(P) - 2);
+function paintCell(i, s) {
+  const P = cellP(i, s), a = Math.abs(P);
+  LS[i] = s; LB[i] = bright(a); LY[i] = hOf(a) + (P < 0 ? .25 : 0); LD[i] = P < 0 ? 1 : 0;
+}
+
+/* ---------- land: coastal relief near the site (display only; land is masked from the tracker) ---------- */
+const GXa = [], GYa = [], GZa = [], GBa = [], GAa = [];
+const shade = (x, z) => { const e = .6, dx = hM(x + e, z) - hM(x - e, z), dz = hM(x, z + e) - hM(x, z - e); const nx = -dx * EXAG / 1000 / (2 * e), nz = -dz * EXAG / 1000 / (2 * e), l = Math.hypot(nx, 1, nz); return Math.max(0, (-.5 * nx + .75 - .45 * nz) / l); };
+for (let z = -12; z < 6; z += .42) for (let x = -60; x < 70; x += .42 + Math.abs(x) * .012) {
+  const px = x + (r0() - .5) * .35, pz = z + (r0() - .5) * .35, h = hM(px, pz);
+  if (h <= 0) continue;
+  GXa.push(px); GYa.push(yOf(h)); GZa.push(pz); GBa.push(.1 + .3 * shade(px, pz) + .08 * r0()); GAa.push(Math.atan2(px, pz));
+}
+const NG = GXa.length;
+const GX = new Float32Array(GXa), GY = new Float32Array(GYa), GZ = new Float32Array(GZa), GB = new Float32Array(GBa), GA = new Float32Array(GAa);
+
+/* map: coastline, islands and the far shore (level-0 contour), range rings, bearing ticks */
+const MAPa = [];
+for (const line of TH.contours['0']) for (let k = 0; k < line.length - 1; k++) {
+  const a = line[k], b = line[k + 1], ax = a[0] - RX, az = a[1] - RZ, bx = b[0] - RX, bz = b[1] - RZ;
+  const far = az > 40;
+  if (az < -20 || Math.abs(ax) > (far ? 420 : 90)) continue;
+  const n = Math.max(1, Math.round(Math.hypot(bx - ax, bz - az) / (far ? 1.4 : .22)));
+  for (let j = 0; j < n; j++) MAPa.push(ax + (bx - ax) * j / n, az + (bz - az) * j / n, far ? 4 : 0);
+}
+const RINGS = [16, 32, 48, 64];
+for (const rr of RINGS) for (let a = -92; a <= 92; a += rr === RMAX ? .2 : .32) {
+  const x = Math.sin(a * DEG) * rr, z = Math.cos(a * DEG) * rr;
+  if (hM(x, z) < 0) MAPa.push(x, z, rr === RMAX ? 2 : 1);
+}
+for (let a = -80; a <= 80; a += 10) for (let d = .2; d < 1.6; d += .2) MAPa.push(Math.sin(a * DEG) * (RMAX + d), Math.cos(a * DEG) * (RMAX + d), 3);
+const MP = new Float32Array(MAPa), NMP = MP.length / 3;
+
+/* ---------- ships (true state; the display and tracker never read it directly) ---------- */
+const pol = (b, r) => [Math.sin(b * DEG) * r, Math.cos(b * DEG) * r];
+const SHIPS = [
+  { rcs: 40, L: .155, p: pol(3, 17), hdg: 250, v: .027 },
+  { rcs: 51, L: .33, p: pol(19, 24), hdg: 242, v: .022 },
+  { rcs: 40, L: .155, p: pol(30, 19), hdg: 244, v: .024 },
+  { rcs: 34, L: .19, p: pol(-30, 26), hdg: 110, v: .019, fade: 1 },
+  { rcs: 22, L: .04, p: pol(-12, 8), hdg: 70, v: .027 },
+];
+SHIPS.forEach(s => { s.d = [Math.sin(s.hdg * DEG), Math.cos(s.hdg * DEG)]; s.ret = null; });
+const shipPos = (s, ts) => [s.p[0] + s.d[0] * s.v * ts, s.p[1] + s.d[1] * s.v * ts];
+/* multipath lobing near the radar horizon: the transport sinks into a null for a few sweeps every minute */
+const fadeDb = (s, ts) => s.fade ? -28 * E.ss(0, .35, Math.sin((ts - 26) * TAU / 76) - .15) : 0;
+
+/* ---------- tracker: per-track CV Kalman filter + existence probability ---------- */
+const QN = 1.5e-6;
+const tracks = [], cands = []; let nextTrk = 1;
+function Rmeas(x, z) {
+  const r = Math.hypot(x, z), b = Math.atan2(x, z), ux = Math.sin(b), uz = Math.cos(b), a = SR * SR, c = (r * SB) ** 2;
+  return [a * ux * ux + c * uz * uz, (a - c) * ux * uz, a * uz * uz + c * ux * ux];
+}
+function kfPred(tr, ts) {
+  const dt = ts - tr.t, x = tr.x, P = tr.P, q = QN, d2 = dt * dt, d3 = d2 * dt;
+  const xp = [x[0] + x[2] * dt, x[1] + x[3] * dt, x[2], x[3]];
+  const FP = new Array(16);
+  for (let c = 0; c < 4; c++) { FP[c] = P[c] + dt * P[8 + c]; FP[4 + c] = P[4 + c] + dt * P[12 + c]; FP[8 + c] = P[8 + c]; FP[12 + c] = P[12 + c]; }
+  const Pp = new Array(16);
+  for (let r = 0; r < 4; r++) { Pp[r * 4] = FP[r * 4] + dt * FP[r * 4 + 2]; Pp[r * 4 + 1] = FP[r * 4 + 1] + dt * FP[r * 4 + 3]; Pp[r * 4 + 2] = FP[r * 4 + 2]; Pp[r * 4 + 3] = FP[r * 4 + 3]; }
+  Pp[0] += q * d3 / 3; Pp[5] += q * d3 / 3; Pp[2] += q * d2 / 2; Pp[8] += q * d2 / 2; Pp[7] += q * d2 / 2; Pp[13] += q * d2 / 2; Pp[10] += q * dt; Pp[15] += q * dt;
+  return { x: xp, P: Pp };
+}
+function kfGate(pr, z, Rm) {
+  const P = pr.P, S00 = P[0] + Rm[0], S01 = P[1] + Rm[1], S11 = P[5] + Rm[2], det = S00 * S11 - S01 * S01;
+  const i00 = S11 / det, i01 = -S01 / det, i11 = S00 / det, n0 = z[0] - pr.x[0], n1 = z[1] - pr.x[1];
+  return { d2: n0 * (i00 * n0 + i01 * n1) + n1 * (i01 * n0 + i11 * n1), det, i00, i01, i11, n0, n1 };
+}
+function kfUpd(pr, g) {
+  const P = pr.P, K = [];
+  for (let r = 0; r < 4; r++) { const a = P[r * 4], b = P[r * 4 + 1]; K.push(a * g.i00 + b * g.i01, a * g.i01 + b * g.i11); }
+  const x = pr.x.map((v, r) => v + K[r * 2] * g.n0 + K[r * 2 + 1] * g.n1);
+  const Pn = new Array(16);
+  for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) Pn[r * 4 + c] = P[r * 4 + c] - K[r * 2] * P[c] - K[r * 2 + 1] * P[4 + c];
+  return { x, P: Pn };
+}
+const logit = p => Math.log(p / (1 - p)), sigm = l => 1 / (1 + Math.exp(-l));
+const passOf = (ph, b) => Math.floor((ph - b) / TAU + .5);
+function faDensity(r, az) {
+  const c = clutMean(r, az), cell = rstep(r) * r * DAZ;
+  return (Math.exp(-ALPHA) + .0003 * Math.min(1, c / 20) * .6) / Math.max(.02, cell);
+}
+/* RCS classes (dBsm): each hit is one Swerling-1 sample, ~5.6 dB spread, so the posterior firms up with sqrt(n) */
+const CLS = [[51, 'CVN'], [40, 'DDG'], [33, 'AK'], [21, 'FAC']];
+function classify(rcs) {
+  const lp = CLS.map(([m]) => rcs.reduce((s, v) => s - (v - m) ** 2 / (2 * 5.6 * 5.6), 0)), mx = Math.max(...lp);
+  const w = lp.map(v => Math.exp(v - mx)), sw = w.reduce((a, b) => a + b, 0), k = lp.indexOf(mx);
+  return [CLS[k][1], w[k] / sw];
+}
+const ui = document.getElementById('ui');
+function newTrack(det, cand, ts) {
+  const Rm = Rmeas(det.x, det.z), dtc = ts - cand.ts;
+  let vx = (det.x - cand.x) / dtc, vz = (det.z - cand.z) / dtc; const sp = Math.hypot(vx, vz); if (sp > .04) { vx *= .04 / sp; vz *= .04 / sp; }
+  const P = [Rm[0], Rm[1], 0, 0, Rm[1], Rm[2], 0, 0, 0, 0, .0007, 0, 0, 0, 0, .0007];
+  const el = document.createElement('div'); el.className = 'tag off'; el.innerHTML = '<b></b><i></i>'; ui.appendChild(el);
+  const tr = { id: nextTrk++, x: [det.x, det.z, vx, vz], P, t: ts, lg: logit(.22), st: 'tent', hits: 2, rcs: [], hist: [[cand.x, cand.z], [det.x, det.z]], tHit: ts, Pold: null, pass: det.pass, el, txt: '', pShow: .22, born: ts };
+  if (det.rcs !== undefined) tr.rcs.push(det.rcs);
+  tracks.push(tr);
+}
+function trackHit(tr, pr, g, det, ts) {
+  const u = kfUpd(pr, g);
+  tr.Pold = [pr.P[0], pr.P[1], pr.P[5]]; tr.tHit = ts;
+  tr.x = u.x; tr.P = u.P; tr.t = ts; tr.pass = det.pass; tr.hits++;
+  const r = Math.hypot(det.x, det.z), N = Math.exp(-g.d2 / 2) / (TAU * Math.sqrt(g.det)), L = .85 * N / faDensity(r, Math.atan2(det.x, det.z));
+  tr.lg = Math.min(4.6, tr.lg + E.clamp(.1 * Math.log(L), .15, 1.05));
+  if (det.rcs !== undefined) tr.rcs.push(det.rcs);
+  tr.hist.push([u.x[0], u.x[1]]); if (tr.hist.length > 12) tr.hist.shift();
+  if (tr.st === 'tent' && sigm(tr.lg) >= .8) { tr.st = 'conf'; STAGE.SFX.tone(1250, 1250, .05, 'square', .012); }
+}
+function trackMiss(tr, ts) {
+  tr.lg -= .95; tr.pass = null;
+  const p = sigm(tr.lg);
+  if ((tr.st === 'tent' && p < .1) || (tr.st === 'conf' && p < .2)) { tr.st = 'drop'; tr.tDrop = ts; }
+}
+
+/* ---------- sweep ---------- */
+const PRE = 9.5;
+let simT = -PRE, phase = -PRE * OMEGA, burstUntil = -99, faCur = 0, faLast = 0, sweepNo = 139;
+const hits = [];
+function inSweep(ph0, ph1, b) { const m = Math.floor((ph0 - b) / TAU) + 1; return b + m * TAU <= ph1 ? m : null; }
+function binHit(ph0, ph1, a0, a1) { const m = Math.floor((ph0 - a1) / TAU) + 1; return a0 + m * TAU <= ph1; }
+function step(dt) {
+  const w = OMEGA * (simT < burstUntil ? 4.2 : 1), ph0 = phase, ph1 = phase + w * dt;
+  simT += dt; phase = ph1;
+  const ts = simT, dets = [];
+  // sea cells the beam just painted
+  for (const [i0, i1, a0, a1] of BIN) {
+    if (!binHit(ph0, ph1, a0, a1)) continue;
+    for (let i = i0; i < i1; i++) {
+      const s = inSweep(ph0, ph1, LA[i]); if (s === null) continue;
+      paintCell(i, s);
+      if (LD[i]) dets.push({ x: LX[i], z: LZ[i], az: LA[i], pass: s });
+    }
+  }
+  // ships
+  SHIPS.forEach((sh, j) => {
+    const p = shipPos(sh, ts), az = Math.atan2(p[0], p[1]), s = inSweep(ph0, ph1, az); if (s === null) return;
+    const r = Math.hypot(p[0], p[1]), rr = rng(7919 * (j + 1) + s * 31);
+    // radar equation relative to a 30 km reference, plus lobing
+    const snr = sh.rcs - 40 * Math.log10(r / 30) - 14 + fadeDb(sh, ts), c = clutMean(r, az), scr = Math.pow(10, snr / 10) / (1 + c);
+    const Pd = Math.exp(-ALPHA / (1 + scr)), det = hsh(900 + j, s) < Pd;
+    const ux = Math.sin(az), uz = Math.cos(az), cross = r * BW / 2.4, Lv = sh.L * 4;
+    const dots = [], n = Math.round(E.clamp(6 + 1.1 * snr, 6, 40)), S = Math.pow(10, snr / 10);
+    let wx = 0, wz = 0, ws = 0;
+    for (let k = 0; k < n; k++) {
+      // scatterers along the hull, smeared across range by the beam pattern
+      const al = (rr() - .5) * Lv, cr = M3.gauss(rr) * cross, rg = M3.gauss(rr) * .05;
+      const x = p[0] + sh.d[0] * al + uz * cr + ux * rg, z = p[1] + sh.d[1] * al - ux * cr + uz * rg;
+      const P = S * Math.exp(-.5 * (cr / cross) ** 2) * -Math.log(rr()) - Math.log(rr()) + c * -Math.log(rr()), db = 4.343 * Math.log(P);
+      if (db < 2) continue;
+      const on = det && P / (1 + c) > ALPHA;
+      dots.push(x, z, hOf(P) + (on ? .25 : 0), bright(P) * (on ? 1 : -1));
+      if (on) { wx += x * P; wz += z * P; ws += P; }
+    }
+    sh.ret = { ph: az + s * TAU, dots };
+    if (det && ws > 0) {
+      const gc = M3.gauss(rr) * r * SB * .6, gr = M3.gauss(rr) * SR * .5;
+      dets.push({ x: wx / ws + gc * uz + gr * ux, z: wz / ws - gc * ux + gr * uz, az, pass: s, rcs: sh.rcs + fadeDb(sh, ts) + 4.343 * Math.log(-Math.log(rr())) + 2.5, ship: j });
+    }
+  });
+  // associate (nearest in gate), else seed a candidate, else pair with a candidate into a new track
+  dets.sort((a, b) => a.az - b.az);
+  for (const d of dets) {
+    let best = null, bg = null, bp = null;
+    for (const tr of tracks) {
+      if (tr.st === 'drop' || tr.pass === d.pass) continue;
+      const pr = kfPred(tr, ts), g = kfGate(pr, [d.x, d.z], Rmeas(d.x, d.z));
+      if (g.d2 < 16 && (!bg || g.d2 < bg.d2)) { best = tr; bg = g; bp = pr; }
+    }
+    hits.push({ x: d.x, z: d.z, ts, trk: best ? best.id : 0, ship: d.ship !== undefined });
+    if (best) { trackHit(best, bp, bg, d, ts); if (best.st !== 'conf') faCur++; continue; }
+    faCur++;
+    const r = Math.hypot(d.x, d.z), gate = .5 + .012 * r;
+    const ci = cands.findIndex(c => c.pass === d.pass - 1 && Math.hypot(c.x - d.x, c.z - d.z) < gate);
+    if (ci >= 0) { newTrack(d, cands[ci], ts); cands.splice(ci, 1); }
+    else cands.push({ x: d.x, z: d.z, ts, pass: d.pass });
+  }
+  for (let k = cands.length - 1; k >= 0; k--) if (ts - cands[k].ts > ROT * 1.6 * (simT < burstUntil ? .3 : 1) + .1) cands.splice(k, 1);
+  // misses: the beam passed 3 deg beyond a track's predicted bearing without a hit this pass
+  for (const tr of tracks) {
+    if (tr.st === 'drop') continue;
+    const pr = kfPred(tr, ts), b = Math.atan2(pr.x[0], pr.x[1]) + 3 * DEG, s = inSweep(ph0, ph1, b);
+    if (s !== null && tr.pass !== s) trackMiss(tr, ts);
+  }
+  for (const tr of tracks) tr.pShow = E.damp(tr.pShow, sigm(tr.lg), 5, dt);
+  for (let k = tracks.length - 1; k >= 0; k--) if (tracks[k].st === 'drop' && ts - tracks[k].tDrop > 3.2) { tracks[k].el.remove(); tracks.splice(k, 1); }
+  while (hits.length && ts - hits[0].ts > ROT) hits.shift();
+  if (Math.floor(ph1 / TAU) > Math.floor(ph0 / TAU)) {
+    sweepNo++; faLast = faCur; faCur = 0;
+    STAGE.SFX.tone(2100, 2100, .012, 'square', simT < burstUntil ? .006 : .01);
+  }
+}
+for (let k = 0; k < PRE * 60; k++) step(1 / 60);
+function update(dt) { step(dt); }
+
+/* ---------- render ---------- */
+const cv = document.getElementById('c'), ov = document.getElementById('o'), octx = ov.getContext('2d');
+const pb = new PointBuf(cv, [11, 12, 10], { vignette: .5 });
+const cam = new Cam(); cam.fov = 32 * DEG; cam.cx = 1060; cam.cy = 565;
+const CAM = { tgt: [1.7, 0, 17.4], yaw: .05, pitch: .209, dist: 34.1 };
+const LIME = [198, 244, 50], WH = [238, 238, 228];
+const RSITE = [0, yOf(hM(0, 0)), 0], rdrEl = document.getElementById('rdr');
+let lastUi = -1;
+const els = { sw: document.getElementById('sw'), nt: document.getElementById('nt'), nf: document.getElementById('nf'), bu: document.getElementById('bu') };
+
+function ellipsePts(cxz, P, k) {
+  const a = P[0], b = P[1], c = P[2], m = (a + c) / 2, d = Math.sqrt(((a - c) / 2) ** 2 + b * b);
+  const l1 = Math.max(1e-6, m + d), l2 = Math.max(1e-6, m - d), th = .5 * Math.atan2(2 * b, a - c);
+  return { c: cxz, A: Math.sqrt(l1) * k, B: Math.sqrt(l2) * k, e1: [Math.cos(th), Math.sin(th)], e2: [-Math.sin(th), Math.cos(th)] };
+}
+function render(t) {
+  const ts = simT;
+  const yaw = CAM.yaw + .035 * Math.sin(t * .037), pitch = CAM.pitch + .012 * Math.sin(t * .051), dist = CAM.dist - 2.5 * Math.sin(t * .029);
+  cam.orbit(CAM.tgt, yaw, pitch, dist);
+  pb.clear();
+  const e = cam.eye, f = cam.f, ru = cam.r, u = cam.u, F = cam.fl, cx = cam.cx, cy = cam.cy;
+  const e0 = e[0], e1 = e[1], e2 = e[2], f0 = f[0], f1 = f[1], f2 = f[2], r0x = ru[0], r1x = ru[1], r2x = ru[2], u0 = u[0], u1 = u[1], u2 = u[2];
+  const ph = phase, burst = simT < burstUntil;
+  const LR0 = LIME[0] - WH[0], LG0 = LIME[1] - WH[1], LB0 = LIME[2] - WH[2];
+  // sea cells: a height field of return amplitude, popping up as the beam paints it and settling through the rotation
+  for (let i = 0; i < NL; i++) {
+    let d = ph - LA[i]; const s = Math.floor(d / TAU); d -= s * TAU;
+    if (LS[i] !== s) paintCell(i, s);
+    const glow = Math.exp(-d * .75), rise = d < .5 ? 1 - Math.exp(-d * 16) : 1;
+    const y = LY[i] * rise * (.45 + .55 * glow);
+    const x = LX[i], z = LZ[i], dx = x - e0, dy = y - e1, dz = z - e2, zc = dx * f0 + dy * f1 + dz * f2;
+    if (zc < 1) continue;
+    const sx = cx + F * (dx * r0x + dy * r1x + dz * r2x) / zc, sy = cy - F * (dx * u0 + dy * u1 + dz * u2) / zc;
+    if (sx < 0 || sy < 0 || sx >= 1920 || sy >= 1080) continue;
+    let b = LB[i] * (.4 + .9 * glow) * (1 + .3 * LR[i] / RMAX);
+    let cr = WH[0], cg = WH[1], cb = WH[2];
+    if (d < .6) { const k = Math.exp(-d * 7); cr += LR0 * k; cg += LG0 * k; cb += LB0 * k; b = Math.max(b, k * .7); if (d < .12) pb.add(sx, sy, 3, LIME[0], LIME[1], LIME[2], .05 * k); }
+    if (LD[i]) {
+      // over the CFAR threshold: a stalk from the sea surface
+      b = Math.max(b, .5 + .5 * glow);
+      const zb = dx * f0 - e1 * f1 + dz * f2, bx0 = cx + F * (dx * r0x - e1 * r1x + dz * r2x) / zb, by0 = cy - F * (dx * u0 - e1 * u1 + dz * u2) / zb;
+      pb.dline(bx0, by0, sx, sy, 2.5, 1, cr, cg, cb, b * .55);
+      pb.dot(sx, sy, 2, cr, cg, cb, Math.min(1, b * 1.1));
+      continue;
+    }
+    pb.dot(sx, sy, zc < 24 ? 2 : 1, cr, cg, cb, Math.min(1, b));
+  }
+  // land relief, lightly lit by the beam as it passes behind the site
+  for (let i = 0; i < NG; i++) {
+    const x = GX[i], y = GY[i], z = GZ[i], dx = x - e0, dy = y - e1, dz = z - e2, zc = dx * f0 + dy * f1 + dz * f2;
+    if (zc < 1) continue;
+    const sx = cx + F * (dx * r0x + dy * r1x + dz * r2x) / zc, sy = cy - F * (dx * u0 + dy * u1 + dz * u2) / zc;
+    if (sx < 0 || sy < 0 || sx >= 1920 || sy >= 1080) continue;
+    let d = ph - GA[i]; d -= Math.floor(d / TAU) * TAU;
+    const k = d < .6 ? Math.exp(-d * 6) : 0;
+    const b = GB[i] * (1 + .6 * Math.exp(-d * 1.2)) + k * .4;
+    pb.dot(sx, sy, zc < 13 ? 2 : 1, WH[0] + LR0 * k, WH[1] + LG0 * k, WH[2] + LB0 * k, b);
+  }
+  // map: coast, rings, ticks, far shore
+  for (let i = 0; i < NMP; i++) {
+    const x = MP[i * 3], z = MP[i * 3 + 1], kind = MP[i * 3 + 2], dx = x - e0, dy = .01 - e1, dz = z - e2, zc = dx * f0 + dy * f1 + dz * f2;
+    if (zc < 1) continue;
+    const sx = cx + F * (dx * r0x + dy * r1x + dz * r2x) / zc, sy = cy - F * (dx * u0 + dy * u1 + dz * u2) / zc;
+    pb.dot(sx, sy, 1, WH[0], WH[1], WH[2], kind === 0 ? .5 : kind === 2 ? .38 : kind === 4 ? .3 : .22);
+  }
+  // ship returns: same height-field language, tighter and taller
+  for (const sh of SHIPS) {
+    if (!sh.ret) continue;
+    const d = ph - sh.ret.ph; if (d > TAU * 1.5) continue;
+    const glow = Math.exp(-d * .75), rise = d < .5 ? 1 - Math.exp(-d * 16) : 1, k = d < .6 ? Math.exp(-d * 7) : 0, D = sh.ret.dots;
+    for (let q = 0; q < D.length; q += 4) {
+      const h = D[q + 2] * rise * (.45 + .55 * glow), on = D[q + 3] > 0;
+      const p = cam.project([D[q], h, D[q + 1]]); if (!p) continue;
+      let b = Math.abs(D[q + 3]) * (.36 + .64 * glow);
+      const cr = WH[0] + LR0 * k, cg = WH[1] + LG0 * k, cb = WH[2] + LB0 * k;
+      if (on) {
+        b = Math.max(b, .55 + .45 * glow);
+        const bp = cam.project([D[q], 0, D[q + 1]]);
+        if (bp) pb.dline(bp[0], bp[1], p[0], p[1], 2.5, 1, cr, cg, cb, b * .55);
+      }
+      pb.dot(p[0], p[1], 2, cr, cg, cb, Math.min(1, b));
+    }
+  }
+  // beam: lime leading edge on the sea + a sparse curtain above it
+  const bx = Math.sin(ph), bz = Math.cos(ph), ba = burst ? 1 : .92;
+  for (let r = .5; r < RMAX; r += .12 + r * .006) {
+    const p = cam.project([bx * r, .02, bz * r]); if (!p) continue;
+    const fa = ba * (1 - .45 * r / RMAX);
+    pb.dot(p[0], p[1], 2, LIME[0], LIME[1], LIME[2], fa);
+    pb.add(p[0], p[1], 7, LIME[0], LIME[1], LIME[2], .018 * fa);
+    // the beam's vertical coverage as a thin sheet of light that thins out upward
+    if (r > 1.5) for (let j = 1; j <= 6; j++) {
+      if (hsh((r * 60) | 0, j) > .55 - j * .06) continue;
+      const q = cam.project([bx * r, j * .16 * Math.pow(r / 10, .6), bz * r]);
+      if (q) pb.dot(q[0], q[1], 1, LIME[0], LIME[1], LIME[2], ba * .55 * (1 - j / 7) * (1 - .5 * r / RMAX));
+    }
+  }
+  // radar site
+  const rs = cam.project(RSITE), rt = cam.project([0, RSITE[1] + .7, 0]);
+  if (rs && rt) {
+    pb.dline(rs[0], rs[1], rt[0], rt[1], 2, 1, 238, 238, 228, .8); pb.dot(rt[0], rt[1], 4, LIME[0], LIME[1], LIME[2], 1);
+    rdrEl.style.transform = `translate(${(rt[0] + 14).toFixed(0)}px, ${(rt[1] - 9).toFixed(0)}px)`;
+  }
+
+  // tracks
+  const tags = [];
+  for (const tr of tracks) {
+    const pr = kfPred(tr, ts), p = sigm(tr.lg), conf = tr.st === 'conf', drop = tr.st === 'drop';
+    const ageHit = ts - tr.tHit, sh = E.outCubic(E.sat(ageHit / .55));
+    // gate: 3 sigma of the innovation covariance (track + measurement)
+    const Rm = Rmeas(pr.x[0], pr.x[1]);
+    let Pp = [pr.P[0], pr.P[1], pr.P[5]];
+    if (tr.Pold && sh < 1) Pp = Pp.map((v, k) => v + (tr.Pold[k] - v) * (1 - sh));
+    const el = ellipsePts([pr.x[0], pr.x[1]], [Pp[0] + Rm[0], Pp[1] + Rm[1], Pp[2] + Rm[2]], 3.5);
+    const col = conf ? LIME : WH, fl = 1 - sh;
+    const da = drop ? 1 - E.sat((ts - tr.tDrop) / 1.4) : 1, spread = drop ? 1 + 1.5 * E.sat((ts - tr.tDrop) / 1.4) : 1;
+    const born = E.sat((ts - tr.born) / .5);
+    const cp = cam.project([pr.x[0], 0, pr.x[1]]); if (!cp) continue;
+    const pxkm = F / cp[2], n = Math.round(E.clamp(TAU * el.A * pxkm / 5.5, 18, 110));
+    let rx = -1e9, ry = 0;
+    for (let k = 0; k < n; k++) {
+      const a = k / n * TAU, ca = Math.cos(a), sa = Math.sin(a), jit = drop ? (hsh(tr.id * 131 + k, 5) - .5) * (spread - 1) * .8 : 0;
+      const wx = el.c[0] + (el.e1[0] * ca * el.A + el.e2[0] * sa * el.B) * (spread + jit), wz = el.c[1] + (el.e1[1] * ca * el.A + el.e2[1] * sa * el.B) * (spread + jit);
+      const q = cam.project([wx, .03, wz]); if (!q) continue;
+      if (k % 2 === 0 || !drop) pb.dot(q[0], q[1], conf ? 2 : 1 + (fl > .3 ? 1 : 0), col[0], col[1], col[2], born * da * Math.min(1, (conf ? .95 : .7) + fl * .5));
+      if (q[0] - q[1] * .25 > rx) { rx = q[0] - q[1] * .25; ry = q; }
+    }
+    // a hit: the gate pings outward once as the evidence lands
+    if (!drop && ageHit < .7) {
+      const g = 1 + E.outCubic(ageHit / .7) * 1.4, a = (1 - ageHit / .7) * born;
+      for (let k = 0; k < 56; k++) {
+        const th = k / 56 * TAU, ca = Math.cos(th), sa = Math.sin(th);
+        const q = cam.project([el.c[0] + (el.e1[0] * ca * el.A + el.e2[0] * sa * el.B) * g, .03, el.c[1] + (el.e1[1] * ca * el.A + el.e2[1] * sa * el.B) * g]);
+        if (q) pb.dot(q[0], q[1], 1, LIME[0], LIME[1], LIME[2], a * .8);
+      }
+    }
+    // estimate + history
+    if (!drop) {
+      pb.dot(cp[0], cp[1], 3, col[0], col[1], col[2], born);
+      let prev = null;
+      tr.hist.forEach((hp, k) => {
+        const q = cam.project([hp[0], .02, hp[1]]); if (!q) return;
+        const a = born * (.25 + .6 * k / tr.hist.length);
+        pb.dot(q[0], q[1], 2, col[0], col[1], col[2], a);
+        if (prev) pb.dline(prev[0], prev[1], q[0], q[1], 3, 1, col[0], col[1], col[2], a * .6);
+        prev = q;
+      });
+      if (conf) { const v = cam.project([pr.x[0] + pr.x[2] * 60, .02, pr.x[1] + pr.x[3] * 60]); if (v) pb.dline(cp[0], cp[1], v[0], v[1], 3, 1, col[0], col[1], col[2], .55); }
+    }
+    // tag
+    let txt;
+    if (drop) txt = 'dropped';
+    else if (conf && tr.rcs.length >= 3) {
+      const [cl, pc] = classify(tr.rcs);
+      txt = `${cl}${pc < .93 ? '?' : ''} · p ${tr.pShow.toFixed(2)}`;
+    } else txt = `p ${tr.pShow.toFixed(2)}`;
+    const id = 'TRK ' + String(tr.id).padStart(2, '0'), key = id + txt + tr.st;
+    if (tr.txt !== key) { tr.txt = key; tr.el.firstChild.textContent = id; tr.el.lastChild.textContent = txt; tr.el.className = 'tag' + (conf ? ' lime' : '') + (drop ? ' drop' : '') + (!conf && !drop ? ' sm' : ''); }
+    const inMenu = ry && ry[0] < 640 && ry[1] > 560;
+    const ta = born * (drop ? 1 - E.sat((ts - tr.tDrop - 1.9) / 1.1) : 1);
+    if (ry && !inMenu && ta > .05) tags.push({ tr, ax: ry[0], ay: ry[1], x: ry[0] + 16, y: ry[1] - 30, a: ta });
+    else tr.el.style.opacity = 0;
+  }
+  tags.sort((a, b) => (b.tr.st === 'conf') - (a.tr.st === 'conf') || a.y - b.y);
+  const placed = [];
+  for (const tg of tags) {
+    const w = tg.tr.el.offsetWidth || 150;
+    for (let guard = 0; guard < 10; guard++) {
+      const hit = placed.find(p => tg.x < p.x + p.w + 6 && p.x < tg.x + w + 6 && Math.abs(tg.y - p.y) < 24);
+      if (!hit) break; tg.y = hit.y - 25;
+    }
+    tg.x = Math.min(tg.x, 1900 - w);
+    placed.push({ x: tg.x, y: tg.y, w });
+    const col = tg.tr.st === 'conf' ? LIME : WH;
+    pb.dline(tg.ax, tg.ay, tg.x, tg.y + 20, 3, 1, col[0], col[1], col[2], .7 * tg.a);
+    tg.tr.el.style.opacity = tg.a.toFixed(2);
+    tg.tr.el.style.transform = `translate(${tg.x.toFixed(0)}px, ${tg.y.toFixed(0)}px)`;
+  }
+  pb.blit();
+
+  // calm the menu corner, then range labels
+  octx.clearRect(0, 0, 1920, 1080);
+  const g = octx.createRadialGradient(120, 1080, 0, 120, 1080, 900);
+  g.addColorStop(0, 'rgba(11,12,10,.86)'); g.addColorStop(.55, 'rgba(11,12,10,.55)'); g.addColorStop(1, 'rgba(11,12,10,0)');
+  octx.fillStyle = g; octx.fillRect(0, 180, 1100, 900);
+  octx.font = '400 11px "Geist Mono", monospace'; octx.fillStyle = 'rgba(255,255,255,.34)'; octx.textAlign = 'left';
+  for (const rr of RINGS) { const p = cam.project([Math.sin(62 * DEG) * rr, 0, Math.cos(62 * DEG) * rr]); if (p) octx.fillText(rr + (rr === RMAX ? ' KM' : ''), p[0] + 6, p[1] - 5); }
+
+  if (t - lastUi > .1 || t < lastUi) {
+    lastUi = t;
+    els.sw.textContent = sweepNo; els.nt.textContent = tracks.filter(tr => tr.st === 'conf').length; els.nf.textContent = faLast;
+    els.bu.classList.toggle('on', burst);
+  }
+  STAGE.dbg = { NL, NG, NMP, tracks: tracks.map(tr => [tr.id, tr.st, sigm(tr.lg).toFixed(2), tr.hits]), faLast };
+}
+STAGE.run({ update, render });
+})();
+</script>
+</body></html>

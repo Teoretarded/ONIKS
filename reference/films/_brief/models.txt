@@ -1,0 +1,105 @@
+HD MODEL KIT for the extended menu cutscenes
+============================================
+
+Two files, two builders, one shared namespace:
+  common/hd_land.js     -> builder "land":    HD.tel, HD.telTube, HD.oniks, HD.oniksBooster, HD.radar, HD.pantsir, HD.sm6, HD.mk72 + helpers
+  common/hd_sea_air.js  -> builder "sea/air": HD.destroyer, HD.helo, HD.fighter, HD.drone, HD.catapult, HD.satellite, HD.carrier
+Each file starts with `window.HD = window.HD || {};` and ends by setting HD.READY_LAND = true / HD.READY_SEA_AIR = true.
+Both load after ../menus/common/m3.js and ../menus/common/geo.js and must not depend on each other at load time
+(hd_sea_air.js may use HD.wheel etc. only if present, with a local fallback).
+Write the file in one go when a first complete, working version exists (films are waiting to switch over),
+then keep improving it in place. Never break the API below once published.
+
+Primitives (GEO, menus/common/geo.js): hex, box, lathe, cyl, panel, line (polyline; w = alpha scale),
+blades (fans/props/rotors: c, d, n, r0, r1, {chord, taper, pitch, edge, rib, hub, shroud, rot}), hull (GEO's ship hull).
+Part = { name, label, prims | dyn(st) -> prims, xf?(st) -> rigid X, show?(st) -> bool, alpha? }.
+  dyn(st) rebuilds prims from state (telescoping rams, folding wings, spinning blades: put rot into blades()).
+Prim options: fine: true = small detail skipped by GEO.draw(..., {fine:false}) / GEO.sample(m, s, seed, st, {fine:false});
+  pts: false = not sampled into dots; ds = sampling density multiplier; al = alpha; gen/rings/n for lathes.
+Renderers: Orbital films draw GEO.draw(W, model, worldX, st, opt) as facing-aware hairlines;
+  Point Cloud films GEO.sample(model, spacing, seed, st) -> per-part points (+normals) and project them as dots.
+  A model must look right in BOTH: clean readable hairlines (no moire from too many parallel lines; use gen/rings
+  sparingly, hatch for panels) and a good dot surface (closed shapes, sensible normals, panels only where thin).
+
+Conventions: metres, +Z forward, +Y up, X to the right-hand side... (X east when unrotated, see m3.js).
+Vehicles: origin on the ground at the vehicle centre. Missiles/aircraft: origin at the middle of the body, nose +Z.
+Real dimensions. Every part has a `label` with its real designation (films use them for identification boxes).
+Keep the part names below stable: films key off them.
+
+----------------------------------------------------------------------------------------------------
+LAND (common/hd_land.js)
+----------------------------------------------------------------------------------------------------
+HD.tel()  K340P TEL (Bastion-P) on MZKT-7930 8x8. Drop-in for GEO.tel():
+  same PIV [0,1.55,-6.7], TUBE [.66,2.5,-6.6], TUBE_LEN 9.25, state elev (rad; 0 stowed .. ~1.53 vertical), dep (0..1 jacks down).
+  extra state: capL, capR (0 fitted .. 1 gone: front end caps of the two TLCs), wheel (rad, rolling), fan (rad).
+  parts: chassis, wheels, cab, launcher (TLC pair; rotates about PIV), capL, capR (launcher frame), ram (hydraulic erector,
+         telescoping, attached at both ends at every elev), jacks (outriggers + pads, move with dep).
+  detail: tyres with tread, rims/hubs/lug rings, fenders, fuel tanks, battery/tool boxes, exhaust stack, split windscreen,
+          side windows, mirrors on arms, grille, bumper, lights, beacon, whip antenna (line), ladder, TLC lifting lugs,
+          cable trays, cap bolt rings, rear TLC closures.
+HD.telTube(m, st, side) -> {base, mouth, dir} in model space (same as GEO.tubeFrame; side 1 = right tube, -1 = left).
+
+HD.oniks(o?)  P-800 Oniks / 3M55. Origin mid-body, nose +Z, length 8.9 m, body Ø 0.7 m (match GEO.oniks extents).
+  state: wing (0 folded .. 1 deployed), fin (0 folded .. 1), booster (bool: solid booster still in the ramjet chamber,
+         its nozzle protrudes from the ramjet nozzle), cover (bool: intake cover fitted, jettisoned at launch).
+  parts: body (joint rings, antenna fairings, cable duct), intake (annular nose inlet: lip + conical centre body =
+         seeker radome), wings (two mid-body folding wings), fins (4 cruciform tail fins, folding), nozzle (ramjet bell),
+         booster (inner booster nozzle), cover.
+  constants: HD.oniks.NOZZLE (exit centre), HD.oniks.NOZZLE_R, HD.oniks.INTAKE (lip centre), HD.oniks.LEN.
+HD.oniksBooster()  the ejected booster casing with its nozzle; origin at its middle, +Z = its front.
+
+HD.radar()  Monolith-B-class coastal search radar on an 8x8. Drop-in for GEO.radarTruck(): state ant (rad).
+  extra state: mast (0 stowed .. 1 raised; default 1).
+  parts: chassis, wheels, cab, body (shelter: doors, vents, A/C units, cable reels), mast (telescoping), array (planar
+         array: dipole rows, feed, back truss, IFF strip, rotary joint; turns with ant).
+  constant: HD.radar.ARRAY (array centre, raised, ant = 0).
+
+HD.pantsir()  Pantsir-S1 on KamAZ-6560 8x8. state: yaw (turret), pitch (guns + missile packs), sAnt (search radar),
+  fire (0..1 recoil pulse). parts: chassis, wheels, cab, turret, guns (2x 2A38M twin 30 mm), missiles (2 packs x 6 57E6
+  TLCs), searchRadar (turns with sAnt), trackRadar (front phased array), eo.
+  functions: HD.pantsir.muzzles(st) -> 4 points; HD.pantsir.tubes(st) -> 12 {mouth, dir}.
+
+HD.sm6(o?)  RIM-174 SM-6 with Mk 72 booster. Origin mid (whole stack), nose +Z. state: booster (bool attached).
+  parts: radome, body (with the long low dorsal strakes), fins, mk72 (booster Ø 0.53 m, 4 fins, 4-nozzle cluster), nozzle.
+  constants: HD.sm6.NOZZLES (4 booster nozzle exits), HD.sm6.SUSTAINER (sustainer nozzle exit), HD.sm6.LEN.
+HD.mk72()  ejected booster, origin its middle.
+
+Helpers (exported for everyone): HD.wheel(prims, z, side, o), HD.chassis8x8(prims, zFront, zRear, o),
+HD.ram(B, A, radii, lmin) -> prims, HD.tp(X, prim) -> transformed prim copy.
+
+----------------------------------------------------------------------------------------------------
+SEA / AIR (common/hd_sea_air.js)
+----------------------------------------------------------------------------------------------------
+HD.destroyer()  Arleigh Burke Flight IIA, 155 m x 20 m, origin midships on the waterline, bow +Z.
+  Drop-in part names from GEO.destroyer (hull, super, mast, arms) plus:
+  spy (4 octagonal SPY-1D faces), stacks (2 funnels with uptake grilles), sps (surface-search radar on the mast, turns with
+  state sps), gun (Mk 45 5"/62; state gunYaw, gunPitch), vlsF (32 cells) + vlsA (64 cells) with individual hatches
+  (state vlsOpen: array of open cell ids, ids 0..31 fwd, 32..95 aft), ciwsF + ciwsA (Phalanx 1B: pedestal, radome, 6-barrel
+  M61 gatling; state ciwsYaw [f, a], ciwsPitch [f, a], ciwsSpin rad), decoys (Mk 36 SRBOC / Nulka launchers), boats
+  (RHIB + davits), hangar (twin doors), deck (flight deck markings, line prims), rails (lifelines, fine), bridge windows,
+  yardarm antennas.
+  anchors object HD.destroyer.A: stacks [2 exhaust mouths], vls(i) -> cell centre, ciws(st, i) -> muzzle,
+  gun(st) -> muzzle, spy [4 face centres], heloSpot, stern, bow.
+
+HD.helo()  MH-60R Seahawk. Origin on the ground under the rotor mast, nose +Z. state: rotor (rad), trotor (rad),
+  droop (0 flight .. 1 at rest). parts: fuselage (cockpit glazing, doors), rotor (4 blades, 16.36 m disc, hub),
+  tailrotor (4 blades, canted), tail (boom, pylon, stabilator), gear, sensors (nose turret, radome), pylons.
+
+HD.fighter()  F/A-18E Super Hornet. Origin at mid-body, gear up. state: fan (rad), nozzle (0 closed .. 1 open), ab (0..1).
+  parts: fuselage, lex, wings, tails (twin canted), stabs, canopy, intakes (caret intakes WITH visible first-stage fan
+  faces: blades + spinner, turning with fan), nozzles (petals), pylons (+ optional stores).
+  constants: HD.fighter.NOZZLES [2], HD.fighter.INTAKES [2].
+
+HD.drone()  Orlan-10-class recon UAV (3.1 m span). Origin at mid-body. state: prop (rad), gimYaw, gimPitch.
+  parts: fuselage, wing, tail, prop (2 blades), gimbal (EO ball under the nose), antennas. constants: HD.drone.PROP, .GIMBAL.
+HD.catapult()  pneumatic launch rail on a trailer; state carriage (0..1 along the rail). constant: HD.catapult.RAIL (start, end).
+
+HD.satellite()  Lotos-S1 / Kondor-class spacecraft. Origin at the bus centre, +Z = velocity, -Y = nadir.
+  parts: bus, solar (2 wings, cell grids, hinges), reflector (deployable mesh dish: rim, ribs, feed boom), sensors
+  (star trackers, antennas), thrusters.
+
+HD.carrier()  Nimitz-class, lower detail (seen from far/above): flight deck + angled deck outline, island with radars,
+  catapult tracks, elevators, a few parked aircraft (HD.fighter with fine:false or simpler). Origin midships waterline.
+
+Budgets: HD.destroyer as wire < ~15k segments full detail (much less with fine:false); sampled at 0.35 m < ~200k points.
+Small craft proportionally less.

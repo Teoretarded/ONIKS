@@ -1,0 +1,58 @@
+COMBAT FILMS: two more menu cinematics for the ONIKS strategy game, built in three stages each
+=========================================================================================
+
+These are video-game menu cinematics. Combat is shown the way a game trailer shows it: as spectacle (motion, light,
+flashes, tracer, smoke, debris, labels). Never as tactics: no guidance or targeting logic, no countermeasure or
+counter-countermeasure reasoning, no damage mechanics, no weapon internals. Keep labels short and visual ("Hit · DDG",
+"Round 2 · stopped", "CIWS").
+
+Common rules: _brief/films.txt (one take, seamless loop, pure function of film time T, menu on screen, style, sound via
+FILM.cue, <= 16 ms/frame, HD models, render stills and look at them). Runtime common/film.js. Models common/hd_land.js,
+common/hd_sea_air.js (HD.destroyer + HD.destroyer.A anchors: vls(i), ciws, ciwsDir, gun, spy, stacks, deckY...; HD.helo;
+HD.sm6; HD.oniks; HD.wire(model) for cheap wire). Never open ../menus/*.html pages. You may copy drawing code from the
+finished films in this folder: oc_underway_world.js / oc_underway_fast.js (wire sea, wake, ship, tracer streams,
+climbing plumes, smoke, flashes), oa_scale_main.js (wire sea at speed, the round in close-up, plume), ob_long_exposure_core.js,
+pa_picture_*.js (scope, hit burst), pb_survey_film.js (dot ship, tracer dots, dot burst, smoke), pc_anatomy_*.js.
+
+---------------------------------------------------------------------------------------------------------------
+OD  od_salvo.html   ORBITAL D: SALVO   (~150 s)   black, white hairlines, one yellow accent, Inter + DM Mono
+---------------------------------------------------------------------------------------------------------------
+One take. Menu column left, a short engagement log right (like a ship's log), "Fig. N" caption bottom right.
+ 1 Inbound (0-28): alongside four rounds (HD.oniks, wings out) low over the wire sea at speed, in a loose line; the
+   camera weaves between them; a far horizon.
+ 2 The ship (28-55): the camera runs ahead of them and arrives at the destroyer (HD.destroyer) under way, with a cruiser
+   and the carrier far off; radar arcs pulsing from its faces (see oc_underway); the rounds are points on the horizon.
+ 3 Defence (55-95): VLS hatches open, two interceptors (HD.sm6) leave on bright plumes with lingering smoke; flashes far
+   out where they meet two of the rounds; the close-in gun (Phalanx) slews and fires tracer streams; the third round
+   bursts ~500 m out, debris falling into the sea.
+ 4 The hit (95-112): the fourth round comes in; slow motion (rate shown, e.g. "x0.1"); the hit: flash and restrained
+   bloom, fireball rings, debris arcs, fires on deck.
+ 5 Aftermath (112-150): real time again; the ship burning, a heavy smoke column leaning downwind, a slight list; the
+   camera pulls back and up, the group turning; it keeps pulling back toward the horizon, where the next salvo of four
+   is inbound low over the sea: the camera drops in alongside them = frame 0.
+
+---------------------------------------------------------------------------------------------------------------
+PD  pd_engagement.html   POINT CLOUD D: ENGAGEMENT   (~150 s)   graphite, white dots, lime (own), coral (hostile)
+---------------------------------------------------------------------------------------------------------------
+The same kind of fight through the sensors. One take. Menu column left (like pa_picture), kick label top-left, one stat
+top-right.
+ 1 Scope (0-25): a 3D radar clutter scope (see pa_picture_scope.js) with the ships as tracks; four lime own tracks
+   crossing the sea toward them, rate shown if sped up.
+ 2 Down to the sea (25-50): the camera dives from the scope into the dot world low over the sea behind the four rounds
+   (dot-sampled HD.oniks, lime-edged); the destroyer ahead as a dot cloud (HD.destroyer sampled).
+ 3 Defence (50-90): an EO-tracker inset with boxes on each round; coral streaks of the interceptors climbing, bursts of
+   dots where two rounds are stopped; coral tracer dots from the close-in gun; the third round bursts short, debris dots
+   raining into the sea.
+ 4 The hit (90-108): slow motion (rate shown); a lime-white bloom of dots at the hull, spray, fire points, a dot smoke
+   column; tag "Hit · DDG".
+ 5 Picture (108-150): the camera climbs back into the scope; the contact's returns flare and thin; tag "TRK · hit"; a new
+   raid appears at the edge of the scope = frame 0.
+
+---------------------------------------------------------------------------------------------------------------
+STAGES (each a separate builder; the file carries over)
+---------------------------------------------------------------------------------------------------------------
+A  Skeleton: the whole timeline and one-take camera path end to end, chapters, menu, captions, sea, ships, the four
+   rounds flying their paths to the ship (no effects yet), loop seam, <= 16 ms.
+B  Defence: chapter 3 effects (launches, plumes and smoke, flashes, tracer, the burst short with debris, log lines/tags).
+C  Hit and aftermath: chapter 4 and 5 effects (slow motion, the hit, fires, smoke, the pull-back / climb), polish every
+   chapter, verify the loop seam and performance, pick 4 gallery moments.

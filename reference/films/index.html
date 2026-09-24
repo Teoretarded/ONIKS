@@ -1,0 +1,148 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Oniks — extended menu cutscenes</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=DM+Mono:wght@400;500&display=swap">
+<style>
+  :root { --w: #F2F1EC; --w2: rgba(242,241,236,.62); --w3: rgba(242,241,236,.36); --hair: rgba(242,241,236,.12); --hi: #F4D23C; --lime: #C6F432; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { background: #070707; }
+  body { color: var(--w); font-family: Inter, 'Segoe UI', sans-serif; -webkit-font-smoothing: antialiased; padding: 48px clamp(20px, 4vw, 64px) 80px; }
+  header { border-bottom: 1px solid var(--hair); padding-bottom: 22px; }
+  h1 { font-weight: 300; font-size: clamp(28px, 3vw, 40px); letter-spacing: -.03em; }
+  h1 b { font-weight: 500; }
+  .how { margin-top: 12px; font: 400 12.5px/1.8 'DM Mono', monospace; color: var(--w3); }
+  .how b { color: var(--w2); font-weight: 400; }
+  section { margin-top: 40px; }
+  h2 { display: flex; align-items: center; gap: 12px; font: 500 12.5px 'DM Mono', monospace; letter-spacing: .08em; text-transform: uppercase; color: var(--w2); margin-bottom: 18px; }
+  h2 i { width: 8px; height: 8px; flex: none; }
+  .o h2 i, .od h2 i { background: var(--hi); } .p h2 i, .pd h2 i { background: var(--lime); } .x h2 i { background: #FF6A3D; } .a h2 i { background: var(--lime); }
+  h2 span { color: var(--w3); letter-spacing: 0; text-transform: none; font-weight: 400; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(520px, 100%), 1fr)); gap: 32px 28px; }
+  .tile { cursor: pointer; }
+  .tile.pending { cursor: default; }
+  .shot { position: relative; aspect-ratio: 16/9; background: #111; overflow: hidden; outline: 1px solid var(--hair); }
+  .shot img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .5s cubic-bezier(.2,.7,.2,1); }
+  .tile:not(.pending):hover .hero img { transform: scale(1.025); }
+  .hero .zoom { position: absolute; right: 12px; bottom: 12px; font: 400 12px 'DM Mono', monospace; color: #fff; background: rgba(0,0,0,.72); padding: 6px 9px; opacity: 0; transition: opacity .2s; }
+  .tile:not(.pending):hover .hero .zoom { opacity: 1; }
+  .strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 6px; }
+  .pend { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; font: 400 12.5px 'DM Mono', monospace; color: var(--w3); }
+  .pend i { width: 7px; height: 7px; background: var(--w3); animation: bl 1s steps(2) infinite; }
+  @keyframes bl { 50% { opacity: 0; } }
+  .meta { display: grid; grid-template-columns: 44px 1fr auto; gap: 0 12px; align-items: baseline; margin-top: 14px; }
+  .meta .n { font: 400 13px 'DM Mono', monospace; color: var(--w3); }
+  .meta .t { font-size: 24px; letter-spacing: -.02em; }
+  .meta .go { font: 400 12px 'DM Mono', monospace; color: var(--w3); text-decoration: none; }
+  .meta .go:hover { color: var(--w); }
+  .meta .d { grid-column: 2 / 4; margin-top: 6px; font-size: 14.5px; line-height: 1.45; color: var(--w2); max-width: 680px; }
+
+  /* big view */
+  #lb { position: fixed; inset: 0; z-index: 10; background: rgba(4,4,4,.96); display: none; flex-direction: column; padding: 18px clamp(12px, 2.5vw, 36px); }
+  #lb.on { display: flex; }
+  #lb .bar { display: flex; align-items: baseline; gap: 16px; padding-bottom: 12px; }
+  #lb .bar .n { font: 400 13px 'DM Mono', monospace; color: var(--w3); }
+  #lb .bar .t { font-size: 22px; letter-spacing: -.02em; }
+  #lb .bar .sp { flex: 1; }
+  #lb .btn { font: 400 12.5px 'DM Mono', monospace; color: var(--w2); background: none; border: 1px solid var(--hair); padding: 7px 11px; cursor: pointer; text-decoration: none; }
+  #lb .btn:hover { color: #fff; border-color: var(--w3); }
+  #lb .btn.play { color: #0b0b0b; background: var(--w); border-color: var(--w); }
+  #lb .stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
+  #lb .frame { position: relative; aspect-ratio: 16/9; max-width: 100%; max-height: 100%; width: 100%; background: #000; outline: 1px solid var(--hair); }
+  @supports (aspect-ratio: 1) { #lb .frame { width: min(100%, calc((100vh - 230px) * 16 / 9)); } }
+  #lb .frame img, #lb .frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; object-fit: contain; }
+  #lb .foot { display: grid; grid-template-columns: auto 1fr; gap: 18px; align-items: center; padding-top: 12px; }
+  #lb .moms { display: flex; gap: 6px; }
+  #lb .moms img { width: 128px; aspect-ratio: 16/9; object-fit: cover; cursor: pointer; outline: 1px solid var(--hair); opacity: .55; transition: opacity .15s; }
+  #lb .moms img.on, #lb .moms img:hover { opacity: 1; outline-color: var(--w2); }
+  #lb .d { font-size: 14px; line-height: 1.45; color: var(--w2); max-width: 900px; }
+  #lb .keys { font: 400 11.5px 'DM Mono', monospace; color: var(--w3); margin-top: 6px; }
+</style></head>
+<body>
+<header>
+  <h1><b>Oniks</b> extended menu cutscenes</h1>
+  <div class="how">Long one-take films in both styles. Each is one continuous take that stitches that style's menu scenes into a full engagement and loops without a cut, behind the game's real five entries.
+    Click a tile to open it big · <b>← →</b> next / previous · <b>Play</b> runs the film · <b>Esc</b> close.
+    Inside a film: move the mouse for the timeline · <b>P</b> pause · <b>J L</b> ±5 s · <b>, .</b> chapter · <b>H</b> hide UI · <b>[ ]</b> films · <b>M</b> sound.
+    The earlier ten menus: <a href="../menus/index.html" style="color:inherit">menus/index.html</a>.</div>
+</header>
+<div id="g"></div>
+
+<div id="lb">
+  <div class="bar"><span class="n" id="lbn"></span><span class="t" id="lbt"></span><span class="sp"></span>
+    <button class="btn" id="lbprev">← prev</button><button class="btn" id="lbnext">next →</button>
+    <button class="btn play" id="lbplay">▶ Play film</button><a class="btn" id="lbopen" target="_blank">open full screen ↗</a><button class="btn" id="lbx">close ✕</button></div>
+  <div class="stage"><div class="frame" id="lbf"></div></div>
+  <div class="foot"><div class="moms" id="lbm"></div><div><div class="d" id="lbd"></div><div class="keys">click a moment to see it big · Play runs the film here (click into it: mouse for the timeline, P pause, J L seek, H hide UI) · ← → films · Esc close</div></div></div>
+</div>
+
+<script>
+const V = [
+  ['o', 'oa_scale', 'OA', 'Scale', 'Powers of ten in one take: a satellite in orbit, the dive onto the real map, the contour lines becoming the coast, the battery, the cold launch from a metre off the skin, the round racing out over the sea under a pair of fighters to hit a destroyer on the horizon, then the long climb back to orbit with the hit ringed on the map.'],
+  ['o', 'ob_long_exposure', 'OB', 'Long Exposure', 'Time made visible: a side-on long lens stamps a hairline ghost of everything every 0.35 s. Three launchers rise, four rounds leave in a ripple, pace out over the sea past a helicopter whose rotor becomes a disc of ghost blades; the ship’s gun stops one short and three hit. The whole plate at once, then it rewinds into the tubes.'],
+  ['o', 'oc_underway', 'OC', 'Underway', 'A night at sea with the strike group: a slow dolly along the destroyer, its helicopter lifting off, fighters launching from the carrier, the climb over the group, then a raid far off on the horizon (missiles climbing, an intercept flash, tracer, a picket hit and burning) while the helicopter lands, and a glide to the next ship.'],
+  ['p', 'pa_picture', 'PA', 'The Picture', 'Radar all the way: the clutter scope, a ride out along the beam to a contact that condenses from a cloud of doubt into a destroyer, back over the coast as the LiDAR draws it, the strike scan of the battery, the tracker on a helicopter, and back on the scope our own track crosses to the contact and it bursts.'],
+  ['p', 'pb_survey', 'PB', 'Survey', 'A survey drone’s eye: catapult launch, a LiDAR survey of the real coastline, a radar swath over the sea, a destroyer identified from standoff, the strike on it seen through the drone’s camera (tracer, burst, smoke), a rain squall on the way home, and a parachute landing beside the next drone.'],
+  ['p', 'pc_anatomy', 'PC', 'Anatomy', 'X-ray dots: the scan passes through the launcher and its truck floats apart into a museum cutaway (engine fans, axles, the hydraulic lift arm) and back together. Then the launch is tracked, the round flies out over the scanned coast to a flash on the horizon, and a crane loads the next container.'],
+  ['od', 'od_salvo', 'D·O1', 'Salvo', 'The fight itself, in one take: four rounds low over the sea, the destroyer’s defence (interceptors off the deck, flashes, the close-in gun’s tracer), the one that gets through in slow motion, and the burning ship left behind as the next salvo comes over the horizon.'],
+  ['od', 'oe_ring', 'D·O2', 'Ring', 'The camera never leaves the destroyer: one slow orbit around it through three raids, each bigger than the last, closing in on each system as it fires: VLS hatches, interceptor plumes, the 5-inch gun, both Phalanx mounts, decoy clouds. The ship takes a hit on the last wave and keeps fighting.'],
+  ['od', 'of_task_force', 'D·O3', 'Task Force', 'The whole group defends: carrier, cruiser and destroyers in a ring under a raid from three bearings. The sky fills with a lattice of interceptor trails and the camera dives through it between the ships; a destroyer on the threat axis takes the hit that was meant for the carrier.'],
+  ['od', 'og_bullet_time', 'D·O4', 'Bullet Time', 'The last twenty seconds of a defence stretched across the whole film: the camera moves freely through frozen tracer streams, hanging plumes and suspended fragments, the incoming round a few metres from the hull, then time snaps back to full speed and rewinds.'],
+  ['od', 'oh_storm', 'D·O5', 'Storm', 'A defence at night in a storm: heavy swell, rain streaks, the destroyer pitching and throwing spray, lightning flashes lighting every hairline at once, interceptor plumes glowing inside the cloud, Phalanx tracer through the rain.'],
+  ['pd', 'pd_engagement', 'D·P1', 'Engagement', 'The same fight through the sensors: the raid on the radar scope, the ship as a dot cloud, tracker boxes on each incoming round, the defensive fire as coral streaks, bursts of dots, the hit, and the contact fading from the scope.'],
+  ['pd', 'pe_aegis', 'D·P2', 'Aegis', 'The ship’s own radar picture: a 360° dot scope around the destroyer, the raid condensing out of uncertainty clouds on the horizon, lime interceptor tracks leaving the ship, bursts where they meet the coral tracks, and the close-in radar’s dense cone for the last one.'],
+  ['pd', 'pf_gun_camera', 'D·P3', 'Gun Camera', 'The close-in gun’s own camera: tracking boxes and lag lines on each incoming round, tracer dots streaming out of the frame, bursts of debris dots. Between engagements the camera pulls back to the Phalanx mount itself, barrels spinning, on the deck.'],
+  ['pd', 'pg_thermal', 'D·P4', 'Thermal', 'The defence through a thermal imager: white-hot stacks and plumes, a warm hull, a cold speckled sea, blinding interceptor launches, barrel heat bloom, and debris glowing as it cools; the view switches between white-hot and black-hot.'],
+  ['pd', 'ph_damage_scan', 'D·P5', 'Damage Scan', 'Combat meets Anatomy: the destroyer defends and takes a hit, then a lightning scan sweeps the ship and the damaged section’s systems float apart in an exploded view, tagged, and glide back together as the ship steams on.'],
+  ['x', 'oa_strike', 'X·OA', 'Scale · Strike', 'Scale with the fight brought close: a full salvo from launch to the ship, the camera staying among the rounds through the defence and the hits, then the climb to orbit with every track ringed on the map.'],
+  ['x', 'ob_barrage', 'X·OB', 'Long Exposure · Barrage', 'Long Exposure with a full barrage: more rounds, the ship’s interceptors and gun fire all stamped as ghosts, the plate filling with the whole fight before it rewinds.'],
+  ['x', 'pa_raid', 'X·PA', 'The Picture · Raid', 'The Picture with a full raid on the scope: own tracks in lime, the ship’s interceptors in coral, bursts where they meet, several contacts hit.'],
+  ['x', 'pb_battle', 'X·PB', 'Survey · Battle', 'Survey where the drone watches a whole engagement from standoff: interceptors climbing, tracer, several strikes on the ship, smoke columns on the horizon.'],
+  ['a', 'pc_anatomy_ship', 'A·2', 'Anatomy · Ship', 'X-ray dots through the destroyer: gas turbines with their fan blades, reduction gears, shafts and propellers, VLS modules, radar faces, the gun and the Phalanx float apart into a cutaway and back, then a pierside crane reloads the launch cells.'],
+  ['a', 'pc_anatomy_battery', 'A·3', 'Anatomy · Battery', 'X-ray dots through the Pantsir and the radar truck: turret, guns, radars and mast float apart and back together, and a reload vehicle swings fresh missile packs onto the turret.'],
+];
+const src = (id, k) => `thumbs/${id}_${k}.jpg`;
+const ready = {};
+const pendHTML = '<div class="pend"><i></i>being built — reload in a bit</div>';
+function tile([, id, n, t, d], idx) {
+  return `<div class="tile pending" data-i="${idx}" id="tile-${id}">
+    <div class="shot hero"><img src="${src(id, 0)}" alt="" onload="mark('${id}')" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'pend',innerHTML:'<i></i>being built — reload in a bit'}))"><span class="zoom">click to view big</span></div>
+    <div class="strip">${[1, 2, 3].map(k => `<div class="shot"><img src="${src(id, k)}" alt="" data-k="${k}" onerror="this.style.visibility='hidden'"></div>`).join('')}</div>
+    <div class="meta"><span class="n">${n}</span><span class="t">${t}</span><a class="go" href="${id}.html" onclick="event.stopPropagation()">play ↗</a><span class="d">${d}</span></div></div>`;
+}
+function mark(id) { ready[id] = true; document.getElementById('tile-' + id).classList.remove('pending'); }
+const sec = (cls, title, sub) => `<section class="${cls}"><h2><i></i>${title}<span>${sub}</span></h2><div class="grid">` +
+  V.map((v, i) => [v, i]).filter(([v]) => v[0] === cls).map(([v, i]) => tile(v, i)).join('') + '</div></section>';
+document.getElementById('g').innerHTML = sec('o', 'Orbital', ' — black, white hairline wireframe, yellow highlighter') + sec('p', 'Point Cloud', ' — graphite, LiDAR dots, lime identification') + sec('od', 'Ship defence · Orbital', ' — long takes of the destroyer fighting off raids, after O5') + sec('pd', 'Ship defence · Point Cloud', ' — the same fights through sensors and dots') + sec('x', 'Combat editions', ' — the films above with much more fighting') + sec('a', 'Anatomy', ' — X-ray scans, exploded views and reloads');
+
+/* big view */
+const lb = document.getElementById('lb'), lbf = document.getElementById('lbf'), lbm = document.getElementById('lbm');
+let cur = -1, mom = 0;
+function show(i, k) {
+  const [, id, n, t, d] = V[i]; cur = i; mom = k || 0;
+  document.getElementById('lbn').textContent = n;
+  document.getElementById('lbt').textContent = t;
+  document.getElementById('lbd').textContent = d;
+  document.getElementById('lbopen').href = id + '.html';
+  lbf.innerHTML = ready[id] ? `<img src="${src(id, mom)}" alt="">` : pendHTML;
+  lbm.innerHTML = ready[id] ? [0, 1, 2, 3].map(q => `<img src="${src(id, q)}" data-q="${q}" class="${q === mom ? 'on' : ''}" onerror="this.remove()">`).join('') : '';
+  lb.classList.add('on'); document.body.style.overflow = 'hidden';
+}
+function close() { lb.classList.remove('on'); lbf.innerHTML = ''; document.body.style.overflow = ''; cur = -1; }
+function step(d) { if (cur < 0) return; show((cur + d + V.length) % V.length, 0); }
+document.getElementById('g').addEventListener('click', e => {
+  const t = e.target.closest('.tile'); if (!t || t.classList.contains('pending')) return;
+  const im = e.target.closest('.strip img'); show(+t.dataset.i, im ? +im.dataset.k : 0);
+});
+lbm.addEventListener('click', e => { const im = e.target.closest('img'); if (!im) return; mom = +im.dataset.q; lbf.innerHTML = `<img src="${im.src}" alt="">`; lbm.querySelectorAll('img').forEach(x => x.classList.toggle('on', x === im)); });
+document.getElementById('lbplay').onclick = () => { if (cur < 0) return; const id = V[cur][1]; lbf.innerHTML = `<iframe src="${id}.html?embed" allow="autoplay"></iframe>`; lbf.querySelector('iframe').focus(); };
+document.getElementById('lbprev').onclick = () => step(-1);
+document.getElementById('lbnext').onclick = () => step(1);
+document.getElementById('lbx').onclick = close;
+lb.addEventListener('click', e => { if (e.target === lb || e.target.classList.contains('stage')) close(); });
+addEventListener('keydown', e => {
+  if (cur < 0) return;
+  if (e.key === 'Escape') close(); else if (e.key === 'ArrowRight') step(1); else if (e.key === 'ArrowLeft') step(-1);
+});
+// a live menu inside the big view asks us to flip or close
+addEventListener('message', e => { const m = e.data && e.data.oniks; if (m === 'next') step(1); else if (m === 'prev') step(-1); else if (m === 'close') close(); });
+</script>
+</body></html>

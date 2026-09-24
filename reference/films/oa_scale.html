@@ -1,0 +1,42 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Oniks — Scale</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=DM+Mono:wght@400;500&display=block">
+<link rel="stylesheet" href="../menus/common/orbital.css">
+<style>
+  .logo { left: 96px; top: 66px; }
+  .sub { left: 96px; top: 104px; font-size: 14px; color: var(--w3); }
+  .menu { left: 96px; top: 318px; width: 430px; }
+  .menu .it { height: 66px; padding-top: 15px; border-top: 1px solid var(--wr); font-size: 34px; letter-spacing: -.028em; }
+  .menu .it:last-child { border-bottom: 1px solid var(--wr); }
+  .blurb { left: 146px; top: 668px; width: 380px; }
+  .keys { left: 96px; bottom: 58px; }
+  .ro { right: 96px; top: 54px; text-align: right; }
+  .ro .v { font: 300 46px var(--sans); letter-spacing: -.03em; font-variant-numeric: tabular-nums; display: flex; justify-content: flex-end; align-items: baseline; gap: 11px; }
+  .ro .v i { font: 400 12px var(--mono); font-style: normal; color: var(--w3); letter-spacing: 0; }
+  .ro .v u { text-decoration: none; font-size: 22px; color: var(--w2); letter-spacing: -.01em; }
+  .ro .s { font: 400 12.5px var(--mono); color: var(--w2); margin-top: 8px; letter-spacing: 0; white-space: nowrap; }
+  .ro .s b { font-weight: 400; color: var(--w); }
+  .fig { right: 96px; bottom: 56px; text-align: right; }
+  .foot { left: 50%; bottom: 58px; transform: translateX(-50%); }
+  .call { opacity: 0; }
+</style></head>
+<body><div id="stage">
+  <canvas id="c"></canvas>
+  <div class="ui" id="ui">
+    <div class="logo abs"><svg viewBox="0 0 24 24" fill="none" stroke="#F6F5F2" stroke-width="1.2"><circle cx="11" cy="13" r="8.2"/><path d="M1.5 22.5 22 2"/><rect x="19.2" y="1.4" width="3.8" height="3.8" fill="#F6F5F2" stroke="none"/></svg>Oniks</div>
+    <div class="sub abs">Krasnaya Kosa — Coastal Defense Command</div>
+    <div class="menu abs" id="menu"></div>
+    <div class="blurb abs" id="blurb"></div>
+    <div class="keys abs"><span><b>↑↓</b>Select</span><span><b>Enter</b>Open</span><span><b>G</b>Graphics</span><span><b>Esc</b>Quit</span></div>
+    <div class="ro abs"><div class="v"><i id="rol">Alt</i><span id="rov">900</span><u id="rou">km</u></div><div class="s" id="ros"></div></div>
+    <div class="fig abs" id="fig"><b>Fig. 1</b>Orbit</div>
+    <div class="foot abs">Proto v0.5.0</div>
+  </div>
+  <div class="veil" id="veil"><div class="msg">Stand the battery down.</div></div>
+</div>
+<script src="../menus/common/m3.js"></script><script src="../menus/common/orb.js"></script><script src="../menus/common/wire.js"></script><script src="../menus/common/geo.js"></script>
+<script src="common/hd_land.js"></script><script src="common/hd_sea_air.js"></script>
+<script src="../menus/common/theatre.js"></script><script src="../menus/common/stage.js"></script><script src="common/film.js"></script>
+<script src="oa_scale_world.js"></script>
+<script src="oa_scale_main.js"></script>
+</body></html>

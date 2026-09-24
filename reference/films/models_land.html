@@ -1,0 +1,135 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>HD land models</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=block">
+<style>
+html,body{margin:0;background:#000;overflow:hidden;width:100%;height:100%}
+#stage{position:absolute;left:0;top:0;width:1920px;height:1080px;transform-origin:0 0;overflow:hidden;background:#000}
+canvas{position:absolute;top:0;height:1080px}
+#w{left:0;width:960px}#d{left:960px;width:960px}
+.l{position:absolute;font:400 12px/1.5 'DM Mono',Consolas,monospace;color:rgba(255,255,255,.62);letter-spacing:.03em;white-space:pre;pointer-events:none}
+.l b{color:#fff;font-weight:500}
+.t{position:absolute;font:400 11px/1 'DM Mono',Consolas,monospace;color:rgba(255,255,255,.5);letter-spacing:.04em;text-transform:uppercase;pointer-events:none}
+</style></head>
+<body><div id="stage"><canvas id="w" width="960" height="1080"></canvas><canvas id="d" width="960" height="1080"></canvas><div id="ui"></div></div>
+<script src="../menus/common/m3.js"></script><script src="../menus/common/wire.js"></script><script src="../menus/common/dots.js"></script>
+<script src="../menus/common/geo.js"></script><script src="common/hd_land.js"></script><script src="../menus/common/stage.js"></script>
+<script>
+/* HD land model viewer. Wire (GEO.draw) on the left half, dots (GEO.sample) on the right.
+   ?m=tel|oniks|booster|radar|pantsir|sm6|mk72 one model (no m: grid of all)
+   ?t=SEC freeze · ?yaw=DEG ?pitch=DEG fixed view · ?dist=M · ?tgt=x,y,z · ?fov=DEG · ?fine=0
+   ?only=part,part show some parts · ?st=k:v,k:v state override · ?s=M dot spacing · ?spd=rad/s orbit speed · ?capture=1&out=... */
+(() => {
+const { V, R, X, E, Cam } = M3;
+const Q = STAGE.Q; STAGE.fit();
+const num = (k, d) => Q.has(k) ? parseFloat(Q.get(k)) : d;
+const inOut = E.inOut, sat = E.sat, ss = E.ss;
+const CFG = {
+  tel: { make: HD.tel, tgt: [0, 2.9, -1.2], dist: 25, s: .07, P: 20, st: (t, u) => ({
+    dep: ss(1, 3, u) * (1 - ss(17, 19, u)),
+    elev: 1.53 * inOut(sat((u - 3.5) / 5)) * (1 - inOut(sat((u - 13.5) / 3.5))),
+    capL: u > 9.4 && u < 13 ? sat((u - 9.4) / .9) : 0, capR: u > 10.4 && u < 13 ? sat((u - 10.4) / .9) : 0,
+    wheel: t * 1.1, fan: t * 16 }) },
+  oniks: { make: HD.oniks, tgt: [0, 0, 0], dist: 11.5, s: .022, P: 12, st: (t, u) => ({
+    cover: u < 2, booster: u < 7, wing: ss(3, 4.5, u) * (1 - ss(10, 11.5, u)), fin: ss(3.6, 5, u) * (1 - ss(10, 11.5, u)) }) },
+  booster: { make: HD.oniksBooster, tgt: [0, 0, 0], dist: 4.2, s: .012, P: 10, st: () => ({}) },
+  radar: { make: HD.radar, tgt: [0, 4.8, -1.6], dist: 30, s: .08, P: 16, st: (t, u) => ({
+    mast: ss(.5, 5.5, u) * (1 - ss(12, 15.5, u)), ant: t * 1.15, fan: t * 20, wheel: t }) },
+  pantsir: { make: HD.pantsir, tgt: [0, 2.4, 0], dist: 20, s: .06, P: 12, st: (t, u) => ({
+    yaw: .75 * Math.sin(t * .45), pitch: .3 + .3 * Math.sin(t * .7), sAnt: t * 2.1, fire: (u % 4) < 1.2 ? (t * 5) % 1 : 0, wheel: t }) },
+  sm6: { make: HD.sm6, tgt: [0, 0, 0], dist: 8.2, s: .014, P: 10, st: (t, u) => ({ booster: u < 6 }) },
+  mk72: { make: HD.mk72, tgt: [0, 0, 0], dist: 3.6, s: .01, P: 10, st: () => ({}) },
+};
+const ORDER = ['tel', 'radar', 'pantsir', 'oniks', 'sm6', 'booster', 'mk72'];
+const single = Q.get('m');
+const override = {};
+if (Q.has('st')) for (const kv of Q.get('st').split(',')) { const [k, v] = kv.split(':'); override[k] = v === 'true' ? true : v === 'false' ? false : parseFloat(v); }
+const fine = Q.get('fine') !== '0';
+
+/* one view per model: in single mode a whole half, in grid mode a 480x270 tile per half */
+const views = [];
+const list = single ? [single] : ORDER;
+list.forEach((name, i) => {
+  const c = CFG[name], model0 = c.make();
+  const model = Q.has('only') ? Object.assign({}, model0, { parts: model0.parts.filter(p => Q.get('only').split(',').includes(p.name)) }) : model0;
+  const tile = single ? { x: 0, y: 0, w: 960, h: 1080 } : { x: (i % 2) * 480, y: Math.floor(i / 2) * 270, w: 480, h: 270 };
+  const mk = () => { const cm = new Cam(960, 1080); const f = num('fov', single ? 34 : 30) * Math.PI / 180; cm.fov = 2 * Math.atan(Math.tan(f / 2) * 1080 / tile.h); cm.cx = tile.x + tile.w / 2; cm.cy = tile.y + tile.h / 2; return cm.update(); };
+  const s = num('s', c.s) * (single ? 1 : 1.6);
+  // static parts sampled once; parts whose dyn changes the surface are resampled per frame
+  const resample = p => !!p.dyn && p.name !== 'wheels' && p.name !== 'fans';
+  const samp = GEO.sample(model, s, 5 + i, {});
+  views.push({ name, c, model, tile, camW: mk(), camD: mk(), s, samp, resample, i });
+});
+const cvW = document.getElementById('w'), ctx = cvW.getContext('2d');
+const pb = new PointBuf(document.getElementById('d'), [11, 12, 10], { vignette: .35 });
+const W = new Wire(views[0].camW, { fog: [1e5, 2e5] });
+const ui = document.getElementById('ui');
+const info = [];
+views.forEach(v => {
+  const a = document.createElement('div'); a.className = single ? 'l' : 't';
+  a.style.left = (v.tile.x + 24) + 'px'; a.style.top = (v.tile.y + (single ? 26 : 14)) + 'px';
+  const b = a.cloneNode(); b.style.left = (960 + v.tile.x + 24) + 'px';
+  ui.appendChild(a); ui.appendChild(b); info.push([a, b]);
+});
+/* counts: segments via a counting wire, points at the view spacing */
+function countSegs(v, st, opt) {
+  let n = 0; const Wc = { cam: v.camW, seg() { n++; }, poly(p, al, cl) { n += p.length - 1 + (cl && p.length > 2 ? 1 : 0); }, ring(c, U, Vv, r, k) { n += k; } };
+  GEO.draw(Wc, v.model, X.make(), st, opt); return n;
+}
+const pts0 = v => v.samp.reduce((a, p) => a + p.pts.length / 6, 0);
+let buf = new Float32Array(4 * 60000);
+
+function state(v, t) {
+  const u = ((t % v.c.P) + v.c.P) % v.c.P;
+  return Object.assign(v.c.st(t, u), override);
+}
+function render(t) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#000'; ctx.fillRect(0, 0, 960, 1080);
+  pb.clear(); W.reset();
+  const stats = [];
+  for (const v of views) {
+    const st = state(v, t);
+    const yaw = (Q.has('yaw') ? num('yaw', 0) * Math.PI / 180 : .75 + t * num('spd', .2));
+    const pitch = num('pitch', 16) * Math.PI / 180, dist = num('dist', v.c.dist * (single ? 1.55 : 1));
+    const tgt = Q.has('tgt') ? Q.get('tgt').split(',').map(Number) : v.c.tgt;
+    v.camW.orbit(tgt, yaw, pitch, dist); v.camD.orbit(tgt, yaw, pitch, dist);
+    W.cam = v.camW;
+    GEO.draw(W, v.model, X.make(), st, { fine });
+    // dots
+    const cam = v.camD, L = V.norm([-.4, .85, -.3]);
+    let np = 0;
+    v.model.parts.forEach((part, pi) => {
+      if (part.show && !part.show(st)) return;
+      let pts = v.samp[pi].pts;
+      if (v.resample(part)) pts = GEO.sample({ parts: [part] }, v.s, 9 + pi, st)[0].pts;
+      else if (!fine) {}
+      const T = GEO.partXf(X.make(), part, st), n = pts.length / 6; np += n;
+      if (buf.length < n * 4) buf = new Float32Array(n * 4 * 2);
+      DOTS.project(cam, T, pts, buf);
+      for (let k = 0; k < n; k++) {
+        const o = k * 4; if (buf[o + 2] <= 0) continue;
+        const x = buf[o], y = buf[o + 1];
+        if (x < v.tile.x || x >= v.tile.x + v.tile.w || y < v.tile.y || y >= v.tile.y + v.tile.h) continue;
+        const f = buf[o + 3], b = f === 2 ? .62 : f > 0 ? .3 + .66 * f : .1;
+        pb.dot(x, y, single ? 1 : 1, 238, 238, 228, b);
+      }
+    });
+    v.np = np;
+  }
+  W.flush(ctx);
+  // grid separators
+  if (!single) { ctx.strokeStyle = 'rgba(255,255,255,.12)'; ctx.lineWidth = 1; ctx.beginPath(); for (let k = 1; k < 4; k++) { ctx.moveTo(0, k * 270 + .5); ctx.lineTo(960, k * 270 + .5); } ctx.moveTo(480.5, 0); ctx.lineTo(480.5, 1080); ctx.stroke(); }
+  pb.blit();
+  if (!single) { const c2 = document.getElementById('d').getContext('2d'); c2.strokeStyle = 'rgba(255,255,255,.1)'; c2.beginPath(); for (let k = 1; k < 4; k++) { c2.moveTo(0, k * 270 + .5); c2.lineTo(960, k * 270 + .5); } c2.moveTo(480.5, 0); c2.lineTo(480.5, 1080); c2.stroke(); }
+  views.forEach((v, i) => {
+    const st = state(v, t);
+    const sv = Object.entries(st).map(([k, x]) => `${k} ${typeof x === 'number' ? (Math.abs(x) > 10 ? (x % (2 * Math.PI)).toFixed(2) : x.toFixed(2)) : x}`).join('  ');
+    if (single) {
+      if (!v.segs) { v.segs = countSegs(v, st, {}); v.segsC = countSegs(v, st, { fine: false }); }
+      info[i][0].innerHTML = `<b>HD.${v.name === 'booster' ? 'oniksBooster' : v.name}()</b>   wire\n${v.segs} segs · fine:false ${v.segsC}\n${sv}`;
+      info[i][1].innerHTML = `<b>${v.model.parts.map(p => p.name).join(' · ')}</b>\ndots ${v.np} @ ${v.s} m`;
+    } else { info[i][0].textContent = v.name; info[i][1].textContent = `${v.name} · ${v.np} pts`; }
+  });
+}
+STAGE.run({ update() {}, render: t => render(t) });
+})();
+</script></body></html>
