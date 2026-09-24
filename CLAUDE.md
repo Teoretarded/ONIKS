@@ -1,8 +1,11 @@
 # ONIKS
 
 A new game built from the look of the reference films in `reference/`. The old Python sim
-(`C:\Users\Teo\Documents\projects\Oinks`) is retired as the base; mine it for data (terrain, seed-1337 map,
-unit facts), not for code or UI.
+(`C:\Users\Teo\Documents\projects\Oinks`, GitHub `Teoretarded/oniks-legacy`) is retired as the base; mine it for
+data (terrain, seed-1337 map, unit facts), not for code or UI.
+
+GitHub: `Teoretarded/ONIKS` (public). The GitHub CLI is at `C:\Program Files\GitHub CLI\gh.exe` (not on Git Bash's
+PATH; call it from PowerShell by full path).
 
 ## Direction (from the user)
 
