@@ -107,29 +107,47 @@
     { id: 'I2', cell: 44, tL: 67.6, rnd: 1, tI: 83.2 },
     { id: 'I3', cell: 13, tL: 75.6, rnd: 3, tI: 89.3, miss: true },   // round 44 is at the top of its weave
   ];
-  /* vertical boost off the cell, a lofted arc, the dive onto the meeting point: a cubic path, arc-length tabled,
-     flown with a boost-then-coast speed law scaled to the flight time (after pe_aegis) */
-  const NP = 480;
+  /* straight up out of the cell for the first second of the boost, then a pitch-over that eases in and blends into
+     one long gentle arc over the top and down onto the meeting point. In the vertical plane through the cell and the
+     meeting point the flight-path angle runs gamma(u) = 90 - A smoothstep(u / UP) - (90 - A - GE) u over the arc
+     after the vertical (u: its arc-length fraction); A is solved so the arc lands on the point. Arc-length tabled,
+     flown with a boost-then-coast speed law scaled to the flight time. */
+  const NP = 480, NV = 24, UP = .1;
+  const gam = (u, a, ge) => { const v = Math.min(1, u / UP); return (90 - a * v * v * (3 - 2 * v) - (90 - a - ge) * u) * DEG; };
+  function arcInt(a, ge) { let cx = 0, sy = 0; const n = 400; for (let i = 0; i < n; i++) { const g = gam((i + .5) / n, a, ge); cx += Math.cos(g) / n; sy += Math.sin(g) / n; } return [cx, sy]; }
+  const v0 = t => (1 - Math.exp(-t / 1.35)) * (1 - .018 * t);
   for (const s of PG.SHOTS) {
     const P0 = A.vls(s.cell); P0[1] += .6;
     const P3 = [0, 0, 0];
     if (s.miss) { relPos(s.rnd, s.tI, P3, true); P3[1] += 50; }       // where 44 would be without its weave, 50 m up
     else relPos(s.rnd, s.tI, P3);
     const hz = Math.hypot(P3[0] - P0[0], P3[2] - P0[2]), dir = [(P3[0] - P0[0]) / hz, 0, (P3[2] - P0[2]) / hz];
-    const loft = 520 + hz * .075;
-    const P1 = [P0[0], P0[1] + loft * .75, P0[2]];
-    const P2 = s.miss ? [P0[0] + dir[0] * hz * .64, P3[1] + hz * .36 * Math.tan(9 * DEG), P0[2] + dir[2] * hz * .64]
-      : [P0[0] + dir[0] * hz * .58, loft * 1.55, P0[2] + dir[2] * hz * .58];
-    const pts = new Float64Array((NP + 1) * 3), S = new Float64Array(NP + 1);
-    for (let i = 0; i <= NP; i++) {
-      const u = i / NP, a = (1 - u) ** 3, b = 3 * (1 - u) ** 2 * u, c = 3 * (1 - u) * u * u, d = u ** 3;
-      for (let j = 0; j < 3; j++) pts[i * 3 + j] = a * P0[j] + b * P1[j] + c * P2[j] + d * P3[j];
-      if (i) S[i] = S[i - 1] + Math.hypot(pts[i * 3] - pts[i * 3 - 3], pts[i * 3 + 1] - pts[i * 3 - 2], pts[i * 3 + 2] - pts[i * 3 - 1]);
-    }
-    const L = S[NP], dur = s.tI - s.tL;
-    const v0 = t => (1 - Math.exp(-t / 1.35)) * (1 - .018 * t);
+    const dur = s.tI - s.tL;
     const NT = 600, ST = new Float64Array(NT + 1);
     for (let i = 1; i <= NT; i++) { const t0 = (i - 1) / NT * dur, t1 = i / NT * dur; ST[i] = ST[i - 1] + (v0(t0) + v0(t1)) * .5 * (t1 - t0); }
+    const f1 = ST[Math.round(NT / dur)] / ST[NT];                      // share of the path flown in the first second
+    const GE = s.miss ? -9 : -16;
+    let s0 = 350, aS = 60, L2 = hz;
+    for (let it = 0; it < 5; it++) {
+      const ratio = (P3[1] - P0[1] - s0) / hz;
+      let lo = 0, hi = 90 - GE;
+      for (let b = 0; b < 50; b++) { aS = (lo + hi) / 2; const c = arcInt(aS, GE); if (c[1] / c[0] > ratio) lo = aS; else hi = aS; }
+      L2 = hz / arcInt(aS, GE)[0];
+      s0 = f1 * (s0 + L2);
+    }
+    const pts = new Float64Array((NP + 1) * 3), S = new Float64Array(NP + 1);
+    let hx = 0, hy = s0, px = 0, py = s0;
+    for (let i = 0; i <= NP; i++) {
+      if (i <= NV) { hx = 0; hy = s0 * i / NV; }
+      else { const u0 = (i - 1 - NV) / (NP - NV), u1 = (i - NV) / (NP - NV), g = gam((u0 + u1) / 2, aS, GE), dl = L2 / (NP - NV); px += Math.cos(g) * dl; py += Math.sin(g) * dl; hx = px; hy = py; }
+      pts[i * 3] = P0[0] + dir[0] * hx; pts[i * 3 + 1] = P0[1] + hy; pts[i * 3 + 2] = P0[2] + dir[2] * hx;
+      if (i) S[i] = S[i - 1] + Math.hypot(pts[i * 3] - pts[i * 3 - 3], pts[i * 3 + 1] - pts[i * 3 - 2], pts[i * 3 + 2] - pts[i * 3 - 1]);
+    }
+    // the midpoint rule leaves the end a few metres off: close it onto the meeting point along the arc
+    const ex = P3[0] - pts[NP * 3], ey = P3[1] - pts[NP * 3 + 1], ez = P3[2] - pts[NP * 3 + 2];
+    for (let i = NV + 1; i <= NP; i++) { const w = (i - NV) / (NP - NV); pts[i * 3] += ex * w; pts[i * 3 + 1] += ey * w; pts[i * 3 + 2] += ez * w; }
+    for (let i = 1; i <= NP; i++) S[i] = S[i - 1] + Math.hypot(pts[i * 3] - pts[i * 3 - 3], pts[i * 3 + 1] - pts[i * 3 - 2], pts[i * 3 + 2] - pts[i * 3 - 1]);
+    const L = S[NP];
     const k = L / ST[NT];
     Object.assign(s, { P0, P3, L, dur, pts, S, ST, NT, vmax: k, dir });
     const tx = pts[NP * 3] - pts[NP * 3 - 3], ty = pts[NP * 3 + 1] - pts[NP * 3 - 2], tz = pts[NP * 3 + 2] - pts[NP * 3 - 1], tl = Math.hypot(tx, ty, tz);
@@ -202,9 +220,9 @@
     return { yaw: s[0] + (yaw - s[0]) * k, pitch: s[1] + (pitch - s[1]) * k };
   };
 
-  /* ---------- the imager's polarity: white-hot, black-hot from 46.5 (the raid on the horizon), white-hot again
-     from 90.5 (the close-in). Each switch is a 0.34 s top-down wipe. ---------- */
-  PG.POL = [{ t: 46.5, to: 1 }, { t: 90.5, to: 0 }];
+  /* ---------- the imager's polarity: white-hot, black-hot from 45.0 (on the whole ship, before the lens goes to
+     the horizon), white-hot again from 90.5 (the close-in). Each switch is a 0.34 s top-down wipe. ---------- */
+  PG.POL = [{ t: 45.0, to: 1 }, { t: 90.5, to: 0 }];
   PG.WIPE = .34;
   PG.polAt = function (T) {
     let cur = 0, from = 0, wipe = -1;

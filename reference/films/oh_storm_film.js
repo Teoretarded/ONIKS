@@ -133,9 +133,9 @@
   const mid = ps => { const q = ps.filter(Boolean); if (!q.length) return null; return V.mul(q.reduce((s, p) => V.add(s, p), [0, 0, 0]), 1 / q.length); };
   const I_ = OH.INTS, RID = OH.RID;
   const TRK = [
-    { a: 71.6, b: 80.5, fi: 1.8, fo: 3, w: .42, p: T => mid([OH.intAt(I_[0], T), T > 71.4 ? OH.intAt(I_[1], T) : null]) },
+    { a: I_[0].tL + 1.6, b: 80.5, fi: 1.8, fo: 3, w: .42, p: T => mid([OH.intAt(I_[0], T), T > I_[1].tL + .1 ? OH.intAt(I_[1], T) : null]) },
     { a: 79.5, b: 85.5, fi: 1.4, fo: 2.4, w: .3, p: () => mid([I_[0].PI, I_[1].PI]) },
-    { a: 86, b: 94, fi: 1.3, fo: 2.6, w: .36, p: T => OH.intAt(I_[2], T) },
+    { a: I_[2].tL + .2, b: 94, fi: 1.3, fo: 2.6, w: .36, p: T => OH.intAt(I_[2], T) },
     { a: 98.5, b: 111.4, fi: 1.8, fo: 1.2, w: .22, p: T => mid([T < RID.R3.tEnd ? OH.roundAt(RID.R3, T) : null, OH.roundAt(RID.R4, Math.min(T, RID.R4.tEnd))]) },
   ];
   function orbitShot(frame, tau, T, track) {
@@ -344,7 +344,7 @@
     [.8, 'SHIP', 'Condition III · 13.6 kn · 000'], [5.5, 'MET', 'Glass 994 hPa · falling'],
     [15.5, 'MET', 'Squall line · 040 · 3 nm'], [30.5, 'MET', 'Wind 040 · 44 kn · sea 6'],
     [43.6, 'MET', 'Lightning · 2.3 km'],
-    [65, 'SPY', '2 tracks · 040 · 24 km'], [66.6, 'EVAL', 'Vampire ×2 · 3M55 · M2.0'],
+    [65, 'SPY', '2 tracks · 040 · 24 km'], [Math.min(66.6, OH.INTS[0].tL - .8), 'EVAL', 'Vampire ×2 · 3M55 · M2.0'],
     [73.8, 'SPY', '2 more · 045 · 24 km'], [77.2, 'EVAL', 'Vampire ×4 · low in the rain'],
     [OH.HIT.t + 2.6, 'DC', 'Repair 2 · fire forward'], [121.2, 'DC', 'Hull open · stbd bow · above wl'],
     [129, 'SHIP', 'Raid · 3 of 4 · hit forward'], [134.5, 'MET', 'Squall passing · 220'], [150.5, 'SHIP', 'Next ship · DDG · astern'],
@@ -382,7 +382,7 @@
     { t: 0, title: 'Calm before', sub: 'DDG Flight IIA · night · 13.6 kn into the swell' },
     { t: 19, title: 'Squall', sub: 'Wind 040 at 44 kn · sea state 6' },
     { t: 58, title: 'Contact', sub: 'Four rounds low through the rain from 040' },
-    { t: 69, title: 'Into the cloud', sub: 'SM-6 up through the overcast' },
+    { t: OH.INTS[0].tL - .4, title: 'Into the cloud', sub: 'SM-6 up through the overcast' },
     { t: 99, title: 'Close-in', sub: 'Phalanx through the rain' },
     { t: OH.HIT.t, title: 'Hit forward', sub: 'Starboard bow · the lightning shows it' },
     { t: 128, title: 'Storm rolls on', sub: 'Aft down the column to the next ship' },
@@ -471,7 +471,7 @@
       if (Sx.n === 0) { hero = drawHero(T, dist, fade * mix(.55, 1, vk) * mix(.95, .86, sk)); Xs = hero.Xs; }
       else Xs = drawRestShip(Sx, T, dist, fade * mix(.35, 1, vk) * mix(.95, .86, sk));
       W.fog = [1e8, 2e8];
-      if (dist < 900) OHS.drawSpray(W, cam, Sx, T, { alpha: clamp(1.3 - dist / 900, 0, 1) });
+      if (dist < 900) OHS.drawSpray(W, cam, Sx, T, { alpha: clamp(1.3 - dist / 900, 0, 1), light: Sx.n === 0 && OHFX.lightFn ? OHFX.lightFn(T) : null });
       if (dist < 2000) {
         const tau = T - Sx.tau, up = X.dir(Xs, [0, 1, 0]), aft = X.dir(Xs, [0, 0, -1]), side = X.dir(Xs, [1, 0, 0]);
         for (const m of DA.stacks) OH.drawShimmer(W, X.ap(Xs, m), up, aft, side, tau, { alpha: clamp(1.2 - dist / 1600, 0, 1) * fade * mix(1, .6, sk), w: 3.2, lean: mix(.7, 1.6, sk) });
@@ -480,14 +480,16 @@
     // the raid
     drawRounds(T, dim);
     drawInterceptors(T, dim);
-    Object.assign(K_, { hero: hero ? { X: hero.Xs, ciws: hero.cs, spin: hero.spin } : null, dim, L, rain: OH.rainK(T), wind: OH.windAt(T), vis: OH.visRange(T, L) });
+    const s0 = shotAt(T - .05).eye, s1 = shotAt(T + .05).eye, vcam = [(s1[0] - s0[0]) * 10, (s1[1] - s0[1]) * 10, (s1[2] - s0[2]) * 10];
+    Object.assign(K_, { hero: hero ? { X: hero.Xs, ciws: hero.cs, spin: hero.spin } : null, dim, L, rain: OH.rainK(T), wind: OH.windAt(T), vis: OH.visRange(T, L), vcam });
     for (const fx of HOOKS) { W.fog = [1e8, 2e8]; OHFX[fx](T, K_); }
     // lightning and the near rain on top
     W.fog = [1e8, 2e8];
     OHS.drawBolts(W, cam, T);
-    const s0 = shotAt(T - .05).eye, s1 = shotAt(T + .05).eye, vcam = [(s1[0] - s0[0]) * 10, (s1[1] - s0[1]) * 10, (s1[2] - s0[2]) * 10];
-    OHS.drawRain(W, cam, T, vcam, { L });
-    OHS.flush(W, ctx, L);
+    // the combat's own flashes (the hit above all) light every hairline like the lightning and freeze the rain
+    const Lf = Math.max(L, OHFX.lift ? OHFX.lift(T) : 0);
+    OHS.drawRain(W, cam, T, vcam, { L: Lf });
+    OHS.flush(W, ctx, Lf);
     // glows from the hooks (additive, restrained)
     if (GL.length) {
       ctx.globalCompositeOperation = 'lighter';
@@ -516,7 +518,7 @@
     shipLab(SB, '155 m · the next ship', win(T, D - 9.5, D - 2.5));
     shipLab(SA, 'hit forward · steaming on', win(T, 136.5, 142));
     labels.push({ id: 'AN/SPY-1D(V)', sub: 'array face · 045', at: X.ap(XsA, SPY[0]), a: win(T, 52.4, 57.6), dx: 70, dy: -80 });
-    labels.push({ id: 'Mk 41 VLS', sub: 'forward · 32 cells', at: X.ap(XsA, TG.vlsF), a: win(T, 66, 70.2), dx: 70, dy: -70 });
+    labels.push({ id: 'Mk 41 VLS', sub: 'forward · 32 cells', at: X.ap(XsA, TG.vlsF), a: win(T, OH.INTS[0].tL - 4, OH.INTS[0].tL + .2), dx: 70, dy: -70 });
     labels.push({ id: 'Phalanx 1B', sub: 'forward mount · 20 mm', at: X.ap(XsA, TG.cF), a: win(T, 100.5, 105.8), dx: 70, dy: -80 });
     for (const [r, a, b] of [[RID.R1, 62, 70], [RID.R3, 99, 105.8], [RID.R4, 106, 111.3]]) {
       const w = win(T, a, Math.min(b, r.tEnd - .05), .6) * OH.roundVis(r, T); if (w <= .01) continue;

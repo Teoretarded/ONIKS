@@ -11,6 +11,7 @@ from PIL import Image
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MOMENTS = {
+    'oh_storm': ['111.6', '72', '107.8', '119.64'],
     'og_bullet_time': ['112.2', '12', '135', '138.5'],
     'pc_anatomy_ship': ['52', '29.6', '10', '131.8'],
     'of_task_force': ['81.1', '47.5', '70.8', '89'],

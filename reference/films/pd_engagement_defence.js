@@ -27,12 +27,57 @@
   PD.fate = (k, tau) => k < 3 ? (tau < PD.tauStop(k) ? 1 : 0) : fate0(k, tau);
 
   /* ---------- SM-6: vertical launch, pitch-over, a shallow loft, a dive onto the round ---------- */
+  /* tL0: the keyed flight's launch, which sets the cruise speed; the smoothed launch (tL) comes a little earlier */
   const SM = [
-    { k: 0, cell: 45, tL: 52.6, apex: 2300, bend: -170, dive: 16 },
-    { k: 1, cell: 12, tL: 62.4, apex: 1750, bend: 150, dive: 15 },
+    { k: 0, cell: 45, tL0: 52.6, apex: 2300, bend: -170, dive: 16 },
+    { k: 1, cell: 12, tL0: 62.4, apex: 1750, bend: 150, dive: 15 },
   ];
-  function buildSM(m) {
-    const tI = PD.tauStop(m.k), Ip = PD.round(m.k, tI).p, P0 = X.ap(PD.shipX(0, m.tL), DDA.vls(m.cell));
+  /* the launch reads heavy: the head rises straight out of the cell for HC m, slow at first and gathering speed
+     over T_RMP s, then bends over in one long round arc into the keyed path at its apex key */
+  const HC = 120, T_RMP = 5.5, RHO = 4000;
+  // ∫ of the speed ramp .3u + .7 smoothstep(u) (cruise from u = 1)
+  const RAMPI = u => u >= 1 ? u - .5 : u * u * (.15 + .7 * u * (1 - .5 * u));
+  function herm(a, ta, b, tb, pts) {
+    const ch = V.dist(a, b), m0 = V.mul(ta, ch), m1 = V.mul(tb, ch), n = Math.max(24, Math.ceil(ch / 10));
+    for (let i = 1; i <= n; i++) {
+      const u = i / n, u2 = u * u, u3 = u2 * u, h00 = 2 * u3 - 3 * u2 + 1, h10 = u3 - 2 * u2 + u, h01 = -2 * u3 + 3 * u2, h11 = u3 - u2;
+      pts.push([0, 1, 2].map(c => a[c] * h00 + m0[c] * h10 + b[c] * h01 + m1[c] * h11));
+    }
+  }
+  /* the rise and the bend, in the flight's vertical plane (x along hd, y up): straight up for HC m, then the
+     heading eases (smoothstep in arc length) from vertical to a climb g1, holds it, and eases into the keyed path's
+     heading gJ at the join J. Each bend is its turn times rho long (rho: a mean radius, the largest that fits);
+     g1 is solved so the arc lands on J. The side offset eases in along x. false if nothing fits. */
+  const sstep = u => u * u * (3 - 2 * u);
+  const bendI = (a, b) => { let cx = 0, cy = 0; for (let i = 0; i < 48; i++) { const u = (i + .5) / 48, th = a + (b - a) * sstep(u); cx += Math.cos(th); cy += Math.sin(th); } return [cx / 48, cy / 48]; };
+  function rise(P0, hd, sd, J, gJ, pts) {
+    const G0 = Math.PI / 2, dx = J[0] - P0[0], dz = J[2] - P0[2];
+    const Jx = dx * hd[0] + dz * hd[2], Jy = J[1] - P0[1] - HC, Jl = dx * sd[0] + dz * sd[2];
+    const rem = (g, r) => { const a = bendI(G0, g), b = bendI(g, gJ), l1 = (G0 - g) * r, l2 = (g - gJ) * r; return [Jx - a[0] * l1 - b[0] * l2, Jy - a[1] * l1 - b[1] * l2]; };
+    let rho = RHO, g1 = -1, Ls = -1;
+    for (; rho > 40; rho *= .95) {
+      const f = g => { const R = rem(g, rho); return Math.atan2(R[1], R[0]) - g; };
+      let lo = gJ + 1e-4, hi = G0 - 1e-4; if (f(lo) <= 0 || f(hi) >= 0) continue;
+      for (let it = 0; it < 50; it++) { const md = (lo + hi) / 2; if (f(md) > 0) lo = md; else hi = md; }
+      g1 = (lo + hi) / 2; const R = rem(g1, rho); Ls = R[0] * Math.cos(g1) + R[1] * Math.sin(g1);
+      if (Ls >= 0) break;
+    }
+    if (!(Ls >= 0)) return false;
+    const L1 = (G0 - g1) * rho, L2 = (g1 - gJ) * rho, Lt = L1 + Ls + L2;
+    const th = s => s < L1 ? G0 + (g1 - G0) * sstep(s / L1) : s < L1 + Ls ? g1 : g1 + (gJ - g1) * sstep(Math.min(1, (s - L1 - Ls) / L2));
+    for (let i = 1; i <= 30; i++) pts.push([P0[0], P0[1] + HC * i / 30, P0[2]]);
+    // integrate the heading (midpoint rule), then spread the residual (centimetres) smoothly along the arc
+    const n = Math.max(200, Math.ceil(Lt / 3)), xs = new Float64Array(n + 1), ys = new Float64Array(n + 1);
+    for (let i = 1; i <= n; i++) { const t = th((i - .5) / n * Lt); xs[i] = xs[i - 1] + Math.cos(t) * Lt / n; ys[i] = ys[i - 1] + Math.sin(t) * Lt / n; }
+    const ex = Jx - xs[n], ey = Jy - ys[n];
+    for (let i = 1; i <= n; i++) {
+      const w = (i / n) * (i / n), x = xs[i] + ex * w, y = ys[i] + ey * w, l = Jl * sstep(E.sat(x / Jx));
+      pts.push([P0[0] + hd[0] * x + sd[0] * l, P0[1] + HC + y, P0[2] + hd[2] * x + sd[2] * l]);
+    }
+    return { rho, g1, Ls };
+  }
+  function flight(m, tL, Ip, smooth) {
+    const P0 = X.ap(PD.shipX(0, tL), DDA.vls(m.cell));
     const hx = Ip[0] - P0[0], hz = Ip[2] - P0[2], Lh = Math.hypot(hx, hz), hd = [hx / Lh, 0, hz / Lh], sd = [hd[2], 0, -hd[0]];
     const at = (u, s, y) => [P0[0] + hd[0] * u + sd[0] * s, y, P0[2] + hd[2] * u + sd[2] * s];
     const dir = (c, y) => V.norm([hd[0] * c, y, hd[2] * c]);
@@ -47,21 +92,38 @@
       [Ip, dir(Math.cos(ga), -Math.sin(ga))],
     ];
     const pts = [P0.slice()];
-    for (let s = 0; s < K.length - 1; s++) {
-      const a = K[s][0], b = K[s + 1][0], ch = V.dist(a, b), m0 = V.mul(K[s][1], ch), m1 = V.mul(K[s + 1][1], ch), n = Math.max(24, Math.ceil(ch / 10));
-      for (let i = 1; i <= n; i++) {
-        const u = i / n, u2 = u * u, u3 = u2 * u, h00 = 2 * u3 - 3 * u2 + 1, h10 = u3 - 2 * u2 + u, h01 = -2 * u3 + 3 * u2, h11 = u3 - u2;
-        pts.push([0, 1, 2].map(c => a[c] * h00 + m0[c] * h10 + b[c] * h01 + m1[c] * h11));
-      }
-    }
+    let s0 = 0;
+    let rb = null;
+    if (smooth && (rb = rise(P0, hd, sd, K[3][0], 0, pts))) s0 = 3;
+    for (let s = s0; s < K.length - 1; s++) herm(K[s][0], K[s][1], K[s + 1][0], K[s + 1][1], pts);
     const N = pts.length, P = new Float64Array(N * 3), A = new Float64Array(N);
     for (let i = 0; i < N; i++) { P[i * 3] = pts[i][0]; P[i * 3 + 1] = pts[i][1]; P[i * 3 + 2] = pts[i][2]; if (i) A[i] = A[i - 1] + V.dist(pts[i], pts[i - 1]); }
-    // speed: a linear ramp through the Mk 72 boost (tb), then flat; scaled so the head meets the round on time
-    const L = A[N - 1], Tf = tI - m.tL, tb = 3.2, vmax = L / (Tf - tb / 2);
-    Object.assign(m, { tI, Ip, P0, P, A, N, L, Tf, tb, vmax, a0: vmax * tb / 2 });
+    return { P0, P, A, N, L: A[N - 1], rb };
   }
+  function buildSM(m) {
+    const tI = PD.tauStop(m.k), Ip = PD.round(m.k, tI).p;
+    // the keyed flight's cruise (a 3.2 s linear boost, then flat) is kept; the slower start costs time, so it
+    // launches earlier by what the ramp and the longer climb lose
+    const vk = flight(m, m.tL0, Ip, false).L / (tI - m.tL0 - 1.6);
+    let tL = m.tL0, F = null;
+    for (let it = 0; it < 3; it++) { F = flight(m, tL, Ip, true); tL = tI - (F.L / vk + T_RMP / 2); }
+    F = flight(m, tL, Ip, true);
+    const Tf = tI - tL, vc = F.L / (Tf - T_RMP / 2);
+    Object.assign(m, { tL, tI, Ip, P0: F.P0, P: F.P, A: F.A, N: F.N, L: F.L, Tf, vc, rb: F.rb });
+    // when the head passed each smoke puff (every SMK_DS m of the path)
+    const nb = Math.floor(F.L / SMK_DS) + 1, BORN = new Float64Array(nb), aR = vc * T_RMP / 2;
+    for (let n = 1; n < nb; n++) {
+      const a = n * SMK_DS;
+      if (a >= aR) { BORN[n] = a / vc + T_RMP / 2; continue; }
+      let lo = 0, hi = 1; for (let it = 0; it < 40; it++) { const md = (lo + hi) / 2; if (vc * T_RMP * RAMPI(md) < a) lo = md; else hi = md; }
+      BORN[n] = (lo + hi) / 2 * T_RMP;
+    }
+    m.BORN = BORN;
+  }
+  const SMK_DS = 5;
   SM.forEach(buildSM);
-  const headArc = (m, t) => { t = E.clamp(t, 0, m.Tf); return t < m.tb ? m.vmax * t * t / (2 * m.tb) : m.vmax * (t - m.tb / 2); };
+  PD.SM = SM;
+  const headArc = (m, t) => { t = E.clamp(t, 0, m.Tf); return m.vc * T_RMP * RAMPI(t / T_RMP); };
   const HP = [0, 0, 0], HQ = [0, 0, 0];
   function posAt(m, a, out) {
     const A = m.A, P = m.P; a = E.clamp(a, 0, m.L);
@@ -70,18 +132,17 @@
     out[0] = P[l3] + (P[h3] - P[l3]) * u; out[1] = P[l3 + 1] + (P[h3 + 1] - P[l3 + 1]) * u; out[2] = P[l3 + 2] + (P[h3 + 2] - P[l3 + 2]) * u;
     return out;
   }
-  const SMK_DS = 5;
   /* the trail: puffs laid where the head passed, thick off the booster, thinner off the sustainer, a wisp in the
      glide; they spread, drift with the wind and thin out (booster smoke lingers longest) */
   function drawSM(m, T, S, k) {
     const t = S - m.tL; if (t < 0 || k <= 0) return;
-    const ha = headArc(m, t), n1 = Math.floor(ha / SMK_DS), P = m.P, A = m.A, vm = m.vmax, tb = m.tb, a0 = m.a0;
+    const ha = headArc(m, t), n1 = Math.min(m.BORN.length - 1, Math.floor(ha / SMK_DS)), P = m.P, A = m.A, BORN = m.BORN;
     const seed = m.k * 4099;
     let i = 0;
     for (let n = 1; n <= n1; n++) {
       const a = n * SMK_DS;
       while (i < m.N - 2 && A[i + 1] < a) i++;
-      const born = a < a0 ? Math.sqrt(2 * tb * a / vm) : a / vm + tb / 2, age = t - born;
+      const born = BORN[n], age = t - born;
       let np, B, tauS, end, spr;
       if (born < 6) { np = 3; B = .62; tauS = 22; end = 40; spr = 1.5; }
       else if (born < 11.5) { np = 2; B = .42; tauS = 11; end = 26; spr = 1.05; }
@@ -329,7 +390,7 @@
     const c = ciwsState(T);
     st.ciwsYaw = [c.yaw[0], c.yaw[1]]; st.ciwsPitch = [c.pitch[0], c.pitch[1]];
     if (T >= 86) st.ciwsPose = [1, 1];
-    if (T >= 52.6 && T < PD.TJ) st.vlsOpen = [[SM[0].cell, 1]].concat(T >= 62.4 ? [[SM[1].cell, 1]] : []);
+    if (T >= SM[0].tL && T < PD.TJ) st.vlsOpen = [[SM[0].cell, 1]].concat(T >= SM[1].tL ? [[SM[1].cell, 1]] : []);
     return st;
   };
   const TRL = CW.v0 / CW.kd;

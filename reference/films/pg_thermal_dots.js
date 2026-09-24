@@ -35,13 +35,15 @@
   let PALN = PALW, PALO = PALW, WIPEY = 1e9;
   /* pol / from: 0 white-hot, 1 black-hot; wipe: 0..1 while switching (rows above the wipe show `pol`), else -1.
      lo, hi: the AGC window in heat; floor: the white-hot level of the coldest dot; grey: the black-hot field */
-  const S = DW.sensor = { pol: 0, from: 0, wipe: -1, lo: .05, hi: .92, gamma: 1.15, floor: .17, grey: .56, noise: .06, glare: 0 };
+  const S = DW.sensor = { pol: 0, from: 0, wipe: -1, lo: .05, hi: .92, gamma: .85, floor: .12, grey: .56, bgam: 1.7, noise: .06, glare: 0 };
   DW.palette = function () {
     const lo = S.lo, sp = Math.max(.02, S.hi - S.lo);
     for (let i = 0; i < NPAL; i++) {
       const h = i / HK, u = E.sat((h - lo) / sp);
       PALW[i] = S.floor + (1 - S.floor) * Math.pow(u, S.gamma);
-      PALB[i] = S.grey * Math.pow(1 - u, .95);
+      // black-hot: the coldest dots sit at a mid grey and warm things fall away steeply, so a hull a little warmer
+      // than the sea already reads as a dark shape
+      PALB[i] = S.grey * Math.pow(1 - u, S.bgam);
     }
     const pn = S.pol ? PALB : PALW, po = S.from ? PALB : PALW;
     if (S.wipe >= 0 && S.wipe < 1) { PALN = pn; PALO = po; WIPEY = S.wipe * PH; } else { PALN = PALO = pn; WIPEY = 1e9; }
@@ -214,7 +216,8 @@
     h += .015 * Math.max(0, -ny);
     return h + (hsh(i, 77) - .5) * .022;
   }
-  const CELL = 6, SP_B = .24, SP_P = .11, SP_R = .045, TG = 2.5;
+  const CELL = 6, SP_B = .24, SP_P = .11, SP_R = .045;
+  let TG = 2.5;
   /* dense patches, cell-aligned: amidships (the stacks, the uptakes, the hull over the engine rooms, the hit) and aft
      (the hangar roof and the aft Phalanx) */
   const PATCH = [[-12, 0, -36, 12, 30, 12], [-12, 6, -60, 12, 30, -36]];
@@ -362,6 +365,8 @@
   /* the hero at state st, alpha a. Draw it first: it writes the occlusion the sea and the sky test. */
   DW.drawShip = function (T, st, a) {
     occOn = true;
+    // in black-hot the hull is a dark shape: fewer, dimmer dots carry it
+    TG = 2.5 * ((S.wipe >= 0 ? (S.wipe > .5 ? S.pol : S.from) : S.pol) ? DW.field.kShip : 1);
     const cd = Math.hypot(E0, E2);
     SDROP = cd * cd * IRE2;
     TAU_S = Math.exp(-cd / 28000); PATH_S = .25 * (1 - TAU_S);
@@ -405,7 +410,7 @@
      its own momentum, taken aft by the air past the ship and cooling as it mixes. Particles are keyed on their
      spawn index (rates are whole per film), so the plume is periodic in D. ---------- */
   const MOUTHS = [];
-  for (const zc of STZ) for (let s = -1; s <= 1; s += 2) { MOUTHS.push([s * .95, 23.5, zc - 2.9, .6, 110, 1.15]); MOUTHS.push([s * 1.05, 22.95, zc + .95, .32, 40, 1.0]); }
+  for (const zc of STZ) for (let s = -1; s <= 1; s += 2) { MOUTHS.push([s * .95, 23.5, zc - 2.9, .6, 200, 1.15]); MOUTHS.push([s * 1.05, 22.95, zc + .95, .32, 70, 1.0]); }
   DW.MOUTHS = MOUTHS;
   const WREL = [-2.4, 0, -12.4];                     // the air past the ship: its own 16 kn and a breeze off the bow
   DW.WREL = WREL;
@@ -413,25 +418,27 @@
   DW.drawExhaust = function (T, a) {
     if (a <= .01) return;
     const cd = Math.hypot(E0, E2), pxm = FL / Math.max(1, cd);
-    const dot2 = pxm > 9 ? 2 : 1;
+    const dot2 = pxm > 7 ? 2 : 1;
     for (let m = 0; m < MOUTHS.length; m++) {
       const M = MOUTHS[m], rate = M[4], N = rate * D;
       const k1 = Math.floor(T * rate), k0 = Math.ceil((T - PLIFE) * rate);
       for (let k = k0; k <= k1; k++) {
         const age = T - k / rate; if (age < 0) continue;
         const id = ((k % N) + N) % N, sd = m * 100003 + id * 3;
-        const rise = 3.4 * (1 - Math.exp(-age / .45)) + 1.35 * age;
-        const wk = age - .5 * (1 - Math.exp(-age / .5));
-        const sig = M[3] * .55 + .5 * Math.pow(age, .8);
-        const x = M[0] + WREL[0] * wk + GT[sd & GM] * sig, y = M[1] + rise + GT[(sd + 1) & GM] * sig * .75, z = M[2] + WREL[2] * wk + GT[(sd + 2) & GM] * sig;
+        // the gas leaves the mouth at ~20 m/s, is bent over by the wind within a second, keeps rising on its heat
+        const rise = 4.6 * (1 - Math.exp(-age / .5)) + 1.5 * age;
+        const wk = age - .55 * (1 - Math.exp(-age / .55));
+        const sig = M[3] * .6 + .72 * Math.pow(age, .85);
+        const x = M[0] + WREL[0] * wk + GT[sd & GM] * sig, y = M[1] + rise + GT[(sd + 1) & GM] * sig * .7, z = M[2] + WREL[2] * wk + GT[(sd + 2) & GM] * sig;
         if (!P3(x, y, z)) continue;
-        const h = .27 + (M[5] - .27) * Math.exp(-age / .7) + .13 * Math.exp(-age / 3);
+        const h = .28 + (M[5] - .28) * Math.exp(-age / .55) + .15 * Math.exp(-age / 2.5);
         const al = a * Math.pow(1 - age / PLIFE, 1.3) * (.55 + .45 * hsh(sd, 9));
-        if (h > .42) occMark(q.x, q.y, q.z, 0);
-        hput(q.x, q.y, age < 1.2 ? dot2 : 1, h * TAU_S + PATH_S, al);
+        // hot gas hides what is behind it; in black-hot this is what draws the plume dark against the field
+        if (h > ((q.y < WIPEY ? S.pol : S.from) ? .31 : .42)) occMark(q.x, q.y, q.z, 0);
+        hput(q.x, q.y, age < .9 ? dot2 : 1, h * TAU_S + PATH_S, al);
       }
       // the mouth: a white-hot disc, and the imager's bloom round it
-      if (m % 2 === 0 && P3(M[0], M[1], M[2])) hglow(q.x, q.y, E.clamp(pxm * 1.1, 1.5, 22), 1.1, .22 * a);
+      if (P3(M[0], M[1] + .2, M[2])) hglow(q.x, q.y, E.clamp(pxm * (m % 2 ? .8 : 1.3), 1.5, 26), 1.15, (m % 2 ? .2 : .34) * a);
     }
   };
 
@@ -439,11 +446,25 @@
   DW.drawWake = function (T, a) {
     if (a <= .01) return;
     const flow = PG.VS * T, cd = Math.hypot(E0, E2), pxm = FL / Math.max(1, cd);
-    const step = pxm > 20 ? 1.5 : pxm > 8 ? 3 : 6, per = Math.round(PG.VS * D / step), hl = 77.6;
-    for (let d = 0; d < 1100; d += step) {
-      const dd = d + (flow % step), fa = a * Math.pow(1 - dd / 1100, 1.4), key = ((Math.floor(flow / step) - Math.round(d / step)) % per + per) % per;
-      for (let sd = -1; sd <= 1; sd += 2) { const lat = sd * (7 + dd * Math.tan(19.5 * DEG)) + (hsh(key, sd + 5) - .5) * 2; if (P3(lat, .3, -hl - dd) && !occ(q.x, q.y, q.z)) hput(q.x, q.y, 1, .22 + .1 * fa, fa * .8); }
-      for (let m = 0; m < 3; m++) { const r = hsh(key * 3 + m, 41), lat = (r - .5) * (14 + dd * .07); if (P3(lat, .3, -hl - dd) && !occ(q.x, q.y, q.z)) hput(q.x, q.y, 1, .27 + .12 * fa, fa * .75); }
+    // a fixed 1.5 m lattice riding the water (1 320 m per film: 880 rows), thinned by rank to ~2.4 px along the wake,
+    // so zooming only ever adds dots
+    const step = 1.5, per = 880, hl = 77.6, keep = Math.min(1, step * pxm * .86 / 2.4), keepC = Math.min(1, keep * 1.6);
+    const off = flow % step, base = Math.floor(flow / step), TW = Math.tan(19.5 * DEG);
+    for (let n = 0; n < 734; n++) {
+      const dd = n * step + off, key = ((base - n) % per + per) % per;
+      // churned water breaks up into warmer and cooler patches that stay with the water (whole waves per 1 320 m)
+      const wph = TAU * key / per, patch = .62 + .38 * Math.sin(wph * 7 + 1.3) * Math.sin(wph * 17 + .4);
+      const fa = a * Math.pow(1 - dd / 1100, 2.4) * patch;
+      for (let sd = -1; sd <= 1; sd += 2) {
+        if (hsh(key, sd + 11) >= keep) continue;
+        const lat = sd * (7 + dd * TW) + (hsh(key, sd + 5) - .5) * 2.4;
+        if (P3(lat, .3, -hl - dd) && !occ(q.x, q.y, q.z)) hput(q.x, q.y, 1, .24 + .11 * fa, fa * .85);
+      }
+      for (let m = 0; m < 4; m++) {
+        if (hsh(key * 4 + m, 47) >= keepC) continue;
+        const r = hsh(key * 4 + m, 41), lat = (r - .5) * (13 + dd * .06) * (.6 + .4 * hsh(key * 4 + m, 53));
+        if (P3(lat, .3, -hl - dd) && !occ(q.x, q.y, q.z)) hput(q.x, q.y, 1, .29 + .14 * fa * (1 - 2 * Math.abs(r - .5)), fa * .85);
+      }
     }
     for (let k = 0; k < 120; k++) { const sd = k & 1 ? 1 : -1, zz = 60 - (k >> 1) * 2.2, b = 10.2 + (60 - zz) * .01; if (P3(sd * b, .5 + .35 * Math.sin(k + T * TAU * 79 / D), zz) && !occ(q.x, q.y, q.z)) hput(q.x, q.y, 1, .27, a * .6); }
   };
@@ -471,7 +492,8 @@
   DW.seaY = (x, z, T) => { const zs = z + PG.VS * T; return A1 * Math.sin(KX1 * x + KZ1 * zs + W1 * T) + A2 * Math.sin(KX2 * x + KZ2 * zs + W2 * T + 1.7) + A3 * Math.sin(KX3 * x + KZ3 * zs + W3 * T + 4.1); };
   /* transmission of the night air by range, 100 m steps */
   const TRL = new Float32Array(400); for (let i = 0; i < 400; i++) TRL[i] = Math.exp(-i * 100 / 28000);
-  /* palette + noise + max blend of a 1 px heat dot at an on-screen (x, y); the spot meter */
+  /* palette + noise + max blend of a 1 px heat dot at an on-screen (x, y); the spot meter. A white-hot dot near
+     saturation spreads into its neighbours (the detector's blur round anything very hot) */
   function dot1(sx, sy, h, a) {
     if (h > SPOT.h && sx - SPX < SPR && SPX - sx < SPR && sy - SPY < SPR && SPY - sy < SPR && a > .45) SPOT.h = h;
     let i = (h * HK) | 0; if (i < 0) i = 0; else if (i >= NPAL) i = NPAL - 1;
@@ -479,10 +501,40 @@
     if (v > 1) v = 1;
     const G = (238 * v) | 0;
     if (G < 2) return;
-    const k = (sy | 0) * PW + (sx | 0);
-    if (G > ((PU[k] >>> 8) & 255)) PU[k] = 0xff000000 | (((228 * v) | 0) << 16) | (G << 8) | G;
+    const k = (sy | 0) * PW + (sx | 0), col = 0xff000000 | (((228 * v) | 0) << 16) | (G << 8) | G;
+    if (G > ((PU[k] >>> 8) & 255)) PU[k] = col;
+    if (G > 205 && sx >= 1 && sy >= 1 && sx < PW - 1 && sy < PH - 1) {
+      const g2 = ((G - 150) * 1.6) | 0, c2 = 0xff000000 | ((g2 * .96) << 16) | (g2 << 8) | g2;
+      if (g2 > ((PU[k + 1] >>> 8) & 255)) PU[k + 1] = c2; if (g2 > ((PU[k - 1] >>> 8) & 255)) PU[k - 1] = c2;
+      if (g2 > ((PU[k + PW] >>> 8) & 255)) PU[k + PW] = c2; if (g2 > ((PU[k - PW] >>> 8) & 255)) PU[k - PW] = c2;
+    }
   }
   DW.dot1 = dot1;
+  /* a dot of the sea / sky field: 1 px in white-hot; in black-hot a 2 px dot, so the cold field reads as a grey
+     ground the warm shapes stand out of */
+  let FS = 1, CLIP0 = 0, CLIP1 = 1080;
+  function dotF(sx, sy, h, a) {
+    if (FS === 1) { dot1(sx, sy, h, a); return; }
+    let i = (h * HK) | 0; if (i < 0) i = 0; else if (i >= NPAL) i = NPAL - 1;
+    let v = (sy < WIPEY ? PALN[i] : PALO[i]) * a * NZ[nzi = (nzi + 1) & 4095];
+    if (v > 1) v = 1;
+    const G = (238 * v) | 0;
+    if (G < 2) return;
+    const x = sx | 0, y = sy | 0;
+    if (x >= PW - 1 || y >= PH - 1) return;
+    const k = y * PW + x, col = 0xff000000 | (((228 * v) | 0) << 16) | (G << 8) | G;
+    if (G > ((PU[k] >>> 8) & 255)) PU[k] = col; if (G > ((PU[k + 1] >>> 8) & 255)) PU[k + 1] = col;
+    if (G > ((PU[k + PW] >>> 8) & 255)) PU[k + PW] = col; if (G > ((PU[k + PW + 1] >>> 8) & 255)) PU[k + PW + 1] = col;
+  }
+  /* the field's density and dot per polarity: black-hot packs the cold field closer (target spacing x FK) */
+  DW.field = { kSea: 1, kSky: .6, kShip: 1.25 };
+  /* runs pass(y0, y1, mode) over the rows each polarity holds this frame (two bands while a wipe runs) */
+  function byPolarity(pass) {
+    if (WIPEY >= PH) pass(0, PH, S.pol);
+    else if (WIPEY <= 0) pass(0, PH, S.from);
+    else { pass(0, WIPEY, S.pol); pass(WIPEY, PH, S.from); }
+    FS = 1; CLIP0 = 0; CLIP1 = PH;
+  }
   const PT = new Float64Array(2);
   /* one sea dot at PT (sea frame), hash hv */
   function seaPoint(hv) {
@@ -492,7 +544,7 @@
     const dy = A1 * SL[ia] + A2 * SL[ib] + A3 * SL[ic] - r2 * IRE2 - E1, zc = dx * F0 + dy * F1 + dz * F2;
     if (zc < NEAR) return;
     const iz = FL / zc, sx = CX + (dx * R0 + dy * R1 + dz * R2) * iz, sy = CY - (dx * U0 + dy * U1 + dz * U2) * iz;
-    if (sx < 0 || sy < 0 || sx >= PW || sy >= PH) return;
+    if (sx < 0 || sy < CLIP0 || sx >= PW || sy >= CLIP1) return;
     if (occOn) { const t = ((sy | 0) >> 2) * OW + ((sx | 0) >> 2); if (OC[t] && zc > OZ[t] + OTOL) return; }
     const r = Math.sqrt(r2), ir = 1 / r;
     // the slope along the line of sight: a face rising away from the lens faces it (more emissive, warmer); at grazing
@@ -506,7 +558,7 @@
     if (z < -60 && z > -1250) { const wd = -60 - z, hw = 13 + wd * .085, ax = xs < 0 ? -xs : xs; if (ax < hw) h += .09 * (1 - wd / 1190) * (1 - ax / hw); }
     const tr = TRL[(r * .01) | 0]; h = h * tr + .29 * (1 - tr);
     SN++;
-    dot1(sx, sy, h, SEA_A);
+    dotF(sx, sy, h, SEA_A);
   }
   /* the point born in sea cell (k, i, j): CPF = its position (sea frame); returns its 30-bit hash (x jitter in bits
      0-10, z jitter 11-21, rank 22-29). Only small integers cross the recursion (no boxed doubles). */
@@ -533,8 +585,8 @@
       if (zc < NEAR) { n++; continue; }
       const iz = FL / zc, sx = CX + (cx0 + u * ax + v * bx) * iz, sy = CY - (cy0 + u * ay + v * by) * iz;
       if (sx < -36) l++; else if (sx > PW + 36) rr++;
-      if (sy < -36) t++; else if (sy > PH + 36) b++;
-      if (sx >= 8 && sx < PW - 8 && sy >= 8 && sy < PH - 8) ins++;
+      if (sy < CLIP0 - 36) t++; else if (sy > CLIP1 + 36) b++;
+      if (sx >= 8 && sx < PW - 8 && sy >= CLIP0 + 8 && sy < CLIP1 - 8) ins++;
     }
     if (n === 4) return 0;
     if (n > 0) return 1;
@@ -582,10 +634,16 @@
     RHA = RH * .42; RHB = RH * .985;
     PH1 = W1 * T * PK; PH2 = (W2 * T + 1.7) * PK; PH3 = (W3 * T + 4.1) * PK;
     SN = 0;
-    // the patch of sea the frame can see: rays through its border, clamped at the horizon
+    byPolarity(seaPass);
+    DW.seaN = SN;
+  };
+  function seaPass(ya, yb, mode) {
+    CLIP0 = ya; CLIP1 = yb; FS = mode ? 2 : 1;
+    const kf = mode ? DW.field.kSea : 1; TGN = 5.4 * kf; TGD = 2.7 * kf;
+    // the patch of sea the band can see: rays through its border, clamped at the horizon
     let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
     for (let m = 0; m < 32; m++) {
-      const e = m >> 3, u = (m & 7) / 7, sx = e === 0 ? u * PW : e === 1 ? PW : e === 2 ? (1 - u) * PW : 0, sy = e === 0 ? PH : e === 1 ? (1 - u) * PH : e === 2 ? 0 : u * PH;
+      const e = m >> 3, u = (m & 7) / 7, sx = e === 0 ? u * PW : e === 1 ? PW : e === 2 ? (1 - u) * PW : 0, sy = e === 0 ? yb : e === 1 ? yb + (ya - yb) * u : e === 2 ? ya : ya + (yb - ya) * u;
       const ax = (sx - CX) / FL, ay = (sy - CY) / FL;
       const dx = F0 + ax * R0 - ay * U0, dy = F1 + ax * R1 - ay * U1, dz = F2 + ax * R2 - ay * U2, hz = Math.hypot(dx, dz);
       if (hz < 1e-6) continue;
@@ -596,8 +654,7 @@
     if (x0 > x1) return;
     const i0 = Math.floor(x0 / S0) - 1, i1 = Math.floor(x1 / S0) + 1, j0 = Math.floor((z0 + FLOW) / S0) - 1, j1 = Math.floor((z1 + FLOW) / S0) + 1;
     for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) seaVisit(0, i, j, 0, i, j, 0);
-    DW.seaN = SN;
-  };
+  }
 
   /* ================= the sky: a hierarchical lattice in azimuth x elevation (dots at infinity) =================
      Cold and dark at elevation, a warm band over the horizon (denser there too), low cloud a little warmer than the
@@ -609,8 +666,9 @@
   const CLW = 1024, CLH = 96, CLE0 = -.02, CLE1 = .42, CLOUD = new Float32Array(CLW * CLH);
   for (let jj = 0; jj < CLH; jj++) for (let ii = 0; ii < CLW; ii++) {
     const az = ii / CLW * TAU, el = CLE0 + (CLE1 - CLE0) * jj / (CLH - 1);
-    const f = M3.fbm(Math.cos(az) * 5.2, Math.sin(az) * 5.2, el * 34 + 3.3, 4) + .35 * M3.fbm(Math.cos(az) * 17, Math.sin(az) * 17, el * 90 + 7.1, 3);
-    CLOUD[jj * CLW + ii] = E.ss(-.04, .38, f);
+    // a broken stratocumulus deck: cells ~1-2° across, flattened by the grazing view into streets along the horizon
+    const f = M3.fbm(Math.cos(az) * 5.2, Math.sin(az) * 5.2, el * 34 + 3.3, 3) * .55 + M3.fbm(Math.cos(az) * 26, Math.sin(az) * 26, el * 95 + 7.1, 4) + .4 * M3.fbm(Math.cos(az) * 70, Math.sin(az) * 70, el * 240 + 1.9, 2);
+    CLOUD[jj * CLW + ii] = E.ss(.02, .42, f) * E.ss(-.02, .012, el);
   }
   function cloudAt(az, el) {
     let u = az / TAU * CLW; u -= Math.floor(u / CLW) * CLW;
@@ -637,11 +695,11 @@
     const dx = sa * ce, dy = se, dz = ca * ce, zc = dx * F0 + dy * F1 + dz * F2;
     if (zc < .05) return;
     const iz = FL / zc, sx = CX + (dx * R0 + dy * R1 + dz * R2) * iz, sy = CY - (dx * U0 + dy * U1 + dz * U2) * iz;
-    if (sx < 0 || sy < 0 || sx >= PW || sy >= PH) return;
+    if (sx < 0 || sy < CLIP0 || sx >= PW || sy >= CLIP1) return;
     if (occOn) { const t = ((sy | 0) >> 2) * OW + ((sx | 0) >> 2); if (OC[t]) return; }
-    const h = .03 + .21 * (EX1[ei] + (EX1[ei + 1] - EX1[ei]) * ef) + .06 * (EX2[ei] + (EX2[ei + 1] - EX2[ei]) * ef) + .12 * cl * (1 - .6 * band) + ((Math.imul(hv, 0x9E3779B1) >>> 24) / 256 - .5) * .025;
+    const h = .03 + .21 * (EX1[ei] + (EX1[ei + 1] - EX1[ei]) * ef) + .06 * (EX2[ei] + (EX2[ei + 1] - EX2[ei]) * ef) + .19 * cl * (1 - .6 * band) + ((Math.imul(hv, 0x9E3779B1) >>> 24) / 256 - .5) * .025;
     SKN++;
-    dot1(sx, sy, h, SKY_A);
+    dotF(sx, sy, h, SKY_A);
   }
   /* the point born in sky cell (k, i, j): SPF = (az, el); returns its 30-bit hash */
   function skyPt(k, i, j) {
@@ -659,7 +717,7 @@
     // the wanted spacing: sparse in the clear sky, closer in cloud, close in the band over the horizon
     const e = (j + .5) * s + DIP, cl = cloudAt((i + .5) * s, (j + .5) * s);
     let ex = (e > 0 ? e : 0) * EXK * BANDK; if (ex > EXN - 1) ex = EXN - 1;
-    const tv = 12 - 6.8 * cl, tg = tv - (tv - 2.9) * EXB[ex | 0], q = (s * FL / tg) * (s * FL / tg);
+    const tv = (12 - 6.8 * cl) * SKK, tg = tv - (tv - 2.9) * EXB[ex | 0], q = (s * FL / tg) * (s * FL / tg);
     const hv = skyPt(kb, ib, jb), pa = SPF[0], pe = SPF[1];
     const hs = s * .5, ci = pa >= i * s + hs ? 1 : 0, cj = pe >= j * s + hs ? 1 : 0;
     if (q >= 4 && k < 22) {
@@ -688,16 +746,23 @@
     // the dense band over the horizon: ~.009 rad in a wide lens, never more than ~46 px deep
     BANDK = .02 / Math.min(.009, 46 / FL);
     DIP = Math.sqrt(2 * Math.max(1, E1) / PG.RE);
+    byPolarity(skyPass);
+    DW.skyN = SKN;
+  };
+  let SKK = 1;
+  function skyPass(ya, yb, mode) {
+    CLIP0 = ya; CLIP1 = yb; FS = mode ? 2 : 1; SKK = mode ? DW.field.kSky : 1;
     const yaw = Math.atan2(F0, F2), pitch = Math.asin(E.clamp(F1, -1, 1));
-    const aL = Math.atan(CX / FL), aR = Math.atan((PW - CX) / FL), eU = Math.atan(CY / FL), eD = Math.atan((PH - CY) / FL);
-    EL0 = Math.max(-DIP, pitch - eD * 1.04 - .002); EL1 = pitch + eU * 1.04 + .002;
+    const aL = Math.atan(CX / FL), aR = Math.atan((PW - CX) / FL), eU = Math.atan((CY - ya) / FL), eD = Math.atan((yb - CY) / FL);
+    // rows map to elevations exactly only on the vertical through the boresight: pad the band
+    const pad = .004 + .03 * (aL + aR) * Math.abs(Math.sin(pitch));
+    EL0 = Math.max(-DIP, pitch - eD * 1.04 - pad); EL1 = pitch + eU * 1.04 + pad;
     if (EL1 <= EL0) return;
     const cm = Math.cos(Math.min(1.2, Math.max(Math.abs(EL0), Math.abs(EL1))));
     AZ0 = yaw - (aL * 1.06 + .002) / cm; AZ1 = yaw + (aR * 1.06 + .002) / cm;
     const i0 = Math.floor(AZ0 / SK0), i1 = Math.floor(AZ1 / SK0), j0 = Math.floor(EL0 / SK0), j1 = Math.floor(EL1 / SK0);
     for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) skyVisit(0, i, j, 0, i, j);
-    DW.skyN = SKN;
-  };
+  }
 
   /* ================= the rounds ================= */
   const OM = HD.oniks(), ONST = { wing: 1, fin: 1, booster: false, cover: false }, OSKIP = { booster: 1, cover: 1 };
@@ -808,13 +873,13 @@
       if (y < hiddenAt(rH) || !P3(x, y, z)) continue;
       const h = .3 + .5 * Math.exp(-age / .16) + .12 * Math.exp(-age / .7);
       const al = a * Math.pow(Math.max(0, 1 - age / (dur + .6)), 1.4);
-      if (h > .4) occMark(q.x, q.y, q.z, 0);
+      if (h > ((q.y < WIPEY ? S.pol : S.from) ? .31 : .4)) occMark(q.x, q.y, q.z, 0);
       hput(q.x, q.y, 1, h * tr + pr, al);
     }
   };
 
-  /* ---------- the interceptors' flight paths: plain faint lines, flown portion only. Stage A's placeholders, drawn
-     as neutral overlay dots (not through the palette) so they read in either polarity; stage B flies the rounds. */
+  /* ---------- the interceptors' flight paths: plain dotted lines, flown portion only, in the own-force lime (an
+     overlay, not through the palette, so they read in either polarity); stage B flies the missiles on them. */
   const SP = [0, 0, 0];
   DW.drawShotPath = function (s, T, a) {
     if (T < s.tL || a <= .01) return;
@@ -822,8 +887,8 @@
     const sl = PG.shotSl(s, Math.min(T, s.tEnd));
     let len = 0, px = 0, py = 0, ok = false;
     for (let i = 0; i <= 24; i++) { PG.shotPath(s, sl * i / 24, SP); if (P3(SP[0], SP[1], SP[2])) { if (ok) len += Math.hypot(q.x - px, q.y - py); px = q.x; py = q.y; ok = true; } else ok = false; }
-    const N = E.clamp(Math.round(len / 3), 6, 2400), al = .34 * a * fade;
-    for (let i = 0; i <= N; i++) { PG.shotPath(s, sl * i / N, SP); if (P3(SP[0], SP[1], SP[2])) put(q.x, q.y, 1, 214, 218, 206, al); }
+    const N = E.clamp(Math.round(len / 3), 6, 2400), al = .62 * a * fade;
+    for (let i = 0; i <= N; i++) { PG.shotPath(s, sl * i / N, SP); if (P3(SP[0], SP[1], SP[2])) put(q.x, q.y, 1, 198, 244, 50, al); }
   };
 
   /* ---------- the sensor's grain, and a veil for the glare of something very hot (stage B) ---------- */

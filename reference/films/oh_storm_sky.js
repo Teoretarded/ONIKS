@@ -205,7 +205,7 @@
     }
     th0 = Math.max(th0 - .02, .25 * D2R); th1 = Math.min(th1 + .02, PI - .25 * D2R);
     if (th1 <= th0) return;
-    const dr = drift(T), vis = o.vis || 8000;
+    const dr = drift(T), vis = o.vis || 8000, fxN = OHS.fxLitN ? OHS.fxLitN(T) : 0;
     const k0 = Math.ceil(th0 / DTH), k1 = Math.floor(th1 / DTH);
     for (const layer of [0, 1]) {
       const hc = (layer ? CB + 170 : CB) - e[1], la = layer ? .5 : 1;
@@ -216,7 +216,7 @@
         // far rows crowd into the cloud's own horizon: fade them, and fade into the murk (the flash opens it)
         let a = .36 * A0 * la * (1 - ss(20000, 60000, hz)) * mix(Math.exp(-Math.pow(rho / (vis * 3), 1.1)), 1, L * .8);
         a *= mix(.78, 1, sk);
-        if (a < .004 && L < .02) continue;
+        if (a < .004 && L < .02 && !fxN) continue;
         const half = Math.min(rho * tW * 1.35 + 60, 40000);
         const n = 40, du = 2 * half / n;
         const capY = Math.min(70, 1.3 * DTH * rho / Math.max(.25, Math.abs(ct)));
@@ -229,7 +229,8 @@
           if (!pj(cam, x, y, z)) { pv = false; continue; }
           const qx = PJ[0], qy = PJ[1];
           if (pv) {
-            const lit = L > .01 || sk > 0 ? cloudLit(x, z, T) : 0;
+            // lit by the lightning, and from below / within by the combat's flames and flashes (oh_storm_fx.js)
+            const lit = (L > .01 || sk > 0 ? cloudLit(x, z, T) : 0) + (fxN ? OHS.fxLit(x, z, T) : 0);
             const al = a * (.1 + .9 * dn * Math.sqrt(dn)) * (1 + 2.5 * lit) + 1.1 * lit * (.25 + dn) * la;
             if (al > .004) W.seg2(px, py, qx, qy, al);
           }
@@ -404,7 +405,8 @@
         if (aj <= 0 || aj > lj) continue;
         const p = drop(j, aj), q = drop(j, Math.max(0, aj - .09));
         if (p[1] < -1.5) continue;
-        const al = A * sl.s * .7 * fade * (1 - .7 * aj / lj) * ss(0, .05, aj);
+        let al = A * sl.s * .7 * fade * (1 - .7 * aj / lj) * ss(0, .05, aj);
+        if (o.light) al *= 1 + 2.5 * Math.min(1.5, o.light(p[0], p[1], p[2]));
         segW(W, cam, q[0], q[1], q[2], p[0], p[1], p[2], al);
       }
       // the sheet's edge: a fan along each flare in the first half second

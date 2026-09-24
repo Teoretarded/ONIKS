@@ -388,7 +388,7 @@
     { cell: 18, tL: 70.9, r: 'R2', tI: 83.3 },
     { cell: 6, tL: 85.8, r: 'R4', tI: 97.6, miss: 38 },
   ];
-  const HZ = 60, KB = 5.5, CV0 = .02;
+  const HZ = 60, KB = 7, CV0 = .02;
   const INTS = OH.INTS = IDEF.map((d, i) => {
     const I = Object.assign({ i }, d), r = RID[I.r];
     I.round = r; r.int = I;
@@ -398,7 +398,7 @@
     if (I.miss) PI_ = V.add(PI_, V.add(V.mul(r.n, I.miss), [0, 11, 0]));
     const hv = [PI_[0] - P0[0], 0, PI_[2] - P0[2]], dist = Math.hypot(hv[0], hv[2]), uh = V.mul(hv, 1 / dist);
     const up = h => V.add(P0, [0, h, 0]);
-    const CP = [P0, up(.075 * dist), up(.15 * dist), V.add(V.mad(PI_, uh, -.5 * dist), [0, .085 * dist, 0]), V.add(V.mad(PI_, uh, -.2 * dist), [0, .012 * dist, 0]), PI_];
+    const CP = [P0, up(.1 * dist), up(.2 * dist), V.add(V.mad(PI_, uh, -.45 * dist), [0, .12 * dist, 0]), V.add(V.mad(PI_, uh, -.2 * dist), [0, .015 * dist, 0]), PI_];
     const bez = u => {
       const q = CP.map(p => p.slice());
       for (let n = q.length - 1; n > 0; n--) for (let k = 0; k < n; k++) for (let c = 0; c < 3; c++) q[k][c] += (q[k + 1][c] - q[k][c]) * u;

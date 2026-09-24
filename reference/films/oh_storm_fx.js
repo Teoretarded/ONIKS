@@ -224,13 +224,13 @@
   /* ================= rain lit by a flash: a seeded drop lattice falling with the storm's rain, only the drops
      within Rr of the light drawn, each a short frozen streak (the flash is a fast exposure) ================= */
   const VF = 8.6, RO = [0, 0, 0];
-  function litRain(W, cam, K, cx, cy, cz, Rr, lev, T, seed, N) {
+  function litRain(W, cam, K, cx, cy, cz, Rr, lev, T, seed, N, exo) {
     if (lev <= .01 || K.rain < .05) return;
     const run = windS(T) * .92;
     RO[0] = WX * run; RO[1] = -VF * T; RO[2] = WZ * run;
-    const v = OHS.rainVel(T), vc = K.vcam || RO, ex = .016;
+    const v = OHS.rainVel(T), vc = K.vcam || RO, ex = exo || .016;
     const sx = (v[0] - vc[0]) * ex, sy = (v[1] - vc[1]) * ex, sz = (v[2] - vc[2]) * ex;
-    const S = 2 * Rr, iR = 1 / Rr, e = cam.eye, lv = lev * K.rain * .75;
+    const S = 2 * Rr, iR = 1 / Rr, e = cam.eye, lv = lev * K.rain;
     for (let k = 0; k < N; k++) {
       const h1 = hash(k, seed), h2 = hash(k + .37, seed + 1.3), h3 = hash(k + .71, seed + 2.9);
       const x = cx + modp(h1 * S + RO[0] - cx + Rr, S) - Rr, y = cy + modp(h2 * S + RO[1] - cy + Rr, S) - Rr, z = cz + modp(h3 * S + RO[2] - cz + Rr, S) - Rr;
@@ -240,7 +240,7 @@
       const ez = (x - e[0]) * cam.f[0] + (y - e[1]) * cam.f[1] + (z - e[2]) * cam.f[2];
       if (ez < 2.5) continue;
       const f = 1 - d;
-      segW(W, cam, x - sx, y - sy, z - sz, x + sx * .25, y + sy * .25, z + sz * .25, lv * f * f * (.45 + .55 * hash(k + 5.3, seed)));
+      segW(W, cam, x - sx, y - sy, z - sz, x + sx * .25, y + sy * .25, z + sz * .25, lv * f * Math.sqrt(f) * (.5 + .5 * hash(k + 5.3, seed)));
     }
   }
 
@@ -298,7 +298,7 @@
       if (hide > .01 && pj(cam, x, y, z)) {
         BX[n] = PJ[0]; BY[n] = PJ[1]; BW[n] = Math.min(900, trailW(age, boost) * fl / PJ[2]); BOK[n] = 1; BG[n] = age; NX[n] = j;
         const dc = Math.hypot(x - e[0], y - e[1], z - e[2]);
-        BA[n] = (boost ? .32 * (.4 + .6 * Math.exp(-age / 1.5)) * Math.exp(-age / 9) : .2 * (.4 + .6 * Math.exp(-age / 1.2)) * Math.exp(-age / 6))
+        BA[n] = (boost ? .55 * (.45 + .55 * Math.exp(-age / 1.5)) * Math.exp(-age / 12) * (1 + 1.4 * Math.exp(-age / .7)) : .24 * (.4 + .6 * Math.exp(-age / 1.2)) * Math.exp(-age / 7))
           * ss(0, .06, age) * (1 - ss(260, 700, BW[n])) * hide * mix(.3, 1, murk(dc, vis));
       } else BOK[n] = 0;
       n++;
@@ -327,7 +327,7 @@
           const bL = sat(.55 + 1.3 * noise(u * .8, v, 9.2) - tear), bR = sat(.55 + 1.3 * noise(u * .8, v, 13.4) - tear);
           W.seg2(pxL, pyL, qxL, qyL, al * bL); W.seg2(pxR, pyR, qxR, qyR, al * bR);
         }
-        if (g < 1.2) W.seg2(BX[i - 1], BY[i - 1], BX[i], BY[i], A * .5 * (1 - g / 1.2) * BA[i] / .32);
+        if (g < 1.2) W.seg2(BX[i - 1], BY[i - 1], BX[i], BY[i], A * .7 * (1 - g / 1.2) * Math.min(1, BA[i] / .5));
       }
       pxL = qxL; pyL = qyL; pxR = qxR; pyR = qyR; prev = true;
     }
@@ -338,17 +338,16 @@
       trailPos(I, nd.j, age, TQ);
       const x = TQ[0], y = TQ[1], z = TQ[2], hide = 1 - inCloud(y); if (hide <= .01) continue;
       const w = trailW(age, nd.boost), dc = Math.hypot(x - e[0], y - e[1], z - e[2]), mk = mix(.3, 1, murk(dc, vis));
-      const ab = A * hide * mk * (nd.boost ? .2 * (.35 + .65 * Math.exp(-age / 2)) * Math.exp(-age / 9) : .13 * (.4 + .6 * Math.exp(-age / 1.5)) * Math.exp(-age / 6)) * ss(.05, .5, age);
+      const ab = A * hide * mk * (nd.boost ? .36 * (.4 + .6 * Math.exp(-age / 2)) * Math.exp(-age / 12) : .15 * (.4 + .6 * Math.exp(-age / 1.5)) * Math.exp(-age / 7)) * ss(.05, .5, age);
       billow(W, cam, x, y, z, w * (1.1 + .3 * nd.h), ab, sd + nd.h * 57, age, nd.boost && nd.h > .4 ? 1 : 0, 1, 1 + .6 * sat(age / 4));
       if (nd.boost && age < 2.4) {
-        const ar = A * hide * .36 * Math.pow(1 - age / 2.4, 1.5) * ss(0, .06, age);
+        const ar = A * hide * .5 * Math.pow(1 - age / 2.4, 1.5) * ss(0, .06, age);
         ringA(W, cam, [x, y, z], nd.U, nd.V, w, ar, ar * .4, 28, .1 + .16 * sat(age / 1.5), nd.h * 20 + age * .7);
       }
     }
   }
   /* the launch cloud: exhaust out of the cell and the uptake, flattened over the deck and ripped off downwind */
   function drawCloud(W, cam, I, T, A) {
-    const s = T - I.tL;
     const P0 = I.P0, up = I.upW;
     for (let k = 0; k < 14; k++) {
       const te = I.tL + k * .09, a = T - te; if (a <= 0 || a > 14) continue;
@@ -358,9 +357,8 @@
       const run = windRun(te, T, src[1] + 5);
       const x = src[0] + Math.cos(ph) * v0 * kk + WX * run, y = src[1] + el * v0 * kk + 1.4 * Math.pow(a, .7), z = src[2] + Math.sin(ph) * v0 * kk + WZ * run;
       const r = (1 + 3.4 * Math.sqrt(a)) * (.75 + .5 * h3);
-      billow(W, cam, x, y, z, r, A * .34 * ss(0, .12, a) * Math.exp(-a / 4) * (k < 4 ? 1 : .8), I.seed + k * 1.7, a, 2, 1, 1 + .8 * sat(a / 2));
+      billow(W, cam, x, y, z, r, A * .5 * ss(0, .12, a) * Math.exp(-a / 5) * (k < 4 ? 1 : .8), I.seed + k * 1.7, a, 2, 1, 1 + .8 * sat(a / 2));
     }
-    if (s < 0) return;
   }
   /* the vent: flame out of the uptake and the cell as the booster lights in it (moves with the ship) */
   function drawVent(W, cam, K, I, T, A) {
@@ -407,7 +405,7 @@
     }
     K.glow(V.mad(nz, ax, Lf * .25), A * (boost ? .55 : .3) * (.8 + .2 * fk) * mk, boost ? 7 : 3, boost ? 5 : 4, boost ? 110 : 60);
     // the rain round the climbing flame catches its light
-    if (boost && s < 4.5 && d < 900) litRain(W, cam, K, nz[0], nz[1] - Lf * .4, nz[2], 20, 1.1 * A * ss(0, .1, s), T, 41 + I.i * 3, 260);
+    if (boost && s < 4.5 && d < 900) litRain(W, cam, K, nz[0], nz[1] - Lf * .4, nz[2], 24, 1.5 * A * ss(0, .1, s) * (1 - inCloud(nz[1])), T, 41 + I.i * 3, 420, .03);
   }
 
   /* ================= plumes inside the cloud: the base lit from within, a patch of light that moves with the
@@ -418,8 +416,9 @@
     const h = OH.intAt(I, T); if (!h) return null;
     const dd = h[1] - CB; if (dd < -200) return null;
     const m = motor(T - I.tL);
-    const k = m * (dd > 0 ? .9 * Math.exp(-dd / 320) : .7 * Math.exp(dd / 95));
-    return { h, dd, k, r: 110 + .55 * Math.abs(dd) };
+    // deeper in, the light spreads wider and dimmer through the cloud
+    const k = m * (dd > 0 ? .9 * Math.exp(-dd / 850) : .7 * Math.exp(dd / 95));
+    return { h, dd, k, r: 110 + .6 * Math.abs(dd) };
   }
   function drawCloudGlow(W, cam, K, I, T, A) {
     const c = cloudPatch(I, T); if (!c || c.k < .01) return;
@@ -428,11 +427,11 @@
     const base = [h[0], CB - 6, h[2]], d = V.dist(base, e), mk = mix(.35, 1, murk(d, K.vis * 1.6));
     // the glow seen through the base: soft and broad, broader the deeper the motor is in the cloud
     if (dd > -30) {
-      K.glow(base, A * .42 * k * fk * mk, r * .55, 10, 380);
-      K.glow(base, A * .16 * k * mk, r * 1.5, 30, 520);
+      K.glow(base, A * 1.05 * k * fk * mk, r * .5, 12, 300);
+      K.glow(base, A * .3 * k * mk, r * 1.4, 36, 360);
     }
     // the underside's lobes (fixed in the drifting cloud) caught by the light
-    const dr = OHS.drift(T), sx0 = h[0] * WX + h[2] * WZ - dr, nx0 = h[0] * WZ - h[2] * WX, R2 = 2.3 * r;
+    const dr = OHS.drift(T), sx0 = h[0] * WX + h[2] * WZ - dr, nx0 = h[0] * WZ - h[2] * WX, R2 = Math.min(2.3 * r, 560);
     const i0 = Math.floor((sx0 - R2) / LOBE), i1 = Math.floor((sx0 + R2) / LOBE), j0 = Math.floor((nx0 - R2) / LOBE), j1 = Math.floor((nx0 + R2) / LOBE);
     for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
       const im = modp(i, 3000 / LOBE), hh = hash(im * 1.7 + 3.1, j * 2.3 + .7);
@@ -444,7 +443,7 @@
       const lit = k * Math.exp(-q / 2) * fk;
       const y = CB - 10 - 26 * hash(im + 4, j), rr = 22 + 26 * hash(j, im + 8);
       const dl = Math.hypot(x - e[0], y - e[1], z - e[2]);
-      ringH(W, cam, [x, y, z], rr, A * .5 * lit * mix(.35, 1, murk(dl, K.vis * 1.6)), 22, .18, hh * 40);
+      ringH(W, cam, [x, y, z], rr, A * .8 * lit * mix(.35, 1, murk(dl, K.vis * 1.6)), 22, .18, hh * 40);
       if (hh < .35) ringH(W, cam, [x + 9, y - 6, z - 6], rr * .55, A * .32 * lit, 16, .22, hh * 70);
     }
   }
@@ -467,8 +466,8 @@
     // what the murk lets through: the flash scattered into a broad soft light, broader the more rain between
     const sp = 1 + d / vis;
     if (a < 3.5) {
-      K.glow(p, A * .85 * fl, 55 * sp * sc, 5, 240);
-      K.glow(p, A * .2 * fl, 320 * sp * sc, 40, 460);
+      K.glow(p, A * .9 * fl, 70 * sp * sc, 6, 260);
+      K.glow(p, A * .3 * fl, 420 * sp * sc, 50, 560);
     }
     // the heaving sea under it catches the flash: a broken path of glints toward the lens
     if (a < 1.4) {
@@ -500,7 +499,15 @@
     const d = V.dist(h, cam.eye); if (d < 600) return;
     const fk = .8 + .2 * noise(T * 30 + I.i, 2.2), m = motor(T - I.tL);
     K.glow(h, A * hide * m * fk * mix(.3, .8, murk(d, K.vis)), 4 + d * .004, 3, 40);
-    K.glow(h, A * hide * m * .12 * fk, 40 * (1 + d / K.vis), 8, 90);
+    K.glow(h, A * hide * m * .22 * fk, 60 * (1 + d / K.vis), 10, 130);
+    // I3 passing its round: the two lights cross, a flare as it goes by
+    if (I.miss) {
+      const u = Math.abs(T - I.tI); if (u < .35) {
+        const w = A * hide * (1 - u / .35);
+        K.glow(h, w * .5, 35 * (1 + d / K.vis), 8, 140);
+        star(W, cam, h, 0, 9, w * .6, 5.5, 8);
+      }
+    }
   }
 
   /* ================= Phalanx: tracer streams through lit rain, muzzle fire, the close kill ================= */
@@ -556,10 +563,11 @@
         seg(W, cam, m, tip, A * .85);
       }
       for (let q = 0; q < 4; q++) { const ph = q / 4 * TAU + f1 * 2, l = .35 + .45 * f2; seg(W, cam, V.mad(m, d, .15), V.add(V.mad(m, d, .15), V.add(V.mul(U, Math.cos(ph) * l), V.mul(Vv, Math.sin(ph) * l))), A * .6); }
-      K.glow(V.mad(m, d, .7), A * (.32 + .28 * f1), 2, 4, 60);
+      K.glow(V.mad(m, d, .7), A * (.38 + .3 * f1), 2.4, 5, 70);
+      K.glow(V.mad(m, d, 1), A * .12 * (.6 + .4 * f1), 9, 20, 160);
       // the rain round the muzzle and along the first of the stream flickers in the flash
       const lv = A * muzzleFlick(e, T);
-      litRain(W, cam, K, m[0] + d[0] * 2, m[1] + d[1] * 2, m[2] + d[2] * 2, 11, 1.25 * lv, T, 61 + e.m, 420);
+      litRain(W, cam, K, m[0] + d[0] * 2, m[1] + d[1] * 2, m[2] + d[2] * 2, 12, 1.6 * lv, T, 61 + e.m, 600);
       litRain(W, cam, K, m[0] + d[0] * 22, m[1] + d[1] * 22, m[2] + d[2] * 22, 9, .7 * lv, T, 67 + e.m, 200);
       litRain(W, cam, K, m[0] + d[0] * 55, m[1] + d[1] * 55, m[2] + d[2] * 55, 9, .45 * lv, T, 71 + e.m, 160);
     }
@@ -608,47 +616,39 @@
     const y = hD(z) - s; return [sideX(z, y) + lift, y, z];
   }
   const DMG = (() => {
-    const z0 = HIT.at[2], s0 = .35, n = 26, out = [], petals = [], cracks = [];
+    const z0 = HIT.at[2], s0 = .85, n = 16, out = [], lip = [], petals = [], cracks = [];
     const th = [], rz = [], rs = [];
     for (let k = 0; k < n; k++) {
-      const t = k / n * TAU, rr = (k % 2 ? .74 : 1.12) * (.82 + .36 * hash(k, 51));
-      th.push(t); rz.push(Math.cos(t) * 1.9 * rr); rs.push(Math.sin(t) * 1.5 * rr);
+      const t = k / n * TAU, rr = (k % 2 ? .86 : 1.06) * (.9 + .2 * hash(k, 51));
+      th.push(t); rz.push(Math.cos(t) * 2.3 * rr); rs.push(Math.sin(t) * 1.35 * rr);
     }
-    // the outline, subdivided so it wraps the edge
-    for (let k = 0; k <= n; k++) {
-      const a = k % n, b = (k + 1) % n;
-      if (k === n) break;
-      for (let q = 0; q < 3; q++) { const f = q / 3; out.push(wrapP(z0 + rz[a] + (rz[b] - rz[a]) * f, s0 + rs[a] + (rs[b] - rs[a]) * f, .06)); }
+    // the hole's torn edge, subdivided so it wraps the deck edge; a second line just inside it for the lip
+    for (let k = 0; k < n; k++) {
+      const a = k, b = (k + 1) % n;
+      for (let q = 0; q < 3; q++) {
+        const f = q / 3, zz = rz[a] + (rz[b] - rz[a]) * f, sv = rs[a] + (rs[b] - rs[a]) * f;
+        out.push(wrapP(z0 + zz, s0 + sv, .06)); lip.push(wrapP(z0 + zz * .78, s0 + sv * .74, -.25));
+      }
     }
-    out.push(out[0]);
-    // torn plating curled outward off the lip
-    for (let k = 0; k < n; k += 2) {
-      const z = z0 + rz[k], s = s0 + rs[k], c = Math.cos(th[k]), sn = Math.sin(th[k]), L = .5 + .6 * hash(k, 52);
-      petals.push([wrapP(z, s, .06), wrapP(z + c * L * .5, s + sn * L * .5, .35 + .4 * hash(k, 53)), wrapP(z + c * L * .7, s + sn * L * .8, .75 + .5 * hash(k, 54))]);
+    out.push(out[0]); lip.push(lip[0]);
+    // plating torn back off the lip, curled outward
+    for (let k = 1; k < n; k += 3) {
+      const z = z0 + rz[k], s = s0 + rs[k], c = Math.cos(th[k]), sn = Math.sin(th[k]), L = .6 + .5 * hash(k, 52);
+      petals.push([wrapP(z, s, .06), wrapP(z + c * L * .45, s + sn * L * .45, .35 + .3 * hash(k, 53)), wrapP(z + c * L * .6, s + sn * L * .7, .8 + .4 * hash(k, 54))]);
     }
-    for (let k = 0; k < 8; k++) {
-      const t = (k + .4 * hash(k, 55)) / 8 * TAU, c = Math.cos(t), sn = Math.sin(t), L = 1.6 + 1.4 * hash(k, 56), pts = [];
-      for (let q = 0; q <= 3; q++) {
-        const f = 1.05 + L * q / 3, j = (hash(k * 5 + q, 57) - .5) * .5 * q;
-        pts.push(wrapP(z0 + c * 1.9 * f - sn * j, s0 + sn * 1.5 * f + c * j, .05));
+    for (let k = 0; k < 3; k++) {
+      const t = (k + .6 + .3 * hash(k, 55)) / 3 * TAU, c = Math.cos(t), sn = Math.sin(t), L = .6 + .8 * hash(k, 56), pts = [];
+      for (let q = 0; q <= 2; q++) {
+        const f = 1.08 + L * q / 2, j = (hash(k * 5 + q, 57) - .5) * .35 * q;
+        pts.push(wrapP(z0 + c * 2.3 * f - sn * j, s0 + sn * 1.35 * f + c * j, .05));
       }
       cracks.push(pts);
     }
-    // scorch: an irregular blotch on the deck round the hole, one down the side plating, soot streaked aft and inboard
-    const blot = (zc, sc, az, as, clampS, seed) => {
-      const p = [];
-      for (let k = 0; k <= 30; k++) {
-        const t = k / 30 * TAU, rr = .8 + .45 * hash(k % 30, seed) + .15 * Math.sin(3 * t + seed);
-        let s = sc + Math.sin(t) * as * rr; s = clampS < 0 ? Math.min(s, -.05) : Math.max(s, .05);
-        p.push(wrapP(zc + Math.cos(t) * az * rr, s, .04));
-      }
-      return p;
-    };
-    const scorch = [blot(z0 - .5, -1.7, 3.1, 1.9, -1, 58), blot(z0 + .2, 1.9, 2.6, 1.6, 1, 59)];
-    const soot = [];
-    for (let k = 0; k < 7; k++) {
-      const z = z0 - 1.2 + 2.4 * hash(k, 61), s = -.8 - 1.2 * hash(k, 62), L = 3.5 + 4 * hash(k, 63);
-      soot.push([wrapP(z, s, .04), wrapP(z - L * .5, s - L * .22 + (hash(k, 64) - .5) * .6, .04), wrapP(z - L, s - L * .38, .04)]);
+    // scorch: a ragged ring round the hole, across the edge
+    const scorch = [];
+    for (let k = 0; k <= 28; k++) {
+      const t = k / 28 * TAU, rr = .85 + .3 * hash(k % 28, 58) + .1 * Math.sin(3 * t + 1.7);
+      scorch.push(wrapP(z0 - .4 + Math.cos(t) * 4.2 * rr, s0 + .2 + Math.sin(t) * 2.4 * rr, .04));
     }
     // the lifeline: stanchions every 3 m (hd_sea_air), two torn over the side, the wires parted and hanging
     const st = z => [hB(z) - .15, hD(z), z];
@@ -662,7 +662,7 @@
     rail.push([top(zD), [hB(53.9) + .15, hD(53.9) + .8, 53.9], bentC, [hB(51.8) + .55, hD(51.8) - .5, 51.7], [hB(51.6) + .45, hD(51.6) - 1.1, 51.5]]);
     rail.push([mid(zA), [hB(48) + .2, hD(48) + .3, 48], [hB(zB) + .45, hD(zB) + .1, zB - .3], [hB(50) + .4, hD(50) - .9, 50.1]]);
     rail.push([mid(zD), [hB(54) + .25, hD(54) + .25, 54], [hB(zC) + .7, hD(zC) - .1, zC + .1], [hB(52) + .5, hD(52) - .7, 51.9]]);
-    return { out, petals, cracks, scorch, soot, rail };
+    return { out, lip, petals, cracks, scorch, rail };
   })();
 
   // the fire: flares, settles into a working fire, knocked down each time a sea comes over the forecastle, and
@@ -720,25 +720,25 @@
     const rw = OH.windSpd(T), rx = WX * rw, rz = WZ * rw - VK, rl = Math.hypot(rx, rz), lean = [rx / rl, 0, rz / rl];
     const e = cam.eye, ax = V.norm([lean[0] * .9, 1, lean[2] * .9]);
     const cs = V.norm(V.cross(ax, [e[0] - F0[0], e[1] - F0[1], e[2] - F0[2]]));
-    for (let k = 0; k < 11; k++) {
-      const kk = k % 7, inner = k >= 7, Pk = .38 + .28 * hash(k, 83), ph = T / Pk + hash(k, 84), u = fr(ph), cyc = Math.floor(ph);
-      const H = (1.2 + 2.8 * hash(k, cyc * 1.7 + 85)) * (.5 + .5 * fk) * (inner ? .55 : 1);
+    for (let k = 0; k < 14; k++) {
+      const kk = k % 9, inner = k >= 9, Pk = .38 + .28 * hash(k, 83), ph = T / Pk + hash(k, 84), u = fr(ph), cyc = Math.floor(ph);
+      const H = (2.4 + 4.6 * hash(k, cyc * 1.7 + 85)) * (.4 + .6 * fk) * (inner ? .55 : 1);
       const ht = H * (.3 + .7 * Math.pow(Math.sin(PI * Math.min(1, u * 1.2)), .7));
-      const bx = -1.6 + (kk / 6) * 2.6 + (hash(kk, 86) - .5) * .5, bz = (hash(kk, 81) - .5) * 3.4, w0 = (.5 + .45 * hash(k, 87)) * (inner ? .5 : 1);
+      const bx = -2.2 + (kk / 8) * 3.4 + (hash(kk, 86) - .5) * .5, bz = (hash(kk, 81) - .5) * 4, w0 = (.75 + .7 * hash(k, 87)) * (inner ? .5 : 1);
       const b0 = F0[0] + side[0] * bx + fwd[0] * bz, b1 = F0[1] + side[1] * bx + fwd[1] * bz - .3, b2 = F0[2] + side[2] * bx + fwd[2] * bz;
       let lx = 0, ly = 0, lz = 0, qx = 0, qy = 0, qz = 0;
       const al = fk * (inner ? .85 : .7);
       for (let q = 0; q <= 7; q++) {
         const t = q / 7, y = ht * t, wd = w0 * Math.pow(Math.sin(PI * Math.min(1, (t + .12) / 1.12)), .75);
-        const wob = .45 * t * noise(T * 7.5 + k * 1.9, t * 2.2 + k), lk = y * (.5 + 1.3 * t);
-        const cx = b0 + lean[0] * lk + cs[0] * wob, cy = b1 + y * .8 + cs[1] * wob, cz = b2 + lean[2] * lk + cs[2] * wob;
+        const wob = .6 * t * noise(T * 7.5 + k * 1.9, t * 2.2 + k), lk = y * (.3 + .85 * t);
+        const cx = b0 + lean[0] * lk + cs[0] * wob, cy = b1 + y + cs[1] * wob, cz = b2 + lean[2] * lk + cs[2] * wob;
         const Lx = cx - cs[0] * wd, Ly = cy - cs[1] * wd, Lz = cz - cs[2] * wd, Rx = cx + cs[0] * wd, Ry = cy + cs[1] * wd, Rz = cz + cs[2] * wd;
         if (q) { segW(W, cam, lx, ly, lz, Lx, Ly, Lz, al * (1 - t * .35)); segW(W, cam, qx, qy, qz, Rx, Ry, Rz, al * (1 - t * .35)); }
         lx = Lx; ly = Ly; lz = Lz; qx = Rx; qy = Ry; qz = Rz;
       }
       // the top tears off and streams away downwind
       if (!inner && u > .5) {
-        const v = (u - .5) / .5, lk = ht * 1.6 + 5 * v, y = ht * .8 + 1.2 * v;
+        const v = (u - .5) / .5, lk = ht * 1.15 + 5 * v, y = ht + 1.2 * v;
         const cx = b0 + lean[0] * lk, cy = b1 + y, cz = b2 + lean[2] * lk, L = 1 + 1.5 * v;
         segW(W, cam, cx, cy, cz, cx + lean[0] * L, cy + .2, cz + lean[2] * L, al * .8 * (1 - v));
         segW(W, cam, cx + cs[0] * .25, cy - .25, cz + cs[2] * .25, cx + lean[0] * L * .7, cy + .05, cz + lean[2] * L * .7, al * .5 * (1 - v));
@@ -751,7 +751,7 @@
       const x = F0[0] + side[0] * (h1 - .5) * 4 + lean[0] * run, y = F0[1] + 4.5 * t - 2 * t * t + 1.5 * h2, z = F0[2] + side[2] * (h1 - .5) * 4 + fwd[2] * (h2 - .5) * 3 + lean[2] * run;
       segW(W, cam, x, y, z, x - lean[0] * .9, y - .1, z - lean[2] * .9, .75 * fk * (1 - u) * ss(0, .08, u));
     }
-    K.glow(V.add(F0, V.mul(upS, 1.8)), fk * .24 * (.75 + .25 * noise(T * 8, 3.3)), 7, 6, 130);
+    K.glow(V.add(F0, V.mul(upS, 2.4)), fk * .32 * (.75 + .25 * noise(T * 8, 3.3)), 9, 8, 160);
     // steam where a sea comes aboard onto the fire
     for (const { sl, age } of OH.slamsAt(SA, T, 3.2)) {
       const a = age - .35; if (a <= 0) continue;
@@ -768,13 +768,13 @@
     const k = A * K.L * ss(HIT.t + .3, HIT.t + .9, T);
     if (k <= .005) return;
     W.style(HI, 1);
-    const o = DMG.out.map(P);
-    for (let i = 0; i < o.length - 1; i++) seg(W, cam, o[i], o[i + 1], k);
+    const o = DMG.out.map(P), l = DMG.lip.map(P);
+    for (let i = 0; i < o.length - 1; i++) { seg(W, cam, o[i], o[i + 1], k); seg(W, cam, l[i], l[i + 1], k * .45); }
     for (const pt of DMG.petals) { const q = pt.map(P); seg(W, cam, q[0], q[1], k * .9); seg(W, cam, q[1], q[2], k * .7); }
-    for (const c of DMG.cracks) { const q = c.map(P); for (let i = 0; i < q.length - 1; i++) seg(W, cam, q[i], q[i + 1], k * .55 * (1 - i * .22)); }
+    for (const c of DMG.cracks) { const q = c.map(P); for (let i = 0; i < q.length - 1; i++) seg(W, cam, q[i], q[i + 1], k * .5 * (1 - i * .3)); }
     for (const r of DMG.rail) { const q = r.map(P); for (let i = 0; i < q.length - 1; i++) seg(W, cam, q[i], q[i + 1], k * .85); }
-    for (const b of DMG.scorch) { const q = b.map(P); for (let i = 0; i < q.length - 1; i++) seg(W, cam, q[i], q[i + 1], k * .45); }
-    for (const s of DMG.soot) { const q = s.map(P); seg(W, cam, q[0], q[1], k * .38); seg(W, cam, q[1], q[2], k * .22); }
+    const sc = DMG.scorch.map(P);
+    for (let i = 0; i < sc.length - 1; i += 2) seg(W, cam, sc[i], sc[i + 1], k * .3);
     W.style(WH, 1);
   }
   function drawHit(W, cam, K, T, A) {
@@ -815,13 +815,12 @@
       // the yellow flash that marks the breach, on the side plating
       if (a < .75) {
         W.style(HI, 1);
-        const n = X.dir(Xh, [1, 0, 0]), U = X.dir(Xh, [0, 0, 1]), Vv = X.dir(Xh, [0, 1, 0]);
+        const U = X.dir(Xh, [0, 0, 1]), Vv = X.dir(Xh, [0, 1, 0]);
         const c = X.ap(Xh, [sideX(HIT.at[2], hD(HIT.at[2]) - .4) + .1, hD(HIT.at[2]) - .4, HIT.at[2]]);
         const w = A * Math.pow(1 - a / .75, 1.4);
         ringA(W, cam, c, U, Vv, .8 + 11 * (1 - Math.exp(-a / .16)), w * .9, w * .5, 40, .06, 1.3);
         if (a < .3) ringA(W, cam, c, U, Vv, .5 + 4 * (1 - Math.exp(-a / .07)), w, w * .6, 28, .1, 2.9);
         W.style(WH, 1);
-        void n;
       }
     }
     drawFire(W, cam, K, T, A);
@@ -840,7 +839,7 @@
     for (const I of OH.INTS) {
       const s = T - I.tL; if (s < -.05 || T > I.tI) continue;
       if (s < 1.4) { const k = Math.exp(-Math.max(0, s) / .32); addC(I.P0[0], I.P0[2], 420, .2 * k); addP(I.P0[0], I.P0[1], I.P0[2], 34, 1.1 * k); }
-      const c = cloudPatch(I, T); if (c) addC(c.h[0], c.h[2], c.r, c.k * .7);
+      const c = cloudPatch(I, T); if (c) addC(c.h[0], c.h[2], c.r, c.k * 2.2);
       if (s < 4) { const h = OH.intAt(I, T); if (h && h[1] < 160) addP(h[0], h[1], h[2], 26, .7 * motor(s)); }
     }
     for (const k of KILLS) { const a = T - k.t; if (a >= 0 && a < 2.5) addC(k.p[0], k.p[2], 1500, 1.1 * killFlash(k, a)); }
@@ -877,7 +876,7 @@
         if (s >= 0) { drawTrail(K.W, K.cam, K, I, T, A); drawCloud(K.W, K.cam, I, T, A); }
         drawVent(K.W, K.cam, K, I, T, A);
         if (s >= 0 && T <= I.tEnd) drawPlume(K.W, K.cam, K, I, T, A);
-        if (s >= 0 && s < .6) litRain(K.W, K.cam, K, I.P0[0], I.P0[1] + 6, I.P0[2], 34, 1.3 * A * Math.exp(-s / .22), T, 31 + I.i, 700);
+        if (s >= 0 && s < 1.2) litRain(K.W, K.cam, K, I.P0[0], I.P0[1] + 6, I.P0[2], 34, 1.6 * A * Math.exp(-s / .35), T, 31 + I.i, 800);
       }
     },
     /* the interceptors' plumes glowing inside the cloud layer, the base lit from within */

@@ -1,9 +1,10 @@
 /* THERMAL (Point Cloud, defence P4) · the film. One take through a gimballed thermal imager on a sister ship's
-   pilothouse: the lens never leaves its mast, it only slews, tracks and zooms. From an empty horizon onto the hero
-   at night, into its stacks and along to the aft Phalanx; out to the threat bearing, where the view flips to
-   black-hot and four hot points come over the horizon; wide for the launches and the far intercepts; white-hot
-   again for the Phalanx and the hit; then up the smoke into the night sky, along the cloud deck and down onto the
-   empty horizon the film began on. render(T) is a pure function of film time T. */
+   pilothouse: the lens never leaves its mast, it only slews, tracks and zooms. Down off the horizon onto the hero
+   at night, into its stacks and along to the aft Phalanx; out to the whole ship as the view flips to black-hot, then
+   to the threat bearing, where four hot points come over the horizon; wide for the launches and the far intercepts;
+   white-hot again for the Phalanx and the hit; the breach, the Phalanx back to stow; up the smoke into the night
+   sky, along the cloud deck and down to the horizon, the slew running on across the loop's seam onto the hero.
+   render(T) is a pure function of film time T. */
 (() => {
   'use strict';
   const { V, R, X, E, Cam } = M3;
@@ -49,29 +50,31 @@
   const BR = brgOf(GRP(61));                                   // the raid at the horizon (~072)
   PG.BR = BR;
   const STOP0 = PG.EV.stops[0].p, STOP1 = PG.EV.stops[1].p;
-  /* AGC windows [lo, hi] in heat: the ship at night, the stacks close, the horizon stretched, the raid, the fight, the sky */
-  const AGC = { A: [.05, .92], S: [.13, 1.08], A2: [.07, .9], Hz: [.1, .47], R: [.09, .66], W: [.06, .95], K: [.02, .36] };
+  /* AGC windows [lo, hi] in heat: the ship at night, the stacks close, the aft end, the horizon stretched, the raid,
+     the fight wide, the ship in black-hot (hot = high in the window, so the hull falls dark), the sky */
+  const AGC = { A: [.14, .9], S: [.16, 1.08], A2: [.14, .88], Hz: [.1, .47], R: [.09, .66], W: [.06, .8], Wb: [.05, .64], K: [.02, .3] };
+  /* keys in film time; the last one runs on across the loop's seam into the first (T = 0 falls inside that slew,
+     with the hero still out of frame) */
   const K = [];
   const key = (t, f, fov, e, g) => K.push({ t, f: typeof f === 'function' ? f : Pt(f), fov, e: e || 'ss', g: AGC[g || 'A'] });
-  key(0, HZ(BH - 21, .15), 3.4, 'ss', 'Hz');                 // an empty sector of horizon (the loop's seam)
-  key(5.8, HERO, 4.6, 'q', 'A');                              // slew right onto the hero
-  key(14.5, [0, 16, -12], 3.4, 'ss', 'A');                    // push in
-  key(19, [0, 20.6, -7.4], 1.7, 'ss', 'S');                  // the uptakes
-  key(24, [-1, 23.5, -9], 1.6, 'ss', 'S');
-  key(28.5, [-6, 31, -24], 2.0, 'ss', 'S');                   // up the exhaust as it streams aft
-  key(33, [0, 17, -32], 1.7, 'ss', 'A2');                     // aft along the superstructure
-  key(37.5, [0, 15.2, -47.5], 1.45, 'ss', 'A2');               // the aft Phalanx, stowed
-  key(41, [0, 14.6, -49.5], 1.4, 'ss', 'A2');
-  key(44.5, [6, 14, -6], 5.0, 'ss', 'A');                     // out
-  key(47.4, HZ(BR - 1.5, .05), 3.2, 'q', 'Hz');              // slew to the threat bearing; black-hot at 46.5
-  key(50.8, HZ(BR - 4.3, .05), 2.6, 'ss', 'Hz');             // step-stare along the horizon
-  key(54.2, HZ(BR + 2.4, .05), 2.6, 'ss', 'Hz');
-  key(57.6, HZ(BR + .2, .03), 2.1, 'ss', 'Hz');
-  key(60.4, GRP, 1.15, 'ss', 'R');                            // four hot points over the horizon: lock on
+  key(4.0, HERO, 4.6, 'ss', 'A');                             // down off the horizon onto the hero
+  key(12.5, [0, 16, -12], 3.4, 'ss', 'A');                    // push in
+  key(17, [0, 20.6, -7.4], 1.7, 'ss', 'S');                   // the uptakes
+  key(22, [-1, 23.5, -9], 1.6, 'ss', 'S');
+  key(27, [-6, 31, -24], 2.0, 'ss', 'S');                     // up the exhaust as it streams aft
+  key(31.5, [0, 17, -32], 1.7, 'ss', 'A2');                   // aft along the superstructure
+  key(36, [0, 15.2, -47.5], 1.45, 'ss', 'A2');                // the aft Phalanx, stowed
+  key(39.5, [0, 14.6, -49.5], 1.4, 'ss', 'A2');
+  key(43.5, OFF(HERO, -.25, .25), 3.6, 'ss', 'A');               // out to the whole ship: black-hot at 45.0
+  key(48.2, OFF(HERO, -.05, .3), 3.9, 'lin', 'Wb');            // held while the ship reads dark
+  key(51.2, HZ(BR - 1.5, .05), 3.2, 'q', 'Hz');              // slew to the threat bearing
+  key(54.2, HZ(BR - 4.0, .05), 2.6, 'ss', 'Hz');             // step-stare along the horizon
+  key(57.4, HZ(BR + .3, .03), 2.2, 'ss', 'Hz');              // the raid comes over it at 57.25
+  key(60.4, GRP, 1.15, 'ss', 'R');                            // four hot points: lock on
   key(63.8, GRP, .95, 'lin', 'R');
-  key(66.0, OFF(HERO, 1.35, 1.2), 7.0, 'q', 'W');            // wide on the hero for the launches (66.0, 67.6)
-  key(69.8, OFF(HERO, 2.2, 2.4), 7.6, 'ss', 'W');            // the climbs
-  key(74.4, OFF(HERO, 3.9, 2.4), 12.2, 'ss', 'W');           // the whole picture: ship, arcs, the raid
+  key(66.0, OFF(HERO, .5, 2.4), 9.0, 'q', 'Wb');            // back on the hero, headroom for the launches (66.0, 67.6)
+  key(69.8, OFF(HERO, 2.6, 7.0), 17.5, 'ss', 'W');           // widening with the climbs
+  key(74.4, OFF(HERO, 5.6, 4.6), 15.5, 'ss', 'W');           // the whole picture: ship, arcs, the raid
   key(78.6, OFF(STOP0, 0, .5), 3.1, 'ss', 'W');              // onto the first meeting point (80.0)
   key(81.3, OFF(STOP0, 0, .4), 3.1, 'ss', 'W');
   key(82.8, OFF(STOP1, 0, .4), 3.1, 'ss', 'W');              // the second (83.2)
@@ -81,24 +84,30 @@
   key(91.0, RND(3), 2.3, 'lin', 'R');                         // white-hot again at 90.5
   key(93.6, [0, 15.2, -47.5], 1.4, 'q', 'A2');               // the aft Phalanx trains (93.9-95.5)
   key(97.0, [0, 15.2, -47.5], 1.45, 'ss', 'A2');
-  key(99.6, OFF(HERO, 1.6, .35), 6.0, 'ss', 'W');            // the ship left, the rounds in from the right
-  key(103.4, OFF(HERO, 1.3, .3), 5.6, 'lin', 'W');           // the hit
+  key(99.6, OFF(HERO, 1.6, .35), 6.0, 'ss', 'A');            // the ship left, the rounds in from the right
+  key(103.4, OFF(HERO, 1.3, .3), 5.6, 'lin', 'A');           // the hit
   key(106.5, [4, 12, -57], 2.8, 'ss', 'A');
-  key(112, [3, 10, -57], 1.8, 'ss', 'A');                     // close on the fire
+  key(112, [3, 10, -57], 1.8, 'ss', 'A');                     // close on the breach
   key(118.4, [2, 11, -59], 1.75, 'ss', 'A');
-  key(123.5, [-12, 70, -90], 2.4, 'ss', 'A');                 // up the smoke
-  key(129.5, SK(BH + 4, 5.4), 4.5, 'ss', 'K');                // into the night sky
-  key(138.5, SK(BH - 14, 4.2), 4.8, 'lin', 'K');              // along the cloud deck
-  key(147, HZ(BH - 19, .4), 3.8, 'ss', 'Hz');                 // down onto the horizon
-  key(D, HZ(BH - 21, .15), 3.4, 'ss', 'Hz');                  // = the first key
+  key(123, [0, 16, -44], 3.0, 'ss', 'A');                     // the aft half
+  key(127.2, [0, 15.4, -47.5], 1.5, 'ss', 'A2');             // the aft Phalanx back to stow (127.5-131.5)
+  key(131.8, [0, 15.2, -48], 1.45, 'ss', 'A2');
+  key(137, [-14, 75, -100], 2.8, 'ss', 'A');                  // up the exhaust as it trails away
+  key(142.5, SK(BH + 3, 3.2), 5.2, 'ss', 'K');                // into the night sky: the cloud deck
+  key(148.5, SK(BH - 14, 2.2), 5.6, 'lin', 'K');              // along it
+  key(153.5, HZ(BH - 20, .5), 4.0, 'ss', 'Hz');               // down to the horizon, and on across the seam
   const q5 = u => u * u * u * (u * (u * 6 - 15) + 10);
   const EASE = { ss: u => u * u * (3 - 2 * u), q: q5, lin: u => u };
   const slerpDir = (a, b, u) => { const d = E.clamp(V.dot(a, b), -1, 1), th = Math.acos(d); if (th < 1e-6) return V.norm(V.lerp(a, b, u)); const s = Math.sin(th); return V.add(V.mul(a, Math.sin((1 - u) * th) / s), V.mul(b, Math.sin(u * th) / s)); };
   const SENS = { lo: .05, hi: .92, fov: 4, dir: [0, 0, 1] };
+  const KN = K.length;
   function camAt(T) {
     PG.eye(T, EYE);
-    let i = 0; while (i < K.length - 2 && K[i + 1].t <= T) i++;
-    const a = K[i], b = K[i + 1], u = sat((T - a.t) / (b.t - a.t)), e = EASE[b.e](u);
+    let a, b, ta, tb;
+    if (T < K[0].t) { a = K[KN - 1]; b = K[0]; ta = a.t - D; tb = b.t; }
+    else if (T >= K[KN - 1].t) { a = K[KN - 1]; b = K[0]; ta = a.t; tb = b.t + D; }
+    else { let i = 0; while (i < KN - 2 && K[i + 1].t <= T) i++; a = K[i]; b = K[i + 1]; ta = a.t; tb = b.t; }
+    const u = sat((T - ta) / (tb - ta)), e = EASE[b.e](u);
     const da = V.norm(V.sub(a.f(T), EYE)), db = V.norm(V.sub(b.f(T), EYE));
     let dir = slerpDir(da, db, e);
     const fov = Math.exp(Math.log(a.fov) + (Math.log(b.fov) - Math.log(a.fov)) * e);
@@ -179,27 +188,29 @@
   const CH = [
     { t: 0, title: 'Watch' },
     { t: 15, title: 'Machinery' },
-    { t: 43, title: 'Horizon' },
+    { t: 43.5, title: 'Black-hot' },
+    { t: 50, title: 'Horizon' },
     { t: 64, title: 'Launch' },
     { t: 90.5, title: 'Close-in' },
     { t: PG.T_HIT, title: 'Hit' },
-    { t: 119, title: 'Night' },
+    { t: 134, title: 'Night' },
   ];
   const b3 = a => String(Math.round(((a % 360) + 360) % 360)).padStart(3, '0');
   const KICKS = [
     [0, 'Mk 20 EOSS / LWIR · white-hot'],
-    [5.5, 'DDG-51 Arleigh Burke / 4.0 km · port quarter'],
-    [16, 'LM2500 × 4 / Uptakes · exhaust'],
-    [32.5, 'Mk 15 Phalanx 1B / Aft mount · stowed'],
-    [44, `Mk 20 EOSS / Threat bearing ${b3(BR)}`],
-    [46.5, 'Mk 20 EOSS / LWIR · black-hot'],
+    [3.2, 'DDG-51 Arleigh Burke / 4.0 km · port quarter'],
+    [15.5, 'LM2500 × 4 / Uptakes · exhaust'],
+    [31.5, 'Mk 15 Phalanx 1B / Aft mount · stowed'],
+    [PG.POL[0].t, 'Mk 20 EOSS / LWIR · black-hot'],
+    [49, `Mk 20 EOSS / Threat bearing ${b3(BR)}`],
     [PG.EV.detect, 'TRK 41–44 / 3M55 Oniks · Mach 2'],
     [65.5, 'Mk 41 / SM-6 · engage'],
-    [90.5, 'Mk 20 EOSS / LWIR · white-hot'],
+    [PG.POL[1].t, 'Mk 20 EOSS / LWIR · white-hot'],
     [93, 'Mk 15 Phalanx 1B / Aft mount · engage'],
     [PG.T_HIT, 'DDG-51 / Hit · starboard quarter'],
-    [120, 'Mk 20 EOSS / Night sky · search'],
-    [146, 'Mk 20 EOSS / LWIR · white-hot'],
+    [126.5, 'Mk 15 Phalanx 1B / Aft mount · stow'],
+    [135.5, 'Mk 20 EOSS / Night sky · search'],
+    [152, 'Mk 20 EOSS / LWIR · white-hot'],
   ];
   const kickT = $('kickt'), spotEl = $('spot'), pW = $('pW'), pB = $('pB'), sFov = $('sFov'), sZm = $('sZm'), sRng = $('sRng'), sAz = $('sAz'), sEl = $('sEl');
   let lastKick = '', lastUi = -1, lastPol = -1;
@@ -296,24 +307,24 @@
     reticle(1);
     const tags = [];
     // the hero, identified in the wide shots (a box on its true bounds)
-    const heroK = win(T, 5.4, 7.2, 13.2, 15) + win(T, 65.6, 67.2, 72.5, 74.2) + win(T, 99.2, 100.4, 102.6, 103.3);
+    const heroK = win(T, 3.4, 5.2, 11.4, 13.2) + win(T, 45.8, 46.6, 48.4, 49.4) + win(T, 65.6, 67.2, 72.5, 74.2) + win(T, 99.2, 100.4, 102.6, 103.3);
     const sb = DW.shipBox;
     if (heroK > .01 && sb && sb.x1 > sb.x0 + 8) {
       bracket(sb.x0 - 5, sb.y0 - 5, sb.x1 + 5, sb.y1 + 5, WH, .75 * heroK, 9);
       tags.push({ key: 'hero', id: 'DDG', txt: 'Arleigh Burke', v: (V.dist(cam.eye, HERO) / 1000).toFixed(1) + ' km', cls: 'lime', ax: sb.x0 + 4, ay: sb.y0 - 5, x: sb.x0 + 14, y: sb.y0 - 46, a: heroK, pri: 6 });
     }
     // the uptakes: the hottest thing aboard, read off the imager
-    const upK = win(T, 17.4, 19.2, 27.5, 29.2);
+    const upK = win(T, 16.2, 18, 25.8, 27.4);
     if (upK > .01) {
       const m = DW.MOUTHS[0], p = cam.project([m[0], m[1] + .3, m[2]]);
       if (p) tags.push({ key: 'upt', id: 'MER 2', txt: 'LM2500 uptake', v: fmtC(degC(1.14)), cls: 'drop', ax: p[0], ay: p[1], x: p[0] + 70, y: p[1] - 90, a: upK, pri: 5 });
     }
     // the aft Phalanx: its mount at rest, then training
-    const cwK = win(T, 36.4, 38, 41.2, 42.6) + win(T, 93.4, 94.4, 98.2, 99.2);
+    const cwK = win(T, 35, 36.6, 40, 41.6) + win(T, 93.4, 94.4, 98.2, 99.2) + win(T, 127.2, 128.2, 132.2, 133.6);
     if (cwK > .01) {
       const p = cam.project([0, 17.4, -47.5]);
       const a = PG.ciwsAim(T);
-      if (p) tags.push({ key: 'ciws', id: 'CIWS 2', txt: 'Mk 15 Phalanx 1B', v: T < 60 ? 'stowed' : 'train ' + b3(a.yaw / DEG), cls: 'lime', ax: p[0] + 4, ay: p[1] - 4, x: p[0] + 90, y: p[1] - 120, a: cwK, pri: 6 });
+      if (p) tags.push({ key: 'ciws', id: 'CIWS 2', txt: 'Mk 15 Phalanx 1B', v: T < 60 || T > PG.CIWS.tBack1 ? 'stowed' : T > PG.CIWS.tBack0 ? 'stow ' + b3(a.yaw / DEG) : 'train ' + b3(a.yaw / DEG), cls: 'lime', ax: p[0] + 4, ay: p[1] - 4, x: p[0] + 90, y: p[1] - 120, a: cwK, pri: 6 });
     }
     // the raid: coral boxes on each round's true bounds while the imager is on them
     const rdK = win(T, PG.EV.detect + .4, PG.EV.detect + 1.2, 65.2, 66.2) + win(T, 74.8, 76, 91.4, 92.6) + win(T, 99.4, 100, 103.2, 103.5);
