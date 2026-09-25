@@ -63,6 +63,17 @@ Unit = { id, type, side, def /* UNITS[type] */, pos, prev, hdg, prevHdg, pitch (
   `'sub'`, 36 m). Missiles leave a boat only from periscope depth (weapon `sub: true`; an attack order brings it up
   for the salvo and back down after it); torpedoes at any depth. Model state: ssn `mast vptA vptB prop`, ssk `mast prop`,
   bal `elev dep n wheel`, aew `dome prop fold`.
+- The landing force (sim/amphib.js): `lhd` (Wasp, `def.carry` { craft 3, veh 8 }, `def.well`, 2 MH-60R on deck), `lcac`
+  (`def.hover`: the only unit that crosses the waterline, on the nav grid `'hover'`: water and flat low ground within
+  1.5 km of it; carries 2 ACVs), `acv` (ACV-1.1, land, RWS gun vs land), and the coast's `kornet` (Kornet-EM on a
+  Tigr-M: `def.lift`, its launcher rises to fire, `needs: 'lift'`). A new LHD spawns loaded (`def.carry.start`;
+  `{ loaded: false }` spawns it empty). Carried units have `aboard` = the host (crafts in the well have `slot`, the
+  berth; vehicles on an LCAC `slot` 0/1): not seen, not hit, hold no ground, their orders wait (a craft in the well asks
+  for the gate itself). LHD: `well` 0..1 (stern gate; the ship slows to `def.well.slow` and ballasts down), `transit`
+  (the craft in the gate); LCAC: `cushion` 0..1, `rampB` 0..1, `dockT` (the scripted slide through the gate), `cargoN`.
+  Model state: lhd `well radar`, lcac `prop fan cushion rampB rampS rudder thrust`, acv `wheel yaw pitch ramp`,
+  kornet `wheel up yaw pitch`. Anchors: data/models.js `LHD` (DECK_Y, WELL, GATE, SLOTS, SPOTS), `LCAC` (deckY(st),
+  SLOTS, PROPS), `ACV`, `KORNET`.
 
 ## Orders
 
@@ -84,6 +95,10 @@ Unit = { id, type, side, def /* UNITS[type] */, pos, prev, hdg, prevHdg, pitch (
 | `launch_drone` | catapult: 12 s, then a drone patrols x, z |
 | `patrol` | aircraft: orbit x, z (radius r). Surface: shuttle between here and x, z |
 | `return` | aircraft to the carrier (land, rearm from its magazine), drones to a catapult, ships to replenish |
+| `land` | LCAC: out of the LHD's well (with its ACVs), to the beach nearest x, z (`beachPoint`), off cushion, ramp down, the ACVs roll off every 8 s and drive clear, then `then` (e.g. a move; `hold` sets their weapons free); with `cycle` (default) back to the LHD for more while it has vehicles, same beach; at the end it docks. `o.ph` 'go' / 'unload' / 'back' / 'dock' |
+| `unload` | LCAC: land at the nearest beach (here, on one) without the return trip |
+| `dock` | LCAC: `target` LHD (else the nearest with room): to the approach point astern, through the gate into a berth |
+| `embark` | ACV: `target` LCAC: drive to its bow ramp and board once it is beached (room permitting) |
 
 Orders queue with `queue: true`. The AI uses the same orders.
 
@@ -91,8 +106,21 @@ Orders queue with `queue: true`. The AI uses the same orders.
 
 - `sim.visible(side, unit)` → `'own' | 'track' | 'contact' | null`.
 - `sim.sides[side].contacts: Map<unitId, Contact>`; `sim.contact(side, unitId)`.
-  `Contact = { track: 'TRK 21', unitId, conf, cls, type, name, pos /* estimate */, vel, err /* m */, lastSeen, identified, emitting, dom, dead }`.
-  `cls`/`type` are set once conf ≥ `CLASSIFY` (0.6). `identified` after a scan (inspect allowed).
+  `Contact = { track: 'TRK 21', unitId, conf, cls, type, name, pos /* estimate */, vel, err /* m */, lastSeen, identified, emitting, xfix, dom, dead }`.
+  `cls`/`type` are set once conf ≥ `CLASSIFY` (0.6). `identified` after a scan (inspect allowed). `classify` events
+  carry `how` ('radar', 'esm', 'scan', ...).
+- Emitters (radars on, the command post's comms) are heard by the other side within their `emits.range`: a rough
+  contact (conf ≤ .45, error ≥ 2.5 km). ESM CROSS-FIX: the fleet's listeners (`sensors.esm`: E-2D, F/A-18E, DDG) in
+  line of sight take bearings (the E-2D hears 1.3× farther, `esm.reach`); bearings ≥ ~12° apart within 3 min (two
+  listeners, or one that flew across) fix the emitter (`xfix` = sine of the crossing, 0 when none; error ≈ range ×
+  0.02 / xfix) and raise its confidence at the listener's `esm.gain` per second (× the emitter's `emits.fix`, the
+  command post's bursty comms .3) up to .8: a radar that keeps radiating is classified after 1-2 min of cross-fixed
+  listening, the command post after 4-10 min. The confidence holds while the unit is still heard; a silent (EMCON)
+  unit gives nothing, and a fix fades within about a minute once it goes quiet. Constants in consts.js (`ESM_*`).
+- Fleet sensors over land: the DDG's radar sees land units within 3 km of the water (`radar.shore`, `SHORE_D`) at
+  .6 of its surface range (inland .3); the E-2D looks down (`land` .45, moving vehicles `gmti` .7) but slowly
+  (`landGain`: ~5 min to classify a parked launcher 25 km off; `hold`: a paint holds the contact 40 s); the F/A-18E's
+  targeting pod (`sensors.pod`) classifies the land and sea units it passes within 5 km of and identifies them.
 - `sim.projVisible(side, proj)` → the side's sensors cover that missile now.
 - Sonar (`sensors.sonarTick`, 1 Hz): DDG hull sonar (less at speed), the MH-60R's dipping sonar (only while it hovers,
   `sonarWorks(u)`), the boats' own. Range = the sonar's `sub` (or `ship`, boats only) range × the target's noise
@@ -117,7 +145,40 @@ over it) or end quietly (`torpedo_end`).
 `oniks` (3M55: vertical cold launch, booster separation at 7 s, low over land, sea-skimming at 15 m),
 `tlam` (VLS, booster 12 s, 60 m terrain following), `slam`, `hellfire`, `sm6` (2 s vertical rise, gentle
 pitch-over, booster separation at 6 s), `pdms` (ESSM), `sam` (57E6, booster at 2.4 s), `aam`, `shell` (5" ballistic).
-Guns (Phalanx, 2A38M) fire bursts resolved at once: `gunfire` events.
+
+### Bodies and hits (bodies.js; nothing is rolled)
+
+A hit is geometry: a path crossing a body during a tick. A unit's body is its part boxes in its model frame (+Z
+forward, +Y up, +X starboard; the HD model's part bounds baked into `bodies.js`, each box owned by a sim part); a
+munition's is a capsule, `PROJ[kind].body = [length m, diameter m, mass kg]`. A strike lands on the part whose box
+it enters (the smallest box holding the point a little past the entry); the nearest other part takes the spill-over
+(`applyDamage(sim, u, dmg, src, { part, part2, pos })`). Rounds miss through seeded aim dispersion only.
+
+- Guns fire bursts of representative rounds (`sim.bursts`: each `{ id, unit, weapon, target, tk, n, x /* Float64Array
+  3n positions */, st /* Uint8Array: 0 not fired, 1 flying, 2 done */, hits }`) that fly with gravity and drag; a
+  renderer may draw the rounds from `x`. Weapon fields: `v0`, `rpm`, `rounds`, `disp`, `drag`, `dmgR`.
+- Proj fields added: `ctrl` (false: out of control, tumbling), `fw` / `up` (its frame while tumbling, unit vectors),
+  `w` (angular velocity, rad/s, world axes), `roll`, `gh` (gun hits taken, real rounds), `missed` ('wide' / 'over'
+  once a strike round has passed its target; it flies on and down).
+- Out of control: the round tumbles (no steering) with gravity and the drag and side force of a body at incidence
+  until it comes down (`splash`, why `'spinout'`) or falls on its target (`hit`, `spin: true`, reduced damage).
+  Tumbling rounds are no longer engaged by defences.
+- `fireGun(sim, u, weapon, target)` and `spinout(sim, proj, info)` are exported from weapons.js (tests, scripts).
+
+### Break-up events (for a rigid-body debris system)
+
+`spinout`, `intercept` and the `'spinout'` splash carry what a debris system needs: `pos` (the struck point, world;
+for the splash, where it came down), `vel` (the round's velocity, m/s), `w` (angular velocity, rad/s, world axes),
+`hdg` / `pitch` / `roll` (its pose), `model` (PROJ[kind].model: the HD model key, aliases in data/models.js), `part`
+(the model part that took the blow, or null; not on the splash), `seed` (uint32, deterministic per round and tick).
+Positions and vectors are fresh arrays. `gunhit` carries only the fields in its row.
+
+| event | when | also |
+|---|---|---|
+| `spinout` | knocked out of control, still whole: it tumbles from here (keep drawing the proj; it stays in `sim.projectiles` until its `splash` / `hit`) | proj, kind, side, `at` (its centre), `imp` (unit direction of the blow), `rel` (relative velocity of what struck it), by, byKind, unit, `cause` ('gun' / 'burst'), `miss` (burst distance, m), target, tk |
+| `intercept` | destroyed outright: `breakup: true` (the proj is removed this tick) | proj, kind, side, `at` (its centre), `imp`, `rel`, by, byKind, unit, `cause`, `miss`, `burst` (burst point or null), target, tk; `w` is its tumble if it was already tumbling, else [0, 0, 0] |
+| `splash`, why `'spinout'` | a tumbling round comes down on the ground or the sea | water, air: false |
+| `gunhit` | gun rounds struck a round this tick (sparks) | unit, weapon, target, tk: 'proj', `n` (real rounds), burst |
 
 ## Economy
 
@@ -135,15 +196,17 @@ units a planner put on one spot (game/setup.js runs it on the starting forces).
 |---|---|
 | `launch` | proj, kind, side, from, target, tk, pos, hdg, pitch, weapon |
 | `booster_sep` | proj, kind, side, pos, vel |
-| `intercept` | pos, proj (the round killed), kind, side, by (interceptor id / gun unit), byKind, unit |
-| `hit` | pos, target, kind, side, from, proj |
-| `splash` | pos, kind, side, proj, air, water, miss, why ('pk'|'moved'|'terrain'|'selfdestruct'|'short'|'lost') ; kind 'crash' for aircraft |
-| `gunfire` | unit, side, weapon, pos (muzzle), to, dur, hit, target, tk, mount |
+| `intercept` | pos, proj (the round killed), kind, side, by (interceptor id / gun unit), byKind, unit; break-up fields (see Projectiles: Break-up events) |
+| `spinout` | a round knocked out of control (see Projectiles: Break-up events) |
+| `hit` | pos (the struck point), target, kind, side, from, proj, part (the part it struck), vel; `n` (gun: real rounds), `burst` / `miss` (a burst near an aircraft), `blast` (a shell's fragments, m), `spin` (a tumbling round fell on it), `under` / `depth` (torpedo) |
+| `splash` | pos, kind, side, proj, air, water, miss, why ('moved'\|'terrain'\|'selfdestruct'\|'short'\|'lost'\|'miss' (an interceptor passed its target)\|'burst' (it went off near its target without destroying it)\|'wide'\|'over' (a strike round passed its target)\|'spinout'); kind 'crash' for aircraft |
+| `gunfire` | unit, side, weapon, pos (muzzle), to, aim (where the burst is pointed), tof (s), dur, n (real rounds), hit (always false: rounds resolve in flight, see `gunhit` / `hit`), target, tk, mount, burst (id in `sim.bursts`) |
+| `gunhit` | unit, side, weapon, target (a round), tk, pos, n, part, vel, burst |
 | `damage` / `part` | unit, part, hp / label, disables |
 | `destroyed` / `removed` | unit, type, side, pos, by |
 | `detect` / `classify` / `lost` | side, unit (or proj), track, pos, how ('radar'|'camera'|'esm'|'scan'|'lightning'), cls, name |
 | `scan` | phase 'start' (from, pos, r, delay, by, side) then 'hit' (pos, r, hits: unit ids) |
-| `deploy` | unit, what ('jacks'|'erect'|'lowered'|'stowed'|'mast_up'|'mast_down') |
+| `deploy` | unit, what ('jacks'|'erect'|'lowered'|'stowed'|'mast_up'|'mast_down'|'well_open'|'well_shut'|'lift_up'|'lift_down') |
 | `reload_start` / `reload_done` / `reload_end` / `resupply` | unit, by, ammo / what |
 | `radar` | unit, side, on |
 | `takeoff` / `land` | unit, type, from / to |
@@ -151,6 +214,9 @@ units a planner put on one spot (game/setup.js runs it on the starting forces).
 | `sonar` | side, by (listener), unit, track, pos (the fix), r (its roughness, m): the side heard a contact (≤ 1 per 5 s per contact) |
 | `dive` / `torpedo_end` | unit, side, depth / pos, kind, side, proj, why |
 | `order_unit` / `reinforce` / `objective` / `result` | side, type, unit / id, owner / winner, reason |
+| `well` | unit (the craft), host, side, dir ('out' / 'clear' / 'in' / 'docked'), pos: an LCAC through the LHD's stern gate |
+| `landing` / `unload` / `embark` | unit, side, state ('done' / 'empty' / 'nobeach' / 'noroute'), n / unit, from, type / unit, host |
+| `overrun` | side ('fleet'), unit (the command post), state ('start' / 'lost' / 'taken'), t (s held), by: fleet ground units within 1.5 km of the coast's command post with no coast ground unit there for 120 s take it (it is destroyed: the `hq` result) |
 | `engage` | unit, side, target, track, state ('volley' / 'lost' / 'resume' / 'done'), why ('destroyed' / 'empty' / 'lost' / 'out' / 'noweapon' / 'reach'), n (volleys), weapon: a persistent attack order |
 
 ## AI
@@ -162,6 +228,7 @@ sites it would choose.
 ## Files
 
 `sim.js` (state, step, visible, hash) · `nav.js` (grids, A*) · `movement.js` · `orders.js` · `mech.js` (deploy,
-reload, refill, turrets, carrier deck) · `sensors.js` (radar, camera, ESM, contacts, scan) · `weapons.js` · `damage.js`
-· `economy.js` · `weather.js` · `ai.js` · `setup.js` · `stubmap.js` (Map-contract test coast) · `probe.js` (headless
+reload, refill, turrets, carrier deck) · `sensors.js` (radar, camera, ESM, contacts, scan) · `weapons.js` · `bodies.js`
+(part boxes, collision tests) · `damage.js`
+· `economy.js` · `weather.js` · `ai.js` · `setup.js` · `amphib.js` (well deck, LCAC, landings, overrun) · `stubmap.js` (Map-contract test coast) · `probe.js` (headless
 battle for the console) · `tests.js` (game/tests.html) · `consts.js`, `util.js`, `rand.js`.
