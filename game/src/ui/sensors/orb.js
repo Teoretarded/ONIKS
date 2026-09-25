@@ -224,8 +224,6 @@ export function orbOverlay(ov) {
   if (!a) { a = new OrbOverlay(ov); ADAPT.set(ov, a); }
   return a;
 }
-/* the overlay a system draws through this frame: the engine's, or its Orbital adapter */
-export const styledOverlay = (R, ov) => orbOn(R) ? orbOverlay(ov) : ov;
 
 /* ---------------- hairlines in the world (R.wire, flushed by the orbital system) ---------------- */
 /* o (as the sensors' dotOpt): { rgb (0..255), a, step (px: >= 6 dashed), size (2: bolder), drape (terrain), lift (m) };
@@ -284,20 +282,6 @@ export function crossW(W, V, x, y, z, s, rgb, a) {
   const m = s * zc / V.fl, R = V.r, U = V.u, c = rgb || W1;
   W.seg(x - R[0] * m, y - R[1] * m, z - R[2] * m, x + R[0] * m, y + R[1] * m, z + R[2] * m, c[0], c[1], c[2], a);
   W.seg(x - U[0] * m, y - U[1] * m, z - U[2] * m, x + U[0] * m, y + U[1] * m, z + U[2] * m, c[0], c[1], c[2], a);
-}
-/* a camera-facing hairline circle of r metres (n segments from its size on screen) */
-export function discW(W, V, x, y, z, r, rgb, a, nMax) {
-  if (!W || a <= .004 || r <= 0) return;
-  const zc = V.depth(x, y, z); if (zc < V.near + r * .2) return;
-  const rp = r * V.fl / zc; if (rp < .6) return;
-  const n = Math.max(8, Math.min(nMax || 48, Math.round(rp * TAU / 6))), R = V.r, U = V.u, c = rgb || W1;
-  let px = x + R[0] * r, py = y + R[1] * r, pz = z + R[2] * r;
-  for (let i = 1; i <= n; i++) {
-    const t = i / n * TAU, cs = Math.cos(t) * r, sn = Math.sin(t) * r;
-    const qx = x + R[0] * cs + U[0] * sn, qy = y + R[1] * cs + U[1] * sn, qz = z + R[2] * cs + U[2] * sn;
-    W.seg(px, py, pz, qx, qy, qz, c[0], c[1], c[2], a);
-    px = qx; py = qy; pz = qz;
-  }
 }
 export { V3 };
 

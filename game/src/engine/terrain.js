@@ -52,6 +52,7 @@ function vnoise(px, pz, out) {
   return (a + k1 * ux + k2 * uz + k3 * ux * uz) * 2 - 1;
 }
 const DET = { a1: .7, l1: 47, a2: .16, l2: 9.3, h0: 1.5, h1: 14 };   // detail relief (m), fades in above the shore
+const D1 = [0, 0], D2 = [0, 0];      // detail(): noise gradients (scratch: heightAt runs many times a frame)
 const ss = (a, b, v) => { const t = Math.max(0, Math.min(1, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
 
 /* ---------- shaders ---------- */
@@ -886,7 +887,7 @@ export class Terrain {
     const k = ss(DET.h0, DET.h1, h);
     if (g) { g[0] = 0; g[1] = 0; }
     if (k <= 0) return 0;
-    const d1 = [0, 0], d2 = [0, 0];
+    const d1 = D1, d2 = D2;
     const n1 = vnoise(x / DET.l1, z / DET.l1, d1), n2 = vnoise(x / DET.l2 + 17.3, z / DET.l2 + 17.3, d2);
     if (g) { g[0] = k * (DET.a1 * d1[0] / DET.l1 + DET.a2 * d2[0] / DET.l2); g[1] = k * (DET.a1 * d1[1] / DET.l1 + DET.a2 * d2[1] / DET.l2); }
     return k * (DET.a1 * n1 + DET.a2 * n2);

@@ -623,11 +623,13 @@ export function createOrbital(game) {
       // rounds in flight: always recorded (their tracks are there when you pull out)
       for (const pr of sim.projectiles.values()) if (pr.alive && sim.projVisible(game.side, pr)) record(pr);
       const now = game.realT;
+      let salvo = false;
       for (const T of trails.values()) {
         if (T.alive && !sim.projectiles.has(T.id)) { T.alive = false; T.tEnd = now; }
         if (!T.alive && now - T.tEnd > 20) trails.delete(T.id);
+        else if (T.alive && T.off && T.side === game.side) salvo = true;
       }
-      O.yellow = [...trails.values()].some(T => T.alive && T.off && T.side === game.side) ? 'salvo' : 'selection';
+      O.yellow = salvo ? 'salvo' : 'selection';
       for (let i = bursts.length - 1; i >= 0; i--) if (now - bursts[i].t0 > 2) bursts.splice(i, 1);
       for (let i = wrecks.length - 1; i >= 0; i--) if (now - wrecks[i].t0 > 90) wrecks.splice(i, 1);
     },

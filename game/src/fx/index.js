@@ -541,6 +541,10 @@ class FxSystem {
     }
     for (const [id, fl] of this.falls) if (!sim.units.has(id)) { this.falls.delete(id); this.ghost.push(fl); }
     for (const [id] of this.sinks) if (!sim.units.has(id)) this.sinks.delete(id);
+    for (const id of this.hitAt.keys()) if (!sim.units.has(id)) this.hitAt.delete(id);
+    for (const id of this.abUntil.keys()) if (!sim.units.has(id)) this.abUntil.delete(id);
+    // a round launched and gone between two frames (x32, ONIKS.ff) never reached the tracker loop that clears it
+    for (const id of this.lnch.keys()) if (!sim.projectiles.has(id)) this.lnch.delete(id);
     // wrecks burning on the ground: they lay their smoke until they burn out
     for (let i = this.groundFires.length - 1; i >= 0; i--) {
       const f = this.groundFires[i];

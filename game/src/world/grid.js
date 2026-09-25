@@ -7,16 +7,6 @@ export function makeGrid(W, H, cell) {
   return { W, H, cell, cols, rows, x0: -W / 2, z0: -H / 2, data: new Float32Array(cols * rows) };
 }
 
-/* fill every node with f(x, z, i, j) */
-export function fillGrid(g, f) {
-  const { cols, rows, cell, x0, z0, data } = g;
-  for (let j = 0; j < rows; j++) {
-    const z = z0 + j * cell, o = j * cols;
-    for (let i = 0; i < cols; i++) data[o + i] = f(x0 + i * cell, z, i, j);
-  }
-  return g;
-}
-
 export function bilinear(data, cols, rows, fx, fz) {
   if (fx < 0) fx = 0; else if (fx > cols - 1) fx = cols - 1;
   if (fz < 0) fz = 0; else if (fz > rows - 1) fz = rows - 1;

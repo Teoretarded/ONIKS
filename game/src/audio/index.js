@@ -16,6 +16,7 @@
    ('user'), the auto drop ('auto') and Inspect ('inspect') only: the replay's and the film maker's ramps are silent. */
 import { Core, Slot, SOUND_SPEED as C, clamp, smooth, rng } from './core.js';
 import { SHOTS, SPEC, LOOPS } from './patches.js';
+import { RATES } from '../game/game.js';
 
 const DT_SIM = .05;                               // the sim tick (unit.prev -> unit.pos)
 const WAIT_EXACT = 12, WAIT_MAX = 30;             // s real: sound travel is exact up to 12 s (4 km at x1, 33 km at x8)
@@ -38,7 +39,6 @@ const MK = {
   mk48: { how: 'torp', size: 1 }, mk54: { how: 'torp', size: .6 }, t53: { how: 'torp', size: .95 },
 };
 const LAUNCH_SOUND = { cold: 'cold_launch', vls: 'vls_launch', tube: 'tube_launch', rail: 'rail_launch', box: 'box_launch', broach: 'broach' };
-const RATES = [1, 2, 4, 8, 16, 32];
 const PING = 6.5;                                 // s sim: a listening sonar's pulse period (game/sonar.js draws the same)
 const WATER_C = 1500;                             // m/s: the ping's echo comes back at the speed of sound in water
 const GUNS = { gun30: 'gun30', ciws: 'ciws' };

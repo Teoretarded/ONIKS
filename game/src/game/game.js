@@ -10,6 +10,7 @@
 import { DT } from '../sim/consts.js';
 import { ENEMY, CLASSIFY, UNITS, PROJ } from '../data/units.js';
 import { landPose, seaPose, deckPose } from './pose.js';
+import { getSetting, setSetting } from '../data/settings.js';
 
 export const RATES = [1, 2, 4, 8, 16, 32];
 /* suggested priorities (input goes high -> low; draw goes low -> high, so high draws on top) */
@@ -51,7 +52,7 @@ export function createGame(o) {
     selection: new Set(), hover: null, groups: {},
     timeRate: RATES.includes(+settings.timeRate) ? +settings.timeRate : 4, paused: false,
     maxStepsPerFrame: 48, stepBudgetMs: 9,
-    autoSlow: readAutoSlow(),
+    autoSlow: settings.autoSlow !== false,   // data/settings.js (it carries over the old 'oniks.autoSlow' key)
     alpha: 0,                  // render interpolation between the last two sim ticks
     t: sim.t,                  // interpolated sim time (what is drawn)
     seaT: 0,                   // clock of the swell (runs at min(rate, 2) so x32 does not boil the sea)
@@ -174,7 +175,11 @@ export function createGame(o) {
     game.paused = on;
     bus.emit('rate', { rate: game.timeRate, paused: on, why: 'user' });
   };
-  game.setAutoSlow = on => { game.autoSlow = !!on; try { localStorage.setItem('oniks.autoSlow', on ? '1' : '0'); } catch (e) { /* */ } bus.emit('autoslow_setting', game.autoSlow); };
+  game.setAutoSlow = on => {
+    game.autoSlow = !!on;
+    if (getSetting('autoSlow') !== game.autoSlow) setSetting('autoSlow', game.autoSlow);   // saved with the settings
+    bus.emit('autoslow_setting', game.autoSlow);
+  };
   /* drop to x1 for something worth watching (a launch, a new hostile contact; the orders system: a track that has
      come within reach of the player's weapons, why 'engage') */
   game.slowFor = (why, e) => autoSlow(why, e);
@@ -287,6 +292,11 @@ export function createGame(o) {
       }
     }
     bus.emit('frame', frame);
+    // drop the cached poses of units and rounds that are gone (every round fired would otherwise keep one)
+    if ((game.frameN & 255) === 0) {
+      for (const id of poses.keys()) if (!sim.units.has(id)) poses.delete(id);
+      for (const id of pposes.keys()) if (!sim.projectiles.has(id)) pposes.delete(id);
+    }
   };
   const reported = new Set();
   function report(s, where, e) {
@@ -358,4 +368,3 @@ export function createGame(o) {
   return game;
 }
 
-function readAutoSlow() { try { return localStorage.getItem('oniks.autoSlow') !== '0'; } catch (e) { return true; } }

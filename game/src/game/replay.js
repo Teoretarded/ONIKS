@@ -28,6 +28,7 @@ import { attitude } from '../engine/models.js';
 import { makeSubject, toWorld, apX } from '../ui/inspect/subject.js';
 import * as O from '../ui/inspect/overlay.js';
 import { TRACK } from './labels.js';
+import { RATES } from './game.js';
 import { DEG, clamp, sat, ss, ease, wrapPi, newPose, lookFrom, blendPose, bumpOf, glideDur, putCam, camState, acrossView, blockedBy } from './director.js';
 import { setSetting, onSettings } from '../data/settings.js';
 
@@ -36,7 +37,6 @@ const RAMP_IN = .35, RAMP_OUT = .55;       // real s
 const LEAD = .3;                           // real s from the camera's arrival to the impact
 const COOL = 40, COOL_KILL = 12;           // real s between automatic replays (a kill waits less)
 const PEAK = 1.0;                          // real s from an impact to its still (the coral names have condensed)
-const RATES = [1, 2, 4, 8, 16, 32];
 const HEAVY = { oniks: 1, tlam: 1, slam: 1, uran: 1, kalibr: 1 };
 const LIME = O.LIME, CORAL = O.CORAL, FAINT = 'rgba(255,255,255,.36)', WHITE = '#FFFFFF';
 const CAM_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyQ', 'KeyE', 'PageUp', 'PageDown']);

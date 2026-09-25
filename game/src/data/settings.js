@@ -133,7 +133,7 @@ function valid(k, v) {
 function read() {
   let o = {};
   try { o = JSON.parse(localStorage.getItem(KEY) || '{}'); if (!o || typeof o !== 'object') o = {}; } catch (e) { o = {}; }
-  // auto x1 used to live on its own key (game.js still writes it): an old Off carries over
+  // auto x1 used to live on its own key: an old Off carries over
   if (!('autoSlow' in o)) { try { if (localStorage.getItem('oniks.autoSlow') === '0') o.autoSlow = false; } catch (e) { /* */ } }
   return o;
 }

@@ -122,7 +122,7 @@ export function createSalvo(game, hud, bc) {
       if (!L || L.st !== 'air') return;
       const k = { by: e.proj, kind: e.kind, own: e.side === me, gun: false, k: 0, d0: 0, st: 'fly', ttg: -1, t0: clockT, hit: false, L };
       L.ticks.push(k); ticks.set(e.proj, k);
-      if (L.ticks.length > 14) L.ticks.splice(0, L.ticks.length - 14);
+      if (L.ticks.length > 14) { for (const o of L.ticks.splice(0, L.ticks.length - 14)) if (o.by && ticks.get(o.by) === o) ticks.delete(o.by); }
       return;
     }
     if (!HEAVY[e.kind] || e.tk !== 'unit') return;

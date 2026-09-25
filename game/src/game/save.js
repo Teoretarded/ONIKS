@@ -18,10 +18,10 @@
 
    game.save = { save() -> { ok, slot | why }, slot() -> the slot (without its record), available(), restored } */
 import { playTo, urlOf } from './record.js';
+import { RATES } from './game.js';
 import { createLoading, nextPaint } from '../ui/loading/index.js';
 
 export const SLOT = 'oniks.save';
-const RATES = [1, 2, 4, 8, 16, 32];
 const R2D = 180 / Math.PI;
 
 export const fmtT = t => {
