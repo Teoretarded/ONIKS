@@ -167,3 +167,11 @@ heavy round is about to hit something you can see, time eases to x0.25, the came
 front reaches the impact point at the moment of impact, damaged parts flash coral with their names
 ("04 DECKHOUSE · AN/SPY-1D(V) ×4 · OUT"), a destroyed hull drifts apart along its explode offsets, then the camera
 pulls back to the sinking. J replays the last hit; Esc skips. Stills: `final_rep*.png`, `fin_*.png`.
+
+## 07:20 · Orbital layer done
+Zoom out past ~36 km and the dots drop away one by one into the Orbital films' language: pure black, the coastline
+and contours as white hairlines, a 10 km grid, the map frame, catalog labels (square, name, barcode, true status),
+range rings labelled by what reaches, and one yellow: your salvo in flight with "3M55 ×4 · Mach 2.2 · 36 km to go".
+Zoom back in and the dots re-condense. The whole game can also be played in the Orbital style (Settings → Graphics
+→ Render style, or `?style=orbital`): hairline models, wire swell rows, contour terrain. Stills: `orb_*.png`.
+Review 2 started.
