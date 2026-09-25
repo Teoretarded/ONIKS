@@ -250,24 +250,34 @@ function transloader() {
 }
 /* TLC middle (transloader-local) of a TEL parked at TEL_AT, tube side (1 right, -1 left) */
 const telMid = side => V.add(TZM.TEL_AT, [(side || 1) * TEL_TUBE[0], TEL_TUBE[1], TEL_TUBE[2] + TLC_LEN / 2]);
+/* TLC middle and yaw (transloader-local) of the TEL tube `side` (1 right, -1 left) for a TEL at rel = [x, y, z, yaw]
+   in the transloader's frame (x right, z ahead, as sim/util.js local) */
+const telMidAt = (rel, side) => {
+  const lx = (side || 1) * TEL_TUBE[0], ly = TEL_TUBE[1], lz = TEL_TUBE[2] + TLC_LEN / 2, c = Math.cos(rel[3]), s = Math.sin(rel[3]);
+  return [rel[0] + lx * c + lz * s, rel[1] + ly, rel[2] - lx * s + lz * c];
+};
 /* the reload: u 0..1 -> crane state (merge into the transloader's state). The crane takes the TLC from
-   cradle `slot` (0 right, 1 left), swings it onto the TEL tube at `telMid` and stows. Returns also
-   hookTlc (on the hook), taken (the cradle is empty from here), placed (the TEL tube is loaded). */
+   cradle `slot` (0 right, 1 left), swings it onto the TEL tube and stows. The tube: o.telMid, else o.telRel =
+   [x, y, z, yaw, side] (the TEL's pose in the transloader's frame and the tube, sim/mech.js), else a TEL parked at
+   TEL_AT, right tube. The TLC on the hook turns to the TEL's yaw on the way over. Returns also hookTlc (on the hook),
+   taken (the cradle is empty from here), placed (the TEL tube is loaded). */
 export function reloadPose(u, o) {
   o = o || {};
-  const slot = o.slot || 0, tm = o.telMid || telMid(1), H = TZM.HOOK_DROP, P = TZM.PIVOT;
+  const R = o.telRel, slot = o.slot || 0, H = TZM.HOOK_DROP, P = TZM.PIVOT;
+  const tm = o.telMid || (R ? telMidAt(R, R[4]) : telMid(1)), ty = R && !o.telMid ? R[3] : 0;
   const sm = V.add(TZM.SLOTS[slot], [0, 0, TLC_LEN / 2]), home = TZM.HOME.hook, homeTip = home[1] + TZM.HOME.cable;
   const up = (p, h) => [p[0], p[1] + h, p[2]];
-  const K = [[0, home, homeTip], [.08, up(sm, H + 2.2), 9.3], [.14, up(sm, H), 9.3], [.22, up(sm, H + 2.4), 9.3],
-    [.45, up(tm, H + 2.4), 9.35], [.6, up(tm, H + .45), 9.35], [.64, up(tm, H), 9.35], [.72, up(tm, H + 1.6), 9.35], [1, home, homeTip]];
-  const cy = K.map(k => [Math.atan2(k[1][0] - P[0], k[1][2] - P[2]), Math.hypot(k[1][0] - P[0], k[1][2] - P[2]), k[1][1], k[2]]);
+  const tipT = Math.max(9.35, tm[1] + H + 2.4 + .9);
+  const K = [[0, home, homeTip, 0], [.08, up(sm, H + 2.2), 9.3, 0], [.14, up(sm, H), 9.3, 0], [.22, up(sm, H + 2.4), 9.3, 0],
+    [.45, up(tm, H + 2.4), tipT, ty], [.6, up(tm, H + .45), tipT, ty], [.64, up(tm, H), tipT, ty], [.72, up(tm, H + 1.6), tipT, ty], [1, home, homeTip, 0]];
+  const cy = K.map(k => [Math.atan2(k[1][0] - P[0], k[1][2] - P[2]), Math.hypot(k[1][0] - P[0], k[1][2] - P[2]), k[1][1], k[2], k[3]]);
   for (let i = 1; i < cy.length; i++) { let d = cy[i][0] - cy[i - 1][0]; while (d > PI) d -= TAU; while (d < -PI) d += TAU; cy[i][0] = cy[i - 1][0] + d; }
   u = sat(u);
   let i = 0; while (i < K.length - 2 && K[i + 1][0] <= u) i++;
   const a = cy[i], b = cy[i + 1], t = inOut(sat((u - K[i][0]) / (K[i + 1][0] - K[i][0])));
   const th = mix(a[0], b[0], t), rho = mix(a[1], b[1], t), hy = mix(a[2], b[2], t), tip = mix(a[3], b[3], t);
   const hook = [P[0] + Math.sin(th) * rho, hy, P[2] + Math.cos(th) * rho];
-  return O(craneSolve(hook, tip - hy), { hook, cable: tip - hy, hookYaw: 0, hookTlc: u >= .14 && u < .64, taken: u >= .14, placed: u >= .64 });
+  return O(craneSolve(hook, tip - hy), { hook, cable: tip - hy, hookYaw: mix(a[4], b[4], t), hookTlc: u >= .14 && u < .64, taken: u >= .14, placed: u >= .64 });
 }
 export const TRANSLOADER = O(TZM, { craneSolve, reloadPose, telMid, tip: st => tzTip(tzCrane(st)), crane: tzCrane });
 

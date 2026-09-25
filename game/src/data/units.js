@@ -184,6 +184,7 @@ export const UNITS = {
     mot: { mass: 40, power: 370, turnR: 13.5 },                      // MZKT-7930
     hp: 25, rcs: 0.5, dieTime: 20,
     cargo: 2, reload: { perRound: 45 }, refill: 30,
+    park: [7.2, 4.5],                                             // a TEL it reloads stands this far [right, ahead] (models.js TZM.TEL_AT)
     sensors: {},
     weapons: {},
     cost: 160, buildTime: 60,
@@ -198,14 +199,16 @@ export const UNITS = {
       boom: { label: 'Crane boom', w: .7, disables: ['reload'] },
       jib: { label: 'Telescopic jib', w: .4, disables: ['reload'] },
     },
-    /* crane pose: the renderer applies TRANSLOADER.reloadPose(st.reload, { slot: st.slot }) (data/models.js) while
-       st.reload > 0; bedR / bedL show the TLCs in the cradles (right is unloaded first) */
+    /* crane pose: the renderer applies TRANSLOADER.reloadPose(st.reload, st) (data/models.js) while st.reload > 0,
+       toward the TEL at st.telRel (sim/mech.js: its pose in this vehicle's frame and the tube). The round is the TEL's
+       from .64 on (set down on its tube): c = the cargo as the swing began. bedR / bedL show the TLCs in the cradles
+       (right is unloaded first); dep = the stabilisers */
     modelState(u, t) {
-      const s = u.st, r = u.reloadU || 0, slot = u.cargo >= 2 ? 0 : 1, gone = r >= .14;
+      const s = u.st, r = u.reloadU || 0, c = u.cargo + (r >= .64 ? 1 : 0), slot = c >= 2 ? 0 : 1, gone = r >= .14;
       s.reload = r; s.slot = slot; s.refill = u.refillU || 0;
-      s.bedR = u.cargo >= 2 && !(r > 0 && slot === 0 && gone);
-      s.bedL = u.cargo >= 1 && !(r > 0 && slot === 1 && gone);
-      s.dep = u.busy || s.refill > 0 ? 1 : 0; s.wheel = wrap(u.odo / .66); s.crane = u.crane; s.cargo = u.cargo; return s;
+      s.bedR = c >= 2 && !(r > 0 && slot === 0 && gone);
+      s.bedL = c >= 1 && !(r > 0 && slot === 1 && gone);
+      s.dep = u.dep; s.wheel = wrap(u.odo / .66); s.crane = u.crane; s.cargo = u.cargo; return s;
     },
   },
 

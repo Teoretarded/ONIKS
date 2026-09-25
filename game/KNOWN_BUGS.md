@@ -5,11 +5,15 @@ Screenshots of several of these were shared in the chat. Start the next session 
 
 ## From the user's play-test
 
-1. **Zooming speeds up the radars.** While zooming around the map, radar sweeps (and possibly other
-   animations) spin much faster. Likely the sweep / antenna animation is driven by frame time (or the time rate
-   applied to frame time) instead of sim time. Check: `game/src/data/units.js` modelState `ant`/`dome`, the radar
-   sweep in `game/src/ui/sensors/radar.js`, the scope in `game/src/ui/hud/scope/ppi.js`, and whether the camera's
-   zoom changes `game.timeRate` or the frame dt.
+1. **Zooming speeds up the radars.** *Cause found (2026-09-25), fix pending in the controls:* every antenna, rotor,
+   dome and scope sweep is already a pure function of sim time (`antA + antW (t - antT)` in `data/units.js`,
+   `ui/sensors/radar.js`, `ui/hud/scope/ppi.js`, `hud/minimap.js`; measured: `game.t` advances exactly with real
+   time while wheel-zooming). What speeds them up is the time rate: **`=` / `-` (and numpad `+` / `-`) are the time
+   rate keys** (`game/time.js` takes them from the camera, whose own `=`/`-` zoom in `engine/camera.js` is dead code),
+   so a player zooming with them steps x1 → x2 → x4 ... and every radar spins that much faster. Fix: give zoom and
+   rate distinct keys (e.g. `=`/`-` zoom, `[`/`]` or `,`/`.` rate) in `time.js`, `camera.js` and the KEYBINDS help
+   (`data/settings.js`); the controls agent owns those files. At x16/x32 fast antennas also strobe (a few frames per
+   turn), which reads as erratic speed; the scope already switches to its "fast" rendering there.
 
 2. **Selecting units feels buggy; double-click should focus.** Expected: double-clicking a unit (e.g. an F/A-18E)
    flies the camera close and orbits / follows it. Today double-click selects all units of that type.
@@ -40,12 +44,15 @@ Screenshots of several of these were shared in the chat. Start the next session 
    screen) plus possibly the selection's ground ring. Air units should not dim the ground, and nothing should
    detach or slide. Files: `game/src/engine/renderer.js` / `terrain.js` (subject list), `game/src/game/select.js`.
 
-7. **TEL reloading is "telepathic".** The transloader does not drive up to the TEL and park alongside; the crane
-   swings a container from a distance and the round transfers anyway. Expected: the transloader drives to a
-   parking spot beside the TEL (within a few metres, the right side), deploys, the crane pose uses the TEL's real
-   relative position (`TRANSLOADER.reloadPose` in `game/src/data/models.js`), and only then does the round move.
-   Files: `game/src/sim/mech.js` (reload), `game/src/sim/orders.js`, `game/src/data/units.js` modelState
-   (transloader), `game/src/game/render.js`.
+7. ~~**TEL reloading is "telepathic".**~~ *Fixed 2026-09-25.* The transloader now drives (rounding the TEL if it
+   comes from ahead) to a point 80 m, then 40 m, behind its spot, creeps the last stretch on its own turning circle
+   and parks at `TZM.TEL_AT` from the TEL (same heading, TEL's left side; the right if the ground there is bad) to
+   ~0.2 m / 2° (`sim/orders.js` parkBy); it then lowers its stabilisers (4 s, `u.dep`), the TEL lowers its launcher,
+   and each round is a full crane cycle (`TRANSLOADER.reloadPose`, now fed the TEL's true relative pose `st.telRel`
+   and turning the TLC to the TEL's yaw); the round becomes the TEL's only when the crane sets it on the tube (.64 of
+   the cycle), and a reload ends only between cycles (`sim/mech.js` reloadStep). Depot refills also set the
+   stabilisers first and only while the transloader has no errand. The S-400 (units3) restocks at a depot like the
+   Pantsir: no vehicle is involved, nothing to fix there.
 
 ## Reported by agents at the end of the build
 

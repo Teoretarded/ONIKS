@@ -19,7 +19,8 @@ import { startScan, scanBlocked } from './sensors.js';
 import { ammoFull, atDepot, elevOf, replenishPoint } from './mech.js';
 import { atPD } from './subs.js';
 import { ORDERS as AMPH, requestWell } from './amphib.js';
-import { dxz, clamp } from './util.js';
+import { dxz, clamp, angTo, wrapPi } from './util.js';
+import { DT } from './consts.js';
 
 /* orbit radius of an aircraft loitering (after a move), on patrol, idle */
 const ORBIT = { fighter: [6000, 9000], aew: [12000, 15000], helo: [0, 3500], drone: [1500, 2500] };
@@ -226,6 +227,79 @@ function moveTo(sim, u, o, x, z, arrive) {
   return !u.path;
 }
 
+/* A transloader parks alongside a TEL for a reload: same heading, the TEL at def.park ([right, ahead] m, the model's
+   TZM.TEL_AT in data/models.js) from it, so it stands on the TEL's left (the tube loaded first) unless the ground
+   there will not do. On the nav grid it drives (from ahead of the TEL: round it on the parking side first) to a point
+   PARK_FAR m behind the spot, then down the parking line to one PARK_BACK m behind it, so it arrives lined up; then
+   it creeps up the last stretch itself (pure pursuit on the parking line within its turning circle, an eased stop) to
+   ~0.2 m and 2°, sets the spot exactly, and only then takes the TEL (mech.js: stabilisers down, then the crane works
+   from the TEL's true relative pose). o.pk = the spot; o.ph = 0 driving (o.leg 0 round the TEL, 1 far point, 2 near
+   point) · 1 creeping · 2 parked. */
+const PARK_BACK = 40, PARK_FAR = 80, PARK_LA = 7, PARK_V = 2.8;
+const landOK = (sim, x, z) => sim.map.h(x, z) >= .3 && sim.nav.open('land', x, z);
+function parkSpot(sim, u, T, o) {
+  const k = o.pk;
+  if (k && dxz(k.tx, k.tz, T.pos[0], T.pos[2]) < 1.5 && Math.abs(angTo(k.h, T.hdg)) < .03) return k;
+  const P = u.def.park || [7.2, 4.5], c = Math.cos(T.hdg), s = Math.sin(T.hdg);
+  let best = null;
+  for (const sd of [1, -1]) {                     // 1: the TEL on the transloader's right (it parks on the TEL's left)
+    const ox = sd * P[0], oz = P[1];
+    const x = T.pos[0] - (ox * c + oz * s), z = T.pos[2] - (-ox * s + oz * c);
+    const spot = { x, z, ax: x - s * PARK_BACK, az: z - c * PARK_BACK, fx: x - s * PARK_FAR, fz: z - c * PARK_FAR, sd, far: true };
+    spot.far = landOK(sim, spot.fx, spot.fz);
+    if (!best) best = spot;
+    if (landOK(sim, x, z) && landOK(sim, spot.ax, spot.az) && landOK(sim, (x + spot.ax) / 2, (z + spot.az) / 2)) { best = spot; break; }
+  }
+  best.h = T.hdg; best.tx = T.pos[0]; best.tz = T.pos[2];
+  o.pk = best; o.ph = 0; o._p = 0; o.leg = 0;
+  return best;
+}
+function parkBy(sim, u, o, T) {
+  const pk = parkSpot(sim, u, T, o), fx = Math.sin(pk.h), fz = Math.cos(pk.h);
+  const rx = u.pos[0] - pk.x, rz = u.pos[2] - pk.z;
+  const along = -(rx * fx + rz * fz), lat = rx * fz - rz * fx, eh = angTo(u.hdg, pk.h);
+  if (o.ph !== 2 && o.ph !== 1) {
+    if (u.off.move) return true;
+    const lined = along > 20 && along < PARK_FAR + 10 && Math.abs(lat) < 6 && Math.abs(eh) < .5;
+    if (!lined) {
+      if (!o.leg) {
+        // ahead of the spot: round the TEL on the parking side (a line through it would stall on it)
+        const wx = T.pos[0] - Math.cos(pk.h) * pk.sd * 30, wz = T.pos[2] + Math.sin(pk.h) * pk.sd * 30;
+        if (along < 10 && landOK(sim, wx, wz) && !moveTo(sim, u, o, wx, wz, 15)) return false;
+        o.leg = 1; o._p = 0; u.path = null;
+      }
+      if (o.leg === 1) {
+        if (pk.far && !moveTo(sim, u, o, pk.fx, pk.fz, 15)) return false;
+        o.leg = 2; o._p = 0; u.path = null;
+      }
+      if (!moveTo(sim, u, o, pk.ax, pk.az, 12)) return false;
+    }
+    if (!canMove(u)) { stow(sim, u); return false; }
+    o.ph = 1; o.v = u.speed; o._p = 0; u.path = null;
+  }
+  if (o.ph === 1) {
+    // the last stretch on its own wheels: steer for a point PARK_LA ahead on the parking line, ease to a stop on it
+    const R = (u.def.mot && u.def.mot.turnR) || 13.5;
+    const q = PARK_LA - along, cx = pk.x + fx * q, cz = pk.z + fz * q;
+    const dx = cx - u.pos[0], dz = cz - u.pos[2], L = Math.hypot(dx, dz) || 1e-3, e = angTo(u.hdg, Math.atan2(dx, dz));
+    const kap = clamp(Math.abs(e) > Math.PI / 2 ? Math.sign(e) / R : 2 * Math.sin(e) / L, -1 / R, 1 / R);
+    const vT = along > 0 ? Math.min(PARK_V, Math.sqrt(.9 * along) + .1) : 0;
+    o.v = Math.max(0, o.v + clamp(vT - o.v, -1.6 * DT, .8 * DT));
+    const step = Math.min(o.v * DT, Math.max(0, along));
+    u.hdg = wrapPi(u.hdg + kap * step);
+    u.pos[0] += Math.sin(u.hdg) * step; u.pos[2] += Math.cos(u.hdg) * step; u.odo += step;
+    u.speed = 0; u.path = null;              // moved here: the movement step leaves it be (and so does the separation)
+    if (along - step > .03) return false;
+    const r2x = u.pos[0] - pk.x, r2z = u.pos[2] - pk.z;
+    if (Math.abs(r2x * fz - r2z * fx) < .25 && Math.abs(angTo(u.hdg, pk.h)) < .035 || (o.tries || 0) >= 3) {
+      u.pos[0] = pk.x; u.pos[2] = pk.z; u.hdg = pk.h; o.ph = 2;
+    } else { o.ph = 0; o._p = 0; o.leg = 0; o.tries = (o.tries || 0) + 1; return false; }   // not lined up at the spot: round again
+  }
+  u.path = null;
+  if (!T.reloader) { T.reloader = u.id; T.reloadP = 0; if (!T.wantElev && T.elev > 0) T.wantElev = TEL_ELEV; }
+  return false;       // stays until the TEL ends the reload (then the order completes via the checks in reload())
+}
+
 const H = {
   move(sim, u, o) {
     const done = moveTo(sim, u, o, o.x, o.z);
@@ -296,16 +370,11 @@ const H = {
       if (u.off.reload) return true;
       if (o.target) {
         const T = sim.units.get(o.target);
+        if (T && T.alive && T.reloader === u.id) return false;   // parked alongside, reloading: stays until the TEL ends it
         if (!T || !T.alive || T.side !== u.side || T.ammo.oniks >= T.def.weapons.oniks.ammo) return true;
         if (u.cargo <= 0) return true;
         if (T.reloader && T.reloader !== u.id) return true;
-        const side = [T.pos[0] + Math.cos(T.hdg) * 9, T.pos[2] - Math.sin(T.hdg) * 9];
-        const near = dxz(u.pos[0], u.pos[2], T.pos[0], T.pos[2]) < 45;
-        if (!near) { moveTo(sim, u, o, side[0], side[1], 30); return false; }
-        u.path = null;
-        if (u.speed > .3) return false;
-        if (!T.reloader) { T.reloader = u.id; T.reloadP = 0; if (!T.wantElev && T.elev > 0) T.wantElev = TEL_ELEV; }
-        return false;       // stays until the TEL ends the reload (then the order completes via checks above)
+        return parkBy(sim, u, o, T);
       }
       // no target: go and fill up at a depot
       if (u.cargo >= d.cargo) return true;

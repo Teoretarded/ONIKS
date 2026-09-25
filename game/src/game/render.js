@@ -192,7 +192,7 @@ export function createRender(game, DM) {
     d.tint = tintOf(v);
     // smooth spinners: the model state at the drawn time
     d.st = d0.modelState(u, game.t);
-    if (u.type === 'transloader' && d.st.reload > 0 && DM && DM.TRANSLOADER) Object.assign(d.st, DM.TRANSLOADER.reloadPose(d.st.reload, { slot: d.st.slot }));
+    if (u.type === 'transloader' && d.st.reload > 0 && DM && DM.TRANSLOADER) Object.assign(d.st, DM.TRANSLOADER.reloadPose(d.st.reload, d.st));
     d.key = d0.model; d.dissolve = 0; d.alpha = 1;
     d.damage = hasDamage(u) ? u.parts : null;
     if (d0.sub && submerged(u)) {

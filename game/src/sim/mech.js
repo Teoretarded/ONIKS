@@ -102,7 +102,9 @@ export function mechanics(sim, u) {
   if (u.type === 'catapult' && !(u.orders[0] && u.orders[0].kind === 'launch_drone')) u.carriage = Math.max(0, u.carriage - DT / 3);
   if (u.type === 'transloader') {
     if (!u.busy) u.crane = Math.max(0, u.crane - DT / 4);
-    refillTransloader(sim, u);
+    // stabilisers down (STAB s) while it works a reload or takes rounds at a depot, up before it drives (canMove)
+    const want = u.busy || refillTransloader(sim, u);
+    u.dep = want ? Math.min(1, u.dep + DT / STAB) : Math.max(0, u.dep - DT / STAB);
   }
   if (u.type === 'pantsir' || u.type === 'bal' || u.type === 'kornet' || d.depotRefill) refillAtDepot(sim, u);
   if (d.domain === 'sea') replenish(sim, u);
@@ -111,30 +113,47 @@ export function mechanics(sim, u) {
   if (u.aboard) aboardStep(sim, u);
 }
 
-/* TEL side of a reload: lower the launcher, then one round per `perRound` from the transloader beside it */
+/* TEL side of a reload. The transloader has parked alongside (orders.js parkBy: o.ph 2) and set its stabilisers; the
+   TEL lowers its launcher onto the jacks; then one round per `perRound`: the crane (data/models.js
+   TRANSLOADER.reloadPose, driven by L.reloadU) lifts a TLC off the bed, swings it over and sets it on the TEL's tube,
+   and the round is the TEL's only then (PLACED), the crane going home after. L.st.telRel = the TEL's pose in the
+   transloader's frame [x, y, z, yaw, tube side] for the crane's pose. */
+const STAB = 4;               // s, transloader stabilisers down / up
+const PLACED = .64;           // reloadPose: the TLC is set down on the TEL's tube
 function reloadStep(sim, u) {
   const L = sim.units.get(u.reloader);
-  const full = u.ammo.oniks >= u.def.weapons.oniks.ammo;
-  if (!L || !L.alive || L.cargo <= 0 || L.off.reload || u.off.reload || full || dxz(L.pos[0], L.pos[2], u.pos[0], u.pos[2]) > 60) {
+  const full = u.ammo.oniks >= u.def.weapons.oniks.ammo, lo = L && L.orders[0];
+  const parked = lo && lo.kind === 'reload' && lo.target === u.id && lo.ph === 2;
+  // a full TEL or an empty transloader ends it between rounds (the crane finishes its swing home first)
+  const between = u.reloadP === 0;
+  if (!L || !L.alive || !parked || L.off.reload || u.off.reload || between && (L.cargo <= 0 || full) || dxz(L.pos[0], L.pos[2], u.pos[0], u.pos[2]) > 15) {
     if (L) { L.busy = false; L.reloadU = 0; }
     sim.emit('reload_end', { unit: u.id, by: L ? L.id : 0, side: u.side, pos: u.pos.slice(), ammo: u.ammo.oniks });
     u.reloader = 0; u.reloadP = 0; u.elevT = u.wantElev; u.depT = u.wantElev > 0 ? 1 : u.depT;
     return;
   }
   L.busy = true; u.depT = 1; u.elevT = 0;
-  if (u.dep < 1 || u.elev > 0) return;
+  const per = u.def.reload.perRound, placed = u.reloadP >= per * PLACED;
+  telRel(L, u, (u.ammo.oniks - (placed ? 1 : 0)) === 0 ? -1 : 1);
+  if (u.dep < 1 || u.elev > 0 || L.dep < 1) return;
   if (u.reloadP === 0) sim.emit('reload_start', { unit: u.id, by: L.id, side: u.side, pos: u.pos.slice(), round: u.ammo.oniks + 1 });
   u.reloadP += DT;
-  const per = u.def.reload.perRound;
   L.reloadU = Math.min(1, u.reloadP / per);
   L.crane = Math.sin(Math.PI * L.reloadU);
-  if (u.reloadP >= per) {
-    L.reloadU = 0;
+  if (!placed && u.reloadP >= per * PLACED) {
     // rounds leave right (caps[0]) then left (caps[1]); reloads refill left first so the next launch finds it
     const n = u.ammo.oniks;
-    u.ammo.oniks++; L.cargo--; u.caps[n === 0 ? 1 : 0] = 0; u.reloadP = 0;
+    u.ammo.oniks++; L.cargo--; u.caps[n === 0 ? 1 : 0] = 0;
     sim.emit('reload_done', { unit: u.id, by: L.id, side: u.side, pos: u.pos.slice(), ammo: u.ammo.oniks, cargo: L.cargo });
   }
+  if (u.reloadP >= per) { u.reloadP = 0; L.reloadU = 0; }
+}
+/* the TEL's pose in the transloader's frame (x right, z ahead; the inverse of util.local) and the tube being loaded
+   (-1 left, 1 right), for the crane (render: TRANSLOADER.reloadPose(st.reload, st)) */
+function telRel(L, T, side) {
+  const r = L.st.telRel || (L.st.telRel = [0, 0, 0, 0, 1]);
+  const c = Math.cos(L.hdg), s = Math.sin(L.hdg), dx = T.pos[0] - L.pos[0], dz = T.pos[2] - L.pos[2];
+  r[0] = dx * c - dz * s; r[1] = T.pos[1] - L.pos[1]; r[2] = dx * s + dz * c; r[3] = wrapPi(T.hdg - L.hdg); r[4] = side;
 }
 
 /* a TEL at a depot reloads there (slower than from a transloader): launcher down, one round per reload.depot */
@@ -161,13 +180,18 @@ export function atDepot(sim, u) {
   const s = sim.map.spawns && sim.map.spawns[u.side];
   return !!(s && dxz(x, z, s.x, s.z) < Math.max(s.r, 2500));
 }
+/* a transloader takes rounds at a depot while it stands there with no errand (idle, or a reload order with no TEL);
+   returns true while it wants its stabilisers down for it */
 function refillTransloader(sim, u) {
-  if (u.cargo >= u.def.cargo || u.speed > .5 || u.busy) { u.refillP.cargo = 0; u.refillU = 0; return; }
-  if (!atDepot(sim, u)) { u.refillU = 0; return; }
+  const o = u.orders[0];
+  if (u.cargo >= u.def.cargo || u.speed > .5 || u.busy || u.path || (o && !(o.kind === 'reload' && !o.target))) { u.refillP.cargo = 0; u.refillU = 0; return false; }
+  if (!atDepot(sim, u)) { u.refillU = 0; return false; }
+  if (u.dep < 1) return true;
   u.refillP.cargo = (u.refillP.cargo || 0) + DT;
   u.refillU = Math.min(1, u.refillP.cargo / u.def.refill);
   u.crane = Math.sin(Math.PI * u.refillU);
   if (u.refillP.cargo >= u.def.refill) { u.cargo++; u.refillP.cargo = 0; u.refillU = 0; sim.emit('resupply', { unit: u.id, side: u.side, pos: u.pos.slice(), what: 'cargo', n: u.cargo }); }
+  return true;
 }
 function refillWeapons(sim, u) {
   let any = false;
