@@ -42,6 +42,10 @@ function focusPt() {
   if (f === 'pantsir') { const u = sim.pantsir; return [u.pos[0], u.pos[1] + 4, u.pos[2]]; }
   if (f === 'helo') { const u = sim.helo; return [u.pos[0], Math.max(4, u.pos[1] * .5), u.pos[2]]; }
   if (f === 'fighter') { const u = sim.fighter; return u.pos.slice(); }
+  if (f === 'bal') { const u = sim.bal; return [u.pos[0], u.pos[1] + 4, u.pos[2]]; }
+  if (f === 'kilo') { const u = sim.kilo; return [u.pos[0], 2, u.pos[2]]; }
+  if (f === 'ssn') { const u = sim.ssn; return [u.pos[0], 2, u.pos[2]]; }
+  if (f === 'aew') { const u = sim.aew; return u.pos.slice(); }
   if (f === 'mid') return [900, 60, -300];
   if (f === 'coast') return [-1600, 20, 200];
   if (f === 'round') {
@@ -62,6 +66,14 @@ const inFlightOniks = (sim, from, o) => {
   const s = sim.ship, h = toward(from, s.pos);
   return sim.launch('oniks', 'coast', null, from, h, 0, Object.assign({ target: s.id, inFlight: 9 }, o));
 };
+/* the Bal's k-th container mouth (units.js launch: the rear end of the raised pack) */
+const balMouth = (u, k) => {
+  const PIV = [0, 1.66, -.35], LEN = 6.3, COLS = [-.96, -.32, .32, .96], ROWS = [.36, .98], ORD = [[1, 0], [1, 3], [1, 1], [1, 2], [0, 0], [0, 3], [0, 1], [0, 2]];
+  const [r, c] = ORD[k % 8], a = .52, dy = ROWS[r], dz = -LEN - .2, ca = Math.cos(a), sa = Math.sin(a);
+  const o = [COLS[c], PIV[1] + ca * dy - sa * dz, PIV[2] + sa * dy + ca * dz], ch = Math.cos(u.hdg), sh = Math.sin(u.hdg);
+  return [u.pos[0] + o[0] * ch + o[2] * sh, u.pos[1] + o[1], u.pos[2] - o[0] * sh + o[2] * ch];
+};
+const boatAt = (u, o) => { const c = Math.cos(u.hdg), s = Math.sin(u.hdg); return [u.pos[0] + o[0] * c + o[2] * s, u.pos[1] + o[1], u.pos[2] - o[0] * s + o[2] * c]; };
 const ACTIONS = {
   cold: { label: 'Cold launch', focus: 'tel', dist: 160, run: (sim, t) => at(sim, t, sim => { const u = sim.telA; sim.launch('oniks', 'coast', u, telMouth(u, 1), u.hdg, Math.PI / 2, { target: sim.ship.id, splashAt: 90, weapon: 'oniks' }); }) },
   vls: { label: 'VLS launch', focus: 'ship', dist: 320, run: (sim, t) => at(sim, t, sim => { const s = sim.ship; sim.launch('sm6', 'fleet', s, vlsCell(s, 3), s.hdg, Math.PI / 2, { aim: [s.pos[0] - 9000, 3000, s.pos[2] + 3000], maxT: 16, weapon: 'sm6' }); }) },
@@ -86,6 +98,18 @@ const ACTIONS = {
   storm: { label: 'Rain', focus: 'ship', dist: 180, run: (sim, t) => at(sim, t, sim => { const s = sim.ship; sim.weather.kind = sim.weather.kind === 'storm' ? 'calm' : 'storm'; sim.weather.squalls = sim.weather.kind === 'storm' ? [{ x: s.pos[0], z: s.pos[2], r: 5000 }, { x: s.pos[0] + 12000, z: s.pos[2] - 6000, r: 4000 }] : []; }) },
   hover: { label: 'Downwash', focus: 'helo', dist: 120, run: (sim, t) => at(sim, t, sim => { sim.heloAlt = sim.heloAlt > 30 ? 12 : 60; }) },
   ab: { label: 'Afterburner', focus: 'fighter', dist: 90, run: (sim, t) => at(sim, t, sim => { const f = sim.fighter; sim.emit('takeoff', { unit: f.id, side: f.side, type: 'fighter', from: 0, pos: null }); }) },
+  bal: { label: 'Kh-35 · Bal', focus: 'bal', dist: 140, run: (sim, t) => at(sim, t, sim => { const u = sim.bal; sim.launch('uran', 'coast', u, balMouth(u, sim.nBal = (sim.nBal || 0) + 1), u.hdg + Math.PI, .52, { target: sim.ship.id, weapon: 'uran', maxT: 90 }); }) },
+  kalibr: { label: 'Kalibr · Kilo', focus: 'kilo', dist: 260, run: (sim, t) => at(sim, t, sim => { const u = sim.kilo, p = boatAt(u, [0, 0, u.def.size[0] * .42]); p[1] = .5; sim.launch('kalibr', 'coast', u, p, toward(p, sim.ship.pos), Math.PI / 2, { target: sim.ship.id, weapon: 'klub', maxT: 120 }); }) },
+  tlamsub: { label: 'Tomahawk · SSN', focus: 'ssn', dist: 300, run: (sim, t) => at(sim, t, sim => { const u = sim.ssn, p = boatAt(u, [.6, 1, 46.2]); p[1] = Math.max(p[1], .5); sim.launch('tlam', 'fleet', u, p, u.hdg, Math.PI / 2, { aim: [-9000, 60, -2000], weapon: 'strike', maxT: 40 }); }) },
+  torpship: { label: 'Torpedo · DDG', focus: 'ship', dist: 150, run: (sim, t) => at(sim, t, sim => { const s = sim.ship, p = boatAt(s, [4.6, 0, -14]); sim.launch('mk54', 'fleet', s, p, toward(p, sim.kilo.pos), 0, { target: sim.kilo.id, spd: 12, weapon: 'svtt', maxT: 200 }); }) },
+  torphelo: { label: 'Torpedo · helo', focus: 'helo', dist: 140, run: (sim, t) => at(sim, t, sim => { const h = sim.helo, p = [h.pos[0], h.pos[1] - 2, h.pos[2]]; sim.launch('mk54', 'fleet', h, p, toward(p, sim.kilo.pos), 0, { target: sim.kilo.id, spd: 0, weapon: 'mk54', maxT: 200 }); }) },
+  torphit: { label: 'Torpedo hit', focus: 'ship', dist: 900, run: (sim, t) => at(sim, t, sim => { const s = sim.ship, p = boatAt(s, [-260, -12, 380]); sim.launch('t53', 'coast', null, p, toward(p, s.pos), 0, { target: s.id, spd: 25, inFlight: 30, maxT: 80 }); }) },
+  surface: { label: 'Kilo surface', focus: 'kilo', dist: 260, run: (sim, t) => at(sim, t, sim => { sim.kilo.dive = 0; }) },
+  periscope: { label: 'Kilo periscope', focus: 'kilo', dist: 260, run: (sim, t) => at(sim, t, sim => { sim.kilo.dive = 1; }) },
+  deep: { label: 'Kilo deep', focus: 'kilo', dist: 260, run: (sim, t) => at(sim, t, sim => { sim.kilo.dive = 2; }) },
+  subhit: { label: 'Torpedo · boat', focus: 'kilo', dist: 700, run: (sim, t) => at(sim, t, sim => { const k = sim.kilo, p = boatAt(k, [300, k.pos[1] - 4, -200]); sim.launch('mk48', 'fleet', null, p, toward(p, k.pos), 0, { target: k.id, spd: 28, inFlight: 30, maxT: 80 }); }) },
+  aew: { label: 'E-2D', focus: 'aew', dist: 45, run: () => {} },
+  cat: { label: 'Catapult · E-2D', focus: [3000, 20, -900], dist: 160, run: (sim, t) => at(sim, t, sim => { const u = sim.aew; sim.emit('takeoff', { unit: u.id, side: u.side, type: 'aew', from: 0, pos: [3000, 20, -900] }); }) },
   salvo: { label: 'Salvo', focus: 'mid', dist: 5200, run: (sim, t) => {
     // four launches from the battery, four more rounds already in the air, six stopped (four SM-6, two by the
     // Phalanx), two hits
@@ -114,7 +138,7 @@ function buildUI() {
     b.onclick = () => press(k); box.appendChild(b);
   }
   const fb = $('focus');
-  for (const f of ['ship', 'tel', 'pantsir', 'mid', 'coast', 'round', 'helo', 'fighter']) {
+  for (const f of ['ship', 'tel', 'pantsir', 'mid', 'coast', 'round', 'helo', 'fighter', 'bal', 'kilo', 'ssn', 'aew']) {
     const b = document.createElement('button'); b.className = 'c'; b.textContent = f; b.dataset.f = f; b.onclick = () => { S.focus = f; syncCam(); }; fb.appendChild(b);
   }
   const db = $('dists');
@@ -178,12 +202,18 @@ function render() {
     else if (u.type === 'tel' || u.type === 'pantsir') scene.drawModel(R, 'tel', p, u.hdg, 0, 0, u.alive ? 1 : .55);
     else if (u.type === 'helo') scene.drawModel(R, 'helo', p, u.hdg, 0, 0, 1);
     else if (u.type === 'fighter') scene.drawModel(R, 'fighter', p, u.hdg, 0, u.roll, 1);
+    else if (u.type === 'bal') scene.drawModel(R, 'bal', p, u.hdg, 0, 0, 1);
+    else if (u.type === 'ssk' || u.type === 'ssn') { if (u.depth - u.def.draught <= 2.5) p[1] = 0; scene.drawBoat(R, u.type, p, u.hdg, u.alive ? 1 : 1 - u.dying); }   // as the game draws it: on the surface until submerged
+    else if (u.type === 'aew') scene.drawModel(R, 'aew', p, u.hdg, 0, u.roll, 1);
   }
   for (const p of sim.projectiles.values()) {
     const x = [lerp(p, 0), lerp(p, 1), lerp(p, 2)], v = p.vel, l = Math.hypot(v[0], v[1], v[2]) || 1;
     const hdg = Math.atan2(v[0], v[2]), pitch = Math.asin(Math.max(-1, Math.min(1, v[1] / l)));
     if (p.kind === 'oniks') scene.drawModel(R, p.st.booster ? 'oniks' : 'oniksR', x, hdg, pitch, 0, 1);
     else if (p.kind === 'sm6') scene.drawModel(R, p.st.booster ? 'sm6' : 'sm6R', x, hdg, pitch, 0, 1);
+    else if (p.kind === 'uran') scene.drawModel(R, p.st.booster ? 'kh35' : 'kh35R', x, hdg, pitch, 0, 1);
+    else if (p.kind === 'kalibr') scene.drawModel(R, p.st.booster ? 'kalibr' : 'kalibrR', x, hdg, pitch, 0, 1);
+    else if (p.P && p.P.torpedo) continue;
     else if (p.kind !== 'shell') R.scenePt(x[0], x[1], x[2], .9, 238, 238, 228, 2, scene.LT);
     S.lastRound = x;
   }

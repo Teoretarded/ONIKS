@@ -136,6 +136,17 @@ export function ballistic(p0, v0, k, ground, dur, dt) {
   };
 }
 
+/* height gained after t by a body under linear drag k (1/s) with gravity inside the drag (it falls at most at G / k):
+   spray and water columns that hang and come down slowly */
+export const yDrag = (vy, k, t) => k > 1e-6 ? ((vy + G / k) * (1 - Math.exp(-k * t)) - G * t) / k : vy * t - G2 * t * t;
+/* when that body (from y0, vertical velocity vy) is back down to yG: bisection past its top */
+export function dropTime(y0, vy, k, yG, tMax) {
+  if (y0 + yDrag(vy, k, tMax) > yG) return tMax;
+  let lo = k > 1e-6 ? Math.max(0, Math.log(1 + k * Math.max(0, vy) / G) / k) : Math.max(0, vy / G), hi = tMax;
+  if (y0 + yDrag(vy, k, lo) <= yG) lo = 0;
+  for (let it = 0; it < 30; it++) { const md = (lo + hi) / 2; if (y0 + yDrag(vy, k, md) > yG) lo = md; else hi = md; }
+  return lo;
+}
 /* time a body under linear drag kd and gravity takes to fall from y0 (vertical velocity vy) to yG: bisection */
 export function landTime(y0, vy, kd, yG, tMax) {
   const yAt = a => y0 + vy * dragH(kd, a) - G2 * a * a;

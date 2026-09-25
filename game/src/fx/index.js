@@ -10,22 +10,23 @@
    high = the films (every light), medium = lighter smoke and debris and fewer, stronger lights, low = sparse smoke
    and debris and only the strongest flashes lighting the world. Every particle is an analytic function of its age plus a seeded index;
    the only records kept are emission data (where a puff, a wake row or a smoke parcel was laid, and when). */
-import { View, TAU, dirOf, norm3, hsh, sat, clamp, LIME } from './lib/core.js';
+import { View, TAU, dirOf, norm3, hsh, sat, ss, clamp, LIME } from './lib/core.js';
 import { Trail, STAGE } from './lib/smoke.js';
 import { drawPlume, drawHead, PLUME } from './lib/plume.js';
-import { ColdLaunch, VlsLaunch, HotLaunch, GunBlast } from './lib/launch.js';
+import { ColdLaunch, VlsLaunch, HotLaunch, GunBlast, BalLaunch, SubLaunch, TorpLaunch } from './lib/launch.js';
 import { Burst, BoosterSep } from './lib/burst.js';
-import { Splash, Dirt, Blast, Fire, Sinking } from './lib/impact.js';
+import { Splash, Dirt, Blast, Fire, Sinking, TorpedoHit } from './lib/impact.js';
 import { TracerStream, Muzzle } from './lib/guns.js';
-import { Wake, Downwash } from './lib/water.js';
-import { drawJet } from './lib/air.js';
+import { Wake, Downwash, Bubbles, SubWater } from './lib/water.js';
+import { drawJet, drawProps } from './lib/air.js';
 import { Lightning, drawRain } from './lib/weather.js';
 
 export { engineSink };
 
 /* ---------------- flight profiles: which smoke and which flame, by kind and age ---------------- */
-/* returns [trail stage | null, plume spec | null, head glow 0..1] */
-function profile(kind, age, P) {
+/* returns [trail stage | null, plume spec | null, head glow 0..1]; p: the projectile (the Kalibr's dash: p.dash) */
+const NONE = [null, null, 0];
+function profile(kind, age, P, p) {
   switch (kind) {
     case 'oniks': {
       const ig = .38, sep = (P && P.sepAt) || 7;
@@ -46,6 +47,22 @@ function profile(kind, age, P) {
       return [STAGE.heat, PLUME.turbojet, 0];
     }
     case 'slam': return [STAGE.heat, PLUME.turbojet, 0];
+    case 'uran': {
+      // Kh-35U: a 2 s solid booster out of the pack, dropped; then the turbofan, no flame at all
+      const sep = (P && P.sepAt) || 2;
+      if (age < sep) return [STAGE.kh, PLUME.khBoost, 0];
+      if (age < sep + .25) return NONE;
+      return [STAGE.fan, PLUME.fanKh, 0];
+    }
+    case 'kalibr': {
+      // 3M-54: the booster out of the sea (lit just over it: the tracker's ig), the turbofan; the supersonic
+      // terminal stage's rocket only when the sim flies the dash (p.dash / phase 'dash')
+      const sep = (P && P.sepAt) || 5;
+      if (age < sep) return [STAGE.boost, PLUME.kalBoost, 0];
+      if (age < sep + .3) return NONE;
+      if (p && (p.dash || p.phase === 'dash')) return [STAGE.sustain, PLUME.dash, 0];
+      return [STAGE.fan, PLUME.fanKal, 0];
+    }
     case 'pdms': return age < 3 ? [STAGE.sustain, PLUME.small, 1] : age < 7 ? [STAGE.glide, PLUME.glide, .3] : [null, null, .15];
     case 'sam': return age < 2.4 ? [STAGE.small, PLUME.small, 1] : [STAGE.glide, null, .2];
     case 'aam': return age < 3 ? [STAGE.sustain, PLUME.small, .8] : [STAGE.glide, null, .15];
@@ -53,11 +70,19 @@ function profile(kind, age, P) {
     default: return [null, null, 0];
   }
 }
-const BOOSTER = { oniks: 'oniks', sm6: 'mk72', tlam: 'tlam', sam: 'small', pdms: 'small' };
-const SPLASH_H = { shell: 26, oniks: 46, tlam: 36, slam: 34, hellfire: 12, sm6: 16, pdms: 14, sam: 12, aam: 12, crash: 30 };
-const HIT_SC = { oniks: 1, tlam: .7, slam: .65, hellfire: .3, shell: .2, sm6: .35, pdms: .3, sam: .3, aam: .3, ciws: .05, gun30: .06 };
+const BOOSTER = { oniks: 'oniks', sm6: 'mk72', tlam: 'tlam', sam: 'small', pdms: 'small', uran: 'kh35', kalibr: 'kalibr' };
+const SPLASH_H = { shell: 26, oniks: 46, tlam: 36, slam: 34, hellfire: 12, sm6: 16, pdms: 14, sam: 12, aam: 12, crash: 30, uran: 30, kalibr: 40 };
+const HIT_SC = { oniks: 1, tlam: .7, slam: .65, hellfire: .3, shell: .2, sm6: .35, pdms: .3, sam: .3, aam: .3, ciws: .05, gun30: .06, uran: .55, kalibr: .75 };
+const THREAT = { oniks: 1, tlam: 1, slam: 1, hellfire: 1, shell: 1, crash: 1, uran: 1, kalibr: 1 };
 const GUNS = { ciws: 1, gun30: 1 };
-const NOZ = { oniks: 4.5, sm6: 3.3, tlam: 3.1, slam: 2.2, pdms: 1.8, sam: 1.7, aam: 1.8, hellfire: .85 };
+const NOZ = { oniks: 4.5, sm6: 3.3, tlam: 3.1, slam: 2.2, pdms: 1.8, sam: 1.7, aam: 1.8, hellfire: .85, uran: 2.25, kalibr: 4.15 };
+/* torpedoes: the round's length (m) and the height of the column its charge throws up under a keel */
+const TORP = { mk48: { len: 5.8, H: 115 }, t53: { len: 7.2, H: 105 }, mk54: { len: 2.72, H: 45 } };
+/* the boats (data/models.js SUBS: VA, KL): the sail [z0, z1, half width, top], the casing's top over the waterline,
+   the pressure hull [axis height, radius] (m, boat frame), where the masts stand (z) */
+const SUBG = { ssn: { sail: [22.6, 32.6, 1.3, 7.9], deck: 1.1, mast: 30.5, hull: [-4.1, 5.2] }, ssk: { sail: [-5, 8.3, 1.2, 7.75], deck: 2.7, mast: 6, hull: [-1.9, 4.4] } };
+/* a boat under the water (sim/subs.js submerged) */
+const subUnder = u => !!(u && u.def && u.def.sub) && (u.depth || 0) > u.def.draught + 2.5;
 /* Effects quality (data/settings.js `effects`): budget share, q ceiling, dynamic lights (min intensity, max a frame) */
 export const FX_LEVELS = {
   low: { budget: .35, q: .4, lightMin: .45, lights: 4 },
@@ -80,6 +105,13 @@ class FxSystem {
     this.gone = new Map();        // trackers of rounds that just ended (their last velocity, for the bursts)
     this.ghost = [];              // trails whose round is gone, still hanging in the air
     this.wk = new Map();          // unit id -> Wake
+    this.wkM = new Map();         // boat id -> Wake of its masts at periscope depth (feather)
+    this.subw = new Map();        // boat id -> SubWater (surfacing, diving)
+    this.bubGhost = [];           // bubble lines of torpedoes that ended, fading on the water
+    this.lnch = new Map();        // projectile id -> seconds after launch its motor lights (rounds out of the sea)
+    this.P3 = [0, 0, 0];
+    /* FX draws the Kh-35U / Kalibr plumes and smoke (the render system's stop-gap trail can go) */
+    this.ownTrails = true;
     this.fires = new Map();       // unit id -> Fire
     this.sinks = new Map();       // unit id -> Sinking
     this.falls = new Map();       // unit id -> Trail (aircraft going down / trailing smoke)
@@ -143,8 +175,16 @@ class FxSystem {
         const u = sim && sim.units.get(ev.from);
         if (u && !this.seeUnit(u)) return;
         const axis = dirOf(ev.hdg, ev.pitch), pos = ev.pos, k = ev.kind;
+        if (TORP[k]) return this.onTorpLaunch(ev, u, t, seed);
+        const boat = !!(u && u.def.sub);
         if (k === 'oniks') this.add(new ColdLaunch({ t0: t, pos, axis, ground: this.C.ground, seed }), 1);
-        else if ((k === 'sm6' || k === 'tlam') && (!u || u.def.domain === 'sea')) this.add(new VlsLaunch({ t0: t, pos, seed, big: k === 'tlam' }), 1);
+        else if (k === 'kalibr' || (boat && subUnder(u))) {
+          // out of a boat: the round breaches, its booster lights a few metres over the sea
+          this.lnch.set(ev.proj, .15);
+          this.add(new SubLaunch({ t0: t, pos, seed, ign: .15, rise: 25, s: k === 'kalibr' ? 1 : .9 }), 1);
+        }
+        else if (k === 'uran') this.add(new BalLaunch({ t0: t, pos, axis, len: 6.5, ground: this.C.ground, seed }), 1);
+        else if ((k === 'sm6' || k === 'tlam') && (!u || u.def.domain === 'sea')) this.add(new VlsLaunch({ t0: t, pos, seed, big: k === 'tlam' && !boat }), 1);
         else if (k === 'shell') this.add(new GunBlast({ t0: t, pos, axis, seed, sea: this.wet(pos[0], pos[2]) }), 1);
         else if (k === 'sam') this.add(new HotLaunch({ t0: t, pos, axis, seed, scale: 1, ground: this.C.ground }), 1);
         else if (k === 'pdms') this.add(new HotLaunch({ t0: t, pos, axis, seed, scale: .8 }), 1);
@@ -158,7 +198,7 @@ class FxSystem {
         const b = this.add(new BoosterSep({ t0: t, pos: ev.pos, vel: v, axis, kind, ground: this.C.ground, seed }), 2);
         if (b.fly.wet && b.fly.landed < 60) {
           const lp = b.fly.at(b.fly.landed, [0, 0, 0]);
-          this.add(new Splash({ t0: t + b.fly.landed, pos: [lp[0], 0, lp[2]], size: kind === 'oniks' ? 14 : 9, seed: seed + 1, ring: .5 }), 2);
+          this.add(new Splash({ t0: t + b.fly.landed, pos: [lp[0], 0, lp[2]], size: kind === 'oniks' ? 14 : kind === 'kh35' ? 5 : 9, seed: seed + 1, ring: .5 }), 2);
         }
         return;
       }
@@ -185,7 +225,7 @@ class FxSystem {
           return;
         }
         const wet = ev.water !== undefined ? ev.water : this.wet(pos[0], pos[2]);
-        const H = SPLASH_H[k] || 14, threat = k === 'oniks' || k === 'tlam' || k === 'slam' || k === 'hellfire' || k === 'shell' || k === 'crash';
+        const H = SPLASH_H[k] || 14, threat = !!THREAT[k];
         if (wet) {
           this.add(new Splash({ t0: t, pos: [pos[0], 0, pos[2]], size: H, seed, ring: .35 }), 2);
           if (threat && k !== 'shell') this.add(new Blast({ t0: t, pos: [pos[0], 1, pos[2]], sc: k === 'crash' ? .35 : .45, sea: true, gy: 0, seed: seed + 3 }), 3);
@@ -202,6 +242,13 @@ class FxSystem {
         if (dom === 'none') return;
         if (dom === 'sea') {
           const L = u.def.size[0], B = u.def.size[1];
+          if (subUnder(u)) {
+            // a boat lost under the water: no fire; the air of the hull coming up in a boil, the slick
+            this.add(new TorpedoHit({ t0: t + 2.5, pos, hdg: u.hdg, L, B, H: 36, sub: true, depth: Math.max(0, (u.depth || 0) - u.def.draught), seed: seed + 5 }), 2);
+            this.sinks.set(ev.unit, this.add(new Sinking({ t0: t, pos, hdg: u.hdg, L, B, seed, dur: u.def.dieTime, steam: false }), 0));
+            const f0 = this.fires.get(ev.unit); if (f0) f0.stop(t);
+            return;
+          }
           this.add(new Blast({ t0: t + .3, pos: [pos[0], pos[1] + 6, pos[2]], sc: 1.4, sea: true, gy: 0, seed: seed + 5 }), 3);
           const f = this.fires.get(ev.unit) || this.startFire(u, t, null, L > 200 ? 1.5 : 1, seed);
           f.k = 1;
@@ -233,8 +280,8 @@ class FxSystem {
         if (ev.type === 'takeoff' && (ev.unit !== undefined)) {
           const u = sim && sim.units.get(ev.unit);
           if (u && u.type === 'fighter') this.abUntil.set(ev.unit, t + 7);
-          // the catapult's breath of steam / the drone's launch puff
-          if (ev.pos) this.add(new HotLaunch({ t0: t, pos: ev.pos, axis: u ? dirOf(u.hdg, 0) : [0, 0, 1], seed, scale: u && u.type === 'fighter' ? .9 : .3 }), 1);
+          // the catapult's breath of steam / the drone's launch puff (the E-2D: steam only, no afterburner)
+          if (ev.pos) this.add(new HotLaunch({ t0: t, pos: ev.pos, axis: u ? dirOf(u.hdg, 0) : [0, 0, 1], seed, scale: u && (u.type === 'fighter' || u.type === 'aew') ? .9 : .3, steam: !!(u && u.type === 'aew') }), 1);
         }
         return;
       }
@@ -261,8 +308,41 @@ class FxSystem {
     for (const c of W.cells()) if (c.id === id) return c;
     return null;
   }
+  /* a torpedo leaving its tube / its aircraft */
+  onTorpLaunch(ev, u, t, seed) {
+    const pos = ev.pos, T = TORP[ev.kind], len = T.len;
+    if (u && u.def.domain === 'air') this.add(new TorpLaunch({ t0: t, mode: 'air', pos, hdg: u.hdg, len, fall: 18, seed }), 2);
+    else if (u && u.def.sub) this.add(new TorpLaunch({ t0: t, mode: 'sub', pos, depth: Math.max(0, -pos[1]), len, seed }), 2);
+    else if (u) {
+      // the deck tubes: the round leaves outboard of the side they stand on, trained a little aft
+      const s = Math.sin(u.hdg), c = Math.cos(u.hdg), dx = pos[0] - u.pos[0], dz = pos[2] - u.pos[2];
+      const side = dx * c - dz * s < 0 ? -1 : 1, al = dx * s + dz * c, B = u.def.size[1], lc = side * (B / 2 - 1.3);
+      const mouth = [u.pos[0] + s * al + c * lc, (u.pos[1] || 0) + Math.min(7, B * .33), u.pos[2] + c * al - s * lc];
+      const ca = Math.cos(.35), sa = Math.sin(.35);
+      const sp = u.speed || 0;
+      this.add(new TorpLaunch({ t0: t, mode: 'ship', pos: mouth, out: [side * c * ca - s * sa, 0, -side * s * ca - c * sa], vel: [s * sp, 0, c * sp], len, seed }), 2);
+    }
+  }
+  /* a torpedo's charge under a keel (or under a boat) */
+  onTorpHit(ev, u, t, seed) {
+    const pos = ev.pos, T = TORP[ev.kind] || TORP.mk48;
+    if (u && subUnder(u)) {
+      this.add(new TorpedoHit({ t0: t, pos, hdg: u.hdg, L: u.def.size[0], B: u.def.size[1], H: T.H, sub: true, depth: Math.max(0, (u.depth || 0) - u.def.draught * .5), seed }), 2);
+      return;
+    }
+    const L = u ? u.def.size[0] : 120, B = u ? u.def.size[1] : 16;
+    this.add(new TorpedoHit({ t0: t, pos, hdg: u ? u.hdg : 0, L, B, H: T.H, seed }), 2);
+    if (u) {
+      // the hull broken low amidships: fire and smoke from the damage once the water has come down
+      const al = (hsh(seed, 3) - .5) * L * .25;
+      this.hitAt.set(u.id, [al, Math.max(2, u.def.size[2] * .12), 0]);
+      const heavy = T.H > 80, f = this.fires.get(u.id) || this.startFire(u, t + 3, null, (L > 200 ? 1.4 : L < 90 ? .6 : 1) * (heavy ? 1 : .75), seed);
+      f.k = Math.min(1, (f.k || 0) + (heavy ? .7 : .45));
+    }
+  }
   onHit(ev, t, seed) {
     const sim = this.sim, u = sim && sim.units.get(ev.target), pos = ev.pos, k = ev.kind, sc = HIT_SC[k] || .3;
+    if (ev.under || TORP[k]) return this.onTorpHit(ev, u, t, seed);
     const dom = u ? u.def.domain : (this.wet(pos[0], pos[2]) ? 'sea' : 'land');
     if (u) {
       // where it struck, in the unit's frame (the fire burns there as the ship turns)
@@ -284,6 +364,33 @@ class FxSystem {
       const f = this.fires.get(u.id) || this.startFire(u, t, null, big * Math.min(1, .45 + sc), seed);
       f.k = Math.min(1, (f.k || 0) + .35 + sc * .5);
     }
+  }
+  /* a boat's marks on the sea: its wake only as strong as it is near the surface (a slight scar at periscope depth,
+     nothing deep), the feather of its masts at periscope depth, the water off it as it surfaces or dives */
+  boatWater(u, w, t) {
+    const d = u.def, S = d.sub, G = SUBG[u.type] || SUBG.ssk, under = Math.max(0, (u.depth || 0) - d.draught), vis = this.seeUnit(u);
+    const sK = 1 - ss(.5, 4, under), pdU = (S ? S.pd : 16) - d.draught;
+    if (w) w.update(u.pos, u.hdg, u.speed || 0, t, u.alive ? sK + (1 - sK) * .15 * (1 - ss(pdU + 3, pdU + 12, under)) : 0);
+    const kM = u.alive && this.wakes ? .6 * (u.mastUp || 0) * (1 - sK) * (under < pdU + 4 ? 1 : 0) : 0;
+    let m = this.wkM.get(u.id);
+    if (!m && kM > .01) { m = new Wake({ L: 1, B: .7, len: 170, rate: 10, seed: u.id * 3 + 1, feather: true }); this.wkM.set(u.id, m); }
+    if (m) {
+      const s = Math.sin(u.hdg), c = Math.cos(u.hdg), P = this.P3;
+      P[0] = u.pos[0] + s * G.mast; P[1] = 0; P[2] = u.pos[2] + c * G.mast;
+      m.update(P, u.hdg, u.speed || 0, t, kM); m.vis = vis;
+    }
+    let sw = this.subw.get(u.id);
+    if (!sw) { sw = new SubWater({ L: d.size[0], B: d.size[1], sail: G.sail, deck: G.deck, hull: G.hull, seed: u.id }); sw.prev = under; this.subw.set(u.id, sw); }
+    const pu = sw.prev, top = G.sail[3] * .92;
+    if (u.alive) {
+      if (pu >= top && under < top) sw.mark('sail', t);
+      if (pu >= 1.2 && under < 1.2) sw.mark('hull', t);
+      if (pu <= .6 && under > .6) sw.mark('vent', t);
+      if (pu <= 2 && under > 2) sw.mark('awash', t);
+      if (pu <= top && under > top) sw.mark('sailDown', t);
+    }
+    // drawn where the renderer draws the hull: at its depth once submerged, riding the surface until then
+    sw.prev = under; sw.follow(u.pos, u.hdg, under > 2.5 ? under : 0); sw.vis = vis;
   }
   /* a fire on a unit (or on the ground where a wreck fell) */
   startFire(u, t, at, size, seed) {
@@ -309,7 +416,10 @@ class FxSystem {
     for (const p of sim.projectiles.values()) {
       let tr = this.trk.get(p.id);
       if (!tr) {
-        tr = { id: p.id, kind: p.kind, t0: p.t0 !== undefined ? p.t0 : t, trail: new Trail(p.kind === 'sm6' ? 14000 : p.kind === 'oniks' ? 8000 : 6000, p.id, this.C.ground), vel: [0, 0, 0], pos: p.pos.slice(), seen: false, killed: false, P: p.P };
+        const torp = !!TORP[p.kind] || !!(p.P && p.P.torpedo);
+        tr = { id: p.id, kind: p.kind, t0: p.t0 !== undefined ? p.t0 : t, trail: new Trail(torp ? 4 : p.kind === 'sm6' ? 14000 : p.kind === 'oniks' ? 8000 : 6000, p.id, this.C.ground), vel: [0, 0, 0], pos: p.pos.slice(), seen: false, killed: false, P: p.P,
+          ig: this.lnch.get(p.id) || 0, bub: torp ? new Bubbles(p.id) : null };
+        this.lnch.delete(p.id);
         this.trk.set(p.id, tr);
       }
       tr.vel[0] = p.vel[0]; tr.vel[1] = p.vel[1]; tr.vel[2] = p.vel[2];
@@ -317,7 +427,8 @@ class FxSystem {
       tr.alive = p.alive; tr.p = p;
       const age = t - tr.t0, vis = this.seeProj(p);
       tr.seen = tr.seen || vis;
-      const pr = profile(p.kind, age, p.P);
+      if (tr.bub) { if (vis && p.pos[1] < -1) tr.bub.feed(t, p.pos[0], p.pos[2], -p.pos[1]); continue; }
+      const pr = age < tr.ig ? NONE : profile(p.kind, age, p.P, p);
       if (pr[0] && vis) {
         // puffs leave the nozzle, not the round's middle
         const v = p.vel, l = Math.hypot(v[0], v[1], v[2]) || 1, ax = v[0] / l, ay = v[1] / l, az = v[2] / l, nz = pr[1] ? pr[1].off : (NOZ[p.kind] || 2);
@@ -326,26 +437,32 @@ class FxSystem {
     }
     // rounds gone this frame: their smoke hangs on; the tracker is kept a moment for the events that follow
     for (const [id, tr] of this.trk) {
-      if (!sim.projectiles.has(id) || !tr.alive) { this.trk.delete(id); tr.goneT = t; this.gone.set(id, tr); if (tr.trail.n) this.ghost.push(tr.trail); }
+      if (!sim.projectiles.has(id) || !tr.alive) { this.trk.delete(id); tr.goneT = t; this.gone.set(id, tr); if (tr.trail.n) this.ghost.push(tr.trail); if (tr.bub && tr.bub.n) this.bubGhost.push(tr.bub); }
     }
+    for (let i = this.bubGhost.length - 1; i >= 0; i--) if (this.bubGhost[i].done(t)) this.bubGhost.splice(i, 1);
     for (const [id, tr] of this.gone) if (t - tr.goneT > 2) this.gone.delete(id);
     for (let i = this.ghost.length - 1; i >= 0; i--) if (this.ghost[i].done(t)) this.ghost.splice(i, 1);
     // units: wakes, fires, sinking, falling aircraft
     for (const u of sim.units.values()) {
-      const dom = u.def.domain;
-      if (dom === 'sea' && this.wakes) {
-        let w = this.wk.get(u.id);
-        if (!w) { w = new Wake({ L: u.def.size[0], B: u.def.size[1], seed: u.id, len: u.def.size[0] > 200 ? 1800 : 1400 }); this.wk.set(u.id, w); }
-        w.update(u.pos, u.hdg, u.speed || 0, t); w.vis = this.seeUnit(u);
+      const dom = u.def.domain, drown = subUnder(u);
+      if (dom === 'sea') {
+        let w = null;
+        if (this.wakes) {
+          w = this.wk.get(u.id);
+          if (!w) { w = new Wake({ L: u.def.size[0], B: u.def.size[1], seed: u.id, len: u.def.size[0] > 200 ? 1800 : 1400 }); this.wk.set(u.id, w); }
+          w.vis = this.seeUnit(u);
+        }
+        if (u.def.sub) this.boatWater(u, w, t);
+        else if (w) w.update(u.pos, u.hdg, u.speed || 0, t);
       }
       const f = this.fires.get(u.id);
       if (f) {
         let k = f.k;
         if (u.alive) { const hp = u.hp / u.hpMax; k = Math.max(k * .9995, sat((.85 - hp) * 1.4)); }
         else if (dom === 'sea') k = u.dying < .8 ? 1 : Math.max(0, 1 - (u.dying - .8) / .17);
-        f.k = k; f.follow(t, u.pos, u.hdg, this.seeUnit(u) ? k : 0);
+        f.k = k; f.follow(t, u.pos, u.hdg, this.seeUnit(u) && !drown ? k : 0);
         if (dom === 'sea' && !u.alive && u.dying > .97) f.stop(t);
-      } else if (u.alive && u.hp < u.hpMax * .55 && dom !== 'air' && this.hitAt.has(u.id)) {
+      } else if (u.alive && u.hp < u.hpMax * .55 && dom !== 'air' && !drown && this.hitAt.has(u.id)) {
         this.startFire(u, t, null, dom === 'sea' ? (u.def.size[0] > 200 ? 1.2 : .8) : .25, u.id * 17);
       }
       const s = this.sinks.get(u.id); if (s) s.follow(u.pos, u.hdg, u.dying || 0);
@@ -357,6 +474,8 @@ class FxSystem {
     }
     // units gone: their wakes fade out in the water, fires burn out, the slick stays a while
     for (const [id, w] of this.wk) if (!sim.units.has(id)) { w.alive = false; w.speed = 0; if (w.done(t)) this.wk.delete(id); }
+    for (const [id, w] of this.wkM) if (!sim.units.has(id)) { w.alive = false; w.speed = 0; if (w.done(t)) this.wkM.delete(id); }
+    for (const [id, sw] of this.subw) if (!sim.units.has(id) && !sw.busy(t)) this.subw.delete(id);
     for (const [id, f] of this.fires) if (!sim.units.has(id)) {
       this.fires.delete(id);
       // a wreck on land burns on where it stood (the model is gone, the fire and its smoke are not)
@@ -444,17 +563,19 @@ class FxSystem {
       const fr = Math.floor(C.tr * 60);
       for (const tr of this.trk.values()) {
         const p = tr.p; if (!p || !p.alive || !this.seeProj(p)) continue;
-        const age = t - tr.t0, pr = profile(p.kind, age, p.P); if (!pr[1] && !pr[2]) continue;
+        const age = t - tr.t0; if (tr.bub || age < tr.ig) continue;
+        const pr = profile(p.kind, age, p.P, p); if (!pr[1] && !pr[2]) continue;
         const x = p.prev[0] + (p.pos[0] - p.prev[0]) * alpha, y = p.prev[1] + (p.pos[1] - p.prev[1]) * alpha, z = p.prev[2] + (p.pos[2] - p.prev[2]) * alpha;
         const v = p.vel, l = Math.hypot(v[0], v[1], v[2]) || 1;
-        if (pr[1]) drawPlume(C, x, y, z, v[0] / l, v[1] / l, v[2] / l, pr[1], ignOf(p.kind, age), p.id, fr);
+        if (pr[1]) drawPlume(C, x, y, z, v[0] / l, v[1] / l, v[2] / l, pr[1], ignOf(p.kind, age, tr.ig), p.id, fr);
         if (pr[2] && V.pxm(x, y, z) < 3) drawHead(C, x, y, z, pr[2], 1);
       }
       // jets and rotors
       for (const u of sim.units.values()) {
         if (u.def.domain !== 'air' || u.aboard || !this.seeUnit(u)) continue;
-        const pos = g && g.unitPose ? g.unitPose(u, alpha).pos : u.pos;
-        if (u.type === 'fighter') {
+        const ps = g && g.unitPose ? g.unitPose(u, alpha) : u, pos = ps.pos;
+        if (u.type === 'aew') { if (u.alive) drawProps(C, pos, ps.hdg, ps.pitch, ps.roll, 1, u.id); }
+        else if (u.type === 'fighter') {
           const ab = Math.max(u.ab || 0, (this.abUntil.get(u.id) || 0) > t ? 1 : 0);
           drawJet(C, pos, u.hdg, u.pitch, u.roll, ab, .6, u.id);
         } else if (u.type === 'helo') {
@@ -471,10 +592,16 @@ class FxSystem {
     for (const tr of this.trk.values()) tr.trail.draw(C, 1);
     for (const tr of this.ghost) tr.draw(C, 1);
     for (const fl of this.falls.values()) fl.draw(C, 1);
+    for (const tr of this.trk.values()) if (tr.bub) tr.bub.draw(C, 1);
+    for (const b of this.bubGhost) b.draw(C, 1);
     mark('trails');
     for (const e of this.fx) if (e.layer === 0) { const a = t - e.t0; if (a >= -.001) e.draw(C, a); }
     mark('fires');
-    if (this.wakes) for (const w of this.wk.values()) if (w.vis !== false) w.draw(C, 1);
+    if (this.wakes) {
+      for (const w of this.wk.values()) if (w.vis !== false) w.draw(C, 1);
+      for (const w of this.wkM.values()) if (w.vis !== false) w.draw(C, 1);
+    }
+    for (const sw of this.subw.values()) if (sw.vis !== false) sw.draw(C);
     mark('wakes');
     // the rain round the lens, only inside a cell (the shafts and the cloud are SENSORS', on the GPU)
     if (sim && sim.weather) {
@@ -498,9 +625,9 @@ class FxSystem {
   }
 }
 /* ignition envelope of the flame (the booster lighting, the ramjet catching) */
-function ignOf(kind, age) {
+function ignOf(kind, age, ig) {
   if (kind === 'oniks') return age < 7 ? sat((age - .38) / .12) : sat((age - 7.35) / .4);
-  return sat(age / .12);
+  return sat((age - (ig || 0)) / .12);
 }
 
 /* ---------------- the engine's streaming API as a sink ---------------- */

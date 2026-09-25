@@ -16,6 +16,8 @@ export const STAGE = {
   heat:    { id: 5, cap: 2, dens: .3, B: .16, tau: .5, life: 1.2, spr: .25, ds: 8, v0: 0, kd: 1, rise: 0, hot: 0, col: 0 },    // turbojets: a faint shimmer
   wreck:   { id: 6, cap: 40, dens: 1, B: .7, tau: 18, life: 45, spr: 1.4, ds: 1.5, v0: 0, kd: 1, rise: .5, hot: 1.4, col: 1 },   // a burning aircraft going down
   damaged: { id: 7, cap: 16, dens: .6, B: .45, tau: 10, life: 22, spr: .9, ds: 3, v0: 0, kd: 1, rise: .4, hot: .3, col: 1 },  // a hit aircraft trailing smoke
+  kh:      { id: 8, cap: 32, dens: .85, B: .72, tau: 15, life: 48, spr: 1.25, ds: .6, v0: 30, kd: 2.6, rise: .4, hot: 1.2, col: 1 },  // Kh-35U booster: a short solid motor, 2 s
+  fan:     { id: 9, cap: 2, dens: .3, B: .14, tau: 1.5, life: 4, spr: .28, ds: 7, v0: 0, kd: 1, rise: 0, hot: 0, col: 0 },       // turbofans (Kh-35U, Kalibr cruise): a faint thread
 };
 const BY_ID = Object.values(STAGE).sort((a, b) => a.id - b.id);
 const S = 12;  // record stride: birth, x, y, z, vx, vy, vz, stage, k, ground under it at birth, spacing, path length
@@ -89,7 +91,7 @@ export class Trail {
       const zc0 = (x0 - e[0]) * f[0] + (y0 - e[1]) * f[1] + (z0 - e[2]) * f[2];
       let thin = 0;
       // near the launcher the exhaust blasts its first tens of metres wide
-      const pl = R[o + 11], blast = st.id === 0 && pl < 50 ? 3.2 * (1 - pl / 50) : 0;
+      const pl = R[o + 11], blast = st.id === 0 && pl < 50 ? 3.2 * (1 - pl / 50) : st.id === 8 && pl < 30 ? 1.8 * (1 - pl / 30) : 0;
       const spr = st.spr + blast, sa = Math.sqrt(age), rad = spr * (.25 + 1.1 * sa + .16 * age);
       if (age > 1.2 && zc0 > 50) {
         // keep puffs a tenth of their own size apart on screen (at least a third of a pixel)

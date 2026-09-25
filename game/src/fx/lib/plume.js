@@ -17,6 +17,14 @@ export const PLUME = {
   tiny:       { L: 2.2, r0: .08, cells: 2, off: .85, burn: .5, lr: 15, li: .1 },
   turbojet:   { L: 1.5, r0: .15, cells: 0, off: 2.4, burn: .08, lr: 0, li: 0, cold: 1 },
   ab:         { L: 6.5, r0: .36, cells: 5, off: 0, burn: .8, lr: 40, li: .2, dia: 1 },
+  // Kh-35U booster (data/models.js kh35: nozzle at z -2.2) and its turbofan (tail at -1.62)
+  khBoost:    { L: 5, r0: .15, cells: 4, off: 2.25, burn: .9, lr: 45, li: .25 },
+  fanKh:      { L: 1.6, r0: .1, cells: 0, off: 1.66, burn: .06, lr: 0, li: 0, cold: 1 },
+  // 3M-54 Kalibr booster (nozzle at z -4.11), its turbofan (tail at -2.45), the terminal stage's rocket (its nozzle
+  // at z +1.55: drawn only when the sim flies the supersonic dash, p.dash)
+  kalBoost:   { L: 10, r0: .24, cells: 5, off: 4.15, burn: 1, lr: 70, li: .3 },
+  fanKal:     { L: 2.2, r0: .13, cells: 0, off: 2.5, burn: .06, lr: 0, li: 0, cold: 1 },
+  dash:       { L: 8, r0: .19, cells: 5, off: -1.55, burn: .9, lr: 50, li: .25, dia: 1 },
 };
 
 const PB = new Float64Array(6);
@@ -30,8 +38,19 @@ export function drawPlume(C, x, y, z, ax, ay, az, P, ign, seed, fr) {
   const pxm = V.fl / zc, L = P.L;
   if (!V.vis(nx, ny, nz, L + 4)) return;
   if (P.cold) {
-    // a turbojet: only a faint warm shimmer behind the tail
-    if (pxm > 2) for (let i = 0; i < 10; i++) { const s = L * hsh(i + seed, fr), j = (i * 7 + fr * 3) & GM; dot(nx - ax * s + GT[j] * .12, ny - ay * s + GT[(j + 1) & GM] * .12, nz - az * s + GT[(j + 2) & GM] * .12, 1, 230, 236, 214, .22 * ign * (1 - s / L)); }
+    // a turbojet / turbofan: no flame, only a faint warm shimmer wavering in a thin cone behind the tail (real time,
+    // so it never strobes), and close up the warm lip of the nozzle
+    if (pxm > 2) {
+      const n = Math.max(6, Math.round(Math.min(48, 6 + L * pxm * .25) * C.q));
+      for (let i = 0; i < n; i++) {
+        const s = L * 2.2 * Math.pow(hsh(i + seed, fr), 1.3), j = (i * 7 + fr * 3 + seed) & GM, w = P.r0 * (.6 + 1.4 * s / L);
+        dot(nx - ax * s + GT[j] * w, ny - ay * s + GT[(j + 1) & GM] * w, nz - az * s + GT[(j + 2) & GM] * w, 1, 228, 234, 214, .3 * ign * (1 - s / (L * 2.3)));
+      }
+      if (pxm * P.r0 > 3) {
+        const B = perp(ax, ay, az, PB), m = Math.min(24, Math.round(TAU * P.r0 * pxm / 2));
+        for (let k = 0; k < m; k++) { const th = k / m * TAU, c = Math.cos(th) * P.r0 * .8, d = Math.sin(th) * P.r0 * .8; dot(nx + B[0] * c + B[3] * d, ny + B[1] * c + B[4] * d, nz + B[2] * c + B[5] * d, 1, 236, 240, 222, .3 * ign); }
+      }
+    }
     return;
   }
   const burn = P.burn * ign;
@@ -52,8 +71,10 @@ export function drawPlume(C, x, y, z, ax, ay, az, P, ign, seed, fr) {
     const cx = Math.cos(th) * rad, cy = Math.sin(th) * rad;
     const knot = s < L * .7 ? Math.pow(.5 + .5 * Math.cos(TAU * c + Math.PI), 6) * (1 - s / (L * .7)) : 0;
     const hot = Math.exp(-s / (L * .22)), b = ign * Math.min(1, .28 + 1.1 * hot + 1.1 * knot) * (1 - s / (L * 1.04));
-    if (b < .02) continue;
-    dot(nx - ax * s + B[0] * cx + B[3] * cy, ny - ay * s + B[1] * cx + B[4] * cy, nz - az * s + B[2] * cx + B[5] * cy,
+    // never under the sea (a round lit just over it: its jet goes into the water)
+    const py = ny - ay * s + B[1] * cx + B[4] * cy;
+    if (b < .02 || py < 0) continue;
+    dot(nx - ax * s + B[0] * cx + B[3] * cy, py, nz - az * s + B[2] * cx + B[5] * cy,
       zc < 60 ? 2 : 1, 240 + 15 * hot, 255, 200 + 45 * hot, b);
   }
   // close up, the jet as the anatomy draws it: rings of dots pinched into cells, a hot core in each knot
@@ -63,6 +84,7 @@ export function drawPlume(C, x, y, z, ax, ay, az, P, ign, seed, fr) {
       const cell = s / L * cells, fr2 = cell - Math.floor(cell), pinch = .45 + .55 * Math.abs(Math.cos(fr2 * Math.PI));
       const knot = Math.exp(-Math.pow((fr2 - .5) * 6, 2)), al = (.35 + .65 * knot) * (1 - s / L) * ign, rp = P.r0 * pinch * (1 - s / L * .6);
       const px = nx - ax * s, py = ny - ay * s, pz = nz - az * s;
+      if (py < 0) break;
       if (rp * pxm < 1.2) { C.glow(px, py, pz, 2, 255, 255, 230, al * .5); continue; }
       for (let m = 0; m < 6; m++) {
         const th = m / 6 * TAU + s * 3, c = Math.cos(th) * rp, d = Math.sin(th) * rp;

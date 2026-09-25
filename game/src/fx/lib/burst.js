@@ -169,19 +169,21 @@ export class Burst {
 const CASE = {};
 function casePts(kind) {
   if (CASE[kind]) return CASE[kind];
-  const d = kind === 'oniks' ? [.36, 2.6, .25] : kind === 'mk72' ? [.27, 1.7, .2] : kind === 'tlam' ? [.26, 1.2, .18] : [.19, 1.4, .12];
+  const d = kind === 'oniks' ? [.36, 2.6, .25] : kind === 'mk72' ? [.27, 1.7, .2] : kind === 'tlam' ? [.26, 1.2, .18] : kind === 'kh35' ? [.2, .58, .15] : kind === 'kalibr' ? [.267, 1.66, .19] : [.19, 1.4, .12];
   const [R, L, rn] = d, P = [], nr = 14, nl = Math.max(4, Math.round(L / .22));
   for (let i = 0; i <= nl; i++) for (let j = 0; j < nr; j++) { const th = (j + (i & 1) * .5) / nr * TAU; P.push(Math.cos(th) * R, Math.sin(th) * R, -L / 2 + L * i / nl); }
   for (let j = 0; j < 10; j++) { const th = j / 10 * TAU; P.push(Math.cos(th) * rn, Math.sin(th) * rn, -L / 2 - .15); P.push(Math.cos(th) * R * .5, Math.sin(th) * R * .5, L / 2); }
   return (CASE[kind] = { P: new Float32Array(P), L, R });
 }
-/* o: { t0, pos, vel, axis (unit, the round's), kind ('oniks' | 'mk72' | 'tlam' | 'small'), ground, seed } */
+const SEP_BACK = { oniks: 4.9, mk72: 3.2, tlam: 3.2, small: 3.2, kh35: 1.91, kalibr: 3.28 };
+/* o: { t0, pos, vel, axis (unit, the round's), kind ('oniks' | 'mk72' | 'tlam' | 'kh35' | 'kalibr' | 'small'), ground, seed } */
 export class BoosterSep {
   constructor(o) {
     const r = rng(o.seed || 31), a = o.axis, v = o.vel;
     this.t0 = o.t0; this.kind = o.kind || 'mk72'; this.shape = casePts(this.kind); this.seed = o.seed || 31;
     this.p = o.pos.slice(); this.a = a.slice();
-    const back = this.kind === 'oniks' ? 4.9 : 3.2, p0 = [o.pos[0] - a[0] * back, o.pos[1] - a[1] * back, o.pos[2] - a[2] * back];
+    // the casing's centre behind the round's (models: oniks, mk72 / sm6, kh35 -1.91, kalibr -3.28)
+    const back = SEP_BACK[this.kind] || 3.2, p0 = [o.pos[0] - a[0] * back, o.pos[1] - a[1] * back, o.pos[2] - a[2] * back];
     this.p0 = p0;
     const kick = [(r() - .5) * 8, (r() - .5) * 8, (r() - .5) * 8];
     this.fly = ballistic(p0, [v[0] - a[0] * 40 + kick[0], v[1] - a[1] * 40 + kick[1], v[2] - a[2] * 40 + kick[2]], 7e-4, o.ground, 70, 1 / 30);

@@ -1,6 +1,8 @@
 /* The bench's world: a coast (land to the west, a bluff for the battery), the sea as world-fixed jittered dot
    lattices in rings round the view (spacing doubling outward, like the engine's clipmap), and the HD models
-   (destroyer, K340P TELs, Seahawk, Super Hornet, the rounds) sampled once as dots and lit by the low moon. */
+   (destroyer, K340P TELs, Seahawk, Super Hornet, the rounds) and the game's own (Bal, Kilo, Virginia, E-2D,
+   Kh-35U, Kalibr: data/models.js) sampled once as dots and lit by the low moon. */
+import { EXTRA_MODELS } from '../../data/models.js';
 const LK = (() => { const v = [-.5, .62, -.6], l = Math.hypot(v[0], v[1], v[2]); return [v[0] / l, v[1] / l, v[2] / l]; })();
 
 /* the coast: land west of a wavy shoreline, rising to a 30-45 m bluff */
@@ -48,6 +50,15 @@ export class Scene {
     lv('sm6R', () => HD.sm6(), [.03, .1, .35], { booster: false });
     lv('oniksBooster', () => HD.oniksBooster(), [.03, .1, .35], {});
     lv('mk72', () => HD.mk72(), [.03, .1, .35], {});
+    const X = EXTRA_MODELS;
+    lv('bal', X.bal, [.05, .14, .4], { elev: .52, dep: 1, n: 8 });
+    lv('ssk', X.ssk, [.3, .8, 2.2], { mast: 1, prop: 0 });
+    lv('ssn', X.ssn, [.35, .9, 2.4], { mast: 1, prop: 0, vptA: 0, vptB: 0 });
+    lv('aew', X.aew, [.06, .16, .45], { dome: 0, prop: 0, fold: 0 });
+    lv('kh35', X.kh35, [.03, .08, .25], { wing: 0, fin: 1, booster: true });
+    lv('kh35R', X.kh35, [.03, .08, .25], { wing: 1, fin: 1, booster: false });
+    lv('kalibr', X.kalibr, [.035, .1, .3], { wing: 0, fin: 1, booster: true });
+    lv('kalibrR', X.kalibr, [.035, .1, .3], { wing: 1, fin: 1, booster: false });
     this.LT = [0, 0, 0, 0];
   }
   /* sea and land dots: rings of world-fixed lattices round the point under the camera target */
@@ -82,7 +93,9 @@ export class Scene {
   }
   has(key) { return !!this.models[key]; }
   /* a model instance: key, world position, heading, pitch, roll (rad); a 0..1; or a 3x3 row-major rotation M */
-  drawModel(R, key, T, hdg, pitch, roll, a, M) {
+  /* a boat: above the surface as it is; under it faint, as seen through the water */
+  drawBoat(R, key, T, hdg, a) { this.drawModel(R, key, T, hdg, 0, 0, a, null, 0); }
+  drawModel(R, key, T, hdg, pitch, roll, a, M, sea) {
     const lv = this.models[key]; if (!lv) return;
     const c = R.cam, e = c.eye, LT = this.LT, dist = Math.max(1, Math.hypot(T[0] - e[0], T[1] - e[1], T[2] - e[2]));
     const pxm = c.fl / dist;
@@ -105,7 +118,7 @@ export class Scene {
         if (fac < -.15) continue;
         b = .22 + .72 * Math.max(0, wx * LK[0] + wy * LK[1] + wz * LK[2]);
       }
-      R.scenePt(x, y, z, b * a, 238, 238, 228, big, LT);
+      R.scenePt(x, y, z, sea !== undefined && y < sea ? b * a * .14 : b * a, 238, 238, 228, big, LT);
     }
   }
 }

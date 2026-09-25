@@ -12,6 +12,14 @@ const PROJ = {
   sm6: { speed: 1100, vert: 1.2, v0: 20, boost: 6, sepAt: 6, turn: .8, pitchRate: .9, bendT: .7, mode: 'direct' },
   sam: { speed: 900, vert: 0, v0: 60, boost: 2.4, sepAt: 2.4, turn: .6, pitchRate: .6, mode: 'direct' },
   shell: { speed: 810, mode: 'ballistic' },
+  // the Kh-35U (Bal) and the 3M-54 Kalibr (Kilo), as data/units.js flies them; the bench's Kalibr also flies the
+  // supersonic dash the game's sim does not have yet (dashAt: m from the target), to judge its plume
+  uran: { speed: 270, vert: 0, v0: 35, boost: 2, sepAt: 2, alt: 25, seaAlt: 10, pitchMax: .45, pitchRate: .35, turn: .3, mode: 'cruise' },
+  kalibr: { speed: 280, vert: 1.6, v0: 25, boost: 5, sepAt: 5, alt: 30, seaAlt: 15, pitchMax: .5, pitchRate: .35, turn: .2, mode: 'cruise', dashAt: 5000, dash: 700 },
+  // torpedoes: under the water, not drawn (a helicopter's falls into the sea first)
+  mk48: { speed: 28, depth: 60, mode: 'run', torpedo: true },
+  mk54: { speed: 20, depth: 40, mode: 'run', torpedo: true },
+  t53: { speed: 25, depth: 50, mode: 'run', torpedo: true },
 };
 const ease = t => t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t);
 const wrapPi = a => { a = (a + Math.PI) % (2 * Math.PI); if (a < 0) a += 2 * Math.PI; return a - Math.PI; };
@@ -33,6 +41,14 @@ export class FakeSim {
     this.helo = this.addUnit('helo', 'fleet', 'air', [19.8, 16.4, 5.1], [3700, 60, 300], -.4, 0, 12, 8);
     this.fighter = this.addUnit('fighter', 'fleet', 'air', [18.3, 13.6, 4.9], [1200, 420, -1600], 0, 210, 15, 10);
     this.heloAlt = 60;
+    // the Bal on the bluff, its pack raised, its back to the sea; a Kilo at periscope depth, a Virginia; an E-2D
+    this.bal = this.addUnit('bal', 'coast', 'land', [14, 3.1, 3.6], [-2380, bh(-2380, -900), -900], -Math.PI / 2 - .15, 0, 30, 20);
+    this.kilo = this.addUnit('ssk', 'coast', 'sea', [73.8, 9.9, 14], [2600, 0, 1900], .55, 3.6, 45, 45);
+    Object.assign(this.kilo.def, { draught: 6.2, sub: { pd: 16, deep: 150, rate: 1.2, speeds: [5.1, 3.6, 8.7] } });
+    this.ssn = this.addUnit('ssn', 'fleet', 'sea', [114.9, 10.4, 17.2], [6200, 0, 2600], -.4, 4.5, 70, 60);
+    Object.assign(this.ssn.def, { draught: 9.3, sub: { pd: 18, deep: 180, rate: 1.5, speeds: [6.2, 5.1, 12.9] } });
+    for (const b of [this.kilo, this.ssn]) { b.dive = 1; b.depth = b.def.sub.pd; b.mastUp = 1; b.pos[1] = b.prev[1] = -(b.depth - b.def.draught); }
+    this.aew = this.addUnit('aew', 'fleet', 'air', [17.6, 24.56, 5.58], [3000, 450, -600], 0, 150, 12, 10);
   }
   addUnit(type, side, domain, size, pos, hdg, speed, hp, dieTime) {
     const u = { id: this.nextId++, type, side, def: { domain, size, dieTime }, pos: pos.slice(), prev: pos.slice(), p0: pos.slice(), hdg, prevHdg: hdg, pitch: 0, roll: 0, speed, hp, hpMax: hp, alive: true, dying: 0, st: {} };
@@ -68,6 +84,7 @@ export class FakeSim {
   stepProj(p) {
     const P = p.P;
     p.age += DT;
+    if (P.mode === 'run') return this.stepTorp(p);
     if (P.mode === 'ballistic') {
       const b = p.ball, a = Math.min(p.age, b.T);
       p.pos[0] = b.p0[0] + b.v[0] * a; p.pos[1] = b.p0[1] + b.v[1] * a - .5 * G * a * a; p.pos[2] = b.p0[2] + b.v[2] * a;
@@ -94,6 +111,8 @@ export class FakeSim {
     }
     if (!aim) aim = [p.pos[0] + p.vel[0] * 10, p.pos[1], p.pos[2] + p.vel[2] * 10];
     p.spd = p.age < (P.boost || 0) ? (P.v0 || 0) + (P.speed - (P.v0 || 0)) * ease(p.age / P.boost) : P.speed;
+    if (P.dashAt && tgt && !p.dash && p.age > (P.sepAt || 0) + 2 && Math.hypot(tgt.pos[0] - p.pos[0], tgt.pos[2] - p.pos[2]) < P.dashAt) { p.dash = true; p.dashT = p.age; }
+    if (p.dash) p.spd = P.speed + (P.dash - P.speed) * ease((p.age - p.dashT) / 1.5);
     const dx = aim[0] - p.pos[0], dz = aim[2] - p.pos[2], dist = Math.hypot(dx, dz);
     if (p.age >= (P.vert || 0)) {
       const hT = Math.atan2(dx, dz), bend = ease((p.age - (P.vert || 0)) / (P.bendT || 2.5));
@@ -138,6 +157,24 @@ export class FakeSim {
     if (p.pos[1] < ground(p.pos[0], p.pos[2]) + 1 && p.age > 3) { this.emit('splash', { pos: [p.pos[0], ground(p.pos[0], p.pos[2]), p.pos[2]], kind: p.kind, side: p.side, proj: p.id, air: false, water: landH(p.pos[0], p.pos[2]) < 0, why: 'terrain' }); this.kill(p); return; }
     if (p.age > p.maxT) { this.emit('splash', { pos: p.pos.slice(), kind: p.kind, side: p.side, proj: p.id, air: p.pos[1] > 30, miss: true, why: 'selfdestruct' }); this.kill(p); }
   }
+  /* a torpedo: into the water (off a helicopter: falling first), then running at depth to its target */
+  stepTorp(p) {
+    const P = p.P;
+    if (p.phase !== 'run' && p.pos[1] > -3) { p.pos[1] -= (p.pos[1] > 0 ? 18 : 4) * DT; p.vel[0] = 0; p.vel[1] = -10; p.vel[2] = 0; return; }
+    p.phase = 'run';
+    const tgt = this.units.get(p.target);
+    p.spd = Math.min(P.speed, Math.max(p.spd || 0, 6) + 3 * DT);
+    if (tgt && tgt.alive) { const h = Math.atan2(tgt.pos[0] - p.pos[0], tgt.pos[2] - p.pos[2]); p.hdg += clamp(wrapPi(h - p.hdg), -.3 * DT, .3 * DT); }
+    const yT = tgt && tgt.def.sub ? tgt.pos[1] - 4 : -Math.min(P.depth, 12), vy = clamp(yT - p.pos[1], -4, 4);
+    p.vel[0] = Math.sin(p.hdg) * p.spd; p.vel[1] = vy; p.vel[2] = Math.cos(p.hdg) * p.spd;
+    p.pos[0] += p.vel[0] * DT; p.pos[1] = Math.min(-2, p.pos[1] + vy * DT); p.pos[2] += p.vel[2] * DT;
+    if (tgt && tgt.alive && Math.hypot(tgt.pos[0] - p.pos[0], tgt.pos[2] - p.pos[2]) < Math.max(15, tgt.def.size[1] * .8)) {
+      this.emit('hit', { pos: [tgt.pos[0], .5, tgt.pos[2]], target: tgt.id, kind: p.kind, side: p.side, from: p.from, proj: p.id, under: true });
+      tgt.hp -= 60; if (tgt.hp <= 0 && tgt.alive) { tgt.alive = false; tgt.dying = 0; this.emit('destroyed', { unit: tgt.id, type: tgt.type, side: tgt.side, pos: [tgt.pos[0], Math.max(0, tgt.pos[1]), tgt.pos[2]] }); }
+      this.kill(p); return;
+    }
+    if (p.age > p.maxT) { this.emit('torpedo_end', { pos: p.pos.slice(), kind: p.kind, side: p.side, proj: p.id, why: 'selfdestruct' }); this.kill(p); }
+  }
   hitUnit(u, pos, kind, p, dmg) {
     this.emit('hit', { pos: pos.slice(), target: u.id, kind, side: p ? p.side : 'fleet', from: p ? p.from : 0, proj: p ? p.id : 0 });
     u.hp -= dmg;
@@ -159,6 +196,19 @@ export class FakeSim {
       if (!s.alive && s.dying >= 1) { this.units.delete(s.id); this.emit('removed', { unit: s.id }); }
     }
     for (const u of [this.telA, this.telB]) if (!u.alive) { u.dying = Math.min(1, u.dying + DT / u.def.dieTime); if (u.dying >= 1 && this.units.has(u.id)) { this.units.delete(u.id); this.emit('removed', { unit: u.id }); } }
+    // the boats: depth toward the ordered one (0 surface, 1 periscope depth, 2 deep), masts, headway
+    for (const b of [this.kilo, this.ssn]) {
+      if (!b.alive) { b.dying = Math.min(1, b.dying + DT / b.def.dieTime); continue; }
+      const S = b.def.sub, goal = b.dive === 0 ? b.def.draught : b.dive === 1 ? S.pd : 80;
+      b.depth += clamp(goal - b.depth, -S.rate * DT, S.rate * DT);
+      const up = b.depth <= S.pd + 1.5 && b.dive < 2;
+      b.mastUp = clamp(b.mastUp + (up ? DT / 6 : -DT / 3), 0, 1);
+      const sub = b.depth > b.def.draught + 2.5, deep = b.depth > S.pd + 4;
+      b.speed += clamp(S.speeds[!sub ? 0 : deep ? 2 : 1] * .8 - b.speed, -.1 * DT * 10, .1 * DT * 10);
+      b.pos[0] += Math.sin(b.hdg) * b.speed * DT; b.pos[2] += Math.cos(b.hdg) * b.speed * DT; b.pos[1] = -(b.depth - b.def.draught);
+    }
+    const ae = this.aew, wa = ae.speed / 1800, aa = t * wa + 1;
+    ae.pos[0] = 3000 + Math.sin(aa) * 1800; ae.pos[2] = -600 + Math.cos(aa) * 1800; ae.pos[1] = 450; ae.hdg = aa + Math.PI / 2; ae.roll = .22;
     const h = this.helo; h.pos[1] += (this.heloAlt - h.pos[1]) * Math.min(1, DT * .8); h.pos[0] = h.p0[0] + 10 * Math.sin(t * .1); h.pos[2] = h.p0[2] + 10 * Math.cos(t * .13);
     const f = this.fighter, w = f.speed / 1500, a = t * w;
     f.pos[0] = 1200 + Math.sin(a) * 1500; f.pos[2] = -1600 + Math.cos(a) * 1500 - 1500; f.pos[1] = 420; f.hdg = a + Math.PI / 2; f.roll = .45;
