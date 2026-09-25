@@ -28,3 +28,46 @@ Plan:
    intercepts, hits), the radar picture + lime lightning SCAN, Inspect / X-ray / exploded view, sound.
 3. Modes: Sandbox, Combat (skirmish vs AI), Campaign (six missions, films as cutscenes).
 4. Review agent every ~2 h scoring 1-10, fixes, polish, performance.
+
+## 02:40 · Menus done
+`game/index.html`: a favourite Point Cloud film plays live behind the menu, laid out like that film's own menu.
+Sandbox / Combat setup screens with live map previews, Campaign screen (six missions, each opens with one of your
+favourite films as the cutscene, then a briefing), Settings (saved), Quit ("stand the battery down": the film plays on).
+
+## 02:50 · Maps done
+Six maps, each 0.7-1.0 s to generate, cached after the first load: Krasnaya Kosa (the real seed-1337 coast),
+Dolgaya Guba (fjords), Proliv Uzky (strait with a mid-channel island), Belye Shkhery (archipelago),
+Ust-Solyonaya (river delta), Chyortova Past (drowned caldera). Viewer: `game/maps.html`.
+
+## 03:00 · Sound and effects started early
+Both are built against the contract so they don't wait for the engine: synthesized positional sound (thunder and
+far explosions arrive late at the speed of sound) and the film effects library (launch, plume, intercept, hits,
+splashes, wakes, lightning), each with its own test page (`game/audio.html`, `game/fx.html`).
+
+## 03:20 · Engine done
+WebGL2 renderer in the films' dot look: 1.5-3 ms per frame at 1920x1080 (budget 16 ms), ~700k ground dots in a
+busy scene. Terrain and sea are a point clipmap that holds from 20 m to 150 km up, with the Earth's curvature
+(ships go hull-down), a moving swell, a radar sweep that paints the sea, lime scan fronts, x-ray, exploded view,
+per-part damage, dynamic lights. 360° camera. All HD models draw with turning rotors, fans and radars.
+Integration started: the playable game (selection, orders, time rate, match flow, sandbox palette, cinematic camera).
+
+## 03:30 · Sim done
+The rules: 11 unit types with real sizes and speeds, land/sea pathfinding, fog of war built from sensors (radar
+horizon, contacts that firm up into classified tracks, radars that can be heard, go-silent), the SCAN mechanic,
+weapons, per-part damage, reloads by transloader, supply from objectives, reinforcements, weather, and an AI for each
+side that only knows what its own sensors know. 16/16 tests pass; a 200-unit battle costs ~5 ms per frame at x32.
+First balance runs: the fleet wins most maps, so a balance agent is now tuning it.
+
+## 03:55 · Sound done; integration wave running
+Positional synthesized sound (thunder after lightning at the speed of sound, doppler on missiles, loops for rotors
+and fires), measured never to clip. Now running in parallel: game integration, HUD (minimap, command card, event log
+like the Ring film), sensors (radar picture, contacts condensing into hulls, the lime lightning SCAN, radar view,
+storms), Inspect (X-ray + exploded view in-game, the Anatomy films as gameplay), effects, world look polish, balance.
+
+## 04:10 · It plays
+All three modes start real matches from the menus: select (click, box, double-click, groups), right-click orders,
+hotkeys (Z stop, H hold, T deploy, R reload, X scan, Y radar, L drone, B reinforce, Space pause, C cinematic camera,
+F10 hide UI), time rate x1..x32 shown on screen, win/lose screens, campaign results back to the menu, and a sandbox
+palette (P: place any unit, G fog, K wake the enemy AI, J switch side, N weather). Ships list and sink, vehicles
+burn and wreck, aircraft sit on the carrier deck and bank in turns. The cinematic camera chases missiles like the films.
+Agent retries used so far: 1 of 100 (the balance agent tripped the safety filter; relaunched as a pure numbers job).
