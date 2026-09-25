@@ -3,9 +3,9 @@
    sandbox palette (game/sandbox.js re-renders its DOM, so the row is put back whenever it goes). */
 
 export const MUSEUM = [
-  ['Coast', ['tel', 'transloader', 'radar', 'pantsir', 'drone', 'catapult', 'hq']],
-  ['Fleet', ['destroyer', 'carrier', 'helo', 'fighter']],
-  ['Munitions', ['oniks', 'tlc', 'oniks_booster', 'pantsir_missile', 'sm6', 'mk72', 'mk41_can', 'strike_missile', 'essm', 'slam', 'hellfire', 'aam', 'shell']],
+  ['Coast', ['tel', 'transloader', 'radar', 'pantsir', 'drone', 'catapult', 'hq', 'bal', 'ssk']],
+  ['Fleet', ['destroyer', 'carrier', 'helo', 'fighter', 'aew', 'ssn']],
+  ['Munitions', ['oniks', 'tlc', 'oniks_booster', 'pantsir_missile', 'sm6', 'mk72', 'mk41_can', 'strike_missile', 'essm', 'slam', 'hellfire', 'aam', 'shell', 'kh35', 'kalibr', 'torpedo533', 'vpt_can']],
   ['Structures', ['depot', 'port', 'lighthouse', 'radar_hill', 'airfield']],
 ];
 export const MUSEUM_KEYS = MUSEUM.flatMap(g => g[1]);

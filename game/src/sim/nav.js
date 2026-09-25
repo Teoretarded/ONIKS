@@ -1,10 +1,11 @@
 /* Coarse navigation grids (land / sea) and A* with a path cache. Pure logic, no DOM.
 
    Land cells: every sample on land, slope under the limit (or a road). Roads cost less (trucks drive faster).
-   Sea cells: every sample deeper than SEA_DEPTH. Connected components let unreachable goals be snapped to the
-   nearest reachable cell without a failed search. */
+   Sea cells: every sample deeper than SEA_DEPTH; 'sub' cells (submarines): deeper than SUB_DEPTH. Connected
+   components let unreachable goals be snapped to the nearest reachable cell without a failed search. */
 
 export const SEA_DEPTH = 16;          // m: deepest draught (CVN 11.3 m) plus margin
+export const SUB_DEPTH = 36;          // m: boats keep to deep water (room to dive under a ship's keel)
 const LAND_SLOPE = .42;               // tan: steepest off-road cell
 const ROAD_COST = .5, SHORE_COST = 1.6;
 
@@ -72,11 +73,12 @@ export class Nav {
         else if (sl <= LAND_SLOPE) cost[k] = 1 + sl * 3;
       } else {
         let ok = true, shore = false;
+        const D = dom === 'sub' ? SUB_DEPTH : SEA_DEPTH;
         for (let s = 0; s < 9 && ok; s++) {
           const px = x + ((s % 3) - 1) * q, pz = z + (Math.floor(s / 3) - 1) * q;
           const h = map.h(px, pz);
-          if (h > -SEA_DEPTH) ok = false;
-          else if (h > -SEA_DEPTH * 3) shore = true;
+          if (h > -D) ok = false;
+          else if (h > -D * (dom === 'sub' ? 1.8 : 3)) shore = true;
         }
         if (ok) cost[k] = shore ? SHORE_COST : 1;
       }
@@ -184,7 +186,7 @@ export class Nav {
     if (!found) return null;
     const cells = []; for (let k = g; k >= 0; k = par[k]) cells.push(k);
     cells.reverse();
-    return dom === 'sea' ? this.pull(G, cells) : this.collinear(cells);
+    return dom === 'land' ? this.collinear(cells) : this.pull(G, cells);
   }
   collinear(cells) {
     if (cells.length < 3) return cells;

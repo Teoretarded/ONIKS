@@ -5,11 +5,17 @@
    - Radiating units (radars on, the command post's comms) can be heard by the other side: a rough contact with a
      large error that never classifies on its own.
    - Unseen contacts decay and their error grows; confidence >= CLASSIFY classifies the track and allows engagement.
-   - SCAN: after a short delay every enemy unit in the radius is identified (conf .97); the scanner is revealed. */
+   - SCAN: after a short delay every enemy unit in the radius is identified (conf .97); the scanner is revealed.
+   - Submarines: a submerged boat is invisible to radar and cameras (at periscope depth its masts show to a radar at
+     short range and to a camera close by), scans do not reach it, lightning does not show it. SONAR (destroyer hull
+     sonar, the MH-60R's dipping sonar while it hovers, the boats' own) hears submerged boats at short range (boats
+     also hear ships far off); the contacts it makes are like any other (confidence, classification). Torpedoes are
+     heard by sonar, never seen by radar. A boat that launches is heard / seen for a moment (launchSeen). */
 import { UNITS, PROJ, ENEMY, CLASSIFY } from '../data/units.js';
 import { SIDE_SCAN_CD, SCAN_DELAY } from './consts.js';
 import { gauss } from './rand.js';
 import { dxz, ground, wrapPi } from './util.js';
+import { isSub, submerged, deep, domOf, mastTop, noiseOf } from './subs.js';
 
 const R43 = 16.99e6;          // 2 x (4/3 earth radius), m: bulge = f (1 - f) d^2 / R43
 const TAU = Math.PI * 2;
@@ -33,11 +39,13 @@ export function los(map, ax, ay, az, bx, by, bz) {
 /* absolute antenna height of a sensor unit, and the height of a target's top */
 function antH(u, R) {
   if (u.def.domain === 'air') return u.pos[1];
+  if (u.def.sub) return mastTop(u);
   const h = R && R.h ? R.h * (R.needsMast ? Math.max(.25, u.mast) : 1) : u.def.top;
   return u.pos[1] + h;
 }
 export function topH(e) {
   if (e.def.domain === 'air') return e.pos[1];
+  if (e.def.sub) return mastTop(e);
   if (e.dying > 0) return e.pos[1] + e.def.top * (1 - e.dying);
   return e.pos[1] + (e.type === 'tel' && e.elev > .3 ? e.def.topErect : e.def.top);
 }
@@ -51,6 +59,16 @@ export function emitting(u) {
   if (u.def.hq && u.def.emits && u.def.domain === 'land') return !u.off.scan;
   return radarWorks(u);
 }
+
+/* a working sonar: the dipping sonar only while its helicopter hovers low; hull and boat sonars always */
+export function sonarWorks(u) {
+  const S = u.def.sensors.sonar;
+  if (!S || !u.alive || u.aboard || u.off.sonar) return false;
+  if (S.dip) return u.speed < 6;
+  return true;
+}
+/* what a submerged boat still shows to radar / cameras: masts at periscope depth, nothing deeper */
+const subVis = (e, cam) => !isSub(e) || !submerged(e) ? 1 : deep(e) ? 0 : cam ? .5 : .14;
 
 function rangeVs(R, e) {
   const dom = e.def.domain;
@@ -67,7 +85,7 @@ export function getContact(sim, side, e) {
     c = {
       track: 'TRK ' + (S.trkNext++), unitId: e.id, conf: 0, cls: null, type: null, name: null,
       pos: [e.pos[0], e.pos[1], e.pos[2]], vel: [0, 0, 0], err: 5000, lastSeen: sim.t, firstSeen: sim.t,
-      identified: false, emitting: false, lastEmit: -1e9, dom: e.def.domain, hits: 0, dead: false, fresh: true,
+      identified: false, emitting: false, lastEmit: -1e9, dom: domOf(e), hits: 0, dead: false, fresh: true, pingT: -1e9, deadT: 0,
     };
     S.contacts.set(e.id, c);
   }
@@ -81,6 +99,7 @@ export function detect(sim, side, e, sigma, gain, how) {
   const c = getContact(sim, side, e), r = sim.rng.sense, t = sim.t;
   const mx = e.pos[0] + gauss(r) * sigma, mz = e.pos[2] + gauss(r) * sigma;
   const my = e.def.domain === 'air' ? e.pos[1] + gauss(r) * sigma * .3 : e.pos[1];
+  c.dom = domOf(e);
   if (isNew || c.err > sigma * 4 || t - c.lastSeen > 60) {
     c.pos[0] = mx; c.pos[1] = my; c.pos[2] = mz; c.vel[0] = c.vel[1] = c.vel[2] = 0; c.err = sigma;
   } else {
@@ -88,7 +107,7 @@ export function detect(sim, side, e, sigma, gain, how) {
     const rx = mx - c.pos[0], ry = my - c.pos[1], rz = mz - c.pos[2];
     c.pos[0] += a * rx; c.pos[1] += a * ry; c.pos[2] += a * rz;
     c.vel[0] += b * rx; c.vel[1] += b * ry; c.vel[2] += b * rz;
-    const vmax = c.dom === 'air' ? 400 : c.dom === 'sea' ? 20 : 25, v = Math.sqrt(c.vel[0] * c.vel[0] + c.vel[2] * c.vel[2]);
+    const vmax = c.dom === 'air' ? 400 : c.dom === 'sea' || c.dom === 'sub' ? 20 : 25, v = Math.sqrt(c.vel[0] * c.vel[0] + c.vel[2] * c.vel[2]);
     if (v > vmax) { c.vel[0] *= vmax / v; c.vel[2] *= vmax / v; }
     c.vel[1] = c.dom === 'air' ? Math.max(-60, Math.min(60, c.vel[1])) : 0;
     c.err = Math.min(c.err, sigma) * .9 + sigma * .1;
@@ -111,6 +130,7 @@ function classify(sim, side, c, e) {
 export function roughContact(sim, side, e, err, gain, cap) {
   if (!e.alive || e.aboard) return null;
   const S = sim.sides[side], isNew = !S.contacts.has(e.id), c = getContact(sim, side, e), r = sim.rng.sense;
+  c.dom = domOf(e);
   // fuse the fix by accuracy (a precise track barely moves; repeated rough fixes average down, not below err / 3)
   const mx = e.pos[0] + gauss(r) * err * .6, mz = e.pos[2] + gauss(r) * err * .6;
   if (isNew || sim.t - c.lastSeen > 60) { c.pos[0] = mx; c.pos[2] = mz; c.pos[1] = e.pos[1]; c.err = err; c.vel[0] = c.vel[1] = c.vel[2] = 0; c.lastSeen = sim.t; }
@@ -136,7 +156,7 @@ export function senseTick(sim, dt) {
     if (e.aboard) continue;
     const c = getContact(sim, side, e);
     c.pos[0] = e.pos[0]; c.pos[1] = e.pos[1]; c.pos[2] = e.pos[2]; c.vel[0] = c.vel[1] = c.vel[2] = 0;
-    c.err = 10; c.conf = .995; c.lastSeen = t; c.identified = true; c.fresh = false;
+    c.err = 10; c.conf = .995; c.lastSeen = t; c.identified = true; c.fresh = false; c.dom = domOf(e);
     if (!c.cls) { c.cls = e.def.cls; c.type = e.type; c.name = e.def.name; }
   }
   for (const side of ['coast', 'fleet']) {
@@ -160,7 +180,7 @@ export function senseTick(sim, dt) {
           const dx = e.pos[0] - u.pos[0], dz = e.pos[2] - u.pos[2];
           if (Math.abs(dx) > rmax || Math.abs(dz) > rmax) continue;
           const d = Math.sqrt(dx * dx + dz * dz);
-          let rng = rangeVs(R, e);
+          let rng = rangeVs(R, e) * subVis(e, false);
           if (!rng || d > rng) continue;
           if (!full) {
             const b = Math.atan2(dx, dz), off = wrapPi(b - a0);
@@ -177,14 +197,14 @@ export function senseTick(sim, dt) {
         }
       }
       // camera: every tick, all around, short range
-      if (Sd.camera && !u.off.camera) {
-        const C = Sd.camera, ha = u.pos[1];
+      if (Sd.camera && !u.off.camera && !(Sd.camera.mast && (u.mastUp || 0) < .8)) {
+        const C = Sd.camera, ha = u.def.sub ? mastTop(u) : u.pos[1];
         for (let j = 0; j < foes.length; j++) {
           const e = foes[j];
           if (e.aboard) continue;
           const dx = e.pos[0] - u.pos[0], dz = e.pos[2] - u.pos[2];
           if (Math.abs(dx) > C.range || Math.abs(dz) > C.range) continue;
-          const d = Math.sqrt(dx * dx + dz * dz), rng = C.range * wx.camera(e.pos[0], e.pos[2]);
+          const d = Math.sqrt(dx * dx + dz * dz), rng = C.range * wx.camera(e.pos[0], e.pos[2]) * subVis(e, true);
           if (d > rng) continue;
           if (!los(map, u.pos[0], ha, u.pos[2], e.pos[0], topH(e), e.pos[2])) continue;
           if (sim.rng.sense() > .92 - .3 * (d / rng)) continue;
@@ -202,7 +222,7 @@ export function senseTick(sim, dt) {
 function seeProjectiles(sim, side, own) {
   const t = sim.t, map = sim.map;
   for (const p of sim.projectiles.values()) {
-    if (p.side === side || !p.alive) continue;
+    if (p.side === side || !p.alive || p.P.torpedo) continue;
     if (t - p.seen[side] < .3) continue;
     const rcs = p.P.rcs || .1, k = Math.pow(rcs, .25);
     for (let i = 0; i < own.length; i++) {
@@ -210,7 +230,11 @@ function seeProjectiles(sim, side, own) {
       if (u.aboard) continue;
       const Sd = u.def.sensors;
       let rng = 0, ha = 0;
-      if (Sd.radar && radarWorks(u)) { rng = Sd.radar.air * k * sim.weather.radar(p.pos[0], p.pos[2]); ha = antH(u, Sd.radar); }
+      if (Sd.radar && radarWorks(u)) {
+        rng = Sd.radar.air * k * sim.weather.radar(p.pos[0], p.pos[2]); ha = antH(u, Sd.radar);
+        // a look-down radar (the E-2D's) loses sea-skimmers in the sea clutter: skim = its range factor under 80 m
+        if (Sd.radar.skim && p.pos[1] < 80) rng *= Sd.radar.skim;
+      }
       if (Sd.camera && !u.off.camera && Sd.camera.range > rng) { rng = Sd.camera.range; ha = u.pos[1]; }
       if (!rng) continue;
       const dx = p.pos[0] - u.pos[0], dz = p.pos[2] - u.pos[2];
@@ -233,7 +257,7 @@ function decay(sim, side, dt) {
     const since = t - c.lastSeen;
     if (since > 4) {
       c.conf -= (c.cls ? (c.dom === 'air' ? .01 : .004) : .015) * dt;
-      c.err = Math.min(30000, c.err + (c.dom === 'air' ? 120 : c.dom === 'sea' ? 12 : c.type === 'hq' ? 0 : 6) * dt);
+      c.err = Math.min(30000, c.err + (c.dom === 'air' ? 120 : c.dom === 'sea' || c.dom === 'sub' ? 12 : c.type === 'hq' ? 0 : 6) * dt);
       if (since > (c.dom === 'air' ? 8 : 30)) { c.vel[0] *= .96; c.vel[1] *= .9; c.vel[2] *= .96; }
     }
     c.fresh = since < 6;
@@ -256,7 +280,7 @@ export function esmTick(sim) {
       const he = e.def.domain === 'air' ? e.pos[1] : e.pos[1] + (e.def.sensors.radar ? e.def.sensors.radar.h || 5 : 10);
       let best = 1e18;
       for (const u of own) {
-        if (u.aboard) continue;
+        if (u.aboard || deep(u)) continue;                        // a deep boat has no mast up to listen with
         const d = dxz(u.pos[0], u.pos[2], e.pos[0], e.pos[2]);
         if (d > er || d >= best) continue;
         if (d > horizon(he, topH(u)) * 1.15) continue;
@@ -306,12 +330,12 @@ export function resolveScans(sim) {
     const hits = [];
     // what the scan does not find inside its radius is not there: stale contacts there are dropped
     for (const [id, c] of sim.sides[s.side].contacts) {
-      if (c.dom === 'air' || c.emitting || dxz(c.pos[0], c.pos[2], s.x, s.z) > s.r) continue;
+      if (c.dom === 'air' || c.dom === 'sub' || c.emitting || dxz(c.pos[0], c.pos[2], s.x, s.z) > s.r) continue;
       const e = sim.units.get(id);
       if (!e || !e.alive || dxz(e.pos[0], e.pos[2], s.x, s.z) > s.r) { sim.sides[s.side].contacts.delete(id); if (!c.dead) sim.emit('lost', { side: s.side, unit: id, track: c.track, pos: c.pos.slice(), by: 'scan' }); }
     }
     for (const e of sim.alive(ENEMY[s.side])) {
-      if (e.aboard) continue;
+      if (e.aboard || submerged(e)) continue;                   // the scan does not reach under the water
       if (dxz(e.pos[0], e.pos[2], s.x, s.z) > s.r) continue;
       const c = detect(sim, s.side, e, 5, 1, 'scan');
       if (!c) continue;
@@ -327,7 +351,62 @@ export function resolveScans(sim) {
 /* lightning: a flash reveals everything near it to both sides */
 export function flashReveal(sim, x, z, r) {
   for (const side of ['coast', 'fleet']) for (const e of sim.alive(ENEMY[side])) {
-    if (e.aboard) continue;
+    if (e.aboard || submerged(e)) continue;
     if (dxz(e.pos[0], e.pos[2], x, z) < r) detect(sim, side, e, 150, .3, 'lightning');
+  }
+}
+
+/* ---------- SONAR (1 Hz) ----------
+   Every working sonar listens all round. Range = the sonar's range for boats (sub) or ships (ship) x how loud the
+   target is (subs.noiseOf: boats are quiet, louder fast and snorting) x the listener's own noise (a hull sonar
+   hears less at speed) x the sea state. A hit raises the contact like any sensor; a 'sonar' event (at most every
+   5 s per contact) tells the game where the side heard something. Torpedoes in the water are heard further. */
+export function sonarTick(sim) {
+  const t = sim.t, seaK = 1 - .35 * Math.min(1, (sim.weather && sim.weather.sea) || 0);
+  for (const side of ['coast', 'fleet']) {
+    const own = sim.alive(side), foes = sim.alive(ENEMY[side]);
+    let any = false;
+    for (let i = 0; i < own.length; i++) {
+      const u = own[i], So = u.def.sensors.sonar;
+      if (!So || !sonarWorks(u)) continue;
+      any = true; u.sonarT = t;
+      const v = Math.min(1, u.speed / Math.max(1, u.def.speed)), self = So.hull ? 1 - .45 * v : isSub(u) ? 1 - .3 * v : 1;
+      for (let j = 0; j < foes.length; j++) {
+        const e = foes[j];
+        if (e.aboard || e.def.domain !== 'sea') continue;
+        const sub = submerged(e), base = sub ? So.sub : So.ship;
+        if (!base) continue;
+        const rng = base * self * seaK * noiseOf(e);
+        const dx = e.pos[0] - u.pos[0], dz = e.pos[2] - u.pos[2];
+        if (Math.abs(dx) > rng || Math.abs(dz) > rng) continue;
+        const d = Math.sqrt(dx * dx + dz * dz);
+        if (d > rng) continue;
+        const f = d / rng;
+        if (sim.rng.sense() > .9 - .6 * f * f) continue;
+        const c = detect(sim, side, e, 120 + .04 * d, So.gain * (sub ? 1 : .7), 'sonar');
+        if (c && sub && c.conf >= .9) c.identified = true;          // a boat held long on sonar is known by its sound (scans cannot reach it)
+        if (c && t - (c.pingT || -1e9) >= 5) { c.pingT = t; sim.emit('sonar', { side, by: u.id, unit: e.id, track: c.track, pos: c.pos.slice(), r: Math.max(300, Math.min(2500, c.err * 1.5)) }); }
+      }
+    }
+    if (!any) continue;
+    // torpedoes are loud: heard (seen on the side's picture) while a listening unit is within reach
+    for (const p of sim.projectiles.values()) {
+      if (!p.alive || p.side === side || !p.P.torpedo) continue;
+      for (let i = 0; i < own.length; i++) {
+        const u = own[i], So = u.def.sensors.sonar;
+        if (!So || u.sonarT !== t) continue;
+        if (dxz(u.pos[0], u.pos[2], p.pos[0], p.pos[2]) < (So.sub || So.ship) * (p.P.noise || 2)) { p.seen[side] = t + .6; break; }
+      }
+    }
+  }
+}
+
+/* a torpedo launch is loud: the other side's sonars close by get a rough fix on the shooter */
+export function torpedoHeard(sim, u) {
+  const foe = ENEMY[u.side];
+  for (const v of sim.alive(foe)) {
+    const So = v.def.sensors.sonar;
+    if (!So || !sonarWorks(v)) continue;
+    if (dxz(u.pos[0], u.pos[2], v.pos[0], v.pos[2]) < (So.sub || 10000) * 1.8) { roughContact(sim, foe, u, 1500, .2, .5); return; }
   }
 }

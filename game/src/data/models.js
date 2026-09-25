@@ -11,9 +11,11 @@
      EXTRA_MODELS   key -> factory for the game's own models and the munitions:
                     transloader hq depot port lighthouse radar_hill airfield · tlc pantsir_missile
                     strike_missile essm slam hellfire aam shell mk41_can · oniks oniks_booster sm6 mk72 (HD) ·
+                    aew (E-2D) ssn (Virginia) ssk (Kilo 636.3) bal (3K60) · kh35 kalibr torpedo533 vpt_can ·
                     aliases for data/units.js: tomahawk sam57e6 aim120 (MODEL_ALIASES)
      CUT_MODELS     key -> factory for the Inspect / Anatomy cutaways (tel_cut radar_cut pantsir_cut
-                    destroyer_cut helo_cut fighter_cut drone_cut oniks_cut sm6_cut): the unit model
+                    destroyer_cut helo_cut fighter_cut drone_cut oniks_cut sm6_cut aew_cut ssn_cut ssk_cut
+                    bal_cut): the unit model
                     re-partitioned into the assemblies the exploded view pulls apart (same frame, same
                     state) plus interior parts. Interior parts carry inside:true and show(st) = !!st.xray:
                     set st.xray while the X-ray or the exploded view is on. Heavier; build lazily.
@@ -24,7 +26,9 @@
      wreckOf(model, {seed, k})   destroyed variant (st.wreck 0..1 animates it)
      TRANSLOADER    crane constants, craneSolve(hook, cable), reloadPose(u, {slot, telMid}), telMid(side), tip(st)
      LIGHTHOUSE     LAMP, beam(st) -> {origin, dirs[4]};  PORT (crane positions);  DEPOT_SLOTS() (TLCs in
-                    the magazines);  DDG (VLS cells, helo spot);  PANTSIR (tubes, turret / pitch frames) */
+                    the magazines);  DDG (VLS cells, helo spot);  PANTSIR (tubes, turret / pitch frames);
+                    SUBS (SSN VPT cells, SSK tubes, hull axes);  BAL (pack pivot, container centres, raise frame);
+                    E2D (rotodome centre, gear height) */
 const M3 = window.M3, GEO = window.GEO, HD = window.HD;
 if (!M3 || !GEO || !HD || !HD.READY_LAND || !HD.READY_SEA_AIR) throw new Error('models.js needs m3.js, geo.js, hd_land.js and hd_sea_air.js loaded first');
 const { V, R, X } = M3;
@@ -1410,6 +1414,721 @@ const droneCut = () => cutBySides(HD.drone(), 'drone_cut', { wing: 'Wing panel' 
 const oniksCut = () => cutBySides(HD.oniks(), 'oniks_cut', { wings: p => indexSplit(p, ['wingL', 'wingR'], ['Wing · folding · L', 'Wing · folding · R'], 2), fins: p => quadSplit(p, 'fin', 'Tail fin · folding') });
 const sm6Cut = () => cutBySides(HD.sm6(), 'sm6_cut', { fins: p => quadSplit(p, 'fin', 'Control fin'), mk72: p => splitPart(p, [{ name: 'mk72fins', label: 'Mk 72 fins ×4', test: pr => pr.t === 'panel' || pr.t === 'line' }, { name: 'mk72', label: 'Mk 72 booster · 4 nozzles' }]) });
 
+/* ================================================================ skins, foils (shared by the aircraft and the boats)
+   hd_sea_air's skin lookups are private there; these are the same (u: section index, v: point index round it). */
+function skAt(k, u, v) {
+  const i = Math.max(0, Math.min(k.ns - 2, Math.floor(u))), fu = Math.max(0, Math.min(1, u - i));
+  let j, j2, fv;
+  if (k.open) { const vv = Math.max(0, Math.min(k.N - 1, v)); j = Math.min(k.N - 2, Math.floor(vv)); fv = vv - j; j2 = j + 1; }
+  else { const vv = ((v % k.N) + k.N) % k.N; j = Math.floor(vv) % k.N; fv = vv - Math.floor(vv); j2 = (j + 1) % k.N; }
+  return V.lerp(V.lerp(k.S[i][j], k.S[i][j2], fv), V.lerp(k.S[i + 1][j], k.S[i + 1][j2], fv), fu);
+}
+function skN(k, u, v) {
+  const e = .08, du = V.sub(skAt(k, Math.min(k.ns - 1, u + e), v), skAt(k, Math.max(0, u - e), v));
+  const dv = V.sub(skAt(k, u, v + e), skAt(k, u, v - e)), p = skAt(k, u, v);
+  const i = Math.max(0, Math.min(k.ns - 2, Math.floor(u))), c = V.lerp(k.C[i], k.C[i + 1], Math.max(0, Math.min(1, u - i)));
+  let n = V.norm(V.cross(dv, du));
+  if (V.dot(n, V.sub(p, c)) < 0) n = V.mul(n, -1);
+  return n;
+}
+/* facing-aware outline (windows, doors, panels) on a skin through 4 (u, v) corners */
+function skQuad(k, uv, o) {
+  const n = V.norm(uv.reduce((a, [u, v]) => V.add(a, skN(k, u, v)), [0, 0, 0]));
+  return SA.fquad(uv.map(([u, v]) => V.mad(skAt(k, u, v), skN(k, u, v), .015)), n, o);
+}
+/* thin slab from a planar quad (wings, fins, planes): both faces sampled, edges in wire */
+function slab2(q, th, o) {
+  const n = V.norm(V.cross(V.sub(q[1], q[0]), V.sub(q[3], q[0]))), t = Array.isArray(th) ? th : [th, th, th, th];
+  return hex([...q.map((p, i) => V.mad(p, n, -t[i] / 2)), ...q.map((p, i) => V.mad(p, n, t[i] / 2))], O({ skip: [2, 3, 4, 5], bottom: true }, o));
+}
+/* NACA 00xx thickness form normalised to 1 at its thickest (u = 0 leading edge .. 1 trailing edge) */
+const naca = u => { u = sat(u); return Math.max(0, 2.969 * Math.sqrt(u) - 1.26 * u - 3.516 * u * u + 2.843 * u * u * u - 1.036 * u * u * u * u); };
+/* horizontal foil outline at height y (sails seen from above): N points, leading edge zl, trailing edge zt, half width w */
+function foilSec(y, zl, zt, w, N) {
+  const out = [];
+  for (let j = 0; j < N; j++) {
+    const th = j / N * TAU, u = (1 - Math.cos(th)) / 2, s = Math.sin(th) >= 0 ? 1 : -1;
+    out.push([s * w * naca(u), y, zl + (zt - zl) * u]);
+  }
+  return out;
+}
+/* flat cap over a closed horizontal foil section (sail tops): dots only, facing up */
+function foilCap(S, o) {
+  const P = [], N = S.length;
+  // point j (one side) pairs with N - j (the other); quads between neighbouring pairs, leading to trailing edge
+  for (let j = 0; j < N / 2; j++) P.push(SA.plate([S[j], S[j + 1], S[(N - j - 1) % N], S[(N - j) % N]], [0, 1, 0], o));
+  return P;
+}
+/* a surface of revolution along +Z sampled from a radius function r(z), z0..z1, n stations */
+function revZ(ax, rf, z0, z1, n, o, zs) {
+  const st = [], Z = zs || Array.from({ length: n + 1 }, (_, i) => z0 + (z1 - z0) * i / n);
+  for (const z of Z) st.push([z - z0, Math.max(.001, rf(z))]);
+  return lathe([0, ax, z0], FZ, st, o);
+}
+
+/* ================================================================ E-2D Advanced Hawkeye (carrier AEW)
+   17.60 m long, 24.56 m span (8.94 m folded), 5.58 m high on its gear. AN/APY-9 radar in a Ø 7.32 m rotodome on
+   a pylon over the wing (turns ~6 rpm), two T56-A-427A turboprops with 8-blade NP2000 propellers (Ø 4.11 m), four
+   vertical tails on a dihedral tailplane, outer wings that fold back along the fuselage (Sto-Wing).
+   Origin on the fuselage axis at mid-length, nose +Z, gear up (the axis stands 2.1 m over the deck on the gear).
+   state: dome (rad), prop (rad), fold (0 spread .. 1 folded). */
+const E2 = { DOME_C: [0, 3.1, -2.1], DOME_R: 3.66, DOME_T: .38, NAC_X: 3.72, NAC_Y: .45, PROP_Z: 4.34, PROP_R: 2.055, FOLD_X: 4.45, FOLD_Z: -.55, TIP_X: 12.28, GEAR_H: 2.1 };
+const e2LE = x => 1.7 - (Math.abs(x) - 1.1) * .115, e2TE = x => -1.9 + (Math.abs(x) - 1.1) * .05;
+const e2Y = x => 1.12 + (Math.abs(x) - 1.1) * .04, e2TH = x => .5 - (Math.abs(x) - 1.1) * .025;
+/* the outer panel's fold: about its span first (leading edge down), then swung aft about the hinge */
+const e2FoldXf = (sx, f) => about(R.mul(R.y(sx * f * 1.62), R.x(f * PI / 2)), [sx * E2.FOLD_X, e2Y(E2.FOLD_X), E2.FOLD_Z]);
+const e2Dome = rho => Math.max(.035, E2.DOME_T * Math.pow(Math.max(0, 1 - (rho / E2.DOME_R) ** 2), .72));
+function e2WingPanel(sx, x0, x1, P) {
+  const S = p => [sx * p[0], p[1], p[2]];
+  let q = [[x0, e2Y(x0), e2LE(x0)], [x1, e2Y(x1), e2LE(x1)], [x1, e2Y(x1), e2TE(x1)], [x0, e2Y(x0), e2TE(x0)]].map(S);
+  let th = [e2TH(x0), e2TH(x1), e2TH(x1) * .45, e2TH(x0) * .45];
+  if (V.cross(V.sub(q[1], q[0]), V.sub(q[3], q[0]))[1] < 0) { q = [q[0], q[3], q[2], q[1]]; th = [th[0], th[3], th[2], th[1]]; }
+  P.push(slab2(q, th, { bottom: false }));
+  // hinge lines on the upper skin: flaps / ailerons at 74 % chord, the front spar at 18 %
+  const top = (x, f) => S([x, e2Y(x) + mix(e2TH(x), e2TH(x) * .45, f) / 2 + .012, mix(e2LE(x), e2TE(x), f)]);
+  P.push(line([top(x0 + .08, .74), top(x1 - .08, .74)], fn({ w: .45, pts: false })));
+  P.push(line([top(x0 + .08, .18), top(x1 - .08, .18)], fn({ w: .3, pts: false })));
+  // leading edge (the slab's edge reads as a hairline; this keeps it bright)
+  P.push(line([S([x0, e2Y(x0), e2LE(x0) + .02]), S([x1, e2Y(x1), e2LE(x1) + .02])], { w: .7, pts: false }));
+}
+const E2_GEO = memo(() => {
+  const N = 16, FU = [], WG = [], OL = [], OR = [], NL = [], NR = [], PY = [], DM = [], TL = [], HK = [];
+  // fuselage: z, half width, bottom, top, exponent
+  const ST = [[8.8, .28, -.5, -.08, 2], [8.62, .6, -.76, .28, 2.1], [8.22, .86, -.95, .6, 2.3], [7.5, 1.03, -1.07, .9, 2.5], [6.45, 1.13, -1.14, 1.12, 2.6],
+    [5.3, 1.17, -1.18, 1.22, 2.8], [3.2, 1.18, -1.2, 1.22, 2.9], [.4, 1.17, -1.2, 1.22, 2.9], [-1.9, 1.14, -1.12, 1.2, 2.8], [-3.6, 1.02, -.86, 1.17, 2.6],
+    [-5.2, .84, -.46, 1.12, 2.4], [-6.6, .62, -.02, 1.07, 2.2], [-7.8, .42, .34, 1.02, 2], [-8.8, .2, .62, .94, 2]];
+  const K = SA.skin(ST.map(q => SA.sec(q[0], q[1], q[2], q[3], q[4], N)));
+  FU.push(...SA.loft(K, { lines: [0, 2, 4, 6, 8, 10, 12, 14], fineJ: [2, 6, 10, 14], rings: [3, 5, 8, 11], al: .85, ral: .4 }));
+  // flight deck glazing: split windscreen, quarter panes, side windows; the mission crew's small windows
+  FU.push(skQuad(K, [[3.25, -.55], [3.25, .55], [4.05, .6], [4.05, -.6]], { al: .8 }));
+  for (const m of [1, -1]) {
+    const vv = v => m > 0 ? v : N - v;
+    FU.push(skQuad(K, [[3.3, vv(.75)], [3.3, vv(2.3)], [4.1, vv(2.5)], [4.1, vv(.8)]], { al: .8 }));
+    FU.push(skQuad(K, [[4.25, vv(2.2)], [4.25, vv(3.5)], [5.05, vv(3.5)], [5.05, vv(2.3)]], { al: .6 }));
+    for (const u of [6.1, 6.9]) FU.push(skQuad(K, [[u, vv(3.3)], [u, vv(3.8)], [u + .35, vv(3.8)], [u + .35, vv(3.3)]], fn({ al: .45 })));
+    FU.push(skQuad(K, [[4.6, vv(4.4)], [4.6, vv(6.4)], [5.4, vv(6.4)], [5.4, vv(4.4)]], fn({ al: .3 })));            // crew door / hatch
+    FU.push(box([m * .06, 1.2, 4.6 - (m > 0 ? 0 : 3.4)], [m * .12, 1.52, 4.1 - (m > 0 ? 0 : 3.4)], fn()));           // blade antennas
+  }
+  FU.push(skQuad(K, [[3.0, 7.4], [3.0, 8.6], [4.6, 8.6], [4.6, 7.4]], fn({ al: .4 })));                              // nose gear doors
+  FU.push(skQuad(K, [[7.2, 7.2], [7.2, 8.8], [8.4, 8.8], [8.4, 7.2]], fn({ al: .3 })));
+  for (const z of [1.6, -3.4]) FU.push(box([-.05, -1.46, z - .35], [.05, -1.18, z]));                             // ventral blades
+  // wing centre section across the fuselage top, inner panels to the fold, nacelle junctions
+  WG.push(slab2([[-1.1, e2Y(1.1), e2LE(1.1)], [1.1, e2Y(1.1), e2LE(1.1)], [1.1, e2Y(1.1), e2TE(1.1)], [-1.1, e2Y(1.1), e2TE(1.1)]], [e2TH(1.1), e2TH(1.1), e2TH(1.1) * .45, e2TH(1.1) * .45], { bottom: false }));
+  for (const sx of [-1, 1]) {
+    e2WingPanel(sx, 1.1, E2.FOLD_X, WG);
+    // fold joint: hinge fairing on the upper skin
+    WG.push(box([sx * E2.FOLD_X - .06, e2Y(E2.FOLD_X) + .1, e2TE(E2.FOLD_X) + .2], [sx * E2.FOLD_X + .06, e2Y(E2.FOLD_X) + .24, e2LE(E2.FOLD_X) - .3], fn()));
+    e2WingPanel(sx, E2.FOLD_X, E2.TIP_X, sx > 0 ? OR : OL);
+    // tip: rounded cap, navigation light
+    const O2 = sx > 0 ? OR : OL, xt = E2.TIP_X;
+    O2.push(lathe([sx * xt, e2Y(xt), e2TE(xt)], FZ, [[0, .04], [.2, e2TH(xt) * .45], [e2LE(xt) - e2TE(xt) - .1, e2TH(xt) * .5], [e2LE(xt) - e2TE(xt), .04]], { n: 8, gen: 2, rings: [1] }));
+    O2.push(line([[sx * (xt - .2), e2Y(xt), e2LE(xt) - .2], [sx * (xt + .05), e2Y(xt), e2LE(xt) - .4]], fn({ w: .5 })));
+  }
+  // nacelles: skins under the wing at ±3.72 m, chin intakes, exhaust stubs, main gear doors
+  const NS = [[4.1, .36, .08, .82, 2], [3.75, .48, -.1, .98, 2.2], [3.05, .6, -.5, 1.16, 2.4], [1.6, .64, -.8, 1.22, 2.7], [-.4, .62, -.86, 1.2, 2.7],
+    [-2.4, .54, -.68, 1.14, 2.5], [-3.9, .34, -.2, 1.04, 2.2], [-4.9, .12, .36, .92, 2]];
+  for (const sx of [-1, 1]) {
+    const P = sx > 0 ? NR : NL, xc = sx * E2.NAC_X;
+    const KN = SA.skin(NS.map(q => SA.sec(q[0], q[1], q[2], q[3], q[4], 12, xc)));
+    P.push(...SA.loft(KN, { lines: [0, 3, 6, 9], rings: [1, 3, 5], al: .8, ral: .4 }));
+    P.push(hex([[xc - .26, -.5, 3.3], [xc + .26, -.5, 3.3], [xc + .26, -.5, 3.95], [xc - .26, -.5, 3.95], [xc - .2, -.2, 3.3], [xc + .2, -.2, 3.3], [xc + .2, -.2, 3.95], [xc - .2, -.2, 3.95]], { bottom: true }));
+    P.push(ringW([xc, -.35, 3.96], FZ, .19, fn({ n: 12 })));
+    P.push(cyl([xc + sx * .5, .55, -1.2], [xc + sx * .74, .5, -2.1], .13, { n: 10, gen: 3 }));                           // exhaust
+    P.push(ringW([xc + sx * .74, .5, -2.1], V.norm([sx * .24, -.05, -.9]), .15, fn({ n: 10 })));
+    for (const dx of [-.22, .22]) P.push(line([[xc + dx, -.86, 1.9], [xc + dx, -.88, -1.9]], fn({ w: .45, pts: false })));
+    P.push(line([[xc - .22, -.86, 1.9], [xc + .22, -.86, 1.9]], fn({ w: .45, pts: false })));
+  }
+  // rotodome (dome-local: centre at the origin): an airfoil section turned about Y, rim band, the strongback
+  // across the middle between the two radar windows (it shows the dome turning), IFF edge fairing
+  const rh = [0, .5, 1.0, 1.5, 2.0, 2.45, 2.85, 3.18, 3.42, 3.58, 3.66];
+  const dst = [];
+  for (const r of rh) dst.push([E2.DOME_T - e2Dome(r), r]);
+  for (let i = rh.length - 1; i >= 0; i--) dst.push([E2.DOME_T + e2Dome(rh[i]), rh[i]]);
+  DM.push(lathe([0, -E2.DOME_T, 0], FY, dst, { n: 56, gen: 14, rings: [6, 9, 10, 11, 12, 15] }));
+  for (const zs of [-.46, .46]) for (const up of [1, -1]) {
+    const pts = [];
+    for (let x = -3.5; x <= 3.501; x += .25) { const rho = Math.hypot(x, zs); if (rho < E2.DOME_R - .05) pts.push([x, up * (e2Dome(rho) + .012), zs]); }
+    DM.push(line(pts, { w: .75 }));
+  }
+  DM.push(hex([[3.3, -.06, -.5], [3.66, -.03, -.5], [3.66, -.03, .5], [3.3, -.06, .5], [3.3, .06, -.5], [3.66, .03, -.5], [3.66, .03, .5], [3.3, .06, .5]], fn()));
+  DM.push(lathe([0, -E2.DOME_T - .08, 0], FY, [[0, .55], [.1, .5]], fn({ n: 16, gen: 0, rings: [0, 1] })));        // turntable
+  // pylon: a faired strut from the fuselage top to the dome
+  const dc = E2.DOME_C, yb = dc[1] - E2.DOME_T + .02;
+  PY.push(hex([[-.24, 1.1, -3.6], [.24, 1.1, -3.6], [.24, 1.1, -.7], [-.24, 1.1, -.7], [-.18, yb, dc[2] - .8], [.18, yb, dc[2] - .8], [.18, yb, dc[2] + .8], [-.18, yb, dc[2] + .8]]));
+  PY.push(line([[0, 1.14, -.62], [0, yb, dc[2] + .88]], { w: .8, pts: false }));
+  PY.push(line([[0, 1.14, -3.68], [0, yb, dc[2] - .88]], { w: .6, pts: false }));
+  // tailplane with dihedral, four fins (two at the tips), rudder hinges
+  const tY = x => .98 + Math.abs(x) * .19, tLE = x => -6.35 - Math.abs(x) * .12, tTE = -8.45;
+  for (const sx of [-1, 1]) {
+    const S = p => [sx * p[0], p[1], p[2]];
+    let q = [[.3, tY(.3), tLE(.3)], [4.0, tY(4.0), tLE(4.0)], [4.0, tY(4.0), tTE], [.3, tY(.3), tTE]].map(S);
+    if (V.cross(V.sub(q[1], q[0]), V.sub(q[3], q[0]))[1] < 0) q = [q[0], q[3], q[2], q[1]];
+    TL.push(slab2(q, [.18, .1, .06, .1], { bottom: false }));
+    TL.push(line([S([.4, tY(.4) + .06, -7.8]), S([3.9, tY(3.9) + .05, -7.9])], fn({ w: .4, pts: false })));
+    for (const xf of [1.55, 3.95]) {
+      const x = sx * xf, y0 = tY(xf) - .5, y1 = 3.42;
+      TL.push(slab2([[x, y0, -6.55], [x, y1, -7.6], [x, y1, -8.62], [x, y0, -8.6]], [.16, .07, .05, .1]));
+      TL.push(line([[x + sx * .05, y0 + .5, -7.95], [x + sx * .04, y1 - .1, -8.05]], fn({ w: .4, pts: false })));
+      TL.push(lathe([x, y1, -8.1], FY, [[0, .04], [.12, .01]], fn({ n: 6, gen: 0, rings: [0] })));
+    }
+  }
+  // arresting hook under the tail, its fairing; catapult launch bar on the nose gear door
+  HK.push(line([[0, .52, -6.8], [0, .3, -8.2], [0, .2, -8.95]], { w: .9 }));
+  HK.push(box([-.07, .14, -9.05], [.07, .26, -8.85]));
+  HK.push(box([-.18, .5, -7.0], [.18, .62, -6.5], fn()));
+  HK.push(line([[0, -1.24, 4.5], [0, -1.28, 3.3]], fn({ w: .6 })));
+  return { FU, WG, OL, OR, NL, NR, PY, DM, TL, HK, K };
+});
+/* the propellers (dyn: turn with st.prop): 8 blades, spinner, de-ice boot line */
+function e2Prop(sx, st) {
+  const c = [sx * E2.NAC_X, E2.NAC_Y, E2.PROP_Z], P = [];
+  P.push(blades(c, FZ, 8, .36, E2.PROP_R, { rot: (st.prop || 0) + sx * .2, chord: .62, taper: .55, pitch: .32, edge: .85 }));
+  P.push(lathe([c[0], c[1], 4.1], FZ, [[0, .37], [.3, .33], [.56, .22], [.72, .08], [.78, 0]], { n: 18, gen: 4, rings: [0, 1] }));
+  P.push(ringW(c, FZ, .38, fn({ n: 16, al: .6 })));
+  return P;
+}
+function aew() {
+  const g = E2_GEO(), fold = st => sat(st.fold || 0);
+  const pl = st => e2Prop(-1, st), pr = st => e2Prop(1, st);
+  return {
+    name: 'aew', L: 17.6, DOME_C: E2.DOME_C.slice(), NAC: [[-E2.NAC_X, E2.NAC_Y, E2.PROP_Z], [E2.NAC_X, E2.NAC_Y, E2.PROP_Z]], GEAR_H: E2.GEAR_H,
+    parts: [
+      { name: 'fuselage', label: 'E-2D Advanced Hawkeye · crew 5', prims: g.FU },
+      { name: 'wing', label: 'Wing centre section', prims: g.WG },
+      { name: 'outerL', label: 'Outer wing · folds · L', prims: g.OL, xf: st => e2FoldXf(-1, fold(st)) },
+      { name: 'outerR', label: 'Outer wing · folds · R', prims: g.OR, xf: st => e2FoldXf(1, fold(st)) },
+      { name: 'nacelleL', label: 'T56-A-427A nacelle · L', prims: g.NL },
+      { name: 'nacelleR', label: 'T56-A-427A nacelle · R', prims: g.NR },
+      { name: 'propL', label: 'NP2000 propeller · 8 blades · L', prims: pl({}), dyn: pl },
+      { name: 'propR', label: 'NP2000 propeller · 8 blades · R', prims: pr({}), dyn: pr },
+      { name: 'pylon', label: 'Rotodome pylon', prims: g.PY },
+      { name: 'dome', label: 'Rotodome · AN/APY-9 · Ø 7.32 m', prims: g.DM, xf: st => X.make(R.y(st.dome || 0), E2.DOME_C) },
+      { name: 'tail', label: 'Tailplane · four fins', prims: g.TL },
+      { name: 'hook', label: 'Arresting hook', prims: g.HK },
+    ],
+  };
+}
+/* cutaway: + the APY-9 array in the dome (turns with it), the T56 cores, the crew stations */
+function aewCut() {
+  const M = aew(), dc = E2.DOME_C;
+  const AN = [];
+  // UHF electronically scanned array standing on edge across the dome, IFF array on its back face
+  AN.push(box([-3.2, -.24, -.05], [3.2, .24, .05]));
+  for (let k = 0; k <= 18; k++) { const x = -3.1 + k * 6.2 / 18; AN.push(line([[x, -.22, .06], [x, .22, .06]], fn({ w: .45 }))); }
+  AN.push(box([-2.6, -.12, -.12], [2.6, .12, -.05], fn()));
+  AN.push(cyl([0, -.34, 0], [0, -.24, 0], .3, { n: 14, gen: 0, caps: true }));
+  const EN = [];
+  for (const sx of [-1, 1]) {
+    const xc = sx * E2.NAC_X, y = E2.NAC_Y + .05;
+    EN.push(lathe([xc, y, -2.0], FZ, [[0, .18], [.3, .3], [1.7, .34], [2.5, .3], [3.4, .34], [4.3, .3], [5.3, .2]], { n: 16, gen: 6, rings: [1, 3, 5] }));        // T56 core
+    EN.push(box([xc - .32, y - .35, 3.3], [xc + .32, y + .35, 3.9]));                                           // reduction gearbox
+    EN.push(cyl([xc, y, 3.9], [xc, E2.NAC_Y, 4.12], .12, { n: 10, gen: 0 }));
+  }
+  const CB = [];
+  CB.push(box([-1.0, -.62, 5.2], [1.0, -.54, 7.2]));                                                           // flight deck floor
+  for (const sx of [-1, 1]) { CB.push(box([sx * .7 - .25, -.54, 5.6], [sx * .7 + .25, .35, 6.1])); CB.push(box([sx * .7 - .3, .1, 6.6], [sx * .7 + .3, .55, 7.1], fn())); }
+  CB.push(box([-1.05, -.72, -2.8], [1.05, -.64, 4.6]));                                                       // cabin floor
+  for (const z of [-.6, .6, 1.8]) { CB.push(box([.25, -.64, z - .5], [1.0, .75, z + .45])); CB.push(box([-.35, -.64, z - .25], [.1, .1, z + .2], fn())); }
+  const parts = M.parts.map(p => O(p));
+  parts.push(O({ name: 'antenna', label: 'AN/APY-9 · UHF electronically scanned array', prims: AN, xf: st => X.make(R.y(st.dome || 0), dc) }, hidden));
+  parts.push(O({ name: 'engines', label: 'T56-A-427A turboprops ×2 · 5 100 shp', prims: EN }, hidden));
+  parts.push(O({ name: 'cabin', label: 'Flight deck · mission crew stations ×3', prims: CB }, hidden));
+  return O(M, { name: 'aew_cut', parts });
+}
+
+/* ================================================================ SSN Virginia class · Block III
+   114.9 m, Ø 10.4 m, 7 800 t submerged. Sail with a leading-edge fillet and non-hull-penetrating masts (two
+   photonics masts instead of periscopes), Large Aperture Bow, retractable bow planes, two Virginia Payload Tubes
+   (Ø 2.2 m, six cells each) forward of the sail, three wide-aperture flank arrays a side, cruciform stern with
+   end-plated stern planes, pump-jet propulsor. Origin midships on the surfaced waterline (hull axis 4.1 m under it),
+   bow +Z. state: mast (0 housed .. 1 raised), vptA / vptB (hatch open 0..1), prop (rad). */
+const VA = { R: 5.2, AX: -4.1, ZB: 57.45, ZBOW: 44, ZAFT: -18, ZDUCT: [-55.2, -50.9], SAIL: [32.6, 22.6, 1.3], SAIL_TOP: 7.9, VPT_Z: [46.2, 42.6], VPT_R: 1.2, CELL_R: .62, MAST_UP: 4.6 };
+function vaR(z) {
+  if (z >= VA.ZBOW) { const u = Math.min(1, (z - VA.ZBOW) / (VA.ZB - VA.ZBOW)); return VA.R * Math.sqrt(Math.max(0, 1 - Math.pow(u, 2.2))); }
+  if (z >= VA.ZAFT) return VA.R;
+  const u = Math.min(1, (VA.ZAFT - z) / 34); return VA.R - (VA.R - 1.3) * Math.pow(u, 1.6);
+}
+const vaTop = z => VA.AX + vaR(z);
+/* VPT cell tops (ship frame), 0..5 the forward tube, 6..11 the after one */
+const vaCell = i => { const t = i < 6 ? 0 : 1, a = (i % 6) / 6 * TAU + PI / 6, z = VA.VPT_Z[t]; return [Math.sin(a) * VA.CELL_R, vaTop(z) - .35, z + Math.cos(a) * VA.CELL_R]; };
+/* masts on the sail top: x, z, radius, height raised, head */
+const VA_MASTS = [[.42, 30.3, .26, 4.6, 'eo'], [-.42, 30.3, .26, 4.6, 'eo'], [0, 28.4, .3, 4.2, 'rdr'], [.45, 26.4, .15, 4.4, 'whip'], [-.45, 26.4, .15, 4.4, 'whip'], [0, 24.3, .28, 3.4, 'snort']];
+const VA_GEO = memo(() => {
+  const BW = [], HL = [], SN = [], SL = [], BP = [], SP = [], AR = [], PU = [];
+  const lat = { n: 56, gen: 16 };
+  // hull: bow (Large Aperture Bow), parallel midbody, tapering stern to the propulsor hub
+  BW.push(revZ(VA.AX, vaR, VA.ZBOW, VA.ZB, 0, O(lat, { rings: [0, 3, 6, 8, 10] }), [44, 46, 48, 50, 51.5, 53, 54.3, 55.4, 56.2, 56.8, 57.2, 57.45]));
+  for (const z of [48.5, 53.5]) BW.push(ringW([0, VA.AX, z], FZ, vaR(z) + .02, fn({ n: 40, al: .5 })));      // LAB window seams
+  HL.push(revZ(VA.AX, vaR, VA.ZAFT, VA.ZBOW, 0, O(lat, { rings: [0, 2, 4, 6] }), [-18, -8, 2, 12, 22, 33, 44]));
+  SN.push(revZ(VA.AX, vaR, -52, VA.ZAFT, 0, O(lat, { rings: [0, 3, 6, 9] }), [-52, -50, -48, -45.5, -43, -40, -36.5, -32.5, -28, -23, -18]));
+  // deck: escape trunks, the lock-out trunk, the weapons shipping hatch (outlines on the hull top)
+  for (const [z, r] of [[12.5, .55], [-26.5, .55], [36.8, .5]]) HL.push(circle([0, vaTop(z) + .03, z], FY, r, 18, fn({ w: .6, pts: false })));
+  HL.push(line([[0, vaTop(0) + .02, 20.5], [0, vaTop(0) + .02, -14]], fn({ w: .3, pts: false })));
+  // sail: foil sections from inside the hull to the top; the fillet swells the base forward
+  const [zl, zt, w] = VA.SAIL, SS = [[.9, zl + 3.6, zt - .8, w + .32], [1.9, zl + 1.6, zt - .5, w + .12], [3.0, zl + .5, zt - .2, w + .03], [5.5, zl + .1, zt - .05, w], [VA.SAIL_TOP, zl, zt, w]];
+  const KS = SA.skin(SS.map(q => foilSec(q[0], q[1], q[2], q[3], 20)));
+  SL.push(...SA.loft(KS, { lines: [0, 3, 5, 7, 10, 13, 15, 17], fineJ: [3, 7, 13, 17], rings: [1, 4], al: .9, ral: .55 }));
+  const top = foilSec(VA.SAIL_TOP, zl, zt, w, 20);
+  SL.push(...foilCap(top));
+  for (const [x, z, r] of VA_MASTS) SL.push(circle([x, VA.SAIL_TOP + .02, z], FY, r + .06, 12, fn({ w: .55, pts: false })));
+  SL.push(SA.fquad([[-.5, VA.SAIL_TOP + .01, zl - .3], [.5, VA.SAIL_TOP + .01, zl - .3], [.5, VA.SAIL_TOP + .01, zl - 1.6], [-.5, VA.SAIL_TOP + .01, zl - 1.6]], FY, fn({ al: .6 })));   // bridge cockpit
+  for (const s of [-1, 1]) SL.push(line([[s * w * .98, 5.6, zl - 1.8], [s * w * .98, 5.6, zl - 4.0]], fn({ w: .35, pts: false })));              // bridge access door rails
+  // bow planes (retractable, high on the bow)
+  for (const s of [-1, 1]) {
+    const z = 45.6, y = VA.AX + 1.9, x0 = Math.sqrt(Math.max(0, vaR(z) ** 2 - 1.9 ** 2)) - .15;
+    BP.push(slab2([[s * x0, y, z + 1.0], [s * (x0 + 2.3), y, z + .7], [s * (x0 + 2.3), y, z - .6], [s * x0, y, z - 1.0]], [.32, .18, .12, .22]));
+    BP.push(line([[s * (x0 + .1), y + .12, z - .45], [s * (x0 + 2.2), y + .08, z - .3]], fn({ w: .4, pts: false })));
+  }
+  // stern: upper and lower rudders, stern planes with end plates
+  const rT = z => vaR(z) - .12;
+  for (const s of [1, -1]) {
+    SP.push(slab2([[0, VA.AX + s * rT(-40.5), -40.5], [0, VA.AX + s * 6.9, -43.4], [0, VA.AX + s * 6.9, -48.3], [0, VA.AX + s * rT(-47.9), -47.9]], [.5, .22, .12, .3]));
+    SP.push(line([[.14, VA.AX + s * (rT(-46.6) + .1), -46.6], [.14, VA.AX + s * 6.7, -46.9]], fn({ w: .4, pts: false })));
+    SP.push(slab2([[s * rT(-40.5), VA.AX, -40.5], [s * 6.6, VA.AX, -43.5], [s * 6.6, VA.AX, -48.3], [s * rT(-47.9), VA.AX, -47.9]], [.5, .22, .12, .3]));
+    SP.push(line([[s * (rT(-46.6) + .1), VA.AX + .14, -46.6], [s * 6.5, VA.AX + .12, -46.9]], fn({ w: .4, pts: false })));
+    SP.push(slab2([[s * 6.62, VA.AX - 1.35, -43.4], [s * 6.62, VA.AX + 1.35, -43.4], [s * 6.62, VA.AX + 1.35, -48.4], [s * 6.62, VA.AX - 1.35, -48.4]], [.16, .16, .1, .1]));
+  }
+  // wide-aperture flank arrays, three a side
+  for (const s of [-1, 1]) for (const [z0, z1] of [[-15, -7.5], [-2, 5.5], [9, 16.5]]) {
+    AR.push(box([s > 0 ? VA.R - .15 : -VA.R - .12, VA.AX - 1.65, z0], [s > 0 ? VA.R + .12 : -VA.R + .15, VA.AX + 1.65, z1], { bottom: true }));
+    for (let k = 1; k < 5; k++) AR.push(line([[s * (VA.R + .13), VA.AX - 1.6, z0 + k * (z1 - z0) / 5], [s * (VA.R + .13), VA.AX + 1.6, z0 + k * (z1 - z0) / 5]], fn({ w: .3, pts: false })));
+  }
+  // propulsor: duct on its struts round the hub (the rotor turns: e2-style dyn below)
+  const [d0, d1] = VA.ZDUCT, dl = d1 - d0;
+  PU.push(lathe([0, VA.AX, d0], FZ, [[0, 2.02], [.5, 2.25], [dl * .7, 2.31], [dl - .25, 2.18], [dl, 2.0]], { n: 44, gen: 12, rings: [0, 2, 4] }));
+  PU.push(lathe([0, VA.AX, d0], FZ, [[0, 1.93], [dl, 1.93]], { n: 44, gen: 0, rings: [], sil: false }));
+  PU.push(ringW([0, VA.AX, d1], FZ, 1.96, { n: 44 }));
+  PU.push(lathe([0, VA.AX, -52], [0, 0, -1], [[0, 1.3], [1.4, 1.14], [3.0, .88], [4.4, .48], [5.2, .14], [5.45, 0]], { n: 32, gen: 8, rings: [0, 2, 4] }));
+  PU.push(blades([0, VA.AX, -51.6], FZ, 9, 1.22, 1.96, { chord: .16, taper: 1.6, pitch: 1.1, edge: .6 }));   // stator vanes / duct struts
+  return { BW, HL, SN, SL, BP, SP, AR, PU, KS };
+});
+/* masts (dyn, st.mast 0 housed .. 1 raised): only what stands above the sail top is drawn */
+function vaMasts(st) {
+  const m = st.mast === undefined ? 1 : sat(st.mast), P = [], y0 = VA.SAIL_TOP;
+  if (m < .02) return P;
+  for (const [x, z, r, h, kind] of VA_MASTS) {
+    const H = h * m, y1 = y0 + H;
+    P.push(lathe([x, y0, z], FY, [[0, r], [Math.max(.05, H - .5), r * .9], [H, r * .75]], { n: 12, gen: 3, rings: [1] }));
+    if (kind === 'eo') { P.push(lathe([x, y1, z], FY, [[0, r * 1.3], [.5, r * 1.3], [.62, r * .5], [.66, 0]], { n: 14, gen: 4, rings: [0, 1] })); P.push(ringW([x, y1 + .3, z + r * 1.3], FZ, .1, fn({ n: 10 }))); }
+    else if (kind === 'rdr') { P.push(box([x - .55, y1 - .2, z - .12], [x + .55, y1 + .3, z + .12])); P.push(lathe([x, y1 + .3, z], FY, [[0, .18], [.4, .1]], fn({ n: 10, gen: 2 }))); }
+    else if (kind === 'snort') P.push(box([x - .4, y1 - .1, z - .35], [x + .4, y1 + .5, z + .35]));
+    else P.push(line([[x, y1, z], [x, y1 + 1.4, z]], { w: .6 }));
+  }
+  return P;
+}
+/* the VPT hatches (dyn, st.vptA / st.vptB 0..1): hinged on the starboard edge; the six cell tops show when open */
+function vaVpt(st) {
+  const P = [];
+  VA.VPT_Z.forEach((z, t) => {
+    const f = sat(t ? st.vptB || 0 : st.vptA || 0), y = vaTop(z) + .02, hinge = [VA.VPT_R, y, z];
+    const Tm = f > 0 ? about(R.z(-f * 1.9), hinge) : null;
+    const hatch = [lathe([0, y - .06, z], FY, [[0, VA.VPT_R], [.12, VA.VPT_R], [.14, .9], [.16, 0]], { n: 32, gen: 0, rings: [0, 1], caps: true }),
+      line([[-.6, y + .1, z], [.6, y + .1, z]], fn({ w: .4, pts: false })), box([VA.VPT_R - .12, y, z - .5], [VA.VPT_R + .08, y + .15, z + .5], fn())];
+    P.push(...(Tm ? tps(Tm, hatch) : hatch));
+    P.push(ringW([0, y - .05, z], FY, VA.VPT_R + .08, { n: 32 }));
+    if (f > .05) for (let i = t * 6; i < t * 6 + 6; i++) { const c = vaCell(i); P.push(ringW([c[0], c[1] + .2, c[2]], FY, .31, { n: 14 })); P.push(lathe([c[0], c[1] - .2, c[2]], FY, [[0, .28], [.25, .28]], fn({ n: 12, gen: 0, caps: true }))); }
+  });
+  return P;
+}
+function vaRotor(st) { return [blades([0, VA.AX, -53.4], [0, 0, -1], 7, 1.1, 1.9, { rot: st.prop || 0, chord: .42, taper: .8, pitch: .7, edge: .8 })]; }
+function ssn() {
+  const g = VA_GEO();
+  return {
+    name: 'ssn', L: 114.9, AX: VA.AX, SAIL_TOP: VA.SAIL_TOP, cell: vaCell,
+    parts: [
+      { name: 'bow', label: 'Large Aperture Bow · sonar', prims: g.BW },
+      { name: 'hull', label: 'Hull · Ø 10.4 m · 114.9 m', prims: g.HL },
+      { name: 'stern', label: 'Stern', prims: g.SN },
+      { name: 'sail', label: 'Sail · leading-edge fillet', prims: g.SL },
+      { name: 'masts', label: 'Photonics masts ×2 · mast array', prims: vaMasts({}), dyn: vaMasts, show: st => (st.mast === undefined ? 1 : st.mast) > .02 },
+      { name: 'vpt', label: 'Virginia Payload Tubes ×2 · hatches', prims: vaVpt({}), dyn: vaVpt },
+      { name: 'bowPlanes', label: 'Bow planes · retractable', prims: g.BP },
+      { name: 'sternPlanes', label: 'Stern planes · end plates · rudders', prims: g.SP },
+      { name: 'arrays', label: 'Wide-aperture flank arrays ×6', prims: g.AR },
+      { name: 'propulsor', label: 'Pump-jet propulsor', prims: g.PU.concat(vaRotor({})), dyn: st => g.PU.concat(vaRotor(st)) },
+    ],
+  };
+}
+/* cutaway: + torpedo room (4 tubes, racks), the two VPTs, control room, reactor compartment, engine room, bow array */
+function ssnCut() {
+  const M = ssn(), AX = VA.AX;
+  const TR = [];
+  // four 533 mm tubes: breeches aft at the lower level, angled outboard to muzzles on the bow flanks
+  for (const s of [-1, 1]) for (const y of [AX - 1.5, AX - 2.6]) {
+    const a = [s * .85, y, 30.5], b = [s * (Math.sqrt(Math.max(0, vaR(40.5) ** 2 - (y - AX) ** 2)) - .35), y, 40.5];
+    TR.push(cyl(a, b, .36, { n: 14, gen: 4, caps: true }));
+    TR.push(lathe(a, V.norm(V.sub(a, b)), [[0, .42], [.5, .42]], { n: 14, gen: 0, caps: true, rings: [0, 1] }));    // breech door
+  }
+  TR.push(box([-3.7, AX - 3.25, 20.5], [3.7, AX - 3.15, 39.5], { ds: 2.6 }));                                      // torpedo room deck
+  for (const s of [-1, 1]) for (const x of [.8, 1.75, 2.7]) TR.push(box([s * x - .32, AX - 3.15, 21.8], [s * x + .32, AX - 3.0, 29.2], fn()));   // skids
+  const VT = [];
+  VA.VPT_Z.forEach(z => { VT.push(lathe([0, AX - 4.6, z], FY, [[0, VA.VPT_R - .08], [vaTop(z) - (AX - 4.6) - .2, VA.VPT_R - .08]], { n: 32, gen: 8, caps: true, rings: [0, 1] })); VT.push(cyl([0, AX - 4.6, z], [0, vaTop(z) - .4, z], .22, { n: 10, gen: 0 })); });
+  const CR = [];
+  CR.push(box([-3.8, AX + .9, 14], [3.8, AX + 1.0, 34], { ds: 2.6 }));                                          // command deck
+  CR.push(box([-4.2, AX - 2.1, 5], [4.2, AX - 2.0, 34], fn({ ds: 3 })));                                        // middle deck
+  for (const s of [-1, 1]) for (const z of [18, 20.5, 23, 25.5]) CR.push(box([s * 2.6, AX + 1.0, z], [s * 3.4, AX + 2.6, z + 1.8]));   // consoles
+  CR.push(box([-1.2, AX + 1.0, 27.5], [1.2, AX + 2.0, 29.5]));                                                   // pilot / co-pilot stations
+  CR.push(cyl([0, AX + 1.0, 30.3], [0, VA.SAIL_TOP - .2, 30.3], .3, fn({ n: 10, gen: 2 })));                     // mast wells (non-penetrating)
+  const RC = [];
+  RC.push(box([-4.4, AX - 4.2, -6], [4.4, AX + 3.9, 6], { ds: 2 }));                                            // shielded compartment
+  RC.push(lathe([0, AX - 3.6, 0], FY, [[0, 1.3], [.4, 1.7], [4.8, 1.7], [5.4, 1.2], [5.6, 0]], { n: 24, gen: 6, rings: [1, 2, 3] }));   // pressure vessel
+  RC.push(cyl([-3.6, AX - 1.5, -3.5], [-3.6, AX + 2.6, -3.5], .75, { n: 16, gen: 4, caps: true }));             // steam generator
+  const ER = [];
+  for (const s of [-1, 1]) ER.push(lathe([s * 1.9, AX - .6, -26], FZ, [[0, .6], [.4, 1.1], [6.5, 1.2], [7.2, .7]], { n: 20, gen: 6, rings: [1, 2] }));   // main turbines
+  ER.push(box([-2.0, AX - 2.6, -30.5], [2.0, AX + 1.2, -27]));                                                   // reduction gear
+  for (const s of [-1, 1]) ER.push(lathe([s * 3.0, AX + 1.8, -18], FZ, [[0, .5], [5, .5]], { n: 14, gen: 4, caps: true }));   // turbine generators
+  ER.push(cyl([0, AX, -30.5], [0, AX, -51.8], .28, { n: 12, gen: 3 }));                                           // shaft
+  ER.push(box([-4.0, AX - 3.2, -34], [4.0, AX - 3.1, -8], fn({ ds: 3 })));
+  const LB = [];
+  // the LAB: a horseshoe of vertical staves in the free-flood bow
+  for (let k = 0; k <= 24; k++) { const a = -2.2 + k * 4.4 / 24, x = Math.sin(a) * 3.7, z = 51.5 + Math.cos(a) * 3.0; LB.push(line([[x, AX - 3.0, z], [x, AX + 3.0, z]], { w: .55 })); }
+  LB.push(lathe([0, AX - 3.2, 51.5], FY, [[0, 3.8], [6.4, 3.8]], { n: 40, gen: 0, rings: [0, 1], pts: false }));
+  const parts = M.parts.map(p => O(p));
+  parts.push(O({ name: 'torpRoom', label: 'Torpedo room · 4 tubes · 533 mm', prims: TR }, hidden));
+  parts.push(O({ name: 'vptTubes', label: 'Virginia Payload Tubes · 6 cells each', prims: VT }, hidden));
+  parts.push(O({ name: 'control', label: 'Control room · command deck', prims: CR }, hidden));
+  parts.push(O({ name: 'reactor', label: 'Reactor compartment · S9G', prims: RC }, hidden));
+  parts.push(O({ name: 'engine', label: 'Engine room · main turbines · shaft', prims: ER }, hidden));
+  parts.push(O({ name: 'lab', label: 'Large Aperture Bow array', prims: LB }, hidden));
+  return O(M, { name: 'ssn_cut', parts });
+}
+
+/* ================================================================ SSK Kilo class · Project 636.3
+   73.8 m, beam 9.9 m, surfaced draught 6.2 m, 3 950 t submerged. Blunt bow with the big sonar and six 533 mm
+   tubes, a flat upper casing with rows of free-flooding (limber) holes, long sail with a bridge, bow planes that
+   retract into the casing, cruciform stern, a seven-blade skewed propeller. Origin midships on the surfaced
+   waterline (hull axis 1.9 m under it), bow +Z. state: mast (0 housed .. 1 raised), prop (rad). */
+const KL = { R: 4.4, AX: -1.9, ZB: 36.9, ZBOW: 26.5, ZAFT: -12, DECK: 2.9, SAIL: [8.3, -5.0, 1.2], SAIL_TOP: 7.75 };
+function klR(z) {
+  if (z >= KL.ZBOW) { const u = Math.min(1, (z - KL.ZBOW) / (KL.ZB - KL.ZBOW)); return KL.R * Math.sqrt(Math.max(0, 1 - Math.pow(u, 2.6))); }
+  if (z >= KL.ZAFT) return KL.R;
+  const u = Math.min(1, (KL.ZAFT - z) / 22.6); return KL.R - (KL.R - .8) * Math.pow(u, 1.45);
+}
+const klTop = z => KL.AX + klR(z);
+const KL_MASTS = [[0, 5.7, .12, 5.2, 'scope'], [0, 4.6, .19, 5.0, 'scope'], [0, 3.1, .22, 4.1, 'rdr'], [0, 1.6, .2, 4.3, 'esm'], [0, -.6, .34, 3.3, 'snort'], [0, -1.9, .22, 2.5, 'exh'], [0, -3.1, .12, 4.4, 'whip']];
+/* torpedo tube muzzles on the bow: 2 rows of 3 */
+const KL_TUBES = (() => { const T = []; for (const y of [.95, -.35]) for (const x of [-1.0, 0, 1.0]) T.push([x, KL.AX + y]); return T; })();
+const klBowZ = rho => KL.ZBOW + (KL.ZB - KL.ZBOW) * Math.pow(Math.max(0, 1 - (rho / KL.R) ** 2), 1 / 2.6);
+const KL_GEO = memo(() => {
+  const BW = [], HL = [], SN = [], CS = [], SL = [], BP = [], SP = [], PH = [];
+  const lat = { n: 48, gen: 14 };
+  BW.push(revZ(KL.AX, klR, KL.ZBOW, KL.ZB, 0, O(lat, { rings: [0, 3, 6, 8] }), [26.5, 28.5, 30.5, 32.3, 33.8, 35, 35.9, 36.4, 36.75, 36.9]));
+  for (const [x, y] of KL_TUBES) {
+    const rho = Math.hypot(x, y - KL.AX), z = klBowZ(rho) + .02, n = V.norm([x * .12, (y - KL.AX) * .12, 1]);
+    BW.push(circle([x, y, z], n, .33, 16, { w: .75 }));
+    BW.push(circle([x, y, z + .01], n, .42, 16, fn({ w: .45, pts: false })));
+  }
+  BW.push(ringW([0, KL.AX, 31.8], FZ, klR(31.8) + .02, fn({ n: 40, al: .5 })));                                  // sonar window seam
+  HL.push(revZ(KL.AX, klR, KL.ZAFT, KL.ZBOW, 0, O(lat, { rings: [0, 2, 4] }), [-12, -2, 8, 18, 26.5]));
+  SN.push(revZ(KL.AX, klR, -34.6, KL.ZAFT, 0, O(lat, { rings: [0, 3, 6] }), [-34.6, -33, -31, -28.5, -25.5, -22, -18, -12]));
+  // upper casing: flat deck on a faired box over the hull, ramps down at bow and stern, limber holes along it
+  const deckY = z => z > 30 ? mix(KL.DECK, klTop(35.2) + .15, sat((z - 30) / 5.2)) : z < -22 ? mix(KL.DECK, klTop(-28.5) + .12, sat((-22 - z) / 6.5)) : KL.DECK;
+  const hw = z => 1.3 * (z > 30 ? mix(1, .45, sat((z - 30) / 5.2)) : z < -22 ? mix(1, .5, sat((-22 - z) / 6.5)) : 1);
+  const secAt = z => {
+    const yt = deckY(z), yb = Math.min(yt - .15, klTop(z) - .45), w = hw(z), r = klR(z);
+    const xb = Math.sqrt(Math.max(0, r * r - (yb - KL.AX) ** 2));
+    return [[-xb, yb, z], [-w - .12, yt - .25, z], [-w, yt, z], [w, yt, z], [w + .12, yt - .25, z], [xb, yb, z]];
+  };
+  const CZ = [-28.5, -26, -22, -12, 0, 12, 24, 30, 32.5, 35.2];
+  const KC = SA.skin(CZ.map(secAt), true);
+  CS.push(...SA.loft(KC, { lines: [1, 2, 3, 4], fineJ: [], rings: [2, 7], al: .85, ral: .4 }));
+  for (let z = -20.5; z < 29; z += .95) for (const s of [-1, 1]) for (const f of [.3, .7]) {
+    const q = secAt(z), a = q[s > 0 ? 5 : 0], b = q[s > 0 ? 4 : 1], p = V.lerp(a, b, f), hy = .13;
+    CS.push(line([[p[0] + s * .01, p[1] - hy, z - .22], [p[0] + s * .01, p[1] + hy, z - .22], [p[0] + s * .01, p[1] + hy, z + .22], [p[0] + s * .01, p[1] - hy, z + .22]], fn({ closed: true, w: .5 })));
+  }
+  for (let z = -18; z < 28; z += 6) CS.push(line([[-1.1, KL.DECK + .01, z], [1.1, KL.DECK + .01, z]], fn({ w: .3, pts: false })));
+  for (const z of [22.5, -15.5]) CS.push(circle([0, KL.DECK + .02, z], FY, .42, 14, fn({ w: .6, pts: false })));   // hatches
+  // sail: long, rounded front, bridge at the top forward
+  const [zl, zt, w] = KL.SAIL, SS = [[2.5, zl + .3, zt - .2, w + .05], [KL.DECK, zl, zt, w], [5.0, zl - .6, zt + .3, w - .08], [7.3, zl - 1.2, zt + .6, w - .15], [KL.SAIL_TOP, zl - 1.9, zt + .75, w - .22]];
+  const KS = SA.skin(SS.map(q => foilSec(q[0], q[1], q[2], q[3], 20)));
+  SL.push(...SA.loft(KS, { lines: [0, 3, 5, 7, 10, 13, 15, 17], fineJ: [3, 7, 13, 17], rings: [2, 4], al: .9, ral: .55 }));
+  SL.push(...foilCap(foilSec(KL.SAIL_TOP, zl - 1.9, zt + .75, w - .22, 20)));
+  SL.push(SA.fquad([[-.6, KL.SAIL_TOP + .01, zl - 2.2], [.6, KL.SAIL_TOP + .01, zl - 2.2], [.6, KL.SAIL_TOP + .01, zl - 3.8], [-.6, KL.SAIL_TOP + .01, zl - 3.8]], FY, { al: .7 }));   // bridge
+  for (const s of [-1, 1]) {
+    SL.push(line([[s * (w - .2), 6.9, zl - 2.2], [s * (w - .2), 6.9, zl - 3.9]], fn({ w: .4, pts: false })));
+    for (const z of [zl - 2.5, zl - 3.1]) SL.push(circle([s * (w - .18), 6.5, z], [s, 0, 0], .12, 10, fn({ w: .5, pts: false })));   // bridge scuttles
+  }
+  for (const [x, z, r] of KL_MASTS) SL.push(circle([x, KL.SAIL_TOP + .02, z], FY, r + .06, 12, fn({ w: .5, pts: false })));
+  // bow planes: out of the casing sides high on the bow
+  for (const s of [-1, 1]) {
+    const z = 28.8, y = 1.25, x0 = Math.sqrt(Math.max(0, klR(z) ** 2 - (y - KL.AX) ** 2)) - .1;
+    BP.push(slab2([[s * x0, y, z + .85], [s * (x0 + 2.2), y, z + .6], [s * (x0 + 2.2), y, z - .55], [s * x0, y, z - .8]], [.28, .16, .1, .18]));
+  }
+  // stern: rudders above and below, stern planes
+  const rT = z => klR(z) - .1;
+  for (const s of [1, -1]) {
+    SP.push(slab2([[0, KL.AX + s * rT(-26.5), -26.5], [0, KL.AX + s * (s > 0 ? 4.9 : 5.0), -29.2], [0, KL.AX + s * (s > 0 ? 4.9 : 5.0), -32.2], [0, KL.AX + s * rT(-31.8), -31.8]], [.42, .2, .1, .26]));
+    SP.push(slab2([[s * rT(-26.5), KL.AX, -26.5], [s * 5.3, KL.AX, -29.0], [s * 5.3, KL.AX, -32.1], [s * rT(-31.8), KL.AX, -31.8]], [.42, .2, .1, .26]));
+    SP.push(line([[s * (rT(-30.5) + .1), KL.AX + .12, -30.6], [s * 5.2, KL.AX + .1, -31.0]], fn({ w: .4, pts: false })));
+    SP.push(line([[.12, KL.AX + s * (rT(-30.5) + .1), -30.6], [.12, KL.AX + s * 4.8, -31.0]], fn({ w: .4, pts: false })));
+  }
+  PH.push(lathe([0, KL.AX, -34.6], [0, 0, -1], [[0, .8], [.5, .72], [1.3, .5], [1.95, .18], [2.3, 0]], { n: 24, gen: 6, rings: [0, 2] }));
+  return { BW, HL, SN, CS, SL, BP, SP, PH };
+});
+function klMasts(st) {
+  const m = st.mast === undefined ? 1 : sat(st.mast), P = [], y0 = KL.SAIL_TOP;
+  if (m < .02) return P;
+  for (const [x, z, r, h, kind] of KL_MASTS) {
+    const H = h * m, y1 = y0 + H;
+    P.push(lathe([x, y0, z], FY, [[0, r], [Math.max(.05, H - .4), r * .85], [H, r * .7]], { n: 10, gen: 3, rings: [1] }));
+    if (kind === 'scope') { P.push(lathe([x, y1, z], FY, [[0, r * .9], [.45, r * .9], [.5, 0]], { n: 10, gen: 2 })); P.push(ringW([x, y1 + .25, z + r * .9], FZ, r * .45, fn({ n: 8 }))); }
+    else if (kind === 'rdr') P.push(box([x - .7, y1 - .1, z - .1], [x + .7, y1 + .32, z + .1]));
+    else if (kind === 'esm') P.push(lathe([x, y1, z], FY, [[0, .3], [.5, .3], [.6, 0]], { n: 12, gen: 3, rings: [0, 1] }));
+    else if (kind === 'snort') P.push(box([x - .45, y1 - .1, z - .5], [x + .45, y1 + .55, z + .5]));
+    else if (kind === 'exh') P.push(box([x - .3, y1 - .1, z - .3], [x + .3, y1 + .2, z + .3]));
+    else P.push(line([[x, y1, z], [x, y1 + 1.3, z]], { w: .6 }));
+  }
+  return P;
+}
+function klProp(st) { return [blades([0, KL.AX, -35.0], [0, 0, -1], 7, .62, 1.55, { rot: st.prop || 0, chord: .78, taper: .8, pitch: .45, edge: .85 })]; }
+function ssk() {
+  const g = KL_GEO();
+  return {
+    name: 'ssk', L: 73.8, AX: KL.AX, SAIL_TOP: KL.SAIL_TOP, TUBES: KL_TUBES.map(([x, y]) => [x, y, klBowZ(Math.hypot(x, y - KL.AX))]),
+    parts: [
+      { name: 'bow', label: 'Bow · MGK-400EM sonar · 6 tubes', prims: g.BW },
+      { name: 'hull', label: 'Hull · double hull · 73.8 m', prims: g.HL },
+      { name: 'stern', label: 'Stern', prims: g.SN },
+      { name: 'casing', label: 'Upper casing · limber holes', prims: g.CS },
+      { name: 'sail', label: 'Sail · bridge', prims: g.SL },
+      { name: 'masts', label: 'Periscopes ×2 · radar · ESM · snorkel', prims: klMasts({}), dyn: klMasts, show: st => (st.mast === undefined ? 1 : st.mast) > .02 },
+      { name: 'bowPlanes', label: 'Bow planes · retractable', prims: g.BP },
+      { name: 'sternPlanes', label: 'Stern planes · rudders', prims: g.SP },
+      { name: 'prop', label: 'Propeller · 7 blades · skewed', prims: g.PH.concat(klProp({})), dyn: st => g.PH.concat(klProp(st)) },
+    ],
+  };
+}
+/* cutaway: + torpedo room (6 tubes, racks), batteries, diesel generators, main motor, central post, bow array */
+function sskCut() {
+  const M = ssk(), AX = KL.AX;
+  const TR = [];
+  for (const [x, y] of KL_TUBES) { const z1 = klBowZ(Math.hypot(x, y - AX)) - .2; TR.push(cyl([x, y, 27.2], [x, y, z1], .33, { n: 14, gen: 4, caps: true })); TR.push(lathe([x, y, 27.2], [0, 0, -1], [[0, .4], [.4, .4]], { n: 14, gen: 0, caps: true, rings: [0, 1] })); }
+  TR.push(box([-3.4, AX - 2.1, 17.5], [3.4, AX - 2.0, 27.2], { ds: 2.6 }));
+  for (const s of [-1, 1]) for (const x of [.85, 1.9]) for (const y of [AX - 2.0, AX - .75]) TR.push(box([s * x - .3, y, 18.6], [s * x + .3, y + .12, 25.6], fn()));
+  const BT = [];
+  for (const [z0, z1] of [[10, 16.5], [-4, 2.5]]) {
+    BT.push(box([-3.3, AX - 3.6, z0], [3.3, AX - 1.9, z1]));
+    for (let z = z0 + .5; z < z1; z += .55) BT.push(line([[-3.25, AX - 1.88, z], [3.25, AX - 1.88, z]], fn({ w: .35 })));
+  }
+  const DG = [];
+  for (const s of [-1, 1]) { DG.push(box([s * 1.9 - .8, AX - 1.4, -15.5], [s * 1.9 + .8, AX + .9, -9.5])); DG.push(lathe([s * 1.9, AX - .25, -9.5], FZ, [[0, .75], [1.6, .75]], { n: 16, gen: 4, caps: true })); }
+  const MM = [];
+  MM.push(lathe([0, AX, -22.5], FZ, [[0, 1.1], [.3, 1.5], [3.6, 1.5], [3.9, 1.1]], { n: 24, gen: 6, caps: true, rings: [1, 2] }));
+  MM.push(cyl([0, AX, -22.5], [0, AX, -34.4], .22, { n: 12, gen: 3 }));
+  const CP = [];
+  CP.push(box([-3.5, AX + .3, -3.5], [3.5, AX + .4, 8.5], { ds: 2.6 }));
+  for (const s of [-1, 1]) for (const z of [-1.5, 1, 3.5]) CP.push(box([s * 2.3, AX + .4, z], [s * 3.1, AX + 2.0, z + 1.8]));
+  CP.push(cyl([0, AX + .4, 5.7], [0, KL.SAIL_TOP - .2, 5.7], .22, fn({ n: 10, gen: 2 })));
+  CP.push(cyl([0, AX + .4, 4.6], [0, KL.SAIL_TOP - .2, 4.6], .28, fn({ n: 10, gen: 2 })));
+  const SA2 = [];
+  for (let k = 0; k <= 20; k++) { const a = -1.9 + k * 3.8 / 20, x = Math.sin(a) * 3.1, z = 32.4 + Math.cos(a) * 2.2; SA2.push(line([[x, AX - 2.6, z], [x, AX + 2.6, z]], { w: .55 })); }
+  const parts = M.parts.map(p => O(p));
+  parts.push(O({ name: 'torpRoom', label: 'Torpedo room · 6 tubes · 533 mm', prims: TR }, hidden));
+  parts.push(O({ name: 'battery', label: 'Batteries · 2 groups', prims: BT }, hidden));
+  parts.push(O({ name: 'diesels', label: 'Diesel generators ×2', prims: DG }, hidden));
+  parts.push(O({ name: 'motor', label: 'Main propulsion motor · shaft', prims: MM }, hidden));
+  parts.push(O({ name: 'control', label: 'Central post', prims: CP }, hidden));
+  parts.push(O({ name: 'sonarArr', label: 'Bow sonar array', prims: SA2 }, hidden));
+  return O(M, { name: 'ssk_cut', parts });
+}
+
+/* anchors for anatomy.js and the game: the SSN's VPT cells (top centres, ship frame) and the boats' hull axes */
+export const SUBS = { ssn: { AX: VA.AX, R: VA.R, SAIL_TOP: VA.SAIL_TOP, VPT_Z: VA.VPT_Z, cell: vaCell, top: vaTop }, ssk: { AX: KL.AX, R: KL.R, SAIL_TOP: KL.SAIL_TOP, TUBES: KL_TUBES, top: klTop } };
+export const E2D = { DOME_C: E2.DOME_C, GEAR_H: E2.GEAR_H, NAC: [[-E2.NAC_X, E2.NAC_Y, E2.PROP_Z], [E2.NAC_X, E2.NAC_Y, E2.PROP_Z]] };
+
+/* ================================================================ Bal coastal missile system · 3K60 launcher
+   MZKT-7930 8×8 (the TEL's chassis, cab and power pack) with a crew cabin for the launch control and a pack of
+   eight Kh-35U transport-launch containers (two tiers of four) hinged at its front: raised, the rear of the pack
+   lifts and the rounds leave over the back of the vehicle. Vehicle-local: origin on the ground at the centre, +Z
+   forward. state: elev (rad, 0 stowed .. 0.52 raised), dep (0..1 jacks), n (rounds left 0..8: a fired container
+   has lost its rear cover), wheel (rad). */
+const BL = { AXLES: [4.45, 2.25, -2.75, -4.95], PIV: [0, 1.66, -.35], LEN: 6.3, COLS: [-.96, -.32, .32, .96], ROWS: [.36, .98], BOX: .6, ELEV: .52, JACKS: [[1.66, 1.15], [1.7, -6.5]], JT: .55 };
+/* container k (0..7, the firing order: top tier outboard first) -> [x, y, z mid] in the pack frame (before the raise) */
+const BL_ORDER = [[1, 0], [1, 3], [1, 1], [1, 2], [0, 0], [0, 3], [0, 1], [0, 2]];
+const blCont = k => { const [r, c] = BL_ORDER[k]; return [BL.COLS[c], BL.PIV[1] + BL.ROWS[r], BL.PIV[2] - BL.LEN / 2]; };
+const blPackXf = st => X.pivotX(BL.PIV, st.elev || 0);
+const BL_GEO = memo(() => {
+  const C = [], K = [], CB = [], B = [], PK = [];
+  HD.chassis8x8(C, 6.2, -6.9, { axles: BL.AXLES, deckFront: 2.35, fenders: [[1.42, 2.95, false, true], [-5.78, -1.9, true, true]] });
+  for (const sx of [-1, 1]) C.push(cyl([sx * 1.28, 1.02, -.6], [sx * 1.28, 1.02, -2.4], .3, { n: 16, gen: 4, caps: true }));
+  for (const [x, z] of BL.JACKS) for (const sx of [-1, 1]) {
+    C.push(box([sx * .8, 1.14, z - .16], [sx * (x - .08), 1.4, z + .16]));
+    C.push(lathe([sx * x, .76, z], FY, [[0, .15], [.08, .15], [.08, .13], [.76, .13], [.8, .15], [.84, .15]], { n: 12, gen: 2, rings: [0, 1, 4, 5], caps: true }));
+  }
+  // pack hinge brackets and pin; ram trunnion on the frame
+  for (const sx of [-1, 1]) C.push(HD.prism(sx * 1.1, sx * 1.26, 1.45, 1.78, -.7, -.05, sx * 1.1, sx * 1.26, -.5, -.2));
+  C.push(cyl([-1.3, BL.PIV[1], BL.PIV[2]], [1.3, BL.PIV[1], BL.PIV[2]], .07, { n: 10, gen: 0, caps: true }));
+  C.push(box([-.3, 1.45, -3.3], [.3, 1.62, -2.7]));
+  K.push(...partOf(HD.tel(), 'cab').prims);
+  // power pack cover behind the cab, as on the TEL
+  B.push(box([-1.36, 1.45, 2.95], [1.36, 2.95, 4.1]));
+  for (const sx of [-1, 1]) B.push(panel([[sx * 1.365, 1.62, 3.05], [sx * 1.365, 1.62, 4.0], [sx * 1.365, 2.78, 4.0], [sx * 1.365, 2.78, 3.05]], { hatch: 5, edge: .6, pts: false }));
+  B.push(lathe([1.18, 2.95, 3.2], FY, [[0, .1], [.75, .1], [.8, .115]], { n: 12, gen: 2, rings: [0, 2] }));
+  // crew cabin: the launch control station between the power pack and the pack
+  CB.push(box([-1.3, 1.45, .05], [1.3, 3.25, 2.9]));
+  for (const sx of [-1, 1]) {
+    CB.push(panel([[sx * 1.305, 2.35, 1.65], [sx * 1.305, 2.35, 2.55], [sx * 1.305, 2.95, 2.55], [sx * 1.305, 2.95, 1.65]], { edge: .8, pts: false }));
+    CB.push(panel([[sx * 1.305, 1.6, .35], [sx * 1.305, 1.6, 1.3], [sx * 1.305, 3.0, 1.3], [sx * 1.305, 3.0, .35]], { edge: .5, pts: false }));
+    CB.push(line([[sx * 1.33, 2.1, 1.2], [sx * 1.33, 2.1, .95]], fn({ w: .7 })));
+    for (const yy of [.72, 1.12]) CB.push(box([sx * 1.05, yy, .4], [sx * 1.45, yy + .06, 1.2], fn()));
+  }
+  CB.push(box([-.6, 3.25, .5], [.6, 3.6, 1.5]));                                                               // air conditioner
+  CB.push(lathe([.9, 3.25, 2.4], FY, [[0, .05], [.1, .04]], fn({ n: 8, gen: 0, rings: [0] })));
+  CB.push(line([[.9, 3.35, 2.4], [.88, 4.6, 2.3], [.85, 5.8, 2.15]], { w: .55 }));                              // whip antenna
+  // the pack: eight square containers with stiffening frames, the cradle under them, rear cover rims
+  const P0 = BL.PIV, z0 = P0[2], z1 = P0[2] - BL.LEN, h = BL.BOX / 2;
+  PK.push(box([-1.32, P0[1] - .1, z1 - .05], [1.32, P0[1] + .06, z0]));                                         // cradle
+  for (const sx of [-1, 1]) PK.push(box([sx * 1.28 - .06, P0[1] + .06, z1], [sx * 1.28 + .06, P0[1] + 1.32, z0 - .1]));
+  for (const z of [z0 - .5, z0 - 3.15, z1 + .5]) PK.push(box([-1.34, P0[1] + .06, z - .08], [1.34, P0[1] + 1.36, z + .08], fn()));
+  for (let k = 0; k < 8; k++) {
+    const [x, y] = blCont(k);
+    PK.push(box([x - h, y - h, z1], [x + h, y + h, z0], { bottom: true }));
+    for (let q = 1; q < 6; q++) { const z = z0 - q * BL.LEN / 6; PK.push(box([x - h - .02, y - h - .02, z - .05], [x + h + .02, y + h + .02, z + .05], fn({ skip: [0, 1] }))); }
+    PK.push(SA.fquad([[x - h + .05, y - h + .05, z0 + .01], [x + h - .05, y - h + .05, z0 + .01], [x + h - .05, y + h - .05, z0 + .01], [x - h + .05, y + h - .05, z0 + .01]], FZ, fn({ al: .5 })));
+  }
+  PK.push(box([-.5, P0[1] + 1.32, z0 - 1.2], [.5, P0[1] + 1.46, z0 - .3], fn()));                               // cable box
+  return { C, K, CB, B, PK };
+});
+export const BAL = { PIV: BL.PIV, LEN: BL.LEN, ELEV: BL.ELEV, cont: blCont, packXf: blPackXf, ORDER: BL_ORDER };
+/* rear covers (dyn): containers still loaded keep theirs */
+function blCaps(st) {
+  const n = st.n === undefined ? 8 : st.n, P = [], z = BL.PIV[2] - BL.LEN - .03, h = BL.BOX / 2;
+  for (let k = 8 - Math.max(0, Math.min(8, Math.round(n))); k < 8; k++) {
+    const [x, y] = blCont(k);
+    P.push(box([x - h - .03, y - h - .03, z - .07], [x + h + .03, y + h + .03, z + .03], { bottom: true }));
+    P.push(line([[x - .15, y, z - .09], [x + .15, y, z - .09]], fn({ w: .5 })));
+  }
+  return P;
+}
+function blRam(st) {
+  const A = X.ap(blPackXf(st), [0, BL.PIV[1] - .1, BL.PIV[2] - 3.4]);
+  const out = HD.ram([0, 1.6, -3.0], A, [.16, .12, .09], 1.6, { n: 14 });
+  out.push(lathe([0, 1.6, -3.0], FX, [[-.14, .14], [.14, .14]], { n: 10, gen: 0, rings: [0, 1] }));
+  return out;
+}
+function blJacks(st) {
+  const dep = st.dep === undefined ? 1 : st.dep, lift = BL.JT * (1 - dep), out = [];
+  for (const [x, z] of BL.JACKS) for (const sx of [-1, 1]) {
+    const X0 = sx * x;
+    out.push(box([X0 - .3, lift, z - .3], [X0 + .3, lift + .07, z + .3]));
+    out.push(cyl([X0, lift + .07, z], [X0, .86, z], .075, { n: 10, gen: 2, rings: [0] }));
+  }
+  return out;
+}
+function bal() {
+  const g = BL_GEO();
+  const whL = st => wheelSide(BL.AXLES, -1, st.wheel || 0, {}), whR = st => wheelSide(BL.AXLES, 1, st.wheel || 0, {});
+  return {
+    name: 'bal', PIV: BL.PIV, LEN: BL.LEN, ELEV: BL.ELEV, cont: blCont,
+    parts: [
+      { name: 'chassis', label: 'MZKT-7930 · 8×8', prims: g.C },
+      { name: 'wheelsL', label: 'Wheels ×4 · 1500×600-635 · L', prims: whL({}), dyn: whL },
+      { name: 'wheelsR', label: 'Wheels ×4 · 1500×600-635 · R', prims: whR({}), dyn: whR },
+      { name: 'cab', label: 'Cab · MZKT-7930', prims: g.K },
+      { name: 'bay', label: 'Power pack cover', prims: g.B },
+      { name: 'cabin', label: 'Crew cabin · launch control', prims: g.CB },
+      { name: 'pack', label: 'Containers ×8 · Kh-35U', prims: g.PK, xf: blPackXf },
+      { name: 'caps', label: 'Container rear covers', prims: blCaps({}), dyn: blCaps, xf: blPackXf },
+      { name: 'ram', label: 'Pack ram · hydraulic', prims: blRam({}), dyn: blRam },
+      { name: 'jacks', label: 'Outrigger jacks ×4', prims: blJacks({}), dyn: blJacks },
+    ],
+  };
+}
+/* cutaway: + the diesel and radiators, the launch control consoles */
+function balCut() {
+  const M = bal(), eng = yamz846();
+  for (const sx of [-1, 1]) eng.push(...mzktRadiator(sx, 0));
+  const CO = [];
+  for (const sx of [-1, 1]) { CO.push(box([sx * .55 - .45, 1.45, 1.5], [sx * .55 + .45, 2.35, 2.6])); CO.push(box([sx * .55 - .42, 2.35, 2.3], [sx * .55 + .42, 2.95, 2.55])); CO.push(box([sx * .55 - .25, 1.45, .8], [sx * .55 + .25, 1.95, 1.25], fn())); }
+  CO.push(box([-1.2, 1.45, .15], [-.6, 3.1, .7]));
+  const parts = M.parts.map(p => O(p));
+  parts.push(O({ name: 'engine', label: 'YaMZ-846 · V12 · radiators ×2', prims: eng }, hidden));
+  parts.push(O({ name: 'consoles', label: 'Launch control consoles ×2 · racks', prims: CO }, hidden));
+  return O(M, { name: 'bal_cut', parts });
+}
+
+/* ================================================================ munitions for the new launchers
+   Kh-35U (Bal): 4.4 m with the booster, Ø 0.42 m, 1.33 m span; cruciform folding wings and fins, a flush ventral
+   intake. 3M-54 Kalibr (Kilo): 8.22 m with the booster, Ø 0.533 m, 3.1 m span. Closed shells; origin mid-body, nose +Z. */
+function kh35() {
+  const r = .21, zT = -2.2, zB = -1.62, zN = 2.2;
+  const g = slimShell({ r, z0: zB, z1: zN, nl: .5, tail: .96, joints: [-.8, .45, 1.25] });
+  const fold = (e, deg, rr, set, w) => { const a = deg * DEG, c = Math.cos(a), s = Math.sin(a), at = (q, z) => [c * q, s * q, z]; return tp(about(R.z(-(1 - w) * PI / 2), at(rr, 0)), panel(set.map(([q, z]) => at(q, z)), { edge: 1 })); };
+  const wingsP = st => { const w = st.wing === undefined ? 1 : st.wing; return [45, 135, 225, 315].map(d => fold(0, d, r, [[r, .6], [r + .455, .22], [r + .455, -.08], [r, -.2]], w)); };
+  const finsP = st => { const f = st.fin === undefined ? 1 : st.fin; return [45, 135, 225, 315].map(d => fold(0, d, r, [[r, -1.1], [r + .3, -1.42], [r + .3, -1.6], [r, -1.62]], f)); };
+  const IN = [hex([[-.12, -r + .02, -.95], [.12, -r + .02, -.95], [.12, -r + .02, -.2], [-.12, -r + .02, -.2], [-.1, -r - .06, -.9], [.1, -r - .06, -.9], [.1, -r - .01, -.3], [-.1, -r - .01, -.3]], { edge: 1 })];
+  const BO = [lathe([0, 0, zT], FZ, [[0, .15], [.06, .2], [zB - zT, .2]], { n: 16, gen: 4, rings: [1, 2], caps: true })];
+  for (const d of [0, 90, 180, 270]) { const a = d * DEG, c = Math.cos(a), s = Math.sin(a); BO.push(panel([[c * .2, s * .2, zT + .45], [c * .36, s * .36, zT + .12], [c * .36, s * .36, zT + .02], [c * .2, s * .2, zT + .02]], { edge: 1 })); }
+  return { name: 'kh35', LEN: 4.4, R: r, parts: [
+    { name: 'nose', label: 'Nose · radar seeker radome', prims: g.NS },
+    { name: 'body', label: 'Kh-35U · Ø 0.42 m', prims: g.BD },
+    { name: 'wings', label: 'Wings ×4 · folding · 1.33 m', prims: wingsP({}), dyn: wingsP },
+    { name: 'fins', label: 'Tail fins ×4 · folding', prims: finsP({}), dyn: finsP },
+    { name: 'inlet', label: 'Air intake · ventral', prims: IN },
+    { name: 'booster', label: 'Booster · solid · 4 fins', prims: BO, show: st => st.booster !== false },
+  ] };
+}
+function kalibr() {
+  const r = .2665, zT = -4.11, zB = -2.45, zS = 1.55, zN = 4.11;
+  const NS = [lathe([0, 0, zN - .95], FZ, [[0, r], [.35, r * .93], [.6, r * .74], [.8, r * .45], [.92, r * .15], [.95, 0]], { n: 22, gen: 6, rings: [0, 2] })];
+  const TS = [lathe([0, 0, zS], FZ, [[0, r], [zN - .95 - zS, r]], { n: 22, gen: 6, rings: [0, 1] })];
+  for (const d of [45, 135, 225, 315]) { const a = d * DEG, c = Math.cos(a), s = Math.sin(a); TS.push(panel([[c * r, s * r, zS + .55], [c * (r + .16), s * (r + .16), zS + .2], [c * (r + .16), s * (r + .16), zS + .04], [c * r, s * r, zS + .04]], { edge: 1 })); }
+  const BD = [lathe([0, 0, zB], FZ, [[0, r], [zS - zB, r]], { n: 22, gen: 6, rings: [0, 1] })];
+  for (const z of [-1.1, .3]) BD.push(ringW([0, 0, z], FZ, r + .003, fn({ n: 20 })));
+  BD.push(box([-.06, r - .02, -1.9], [.06, r + .04, 1.3], fn()));
+  const wingsP = st => {
+    const w = st.wing === undefined ? 1 : st.wing, out = [];
+    for (const sx of [-1, 1]) {
+      const T = X.mul(T3([0, -r + .1, -.25]), X.make(R.y(sx * (1 - w) * PI / 2), [0, 0, 0]));
+      out.push(tp(T, sheet([[sx * .02, 0, .42], [sx * 1.55, 0, .12], [sx * 1.55, 0, -.2], [sx * .02, 0, -.36]], [0, 1, 0], { th: .03 })));
+    }
+    return out;
+  };
+  const finsP = st => {
+    const f = st.fin === undefined ? 1 : st.fin, out = [];
+    for (const d of [45, 135, 225, 315]) {
+      const a = d * DEG, c = Math.cos(a), s = Math.sin(a), at = (q, z) => [c * q, s * q, z];
+      out.push(tp(about(R.z(-(1 - f) * PI / 2), at(r * .8, 0)), panel([at(r * .8, zB + .55), at(r + .42, zB + .2), at(r + .42, zB + .03), at(r * .8, zB + .03)], { edge: 1 })));
+    }
+    return out;
+  };
+  const IN = [hex([[-.14, -r + .02, -1.55], [.14, -r + .02, -1.55], [.14, -r + .02, -.85], [-.14, -r + .02, -.85], [-.15, -r - .16, -1.5], [.15, -r - .16, -1.5], [.15, -r - .16, -1.08], [-.15, -r - .1, -1.08]], { edge: 1 })];
+  const BO = [lathe([0, 0, zT], FZ, [[0, .19], [.1, r], [zB - zT, r]], { n: 20, gen: 4, rings: [1, 2], caps: true })];
+  for (const d of [45, 135, 225, 315]) { const a = d * DEG, c = Math.cos(a), s = Math.sin(a); BO.push(panel([[c * r, s * r, zT + .6], [c * (r + .22), s * (r + .22), zT + .2], [c * (r + .22), s * (r + .22), zT + .03], [c * r, s * r, zT + .03]], { edge: 1 })); }
+  return { name: 'kalibr', LEN: 8.22, R: r, parts: [
+    { name: 'nose', label: 'Nose · seeker radome', prims: NS },
+    { name: 'terminal', label: 'Terminal stage · supersonic · fins ×4', prims: TS },
+    { name: 'body', label: '3M-54 Kalibr · Ø 0.533 m', prims: BD },
+    { name: 'wings', label: 'Wings ×2 · pop-out · 3.1 m', prims: wingsP({}), dyn: wingsP, show: st => (st.wing === undefined ? 1 : st.wing) > .02 },
+    { name: 'fins', label: 'Tail fins ×4 · folding', prims: finsP({}), dyn: finsP },
+    { name: 'inlet', label: 'Air intake · ventral', prims: IN },
+    { name: 'booster', label: 'Booster · solid', prims: BO, show: st => st.booster !== false },
+  ] };
+}
+/* 533 mm torpedo, stowed on a rack (the boats' X-ray): 6.2 m closed shell. Origin mid-body, nose +Z. */
+function torpedo533() {
+  const r = .2665, z0 = -3.1, z1 = 3.1, NS = [], BD = [], TL = [];
+  NS.push(lathe([0, 0, z1 - .42], FZ, [[0, r], [.18, r * .94], [.3, r * .78], [.38, r * .5], [.42, 0]], { n: 20, gen: 4, rings: [0, 2] }));
+  BD.push(lathe([0, 0, z0 + .95], FZ, [[0, r], [z1 - .42 - z0 - .95, r]], { n: 20, gen: 5, rings: [0, 1] }));
+  for (const z of [-1.3, .4, 1.8]) BD.push(ringW([0, 0, z], FZ, r + .003, fn({ n: 18 })));
+  TL.push(lathe([0, 0, z0 + .12], FZ, [[0, .14], [.4, .19], [.83, r]], { n: 18, gen: 4, rings: [0, 2] }));
+  TL.push(lathe([0, 0, z0], FZ, [[0, .2], [.28, .2]], { n: 16, gen: 0, rings: [0, 1], sil: false }));
+  for (const d of [45, 135, 225, 315]) { const a = d * DEG, c = Math.cos(a), s = Math.sin(a); TL.push(panel([[c * .15, s * .15, z0 + .5], [c * .21, s * .21, z0 + .26], [c * .21, s * .21, z0 + .02], [c * .13, s * .13, z0 + .02]], { edge: .9 })); }
+  return { name: 'torpedo533', LEN: 6.2, parts: [
+    { name: 'nose', label: 'Nose · homing head', prims: NS },
+    { name: 'body', label: 'Torpedo · 533 mm', prims: BD },
+    { name: 'tail', label: 'Afterbody · shrouded propulsor', prims: TL },
+  ] };
+}
+/* VPT cell canister, closed: canister-local, top centre at the origin, axis down -Y (as mk41_can) */
+function vptCan() {
+  const L = 6.35, r = .3, P = [];
+  P.push(lathe([0, -L, 0], FY, [[0, r], [L, r]], { n: 18, gen: 6, caps: true, rings: [0, 1] }));
+  for (const y of [-.3, -2.1, -4.2, -6.05]) P.push(lathe([0, y - .06, 0], FY, [[0, r + .025], [.12, r + .025]], fn({ n: 18, gen: 0, rings: [0, 1] })));
+  P.push(lathe([0, 0, 0], FY, [[0, r - .06], [.04, r - .06], [.05, 0]], fn({ n: 16, gen: 0, rings: [0] })));
+  return { name: 'vpt_can', LEN: L, parts: [{ name: 'canister', label: 'Cell canister · Tomahawk · closed', prims: P }] };
+}
+
 /* ================================================================ wrecks
    wreckOf(model, {seed, k}) -> the same model with every part displaced and tilted about its centre
    (heavy tall parts fall further), the whole settled and listed. st.wreck (0..1, default k or 1)
@@ -1452,6 +2171,8 @@ export const EXTRA_MODELS = {
   tlc, pantsir_missile: pantsirMissile, strike_missile: strikeMissile, aam, shell, mk41_can: mk41Can,
   essm, slam, hellfire,
   oniks: HD.oniks, oniks_booster: HD.oniksBooster, sm6: HD.sm6, mk72: HD.mk72,
+  // the second wave of units and their munitions
+  aew, ssn, ssk, bal, kh35, kalibr, torpedo533, vpt_can: vptCan,
   // the projectile names data/units.js uses
   tomahawk: strikeMissile, sam57e6: pantsirMissile, aim120: aam,
 };
@@ -1460,6 +2181,7 @@ const cache = f => { let m = null; return () => cloneModel(m || (m = f())); };
 export const CUT_MODELS = {
   tel_cut: cache(telCut), radar_cut: cache(radarCut), pantsir_cut: cache(pantsirCut), destroyer_cut: cache(destroyerCut),
   helo_cut: cache(heloCut), fighter_cut: cache(fighterCut), drone_cut: cache(droneCut), oniks_cut: cache(oniksCut), sm6_cut: cache(sm6Cut),
+  aew_cut: cache(aewCut), ssn_cut: cache(ssnCut), ssk_cut: cache(sskCut), bal_cut: cache(balCut),
 };
 export const ALL_MODELS = O(UNIT_MODELS, EXTRA_MODELS, CUT_MODELS);
 export function makeModel(key) { const f = ALL_MODELS[key]; if (!f) throw new Error('unknown model ' + key); return f(); }
@@ -1486,8 +2208,14 @@ export const MODEL_STATES = {
   pantsir_missile: { booster: true, fin: [0, 1, 1] },
   strike_missile: { wing: [0, 1, 1], fin: [0, 1, 1], inlet: [0, 1, 1], booster: false },
   slam: { wing: [0, 1, 1] },
+  aew: { dome: [0, TAU, 0], prop: [0, TAU, 0], fold: [0, 1, 0] },
+  ssn: { mast: [0, 1, 1], vptA: [0, 1, 0], vptB: [0, 1, 0], prop: [0, TAU, 0] },
+  ssk: { mast: [0, 1, 1], prop: [0, TAU, 0] },
+  bal: { elev: [0, BL.ELEV, 0], dep: [0, 1, 1], n: [0, 8, 8], wheel: [0, TAU, 0] },
+  kh35: { wing: [0, 1, 1], fin: [0, 1, 1], booster: true },
+  kalibr: { wing: [0, 1, 1], fin: [0, 1, 1], booster: true },
 };
-for (const k of ['tel', 'radar', 'pantsir', 'destroyer', 'helo', 'fighter', 'drone', 'oniks', 'sm6']) MODEL_STATES[k + '_cut'] = O(MODEL_STATES[k], { xray: false });
+for (const k of ['tel', 'radar', 'pantsir', 'destroyer', 'helo', 'fighter', 'drone', 'oniks', 'sm6', 'aew', 'ssn', 'ssk', 'bal']) MODEL_STATES[k + '_cut'] = O(MODEL_STATES[k], { xray: false });
 MODEL_STATES.tomahawk = MODEL_STATES.strike_missile; MODEL_STATES.sam57e6 = MODEL_STATES.pantsir_missile;
 MODEL_STATES.depot = { xray: false }; MODEL_STATES.radar_hill.xray = false;
 
@@ -1521,6 +2249,14 @@ export const MODEL_INFO = {
   essm: { name: 'RIM-162 ESSM', kind: 'munition', size: [3.66, .65, .65], s: [.008, .02, .06] },
   slam: { name: 'AGM-84H SLAM-ER', kind: 'munition', size: [4.37, 2.4, 2.4], s: [.01, .025, .08] },
   hellfire: { name: 'AGM-114 Hellfire', kind: 'munition', size: [1.63, .33, .33], s: [.004, .01, .03] },
+  aew: { name: 'E-2D Advanced Hawkeye', kind: 'unit', size: [17.6, 24.56, 5.58], s: [.04, .1, .3] },
+  ssn: { name: 'SSN Virginia class · Block III', kind: 'unit', size: [114.9, 10.4, 17.2], s: [.2, .5, 1.4] },
+  ssk: { name: 'Kilo class · Project 636.3', kind: 'unit', size: [73.8, 9.9, 14.0], s: [.14, .35, 1] },
+  bal: { name: 'Bal · 3K60 launcher', kind: 'unit', size: [14.0, 3.1, 3.6], s: [.035, .08, .25] },
+  kh35: { name: 'Kh-35U', kind: 'munition', size: [4.4, 1.33, .42], s: [.01, .025, .07] },
+  kalibr: { name: '3M-54 Kalibr', kind: 'munition', size: [8.22, 3.1, .53], s: [.016, .04, .12] },
+  torpedo533: { name: 'Torpedo · 533 mm', kind: 'munition', size: [6.2, .53, .53], s: [.012, .03, .09] },
+  vpt_can: { name: 'VPT cell canister', kind: 'munition', size: [.6, .6, 6.35], s: [.012, .03, .09] },
 };
 for (const [a, k] of Object.entries(MODEL_ALIASES)) { MODEL_INFO[a] = MODEL_INFO[k]; }
 for (const k of Object.keys(CUT_MODELS)) { const b = k.replace(/_cut$/, ''); MODEL_INFO[k] = O(MODEL_INFO[b], { name: MODEL_INFO[b].name + ' · cutaway', kind: 'cut', base: b }); }

@@ -3,9 +3,14 @@
    enemy tracks coral (contacts below the track threshold are the SENSORS system's), fog off draws everything.
    Dying units: ships settle, list and sink (the sim's dying pose under the sea surface occluder); vehicles turn
    into wrecks and dissolve; aircraft fall. Projectiles with their models along their velocity. Ship wakes.
-   The objective sites (port, depot, radar hill, airfield, lighthouse) as structures. Fills game.drawn. */
+   The objective sites (port, depot, radar hill, airfield, lighthouse) as structures. Fills game.drawn.
+   Submarines: surfaced, a boat is drawn like a ship. Submerged, the sea surface would hide it, so it shows as the
+   films' X-ray ghost: the hull pressed flat just under the surface (fainter the deeper it runs), seen through the
+   water; at periscope depth the boat is also drawn at its true depth, so only the raised masts break the surface. */
 import { PRI } from './game.js';
 import { Wake } from '../engine/fx.js';
+import { attitude } from '../engine/renderer.js';
+import { submerged, deep } from '../sim/subs.js';
 
 const sat = v => v < 0 ? 0 : v > 1 ? 1 : v;
 const ss = (a, b, v) => { const t = sat((v - a) / (b - a)); return t * t * (3 - 2 * t); };
@@ -65,10 +70,68 @@ export function createRender(game, DM) {
     const row = s % 2, i = s >> 1;
     const lx = row ? -26 : 24, lz = -110 + i * 24 + (row ? 70 : 0), yaw = row ? Math.PI / 2 : -Math.PI / 2;
     const c = Math.cos(cp.hdg), sn = Math.sin(cp.hdg);
-    out.pos[0] = cp.pos[0] + c * lx + sn * lz; out.pos[2] = cp.pos[2] - sn * lx + c * lz; out.pos[1] = cp.pos[1] + 19.6;
+    out.pos[0] = cp.pos[0] + c * lx + sn * lz; out.pos[2] = cp.pos[2] - sn * lx + c * lz; out.pos[1] = cp.pos[1] + 19.6 + (u.type === 'aew' ? 1.9 : 0);   // the E-2D stands on its gear
     out.hdg = cp.hdg + yaw; out.pitch = cp.pitch; out.roll = cp.roll;
     return out;
   }
+
+  /* a submerged boat. The sea surface hides everything under it, so the boat shows as the films' X-ray ghost: its
+     hull sampled once into dots (GEO.sample, coarse), pressed flat onto the water and drawn as lime (own) / coral
+     (hostile) effect dots, brighter where the hull faces up, fainter the deeper it runs. At periscope depth the
+     boat itself is also drawn at its depth, so only the raised masts break the surface. */
+  const ghosts3 = new Map();                                     // model key -> Float32Array [x, y, z, up] (model frame)
+  function ghostOf(key) {
+    let g = ghosts3.get(key);
+    if (g) return g;
+    const e = R.models.has(key) ? R.models.get(key) : null, GEO = window.GEO, X = window.M3.X;
+    if (!e || !GEO) return null;
+    const st = { mast: 0 }, out = [], sp = Math.max(.45, (e.L || 60) / 190);
+    for (const s of GEO.sample(e.model, sp, 71, st, { fine: false })) {
+      if (s.part.show && !s.part.show(st)) continue;
+      const T = GEO.partXf(X.make(), s.part, st), P = s.pts;
+      for (let i = 0; i < P.length; i += 6) {
+        const q = X.ap(T, [P[i], P[i + 1], P[i + 2]]), n = X.dir(T, [P[i + 3], P[i + 4], P[i + 5]]);
+        out.push(q[0], q[1], q[2], n[1]);
+      }
+    }
+    g = new Float32Array(out);
+    ghosts3.set(key, g);
+    return g;
+  }
+  const LIME3 = [198, 244, 50], CORAL3 = [255, 106, 61];
+  const mastInst = new Map();
+  function drawBoat(u, d, p) {
+    const d0 = u.def, G = ghostOf(d0.model), fx = R.fx, eye = game.camera.eye;
+    const depthK = Math.min(1, Math.max(0, (u.depth - d0.draught) / 140));
+    const a0 = (u.alive ? 1 : 1 - u.dying) * (.62 - .34 * depthK), rgb = d.tint === 'own' ? LIME3 : CORAL3;
+    if (G && a0 > .01) {
+      const c = Math.cos(p.hdg), s = Math.sin(p.hdg), x0 = p.pos[0], z0 = p.pos[2];
+      const dist = Math.hypot(x0 - eye[0], eye[1], z0 - eye[2]);
+      // thin like the X-ray: every few samples, more of them dropped the farther the camera (a fixed pattern, no flicker)
+      const stride = Math.max(2, Math.min(40, Math.round(dist / 400))) * 4, size = dist < 1500 ? 1.4 : 1.2;
+      for (let i = 0; i < G.length; i += stride) {
+        const lx = G[i], lz = G[i + 2], up = G[i + 3];
+        if (up < -.35) continue;                                  // the keel's underside: the flat picture keeps the top
+        // the flattened sides make the outline: bright; the top between them a faint fill (the X-ray's thinned shell)
+        const side = 1 - Math.max(0, up), k = (.2 + .8 * side * side) * a0;
+        fx.dotXYZ(x0 + lx * c + lz * s, .25 + G[i + 1] * .006, z0 - lx * s + lz * c, size, rgb[0] * k, rgb[1] * k, rgb[2] * k, 1, 'max');
+      }
+    }
+    // the unit's instance, pressed flat like the ghost and all but transparent: nothing of it is drawn (the renderer
+    // skips parts under alpha .004), but it is picked and boxed where the ghost lies
+    const R3 = attitude(p.hdg, 0, 0); R3[1] *= .006; R3[4] *= .006; R3[7] *= .006;
+    d.R = R3; d.hdg = undefined; d.pitch = undefined; d.roll = undefined;
+    d.T[0] = p.pos[0]; d.T[1] = .25; d.T[2] = p.pos[2]; d.alpha = .001;
+    R.draw(d);
+    if (u.alive && !deep(u) && u.mastUp > .02) {
+      let m = mastInst.get(u.id);
+      if (!m) { m = { key: d0.model, T: [0, 0, 0], hdg: 0, pitch: 0, roll: 0, st: null, tint: 'own', alpha: 1, id: u.id }; mastInst.set(u.id, m); }
+      m.T[0] = p.pos[0]; m.T[1] = -(u.depth - d0.draught); m.T[2] = p.pos[2]; m.hdg = p.hdg;
+      m.st = d.st; m.tint = d.tint; m.damage = d.damage;
+      R.draw(m);
+    }
+  }
+
   const parked = { pos: [0, 0, 0], hdg: 0, pitch: 0, roll: 0 };
 
   function drawUnit(u) {
@@ -94,6 +157,12 @@ export function createRender(game, DM) {
     if (u.type === 'transloader' && d.st.reload > 0 && DM && DM.TRANSLOADER) Object.assign(d.st, DM.TRANSLOADER.reloadPose(d.st.reload, { slot: d.st.slot }));
     d.key = d0.model; d.dissolve = 0; d.alpha = 1;
     d.damage = hasDamage(u) ? u.parts : null;
+    if (d0.sub && submerged(u)) {
+      if (!u.alive) d.damage = u.parts;
+      drawBoat(u, d, p);
+      game.drawn.set(u.id, d);
+      return;
+    }
     if (!u.alive) {
       const k = u.dying;
       if (d0.domain === 'land') {
@@ -116,6 +185,51 @@ export function createRender(game, DM) {
     }
   }
   function hasDamage(u) { for (const k in u.parts) if (u.parts[k] > 0) return true; return false; }
+
+  /* Kh-35 and Kalibr: the FX system has no plume or smoke for these kinds yet, so they get a light one here: the
+     booster's smoke for its burn, then the faint heat of the turbojet. Points laid every .12 s of sim time along the
+     flight (a ring of 40), drawn as fading dots; kept a few seconds after the round is gone. */
+  const OWN_TRAIL = { uran: 2, kalibr: 5 };                     // kind -> booster burn (s)
+  const ptrails = new Map();                                    // proj id -> { x, y, z, a (age at laying), n, i, last, t0, gone }
+  function layTrails() {
+    const t = sim.t;
+    for (const pr of sim.projectiles.values()) {
+      const boost = OWN_TRAIL[pr.kind];
+      if (boost === undefined || !pr.alive) continue;
+      let tr = ptrails.get(pr.id);
+      if (!tr) { tr = { x: new Float32Array(40), y: new Float32Array(40), z: new Float32Array(40), a: new Float32Array(40), n: 0, i: 0, last: -1e9, t0: pr.t0, gone: 0, side: pr.side, id: pr.id, boost }; ptrails.set(pr.id, tr); }
+      if (t - tr.last < .12) continue;
+      tr.last = t;
+      const v = pr.vel, l = Math.hypot(v[0], v[1], v[2]) || 1, k = pr.kind === 'kalibr' ? 4.3 : 2.4;     // at the nozzle
+      tr.x[tr.i] = pr.pos[0] - v[0] / l * k; tr.y[tr.i] = pr.pos[1] - v[1] / l * k; tr.z[tr.i] = pr.pos[2] - v[2] / l * k; tr.a[tr.i] = t - pr.t0;
+      tr.i = (tr.i + 1) % 40; tr.n = Math.min(40, tr.n + 1);
+    }
+    for (const [id, tr] of ptrails) {
+      const pr = sim.projectiles.get(id);
+      if (!pr || !pr.alive) { tr.gone = tr.gone || t; if (t - tr.gone > 4 || t < tr.gone) ptrails.delete(id); }
+    }
+  }
+  function drawTrails() {
+    const t = game.t, fx = R.fx;
+    for (const tr of ptrails.values()) {
+      const pr = sim.projectiles.get(tr.id);
+      if (tr.side !== game.side && !(pr && sim.projVisible(game.side, pr)) && !tr.gone) continue;
+      for (let j = 0; j < tr.n; j++) {
+        const born = tr.t0 + tr.a[j], age = t - born;
+        if (age < 0) continue;
+        const smoke = tr.a[j] < tr.boost, life = smoke ? 3.5 : 1.4;
+        if (age > life) continue;
+        const f = 1 - age / life, c = smoke ? 205 : 235, a = (smoke ? .55 : .3) * f;
+        fx.dotXYZ(tr.x[j], tr.y[j] + age * (smoke ? 1.2 : 0), tr.z[j], smoke ? 1.6 + age * .9 : 1.2, c, c, c - 12, a, 'max');
+      }
+      if (pr && pr.alive) {
+        // the nozzle: a hot point (the booster's brighter)
+        const hot = pr.age < tr.boost, v = pr.vel, l = Math.hypot(v[0], v[1], v[2]) || 1, k = pr.kind === 'kalibr' ? 4.3 : 2.4;
+        const p = [pr.pos[0] - v[0] / l * k, pr.pos[1] - v[1] / l * k, pr.pos[2] - v[2] / l * k];
+        fx.glow(p, hot ? 6 : 3, [255, 220, 170], hot ? .7 : .35);
+      }
+    }
+  }
 
   function drawProj(pr) {
     if (!pr.alive) return;
@@ -162,11 +276,12 @@ export function createRender(game, DM) {
         // a burnt-out vehicle stays on the ground a while as a wreck, then the returns thin out
         const d = inst.get(e.unit);
         if (d && /_wreck$/.test(d.key)) ghosts.push({ d: { key: d.key, T: d.T.slice(), hdg: d.hdg, pitch: d.pitch, roll: d.roll, st: Object.assign({}, d.st, { wreck: 1 }), tint: 'neutral', dissolve: .55, damage: d.damage ? Object.assign({}, d.damage) : null }, t0: sim.t });
-        inst.delete(e.unit); wakes.delete(e.unit); for (const m of deckSlots.values()) m.delete(e.unit);
+        inst.delete(e.unit); wakes.delete(e.unit); mastInst.delete(e.unit); for (const m of deckSlots.values()) m.delete(e.unit);
       }
       else if (e.type === 'takeoff') { for (const m of deckSlots.values()) m.delete(e.unit); }
     },
     update() {
+      layTrails();
       // forget projectile instances that are gone
       if (pinst.size > sim.projectiles.size + 32) for (const id of pinst.keys()) if (!sim.projectiles.has(id)) pinst.delete(id);
     },
@@ -182,6 +297,7 @@ export function createRender(game, DM) {
       const list = sim.list();
       for (let i = 0; i < list.length; i++) drawUnit(list[i]);
       for (const pr of sim.projectiles.values()) drawProj(pr);
+      if (ptrails.size) drawTrails();
       if (this.ownSweep && !game.getSystem('sensors')) sweep();
     },
   };

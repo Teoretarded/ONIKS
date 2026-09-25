@@ -1,8 +1,13 @@
 /* Movement: land units stay on land (faster on roads, slower on slopes), ships stay in water deeper than their
-   draught, aircraft fly direct at their altitude band. Hard rules are enforced per step, the nav grid only plans. */
+   draught, submarines in deep water only (and at their depth), aircraft fly direct at their altitude band. Hard
+   rules are enforced per step, the nav grid only plans. */
 import { clamp, angTo, ground } from './util.js';
 import { DT } from './consts.js';
 import { kill } from './damage.js';
+import { subSpeed, submerged } from './subs.js';
+
+/* the nav grid a unit plans on: boats keep to the deep-water grid */
+export const navDom = u => u.def.sub ? 'sub' : u.def.domain;
 
 const G = 9.81;
 
@@ -35,7 +40,7 @@ function speedCap(sim, u, dom) {
   if (dom === 'land') {
     const road = sim.nav.isRoad(u.pos[0], u.pos[2]);
     v = road ? d.road : d.speed * (1 - .6 * Math.min(1, sim.map.slope(u.pos[0], u.pos[2]) / .45));
-  } else v = d.speed;
+  } else v = d.sub ? subSpeed(u) : d.speed;
   for (const p in u.parts) if (u.parts[p] >= 1 && d.parts[p].slow) v *= d.parts[p].slow;
   if (u.hp < u.hpMax * .35) v *= .7;
   if (u.spdCap > 0 && u.spdCap < v) v = u.spdCap;
@@ -45,6 +50,7 @@ function speedCap(sim, u, dom) {
 function valid(sim, u, dom, x, z) {
   const h = sim.map.h(x, z);
   if (dom === 'land') return h >= .3;
+  if (u.def.sub) return h <= -u.def.sub.water;
   return h <= -(u.def.draught + 1.5);
 }
 
@@ -89,7 +95,7 @@ function moveSurface(sim, u, dom) {
         u.speed = 0; u.blocked++;
         if (u.blocked > 40 && u.goal) {
           u.blocked = 0; u.repaths = (u.repaths || 0) + 1;
-          u.path = u.repaths > 4 ? null : sim.nav.path(dom, u.pos[0], u.pos[2], u.goal[0], u.goal[1]);
+          u.path = u.repaths > 4 ? null : sim.nav.path(navDom(u), u.pos[0], u.pos[2], u.goal[0], u.goal[1]);
           u.wi = 0;
           if (u.path && u.path.length && dom === 'sea') u.path.unshift(escapePoint(sim, u));
         }
@@ -109,9 +115,14 @@ function moveSurface(sim, u, dom) {
       u.pitch = Math.atan2(hf - hb, 2 * L);
       u.roll = Math.atan2(hl - hr, 2 * W);
     }
+  } else if (d.sub && submerged(u)) {
+    // under water: level at its depth (the model's origin is the surfaced waterline), a slight bow-down while diving
+    u.pos[1] = -(u.depth - d.draught);
+    u.pitch = clamp((u.pos[1] - u.prev[1]) / DT * -.02, -.06, .06);
+    u.roll = u.speed > 2 && u.path ? clamp(angTo(u.prevHdg, u.hdg) / DT * -1.2, -.05, .05) : 0;
   } else {
     const sea = (sim.map.weather && sim.map.weather.sea) || .2, t = sim.t + u.id * 3.1;
-    u.pos[1] = Math.sin(t * .7) * .3 * sea;
+    u.pos[1] = Math.sin(t * .7) * .3 * sea - (d.sub ? u.depth - d.draught : 0);
     u.pitch = Math.sin(t * .45) * .006 * sea * (160 / d.size[0]);
     u.roll = Math.sin(t * .31) * .02 * sea + (u.speed > 2 && u.path ? clamp(angTo(u.prevHdg, u.hdg) / DT * -2, -.08, .08) : 0);
   }
@@ -145,6 +156,7 @@ function moveAir(sim, u) {
     if (u.type === 'drone' && R === 0 && dist < 600) { want = Math.atan2(dx, dz) + Math.PI / 2; }
   }
   if (u.type === 'fighter' && u.speed < 150) vT = Math.max(vT, 150);
+  if (u.type === 'aew' && u.speed < 95) vT = Math.max(vT, 95);
   const err = angTo(u.hdg, want);
   const rate = d.turn * (u.type === 'helo' && u.speed < 20 ? 3 : 1);
   const turn = clamp(err, -rate * DT, rate * DT);
@@ -156,7 +168,7 @@ function moveAir(sim, u) {
   // altitude band: terrain-following for helos and drones
   const s = Math.sin(u.hdg), c = Math.cos(u.hdg);
   let g = ground(map, u.pos[0], u.pos[2]);
-  if (u.type !== 'fighter') g = Math.max(g, ground(map, u.pos[0] + s * u.speed * 8, u.pos[2] + c * u.speed * 8));
+  if (u.type !== 'fighter' && u.type !== 'aew') g = Math.max(g, ground(map, u.pos[0] + s * u.speed * 8, u.pos[2] + c * u.speed * 8));
   let yT = g + u.altT;
   if (u.landing) {
     const cv = sim.units.get(u.landing);

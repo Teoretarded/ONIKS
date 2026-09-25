@@ -5,7 +5,8 @@ import { Nav } from './nav.js';
 import { moveUnit } from './movement.js';
 import { issue, processOrders } from './orders.js';
 import { mechanics, carrierOps } from './mech.js';
-import { senseTick, resolveScans, esmTick } from './sensors.js';
+import { senseTick, resolveScans, esmTick, sonarTick } from './sensors.js';
+import { depthGoal } from './subs.js';
 import { weaponsTick, stepProjectiles } from './weapons.js';
 import { stepDying } from './damage.js';
 import { economyTick, buy, checkResult } from './economy.js';
@@ -51,6 +52,7 @@ export class Sim {
     this.ai = {};
     for (const side of opts.aiSides || []) this.ai[side] = new AI(this, side, (opts.ai && opts.ai[side]) || opts.difficulty || 'normal');
     this._list = []; this._dirty = true; this._alive = { coast: [], fleet: [] };
+    this._subBase = undefined;                                     // the coast boats' base (mech.replenishPoint)
   }
 
   /* ---------- units ---------- */
@@ -79,11 +81,17 @@ export class Sim {
       fuel: def.endurance || 0, cargo: def.cargo || 0, drones: def.drones || 0,
       reloader: 0, reloadP: 0, reloadU: 0, refillU: 0, wantElev: 0, refillP: {}, eng: 0, lastFire: -1e9, busy: false, depotLoad: false,
       task: null, born: this.t,
+      depth: 0, dive: 0, mastUp: 0, propA: 0, sonarT: -1,                  // submarines (sim/subs.js); a listening sonar
     };
     for (const w in def.weapons) { u.ammo[w] = def.weapons[w].ammo; u.cooldowns[w] = 0; u.refillP[w] = 0; }
     for (const p of def.partNames) u.parts[p] = 0;
     if (def.mast && o.deployed) { u.mast = u.mastT = 1; u.deployed = true; }
-    if (type === 'tel' && o.deployed) { u.dep = u.depT = 1; u.elev = u.elevT = TEL_ELEV; u.deployed = true; }
+    if (def.deploy && o.deployed) { const el = def.deploy.elev || TEL_ELEV; u.dep = u.depT = 1; u.elev = u.elevT = u.wantElev = el; u.deployed = true; }
+    // boats start deep (o.dive: 0 surfaced, 1 periscope depth, 2 deep); the model's origin is the surfaced waterline
+    if (def.sub) {
+      u.dive = o.dive !== undefined ? o.dive : 2; u.depth = depthGoal(this, u); u.mastUp = u.depth <= def.sub.pd + 1.5 ? 1 : 0; u.propA = 0;
+      u.pos[1] = u.prev[1] = -(u.depth - def.draught);
+    }
     if (def.air) u.launchQ = [];
     u.mag = def.magazine ? Object.assign({}, def.magazine) : null;
     if (u.radarOn) this.setRadar(u, true, true);
@@ -174,6 +182,7 @@ export class Sim {
     if (this.scans.length) resolveScans(this);
     if (tick % SENSE_EVERY === 0) senseTick(this, SENSE_EVERY * DT);
     if (tick % 20 === 10) esmTick(this);
+    if (tick % 20 === 15) sonarTick(this);
     if (tick % SENSE_EVERY === 2) weaponsTick(this);
     stepProjectiles(this);
     stepDying(this);
@@ -193,6 +202,7 @@ export class Sim {
     for (const id of ids) {
       const u = this.units.get(id);
       mix(id); mix(u.pos[0]); mix(u.pos[1]); mix(u.pos[2]); mix(u.hdg); mix(u.hp); mix(u.alive ? 1 : 0); mix(u.dying);
+      if (u.def.sub) mix(u.depth);
       for (const w in u.ammo) mix(u.ammo[w]);
     }
     for (const p of this.projectiles.values()) { mix(p.id); mix(p.pos[0]); mix(p.pos[1]); mix(p.pos[2]); }

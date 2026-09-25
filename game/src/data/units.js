@@ -201,6 +201,65 @@ export const UNITS = {
     },
   },
 
+  bal: {
+    type: 'bal', side: 'coast', name: 'Bal', cls: 'TEL', label: 'Bal · 3K60 coastal missile system',
+    domain: 'land', model: 'bal',
+    size: [14.0, 3.1, 3.6], top: 3.6, topErect: 6,
+    speed: 8, road: 16.7, turn: .45, accel: 1.2, slopeMax: .4,
+    hp: 30, rcs: 0.5, dieTime: 20,
+    deploy: { jacks: 6, erect: 8, elev: .52 },                     // ~14 s from driving to ready to fire
+    // the pack (models.js BAL): hinged at its front on piv, containers len long; k-th round leaves container order[k]
+    // (tier, column) from its rear end, the pack raised to deploy.elev
+    pack: { piv: [0, 1.66, -.35], len: 6.3, cols: [-.96, -.32, .32, .96], rows: [.36, .98], order: [[1, 0], [1, 3], [1, 1], [1, 2], [0, 0], [0, 3], [0, 1], [0, 2]] },
+    reload: { depot: 40 },                                        // a round per 40 s at a depot
+    sensors: {},
+    weapons: {
+      uran: { proj: 'uran', ammo: 8, range: 95000, min: 6000, cd: 3, vs: ['sea'], salvo: 4, needs: 'erect', refill: 40 },
+    },
+    cost: 520, buildTime: 90,
+    parts: {
+      chassis: { label: 'MZKT-7930 · 8×8', w: 3, slow: .6 },
+      wheelsL: { label: 'Wheels ×4 · L', w: 1, disables: ['move'] },
+      wheelsR: { label: 'Wheels ×4 · R', w: 1, disables: ['move'] },
+      cab: { label: 'Cab', w: 1, slow: .7 },
+      cabin: { label: 'Crew cabin · launch control', w: 1.5, disables: ['uran'] },
+      pack: { label: 'Containers ×8 · Kh-35U', w: 2, lose: { uran: .5 }, disables: ['reload'] },
+      ram: { label: 'Pack ram', w: .8, disables: ['uran'] },
+      jacks: { label: 'Outriggers', w: .8, disables: ['deploy', 'uran'] },
+    },
+    modelState(u, t) {
+      const s = u.st; s.elev = u.elev; s.dep = u.dep; s.n = u.ammo.uran; s.wheel = wrap(u.odo / .66); return s;
+    },
+  },
+
+  ssk: {
+    type: 'ssk', side: 'coast', name: 'Kilo 636.3', cls: 'SSK', label: 'Project 636.3 Kilo · SSK',
+    domain: 'sea', model: 'ssk',
+    // depth: keel depth (m) at periscope depth / deep; dive rate m/s; least water; noise (1 = a ship); speeds surfaced / PD / deep
+    sub: { pd: 16, deep: 150, rate: 1.2, water: 30, quiet: .55, snort: 1.8, speeds: [10 * KN, 7 * KN, 17 * KN] },
+    size: [73.8, 9.9, 14], top: 7.75, draught: 6.2,
+    speed: 17 * KN, turn: .045, accel: .1,
+    hp: 45, rcs: 0.6, dieTime: 45,
+    sensors: { sonar: { sub: 13000, ship: 28000, gain: .1 }, camera: { range: 9000, gain: .3, mast: true } },
+    weapons: {
+      klub: { proj: 'kalibr', ammo: 4, range: 75000, min: 8000, cd: 4, vs: ['sea'], salvo: 2, sub: true, refill: 60 },
+      t53: { proj: 't53', ammo: 12, range: 14000, min: 800, cd: 8, vs: ['sub', 'sea'], salvo: 1, refill: 40 },
+    },
+    cost: 820, buildTime: 240,
+    parts: {
+      bow: { label: 'Bow · sonar · 6 tubes', w: 2, disables: ['sonar'] },
+      hull: { label: 'Hull', w: 4, slow: .7 },
+      stern: { label: 'Stern', w: 1.5, slow: .6 },
+      casing: { label: 'Upper casing', w: 1 },
+      sail: { label: 'Sail', w: 1.5 },
+      masts: { label: 'Periscopes · masts', w: .6, disables: ['camera', 'klub'] },
+      bowPlanes: { label: 'Bow planes', w: .5 },
+      sternPlanes: { label: 'Stern planes · rudders', w: .8, slow: .6 },
+      prop: { label: 'Propeller', w: .8, slow: .4 },
+    },
+    modelState(u, t) { const s = u.st; s.mast = u.mastUp; s.prop = wrap((u.propA || 0)); return s; },
+  },
+
   /* ------------------------------------------------------------------ FLEET */
   carrier: {
     type: 'carrier', side: 'fleet', name: 'CVN-68', cls: 'CVN', label: 'Nimitz · CVN',
@@ -210,7 +269,7 @@ export const UNITS = {
     hp: 300, rcs: 1.6, dieTime: 60,                               // balance: 400 -> 300 (four Oniks hits)
     sensors: { radar: { surf: 45000, air: 110000, land: .3, period: 4, gain: .15, h: 45 } },
     emits: { range: 150000 },
-    air: { cap: 12, launchGap: 20, deckY: 19.5, types: ['fighter', 'helo'] },   // launches F/A-18E and MH-60R
+    air: { cap: 12, launchGap: 20, deckY: 19.5, types: ['fighter', 'helo', 'aew'] },   // launches F/A-18E, MH-60R and E-2D
     magazine: { slam: 60, aam: 40, hellfire: 32 },                // aircraft stores aboard; refilled at the replenishment point
     weapons: {
       pdms: { proj: 'pdms', ammo: 16, range: 15000, min: 1000, cd: 2.0, vs: ['missile', 'air'], auto: true, maxEng: 2, maxShots: 4,
@@ -237,7 +296,8 @@ export const UNITS = {
     size: [155, 20, 45], top: 45, draught: 9.4,
     speed: 30 * KN, turn: .03, accel: .15,
     hp: 110, rcs: 1.0, dieTime: 60,
-    sensors: { radar: { surf: 45000, air: 110000, land: .3, period: 1, gain: .1, h: 20 } },
+    // AN/SQS-53C hull sonar: hears submerged boats close by (less at speed)
+    sensors: { radar: { surf: 45000, air: 110000, land: .3, period: 1, gain: .1, h: 20 }, sonar: { sub: 11000, ship: 0, gain: .12, hull: true } },
     emits: { range: 150000 },
     scan: { reach: 60000, r: 4000, cd: 90 },
     air: { cap: 2, launchGap: 30, deckY: 8, types: ['helo'] },       // Flight IIA hangar: two MH-60R
@@ -249,6 +309,7 @@ export const UNITS = {
               muzzle: [0, 9, 60], refill: 2 },
       ciws: { gun: true, ammo: 40, range: 2000, cd: 1.0, vs: ['missile', 'air'], auto: true, mounts: ['ciwsF', 'ciwsA'],
               pk: { missile: .12, air: .3 }, dmg: 4, burst: .9, refill: 8 },
+      svtt: { proj: 'mk54', ammo: 6, range: 8000, min: 500, cd: 6, vs: ['sub'], salvo: 1, muzzle: [4.6, 3.2, -14], refill: 30 },   // Mk 32 tubes ×2
     },
     cost: 1400, buildTime: 240,
     parts: {
@@ -284,11 +345,13 @@ export const UNITS = {
     sensors: {
       radar: { surf: 60000, air: 25000, land: .35, period: 3, gain: .15, h: 0 },
       camera: { range: 10000, gain: .3 },
+      sonar: { sub: 9000, ship: 0, gain: .18, dip: true },       // AN/AQS-22 dipping sonar: only while hovering
     },
     emits: { range: 80000 },
     scan: { reach: 20000, r: 3000, cd: 90 },
     weapons: {
       hellfire: { proj: 'hellfire', ammo: 4, range: 8000, min: 500, cd: 3.0, vs: ['land', 'sea'], salvo: 2 },
+      mk54: { proj: 'mk54', ammo: 2, range: 3500, min: 0, cd: 5, vs: ['sub'], salvo: 1 },
     },
     cost: 220, buildTime: 60,
     parts: {
@@ -297,8 +360,8 @@ export const UNITS = {
       tailrotor: { label: 'Tail rotor', w: .5, fatal: true },
       tail: { label: 'Tail boom', w: 1, slow: .6 },
       gear: { label: 'Landing gear', w: .5 },
-      sensors: { label: 'AN/APS-153 · MTS-FLIR', w: 1, disables: ['radar', 'camera', 'scan'] },
-      pylons: { label: 'Pylons · Hellfire', w: .5, disables: ['hellfire'] },
+      sensors: { label: 'AN/APS-153 · MTS-FLIR · AQS-22', w: 1, disables: ['radar', 'camera', 'scan', 'sonar'] },
+      pylons: { label: 'Pylons · Hellfire · Mk 54', w: .5, disables: ['hellfire', 'mk54'] },
     },
     modelState(u, t) {
       const s = u.st, on = !u.aboard || u.spool > 0;
@@ -334,6 +397,73 @@ export const UNITS = {
       const s = u.st; s.fan = u.aboard ? 0 : spin(u, t, 60); s.ab = u.ab; s.nozzle = u.aboard ? 0 : .35 + .65 * u.ab; return s;
     },
   },
+
+  aew: {
+    type: 'aew', side: 'fleet', name: 'E-2D', cls: 'AEW', label: 'E-2D Advanced Hawkeye',
+    domain: 'air', model: 'aew',
+    size: [17.6, 24.56, 5.58], alt: [6000, 9000], altDef: 7600,
+    speed: 150, turn: .1, climb: 15, accel: 5,
+    hp: 12, rcs: 1.0, dieTime: 10, endurance: 14400, rearm: 300,
+    // AN/APY-9: the rotodome turns once in 10 s (the sweep period); game-scaled reach over the horizon
+    sensors: { radar: { surf: 110000, air: 140000, land: .12, period: 10, gain: .14, h: 0, skim: .45 } },   // an air and sea search radar: little over land
+    emits: { range: 200000 },
+    weapons: {},
+    cost: 420, buildTime: 120,
+    parts: {
+      fuselage: { label: 'Fuselage', w: 3 },
+      wing: { label: 'Wing centre section', w: 1.5, fatal: true },
+      outerL: { label: 'Outer wing · L', w: 1, slow: .7 },
+      outerR: { label: 'Outer wing · R', w: 1, slow: .7 },
+      nacelleL: { label: 'T56 nacelle · L', w: 1, slow: .6 },
+      nacelleR: { label: 'T56 nacelle · R', w: 1, slow: .6 },
+      propL: { label: 'Propeller · L', w: .5, slow: .7 },
+      propR: { label: 'Propeller · R', w: .5, slow: .7 },
+      pylon: { label: 'Rotodome pylon', w: .5, disables: ['radar'] },
+      dome: { label: 'Rotodome · AN/APY-9', w: 1.5, disables: ['radar'] },
+      tail: { label: 'Tailplane · four fins', w: 1, slow: .8 },
+      hook: { label: 'Arresting hook', w: .2 },
+    },
+    // the rotodome is the radar antenna: it turns with the sweep and stops under EMCON or on deck (wings folded)
+    modelState(u, t) {
+      const s = u.st, on = !u.aboard || u.spool > 0;
+      s.dome = antAt(u, t); s.prop = on ? spin(u, t, 70) : 0; s.fold = u.aboard ? 1 - u.spool : 0; return s;
+    },
+  },
+
+  ssn: {
+    type: 'ssn', side: 'fleet', name: 'SSN-774', cls: 'SSN', label: 'Virginia · SSN',
+    domain: 'sea', model: 'ssn',
+    sub: { pd: 18, deep: 180, rate: 1.5, water: 36, quiet: .4, speeds: [12 * KN, 10 * KN, 25 * KN] },
+    size: [114.9, 10.4, 17.2], top: 7.9, draught: 9.3,
+    speed: 25 * KN, turn: .035, accel: .1,
+    hp: 70, rcs: 0.8, dieTime: 60,
+    sensors: { sonar: { sub: 17000, ship: 32000, gain: .1 }, camera: { range: 10000, gain: .3, mast: true } },
+    weapons: {
+      strike: { proj: 'tlam', ammo: 12, range: 120000, min: 10000, cd: 3.0, vs: ['land'], salvo: 2, vls: true, sub: true, refill: 40 },
+      mk48: { proj: 'mk48', ammo: 12, range: 16000, min: 800, cd: 8, vs: ['sub', 'sea'], salvo: 1, refill: 40 },
+    },
+    // VPT cell tops (ship frame, surfaced): the launch points of the strike rounds
+    vlsAt: (() => { const out = []; for (let i = 0; i < 12; i++) { const t = i < 6 ? 0 : 1, a = (i % 6) / 6 * TAU + Math.PI / 6, z = [46.2, 42.6][t]; out.push([Math.sin(a) * .62, 1.0, z + Math.cos(a) * .62]); } return out; })(),
+    cost: 1500, buildTime: 300,
+    parts: {
+      bow: { label: 'Large Aperture Bow · sonar', w: 2, disables: ['sonar'] },
+      hull: { label: 'Hull', w: 5, slow: .7 },
+      stern: { label: 'Stern', w: 2, slow: .6 },
+      sail: { label: 'Sail', w: 1.5 },
+      masts: { label: 'Photonics masts', w: .6, disables: ['camera'] },
+      vpt: { label: 'Virginia Payload Tubes', w: 1, disables: ['strike'] },
+      bowPlanes: { label: 'Bow planes', w: .5 },
+      sternPlanes: { label: 'Stern planes · rudders', w: .8, slow: .6 },
+      arrays: { label: 'Flank arrays', w: .8 },
+      propulsor: { label: 'Pump-jet propulsor', w: .8, slow: .4 },
+    },
+    modelState(u, t) {
+      const s = u.st; s.mast = u.mastUp; s.prop = wrap(u.propA || 0);
+      s.vptA = 0; s.vptB = 0;
+      for (const [cell, f] of u.vlsOpen) { if (cell % 12 < 6) s.vptA = Math.max(s.vptA, f); else s.vptB = Math.max(s.vptB, f); }
+      return s;
+    },
+  },
 };
 
 /* Projectiles and gun rounds (kind -> stats). mode: 'cruise' holds an altitude profile and flies to the
@@ -360,6 +490,17 @@ export const PROJ = {
   aam: { name: 'AIM-120D', cls: 'AAM', model: 'aim120', mode: 'direct', speed: 1200, dmg: 15, pk: { air: .7, missile: 0 },
          vert: 0, v0: 0, boost: 3, turn: .5, pitchRate: .5 },
   shell: { name: '5"/62 round', cls: 'SHELL', model: 'shell', mode: 'ballistic', speed: 810, dmg: 6, pk: 1, sigma: 40 },
+  uran: { name: 'Kh-35U', cls: 'ASCM', model: 'kh35', boosterModel: null, mode: 'cruise', threat: true, speed: 270, dmg: 35, pk: .82, reach: 3000,
+          rcs: .1, vert: 0, v0: 35, boost: 2, sepAt: 2, alt: 25, seaAlt: 10, pitchMax: .45, pitchRate: .35, turn: .3,
+          finalDist: 12000, finalAlt: 5 },
+  kalibr: { name: '3M-54 Kalibr', cls: 'ASCM', model: 'kalibr', boosterModel: null, mode: 'cruise', threat: true, speed: 280, dmg: 55, pk: .85, reach: 4000,
+            rcs: .15, vert: 1.6, v0: 25, boost: 5, sepAt: 5, alt: 30, seaAlt: 15, pitchMax: .5, pitchRate: .35, turn: .2,
+            finalDist: 20000, finalAlt: 8 },
+  /* torpedoes run under water (not drawn; heard by sonar): mode 'run' holds a depth and closes on the target once it
+     is near the aim point (reach). drop: released from an aircraft, it falls into the sea first */
+  mk48: { name: 'Mk 48 torpedo', cls: 'TORP', model: null, mode: 'run', torpedo: true, speed: 28, dmg: 60, pk: .8, reach: 2500, depth: 60, noise: 3 },
+  mk54: { name: 'Mk 54 torpedo', cls: 'TORP', model: null, mode: 'run', torpedo: true, speed: 20, dmg: 30, pk: .75, reach: 2000, depth: 40, noise: 2.5 },
+  t53: { name: '533 mm torpedo', cls: 'TORP', model: null, mode: 'run', torpedo: true, speed: 25, dmg: 55, pk: .78, reach: 2500, depth: 50, noise: 3 },
 };
 
 export function typesOf(side) { return Object.keys(UNITS).filter(k => UNITS[k].side === side); }

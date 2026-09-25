@@ -5,7 +5,8 @@ import { buyable } from '../../data/units.js';
 import { esc, dur, dots, sat } from './fmt.js';
 
 const SHORTN = { tel: 'K340P TEL', radar: 'Monolith-B radar', pantsir: 'Pantsir-S1', catapult: 'Orlan-10 catapult', drone: 'Orlan-10 UAV',
-  transloader: 'K342P transloader', ddg: 'DDG-51 Arleigh Burke', helo: 'MH-60R Seahawk', fighter: 'F/A-18E Super Hornet' };
+  transloader: 'K342P transloader', ddg: 'DDG-51 Arleigh Burke', helo: 'MH-60R Seahawk', fighter: 'F/A-18E Super Hornet',
+  bal: 'Bal · 3K60 launcher', ssk: 'Kilo 636.3 · SSK', aew: 'E-2D Advanced Hawkeye', ssn: 'Virginia · SSN' };
 
 export function createReinforce(game, hud, parent) {
   const { sim } = game;

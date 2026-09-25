@@ -5,9 +5,11 @@
 import { PROJ, CLASSIFY, ENEMY, TEL_ELEV } from '../data/units.js';
 import { DT } from './consts.js';
 import { applyDamage } from './damage.js';
-import { launchSeen, radarWorks } from './sensors.js';
+import { launchSeen, radarWorks, torpedoHeard } from './sensors.js';
 import { gauss } from './rand.js';
 import { clamp, angTo, local, closest, ground, dxz, d3 } from './util.js';
+import { atPD, submerged, isSub } from './subs.js';
+import { elevOf } from './mech.js';
 
 const G = 9.81;
 const ease = x => x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x);
@@ -18,9 +20,9 @@ export function weaponsTick(sim) {
   const list = sim.list(), t = sim.t;
   THREATS.coast.length = 0; THREATS.fleet.length = 0; INB.coast.clear(); INB.fleet.clear();
   for (const p of sim.projectiles.values()) {
-    if (!p.alive || !p.P.threat) continue;
+    if (!p.alive || !(p.P.threat || p.P.torpedo)) continue;
     const foe = p.side === 'coast' ? 'fleet' : 'coast';
-    if (t - p.seen[foe] <= 1.01) THREATS[foe].push(p);
+    if (p.P.threat && t - p.seen[foe] <= 1.01) THREATS[foe].push(p);
     if (p.tk === 'unit') INB[p.side].set(p.target, (INB[p.side].get(p.target) || 0) + 1);
   }
   for (let i = 0; i < list.length; i++) {
@@ -32,8 +34,9 @@ export function weaponsTick(sim) {
       if (u.ammo[wn] <= 0 || u.cooldowns[wn] > 0 || u.off[wn]) continue;
       if (w.mounts && w.mounts.every(m => u.off[m])) continue;
       if (w.needsRadar && !radarWorks(u)) continue;
+      if (w.sub && isSub(u) && !atPD(u)) continue;               // missiles leave a boat from periscope depth
       if (w.auto && autoFire(sim, u, w)) continue;
-      if (w.vs.includes('land') || w.vs.includes('sea')) offensive(sim, u, w);
+      if (w.vs.includes('land') || w.vs.includes('sea') || w.vs.includes('sub')) offensive(sim, u, w);
     }
   }
 }
@@ -80,7 +83,7 @@ function autoFire(sim, u, w) {
   return false;
 }
 
-const PRIO = { HQ: 10, CVN: 9, TEL: 8, DDG: 7, SAM: 6, RADAR: 6, TLV: 4, 'UAV-L': 3, HELO: 2, FTR: 1, UAV: 1 };
+const PRIO = { HQ: 10, CVN: 9, TEL: 8, DDG: 7, SSN: 7, SSK: 7, SAM: 6, RADAR: 6, TLV: 4, AEW: 3, 'UAV-L': 3, HELO: 2, FTR: 1, UAV: 1 };
 function offensive(sim, u, w) {
   const S = sim.sides[u.side], o = u.orders[0];
   let c = null;
@@ -103,17 +106,17 @@ function offensive(sim, u, w) {
   } else return;
   const d = dxz(u.pos[0], u.pos[2], c.pos[0], c.pos[2]);
   if (d > w.range || d < (w.min || 0)) return;
-  if (w.needs === 'erect' && (u.elev < TEL_ELEV - 1e-6 || u.dep < 1 || u.reloader)) return;
+  if (w.needs === 'erect' && (u.elev < elevOf(u.def) - 1e-6 || u.dep < 1 || u.reloader)) return;
   if (u.def.domain === 'air' && u.aboard) return;
   const p = launch(sim, u, w, c.unitId, 'unit', c.pos);
-  if (p.P.threat) INB[u.side].set(c.unitId, (INB[u.side].get(c.unitId) || 0) + 1);
+  if (p.P.threat || p.P.torpedo) INB[u.side].set(c.unitId, (INB[u.side].get(c.unitId) || 0) + 1);
   if (o && o.kind === 'attack') o.fired = (o.fired || 0) + 1;
 }
 
 /* missiles already flying at a unit (side's own count) */
 export function inbound(sim, side, unitId) {
   let n = 0;
-  for (const p of sim.projectiles.values()) if (p.alive && p.side === side && p.tk === 'unit' && p.target === unitId && p.P.threat) n++;
+  for (const p of sim.projectiles.values()) if (p.alive && p.side === side && p.tk === 'unit' && p.target === unitId && (p.P.threat || p.P.torpedo)) n++;
   return n;
 }
 
@@ -156,9 +159,24 @@ export function launch(sim, u, w, target, tk, aimAt) {
   u.ammo[wn]--; u.cooldowns[wn] = w.cd; u.lastFire = t;
   sim.sides[u.side].fired++;
   let pos, hdg = Math.atan2(aimAt[0] - u.pos[0], aimAt[2] - u.pos[2]), pitch, spd = P.v0 || 0;
-  if (u.def.domain === 'air') {
+  if (P.torpedo) {
+    // torpedoes: dropped from an aircraft, out of a ship's side tubes, or from a boat's bow tubes at its depth
+    if (u.def.domain === 'air') pos = [u.pos[0], u.pos[1] - 2, u.pos[2]];
+    else if (isSub(u)) pos = local(u, [0, -u.def.draught * .45, u.def.size[0] * .36]);
+    else pos = local(u, w.muzzle ? [(before % 2 ? -1 : 1) * w.muzzle[0], 0, w.muzzle[2]] : [0, 0, 0]);
+    pitch = 0; spd = u.def.domain === 'air' ? 0 : 12;
+  } else if (u.def.domain === 'air') {
     pos = [u.pos[0], u.pos[1] - 2, u.pos[2]]; pitch = Math.min(0, u.pitch) - .03; spd = Math.max(spd, u.speed);
     if (P.mode === 'direct') hdg = u.hdg + clamp(angTo(u.hdg, hdg), -.6, .6); else hdg = u.hdg;
+  } else if (w.vls && u.def.vlsAt) {
+    // a boat's vertical tubes: the round broaches from the cell and climbs out of the water
+    const cell = u.vlsNext++ % u.def.vlsAt.length;
+    pos = local(u, u.def.vlsAt[cell]); pos[1] = Math.max(pos[1], .5); pitch = Math.PI / 2;
+    u.vlsOpen.push([cell, 0]); u.vlsT.push(t);
+    u.fireT = t;
+  } else if (w.sub && isSub(u)) {
+    // missiles out of a boat's torpedo tubes: the capsule broaches over the bow, the round rises from the water
+    pos = local(u, [0, 0, u.def.size[0] * .42]); pos[1] = .5; pitch = Math.PI / 2;
   } else if (w.vls) {
     const cell = u.vlsNext++ % 96;
     const zc = cell < 32 ? 38.9 + ((3 - Math.floor(cell / 8)) - 1.5) * .85 : -29.4 + ((7 - Math.floor((cell - 32) / 8)) - 3.5) * .85;
@@ -166,6 +184,12 @@ export function launch(sim, u, w, target, tk, aimAt) {
     pos = local(u, [xc, 8.5, zc]); pitch = Math.PI / 2;
     u.vlsOpen.push([cell, 0]); u.vlsT.push(t);
     u.fireT = t;
+  } else if (w.needs === 'erect' && u.def.pack) {
+    // Bal: the round leaves the rear end of its container, over the back of the raised pack
+    const K = u.def.pack, k = Math.max(0, Math.min(K.order.length - 1, K.order.length - before)), [r, c] = K.order[k];
+    const a = u.elev, dy = K.rows[r], dz = -K.len - .2, ca = Math.cos(a), sa = Math.sin(a);
+    pos = local(u, [K.cols[c], K.piv[1] + ca * dy - sa * dz, K.piv[2] + sa * dy + ca * dz]);
+    hdg = u.hdg + Math.PI; pitch = a;
   } else if (w.needs === 'erect') {
     const tube = 2 - before;                    // first round from the right tube
     const side = tube === 0 ? 1 : -1;
@@ -183,6 +207,7 @@ export function launch(sim, u, w, target, tk, aimAt) {
     aim: [aimAt[0], aimAt[1], aimAt[2]], phase: 'launch', t0: t, age: 0, alive: true, st: { booster: true, wing: 0, fin: 0 },
     spd, spd0: spd, hdg, pitch, eng: 0, shots: 0, minD: 1e9, seen: { coast: -1e9, fleet: -1e9 }, locked: false, sep: false,
     maxT: (w.range / P.speed) * 1.8 + (P.vert || 0) + (P.boost || 0) + 20, ball: null,
+    gA: undefined, gL: null, gLx: 0, gLz: 0, gLmax: 0, gFl: -9, depth: 0,    // terrain look-ahead; torpedo depth
   };
   p.seen[u.side] = t;
   if (tk === 'proj') { const q = sim.projectiles.get(target); if (q) { q.eng++; q.shots++; } }
@@ -193,6 +218,7 @@ export function launch(sim, u, w, target, tk, aimAt) {
   sim.projectiles.set(p.id, p);
   sim.emit('launch', { proj: p.id, kind: p.kind, side: u.side, from: u.id, target, tk, pos: pos.slice(), hdg, pitch, weapon: wn });
   if (P.threat || P.mode === 'ballistic') launchSeen(sim, u);
+  if (P.torpedo) { p.depth = isSub(u) ? Math.max(20, -pos[1]) : 0; torpedoHeard(sim, u); }
   return p;
 }
 
@@ -218,6 +244,32 @@ function setupShell(sim, p, u, aimAt) {
   u.fireT = sim.t;
 }
 
+/* ---------- terrain look-ahead ----------
+   The ground along the next ~2 km of the track (sampled 5x a second). The climb angle that clears the highest of it
+   by `clr` metres is a floor on the round's pitch: it starts climbing early and smoothly for a cliff ahead instead
+   of flying into it. Only ground short of the aim point counts (maxD), so a round still comes down on its target. */
+const LOOK = [120, 250, 400, 600, 850, 1100, 1400, 1750, 2100];
+function lookAhead(sim, p) {
+  const vh = Math.sqrt(p.vel[0] * p.vel[0] + p.vel[2] * p.vel[2]);
+  const ux = vh > 1 ? p.vel[0] / vh : Math.sin(p.hdg), uz = vh > 1 ? p.vel[2] / vh : Math.cos(p.hdg);
+  if (!p.gL) p.gL = new Float32Array(LOOK.length);
+  let mx = 0;
+  for (let i = 0; i < LOOK.length; i++) { const g = ground(sim.map, p.pos[0] + ux * LOOK[i], p.pos[2] + uz * LOOK[i]); p.gL[i] = g; if (g > mx) mx = g; }
+  p.gLx = p.pos[0]; p.gLz = p.pos[2]; p.gLmax = mx;
+}
+function clearAngle(p, clr, maxD) {
+  if (!p.gL || p.pos[1] > p.gLmax + clr + 250) return -9;           // well clear of everything ahead
+  const mx = p.pos[0] - p.gLx, mz = p.pos[2] - p.gLz, moved = Math.sqrt(mx * mx + mz * mz), y = p.pos[1] - clr;
+  let k = -1e9;
+  for (let i = 0; i < LOOK.length; i++) {
+    const d = LOOK[i] - moved;
+    if (d < 40 || d > maxD) continue;
+    const s = (p.gL[i] - y) / d;
+    if (s > k) k = s;
+  }
+  return k === -1e9 ? -9 : Math.atan(k);
+}
+
 /* ---------- projectile flight and resolution (every tick) ---------- */
 export function stepProjectiles(sim) {
   if (!sim.projectiles.size) return;
@@ -240,6 +292,7 @@ function stepOne(sim, p) {
     if (p.age >= b.T) shellImpact(sim, p);
     return;
   }
+  if (P.mode === 'run') { stepTorpedo(sim, p); if (p.alive && p.age > p.maxT) endTorpedo(sim, p, 'selfdestruct'); return; }
   // target and aim point
   let tgt = null;
   if (p.tk === 'proj') {
@@ -247,7 +300,7 @@ function stepOne(sim, p) {
     if (!tgt || !tgt.alive) { tgt = retarget(sim, p); if (!tgt) { selfDestruct(sim, p); return; } }
   } else {
     tgt = sim.units.get(p.target);
-    if (tgt && (!tgt.alive || tgt.aboard)) tgt = null;
+    if (tgt && (!tgt.alive || tgt.aboard || submerged(tgt))) tgt = null;     // a boat that dives is out of a missile's reach
   }
   if (P.mode === 'direct') {
     if (tgt) {
@@ -278,9 +331,15 @@ function stepOne(sim, p) {
   if (p.age >= (P.vert || 0)) {
     const hT = Math.atan2(dx, dz);
     const bend = ease((p.age - (P.vert || 0)) / 2.5);           // gentle, round pitch-over after the vertical rise
-    // terrain ahead (2 s and 4 s, refreshed 5x a second): everything keeps clear of the ground until the last stretch
+    // terrain ahead (2 s and 4 s, and the next 2 km of the track; refreshed 5x a second): everything keeps clear of
+    // the ground until the last stretch
     const g0 = ground(map, p.pos[0], p.pos[2]);
-    if ((sim.tick + p.id) % 4 === 0 || p.gA === undefined) p.gA = Math.max(ground(map, p.pos[0] + p.vel[0] * 2, p.pos[2] + p.vel[2] * 2), ground(map, p.pos[0] + p.vel[0] * 4, p.pos[2] + p.vel[2] * 4));
+    const fresh = (sim.tick + p.id) % 4 === 0 || p.gA === undefined;
+    if (fresh) {
+      p.gA = Math.max(ground(map, p.pos[0] + p.vel[0] * 2, p.pos[2] + p.vel[2] * 2), ground(map, p.pos[0] + p.vel[0] * 4, p.pos[2] + p.vel[2] * 4));
+      // the 2 km look-ahead: 2.5 times a second, and only for rounds low enough for the ground to matter
+      if (P.look !== 0 && (!p.gL || ((sim.tick + p.id) % 8 === 0 && p.pos[1] < p.gA + 800))) lookAhead(sim, p);
+    }
     const gA = Math.max(g0, p.gA);
     const near = Math.max(1200, p.spd * 2.5);
     let pT;
@@ -288,6 +347,10 @@ function stepOne(sim, p) {
       const ay = dist > near ? Math.max(p.aim[1], gA + 50) : p.aim[1];
       pT = Math.atan2(ay - p.pos[1], Math.max(1, dist));
       if (p.pos[1] < gA + 25 && dist > near) pT = Math.max(pT, .12);
+      if (dist > near && P.look !== 0) {
+        if (fresh) p.gFl = clearAngle(p, 25, dist - 200);         // the floor 5x a second (the pitch rate smooths it)
+        if (p.gFl > pT) pT = Math.min(p.gFl, 1.2);
+      }
       p.phase = p.age < (P.boost || 0) ? 'climb' : dist < 3000 ? 'final' : 'cruise';
     } else {
       const g = gA;
@@ -306,6 +369,10 @@ function stepOne(sim, p) {
       const look = final && dist < near ? Math.max(1, dist) : p.spd * 4;
       pT = clamp(Math.atan2(yT - p.pos[1], look), -P.pitchMax - (final ? .3 : 0), P.pitchMax);
       if (p.pos[1] < g + 15 && dist > near) pT = Math.max(pT, .1);
+      // cliffs short of the aim point: climb early enough to clear the highest ground of the next 2 km
+      const clr = dist < near ? 8 : Math.max(12, final ? P.finalAlt : P.seaAlt && g <= 0 ? P.seaAlt : P.alt);
+      if (fresh) p.gFl = P.look === 0 ? -9 : clearAngle(p, clr, dist - (dist < near ? 250 : 150));   // look: 0 switches it off (experiments)
+      if (p.gFl > pT) pT = Math.min(p.gFl, P.pitchMax + .25);
     }
     if (p.age < (P.vert || 0) + .01 && P.vert) p.phase = 'climb';
     const tr = P.turn * DT * (P.vert ? Math.max(.15, bend) : 1), pr = P.pitchRate * DT * (P.vert ? Math.max(.1, bend) : 1);
@@ -348,6 +415,60 @@ function stepOne(sim, p) {
     if (p.pitch < 0) p.pitch = 0;
   }
   if (p.age > p.maxT) selfDestruct(sim, p);
+}
+
+/* ---------- torpedoes ----------
+   A dropped torpedo falls into the sea first; then it runs at depth toward the side's track of its target (the aim
+   point), and closes on the target itself once the target is within reach of the aim point and near. It resolves
+   as it passes the target (the hit chance decides), or ends on the bottom / a shore or when its run is spent.
+   Not drawn (under water); the other side hears it (sensors.sonarTick). */
+function stepTorpedo(sim, p) {
+  const P = p.P, map = sim.map;
+  let tgt = sim.units.get(p.target);
+  if (tgt && (!tgt.alive || tgt.def.domain !== 'sea')) tgt = null;
+  if (p.pos[1] > -3 && p.phase === 'launch') {
+    // into the water (off a helicopter: on its parachute)
+    p.pos[1] -= (p.pos[1] > 0 ? 18 : 4) * DT;
+    p.vel[0] = 0; p.vel[1] = -10; p.vel[2] = 0;
+    return;
+  }
+  if (p.phase === 'launch') p.phase = 'cruise';
+  if (!p.locked) {
+    const c = sim.sides[p.side].contacts.get(p.target);
+    if (c && !c.dead) { p.aim[0] = c.pos[0]; p.aim[2] = c.pos[2]; }
+    if (tgt && dxz(tgt.pos[0], tgt.pos[2], p.aim[0], p.aim[2]) < P.reach && dxz(p.pos[0], p.pos[2], tgt.pos[0], tgt.pos[2]) < P.reach * 2) p.locked = true;
+  }
+  if (p.locked && tgt) { p.aim[0] = tgt.pos[0]; p.aim[2] = tgt.pos[2]; p.phase = 'final'; }
+  else if (p.locked) p.locked = false;
+  p.spd = Math.min(P.speed, (p.spd || 0) + 3 * DT);
+  const dx = p.aim[0] - p.pos[0], dz = p.aim[2] - p.pos[2], dist = Math.sqrt(dx * dx + dz * dz);
+  if (dist > 20) p.hdg += clamp(angTo(p.hdg, Math.atan2(dx, dz)), -.3 * DT, .3 * DT);
+  // depth: a boat's own depth when chasing one, shallow under a ship; never into the bottom
+  const floor = map.h(p.pos[0], p.pos[2]);
+  let yT = tgt && p.locked && tgt.def.sub ? tgt.pos[1] - 4 : -Math.min(P.depth, 12);
+  yT = Math.max(yT, floor + 6);
+  const vy = clamp(yT - p.pos[1], -4, 4);
+  p.vel[0] = Math.sin(p.hdg) * p.spd; p.vel[1] = vy; p.vel[2] = Math.cos(p.hdg) * p.spd;
+  p.pos[0] += p.vel[0] * DT; p.pos[1] = Math.min(-2, p.pos[1] + vy * DT); p.pos[2] += p.vel[2] * DT;
+  if (map.h(p.pos[0], p.pos[2]) > -4) { endTorpedo(sim, p, 'terrain'); return; }           // ran into the shallows
+  if (p.locked && tgt) {
+    const dd = Math.sqrt((tgt.pos[0] - p.pos[0]) ** 2 + (tgt.pos[1] - p.pos[1]) ** 2 + (tgt.pos[2] - p.pos[2]) ** 2);
+    if (closest(p, tgt) < Math.max(15, tgt.def.size[1] * .8) || (p.minD < 120 && dd > p.minD + 1)) {
+      if (sim.rng.fire() < P.pk) {
+        const pos = [tgt.pos[0], .5, tgt.pos[2]];
+        sim.emit('hit', { pos, target: tgt.id, kind: p.kind, side: p.side, from: p.from, proj: p.id, under: true });
+        killProj(sim, p, null);
+        applyDamage(sim, tgt, P.dmg, sim.units.get(p.from));
+      } else endTorpedo(sim, p, 'pk');
+      return;
+    }
+    if (dd < p.minD) p.minD = dd;
+  } else if (dist < 60 && p.age > 10) endTorpedo(sim, p, tgt ? 'moved' : 'lost');
+}
+/* a torpedo that ran out or missed: no splash (it ends under the water) */
+function endTorpedo(sim, p, why) {
+  sim.emit('torpedo_end', { pos: p.pos.slice(), kind: p.kind, side: p.side, proj: p.id, why });
+  killProj(sim, p, null);
 }
 
 function retarget(sim, p) {

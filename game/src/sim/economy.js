@@ -15,7 +15,7 @@ export function economyTick(sim) {
   for (const o of sim.objectives) {
     let c = 0, f = 0;
     for (const side of SIDES) for (const u of sim.alive(side)) {
-      if (u.aboard || u.def.domain === 'air') continue;
+      if (u.aboard || u.def.domain === 'air' || u.def.sub) continue;          // boats hold no ground
       if (dxz(u.pos[0], u.pos[2], o.x, o.z) < o.r) { if (side === 'coast') c++; else f++; }
     }
     const owner = c && !f ? 'coast' : f && !c ? 'fleet' : c && f ? o.owner : null;
@@ -63,7 +63,7 @@ function arrive(sim, side, type) {
     if (cat) { cat.drones++; sim.emit('reinforce', { side, type, unit: cat.id, pos: cat.pos.slice(), stock: true }); return; }
     u = sim.spawn(type, side, sp.x, sp.z, { hdg: sp.hdg });
   } else {
-    const p = findSpot(sim, d.domain === 'sea' ? 'sea' : 'land', sp.x, sp.z, sp.r, sim.rng.place);
+    const p = findSpot(sim, d.sub ? 'sub' : d.domain === 'sea' ? 'sea' : 'land', sp.x, sp.z, sp.r, sim.rng.place);
     u = sim.spawn(type, side, p[0], p[1], { hdg: sp.hdg });
   }
   sim.emit('reinforce', { side, type, unit: u.id, pos: u.pos.slice() });
@@ -86,9 +86,10 @@ export function findSpot(sim, dom, x, z, r, rnd) {
     if (Math.abs(px) > map.W / 2 - 500 || Math.abs(pz) > map.H / 2 - 500) continue;
     if (dom === 'land') { if (map.h(px, pz) > 1 && map.slope(px, pz) < .3 && sim.nav.open('land', px, pz)) return [px, pz]; }
     else if (dom === 'sea') { if (map.h(px, pz) < -25 && sim.nav.open('sea', px, pz)) return [px, pz]; }
+    else if (dom === 'sub') { if (map.h(px, pz) < -60 && sim.nav.open('sub', px, pz)) return [px, pz]; }
     else return [px, pz];
   }
-  const k = sim.nav.nearestOpen(dom === 'sea' ? 'sea' : 'land', sim.nav.cellOf(x, z), -1, 80);
+  const k = sim.nav.nearestOpen(dom === 'land' ? 'land' : dom, sim.nav.cellOf(x, z), -1, 80);
   return k >= 0 ? [sim.nav.cx(k), sim.nav.cz(k)] : [x, z];
 }
 

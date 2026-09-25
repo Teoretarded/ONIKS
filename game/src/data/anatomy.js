@@ -26,7 +26,7 @@
    Helpers: explodeK(w0, e), entryOf(key, part), partOffset(key, part, e), xrayOf(key, st),
    anchorOf(model, entry, st), boundsOf(key, model, st, e), fitView(key, model, st, e, fovY),
    validateAnatomy(key, model). */
-import { TRANSLOADER, DEPOT_SLOTS, DDG, PANTSIR } from './models.js';
+import { TRANSLOADER, DEPOT_SLOTS, DDG, PANTSIR, SUBS, BAL } from './models.js';
 
 const { V, R, X } = window.M3;
 const T3 = p => X.make(R.I(), p);
@@ -344,6 +344,114 @@ export const ANATOMY = {
     ],
     xray: [],
   },
+  aew: {
+    model: 'aew_cut', title: 'E-2D Advanced Hawkeye', size: '17.6 × 24.6 m · rotodome Ø 7.32 m',
+    note: 'Carrier-borne airborne early warning aircraft: the AN/APY-9 radar turns in its rotodome about six times a minute; two T56 turboprops, eight-blade propellers, four fins.',
+    st: { dome: .5, prop: .3, fold: 0 }, view: { yaw: -.95, pitch: .36 },
+    parts: [
+      E('01', ['dome'], 'Rotodome · AN/APY-9', 'Ø 7.32 m', [0, 3.4, 0], 0, 'shell', { side: 'R' }),
+      E('02', ['antenna'], 'AN/APY-9 · UHF electronically scanned array', '', [0, 2.2, 0], .08, 'part', { side: 'R' }),
+      E('03', ['pylon'], 'Rotodome pylon', '', [0, 1.3, 0], .16, 'part', { side: 'L' }),
+      E('04', ['propR'], 'NP2000 propellers · 8 blades', 'Ø 4.11 m', [0, 0, 2.4], .1, 'part', { side: 'R' }),
+      E(null, ['propL'], 'Propeller · L', '', [0, 0, 2.4], .1, 'part'),
+      E('05', ['engines'], 'T56-A-427A turboprops ×2', '5 100 shp', [0, -1.8, .6], .32, 'part', { side: 'L' }),
+      E('06', ['nacelleR'], 'Engine nacelles · main gear bays', '', [1.1, -1.1, 0], .24, 'shell', { side: 'R' }),
+      E(null, ['nacelleL'], 'Nacelle · L', '', [-1.1, -1.1, 0], .24, 'shell'),
+      E('07', ['outerR'], 'Outer wings · fold back (Sto-Wing)', '7.8 m', [3.2, .5, 0], .18, 'part', { side: 'R' }),
+      E(null, ['outerL'], 'Outer wing · L', '', [-3.2, .5, 0], .18, 'part'),
+      E('08', ['wing'], 'Wing centre section', '24.56 m span', [0, .9, 0], .28, 'part', { side: 'L' }),
+      E('09', ['tail'], 'Tailplane · four fins', '', [0, .7, -2.6], .2, 'part', { side: 'L' }),
+      E('10', ['cabin'], 'Flight deck · mission crew ×3', '', [0, -.2, 0], .44, 'part', { side: 'R' }),
+      E('11', ['hook'], 'Arresting hook', '', [0, -1.0, -1.4], .36, 'part', { side: 'L' }),
+      E('12', ['fuselage'], 'Fuselage · crew 5', '17.6 m', [0, 0, 0], .5, 'shell', { side: 'L' }),
+    ],
+    xray: [],
+  },
+  ssn: {
+    model: 'ssn_cut', title: 'SSN Virginia class · Block III', size: '114.9 × 10.4 m',
+    note: 'Nuclear attack submarine: large-aperture bow sonar, two Virginia Payload Tubes of six Tomahawk cells, four 533 mm torpedo tubes, photonics masts instead of periscopes, a pump-jet.',
+    st: { mast: 1, vptA: 0, vptB: 0 }, view: { yaw: -1.05, pitch: .3 },
+    parts: [
+      E('01', ['masts'], 'Photonics masts ×2 · mast array', '', [0, 9, 0], 0, 'part', { side: 'R' }),
+      E('02', ['sail'], 'Sail · leading-edge fillet', '', [0, 12, 0], .05, 'shell', { side: 'R' }),
+      E('03', ['control'], 'Control room · command deck', '', [0, 7, 0], .18, 'part', { side: 'L' }),
+      E('04', ['vpt'], 'Virginia Payload Tubes ×2 · hatches', 'Ø 2.2 m', [0, 14, 6], .1, 'part', { side: 'R' }),
+      E('05', ['vptTubes'], 'VPT · six cells each', '', [0, 9, 6], .14, 'part', { side: 'R' }),
+      E('06', ['torpRoom'], 'Torpedo room · 4 tubes · 533 mm', '', [0, -9, 5], .26, 'part', { side: 'L' }),
+      E('07', ['bow', 'lab'], 'Large Aperture Bow · sonar array', '', [0, 0, 18], .3, 'shell', { side: 'R' }),
+      E('08', ['bowPlanes'], 'Bow planes · retractable', '', [0, 3, 12], .22, 'part', { side: 'R' }),
+      E('09', ['reactor'], 'Reactor compartment · S9G', '', [0, 11, 0], .34, 'part', { side: 'L' }),
+      E('10', ['engine'], 'Engine room · main turbines · shaft', '', [0, -9, -6], .38, 'part', { side: 'L' }),
+      E('11', ['arrays'], 'Wide-aperture flank arrays ×6', '', [0, -5, 0], .2, 'part', { side: 'L' }),
+      E('12', ['sternPlanes'], 'Stern planes · end plates · rudders', '', [0, 0, -14], .3, 'part', { side: 'L' }),
+      E('13', ['propulsor'], 'Pump-jet propulsor', 'Ø 4.6 m', [0, 0, -24], .34, 'part', { side: 'L' }),
+      E('14', ['hull'], 'Hull · Ø 10.4 m', '114.9 m', [0, 0, 0], .5, 'shell', { side: 'R' }),
+      E(null, ['stern'], 'Stern', '', [0, 0, -8], .42, 'shell'),
+    ],
+    xray: [
+      { id: 'VPT', label: 'Tomahawk cells ×12 · VPT', model: 'vpt_can', st: {}, parent: 'vptTubes',
+        inst: () => Array.from({ length: 12 }, (_, i) => { const c = SUBS.ssn.cell(i); return T3([c[0], c[1] - .1, c[2]]); }) },
+      { id: 'SK', label: 'Mk 48 · 533 mm · skids ×6', model: 'torpedo533', st: {}, parent: 'torpRoom',
+        inst: () => [-2.7, -1.75, -.8, .8, 1.75, 2.7].map(x => T3([x, SUBS.ssn.AX - 2.73, 25.5])) },
+      { id: 'TT', label: 'Mk 48 · in the tubes ×4', model: 'torpedo533', st: {}, parent: 'torpRoom',
+        inst: () => {
+          const out = [], AX = SUBS.ssn.AX, R0 = SUBS.ssn.R;
+          for (const s of [-1, 1]) for (const y of [AX - 1.5, AX - 2.6]) {
+            const a = [s * .85, y, 30.5], b = [s * (Math.sqrt(Math.max(0, R0 * R0 - (y - AX) ** 2)) - .35), y, 40.5], d = V.norm(V.sub(b, a));
+            out.push(X.make(R.look(d, [0, 1, 0]), V.mad(a, d, 3.4)));
+          }
+          return out;
+        } },
+    ],
+  },
+  ssk: {
+    model: 'ssk_cut', title: 'Kilo class · Project 636.3', size: '73.8 × 9.9 m',
+    note: 'Diesel-electric attack submarine: six 533 mm bow tubes for torpedoes and Kalibr missiles, a large bow sonar, very quiet running on its batteries.',
+    st: { mast: 1 }, view: { yaw: -1.05, pitch: .3 },
+    parts: [
+      E('01', ['masts'], 'Periscopes ×2 · radar · ESM · snorkel', '', [0, 8, 0], 0, 'part', { side: 'R' }),
+      E('02', ['sail'], 'Sail · bridge', '', [0, 10, 0], .05, 'shell', { side: 'R' }),
+      E('03', ['control'], 'Central post', '', [0, 6, 0], .16, 'part', { side: 'L' }),
+      E('04', ['casing'], 'Upper casing · limber holes', '', [0, 5, 0], .1, 'shell', { side: 'L' }),
+      E('05', ['torpRoom'], 'Torpedo room · 6 tubes · 533 mm', '', [0, -7, 5], .24, 'part', { side: 'R' }),
+      E('06', ['bow', 'sonarArr'], 'Bow · MGK-400EM sonar', '', [0, 0, 12], .3, 'shell', { side: 'R' }),
+      E('07', ['bowPlanes'], 'Bow planes · retractable', '', [0, 3, 9], .2, 'part', { side: 'R' }),
+      E('08', ['battery'], 'Batteries · 2 groups', '', [0, -8, 0], .32, 'part', { side: 'L' }),
+      E('09', ['diesels'], 'Diesel generators ×2', '', [0, 7, -3], .36, 'part', { side: 'L' }),
+      E('10', ['motor'], 'Main propulsion motor · shaft', '', [0, -6, -6], .4, 'part', { side: 'L' }),
+      E('11', ['sternPlanes'], 'Stern planes · rudders', '', [0, 0, -9], .3, 'part', { side: 'L' }),
+      E('12', ['prop'], 'Propeller · 7 blades · skewed', 'Ø 3.1 m', [0, 0, -15], .34, 'part', { side: 'L' }),
+      E('13', ['hull'], 'Hull · double hull', '73.8 m', [0, 0, 0], .5, 'shell', { side: 'R' }),
+      E(null, ['stern'], 'Stern', '', [0, 0, -5], .42, 'shell'),
+    ],
+    xray: [
+      { id: 'RK', label: 'Torpedoes · 533 mm · racks ×8', model: 'torpedo533', st: {}, parent: 'torpRoom',
+        inst: () => { const out = [], AX = SUBS.ssk.AX; for (const s of [-1, 1]) for (const x of [.85, 1.9]) for (const y of [AX - 2.0, AX - .75]) out.push(T3([s * x, y + .39, 22.1])); return out; } },
+      { id: 'TT', label: 'Torpedoes · 533 mm · in the tubes ×6', model: 'torpedo533', st: {}, parent: 'torpRoom',
+        inst: () => SUBS.ssk.TUBES.map(([x, y]) => T3([x, y, 30.5])) },
+    ],
+  },
+  bal: {
+    model: 'bal_cut', title: 'Bal · 3K60 coastal missile system', size: '14.0 × 3.1 m',
+    note: 'Self-propelled launcher on the MZKT-7930 8×8: eight Kh-35U anti-ship missiles in containers; the pack rises at the rear and the rounds leave over the back.',
+    st: { elev: 0, dep: 1, n: 8 }, view: { yaw: -2.1, pitch: .2 },
+    parts: [
+      E('01', ['pack'], 'Containers ×8 · Kh-35U', '6.3 m', [0, 2.8, -.3], 0, 'shell', { side: 'L' }),
+      E('02', ['caps'], 'Container rear covers', '', [0, 2.8, -1.4], .03, 'part', { side: 'R' }),
+      E('03', ['ram'], 'Pack ram · hydraulic', '', [0, 1.6, 0], .18, 'part', { side: 'L' }),
+      E('04', ['cabin'], 'Crew cabin · launch control', '', [0, 2.6, 0], .1, 'shell', { side: 'R' }),
+      E('05', ['consoles'], 'Launch control consoles ×2', '', [0, 1.5, 0], .22, 'part', { side: 'R' }),
+      E('06', ['cab'], 'Cab · MZKT-7930', '', [0, 2.0, 1.5], .08, 'shell', { side: 'R' }),
+      E(null, ['bay'], 'Power pack cover', '', [0, 3.6, .4], .05, 'shell'),
+      E('07', ['engine'], 'YaMZ-846 · V12 diesel', '500 hp', [0, 2.0, .2], .3, 'part', { side: 'R' }),
+      E('08', ['jacks'], 'Outrigger jacks ×4', '', [0, -.5, 0], .32, 'part', { side: 'L' }),
+      E('09', ['chassis'], 'MZKT-7930 · 8×8 frame', '', [0, .9, 0], .24, 'shell', { side: 'L' }),
+      E('10', ['wheelsR'], 'Wheels ×8 · 1500×600-635', 'Ø 1.5 m', [1.35, 0, 0], .42, 'shell', { side: 'R' }),
+      E(null, ['wheelsL'], 'Wheels · L', '', [-1.35, 0, 0], .42, 'shell'),
+    ],
+    xray: [{ id: 'K', label: 'Kh-35U · in its container', model: 'kh35', st: { wing: 0, fin: 0, booster: true }, parent: 'pack',
+      inst: st => { const n = st && st.n !== undefined ? Math.round(st.n) : 8, out = []; for (let k = 8 - Math.max(0, Math.min(8, n)); k < 8; k++) out.push(X.mul(BAL.packXf(st || {}), X.make(R.y(Math.PI), BAL.cont(k)))); return out; } }],
+  },
   /* ---------------------------------------------------------------- munitions */
   oniks: {
     model: 'oniks_cut', title: 'P-800 Oniks · 3M55', size: '8.9 m · Ø 0.7 m',
@@ -485,6 +593,52 @@ export const ANATOMY = {
       E('03', ['wings'], 'Wings ×4', '', [0, 0, -.25], .3, 'part', { side: 'L' }),
       E('04', ['body'], 'Body · Ø 178 mm', '1.63 m', [0, 0, 0], .5, 'shell', { side: 'L' }),
     ],
+    xray: [],
+  },
+  kh35: {
+    model: 'kh35', title: 'Kh-35U · Bal', size: '4.4 m · Ø 0.42 m',
+    note: 'Subsonic sea-skimming anti-ship missile: a small turbofan fed by a flush belly intake, cruciform folding wings, a solid booster for the launch.',
+    st: { wing: 1, fin: 1, booster: true }, view: { yaw: -1.3, pitch: .2 },
+    parts: [
+      E('01', ['nose'], 'Nose · radar seeker radome', '', [0, 0, .8], 0, 'part', { side: 'R' }),
+      E('02', ['wings'], 'Wings ×4 · folding', '1.33 m', [0, 0, .25], .15, 'part', { side: 'R' }),
+      E('03', ['inlet'], 'Air intake · ventral', '', [0, -.5, 0], .22, 'part', { side: 'L' }),
+      E('04', ['fins'], 'Tail fins ×4 · folding', '', [0, 0, -.6], .3, 'part', { side: 'L' }),
+      E('05', ['booster'], 'Booster · solid', '0.58 m', [0, 0, -1.3], .38, 'part', { side: 'L' }),
+      E('06', ['body'], 'Kh-35U · Ø 0.42 m', '3.8 m', [0, 0, 0], .5, 'shell', { side: 'R' }),
+    ],
+    xray: [],
+  },
+  kalibr: {
+    model: 'kalibr', title: '3M-54 Kalibr · anti-ship', size: '8.22 m · Ø 0.533 m',
+    note: 'Submarine-launched anti-ship cruise missile, fired from a 533 mm tube: a subsonic cruise stage and a supersonic terminal stage.',
+    st: { wing: 1, fin: 1, booster: true }, view: { yaw: -1.3, pitch: .2 },
+    parts: [
+      E('01', ['nose'], 'Nose · seeker radome', '', [0, 0, 1.4], 0, 'part', { side: 'R' }),
+      E('02', ['terminal'], 'Terminal stage · supersonic', '', [0, 0, .8], .1, 'part', { side: 'R' }),
+      E('03', ['wings'], 'Wings ×2 · pop-out', '3.1 m', [0, -.8, 0], .18, 'part', { side: 'R' }),
+      E('04', ['inlet'], 'Air intake · ventral', '', [0, -.6, -.3], .24, 'part', { side: 'L' }),
+      E('05', ['fins'], 'Tail fins ×4 · folding', '', [0, 0, -.8], .3, 'part', { side: 'L' }),
+      E('06', ['booster'], 'Booster · solid', '1.66 m', [0, 0, -1.9], .38, 'part', { side: 'L' }),
+      E('07', ['body'], 'Cruise stage · Ø 0.533 m', '', [0, 0, 0], .5, 'shell', { side: 'L' }),
+    ],
+    xray: [],
+  },
+  torpedo533: {
+    model: 'torpedo533', title: 'Torpedo · 533 mm', size: '6.2 m · Ø 0.533 m',
+    note: 'A heavyweight torpedo as it lies in a torpedo room, closed: homing head, body, shrouded propulsor.',
+    view: { yaw: -1.3, pitch: .2 },
+    parts: [
+      E('01', ['nose'], 'Nose · homing head', '', [0, 0, .7], 0, 'part', { side: 'R' }),
+      E('02', ['tail'], 'Afterbody · shrouded propulsor', '', [0, 0, -.7], .25, 'part', { side: 'L' }),
+      E('03', ['body'], 'Torpedo · 533 mm', '6.2 m', [0, 0, 0], .5, 'shell', { side: 'L' }),
+    ],
+    xray: [],
+  },
+  vpt_can: {
+    model: 'vpt_can', title: 'VPT cell canister', size: '6.35 m · Ø 0.6 m',
+    view: { yaw: -1.3, pitch: .2 },
+    parts: [E('01', ['canister'], 'Cell canister · Tomahawk · closed', '6.35 m', [0, 0, 0], 0, 'shell')],
     xray: [],
   },
   mk41_can: {

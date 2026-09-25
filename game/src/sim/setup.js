@@ -26,7 +26,7 @@ export function setupBattle(sim, opts) {
       const n = opts.forces ? n0 : type === 'hq' || type === 'carrier' ? 1 : Math.max(type === 'radar' || type === 'catapult' ? 1 : 0, Math.round(n0 * k));
       for (let i = 0; i < n; i++) {
         let u;
-        if (type === 'fighter' || type === 'helo') {
+        if (type === 'fighter' || type === 'helo' || type === 'aew') {
           const deck = deckFor(sim, side, type);
           if (deck) u = sim.spawn(type, side, deck.pos[0], deck.pos[2], { aboard: deck.id });
           else { const p = findSpot(sim, 'air', sp.x, sp.z, sp.r, r); u = sim.spawn(type, side, p[0], p[1], { hdg: sp.hdg }); }
@@ -51,7 +51,8 @@ export function setupBattle(sim, opts) {
           const p = findSpot(sim, 'sea', ax, az, 1500, r);
           u = sim.spawn(type, side, p[0], p[1], { hdg: Math.atan2(fx, fz) });
         } else {
-          const p = findSpot(sim, side === 'coast' ? 'land' : 'sea', sp.x, sp.z, side === 'coast' ? sp.r : sp.r * 1.2, r);
+          const D = UNITS[type], dom = D.sub ? 'sub' : D.domain === 'sea' ? 'sea' : side === 'coast' ? 'land' : 'sea';
+          const p = findSpot(sim, dom, sp.x, sp.z, side === 'coast' && dom === 'land' ? sp.r : sp.r * 1.2, r);
           u = sim.spawn(type, side, p[0], p[1], { hdg: sp.hdg });
         }
         out[side].push(u);

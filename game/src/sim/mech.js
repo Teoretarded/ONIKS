@@ -4,6 +4,11 @@
 import { TEL_ELEV } from '../data/units.js';
 import { DT } from './consts.js';
 import { clamp, angTo, wrapPi, dxz, local } from './util.js';
+import { subStep } from './subs.js';
+
+/* the erect angle and the weapon of a launcher that deploys (K340P TEL, Bal) */
+export const elevOf = d => (d.deploy && d.deploy.elev) || TEL_ELEV;
+export const erectW = d => d.erectW || (d.erectW = Object.keys(d.weapons).find(k => d.weapons[k].needs === 'erect') || 'oniks');
 
 const SLEW = 1.6;   // rad/s turret slew
 
@@ -11,18 +16,18 @@ export function mechanics(sim, u) {
   const d = u.def, t = sim.t;
   for (const k in u.cooldowns) if (u.cooldowns[k] > 0) u.cooldowns[k] -= DT;
 
-  // TEL: jacks down, then erect; lower before raising the jacks
+  // TEL / Bal: jacks down, then erect (the Bal raises its pack); lower before raising the jacks
   if (d.deploy) {
-    const J = DT / d.deploy.jacks, E = TEL_ELEV * DT / d.deploy.erect;
+    const EL = elevOf(d), J = DT / d.deploy.jacks, E = EL * DT / d.deploy.erect;
     const wasDep = u.dep, wasElev = u.elev;
     if (u.off.deploy) { u.depT = u.dep; }
     if (u.depT > u.dep && u.speed < .3) u.dep = Math.min(u.depT, u.dep + J);
     else if (u.depT < u.dep && u.elev === 0) u.dep = Math.max(u.depT, u.dep - J);
-    if (u.elevT > u.elev && u.dep >= 1 && !u.off.oniks) u.elev = Math.min(u.elevT, u.elev + E);
+    if (u.elevT > u.elev && u.dep >= 1 && !u.off[erectW(d)]) u.elev = Math.min(u.elevT, u.elev + E);
     else if (u.elevT < u.elev) u.elev = Math.max(u.elevT, u.elev - E);
     if (u.dep >= 1 && wasDep < 1) sim.emit('deploy', { unit: u.id, side: u.side, what: 'jacks', pos: u.pos.slice() });
     if (u.dep <= 0 && wasDep > 0) sim.emit('deploy', { unit: u.id, side: u.side, what: 'stowed', pos: u.pos.slice() });
-    if (u.elev >= TEL_ELEV && wasElev < TEL_ELEV) sim.emit('deploy', { unit: u.id, side: u.side, what: 'erect', pos: u.pos.slice() });
+    if (u.elev >= EL && wasElev < EL) sim.emit('deploy', { unit: u.id, side: u.side, what: 'erect', pos: u.pos.slice() });
     if (u.elev <= 0 && wasElev > 0) sim.emit('deploy', { unit: u.id, side: u.side, what: 'lowered', pos: u.pos.slice() });
     u.deployed = u.dep >= 1;
     if (u.reloader) reloadStep(sim, u);
@@ -51,7 +56,8 @@ export function mechanics(sim, u) {
     u.tYaw += clamp(angTo(u.tYaw, yT), -SLEW * DT, SLEW * DT);
     u.tPitch += clamp(pT - u.tPitch, -SLEW * DT, SLEW * DT);
   }
-  if (d.model === 'destroyer' || d.model === 'carrier') {
+  if (d.sub) subStep(sim, u);
+  if (d.model === 'destroyer' || d.model === 'carrier' || d.model === 'ssn') {
     if (t - u.fireT < 1.2) u.cSpin = (u.cSpin + 75 * DT) % (Math.PI * 2);
     // VLS hatches: open .5 s, stay 2 s, close 1 s
     for (let i = u.vlsOpen.length - 1; i >= 0; i--) {
@@ -71,7 +77,7 @@ export function mechanics(sim, u) {
     if (!u.busy) u.crane = Math.max(0, u.crane - DT / 4);
     refillTransloader(sim, u);
   }
-  if (u.type === 'pantsir') refillAtDepot(sim, u);
+  if (u.type === 'pantsir' || u.type === 'bal') refillAtDepot(sim, u);
   if (d.domain === 'sea') replenish(sim, u);
   if (u.aboard) aboardStep(sim, u);
 }
@@ -148,8 +154,19 @@ function refillWeapons(sim, u) {
 }
 /* a Pantsir reloads at a depot only while it is not fighting */
 function refillAtDepot(sim, u) { if (u.speed < .5 && sim.t - u.lastFire > 60 && atDepot(sim, u)) refillWeapons(sim, u); }
+/* where a ship restocks: the map's replenishment point; the coast's boats at their base, the deep water nearest the
+   coast spawn (found once) */
+export function replenishPoint(sim, u) {
+  if (!(u.side === 'coast' && u.def.sub)) return sim.map.replenish;
+  if (sim._subBase === undefined) {
+    const sp = sim.map.spawns && sim.map.spawns.coast, nav = sim.nav;
+    const k = sp ? nav.nearestOpen('sub', nav.cellOf(sp.x, sp.z), -1, 200) : -1;
+    sim._subBase = k >= 0 ? { x: nav.cx(k), z: nav.cz(k), r: 3000 } : null;
+  }
+  return sim._subBase;
+}
 function replenish(sim, u) {
-  const R = sim.map.replenish;
+  const R = replenishPoint(sim, u);
   if (!R || u.speed > 4 || dxz(u.pos[0], u.pos[2], R.x, R.z) > R.r) return;
   refillWeapons(sim, u);
   if (u.mag) for (const k in u.def.magazine) if (u.mag[k] < u.def.magazine[k] && sim.tick % 60 === 0) u.mag[k]++;
@@ -173,6 +190,8 @@ function aboardStep(sim, u) {
   const cv = sim.units.get(u.aboard);
   const queued = cv && cv.launchQ && cv.launchQ.includes(u.id);
   if (u.type === 'helo') u.spool = clamp(u.spool + (queued ? DT / 8 : -DT / 20), 0, 1);
+  // the E-2D spreads its wings and starts its props on the way to the catapult, folds them again on deck
+  if (u.type === 'aew') u.spool = clamp(u.spool + (queued ? DT / 10 : -DT / 15), 0, 1);
 }
 export function ready(u) { return !u.aboard || !u.rearmT; }
 
@@ -183,13 +202,14 @@ export function carrierOps(sim, cv) {
   const u = sim.units.get(id);
   if (!u || !u.alive || u.aboard !== cv.id) { cv.launchQ.shift(); return; }
   if (u.rearmT) return;                                      // still rearming: wait at the head of the queue
+  if (u.type === 'aew' && u.spool < 1) return;               // wings spreading
   cv.launchQ.shift();
   cv.nextLaunch = sim.t + (u.type === 'helo' ? cv.def.air.launchGap * .5 : cv.def.air.launchGap);
   const spot = cv.type === 'ddg' ? [0, 8, -65] : u.type === 'helo' ? [-8, 20, -120] : [-18, 20, 60];
   const p = local(cv, spot);
   u.aboard = 0; u.pos = p; u.prev = p.slice();
-  u.hdg = cv.hdg + (u.type === 'fighter' ? -.157 : 0);
-  u.speed = u.type === 'fighter' ? 75 : 5;
+  u.hdg = cv.hdg + (u.type === 'fighter' || u.type === 'aew' ? -.157 : 0);
+  u.speed = u.type === 'fighter' ? 75 : u.type === 'aew' ? 65 : 5;
   u.born = sim.t; u.landing = false;
   sim._dirty = true;
   sim.emit('takeoff', { unit: u.id, side: u.side, type: u.type, from: cv.id, pos: p.slice() });

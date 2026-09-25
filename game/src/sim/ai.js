@@ -6,10 +6,18 @@
    transloaders keep the TELs loaded, TELs move to a fresh site after firing (normal/hard).
    Fleet: carrier holds back, destroyers screen ahead of it, helos and fighters search the coast, scans on
    emitters and launch points, strikes on classified land targets (saturating known SAMs), resupply at the
-   replenishment point, push closer later in the battle. Both buy reinforcements. */
+   replenishment point, push closer later in the battle. Both buy reinforcements.
+   Second wave (small, simple use cases): the coast's Bal launchers take TEL sites and fire with the TELs; its Kilo
+   patrols deep between the coast and the fleet, comes up to periscope depth to fire Kalibr at a classified ship in
+   reach and goes deep again, torpedoes what it hears close (weapons free). The fleet flies one E-2D on a station
+   behind its screen, keeps a Virginia deep ahead of the destroyers (weapons free: torpedoes at a boat it hears; its
+   Tomahawks join the strikes from periscope depth), and sends a helicopter to hover and dip its sonar over a boat
+   it has only heard (the destroyer and helicopter Mk 54s take a classified boat). */
 import { UNITS, CLASSIFY, TEL_ELEV } from '../data/units.js';
 import { inbound as inboundSlow } from './weapons.js';
 import { scanBlocked } from './sensors.js';
+import { atPD } from './subs.js';
+import { elevOf } from './mech.js';
 import { dxz } from './util.js';
 
 const LEVELS = {
@@ -160,10 +168,12 @@ export class AI {
       this.station(u, m.sam >= 0 ? this.samSites[m.sam] : m.extra, 300);
     }
     this.coastTels(by.tel);
+    this.coastBals(by.bal || []);
     this.coastLoaders(by.transloader, by.tel);
     this.coastDrones(by.catapult, by.drone);
     this.coastScan();
-    this.coastFire(by.tel);
+    this.coastFire(by.tel, by.bal || []);
+    this.coastBoats(by.ssk || []);
     this.coastBuy(by);
   }
 
@@ -276,7 +286,7 @@ export class AI {
     if (S.scanCd > 0 || this.r() > this.L.scanP) return;
     const cands = [];
     for (const c of this.contacts().values()) {
-      if (c.dead || c.dom === 'air' || c.identified && c.conf >= CLASSIFY && t - c.lastSeen < 60) continue;
+      if (c.dead || c.dom === 'air' || c.dom === 'sub' || c.identified && c.conf >= CLASSIFY && t - c.lastSeen < 60) continue;
       if (c.conf >= CLASSIFY && t - c.lastSeen < 30) continue;
       cands.push({ c, s: (c.dom === 'sea' ? 3 : 2) + (c.emitting ? 1 : 0) + (c.cls === 'CVN' ? 2 : 0) - c.conf });
     }
@@ -293,10 +303,29 @@ export class AI {
     }
   }
 
-  coastFire(tels) {
+  balReady(u) { return u.dep >= 1 && u.elev >= elevOf(u.def) - 1e-6 && u.ammo.uran > 0 && !u.off.uran; }
+  /* Bal: a TEL site each (shared with the TELs), jacks and pack up there; a depot when empty; moves on after firing */
+  coastBals(bals) {
+    const t = this.sim.t;
+    for (const u of bals) {
+      const m = this.m(u), k = this.cur(u);
+      if (!m.site || m.site.owner !== u.id) m.site = this.freeSite(u);
+      if (k === 'attack' || k === 'reload') continue;
+      if (u.ammo.uran === 0 && !u.off.move) { this.order(u, { kind: 'reload' }); continue; }
+      if (m.fired && t - m.fired > 5) {
+        if (this.r() < this.L.relocate) { m.site.burnt = m.fired; m.site = this.freeSite(u, m.site); }
+        m.fired = 0;
+      }
+      if (!this.station(u, [m.site.x, m.site.z], 200)) continue;
+      if (!(u.dep >= 1 && u.elev >= elevOf(u.def)) && k !== 'deploy') this.order(u, { kind: 'deploy' });
+    }
+  }
+
+  coastFire(tels, bals) {
     const sim = this.sim, t = sim.t;
-    const ready = tels.filter(u => this.telReady(u) && this.cur(u) !== 'attack');
+    const ready = tels.filter(u => this.telReady(u) && this.cur(u) !== 'attack').concat((bals || []).filter(u => this.balReady(u) && this.cur(u) !== 'attack'));
     if (!ready.length) return;
+    const wn = u => u.type === 'bal' ? 'uran' : 'oniks';
     const targets = [];
     let cvn = false;
     for (const c of this.contacts().values()) if (!c.dead && c.cls === 'CVN' && t - c.lastSeen < 600) cvn = true;
@@ -310,9 +339,9 @@ export class AI {
     for (const c of targets) {
       let need = (c.cls === 'CVN' ? this.L.cvn : this.L.ddg) - this.inbound(c.unitId);
       if (need <= 0) continue;
-      const shooters = ready.filter(u => { const d = dxz(u.pos[0], u.pos[2], c.pos[0], c.pos[2]); return d < u.def.weapons.oniks.range * .97 && d > u.def.weapons.oniks.min; })
-        .sort((a, b) => b.ammo.oniks - a.ammo.oniks);
-      const avail = shooters.reduce((a, u) => a + u.ammo.oniks, 0);
+      const shooters = ready.filter(u => { const d = dxz(u.pos[0], u.pos[2], c.pos[0], c.pos[2]), W = u.def.weapons[wn(u)]; return d < W.range * .97 && d > W.min; })
+        .sort((a, b) => b.ammo[wn(b)] - a.ammo[wn(a)]);
+      const avail = shooters.reduce((a, u) => a + u.ammo[wn(u)], 0);
       // wait for a proper salvo, but not for ever
       this.waitT = this.waitT || new Map();
       if (!this.waitT.has(c.unitId)) this.waitT.set(c.unitId, t);
@@ -320,7 +349,7 @@ export class AI {
       this.waitT.delete(c.unitId);
       for (const u of shooters) {
         if (need <= 0) break;
-        const n = Math.min(u.ammo.oniks, need);
+        const n = Math.min(u.ammo[wn(u)], need);
         this.order(u, { kind: 'attack', target: c.unitId, n });
         this.m(u).fired = t;
         this.addInbound(c.unitId, n);
@@ -335,13 +364,59 @@ export class AI {
     const sim = this.sim, S = sim.sides.coast;
     const count = type => (by[type] ? by[type].length : 0) + S.queue.filter(q => q.type === type).length;
     const stock = (by.catapult || []).reduce((a, c) => a + c.drones, 0) + (by.drone || []).length + S.queue.filter(q => q.type === 'drone').length;
-    const want = (type, n) => count(type) < n ? type : null;
+    const want = (type, n) => count(type) < n && !UNITS[type].aiSkip ? type : null;     // aiSkip: experiments (balance set=)
     const tl = Math.max(1, Math.ceil(count('tel') / 2));
     const next = want('radar', 1) || want('tel', 3) || want('pantsir', 2) || want('transloader', 1) || want('catapult', 1) || want('transloader', Math.min(tl, 2))
       || (stock < 2 && (by.catapult || []).length && sim.t - (this.lastDrone || -1e9) > 240 ? 'drone' : null)
-      || want('pantsir', 3) || want('tel', 5) || want('radar', 2) || want('transloader', tl) || want('tel', 6) || want('pantsir', 4) || want('transloader', tl) || want('tel', 8) || want('pantsir', 5) || want('tel', 10);
+      || want('pantsir', 3) || want('tel', 5) || want('bal', 1) || want('radar', 2) || want('transloader', tl) || want('tel', 6) || want('ssk', 1) || want('pantsir', 4) || want('bal', 2)
+      || want('transloader', tl) || want('tel', 8) || want('pantsir', 5) || want('tel', 10);
     if (!next) return;
     if (S.supply >= UNITS[next].cost * this.L.buyK) { if (sim.buy('coast', next)) { this.note(`buy ${next}`); if (next === 'drone') this.lastDrone = sim.t; } }
+  }
+
+  /* a point in deep water (the boats' grid) between the coast and the fleet, minD .. maxD from the coast spawn */
+  subPoint(minD, maxD) {
+    const sim = this.sim, map = sim.map, sp = map.spawns.coast, fs = map.spawns.fleet, r = this.r;
+    const b0 = Math.atan2(fs.x - sp.x, fs.z - sp.z);
+    for (let i = 0; i < 40; i++) {
+      const b = b0 + (r() - .5) * 1.2, d = minD + r() * (maxD - minD);
+      const x = sp.x + Math.sin(b) * d, z = sp.z + Math.cos(b) * d;
+      if (Math.abs(x) > map.W / 2 - 4000 || Math.abs(z) > map.H / 2 - 4000) continue;
+      if (sim.nav.open('sub', x, z)) return [x, z];
+    }
+    const k = sim.nav.nearestOpen('sub', sim.nav.cellOf(fs.x * .5 + sp.x * .5, fs.z * .5 + sp.z * .5), -1, 120);
+    return k >= 0 ? [sim.nav.cx(k), sim.nav.cz(k)] : null;
+  }
+
+  /* Kilo: deep on a patrol box toward the fleet; up to periscope depth for a Kalibr salvo at a classified ship in
+     reach, deep again after it; torpedoes what it hears close by itself (weapons free) */
+  coastBoats(ssks) {
+    const sim = this.sim, t = sim.t;
+    for (const u of ssks) {
+      const m = this.m(u), k = this.cur(u);
+      u.hold = true;
+      if (k === 'attack') continue;
+      if (u.ammo.klub > 0 && !u.off.klub) {
+        let best = null, bs = -1e18;
+        for (const c of this.contacts().values()) {
+          if (c.dead || c.dom !== 'sea' || c.conf < CLASSIFY || t - c.lastSeen > 60) continue;
+          const d = dxz(u.pos[0], u.pos[2], c.pos[0], c.pos[2]);
+          if (d > u.def.weapons.klub.range * .95 || d < u.def.weapons.klub.min) continue;
+          const s = (c.cls === 'CVN' ? 3 : 1) - d / 100000 - this.inbound(c.unitId) * .5;
+          if (s > bs) { bs = s; best = c; }
+        }
+        if (best && this.inbound(best.unitId) < (best.cls === 'CVN' ? this.L.cvn : this.L.ddg)) {
+          this.order(u, { kind: 'attack', target: best.unitId, n: Math.min(2, u.ammo.klub) });
+          this.addInbound(best.unitId, 2); m.fired = t; this.note(`SSK salvo at ${best.track}`);
+          continue;
+        }
+      }
+      if (u.dive !== 2 && (!m.fired || t - m.fired > 15)) this.order(u, { kind: 'dive', depth: 2 });
+      if (!m.box || t - m.boxT > 900 || (k !== 'move' && dxz(u.pos[0], u.pos[2], m.box[0], m.box[1]) < 3000 && t - m.boxT > 420)) {
+        const p = this.subPoint(22000, 50000);
+        if (p) { m.box = p; m.boxT = t; this.order(u, { kind: 'move', x: p[0], z: p[1] }); }
+      }
+    }
   }
 
   /* start of a battle: put the battery straight onto its sites, emplaced (TELs erect, radar mast up) */
@@ -402,6 +477,8 @@ export class AI {
     this.fleetScan();
     this.fleetStrike(by, sams);
     this.fleetFighters(by.fighter, by.ddg);
+    this.fleetAew(by.aew || []);
+    this.fleetBoats(by.ssn || []);
     this.fleetBuy(by);
   }
 
@@ -432,9 +509,29 @@ export class AI {
     const sim = this.sim, t = sim.t;
     const want = this.L.helos;
     let flying = helos.filter(h => !h.aboard).length;
+    // boats in the picture (heard, or seen launching): the nearest helicopter with a torpedo goes to hover over it
+    const subs = [];
+    for (const c of this.contacts().values()) if (!c.dead && c.dom === 'sub' && t - c.lastSeen < 240) subs.push(c);
+    let asw = null;
+    if (subs.length) {
+      let bd = 1e18;
+      for (const h of helos) if (!h.aboard && h.ammo.mk54 > 0 && !h.off.mk54 && this.cur(h) !== 'return') {
+        const d = dxz(h.pos[0], h.pos[2], subs[0].pos[0], subs[0].pos[2]);
+        if (d < bd) { bd = d; asw = h; }
+      }
+    }
     helos.forEach((h, i) => {
       const m = this.m(h), k = this.cur(h);
       if (k === 'return' || k === 'attack' || k === 'scan') return;
+      if (h === asw) {
+        let c = subs[0], bd = 1e18;
+        for (const q of subs) { const d = dxz(h.pos[0], h.pos[2], q.pos[0], q.pos[2]); if (d < bd) { bd = d; c = q; } }
+        if (c.conf >= CLASSIFY) { this.order(h, { kind: 'attack', target: c.unitId, n: 1 }); this.note(`helo Mk 54 at ${c.track}`); return; }
+        if (m.dip !== c.unitId || t - m.dipT > 150 || (k !== 'move' && dxz(h.pos[0], h.pos[2], c.pos[0], c.pos[2]) > 2500)) {
+          m.dip = c.unitId; m.dipT = t; this.order(h, { kind: 'move', x: c.pos[0], z: c.pos[2] }); this.note(`helo dips on ${c.track}`);
+        }
+        return;
+      }
       if (h.aboard) {
         if (flying >= want || h.rearmT || h.hp < h.hpMax * .5) return;
         flying++;
@@ -485,7 +582,7 @@ export class AI {
       if (c.dead) continue;
       if (c.identified && c.conf >= CLASSIFY && t - c.lastSeen < 90) continue;
       if (c.conf >= CLASSIFY && t - c.lastSeen < 20) continue;
-      if (c.dom === 'air') continue;
+      if (c.dom === 'air' || c.dom === 'sub') continue;                    // scans do not reach under the water
       cands.push({ c, s: (c.dom === 'land' ? 3 : 1) + (c.emitting ? 1.5 : 0) + Math.min(2, c.err / 3000) - c.conf });
     }
     cands.sort((a, b) => b.s - a.s);
@@ -523,7 +620,8 @@ export class AI {
 
   fleetStrike(by, sams) {
     const sim = this.sim;
-    const ddgs = by.ddg.filter(u => u.ammo.strike > 0 && !this.m(u).resupply && this.cur(u) !== 'attack' && !u.off.strike);
+    const ddgs = by.ddg.filter(u => u.ammo.strike > 0 && !this.m(u).resupply && this.cur(u) !== 'attack' && !u.off.strike)
+      .concat((by.ssn || []).filter(u => u.ammo.strike > 0 && this.cur(u) !== 'attack' && !u.off.strike));
     for (const { c, want } of this.strikeTargets(sams)) {
       let need = want - this.inbound(c.unitId);
       if (need <= 0) continue;
@@ -574,13 +672,51 @@ export class AI {
     }
   }
 
+  /* E-2D: one on station behind the destroyer screen, in front of the carrier (its radar sees far over the horizon
+     from there), relieved from the deck */
+  fleetAew(aews) {
+    const t = this.sim.t;
+    let up = aews.filter(a => !a.aboard && this.cur(a) !== 'return').length;
+    const st = this.at(this.push ? 58000 : 68000, 0);
+    for (const a of aews) {
+      const m = this.m(a), k = this.cur(a);
+      if (k === 'return') continue;
+      if (a.aboard) {
+        if (up >= 1 || a.rearmT || k === 'patrol') continue;
+        up++;
+      } else if (k === 'patrol' && m.st && dxz(m.st[0], m.st[1], st[0], st[1]) < 5000) continue;
+      m.st = st;
+      this.order(a, { kind: 'patrol', x: st[0], z: st[1], r: 12000 });
+    }
+  }
+
+  /* Virginia: deep ahead of the destroyers (weapons free: torpedoes at a boat it hears); its Tomahawks join the
+     strikes (fleetStrike: the attack order brings it to periscope depth); after a strike it goes deep again */
+  fleetBoats(ssns) {
+    const t = this.sim.t;
+    ssns.forEach((u, i) => {
+      const m = this.m(u), k = this.cur(u);
+      u.hold = true;
+      if (k === 'attack') return;
+      if (u.dive !== 2) this.order(u, { kind: 'dive', depth: 2 });
+      const back = this.push2 ? 24000 : this.push ? 30000 : 38000;
+      const lat = (i % 2 ? 1 : -1) * 9000;
+      if (!m.st || t - m.stT > 900) {
+        let p = this.at(back, lat);
+        if (!this.sim.nav.open('sub', p[0], p[1])) { const q = this.subPoint(back - 8000, back + 8000); if (q) p = q; }
+        m.st = p; m.stT = t;
+      }
+      this.station(u, m.st, 3000);
+    });
+  }
+
   fleetBuy(by) {
     const sim = this.sim, S = sim.sides.fleet;
     const count = type => (by[type] ? by[type].length : 0) + S.queue.filter(q => q.type === type).length;
-    const want = (type, n) => count(type) < n ? type : null;
-    const next = want('ddg', 2) || want('fighter', 4) || want('helo', 2) || want('ddg', 3) || want('fighter', 6) || want('helo', 3) || want('ddg', 4) || want('fighter', 8) || want('ddg', 5) || want('ddg', 6);
+    const want = (type, n) => count(type) < n && !UNITS[type].aiSkip ? type : null;
+    const next = want('ddg', 2) || want('fighter', 4) || want('helo', 2) || want('ddg', 3) || want('fighter', 6) || want('helo', 3) || want('ddg', 4) || want('aew', 1) || want('fighter', 8) || want('ssn', 1) || want('ddg', 5) || want('ddg', 6);
     if (!next) return;
-    if (next !== 'ddg' && !by.carrier.length) return;
+    if (UNITS[next].domain === 'air' && !by.carrier.length) return;
     if (S.supply >= UNITS[next].cost * this.L.buyK) { if (sim.buy('fleet', next)) this.note(`buy ${next}`); }
   }
 }

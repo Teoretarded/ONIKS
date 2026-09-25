@@ -56,7 +56,9 @@ export function kill(sim, u, src) {
   // a reload in progress ends; aircraft aboard a sinking carrier are lost with it
   if (u.reloader) { const L = sim.units.get(u.reloader); if (L) L.busy = false; u.reloader = 0; }
   if (u.type === 'transloader') for (const v of sim.alive(u.side)) if (v.reloader === u.id) { v.reloader = 0; v.elevT = v.wantElev; }
-  sim.emit('destroyed', { unit: u.id, type: u.type, side: u.side, pos: u.pos.slice(), by: src ? src.id : 0 });
+  // a boat lost under the water shows where it went down on the surface
+  const pos = u.def.sub ? [u.pos[0], Math.max(0, u.pos[1]), u.pos[2]] : u.pos.slice();
+  sim.emit('destroyed', { unit: u.id, type: u.type, side: u.side, pos, by: src ? src.id : 0 });
   if (u.def.air) for (const v of sim.alive(u.side)) if (v.aboard === u.id) kill(sim, v, src);
 }
 
@@ -70,7 +72,14 @@ export function stepDying(sim) {
     if (u.recovered) { sim.units.delete(u.id); removed = true; continue; }
     const d = u.def;
     u.dying = Math.min(1, u.dying + DT / d.dieTime);
-    if (d.domain === 'sea') {
+    if (d.sub) {
+      // a boat goes down from wherever it is, bow or stern first
+      u.speed *= .99;
+      u.pos[0] += Math.sin(u.hdg) * u.speed * DT; u.pos[2] += Math.cos(u.hdg) * u.speed * DT;
+      u.pos[1] -= (1.5 + 5 * u.dying) * DT;
+      u.pitch = (u.id % 2 ? -.25 : .2) * Math.min(1, u.dying * 3);
+      u.roll = .2 * u.dying * (u.id % 2 ? 1 : -1);
+    } else if (d.domain === 'sea') {
       // list, settle by the stern, slow to a stop
       u.speed *= .995;
       u.pos[0] += Math.sin(u.hdg) * u.speed * DT; u.pos[2] += Math.cos(u.hdg) * u.speed * DT;

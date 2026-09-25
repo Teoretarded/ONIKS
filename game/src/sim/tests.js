@@ -201,6 +201,36 @@ async function main() {
     return `2 rounds ${fmt(gaps[0], 2)} s apart, ammo 0, caps off, no further launches in ${fmt(sim.t, 0)} s`;
   });
 
+  await test('terrain look-ahead: strike missiles climb over a sea cliff to a target behind it', async () => {
+    // a 380 m wall of cliff straight out of the sea, the target 3.5 km behind its edge on the plateau
+    const cliff = {
+      W: 100000, H: 60000, cell: 200,
+      h: (x, z) => x < 0 ? -60 : Math.min(320, -60 + x * 2.6), slope: (x, z) => x >= 0 && x < 146 ? 1 : 0, water: (x, z) => x < 0,
+      objectives: [], roads: [], places: [], replenish: { x: -45000, z: 20000, r: 3000 },
+      spawns: { coast: { x: 5000, z: 0, r: 2000, hdg: -Math.PI / 2 }, fleet: { x: -40000, z: 0, r: 3000, hdg: Math.PI / 2 } },
+      weather: { kind: 'calm', wind: [0, 0], sea: .2 },
+    };
+    const sim = new Sim(cliff, { seed: 9, fog: false });
+    const tgt = sim.spawn('tel', 'coast', 3500, 800, { hdg: -Math.PI / 2 });
+    const ddg = sim.spawn('ddg', 'fleet', -42000, 0, { hdg: Math.PI / 2 });
+    sim.run(10);                                                   // fog off: the picture fills on the first sensor tick
+    sim.order([ddg.id], { kind: 'attack', target: tgt.id, n: 2 });
+    let launched = 0, terrain = 0, hits = 0, minClr = 1e9;
+    await run(sim, 20 * 400, s => {
+      for (const e of s.drainEvents()) {
+        if (e.type === 'launch' && e.kind === 'tlam') launched++;
+        if (e.type === 'splash' && e.kind === 'tlam' && e.why === 'terrain') terrain++;
+        if (e.type === 'hit' && e.kind === 'tlam') hits++;
+      }
+      for (const p of s.projectiles.values()) if (p.kind === 'tlam' && p.pos[0] > -200 && p.pos[0] < 2800) minClr = Math.min(minClr, p.pos[1] - cliff.h(p.pos[0], p.pos[2]));
+      return launched >= 2 && !s.projectiles.size;
+    });
+    ok(launched === 2, `launched ${launched}`);
+    ok(terrain === 0, `${terrain} round(s) flew into the cliff`);
+    ok(hits >= 1, 'no hit on the target behind the cliff');
+    return `2 TLAM over a 380 m cliff: ${hits} hit(s), none into the rock · least clearance over the cliff ${fmt(minClr)} m`;
+  });
+
   await test('reload: transloader beside a deployed TEL, ~45 s per round', async () => {
     const m = map(), sim = new Sim(m, { seed: 3, fog: true });
     const { shoreX } = coastPoints(m);
@@ -277,6 +307,60 @@ async function main() {
     ok(ca.err >= 600, `ESM error too small ${ca.err}`);
     ok(!cb, 'silent radar was found');
     return `heard at 62 km: ${ca.track} conf ${fmt(ca.conf, 2)} err ${fmt(ca.err / 1000)} km (unclassified); EMCON radar unseen`;
+  });
+
+  await test('submarines: radar never sees a deep boat, sonar hears it close, a launch shows it, torpedoes sink it', async () => {
+    const m = map(), calm = { kind: 'calm', wind: [0, 0], sea: .2 };
+    // 1. a destroyer's radar 20 km off: nothing while the Kilo is deep; a track once it has surfaced
+    let sim = new Sim(m, { seed: 13, fog: true, weather: calm });
+    const ssk = sim.spawn('ssk', 'coast', -15000, 10000, { hdg: 0 });
+    sim.spawn('ddg', 'fleet', -35000, 10000, { hdg: Math.PI / 2 });
+    ok(ssk.depth > ssk.def.sub.pd + 4, `spawned at ${fmt(ssk.depth)} m, not deep`);
+    await run(sim, 20 * 90);
+    ok(sim.visible('fleet', ssk) === null, 'a deep boat was seen at 20 km');
+    sim.order([ssk.id], { kind: 'dive', depth: 0 });
+    let tSurf = null;
+    await run(sim, 20 * 300, s => { if (tSurf === null && ssk.depth <= ssk.def.draught + .5) tSurf = s.t; return tSurf !== null && s.visible('fleet', ssk) === 'track'; });
+    ok(tSurf !== null, 'never surfaced');
+    ok(sim.visible('fleet', ssk) === 'track', 'a surfaced boat 20 km off was not tracked by radar');
+    const tTrack = sim.t - tSurf;
+    // 2. deep and still, a destroyer 3.5 km off hears it: sonar contact -> classified -> Mk 54s from its tubes (weapons free)
+    sim = new Sim(m, { seed: 14, fog: true, weather: calm });
+    const k2 = sim.spawn('ssk', 'coast', -15000, 10000, { hdg: 0 });
+    const d2 = sim.spawn('ddg', 'fleet', -18500, 10000, { hdg: 0, hold: true });
+    let tHeard = null, tCls = null, tTorp = null, tHit = null, rings = 0;
+    await run(sim, 20 * 1200, s => {
+      for (const e of s.drainEvents()) {
+        if (e.type === 'detect' && e.side === 'fleet' && e.unit === k2.id && tHeard === null) { ok(e.how === 'sonar', `first contact by ${e.how}`); tHeard = s.t; }
+        if (e.type === 'classify' && e.side === 'fleet' && e.unit === k2.id) tCls = s.t;
+        if (e.type === 'sonar' && e.side === 'fleet' && e.unit === k2.id) rings++;
+        if (e.type === 'launch' && e.kind === 'mk54' && tTorp === null) tTorp = s.t;
+        if (e.type === 'hit' && e.target === k2.id && tHit === null) tHit = s.t;
+      }
+      return !k2.alive;
+    });
+    ok(tHeard !== null, 'the destroyer never heard the boat at 3.5 km');
+    ok(tCls !== null && sim.contact('fleet', k2.id) && sim.contact('fleet', k2.id).cls === 'SSK' || !k2.alive, 'sonar contact never classified as SSK');
+    ok(rings > 0, 'no sonar events');
+    ok(tTorp !== null && tTorp >= tCls, `no torpedo after classification (${tTorp})`);
+    ok(tHit !== null && !k2.alive, `the boat survived (hp ${k2.hp})`);
+    // 3. at periscope depth it fires Kalibr at a destroyer its side tracks: the launch gives the fleet a rough contact
+    sim = new Sim(m, { seed: 15, fog: true, weather: calm });
+    const { shoreX } = coastPoints(m);
+    sim.spawn('radar', 'coast', shoreX + 2500, 0, { deployed: true });
+    const k3 = sim.spawn('ssk', 'coast', -22000, 0, { hdg: -Math.PI / 2, dive: 1, hold: true });
+    const d3 = sim.spawn('ddg', 'fleet', -40000, 0, {});                        // inside the coast radar's horizon, out of torpedo reach
+    let tKal = null, before = 'x', prev = null;
+    await run(sim, 20 * 600, s => {
+      for (const e of s.drainEvents()) if (e.type === 'launch' && e.kind === 'kalibr' && tKal === null) { tKal = s.t; before = prev; }
+      prev = s.visible('fleet', k3);                                 // the fleet's picture as the tick ends
+      return tKal !== null && s.t > tKal + 1;
+    });
+    ok(tKal !== null, 'the Kilo never fired at the tracked destroyer');
+    ok(before === null, `the boat was in the fleet picture before it fired (${before})`);
+    const c3 = sim.contact('fleet', k3.id);
+    ok(c3 && c3.conf < CLASSIFY, 'the launch did not give the fleet a rough contact');
+    return `deep: unseen at 20 km; surfaced: tracked ${fmt(tTrack)} s later · sonar at 3.5 km: heard ${fmt(tHeard)} s, classified ${fmt(tCls)} s, Mk 54 ${fmt(tTorp)} s, sunk ${fmt(sim.t && tHit)} s (${rings} sonar pings) · Kalibr from PD at ${fmt(tKal)} s: fleet contact ${c3.track} conf ${fmt(c3.conf, 2)}`;
   });
 
   await test('reinforcements: buy -> arrive after build time', async () => {

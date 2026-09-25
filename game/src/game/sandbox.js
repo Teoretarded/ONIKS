@@ -1,8 +1,9 @@
 /* Sandbox tools: the spawn palette (both sides' rosters as text rows with key chips: pick one, click the map to
    place it, valid ground or water only, a ghost shows where), delete the selection, fog on / off, wake / sleep the
    other side's AI, command either side, weather presets.
-   Keys: P palette · 1-7 coast rows, Shift 1-4 fleet rows (palette open) · Del delete · G fog · K enemy AI ·
-   J switch side · N weather. Click places, Shift-click keeps placing, right-click / Esc stops. */
+   Keys: P palette · 1-9 coast rows, Shift 1-9 fleet rows (palette open) · Del delete · G fog · K enemy AI ·
+   M switch side (J is the hit replay's, O the boats' dive) · N weather. Click places, Shift-click keeps placing,
+   right-click / Esc stops. */
 import { PRI } from './game.js';
 import { setAi, weatherOf } from './setup.js';
 import { SHORT } from './labels.js';
@@ -24,6 +25,7 @@ export function createSandbox(game, ctx) {
     if (Math.abs(x) > game.map.W / 2 - 300 || Math.abs(z) > game.map.H / 2 - 300) return false;
     if (d.domain === 'air') return true;
     if (d.domain === 'land') return h > .5 && game.map.slope(x, z) < (d.slopeMax || .4) && sim.nav.open('land', x, z);
+    if (d.sub) return h < -d.sub.water && sim.nav.open('sub', x, z);          // boats: deep water only
     return h < -(d.draught || 5) - 3 && sim.nav.open('sea', x, z);
   }
   function hdgFor(side, x, z) { const e = game.map.spawns[ENEMY[side]]; return Math.atan2(e.x - x, e.z - z); }
@@ -36,7 +38,7 @@ export function createSandbox(game, ctx) {
   function stop() { if (!place) return; place = null; game.bus.emit('mode', { mode: null }); render(); }
   function doPlace(x, z) {
     const { side, type } = place, d = UNITS[type];
-    if (!valid(type, x, z)) { game.bus.emit('toast', { text: d.domain === 'sea' ? 'NEEDS OPEN WATER' : 'NEEDS OPEN GROUND', bad: true }); return false; }
+    if (!valid(type, x, z)) { game.bus.emit('toast', { text: d.sub ? 'NEEDS DEEP WATER' : d.domain === 'sea' ? 'NEEDS OPEN WATER' : 'NEEDS OPEN GROUND', bad: true }); return false; }
     const u = sim.spawn(type, side, x, z, { hdg: hdgFor(side, x, z) });
     if (u && side === game.side) game.select([u.id], { add: true });
     game.bus.emit('spawned', { unit: u.id, type, side });
@@ -102,7 +104,7 @@ export function createSandbox(game, ctx) {
         <div class="col"><div class="lbl">Fleet${game.side === 'fleet' ? ' · you' : ''}</div>${rosters.fleet.map((t, i) => row('fleet', t, '⇧' + (i + 1))).join('')}</div>
       </div>
       <div class="tools">
-        <div class="t" data-k="side"><b>J</b><span>Command</span><em>${game.side}</em></div>
+        <div class="t" data-k="side"><b>M</b><span>Command</span><em>${game.side}</em></div>
         <div class="t" data-k="ai"><b>K</b><span>Enemy AI</span><em>${sim.ai[game.enemy] ? 'awake' : 'asleep'}</em></div>
         <div class="t" data-k="fog"><b>G</b><span>Fog</span><em>${sim.fog ? 'on' : 'off'}</em></div>
         <div class="t" data-k="weather"><b>N</b><span>Weather</span><em>${w}</em></div>
@@ -123,7 +125,7 @@ export function createSandbox(game, ctx) {
         return false;
       }
       if (place && k === 'Escape') { stop(); return true; }
-      const T = { KeyP: 'palette', Delete: 'delete', KeyG: 'fog', KeyK: 'ai', KeyJ: 'side', KeyN: 'weather' }[k];
+      const T = { KeyP: 'palette', Delete: 'delete', KeyG: 'fog', KeyK: 'ai', KeyM: 'side', KeyN: 'weather' }[k];
       if (T) { tool(T); return true; }
       return false;
     },
@@ -154,7 +156,7 @@ export function createSandbox(game, ctx) {
     },
     draw2d(ov) {
       if (!place || !game.mouse.in) return;
-      ov.tag(game.mouse.x + 18, game.mouse.y + 14, place.side === 'coast' ? 'C' : 'F', 'Place ' + (SHORT[place.type] || place.type), '', { kind: place.side === game.side ? 'lime' : 'coral', size: 10 });
+      ov.tag(game.mouse.x + 18 * ov.ui, game.mouse.y + 14 * ov.ui, place.side === 'coast' ? 'C' : 'F', 'Place ' + (SHORT[place.type] || place.type), '', { kind: place.side === game.side ? 'lime' : 'coral', size: 10 });
     },
   };
 }

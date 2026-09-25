@@ -1,15 +1,22 @@
 /* Orders: issue (with formations for groups) and per-tick processing of each unit's order queue.
    order = { kind: 'move'|'attack'|'stop'|'hold'|'weapons'|'deploy'|'undeploy'|'reload'|'scan'|'radar'|'launch_drone'
-             |'patrol'|'return', x?, z?, target?, on?, free?, n?, r?, queue?, stay? }
+             |'patrol'|'return'|'dive', x?, z?, target?, on?, free?, n?, r?, queue?, stay?, depth? }
+   'dive' (submarines, immediate): depth 0 surface · 1 periscope depth · 2 deep, or no depth: the next one down
+   (surface -> periscope -> deep -> periscope ...). A boat ordered to fire missiles comes up to periscope depth
+   for the salvo and goes back to its depth after it.
    Rules of engagement: `u.hold` is the unit's weapons-free flag (offensive weapons pick their own targets in reach;
    defensive weapons always fire by themselves). 'hold' { on } sets it AND halts the unit (the AI's stance);
    'weapons' { free } only sets it (the player's Weapons free / Hold fire toggle: the unit keeps its orders; hold fire
    also drops attack orders, so nothing fires until the next order). 'stop' also takes an aircraft off the launch queue. */
 import { CLASSIFY, TEL_ELEV, UNITS } from '../data/units.js';
-import { canMove, stow } from './movement.js';
+import { canMove, stow, navDom } from './movement.js';
 import { startScan, scanBlocked } from './sensors.js';
-import { ammoFull, atDepot } from './mech.js';
+import { ammoFull, atDepot, elevOf, replenishPoint } from './mech.js';
+import { atPD } from './subs.js';
 import { dxz, clamp } from './util.js';
+
+/* orbit radius of an aircraft loitering (after a move), on patrol, idle */
+const ORBIT = { fighter: [6000, 9000], aew: [12000, 15000], helo: [0, 3500], drone: [1500, 2500] };
 
 const SPACING = { land: 180, sea: 1600, air: 900 };
 
@@ -45,6 +52,13 @@ function give(sim, u, o) {
   // immediate orders (never queued)
   if (o.kind === 'stop') { cancel(sim, u); unqueue(sim, u); u.orders.length = 0; u.path = null; u.spdCap = 0; if (u.def.domain === 'air' && !u.aboard) { u.goal = [u.pos[0], u.pos[2]]; u.orbitR = u.def.domain === 'air' && u.type !== 'helo' ? 1500 : 0; } return; }
   if (o.kind === 'radar') { if (u.def.sensors.radar) sim.setRadar(u, o.on === undefined ? !u.radarOn : o.on); return; }
+  if (o.kind === 'dive') {
+    if (!u.def.sub) return;
+    u.dive = o.depth !== undefined ? clamp(o.depth | 0, 0, 2) : u.dive === 2 ? 1 : u.dive + 1;
+    for (const x of u.orders) if (x.kind === 'attack') x._dive = u.dive;       // an attack in hand returns to this depth
+    sim.emit('dive', { unit: u.id, side: u.side, depth: u.dive, pos: u.pos.slice() });
+    return;
+  }
   if (o.kind === 'weapons') {
     u.hold = !!o.free;
     if (!o.free && u.orders.some(x => x.kind === 'attack')) {
@@ -101,7 +115,7 @@ function idle(sim, u) {
   if (d.domain !== 'air' || u.aboard) return;
   // aircraft: loiter where they are; go home when fuel runs low or (fighters) when out of weapons
   if (!u.goal) u.goal = [u.pos[0], u.pos[2]];
-  if (!u.orbitR && u.type !== 'helo') u.orbitR = u.type === 'fighter' ? 6000 : 1500;
+  if (!u.orbitR && u.type !== 'helo') u.orbitR = (ORBIT[u.type] || ORBIT.drone)[0];
   autoReturn(sim, u);
 }
 
@@ -147,7 +161,7 @@ function requestLaunch(sim, u) {
 /* surface path to (x, z); returns false when nothing is reachable */
 function goSurface(sim, u, x, z) {
   u.goal = [x, z];
-  u.path = sim.nav.path(u.def.domain, u.pos[0], u.pos[2], x, z);
+  u.path = sim.nav.path(navDom(u), u.pos[0], u.pos[2], x, z);
   u.wi = 0; u.blocked = 0; u.repaths = 0;
   return !!u.path;
 }
@@ -157,7 +171,7 @@ function moveTo(sim, u, o, x, z, arrive) {
   if (dom === 'air') {
     if (u.aboard) { requestLaunch(sim, u); return false; }
     u.goal = [x, z]; u.orbitR = 0;
-    return dxz(u.pos[0], u.pos[2], x, z) < (arrive || (u.type === 'fighter' ? 2500 : 400));
+    return dxz(u.pos[0], u.pos[2], x, z) < (arrive || (u.type === 'fighter' || u.type === 'aew' ? 2500 : 400));
   }
   if (u.def.static || u.off.move) return true;
   if (!canMove(u)) { stow(sim, u); return false; }
@@ -173,7 +187,7 @@ function moveTo(sim, u, o, x, z, arrive) {
 const H = {
   move(sim, u, o) {
     const done = moveTo(sim, u, o, o.x, o.z);
-    if (done && u.def.domain === 'air') { u.goal = [o.x, o.z]; u.orbitR = u.type === 'helo' ? 0 : u.type === 'fighter' ? 6000 : 1500; }
+    if (done && u.def.domain === 'air') { u.goal = [o.x, o.z]; u.orbitR = (ORBIT[u.type] || ORBIT.drone)[0]; }
     return done;
   },
 
@@ -181,7 +195,7 @@ const H = {
     if (u.def.domain === 'air') {
       if (u.aboard) { requestLaunch(sim, u); return false; }
       u.goal = [o.x, o.z];
-      u.orbitR = o.r || (u.type === 'fighter' ? 9000 : u.type === 'helo' ? 3500 : 2500);
+      u.orbitR = o.r || (ORBIT[u.type] || ORBIT.drone)[1];
       return autoReturn(sim, u) ? false : false;
     }
     if (!o.pts) { o.pts = [[u.pos[0], u.pos[2]], [o.x, o.z]]; o.i = 1; }
@@ -208,7 +222,7 @@ const H = {
     if (!w) return true;
     o.w = w.name;
     const n = o.n || w.salvo || 1;
-    if ((o.fired || 0) >= n) return true;
+    if ((o.fired || 0) >= n) { if (o._dive !== undefined && u.def.sub) u.dive = o._dive; return true; }
     if (u.aboard) { requestLaunch(sim, u); return false; }
     const d = dxz(u.pos[0], u.pos[2], c.pos[0], c.pos[2]);
     if (d > w.range * .97) {
@@ -224,15 +238,18 @@ const H = {
     if (d < (w.min || 0)) return true;
     if (u.def.domain !== 'air') { u.path = null; }
     else if (u.type !== 'fighter') { u.goal = [u.pos[0], u.pos[2]]; }
-    if (w.needs === 'erect') { u.wantElev = TEL_ELEV; if (!u.reloader) { u.depT = 1; u.elevT = TEL_ELEV; } }
+    if (w.needs === 'erect') { const el = elevOf(u.def); u.wantElev = el; if (!u.reloader) { u.depT = 1; u.elevT = el; } }
+    // missiles leave a boat from periscope depth: come up for the salvo (and go back down after it)
+    if (w.sub && u.def.sub && u.dive === 2) { if (o._dive === undefined) o._dive = 2; u.dive = 1; }
     return false;
   },
 
   deploy(sim, u, o) {
     if (u.def.deploy) {
       if (u.off.deploy) return true;
-      u.path = null; u.depT = 1; u.elevT = TEL_ELEV; u.wantElev = TEL_ELEV;
-      return u.dep >= 1 && u.elev >= TEL_ELEV;
+      const el = elevOf(u.def);
+      u.path = null; u.depT = 1; u.elevT = el; u.wantElev = el;
+      return u.dep >= 1 && u.elev >= el;
     }
     if (u.def.mast) { u.path = null; u.mastT = 1; return u.mast >= 1; }
     return true;
@@ -288,7 +305,7 @@ const H = {
     }
     if (d.domain === 'air') { u.orders[0] = { kind: 'return' }; return false; }
     if (d.domain === 'sea') {
-      const R = sim.map.replenish;
+      const R = replenishPoint(sim, u);
       const magFull = !u.mag || Object.keys(u.mag).every(k => u.mag[k] >= u.def.magazine[k]);
       if (!R || (ammoFull(u) && magFull)) return true;
       const inside = dxz(u.pos[0], u.pos[2], R.x, R.z) < R.r * .8;
@@ -296,8 +313,9 @@ const H = {
       u.path = null;
       return ammoFull(u) && magFull;
     }
-    if (u.type === 'pantsir') {
+    if (u.type === 'pantsir' || u.type === 'bal') {
       if (ammoFull(u)) return true;
+      if (u.type === 'bal' && (u.dep > 0 || u.elev > 0)) { u.depT = 0; u.elevT = 0; u.wantElev = 0; if (!canMove(u)) return false; }
       if (atDepot(sim, u)) { u.path = null; return ammoFull(u); }
       const dp = nearestDepot(sim, u); if (!dp) return true;
       moveTo(sim, u, o, dp[0], dp[1], 300); return false;
@@ -387,6 +405,7 @@ const H = {
   hold(sim, u, o) { u.hold = o.on !== false; if (u.hold) u.path = null; return true; },
   stop(sim, u) { u.path = null; return true; },
   radar(sim, u, o) { if (u.def.sensors.radar) sim.setRadar(u, o.on === undefined ? !u.radarOn : o.on); return true; },
+  dive(sim, u, o) { give(sim, u, Object.assign({}, o, { queue: false })); return true; },
 };
 
 function nearestDepot(sim, u) {

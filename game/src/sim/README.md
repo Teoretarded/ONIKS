@@ -53,6 +53,16 @@ Unit = { id, type, side, def /* UNITS[type] */, pos, prev, hdg, prevHdg, pitch (
 - Dying: ships list and settle over 60 s, vehicles burn 20 s, aircraft fall; then the unit is removed ('removed').
 - Aircraft on the carrier have `aboard = carrierId` (position follows the deck; draw them parked or not at all).
   Any move/patrol/attack/scan order launches them (one off the deck every 20 s). Drones launch from a catapult.
+  The E-2D (`aew`) flies off the carrier like the fighters (it spreads its wings first: `spool`); its rotodome is its
+  radar antenna (model state `dome` = the sweep angle, 10 s a turn, stopped on deck or under EMCON; `fold` on deck).
+- Submarines (`ssn` Virginia, `ssk` Kilo; `def.sub`, sim/subs.js): `u.dive` the ordered depth (0 surface, 1 periscope
+  depth, 2 deep), `u.depth` the keel depth (m), `u.mastUp` 0..1. The model's origin is the surfaced waterline, so
+  `u.pos[1] = -(depth - draught)` under water. Submerged (`submerged(u)`), a boat counts as domain `'sub'` for contacts
+  and weapons (`domOf(u)`, contact `dom`): radar and cameras do not see it (its masts show to a radar at short range at
+  periscope depth), scans and lightning do not reach it; only sonar hears it. Boats keep to deep water (nav grid
+  `'sub'`, 36 m). Missiles leave a boat only from periscope depth (weapon `sub: true`; an attack order brings it up
+  for the salvo and back down after it); torpedoes at any depth. Model state: ssn `mast vptA vptB prop`, ssk `mast prop`,
+  bal `elev dep n wheel`, aew `dome prop fold`.
 
 ## Orders
 
@@ -69,6 +79,7 @@ Unit = { id, type, side, def /* UNITS[type] */, pos, prev, hdg, prevHdg, pitch (
 | `reload` | transloader + `target` TEL: drive beside it, 45 s per round. Transloader alone: refill at a depot. TEL: calls a transloader, else drives to a depot (90 s per round). Ships: sail to `map.replenish`. Pantsir: depot |
 | `scan` | at x, z within the unit's scan reach (moves closer if mobile, unless `stay` and not an aircraft: the player's scans pass `stay`). Needs the side's and the unit's cooldowns |
 | `radar` | `on` true/false (EMCON). A radiating radar can be heard by the enemy |
+| `dive` | submarines, immediate: `depth` 0 surface · 1 periscope depth · 2 deep (none: one step down) |
 | `launch_drone` | catapult: 12 s, then a drone patrols x, z |
 | `patrol` | aircraft: orbit x, z (radius r). Surface: shuttle between here and x, z |
 | `return` | aircraft to the carrier (land, rearm from its magazine), drones to a catapult, ships to replenish |
@@ -82,6 +93,11 @@ Orders queue with `queue: true`. The AI uses the same orders.
   `Contact = { track: 'TRK 21', unitId, conf, cls, type, name, pos /* estimate */, vel, err /* m */, lastSeen, identified, emitting, dom, dead }`.
   `cls`/`type` are set once conf ≥ `CLASSIFY` (0.6). `identified` after a scan (inspect allowed).
 - `sim.projVisible(side, proj)` → the side's sensors cover that missile now.
+- Sonar (`sensors.sonarTick`, 1 Hz): DDG hull sonar (less at speed), the MH-60R's dipping sonar (only while it hovers,
+  `sonarWorks(u)`), the boats' own. Range = the sonar's `sub` (or `ship`, boats only) range × the target's noise
+  (`subs.noiseOf`: quiet boats, louder fast; a Kilo snorting at periscope depth) × the sea state. Detections raise the
+  contact like any sensor; a boat held at conf ≥ .9 counts as identified. A launch (missile or torpedo) gives the
+  other side a rough contact on the shooter. Torpedoes are never seen by radar; the other side's sonars hear them.
 - Radar horizon `d_km = 4.12 (√h1 + √h2)` (`horizon(h1, h2)` in sensors.js, metres), terrain line of sight with earth
   bulge, sweeps (period per radar), rain squalls cut range, land clutter for ship/air radars.
 - `sim.sides[side]`: `{ supply, income, contacts, scanCd, queue, lost, kills, fired }`.
@@ -90,7 +106,14 @@ Orders queue with `queue: true`. The AI uses the same orders.
 
 `sim.projectiles: Map<id, Proj>`; `Proj = { id, kind, side, P /* PROJ[kind] */, pos, prev, vel, hdg, pitch, spd, from,
 fromPos, target, tk: 'unit'|'proj', aim, phase: 'launch'|'climb'|'cruise'|'final', t0, age, alive, st /* booster wing fin cover */ }`.
-Kinds: `oniks` (3M55: vertical cold launch, booster separation at 7 s, low over land, sea-skimming at 15 m),
+Low flight follows the terrain with a look-ahead: the climb angle that clears the highest ground of the next ~2 km
+of the track (short of the aim point) is a floor on the pitch, so rounds climb smoothly over cliffs (`PROJ[k].look: 0`
+switches it off, for experiments). A missile loses a target that dives.
+Kinds: `uran` (Kh-35U, Bal: out of the rear of the raised pack, sea-skimming at 10 m), `kalibr` (3M-54, Kilo: broaches
+from the bow tubes, booster to 5 s), torpedoes `mk48` (SSN), `mk54` (DDG tubes, MH-60R drop), `t53` (Kilo): mode `run`,
+under water, not drawn; they close on the target near the aim point and resolve on the pass (`hit` at the surface
+over it) or end quietly (`torpedo_end`).
+`oniks` (3M55: vertical cold launch, booster separation at 7 s, low over land, sea-skimming at 15 m),
 `tlam` (VLS, booster 12 s, 60 m terrain following), `slam`, `hellfire`, `sm6` (2 s vertical rise, gentle
 pitch-over, booster separation at 6 s), `pdms` (ESSM), `sam` (57E6, booster at 2.4 s), `aam`, `shell` (5" ballistic).
 Guns (Phalanx, 2A38M) fire bursts resolved at once: `gunfire` events.
@@ -121,6 +144,8 @@ carrier, drones into a catapult). Supply: base 1.2/s + per held objective (held 
 | `radar` | unit, side, on |
 | `takeoff` / `land` | unit, type, from / to |
 | `lightning` | pos, top, r |
+| `sonar` | side, by (listener), unit, track, pos (the fix), r (its roughness, m): the side heard a contact (≤ 1 per 5 s per contact) |
+| `dive` / `torpedo_end` | unit, side, depth / pos, kind, side, proj, why |
 | `order_unit` / `reinforce` / `objective` / `result` | side, type, unit / id, owner / winner, reason |
 
 ## AI
