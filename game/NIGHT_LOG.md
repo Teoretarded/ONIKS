@@ -198,7 +198,7 @@ Four new units with film-quality models and X-ray interiors:
 - **Bal** (coast): 8 Kh-35U in a pack that tilts up, faster to deploy than the TEL, shorter range.
 Rounds now terrain-follow with look-ahead (no more flying into the fjord cliffs). 17/17 sim tests pass.
 
-## 08:45 · Review 2: 7.5 / 10 (passes)
+## 08:25 · Review 2: 7.5 / 10 (passes)
 `game/reviews/review_2.md`. Up from 6.5. Best: the hit replay ("the Anatomy film happening to your enemy"), the
 scan payoff, campaign mission 4 ("the best 10 minutes in the game", won with grade S), the Orbital map, Inspect (9/10).
 Weakest: skirmish Combat is thin without scripts (attack orders fire once, the coast AI doesn't press), storms read as
