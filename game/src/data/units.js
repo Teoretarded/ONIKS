@@ -318,7 +318,7 @@ export const UNITS = {
   bereg: {
     type: 'bereg', side: 'coast', name: 'A-222', cls: 'GUN', label: 'A-222 Bereg · 130 mm coastal gun',
     domain: 'land', model: 'bereg',
-    size: [11.8, 3.1, 3.5], top: 3.5,
+    size: [11.8, 3.1, 3.9], top: 3.9,
     speed: 9, road: 16.7, turn: .45, accel: 1.2, slopeMax: .4,
     hp: 32, rcs: 0.5, dieTime: 20,
     turret: true,                                                 // the turret slews to the last aim bearing (sim/mech.js)
@@ -326,7 +326,7 @@ export const UNITS = {
     emits: { range: 50000 },
     depotRefill: true,
     weapons: {
-      gun130: { proj: 'shell130', ammo: 40, range: 20000, min: 800, cd: 5.0, vs: ['sea'], salvo: 4, muzzle: [0, 2.6, 6.0],
+      gun130: { proj: 'shell130', ammo: 40, range: 20000, min: 800, cd: 5.0, vs: ['sea'], salvo: 4, muzzle: [0, 3.1, 6.0],
                 prefer: ['LCAC', 'LHD'], refill: 5 },
     },
     cost: 300, buildTime: 90,
@@ -571,7 +571,7 @@ export const UNITS = {
       gun5: { proj: 'shell', ammo: 600, range: 24000, min: 1500, cd: 2.0, vs: ['land', 'sea'], salvo: 6, muzzle: [0, 8.9, 70], refill: 2 },   // Mk 45 ×2
       ciws: { gun: true, ammo: 40, range: 2000, cd: 1.0, vs: ['missile', 'air'], auto: true, mounts: ['ciwsF', 'ciwsA'],
               mountAt: [[3.9, 17.6, 22.2], [-4.7, 13.5, -32.6]], pk: { missile: .12, air: .3 }, dmg: 4, burst: .9, refill: 8 },
-      svtt: { proj: 'mk54', ammo: 6, range: 8000, min: 500, cd: 6, vs: ['sub'], salvo: 1, muzzle: [6.6, 7.2, -9.5], refill: 30 },
+      svtt: { proj: 'mk54', ammo: 6, range: 8000, min: 500, cd: 6, vs: ['sub'], salvo: 1, muzzle: [6.6, 7.2, 1.0], refill: 30 },
     },
     // Mk 41 cell tops (ship frame; models_units3.js CG.cell): 61 forward (ids 0..60), 61 aft (61..121); the crane
     // module has 5 cells

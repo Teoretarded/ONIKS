@@ -75,6 +75,21 @@ Unit = { id, type, side, def /* UNITS[type] */, pos, prev, hdg, prevHdg, pitch (
   kornet `wheel up yaw pitch`. Anchors: data/models.js `LHD` (DECK_Y, WELL, GATE, SLOTS, SPOTS), `LCAC` (deckY(st),
   SLOTS, PROPS), `ACV`, `KORNET`.
 
+- The third wave (data/models_units3.js): coast `s400` (5P85SM2-01: `def.deploy` with `elev` π/2, containers
+  vertical to fire; `def.tubes` the four mouths, fired outboard first; its `sam48` weapon is `auto` vs aircraft but fires
+  only erected and cued, `w.cue` { type: 's400r', r }: a radiating 92N6E of its side within r; `def.depotRefill`),
+  `s400r` (92N6E: `def.mast`, the array raised before it radiates), `bereg` (A-222: `def.turret`, weapons free
+  `gun130` 130 mm rounds vs ships and landing craft; `def.depotRefill`); fleet `cg` (Ticonderoga: 122 Mk 41 cells as
+  `def.vlsAt`, SM-6 ×48, ESSM ×32, TLAM ×4, Mk 45 ×2, Phalanx ×2 with `w.mountAt`, two MH-60R with `def.air.spot` /
+  `park`) and `lcs` (Independence: 44 kn, 57 mm `gun57`, SeaRAM `searam` (RAM), one MH-60R, a scan). Model state: cg
+  `radar gunYaw gunPitch gunYawA gunPitchA ciwsYaw[2] ciwsPitch[2] ciwsSpin vlsOpen`, lcs `radar gunYaw gunPitch ramYaw`,
+  s400 `elev dep n wheel`, s400r `mast ant wheel`, bereg `yaw pitch dep fire wheel`. Anchors: data/models.js `CG`, `LCS`,
+  `S400`, `S400R`, `BEREG`.
+- Hooks any unit may use: `def.turret` (the turret slews to the last aim bearing), `def.depotRefill` (restocks at a
+  depot / its spawn; the reload order drives there), `def.tubes` (an erecting launcher's container mouths), `def.air.spot`
+  (where its helicopters take off) and `def.air.park` (where they are drawn on deck), `w.mountAt` (the CIWS mounts'
+  positions; default the DDG's), `w.cue` (see the S-400). The CIWS yaw `u.cYaw[i]` is the mount's bearing off the bow.
+
 ## Orders
 
 `sim.order(ids, order)`; `order = { kind, x?, z?, target?, on?, n?, r?, queue? }`
@@ -87,8 +102,8 @@ Unit = { id, type, side, def /* UNITS[type] */, pos, prev, hdg, prevHdg, pitch (
 | `stop` | clear orders and halt (an aircraft on deck also leaves the launch queue) |
 | `hold` | `on` (default true): hold position, offensive weapons pick their own targets. Defensive weapons always fire by themselves |
 | `weapons` | `free` true/false: set the weapons-free flag (`u.hold`) without touching the orders (the player's Weapons free / Hold fire); `free: false` also drops attack orders |
-| `deploy` / `undeploy` | TEL: jacks 10 s, erect 15 s (immobile while deployed). Radar: mast 15 s (needed to radiate) |
-| `reload` | transloader + `target` TEL: drive beside it, 45 s per round. Transloader alone: refill at a depot. TEL: calls a transloader, else drives to a depot (90 s per round). Ships: sail to `map.replenish`. Pantsir: depot |
+| `deploy` / `undeploy` | TEL: jacks 10 s, erect 15 s (immobile while deployed). Bal: jacks 6 s, pack 8 s. S-400: jacks 12 s, containers vertical 18 s. Radar: mast 15 s, 92N6E array 20 s (needed to radiate) |
+| `reload` | transloader + `target` TEL: drive beside it, 45 s per round. Transloader alone: refill at a depot. TEL: calls a transloader, else drives to a depot (90 s per round). Ships: sail to `map.replenish`. Pantsir, Bal, S-400, Bereg: depot |
 | `scan` | at x, z within the unit's scan reach (moves closer if mobile, unless `stay` and not an aircraft: the player's scans pass `stay`). Needs the side's and the unit's cooldowns |
 | `radar` | `on` true/false (EMCON). A radiating radar can be heard by the enemy |
 | `dive` | submarines, immediate: `depth` 0 surface · 1 periscope depth · 2 deep (none: one step down) |

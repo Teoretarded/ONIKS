@@ -213,9 +213,9 @@ function cgHouses() {
 const CG_SPY = (() => {
   const tilt = 9 * DEG, out = [];
   const face = (c, n) => { const nn = V.norm([n[0] * Math.cos(tilt), Math.sin(tilt), n[2] * Math.cos(tilt)]); const h = V.norm(V.cross(FY, nn)); const u = V.cross(nn, h); out.push({ c, n: nn, h, u }); };
-  face([1.6, 13.0, CG_FH.z1 - 1.05], FZ);            // forward
+  face([1.6, 13.0, CG_FH.z1 - 1.55], FZ);            // forward
   face([6.05, 13.0, CG_FH.z0 + 10.5], FX);           // starboard
-  face([-1.6, 13.6, CG_AH.z0 + 6.4], [0, 0, -1]);    // aft
+  face([-1.6, 13.6, CG_AH.z0 + 6.65], [0, 0, -1]);   // aft
   face([-6.25, 13.6, CG_AH.z0 + 16.5], [-1, 0, 0]);  // port
   return out;
 })();
@@ -352,7 +352,7 @@ function cgHarpoon() {
 function cgArms() {
   const P = [];
   for (const s of [-1, 1]) {
-    const z = -7.5, y = cgD(z);
+    const z = 1.0, y = cgD(z);
     P.push(cyl([s * 6.6, y, z], [s * 6.6, y + .8, z], .35, { n: 10, gen: 0 }));
     for (let k = 0; k < 3; k++) { const a = [s * 6.6, y + .95 + k * .36, z - 2.2], d = V.norm([s * .2, 0, 1]); P.push(lathe(a, d, [[0, .17], [3.1, .17]], { n: 10, gen: 0, rings: [0, 1], caps: true })); }
   }
@@ -858,7 +858,7 @@ export const S400R = { H: SR.H, TURN: SR.TURN, antXf: srAntXf, ARRAY: [0, 6.3, -
    gun, four hydraulic jacks. Travelling, the barrel lies forward over the engine between the cabs. Vehicle-local
    frame as the TEL.
    ====================================================================================================== */
-const BG = { AXLES: [3.95, 1.75, -1.05, -3.25], RING: [0, 1.55, -2.6], TR: [0, 1.05, 1.6], MZ: [0, 1.05, 8.6], ZF: 5.85, ZR: -5.85, JACKS: [[1.5, 4.85], [1.5, -5.25]], JT: .62 };
+const BG = { AXLES: [3.95, 1.75, -1.05, -3.25], RING: [0, 1.55, -2.6], TR: [0, 1.55, 1.6], MZ: [0, 1.55, 8.6], ZF: 5.85, ZR: -5.85, JACKS: [[1.5, 4.85], [1.5, -5.25]], JT: .62 };
 const bgTurretXf = st => X.make(R.y(st.yaw || 0), BG.RING);
 const bgGunXf = st => X.mul(bgTurretXf(st), about(R.x(-(st.pitch || 0)), BG.TR));
 function bgChassis() {
@@ -893,29 +893,29 @@ function bgCabs() {
   P.push(panel([[-.45, 1.45, BG.ZF - .08], [.45, 1.45, BG.ZF - .08], [.45, 2.15, BG.ZF - .08], [-.45, 2.15, BG.ZF - .08]], { hatch: 6, edge: .9, pts: false }));
   P.push(box([-1.55, .85, BG.ZF - .1], [1.55, 1.2, BG.ZF + .12]));
   // barrel travel lock between the cabs
-  P.push(box([-.2, 2.25, 4.8], [.2, 2.42, 5.0]), line([[-.25, 2.42, 4.9], [-.25, 2.75, 4.9], [.25, 2.75, 4.9], [.25, 2.42, 4.9]], { w: .8 }));
+  P.push(box([-.2, 2.25, 4.8], [.2, 2.42, 5.0]), line([[-.25, 2.42, 4.9], [-.25, 2.97, 4.9], [.25, 2.97, 4.9], [.25, 2.42, 4.9]], { w: .8 }));
   return P;
 }
 function bgBody() {
   // fire-control and crew compartment behind the cabs
-  const P = [crate([-1.5, 1.3, .6], [1.5, 3.0, 3.95])];
+  const P = [crate([-1.5, 1.3, .6], [1.5, 2.85, 3.95])];
   for (const s of [-1, 1]) {
     P.push(rect([s * 1.51, 2.2, 2.0], FZ, FY, .45, .7, { edge: .7 }));
     P.push(rect([s * 1.51, 2.6, 3.3], FZ, FY, .3, .22, fn({ edge: .5 })));
   }
-  P.push(crate([-.6, 3.0, 2.6], [.6, 3.25, 3.6], fn()));
-  P.push(lathe([.9, 3.0, 1.2], FY, [[0, .25], [.3, .25], [.35, .1]], fn({ n: 12, gen: 2 })));                         // sight / radar dome
-  P.push(line([[-1.2, 3.0, 1.0], [-1.18, 4.9, .95]], fn({ w: .5 })));
+  P.push(crate([.55, 2.85, 2.6], [1.3, 3.05, 3.6], fn()));
+  P.push(lathe([1.0, 2.85, 1.2], FY, [[0, .25], [.3, .25], [.35, .1]], fn({ n: 12, gen: 2 })));                        // sight / radar dome
+  P.push(line([[-1.2, 2.85, 1.0], [-1.18, 4.75, .95]], fn({ w: .5 })));
   return P;
 }
 function bgTurret() {
   // turret frame: origin on the ring, +Z along the gun at yaw 0
   const P = [];
   P.push(lathe([0, 0, 0], FY, [[0, 1.3], [.12, 1.3]], { n: 24, gen: 0 }));
-  P.push(hex([[-1.45, .12, -2.1], [1.45, .12, -2.1], [1.4, .12, 1.9], [-1.4, .12, 1.9], [-1.25, 1.62, -1.9], [1.25, 1.62, -1.9], [1.05, 1.62, 1.15], [-1.05, 1.62, 1.15]]));
-  P.push(crate([-1.3, .2, -3.0], [1.3, 1.5, -2.1]));                                                   // bustle: ready rounds
-  P.push(lathe([-.7, 1.62, -.7], FY, [[0, .38], [.2, .36], [.3, .2]], fn({ n: 14, gen: 2 })));         // commander's cupola
-  P.push(crate([.5, 1.62, .1], [.9, 1.95, .6], fn()));                                                 // sight head
+  P.push(hex([[-1.45, .12, -2.1], [1.45, .12, -2.1], [1.4, .12, 1.9], [-1.4, .12, 1.9], [-1.25, 2.0, -1.9], [1.25, 2.0, -1.9], [1.05, 2.0, 1.15], [-1.05, 2.0, 1.15]]));
+  P.push(crate([-1.3, .2, -3.0], [1.3, 1.85, -2.1]));                                                   // bustle: ready rounds
+  P.push(lathe([-.7, 2.0, -.7], FY, [[0, .38], [.2, .36], [.3, .2]], fn({ n: 14, gen: 2 })));          // commander's cupola
+  P.push(crate([.5, 2.0, .1], [.9, 2.3, .6], fn()));                                                 // sight head
   for (const s of [-1, 1]) P.push(rect([s * 1.43, .9, -.8], FZ, FY, .5, .4, fn({ edge: .6 })));
   return P;
 }
@@ -1106,7 +1106,7 @@ export const UNITS3_INFO = {
   lcs: { name: 'LCS-2 Independence class', kind: 'unit', size: [128.3, 31.6, 31.8], s: [.3, .7, 2] },
   s400: { name: 'S-400 · 5P85SM2-01 launcher', kind: 'unit', size: [16.5, 3.2, 3.85], s: [.045, .1, .28] },
   s400r: { name: 'S-400 · 92N6E radar', kind: 'unit', size: [13.8, 3.9, 8.3], s: [.04, .09, .26] },
-  bereg: { name: 'A-222 Bereg', kind: 'unit', size: [11.8, 3.1, 3.5], s: [.035, .08, .25] },
+  bereg: { name: 'A-222 Bereg', kind: 'unit', size: [11.8, 3.1, 3.8], s: [.035, .08, .25] },
   s400_msl: { name: '48N6E3', kind: 'munition', size: [7.5, 1.12, 1.12], s: [.016, .04, .12] },
   rim116: { name: 'RIM-116 RAM', kind: 'munition', size: [2.79, .43, .43], s: [.006, .015, .045] },
   shell130: { name: '130 mm projectile', kind: 'munition', size: [.67, .13, .13], s: [.003, .008, .02] },
