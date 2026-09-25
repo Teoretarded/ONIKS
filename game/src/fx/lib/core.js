@@ -191,5 +191,3 @@ export function streak(C, x, y, z, Wpx, r, g, b, a) {
 }
 /* how many dots a puff of radius rad (m) needs at pxm px/m: the films' rule, capped */
 export const puffN = (rad, pxm, cap, q) => { const rp = rad * pxm; return Math.max(1, Math.round(Math.min(cap, 2 + rp * rp * .03) * q)); };
-/* 2 px dots only where the lens is close enough that they do not merge */
-export const dsz = (pxm, k) => pxm * (k || 1) > 3.2 ? 2 : 1;

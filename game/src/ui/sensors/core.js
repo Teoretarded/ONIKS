@@ -3,7 +3,6 @@
    from north. Colours 0..255, alpha 0..1, dot sizes > 0 px at 1080p. */
 
 export const LIME = [198, 244, 50], CORAL = [255, 106, 61], WH = [238, 238, 228], HOT = [248, 255, 232];
-export const LIME_S = '#C6F432', CORAL_S = '#FF6A3D';
 export const TAU = Math.PI * 2, DEG = Math.PI / 180;
 
 export const sat = v => v < 0 ? 0 : v > 1 ? 1 : v;
@@ -118,19 +117,5 @@ export function tagW(id, label, value, px) {
   px = px || 11.5;
   const cw = px * .62, pX = px * .61, pL = px * .7;
   return (id ? id.length * cw + pX * 2 : 0) + (label ? label.length * cw + pL * 2 : 0) + (value ? String(value).length * cw + pL * 2 : 0);
-}
-/* stack tags so they do not overlap: items { x, y, w, h, pri } sorted by pri desc then y; moves y up */
-export function stackTags(items, n) {
-  items.length = n;
-  items.sort((a, b) => (b.pri - a.pri) || (a.y - b.y));
-  for (let i = 0; i < n; i++) {
-    const t = items[i];
-    for (let guard = 0; guard < 8; guard++) {
-      let hit = null;
-      for (let j = 0; j < i; j++) { const p = items[j]; if (t.x < p.x + p.w + 6 && p.x < t.x + t.w + 6 && Math.abs(t.y - p.y) < t.h + 4) { hit = p; break; } }
-      if (!hit) break;
-      t.y = hit.y - t.h - 5;
-    }
-  }
 }
 export const pad2 = n => String(n).padStart(2, '0');

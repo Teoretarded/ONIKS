@@ -55,10 +55,6 @@ export function unitName(type) {
   const u = units && units[type];
   return UNIT_NAMES[type] || (u && (u.label || u.name)) || type.toUpperCase();
 }
-export function unitShort(type) {
-  const u = units && units[type];
-  return (u && (u.name || u.label)) || (UNIT_NAMES[type] || type).split(' · ').pop();
-}
 
 export function loadMap(id) {
   if (!maps) return Promise.resolve(null);

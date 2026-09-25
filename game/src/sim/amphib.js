@@ -37,7 +37,6 @@ export const OVERRUN_R = 1500;         // m round the command post
 export const OVERRUN_T = 120;          // s held to take it
 
 const navOf = u => u.def.hover ? 'hover' : u.def.sub ? 'sub' : u.def.domain;
-export const isHover = u => !!(u && u.def && u.def.hover);
 
 /* ---------------------------------------------------------------- carrying */
 /* units carried by a host (aircraft on its deck excepted), and the crafts / vehicles among them */

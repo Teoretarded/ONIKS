@@ -5,7 +5,7 @@
      loc    part-local points (per-part boxes follow part.xf(st))                      Float32Array 3n
      part   part index of each point                                                   Uint16Array n
    plus the voxel graph the lightning reveal runs over (random-weighted shortest paths = branching fronts). */
-import { rng, clamp } from './core.js';
+import { rng } from './core.js';
 
 const cache = new Map();
 
@@ -141,8 +141,3 @@ export function revealFrom(s, entry, seed, dur) {
   return { nodeT, par, pt };
 }
 
-/* model-space point of the sample nearest to a direction from the centre (the side the front arrives from) */
-export function entryToward(s, dirX, dirY, dirZ) {
-  const c = s.center, half = s.L * .5;
-  return [c[0] + dirX * half, clamp(c[1] + dirY * half, s.mn[1], s.mx[1]), c[2] + dirZ * half];
-}
