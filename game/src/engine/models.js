@@ -6,7 +6,9 @@
    Shading is the films' (pc_anatomy_film.js runPts): low moon + facing + rim, back faces thinned to a third
    at 0.09, two-sided panels at 0.45, depth fade, dot size from on-screen spacing; plus a fill light fixed to the
    view. Density is capped per pixel, not per metre (dotSpacing): big hulls seen close keep the films' dot structure
-   instead of saturating into a white slab, small units stay dense silhouettes (see README, Models). */
+   instead of saturating into a white slab, small units stay dense silhouettes; a cutaway that fills the frame
+   (Inspect, the hit replay) prints its interior as the Anatomy films' dotted grey volumes (see README, Models).
+   Sampling never stalls a frame: a level is sampled a few primitives at a time within budgetMs, one level at a time. */
 import { HEAD, FRAME, COMMON, FS_POINT, CULL } from './shaders.js';
 import { program } from './gl.js';
 
@@ -26,10 +28,12 @@ uniform vec4 uTint;       // rgb, strength at the silhouette
 uniform vec4 uP;          // alpha, x-ray, damage, sample spacing (m)
 uniform vec4 uQ;          // no back faces, tint on the faces (fraction), brightness, dissolve
 uniform vec4 uG;          // x-ray gate (Inspect): x mode (0 off, 1 shell: x-ray only behind the front, 2 hidden: drawn
-                          // only behind it, 3 part: always drawn), z front band width (m), w afterglow (m)
+                          // only behind it, 3 part: always drawn), y the part's layering (>= 1: walls stacked along a
+                          // line of sight, a bank of cells; the cap counts them), z front band width (m), w afterglow (m)
 uniform vec4 uGP;         // gate plane: xyz unit normal (world), w: the front as n.p_rte
 uniform vec4 uDen;        // dots per pixel: x least spacing of the kept dots on screen (1080 px, 0: off), y grazing
-                          // floor of the facing, z least kept share (the model's coarsest level)
+                          // floor of the facing, z least kept share (the model's coarsest level), w cutaway (0..1: the
+                          // highlights on a knee)
 uniform vec4 uFill;       // the view's fill light: xyz direction (toward it), w strength
 out vec3 vCol;
 void main() {
@@ -84,7 +88,7 @@ void main() {
   // silhouette that pops, as in the films). The samples are a jittered grid: a hash keeps it free of moire
   float pxs = uP.w * uCam.x / c.w;
   if (uDen.x > 0.0) {
-    float keep = max(pxs * pxs * fk / (uDen.x * uDen.x), uDen.z);
+    float keep = max(pxs * pxs * fk / (uDen.x * uDen.x * max(1.0, uG.y)), uDen.z);
     if (keep < 1.0 && u01(hash1(hid ^ 0x5bd1e995u)) > keep) { ${CULL} return; }
   }
   if (xr > 0.0) {
@@ -94,6 +98,9 @@ void main() {
   }
   b *= mix(1.0, 0.55, clamp(c.w / uMisc.w, 0.0, 1.0)) * uP.x * uQ.z * uMisc.z;
   if (yw < 0.0) b *= 0.35;
+  // a cutaway's highlights on a knee toward 0.9 (the Anatomy films' interiors and decks top out at ~0.7-0.8): a part
+  // brightened over 1 (the interior, the named assemblies) keeps its shading, dotted volumes, never a white block
+  if (uDen.w > 0.0 && b > 0.5) b = mix(b, 0.5 + 0.4 * (1.0 - exp((0.5 - b) / 0.4)), uDen.w);
   vec3 col = mix(WH, uTint.rgb, uTint.a * mix(uQ.y, 1.0, rim));
   if (dmg > 0.0) col = mix(col, CORAL, min(1.0, dmg * 1.1));
   vec2 sc = scanAt(p);
@@ -121,6 +128,135 @@ export function mul3(A, B) {
 }
 const ap3 = (M, v) => [M[0] * v[0] + M[1] * v[1] + M[2] * v[2], M[3] * v[0] + M[4] * v[1] + M[5] * v[2], M[6] * v[0] + M[7] * v[1] + M[8] * v[2]];
 
+/* ---------- sampling straight into the GPU layout (16 bytes a point: xyz float, normal int8 x 3) ----------
+   The commonest primitive (hex: boxes, walls, houses, decks) is sampled here as GEO does it (a jittered grid on each
+   face, +-0.3 of a cell), with no garbage; the others go through GEO.sample one primitive at a time. */
+class PtBuf {
+  constructor(cap) { this.n = 0; this._alloc(Math.max(64, cap | 0)); }
+  _alloc(cap) {
+    const buf = new ArrayBuffer(cap * 16), f = new Float32Array(buf), b = new Int8Array(buf);
+    if (this.f) new Uint8Array(buf).set(new Uint8Array(this.f.buffer, 0, this.n * 16));
+    this.f = f; this.b = b; this.cap = cap;
+  }
+  need(k) { if (this.n + k > this.cap) this._alloc(Math.max(this.n + k, this.cap * 2)); }
+  /* GEO points (stride 6: xyz, normal; zero normal = two-sided) */
+  addGeo(pts) {
+    const k = pts.length / 6; this.need(k);
+    const f = this.f, b = this.b;
+    for (let i = 0, o = this.n; i < k; i++, o++) {
+      const j = i * 6;
+      f[o * 4] = pts[j]; f[o * 4 + 1] = pts[j + 1]; f[o * 4 + 2] = pts[j + 2];
+      let nx = pts[j + 3], ny = pts[j + 4], nz = pts[j + 5];
+      const l = Math.sqrt(nx * nx + ny * ny + nz * nz);
+      if (l > 1e-6) { nx /= l; ny /= l; nz /= l; }
+      b[o * 16 + 12] = Math.round(nx * 127); b[o * 16 + 13] = Math.round(ny * 127); b[o * 16 + 14] = Math.round(nz * 127); b[o * 16 + 15] = 0;
+    }
+    this.n += k;
+  }
+  /* the packed bytes: the buffer itself when it is nearly full (no copy, no garbage), else trimmed */
+  bytes() { return this.n * 16 * 1.25 >= this.f.buffer.byteLength ? new Uint8Array(this.f.buffer, 0, this.n * 16) : this.f.buffer.slice(0, this.n * 16); }
+}
+const HEX_FACES = [[0, 1, 2, 3], [4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]];
+const _hn = new Float32Array(18);
+/* a hex's outward face normals (GEO's faceNormals) into _hn */
+function hexNormals(P) {
+  let cx = 0, cy = 0, cz = 0;
+  for (let k = 0; k < 8; k++) { cx += P[k][0]; cy += P[k][1]; cz += P[k][2]; }
+  cx /= 8; cy /= 8; cz /= 8;
+  for (let k = 0; k < 6; k++) {
+    const F = HEX_FACES[k], a = P[F[0]], b = P[F[1]], c = P[F[2]], d = P[F[3]];
+    let ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = d[0] - a[0], vy = d[1] - a[1], vz = d[2] - a[2];
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    if (Math.sqrt(nx * nx + ny * ny + nz * nz) < 1e-9) {
+      ux = c[0] - b[0]; uy = c[1] - b[1]; uz = c[2] - b[2]; vx = d[0] - b[0]; vy = d[1] - b[1]; vz = d[2] - b[2];
+      nx = uy * vz - uz * vy; ny = uz * vx - ux * vz; nz = ux * vy - uy * vx;
+    }
+    const l = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+    nx /= l; ny /= l; nz /= l;
+    const fx = (a[0] + b[0] + c[0] + d[0]) / 4 - cx, fy = (a[1] + b[1] + c[1] + d[1]) / 4 - cy, fz = (a[2] + b[2] + c[2] + d[2]) / 4 - cz;
+    if (nx * fx + ny * fy + nz * fz < 0) { nx = -nx; ny = -ny; nz = -nz; }
+    _hn[k * 3] = nx; _hn[k * 3 + 1] = ny; _hn[k * 3 + 2] = nz;
+  }
+}
+const dist3 = (a, b) => Math.sqrt((b[0] - a[0]) * (b[0] - a[0]) + (b[1] - a[1]) * (b[1] - a[1]) + (b[2] - a[2]) * (b[2] - a[2]));
+/* one hex at spacing s into W; rnd() in 0..1 */
+function sampleHex(pr, s, rnd, W) {
+  const P = pr.p;
+  hexNormals(P);
+  for (let k = 0; k < 6; k++) {
+    if (k === 0 && pr.bottom !== true) continue;
+    if (pr.skip && pr.skip.includes(k)) continue;
+    const F = HEX_FACES[k], a = P[F[0]], b = P[F[1]], c = P[F[2]], d = P[F[3]];
+    const nu = Math.max(1, Math.round(dist3(a, b) / s)), nv = Math.max(1, Math.round(dist3(a, d) / s));
+    W.need(nu * nv);
+    const f = W.f, bb = W.b, n0 = Math.round(_hn[k * 3] * 127), n1 = Math.round(_hn[k * 3 + 1] * 127), n2 = Math.round(_hn[k * 3 + 2] * 127);
+    let o = W.n;
+    for (let i = 0; i < nu; i++) for (let j = 0; j < nv; j++) {
+      const u = (i + .5 + (rnd() - .5) * .6) / nu, v = (j + .5 + (rnd() - .5) * .6) / nv, iu = 1 - u, iv = 1 - v;
+      f[o * 4] = (a[0] * iu + b[0] * u) * iv + (d[0] * iu + c[0] * u) * v;
+      f[o * 4 + 1] = (a[1] * iu + b[1] * u) * iv + (d[1] * iu + c[1] * u) * v;
+      f[o * 4 + 2] = (a[2] * iu + b[2] * u) * iv + (d[2] * iu + c[2] * u) * v;
+      bb[o * 16 + 12] = n0; bb[o * 16 + 13] = n1; bb[o * 16 + 14] = n2; bb[o * 16 + 15] = 0;
+      o++;
+    }
+    W.n = o;
+  }
+}
+function mulberry(seed) {
+  let a = seed >>> 0;
+  return () => { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+const _one = { name: '', prims: [null] }, _oneM = { parts: [_one] };
+const sat01 = v => v < 0 ? 0 : v > 1 ? 1 : v;
+const sstep = v => { v = sat01(v); return v * v * (3 - 2 * v); };
+/* how many walls a line of sight through a part crosses, against a closed solid (1): its sampled area over four times
+   the mean projected area of its bounds (Cauchy). A bank of VLS cells, a stack of decks, a truss: 3-16. The density
+   cap counts them, so a layered interior prints as a dotted volume, not a white block */
+function layering(P, cl) {
+  if (!cl || !cl.n) return 1;
+  const b = P.bounds, dx = b[1][0] - b[0][0], dy = b[1][1] - b[0][1], dz = b[1][2] - b[0][2];
+  const mp = (dx * dy + dy * dz + dz * dx) / 2;
+  if (!(mp > 1e-6)) return 1;
+  return Math.max(1, Math.min(16, cl.n * cl.sp * cl.sp / (4 * mp)));
+}
+/* how much of a part is one plate (0..1): the share of its samples' normals along the dominant axis (either way;
+   two-sided panels count as plate). A wing, a fin, a deck ~.9; a box, a hull, a drum ~.3-.5 */
+function flatness(cl) {
+  if (!cl || !cl.n || !cl.pts) return 0;
+  const b = new Int8Array(cl.pts.buffer, cl.pts.byteOffset), n = cl.n, step = Math.max(1, Math.floor(n / 600));
+  let m = 0, two = 0, xx = 0, xy = 0, xz = 0, yy = 0, yz = 0, zz = 0;
+  for (let i = 0; i < n; i += step) {
+    const o = i * 16, x = b[o + 12], y = b[o + 13], z = b[o + 14], q = x * x + y * y + z * z;
+    m++;
+    if (q < 400) { two++; continue; }
+    const k = 1 / q;
+    xx += x * x * k; xy += x * y * k; xz += x * z * k; yy += y * y * k; yz += y * z * k; zz += z * z * k;
+  }
+  if (!m) return 0;
+  // the dominant axis of the normals' second moment (power iteration)
+  let vx = .58, vy = .62, vz = .53;
+  for (let it = 0; it < 16; it++) {
+    const ax = xx * vx + xy * vy + xz * vz, ay = xy * vx + yy * vy + yz * vz, az = xz * vx + yz * vy + zz * vz;
+    const l = Math.sqrt(ax * ax + ay * ay + az * az); if (l < 1e-9) break;
+    vx = ax / l; vy = ay / l; vz = az / l;
+  }
+  const lam = vx * (xx * vx + xy * vy + xz * vz) + vy * (xy * vx + yy * vy + yz * vz) + vz * (xz * vx + yz * vy + zz * vz);
+  return (two + lam) / m;
+}
+/* prims[i0..] at spacing sp into W until the end or until performance.now() passes tEnd; returns the next index */
+function samplePrims(prims, i0, sp, rnd, skipFine, W, tEnd, seed) {
+  let i = i0;
+  for (; i < prims.length; i++) {
+    const pr = prims[i];
+    if (!pr || pr.pts === false || (skipFine && pr.fine)) continue;
+    const s = (pr.ds || 1) * sp;
+    if (pr.t === 'hex' && pr.p && pr.p.length === 8) sampleHex(pr, s, rnd, W);
+    else { _one.prims[0] = pr; W.addGeo(GEO.sample(_oneM, sp, seed + i * 7919, {}, skipFine ? { fine: false } : undefined)[0].pts); }
+    if (performance.now() > tEnd) return i + 1;
+  }
+  return i;
+}
+
 const BUILTIN = {
   tel: () => HD.tel(), radar: () => HD.radar(), pantsir: () => HD.pantsir(), oniks: () => HD.oniks(), oniksBooster: () => HD.oniksBooster(),
   sm6: () => HD.sm6(), mk72: () => HD.mk72(), destroyer: () => HD.destroyer(), carrier: () => HD.carrier(), helo: () => HD.helo(),
@@ -134,14 +270,17 @@ export class ModelLib {
     this.factories = new Map(Object.entries(BUILTIN));
     this.opts = new Map();
     this.entries = new Map();
-    this.budgetMs = 6;              // sampling time per frame
+    this.budgetMs = 5;              // sampling time per frame (a camera jump never costs more: see cloud())
     this.spent = 0;
     this.lodPx = 2.8;               // coarsest level whose spacing stays under this many 1080-px (the films: 4.4)
     this.dotSpacing = 1.8;          // dots per pixel: the kept dots never pack closer than this on screen (1080 px; 0 off)
     this.grazing = .3;              // ... faces seen edge-on counted by their facing down to this floor (large parts)
+    this.dotSpacingCut = 2.2;       // ... in a cutaway that fills the frame (Inspect, the hit replay): the parts that are
+                                    // not x-rayed shells (dotted volumes, as the Anatomy films' interiors)
     this.fill = .6;                 // the view's fill light (behind the lens, over its left shoulder; 0 off)
     this.fillAz = Math.PI - .6; this.fillEl = .44;   // its bearing off the view heading (rad) and elevation (rad)
     this.stats = { parts: 0, points: 0, sampled: 0, gpuMB: 0 };
+    this.pending = [];              // levels queued by warm(), sampled within the frames' budget (idle())
     this._m9 = new Float32Array(9);
   }
   /* register a model factory: factory() -> {parts: [...]} in the GEO/HD part format.
@@ -216,29 +355,62 @@ export class ModelLib {
     }
     return { key: ks.join('|'), st: Object.assign({}, st, q) };
   }
+  _seed(P, lod) { return 7 + lod * 13 + (P.name.length * 31) % 97; }
+  _prims(P, st) { try { const p = GEO.primsOf ? GEO.primsOf(P.part, st || {}) : P.part.prims; return Array.isArray(p) ? p : null; } catch (err) { return null; } }
+  /* one level of a part at state st, at once */
   _sample(e, P, lod, st) {
     const t0 = performance.now();
-    const sp = e.lods[lod];
-    const seed = 7 + lod * 13 + (P.name.length * 31) % 97;
-    const res = GEO.sample({ parts: [P.part] }, sp, seed, st || {}, lod >= 2 ? { fine: false } : undefined)[0];
-    const pts = res.pts, n = pts.length / 6;
-    const cl = this._upload(pts, n, sp);
+    const sp = e.lods[lod], seed = this._seed(P, lod), prims = this._prims(P, st);
+    let cl;
+    if (prims) {
+      const W = new PtBuf(256);
+      samplePrims(prims, 0, sp, mulberry(seed), lod >= 2, W, Infinity, seed);
+      cl = this._uploadPacked(W.bytes(), W.n, sp);
+    } else {
+      const pts = GEO.sample({ parts: [P.part] }, sp, seed, st || {}, lod >= 2 ? { fine: false } : undefined)[0].pts;
+      cl = this._upload(pts, pts.length / 6, sp);
+    }
     this.spent += performance.now() - t0;
     this.stats.sampled++;
     return cl;
   }
+  /* a static part's level sampled a few primitives at a time, within the frame's budget (limit: ms of this frame's
+     sampling it may run up to): a big part (a town's block, a pier) never stalls a frame, it takes a few frames while a
+     coarser level shows. Returns the cloud when the level is complete, else null. */
+  _advance(e, P, lod, limit) {
+    const jobs = P.jobs || (P.jobs = e.lods.map(() => null));
+    let J = jobs[lod];
+    if (!J) {
+      const prims = this._prims(P, {});
+      // no primitive list to walk (a custom part): the level at once
+      if (!prims) return (P.clouds[lod] = this._sample(e, P, lod, {}));
+      const seed = this._seed(P, lod);
+      // room for the level at once, from a coarser level's count (no regrowth: less garbage, fewer GC pauses)
+      let est = 256;
+      for (let k = lod + 1; k < e.lods.length; k++) if (P.clouds[k] && P.clouds[k].n) { est = P.clouds[k].n * (e.lods[k] / e.lods[lod]) ** 2 * 1.1; break; }
+      J = jobs[lod] = { prims, i: 0, W: new PtBuf(est), sp: e.lods[lod], seed, rnd: mulberry(seed), fine: lod >= 2 };
+    }
+    const t0 = performance.now();
+    if (this.spent < limit) J.i = samplePrims(J.prims, J.i, J.sp, J.rnd, J.fine, J.W, t0 + (limit - this.spent), J.seed);
+    let cl = null;
+    if (J.i >= J.prims.length) {
+      jobs[lod] = null;
+      cl = P.clouds[lod] = this._uploadPacked(J.W.bytes(), J.W.n, J.sp);
+      this.stats.sampled++;
+    }
+    this.spent += performance.now() - t0;
+    return cl;
+  }
+  /* GEO points (stride 6: xyz, normal) -> the GPU */
   _upload(pts, n, sp) {
+    if (!n) return { n: 0, sp };
+    const W = new PtBuf(n); W.addGeo(pts);
+    return this._uploadPacked(W.bytes(), W.n, sp);
+  }
+  _uploadPacked(buf, n, sp) {
     const gl = this.gl;
     if (!n) return { n: 0, sp };
-    const buf = new ArrayBuffer(n * 16), f = new Float32Array(buf), b = new Int8Array(buf);
-    for (let i = 0; i < n; i++) {
-      const j = i * 6;
-      f[i * 4] = pts[j]; f[i * 4 + 1] = pts[j + 1]; f[i * 4 + 2] = pts[j + 2];
-      let nx = pts[j + 3], ny = pts[j + 4], nz = pts[j + 5];
-      const l = Math.hypot(nx, ny, nz);
-      if (l > 1e-6) { nx /= l; ny /= l; nz /= l; }
-      b[i * 16 + 12] = Math.round(nx * 127); b[i * 16 + 13] = Math.round(ny * 127); b[i * 16 + 14] = Math.round(nz * 127); b[i * 16 + 15] = 0;
-    }
+    const f = buf instanceof ArrayBuffer ? new Float32Array(buf) : new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength >> 2);
     const vao = gl.createVertexArray();
     gl.bindVertexArray(vao);
     const vb = gl.createBuffer();
@@ -254,15 +426,31 @@ export class ModelLib {
   _free(e) { for (const P of e.parts) { P.clouds.forEach(c => this._freeCloud(c)); if (P.lru) P.lru.forEach(m => m.forEach(c => this._freeCloud(c))); } }
 
   /* the cloud of part P at level lod for state st: cached, or sampled within the frame's budget, or the
-     nearest thing available (a coarser level, the last state) */
+     nearest thing available (a coarser level, the last state). A static part refines one level at a time from what
+     it has (the coarsest level first, at once: a few hundred points), each level sampled a few primitives at a time
+     within the budget: a camera jump into a town costs a few frames of the coarser level, never one long frame. */
   cloud(e, P, lod, st, force) {
     if (!P.dyn) {
-      let c = P.clouds[lod];
-      if (c) return c;
-      if (force || this.spent < this.budgetMs) return (P.clouds[lod] = this._sample(e, P, lod, {}));
-      for (let k = lod + 1; k < e.lods.length; k++) if (P.clouds[k]) return P.clouds[k];
-      for (let k = lod - 1; k >= 0; k--) if (P.clouds[k]) return P.clouds[k];
-      return (P.clouds[lod] = this._sample(e, P, lod, {}));
+      const C = P.clouds;
+      if (C[lod]) return C[lod];
+      if (force) return (C[lod] = this._sample(e, P, lod, {}));
+      const nl = C.length;
+      // what there is to show meanwhile: the finest coarser level, else the nearest finer one
+      let co = -1, fi = -1;
+      for (let k = lod + 1; k < nl; k++) if (C[k]) { co = k; break; }
+      if (co < 0) for (let k = lod - 1; k >= 0; k--) if (C[k]) { fi = k; break; }
+      const none = co < 0 && fi < 0;
+      let w = co >= 0 ? co - 1 : fi >= 0 ? lod : nl - 1;
+      while (w >= lod) {
+        // nothing to draw at all: the coarsest level may run a little over (it is small)
+        const lim = none && w === nl - 1 ? this.budgetMs * 1.4 : this.budgetMs;
+        if (this.spent >= lim) break;
+        const c = this._advance(e, P, w, lim);
+        if (!c) break;
+        if (w === lod) return c;
+        co = w; w--;
+      }
+      return co >= 0 ? C[co] : fi >= 0 ? C[fi] : null;
     }
     const lru = P.lru[lod], q = this._quant(e, P, st, lod);
     let c = lru.get(q.key);
@@ -279,12 +467,26 @@ export class ModelLib {
     let last = null; for (const v of lru.values()) last = v;
     return last;
   }
-  /* pre-sample every part of a model at the given levels (default: the two coarsest), outside the frame budget */
+  /* pre-sample every part of a model at the given levels, outside the frame budget. Without lods: the coarsest level
+     now, the next one queued (sampled in the frames that follow, within their budget: see idle()) */
   warm(key, lods) {
     const e = this.get(key);
-    const ls = lods || [e.lods.length - 1, e.lods.length - 2];
-    for (const l of ls) for (const P of e.parts) if (!P.dyn) this.cloud(e, P, l, {}, true);
+    if (lods) { for (const l of lods) for (const P of e.parts) if (!P.dyn && l >= 0 && l < e.lods.length) this.cloud(e, P, l, {}, true); return e; }
+    const lc = e.lods.length - 1;
+    for (const P of e.parts) {
+      if (P.dyn) continue;
+      this.cloud(e, P, lc, {}, true);
+      if (lc > 0 && !P.clouds[lc - 1]) this.pending.push({ e, P, lod: lc - 1 });
+    }
     return e;
+  }
+  /* the queued levels (warm), within what is left of this frame's budget (the renderer calls it after the models) */
+  idle() {
+    const Q = this.pending;
+    while (Q.length && this.spent < this.budgetMs) {
+      const q = Q[0];
+      if (q.P.clouds[q.lod] || this.entries.get(q.e.key) !== q.e || this._advance(q.e, q.P, q.lod, this.budgetMs)) Q.shift();
+    }
   }
 
   /* ---------- drawing ---------- */
@@ -301,8 +503,12 @@ export class ModelLib {
     const dist = Math.hypot(dv[0], dv[1], dv[2]);
     const rad = e.radius * (1 + (d.explode || 0) * 1.5);
     if (!frame.sphereVisible(dv, rad)) return 0;
-    if (e.radius * flc / Math.max(1, dist) < .7) { d.speck = true; return 0; }
+    const mr = e.radius * flc / Math.max(1, dist);
+    if (mr < .7) { d.speck = true; return 0; }
     d.speck = false;
+    // a cutaway (Inspect, the hit replay, the museum, an x-ray): the Anatomy films' look once it fills the frame (kCut:
+    // model radius ~110-260 px); its highlights go on a knee (parts brightened over 1 keep their shading)
+    const cut = d.gate || d.xray > 0 || d.partXray ? 1 : 0, kCut = cut ? sstep((mr - 110) / 150) : 0;
     gl.useProgram(P.p);
     const tint = d._rgb || [1, 1, 1];
     gl.uniform4f(u.uTint, tint[0], tint[1], tint[2], d._k || 0);
@@ -341,6 +547,8 @@ export class ModelLib {
       if (d.lodBias) lod = Math.max(0, Math.min(e.lods.length - 1, lod + d.lodBias));
       const cl = this.cloud(e, Pt, lod, st);
       if (!cl || !cl.n) continue;
+      // the cloud's shape, once: a thin plate (a wing, a fin) and its layering (walls stacked along a line of sight)
+      if (cl.flat === undefined) { cl.flat = flatness(cl) > .72; cl.layer = layering(Pt, cl); }
       const m = this._m9;
       m[0] = Rp[0]; m[1] = Rp[3]; m[2] = Rp[6]; m[3] = Rp[1]; m[4] = Rp[4]; m[5] = Rp[7]; m[6] = Rp[2]; m[7] = Rp[5]; m[8] = Rp[8];
       gl.uniformMatrix3fv(u.uR, false, m);
@@ -349,16 +557,24 @@ export class ModelLib {
       const dm = d.damage && d.damage[Pt.name] ? d.damage[Pt.name] : 0;
       gl.uniform4f(u.uP, pa, xr, dm, cl.sp);
       const gm = G ? (d.partGate && d.partGate[Pt.name] !== undefined ? d.partGate[Pt.name] : (G.mode || 0)) : 0;
-      gl.uniform4f(u.uG, gm, 0, G ? G.w || 1 : 1, G ? G.g || 1 : 1);
+      gl.uniform4f(u.uG, gm, 1 + (cl.layer - 1) * kCut, G ? G.w || 1 : 1, G ? G.g || 1 : 1);
       // dots per pixel: thinned on screen, never below the density of the model's coarsest level. Faces seen edge-on
       // are counted by their facing only on parts large on screen (a deck, a hull side: no slab); a small part keeps
       // its silhouette's pile-up (a wing, a mast: the films' crisp edges)
-      const spMax = e.lods[e.lods.length - 1], dsp = d.dotSpacing !== undefined ? d.dotSpacing : this.dotSpacing;
+      const spMax = e.lods[e.lods.length - 1], dsp0 = d.dotSpacing !== undefined ? d.dotSpacing : this.dotSpacing;
       // A part small on screen is not thinned at all: a unit seen from play range stays a dense bright silhouette that
-      // pops over the ground (the films' small ships); the cap comes in as the part grows past ~70-220 px
-      const spr = Pt.rad * flc / Math.max(.3, pd), kb = Math.max(0, Math.min(1, (spr - 140) / 460));
-      const ks = Math.max(0, Math.min(1, (spr - 70) / 150)), kSmall = 1 - ks * ks * (3 - 2 * ks);
-      gl.uniform4f(u.uDen, dsp, 1 - (1 - this.grazing) * kb * kb * (3 - 2 * kb), Math.max(kSmall, Math.min(1, (cl.sp / spMax) * (cl.sp / spMax))), 0);
+      // pops over the ground (the films' small ships); the cap comes in as the part grows past ~70-220 px. A thin plate
+      // (a wing, a fin, a deck: its face is large for its radius) comes in sooner, from ~30-110 px
+      const spr = Pt.rad * flc / Math.max(.3, pd), kb = sat01((spr - 140) / 460);
+      const s0 = cl.flat ? 30 : 70, s1 = cl.flat ? 110 : 220;
+      let kSmall = 1 - sstep((spr - s0) / (s1 - s0)), dsp = dsp0;
+      if (kCut > 0) {
+        // a cutaway that fills the frame: every part but the smallest capped, the parts that are not x-rayed shells
+        // (the interior, the named assemblies) sparser, so they read as dotted volumes with visible structure
+        kSmall += (Math.min(kSmall, 1 - sstep((spr - 8) / 28)) - kSmall) * kCut;
+        if (xr <= 0 && dsp0 > 0) dsp = dsp0 + (Math.max(dsp0, this.dotSpacingCut) - dsp0) * kCut;
+      }
+      gl.uniform4f(u.uDen, dsp, 1 - (1 - this.grazing) * kb * kb * (3 - 2 * kb), Math.max(kSmall, Math.min(1, (cl.sp / spMax) * (cl.sp / spMax))), cut);
       gl.bindVertexArray(cl.vao);
       gl.drawArrays(gl.POINTS, 0, cl.n);
       drawn += cl.n;

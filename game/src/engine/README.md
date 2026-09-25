@@ -38,9 +38,13 @@ it applies it too).
 ## Models (`R.models`, engine/models.js)
 
 Built-in keys: `tel radar pantsir drone catapult destroyer carrier helo fighter fighterStores oniks oniksBooster
-sm6 mk72 satellite` (the `HD.*` models). Sampled with `GEO.sample` per part at 4 levels of detail (spacing from
-the model size, finest `L/380`, big ships `L/1000`), uploaded on first use, sampled within a 6 ms per frame
-budget (coarser level shown meanwhile). `dyn` parts are cached per quantized state (dependencies found by a
+sm6 mk72 satellite` (the `HD.*` models). Sampled per part at 4 levels of detail (spacing from the model size, finest
+`L/380`, big ships `L/1000`) as `GEO.sample` does it (boxes, the commonest primitive, straight into the GPU layout
+with no garbage; the other primitives through `GEO.sample`), uploaded on first use. **No frame stalls on sampling**:
+a static part's level is sampled a few primitives at a time within a 5 ms per frame budget (`budgetMs`), refining
+one level at a time from what it has (a part with nothing sampled gets its coarsest level at once, a few hundred
+points); meanwhile the nearest sampled level shows. A camera jump into a town it has never seen costs a few frames of
+coarser dots instead of one 100-900 ms frame. `dyn` parts are cached per quantized state (dependencies found by a
 Proxy; angle keys wrap, 96/48/24/12 steps per level), LRU of 64 states per part and level.
 
 **Dots per pixel, not per metre.** Close up, a big hull must keep the films' visible dot structure (never a solid
@@ -49,19 +53,28 @@ sample survives with probability `(spacing_px^2 x facing) / dotSpacing^2` (a has
 of the model's coarsest level). Faces seen edge-on are counted by their facing (floor `grazing`) only on parts large on
 screen (from ~140 px of part radius), so a deck seen low or a hull side thins like a face turned to the lens, while
 small parts keep their silhouette's pile-up (wings, masts: crisp edges). Parts small on screen (under ~70 px radius)
-are never thinned: a unit at play range stays the dense bright silhouette that pops over the ground. A fill light
+are never thinned: a unit at play range stays the dense bright silhouette that pops over the ground; a thin plate
+(a wing, a fin, a deck: most of its samples face one way) is capped sooner (from ~30-110 px). A fill light
 fixed to the view (behind the lens, over its left shoulder; the moon stays the key) keeps the faces the camera sees
 from going black from the wrong heading, as the films frame their hulls lit.
+
+**Cutaways** (a draw with `d.gate`, `d.partXray` or `d.xray`: Inspect, the museum, the hit replay, the scan's x-ray)
+are drawn like the Anatomy films once the model fills the frame (~110-260 px of radius): every part but the smallest
+is capped, the parts that are not x-rayed shells (the interior, the named assemblies) at `dotSpacingCut` (2.2 px),
+counting the walls a line of sight crosses (a bank of VLS cells, stacked decks: the part's sampled area over four
+times its bounds' mean projected area), and the highlights go on a knee toward 0.9 (parts brightened over 1 keep
+their shading): dotted grey volumes with visible structure, never white blocks. In a cutaway frame a full-frame
+flash (`fx.lift`) lights the returns (mostly multiplicative) instead of greying the black.
 
 | | |
 |---|---|
 | `registerModel(key, factory, opts)` | add a model in the GEO/HD part format. `opts.lods` spacings, `opts.quant {stateKey: step}`, `opts.angles [keys]`, `opts.deps {part: [keys]}`. |
 | `registerAll(table, info)` | e.g. `registerAll(EXTRA_MODELS, MODEL_INFO)` from `data/models.js` (`info[k].s` = spacings). |
 | `get(key)` | entry: `{ model, parts, lods, L, center, radius }` (`model` keeps the factory's anchors). |
-| `warm(key, lods)` | pre-sample (default the two coarsest levels). |
+| `warm(key, lods)` | pre-sample the given levels now; without `lods`: the coarsest level now, the next one queued (sampled within the following frames' budget, `idle()`, which the renderer calls after the models). |
 | `partWorld(d, name)` | world `{R, T}` of a part of an instance (muzzles, tubes, hubs). |
-| `lodPx`, `budgetMs` | level choice (coarsest whose spacing is under this many px at 1080p, 2.8) and sampling budget. |
-| `dotSpacing`, `grazing` | dots per pixel: least on-screen spacing of the kept dots (1.8 px at 1080p; 0 off) and the facing floor for large parts (.3). |
+| `lodPx`, `budgetMs` | level choice (coarsest whose spacing is under this many px at 1080p, 2.8) and sampling budget (5 ms a frame). |
+| `dotSpacing`, `grazing`, `dotSpacingCut` | dots per pixel: least on-screen spacing of the kept dots (1.8 px at 1080p; 0 off), the facing floor for large parts (.3), and the spacing of a cutaway's interior (2.2). |
 | `fill`, `fillAz`, `fillEl` | the view's fill light on the models: strength (.6; 0 off), bearing off the view heading (pi - .6 rad: behind, left), elevation (.44 rad). |
 
 ## Terrain and sea (`R.terrain`, engine/terrain.js)
@@ -80,7 +93,10 @@ world-fixed and identical in every clipmap level, never random speckle.
   ground; contours snapped into crisp dotted lines from high up (dissolving in with altitude and between
   intervals). The coast is one crisp dotted line (returns snapped onto h = 0) with a surf band walking in.
 - **Sea**: the films' sea: seen low, a constant horizontal spacing on screen, banded like Engagement's (rows of
-  density receding to the horizon); seen steeply (from a few hundred metres up) a screen area per return
+  density receding to the horizon); each kept dot is jittered by at most `seaJitter` of the *kept* spacing (not of its
+  own coarser pattern's), so what survives is an orderly lattice whose rows and files read, never speckle; near and
+  mid range (wherever they resolve on screen, ~0.3-9 km) the long swell's crests print as world-fixed rows walking
+  downwind (`seaSwellRows`: crest rows kept and bright, troughs thinned and dark; weaker in a storm); seen steeply (from a few hundred metres up) a screen area per return
   (`seaArea`), denser and dimmer returns, so from 2-20 km the sea reads as a fine surface and never as a star field.
   Brightness from the swell height and the faces turned to the lens, the films' flicker, wind rows; from a few km up
   the swell prints as rows (`seaRows`: its crests keep their returns and brighten, the troughs thin; where the swell
@@ -111,7 +127,7 @@ An invisible depth mesh (ground envelope, then the sea surface) hides what is be
 | `sky` | `{ stars, band, glowAz (rad), glow (0..1) }`, re-derived by `setWeather` from the kind and `time` ('night' \| 'dusk' \| 'day', from `map.time`); change freely between calls (e.g. SENSORS: `stars = 0` under the storm ceiling). `R.skyBright` scales it all. |
 | `stats` | `{ blocks, levels, s0, dots }` (dots = lattice slots walked, most are culled). |
 | `setSubjects(list)` | called by the renderer each frame (units on screen: `{ c (RTE), r, sx, sy, sr, z }`); not needed by callers. |
-| options (all live: set `R.terrain.x` at run time) | `grid` (640), `densNear` / `densFar` (lens height / finest spacing, 140 / 380), `jitter` (.75 of the pattern spacing), `rowK` (1: subtle scan rows 2^rowK apart; 0 an even lattice), `rowJitter` (.25, across the rows), `areaNear` / `areaFar` (land px^2 per dot near / high, 56 / 22), `grazing` (.1, floor of the land's facing), `landBright` (.8), `landHigh` (1.15, brighter from high up), `lightFollow` (1: the view's light, 0: `R.sun`), `lightAz` (-2 rad off the camera heading), `lightEl` (32 deg), `relief` (auto from the map's slopes), `reliefHigh` (2, extra exaggeration from high up), `prominence` (.22), `contours` (1), `fields` (1), `marsh` (1), `beach` (.6), `seaPx` (16, horizontal px between sea returns), `seaBands` (.7, 0 even .. 1 Engagement's bands), `seaHigh` ([.5, .45]: the sea thins and dims from high up), `seaNear` (1200 m, sea dots 2 px nearer), `seaDot2` (3.4), `seaArea` (12 px^2 per return seen steeply, before bands and rows thin it), `seaRecede` (.5: 1 an even density on screen seen steeply, less denser far off), `seaSteepB` (.65, brightness of the steep sea's returns), `seaMidBright` (.15, the sea brightens from the lens to a few km up), `seaRows` (1, the swell's rows from mid altitude; 0 off), `haze` (null: from the weather kind, haze 9000 m; 0 none), `hazeFloor` (.22), `hazeTop` (1500 m), `coastPx` (.34 waterline dots per px), `dotPx` ([4.2, 15, 22]: land 2 px / 3 px / dim thresholds, on-screen spacing). `subjectDim` (.5), `subjectBack` (.55). `seaKeep` is ignored (kept for old callers). |
+| options (all live: set `R.terrain.x` at run time) | `grid` (640), `densNear` / `densFar` (lens height / finest spacing, 140 / 380), `jitter` (.75 of the pattern spacing), `rowK` (1: subtle scan rows 2^rowK apart; 0 an even lattice), `rowJitter` (.25, across the rows), `areaNear` / `areaFar` (land px^2 per dot near / high, 56 / 22), `grazing` (.1, floor of the land's facing), `landBright` (.8), `landHigh` (1.15, brighter from high up), `lightFollow` (1: the view's light, 0: `R.sun`), `lightAz` (-2 rad off the camera heading), `lightEl` (32 deg), `relief` (auto from the map's slopes), `reliefHigh` (2, extra exaggeration from high up), `prominence` (.22), `contours` (1), `fields` (1), `marsh` (1), `beach` (.6), `seaPx` (16, horizontal px between sea returns), `seaBands` (.7, 0 even .. 1 Engagement's bands), `seaHigh` ([.5, .45]: the sea thins and dims from high up), `seaNear` (1200 m, sea dots 2 px nearer), `seaDot2` (3.4), `seaArea` (12 px^2 per return seen steeply, before bands and rows thin it), `seaRecede` (.5: 1 an even density on screen seen steeply, less denser far off), `seaSteepB` (.65, brightness of the steep sea's returns), `seaMidBright` (.15, the sea brightens from the lens to a few km up), `seaRows` (1, the swell's trains from high up; 0 off), `seaJitter` (.6 of the kept spacing), `seaSwellRows` (1, the long swell's crest rows near and mid range; 0 off), `seaRowKeep` (.3, share of the returns kept in a trough), `seaRowDark` (.42, brightness in a trough), `seaRowCrest` (1.05, added on a crest), `haze` (null: from the weather kind, haze 9000 m; 0 none), `hazeFloor` (.22), `hazeTop` (1500 m), `coastPx` (.34 waterline dots per px), `dotPx` ([4.2, 15, 22]: land 2 px / 3 px / dim thresholds, on-screen spacing). `subjectDim` (.5), `subjectBack` (.55). `seaKeep` is ignored (kept for old callers). |
 
 ## Effects (`R.fx`, engine/fx.js) — call between `frame()` and `end()`
 

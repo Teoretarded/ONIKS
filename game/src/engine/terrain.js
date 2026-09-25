@@ -143,9 +143,12 @@ float keepRows(float kd, uint hs) {
 /* SEA (and the waterline, the seabed): isotropic. Pattern k keeps J % 2^ceil(k/2), I % 2^floor(k/2) (density 2^-k);
    the jitter scales with the dot's coarsest pattern, +-uJit.x/2 of its spacing both ways (the films' sea lattice) */
 float seaRank() { return float(min(min(2 * gC.y, 2 * gC.x + 1), 20)); }
-vec2 seaXZ(float lr) {
-  float X = gS * exp2(floor(lr * 0.5)), Z = gS * exp2(ceil(lr * 0.5));
-  return gQ + gH * uJit.x * vec2(X, Z);
+/* the sea's jitter, capped at the kept lattice: a dot kept at density 2^-kd moves by at most +-jit/2 of the kept
+   spacing (not of its own, coarser pattern's), so what survives is an orderly jittered lattice whose rows and files
+   read (the films' sea), never the speckle a coarse dot's own wide jitter scatters over the finer lattice round it.
+   The cap follows kd, which moves with the range only: the drift is a fraction of a percent of the view's motion */
+vec2 seaXZ(float lr, float kd, float jit) {
+  return gQ + gH * jit * gS * exp2(min(lr, max(kd, 0.0)) * 0.5);
 }
 float keepOrdered(float lr, float kd, uint hs) {
   if (kd <= 0.0) return 1.0;
@@ -220,9 +223,10 @@ uniform float uSeaGrp;      // swell-train brightness modulation (grows with the
 uniform vec2 uHz;           // x: horizon dip (rad), y: brightness of the sea at the horizon
 uniform vec4 uSea3;         // x: screen area per sea return seen from above (1080 px^2), y: haze distance (m, 0 none),
                             // z: haze floor (what is left far off), w: swell rows from mid altitude (0..1)
+uniform vec4 uSeaRow;       // the swell's rows: x strength, y share kept in a trough, z brightness in a trough, w added on a crest
 uniform vec4 uSea4;         // x: log2 of the range the steep sea's spacing is set at (m), y: how much the spacing follows
                             // the range (1: constant density on screen, less: denser far off, the plane recedes),
-                            // z: brightness of the steep sea's (denser) returns
+                            // z: brightness of the steep sea's (denser) returns, w: jitter (of the kept spacing)
 uniform vec4 uSubA[${NSUB}];      // subjects (the units on screen): xyz centre (RTE), w: world halo radius (m)
 uniform vec4 uSubB[${NSUB}];      // x, y: screen centre (1080-px units from the centre), z: screen radius (1080 px), w: depth
 uniform vec4 uSubP;         // x: count, y: dimming at a subject, z: aspect (W / H), w: backdrop dimming (behind a subject on screen)
@@ -399,7 +403,7 @@ void main() {
     vis *= keepOrdered(lr, kd, hs);
     if (vis < 0.02) { ${CULL} return; }
     // the sea's own (isotropic) jitter; near the coast it must not land on land
-    vec2 xs = seaXZ(lr);
+    vec2 xs = seaXZ(lr, kd, uSea4.w);
     if (dsh < length(xs - xz) + 2.0) { float d2; if (mapH(xs + uEyeW.xz, d2) > 0.0) { ${CULL} return; } }
     xz = xs;
     vec2 gw;
@@ -427,14 +431,22 @@ void main() {
     vec2 wd = vec2(sin(uSeaP.z), cos(uSeaP.z)), wd2 = vec2(sin(uSeaP.z + 0.7), cos(uSeaP.z + 0.7));
     float gm = 0.5 + 0.3 * sin(dot(w, wd) * 0.00571 - uSurf.z * 0.236) + 0.2 * sin(dot(w, wd2) * 0.00898 - uSurf.z * 0.297 + 1.3);
     b *= mix(1.0, 0.3 + 1.1 * gm, uSeaGrp);
-    // from a few km up the swell prints as rows (the films' sea is a surface, never a star field): its crests keep
-    // their returns and brighten, the troughs thin; where the swell itself is too fine on screen, its trains do
-    float kR = uSea3.w;
-    if (kR > 0.0) {
-      float lamPx = 140.0 * uCam.x / length(p0);
-      float rowv = mix(gm, sw, smoothstep(8.0, 18.0, lamPx));
-      if (u01(hash1(hs ^ 0x2545f491u)) > mix(1.0, 0.25 + 0.75 * smoothstep(0.15, 0.75, rowv), kR)) { ${CULL} return; }
-      b *= mix(1.0, 0.55 + 0.9 * rowv, kR);
+    // the swell's rows, near and mid range (the films' orderly sea): the long swell's crests print as rows of returns,
+    // kept and bright, with dark thinned troughs between them; world-fixed, walking downwind with the swell. Where the
+    // rows resolve on screen (their spacing there: the wavelength foreshortened across and along the view)
+    vec2 k0 = uWave[0].xy;
+    float kl = length(k0), rc = 0.5 + 0.5 * sin(dot(k0, xz) + uWave[0].w);
+    vec2 kh = k0 / max(1e-6, kl), fh = p0.xz * inversesqrt(max(1e-6, dot(p0.xz, p0.xz)));
+    float rowPx = 6.2832 / kl * uCam.x / length(p0) * length(vec2(kh.x * fh.y - kh.y * fh.x, dot(kh, fh) * fg));
+    float kRow = uSeaRow.x * smoothstep(2.5, 7.0, rowPx) * (1.0 - 0.6 * uSea2.x);
+    float rv = mix(sw, rc, 0.7);
+    float kR = uSea3.w * (1.0 - kRow);
+    float rowv = rv, kk = kRow;
+    // from a few km up, where the swell itself is too fine on screen, its trains print instead
+    if (kR > kRow) { rowv = gm; kk = kR; }
+    if (kk > 0.0) {
+      if (u01(hash1(hs ^ 0x2545f491u)) > mix(1.0, uSeaRow.y + (1.0 - uSeaRow.y) * smoothstep(0.18, 0.72, rowv), kk)) { ${CULL} return; }
+      b *= mix(1.0, uSeaRow.z + uSeaRow.w * rowv * rowv, kk);
     }
     // seen steeply the returns are denser, so each is dimmer: a fine surface, not a scatter of bright points
     b *= mix(1.0, uSea4.z, kSteep);
@@ -504,7 +516,10 @@ void main() {
   float s, vis; uint hs;
   if (!latticeDot(s, vis, hs)) { ${CULL} return; }
   float lr = seaRank();
-  vec2 xz = seaXZ(lr);
+  // the kept density from the lattice position (the jitter below is capped at the kept spacing)
+  vec3 q0 = vec3(gQ.x, -uEyeW.y, gQ.y);
+  float kd = 2.0 * log2(uSeaP.y * uCoast.z * length(q0) / (s * uCam.x));
+  vec2 xz = seaXZ(lr, kd, uSea4.w);
   vec2 w = xz + uEyeW.xz;
   float dout;
   float h = mapH(w, dout);
@@ -513,7 +528,6 @@ void main() {
   p.y -= curveDrop(p);
   float cw = dot(uCamF.xyz, p);
   if (cw < uCam.w) { ${CULL} return; }
-  float kd = 2.0 * log2(uSeaP.y * uCoast.z * length(p) / (s * uCam.x));
   vis *= keepOrdered(lr, kd, hs);
   if (vis < 0.02) { ${CULL} return; }
   vec4 N = mapN(w);
@@ -660,6 +674,11 @@ export class Terrain {
                                                // part of the ray inside the layer hazes)
     this.seaNear = opts.seaNear || 1200;       // sea returns are 2 px nearer than this (m; less from low down, more from high up)
     this.seaBands = opts.seaBands !== undefined ? opts.seaBands : .7;       // the films' banded sea (0 = even, 1 = Engagement)
+    this.seaJitter = opts.seaJitter !== undefined ? opts.seaJitter : .6;    // the sea lattice's jitter, of the kept spacing (the films: .7)
+    this.seaSwellRows = opts.seaSwellRows !== undefined ? opts.seaSwellRows : 1;   // the long swell's crest rows, near and mid range (0 off)
+    this.seaRowKeep = opts.seaRowKeep !== undefined ? opts.seaRowKeep : .3;      // ... share of the returns kept in a trough
+    this.seaRowDark = opts.seaRowDark !== undefined ? opts.seaRowDark : .42;     // ... brightness in a trough
+    this.seaRowCrest = opts.seaRowCrest !== undefined ? opts.seaRowCrest : 1.05; // ... added on a crest
     this.reliefHigh = opts.reliefHigh !== undefined ? opts.reliefHigh : 2;    // extra shading exaggeration from high up
     this.coastPx = opts.coastPx || .34;        // waterline dots per px of coast
     this.lightFollow = opts.lightFollow !== undefined ? opts.lightFollow : 1;     // land light: 0 the moon (renderer.sun) .. 1 the view's light
@@ -1055,7 +1074,8 @@ export class Terrain {
     if (u.uHz) gl.uniform2f(u.uHz, this.dip || 0, .6 * this.sky.band);
     // (the screen-area rule takes over from a few hundred metres up: close to the water the films' spacing rule holds)
     if (u.uSea3) gl.uniform4f(u.uSea3, this.seaArea * Math.pow(16, 1 - (this.seaMidK || 0)) * Math.pow(1 + this.seaHigh[0] * (this.seaAltK || 0), 2), this.hazeEff || 0, this.hazeFloor, this.seaRows * (this.seaMidK || 0));
-    if (u.uSea4) gl.uniform4f(u.uSea4, Math.log2(Math.max(50, this.lookD || 1000)), this.seaRecede, this.seaSteepB, 0);
+    if (u.uSeaRow) gl.uniform4f(u.uSeaRow, this.seaSwellRows, this.seaRowKeep, this.seaRowDark, this.seaRowCrest);
+    if (u.uSea4) gl.uniform4f(u.uSea4, Math.log2(Math.max(50, this.lookD || 1000)), this.seaRecede, this.seaSteepB, this.seaJitter);
     gl.bindVertexArray(this.vao);
   }
   /* depth-only occluder: pass 0 land envelope (with the seabed), pass 1 clamped up to the sea surface */

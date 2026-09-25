@@ -287,6 +287,8 @@ export class Renderer {
         this.fx.dot(d.T, 1, c, (d.alpha === undefined ? 1 : d.alpha) * .9);
       }
     }
+    // what is left of the sampling budget goes to the levels queued by warm()
+    this.models.idle();
     this.fx.drawMax();
     // additive: glows, flashes
     gl.blendEquation(gl.FUNC_ADD); gl.blendFunc(gl.ONE, gl.ONE);
@@ -295,12 +297,25 @@ export class Renderer {
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     this.fx.drawOver();
     gl.disable(gl.DEPTH_TEST);
-    gl.blendFunc(gl.ONE, gl.ONE);
-    this.fx.drawLift();
+    this._lift();
     gl.disable(gl.BLEND); gl.depthMask(true);
     gl.bindVertexArray(null);
     this.stats.draws = draws; this.stats.points = pts;
     this._endWire(t0);
+  }
+  /* the full-frame flash (fx.lift). In a cutaway frame (Inspect, the hit replay: an instance with a gate is queued) a
+     flash lights the returns, as the films' flashes lift every return, instead of greying the black: most of it
+     brightens what is drawn (dst x (1 + k v)), a little lifts the floor. Elsewhere it is the plain additive lift */
+  _lift() {
+    const gl = this.gl, lv = this.fx.liftV;
+    if (!lv || !(lv[3] > 0)) return;
+    let cut = false;
+    for (const d of this.queue) if (d.gate) { cut = true; break; }
+    if (!cut) { gl.blendFunc(gl.ONE, gl.ONE); this.fx.drawLift(); return; }
+    const v = lv[3];
+    gl.blendFunc(gl.DST_COLOR, gl.ONE); lv[3] = Math.min(1, v * 3); this.fx.drawLift();
+    gl.blendFunc(gl.ONE, gl.ONE); lv[3] = v * .12; this.fx.drawLift();
+    lv[3] = v;
   }
   /* the full Orbital style: the occluders (hills and the sea surface hide what is behind and below them), the sea's
      swell rows and the survey crosses, the map's contours, every model as facing-aware hairlines, then the effect
@@ -348,6 +363,7 @@ export class Renderer {
       const n = this.wireModels.draw(d, this.frameInfo, { rgb, a: look.models, depth: true, scan: true, lights: true });
       segs += n; if (n) draws++;
     }
+    this.models.idle();
     // the sea, the hairlines and the effect dots over them; unless the hairlines' owner draws them after its own
     // passes (wire.auto = false: it calls orbitalPost() itself, e.g. after a veil over what came between)
     if (W.auto && !W.flushed) this.orbitalPost();
