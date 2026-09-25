@@ -36,7 +36,9 @@ export function planLandmarks(map) {
   const plan = { id: map.id, statics: [], builds: [], settlements: [], lights: [], beams: [], plumes: [], falls: [], ships: [], flares: [], avoid: C.avoid, notes: [] };
   C.plan = plan;
   for (const pl of map.places || []) if (pl.kind === 'town' || pl.kind === 'village') {
-    const s = settlement(C, pl, map.id === 'delta' ? { minH: .7 } : {});
+    const so = SETTLE[map.id] ? SETTLE[map.id](pl, C) : map.id === 'delta' ? { minH: .7 } : {};
+    if (so === null) continue;
+    const s = settlement(C, pl, so);
     if (s && s.buildings.length) plan.settlements.push(s);
   }
   objectiveLights(C, plan);
@@ -88,7 +90,14 @@ function context(map) {
    round a town's centre, a church, a water tower, warehouses by a harbour. Northern villages (fjord, skerries,
    caldera) string out along the shore road with a street or two up the slope. Clear of the spawns and the
    objective structures; dry, fairly flat ground. */
-const NORTH = new Set(['fjord', 'archipelago', 'caldera']);
+const NORTH = new Set(['fjord', 'archipelago', 'caldera', 'arctic']);
+/* per-map settlement options by place (null: the map builds that place itself) */
+const SETTLE = {
+  // the closed town of the naval base: all five- and nine-storey panel blocks on a grid (no private houses in a ZATO)
+  arctic: pl => pl.kind === 'town' ? { flats: true, linear: false, R0: 900, across: .72, noChurch: true } : {},
+  // the harbour city is built district by district (PER_MAP.harbour); the airport's village stays
+  harbour: pl => /Aeroport/.test(pl.name) ? {} : null,
+};
 function settlement(C, pl, opt) {
   const { map } = C, town = pl.kind === 'town', north = opt.linear !== undefined ? opt.linear : NORTH.has(map.id), r = rng(hashStr(pl.name) ^ C.seed);
   const R0 = opt.R0 || (town ? (north ? 760 : 1050) : (north ? 380 : 520));
@@ -121,7 +130,7 @@ function settlement(C, pl, opt) {
   const inside = (u, v) => { const q = (u / A) ** 2 + (v / Bv) ** 2, th = Math.atan2(v / Bv, u / A); return q < lobes(th) ** 2 && !gap(u, v) ? q / lobes(th) ** 2 : -1; };
   // streets: [{ pts: [[x, z]...], main, cross, road }]
   const streets = [];
-  const Sp = north ? 72 : 104 + r() * 12, Sc = north ? 150 : 170 + r() * 40;
+  const Sp = opt.flats ? 118 : north ? 72 : 104 + r() * 12, Sc = opt.flats ? 190 : north ? 150 : 170 + r() * 40;
   const wob = (s, k) => (north ? 14 : 5) * Math.sin(s / (north ? 160 : 400) + k * 1.7);
   for (let k = -Math.floor(Bv / Sp); k <= Math.floor(Bv / Sp); k++) {
     const v0 = k * Sp, span = A * Math.sqrt(Math.max(0, 1 - (v0 / Bv) ** 2)) * 1.1;
@@ -188,16 +197,24 @@ function settlement(C, pl, opt) {
         if (r() > prob * (q < 0 ? .55 * (1.6 - qq) / .6 : 1 - .5 * qq)) continue;
         const dc = Math.sqrt(qq);
         if (town && dc < .14 && !st.road) continue;                                   // the square
-        // blocks of flats round a town's centre
-        if (town && !st.cross && dc < .42 && r() < (north ? .35 : .5)) {
-          const len = r() < .5 ? 60 : 48, hz = len / 2, hx = 6.2, sb = 14 + hx;
+        // blocks of flats round a town's centre (a closed town: blocks everywhere, set back behind their yards)
+        if (town && !st.cross && (opt.flats ? r() < .85 : dc < .42 && r() < (north ? .35 : .5))) {
+          const len = opt.flats ? (r() < .4 ? 84 : r() < .6 ? 60 : 48) : r() < .5 ? 60 : 48, hz = len / 2, hx = 6.2, sb = (opt.flats ? 22 : 14) + hx;
           const x = P[i][0] + n[0] * sg * sb, z = P[i][1] + n[1] * sg * sb;
-          if (free(x, z, yaw, hx, hz) && okGround(x, z, yaw, hx, hz)) {
-            const fl = tall < (north ? 1 : 4) && dc < .28 && r() < .35 ? 9 : 5;
+          if (free(x, z, yaw, hx + (opt.flats ? 8 : 0), hz + (opt.flats ? 6 : 0)) && okGround(x, z, yaw, hx, hz)) {
+            const fl = opt.flats ? (dc < .5 && r() < .55 ? 9 : 5) : tall < (north ? 1 : 4) && dc < .28 && r() < .35 ? 9 : 5;
             if (fl === 9) tall++;
             B.push({ t: 'f', x, z, yaw, w: hx * 2, d: len, e: fl * 2.8 + .6, r: fl * 2.8 + .6, floors: fl }); take(x, z, yaw, hx, hz);
             continue;
           }
+        }
+        if (opt.flats) {
+          // rows of lock-up garages behind the blocks
+          if (r() < .12 && !st.cross) {
+            const sb2 = 50 + r() * 20, gx = P[i][0] + n[0] * sg * sb2, gz = P[i][1] + n[1] * sg * sb2;
+            if (free(gx, gz, yaw, 3, 18) && okGround(gx, gz, yaw, 3, 18)) { B.push({ t: 's', x: gx, z: gz, yaw, w: 6, d: 36, e: 2.6, r: 2.9 }); take(gx, gz, yaw, 3, 18); }
+          }
+          continue;
         }
         const big = town && r() < .4;
         const w = big ? 8 + r() * 3.5 : 6 + r() * 3, dd = big ? 9 + r() * 4 : 7 + r() * 4;
@@ -257,7 +274,158 @@ function settlement(C, pl, opt) {
     }
   }
   let rad = 0; for (const b of B) rad = Math.max(rad, Math.hypot(b.x - cx, b.z - cz) + 40);
-  return { name: pl.name, kind: pl.kind, x: cx, z: cz, r: rad, buildings: B, church, tower, lamps, axis: ax };
+  // streets: for the ground system (game/ground), which draws the streets that have houses on them
+  return { name: pl.name, kind: pl.kind, x: cx, z: cz, r: rad, buildings: B, church, tower, lamps, axis: ax, streets: streets.filter(s => !s.road).map(s => ({ pts: s.pts, main: !!s.main, cross: !!s.cross })) };
+}
+
+/* ================================================================ the harbour city
+   A district of the city (map.extra.districts, from gens/harbour.js) as a settlement the landmarks system draws:
+     centre      perimeter blocks of 4-7 storeys round courtyards on a street grid, a few towers of 12-20 storeys
+     mikro       superblocks of nine- to sixteen-storey slabs in rows and L's round their yards, a school in each
+     private     one- and two-storey houses on small plots up the slopes, sheds behind
+     industrial  sheds and warehouses 40-120 m, yards
+   Buildings keep to dry ground (their base is the lowest corner: on a slope the downhill side stands taller), off the
+   objective sites and the battery's middle; streets are lit. Deterministic. */
+function cityDistrict(C, D) {
+  const { map } = C, hr = map.hRaw || map.h, r = rng(hashStr(D.name) ^ C.seed);
+  const sa = Math.sin(D.rot), ca = Math.cos(D.rot);
+  const W = (u, v) => [D.x + u * sa + v * ca, D.z + u * ca - v * sa];            // (along, across) -> world
+  // the district's outline: an ellipse broken by smooth lobes (value noise at ~700 m) and by whole blocks left out
+  const vn = (x, z, sd) => { const xi = Math.floor(x), zi = Math.floor(z), fu = x - xi, fv = z - zi, a = hash2(xi, zi, sd), b = hash2(xi + 1, zi, sd), c = hash2(xi, zi + 1, sd), d = hash2(xi + 1, zi + 1, sd), su = fu * fu * (3 - 2 * fu), sv = fv * fv * (3 - 2 * fv); return (a + (b - a) * su) * (1 - sv) + (c + (d - c) * su) * sv; };
+  const inside = (u, v) => { const e = (u / D.a) ** 2 + (v / D.b) ** 2 + 1.1 * (vn(u / 800, v / 800, 71) - .5) + .45 * (vn(u / 280, v / 280, 73) - .5); return e < 1; };
+  // occupancy: 8 m cells, shared by all the districts (they overlap: one city)
+  const OC = 8, occ = C.cityOcc || (C.cityOcc = new Set());
+  const cellK = (i, j) => (i + 40000) * 80000 + (j + 40000);
+  const mark = (x, z, yaw, hx, hz, test) => {
+    const c = Math.cos(yaw), s = Math.sin(yaw), ex = Math.abs(c) * hx + Math.abs(s) * hz, ez = Math.abs(s) * hx + Math.abs(c) * hz;
+    const i0 = Math.floor((x - ex) / OC), i1 = Math.floor((x + ex) / OC), j0 = Math.floor((z - ez) / OC), j1 = Math.floor((z + ez) / OC);
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { const k = cellK(i, j); if (test) { if (occ.has(k)) return false; } else occ.add(k); }
+    return true;
+  };
+  const sp = map.spawns && map.spawns.coast;
+  const okSite = (x, z, pad) => {
+    for (const a of C.avoid) {
+      if (a.sea) continue;
+      const rr = a.what === 'spawn coast' ? 380 : a.r;                // the battery's command post keeps a yard; its units stand among the blocks
+      if (Math.hypot(x - a.x, z - a.z) < rr + pad) return false;
+    }
+    return true;
+  };
+  void sp;
+  // flat enough, dry: the ground at the corners (and the middle) within `tol` m
+  const ground = (x, z, yaw, hx, hz, tol) => {
+    const c = Math.cos(yaw), s = Math.sin(yaw);
+    let lo = 1e9, hi = -1e9;
+    for (const [u, v] of [[-1, -1], [1, -1], [1, 1], [-1, 1], [0, 0]]) {
+      const px = x + c * u * (hx + 3) + s * v * (hz + 3), pz = z - s * u * (hx + 3) + c * v * (hz + 3), h = hr(px, pz);
+      if (h < 1.6) return false;
+      if (h < lo) lo = h; if (h > hi) hi = h;
+    }
+    return hi - lo < tol;
+  };
+  const B = [], lamps = [];
+  const put = (b, pad) => {
+    if (!mark(b.x, b.z, b.yaw, b.w / 2 + (pad || 2), b.d / 2 + (pad || 2), true)) return false;
+    if (!okSite(b.x, b.z, Math.max(b.w, b.d) / 2 + 10)) return false;
+    if (!ground(b.x, b.z, b.yaw, b.w / 2, b.d / 2, b.t === 'f' ? Math.max(6, b.floors * .9) : b.t === 'w' ? 5 : 5.5)) return false;
+    mark(b.x, b.z, b.yaw, b.w / 2 + .5, b.d / 2 + .5, false); B.push(b); return true;
+  };
+  const flats = (x, z, yaw, len, dep, fl) => put({ t: 'f', x, z, yaw, w: dep, d: len, e: fl * 2.9 + .6, r: fl * 2.9 + .6, floors: fl });
+  // streets: a grid in the district's frame; the lamps along them
+  const grid = { centre: [150, 112], mikro: [330, 250], private: [120, 84], industrial: [260, 190] }[D.kind] || [200, 150];
+  const [Gu, Gv] = grid;
+
+
+  // the blocks (the centre's middle block is the square, its cathedral on it)
+  let towers = 0, church = null;
+  for (let bu = -D.a - Gu; bu <= D.a; bu += Gu) for (let bv = -D.b - Gv; bv <= D.b; bv += Gv) {
+    const cu = bu + Gu / 2, cv = bv + Gv / 2;
+    if (!inside(cu, cv)) continue;
+    if (D.kind === 'centre' && Math.abs(cu) < Gu * .6 && Math.abs(cv) < Gv * .6) {
+      const [x, z] = W(cu, cv);
+      if (!church && ground(x, z, D.rot, 8, 16, 4) && okSite(x, z, 30)) { church = { x, z, yaw: D.rot }; mark(x, z, D.rot, 10, 18, false); }
+      continue;
+    }
+    const e = (cu / D.a) ** 2 + (cv / D.b) ** 2;                       // 0 at the middle .. 1 at the edge
+    const [cx, cz] = W(cu, cv);
+    if (hr(cx, cz) < 1.5) continue;
+    if (r() < .5 * e * e) continue;                                     // the city frays toward its edges
+    const yaw = D.rot, qu = Gu - 26, qv = Gv - 22;                     // the block inside its streets
+    const P = (u, v) => W(cu + u, cv + v);
+    if (D.kind === 'centre') {
+      // perimeter buildings along the four sides, gaps for the courtyards' gates; a tower now and then
+      if (r() < .1 && towers < 14 && e < .5) {
+        const fl = 12 + Math.floor(r() * 9), [x, z] = P(0, 0);
+        if (flats(x, z, yaw + (r() < .5 ? 0 : PI / 2), 24 + r() * 12, 18 + r() * 6, fl)) { towers++; continue; }
+      }
+      const fl0 = e < .35 ? 5 + Math.floor(r() * 3) : 4 + Math.floor(r() * 2);
+      for (const side of [[0, -1], [0, 1], [1, 0], [-1, 0]]) {
+        const along = side[0] === 0 ? qu : qv, n = Math.max(1, Math.round(along / (40 + r() * 25)));
+        for (let k = 0; k < n; k++) {
+          if (r() < .18) continue;
+          const t = (k + .5) / n - .5, len = along / n - 4, dep = 12 + r() * 3;
+          const u = side[0] === 0 ? t * along : side[0] * (qu / 2 - dep / 2), v = side[0] === 0 ? side[1] * (qv / 2 - dep / 2) : t * along;
+          const [x, z] = P(u, v);
+          flats(x, z, side[0] === 0 ? yaw + PI / 2 : yaw, len, dep, fl0 + (r() < .2 ? 1 : 0));
+        }
+      }
+    } else if (D.kind === 'mikro') {
+      // slabs in two or three rows across the superblock, one turned to close an L; the school in the middle
+      const fl = r() < .45 ? 9 : r() < .6 ? 12 : r() < .5 ? 16 : 10;
+      const rows = 2 + (r() < .5 ? 1 : 0);
+      for (let k = 0; k < rows; k++) {
+        const v = -qv / 2 + (k + .5) * qv / rows, len = qu * (.55 + .35 * r());
+        const [x, z] = P((r() - .5) * (qu - len) * .8, v);
+        flats(x, z, yaw + PI / 2, len, 12.5, fl + (r() < .3 ? 3 : 0));
+      }
+      if (r() < .7) { const [x, z] = P(qu / 2 - 8, (r() - .5) * qv * .4); flats(x, z, yaw, qv * (.5 + .3 * r()), 12.5, fl); }
+      if (r() < .5) { const [x, z] = P(-qu * .1, 0); put({ t: 'f', x, z, yaw, w: 18, d: 70, e: 3 * 3.3, r: 3 * 3.3, floors: 3 }); }
+    } else if (D.kind === 'private') {
+      // houses on their plots along both sides of the lanes, sheds behind; the plots thin toward the edge
+      for (let k = 0; k < 4; k++) {
+        if (r() > .6 - .3 * e) continue;
+        const u = -qu / 2 + (k % 2 + .5) * qu / 2 + (r() - .5) * 14, v = (k < 2 ? -1 : 1) * (qv / 2 - 10);
+        const [x, z] = P(u, v), w = 7 + r() * 4, d = 8 + r() * 5, two = r() < .3;
+        const hy = yaw + (r() < .5 ? 0 : PI / 2) + (r() - .5) * .12;
+        if (put({ t: 'h', x, z, yaw: hy, w, d, e: two ? 5.8 : 2.8 + r() * .5, r: (two ? 5.8 : 2.8) + 2.6 + r() * .6 }, 3) && r() < .5) {
+          const [sx, sz] = P(u + (r() - .5) * 8, v * .35);
+          put({ t: 's', x: sx, z: sz, yaw: hy, w: 3.5 + r() * 2, d: 4 + r() * 2.5, e: 2.2, r: 3.3 }, 1);
+        }
+      }
+    } else {
+      // industry: one or two big sheds, a smaller one, the yard
+      const n = 1 + (r() < .6 ? 1 : 0);
+      for (let k = 0; k < n; k++) {
+        const len = 50 + r() * 70, dep = 22 + r() * 20, [x, z] = P((k - (n - 1) / 2) * qu * .5, (r() - .5) * qv * .3);
+        put({ t: 'w', x, z, yaw: yaw + (r() < .3 ? PI / 2 : 0), w: dep, d: len, e: 8 + r() * 4, r: 10 + r() * 4 }, 4);
+      }
+      if (r() < .5) { const [x, z] = P(qu * .35, qv * .35); put({ t: 'w', x, z, yaw, w: 12, d: 20, e: 5, r: 6.5 }, 3); }
+    }
+  }
+  if (B.length < 4) return null;
+  // the street lights: along the avenues (every grid line in the centre and the estates, every third among the private
+  // houses), only where there are buildings to light
+  const every = { centre: 42, mikro: 50, private: 100, industrial: 80 }[D.kind] || 50, lineK = { centre: 2, private: 4, industrial: 2 }[D.kind] || 1;
+  const near = (x, z) => {
+    const ci = Math.floor(x / OC), cj = Math.floor(z / OC);
+    for (let dj = -6; dj <= 6; dj += 2) for (let di = -6; di <= 6; di += 2) if (occ.has(cellK(ci + di, cj + dj))) return true;
+    return false;
+  };
+  const row = (u0, v0, u1, v1) => {
+    const L = Math.hypot(u1 - u0, v1 - v0), n = Math.floor(L / every);
+    for (let k = 0; k <= n; k++) {
+      const u = u0 + (u1 - u0) * k / Math.max(1, n), v = v0 + (v1 - v0) * k / Math.max(1, n);
+      if (!inside(u, v)) continue;
+      const p = W(u, v); if (hr(p[0], p[1]) < 1.5 || !near(p[0], p[1])) continue;
+      lamps.push(p);
+    }
+  };
+  let li = 0;
+  for (let v = -D.b - Gv; v <= D.b + Gv; v += Gv) if ((li++ % lineK) === 0) row(-D.a, v, D.a, v);
+  li = 0;
+  for (let u = -D.a - Gu; u <= D.a + Gu; u += Gu) if ((li++ % lineK) === 0) row(u, -D.b, u, D.b);
+  let rad = 0; for (const b of B) rad = Math.max(rad, Math.hypot(b.x - D.x, b.z - D.z) + 40);
+  return { name: D.name, kind: 'town', district: D.kind, x: D.x, z: D.z, r: rad, buildings: B, church, tower: null, lamps, axis: D.rot, lods: [.45, 1.1, 2.8, 7], lit: D.kind === 'industrial' ? .05 : D.kind === 'mikro' ? .15 : .19, houseLit: .45, alpha: .46 };
 }
 
 /* ================================================================ lights at the objective sites
@@ -291,7 +459,7 @@ function portBuoys(C, plan) {
       const cx = o.x + Math.sin(out) * d, cz = o.z + Math.cos(out) * d;
       for (const sg of [-1, 1]) {
         const x = cx + rx * sg * 160, z = cz + rz * sg * 160;
-        if (map.h(x, z) > -4) continue;
+        if (map.h(x, z) > -4 || iced(map, x, z)) continue;
         const port = sg < 0;
         buoyAt(plan, port ? 'can' : 'cone', x, z, port ? (k & 1 ? 'Fl(2) R 6s' : 'Fl R 4s') : (k & 1 ? 'Fl(2) G 6s' : 'Fl G 4s'), port ? 'r' : 'g', 'Approach ' + o.name.replace(/^Port · /, '') + ' · ' + (port ? 'port-hand' : 'starboard-hand'));
       }
@@ -299,10 +467,12 @@ function portBuoys(C, plan) {
     let k = 0;
     for (const d of [900, 1700, 2500]) pair(d, k++);
     const sx = o.x + Math.sin(out) * 3600, sz = o.z + Math.cos(out) * 3600;
-    if (map.h(sx, sz) < -6) buoyAt(plan, 'safe', sx, sz, 'LFl W 10s', 'w', 'Fairway ' + o.name.replace(/^Port · /, '') + ' · safe water');
+    if (map.h(sx, sz) < -6 && !iced(map, sx, sz)) buoyAt(plan, 'safe', sx, sz, 'LFl W 10s', 'w', 'Fairway ' + o.name.replace(/^Port · /, '') + ' · safe water');
     void fx; void fz;
   }
 }
+/* sea ice at a point (buoys are lifted before the freeze; nothing floats in the pack) */
+const iced = (map, x, z) => !!(map.ice && map.ice(x, z) >= 1);
 function buoyAt(plan, kind, x, z, ch, col, name) {
   plan.statics.push({ key: 'lm_buoy_' + kind, x, z, hdg: hash2(x | 0, z | 0, 3) * TAU, on: 'sea', float: true, r: 4, name, small: true });
   const top = kind === 'can' || kind === 'cone' ? 2.95 : 3.75;
@@ -509,6 +679,8 @@ const TRAFFIC = {
   archipelago: { through: 1, calls: 1, fishing: 5, perLane: 1 },
   delta: { through: 2, calls: 1, fishing: 3 },
   caldera: { through: 1, calls: 0, fishing: 3, perLane: 1 },
+  arctic: { through: 1, calls: 0, fishing: 0, perLane: 1 },
+  harbour: { through: 2, calls: 2, fishing: 3 },
 };
 /* a closed working loop (an ellipse with a wobble) in water of fishing depth, clear of land */
 function fishingLoop(C, cx, cz, R, clear, r) {
@@ -1298,6 +1470,266 @@ PER_MAP.caldera = (C, plan) => {
       buoyAt(plan, 'can', x0 - rx * l, z0 - rz * l, 'Fl R 3s', 'r', 'Vorota · port-hand');
       buoyAt(plan, 'cone', x0 + rx * rgt, z0 + rz * rgt, 'Fl G 3s', 'g', 'Vorota · starboard-hand');
     }
+  }
+};
+
+/* ================================================================ Guba Ledyanaya
+   The naval base: the quay with its portal cranes, the floating piers in the open water the tugs keep, the floating
+   dock, an icebreaker alongside; another icebreaker working the channel up the fjord with a ship in its wake; the
+   closed town's heating plant, its chimney's plume bent by the wind; the ice road over the fjord above the base;
+   Rybnoye's boats frozen in; the polar station and a Pomor cross on Ostrov Medvezhiy; the channel's leading lights. */
+PER_MAP.arctic = (C, plan) => {
+  const { map } = C, X = map.extra || {}, B = X.base, spec = map.iceSpec, hr = map.hRaw || map.h;
+  if (B && B.piers) {
+    const P = B.piers, ox = Math.sin(P.hdg), oz = Math.cos(P.hdg), rx = Math.cos(P.hdg), rz = -Math.sin(P.hdg);
+    const W = (u, v) => [P.x + rx * u + ox * v, P.z + rz * u + oz * v];
+    const c = W(0, 160);
+    plan.builds.push({ kind: 'naval_piers', key: 'piers', x: P.x, z: P.z, hdg: P.hdg, quayL: P.quayL, piers: P.piers, seed: 11, cx: c[0], cz: c[1], cy: 3, r: P.quayL / 2 + 220, farParts: 3, name: 'Naval base · Zapolyarsk · quay 620 m · 3 floating piers' });
+    P.piers.forEach((q, i) => {
+      const h = W(q.off, q.L + 1);
+      plan.lights.push({ x: h[0], z: h[1], y: 7.5, on: 'abs', ch: i & 1 ? 'Fl R 3s' : 'Fl G 3s', col: i & 1 ? 'r' : 'g', range: 3 * 1852, name: 'Pier head light' });
+    });
+    // an icebreaker alongside the middle pier, the tugs off the pier heads
+    const ib = W(P.piers[1].off + 9 + 17.5, P.piers[1].L * .52);
+    plan.statics.push({ key: 'lm_icebreaker', x: ib[0], z: ib[1], hdg: P.hdg, on: 'sea', float: true, r: 90, name: 'Nuclear icebreaker · alongside', alpha: .85 });
+    for (const [u, v, h] of [[P.piers[0].off - 40, P.piers[0].L + 70, 1.1], [P.piers[2].off + 45, P.piers[2].L + 40, -.6]]) {
+      const t = W(u, v);
+      if (hr(t[0], t[1]) < -6) plan.statics.push({ key: 'lm_tug', x: t[0], z: t[1], hdg: P.hdg + h, on: 'sea', float: true, r: 18, name: 'Harbour tug · 32 m', alpha: .85 });
+    }
+    // the floating dock past the quay's end, along the shore
+    for (const u of [P.quayL / 2 + 170, -P.quayL / 2 - 170]) {
+      const d = W(u, 75);
+      let ok = true; for (let k = -130; k <= 130; k += 40) { const q = [d[0] + rx * k, d[1] + rz * k]; if (hr(q[0], q[1]) > -12) { ok = false; break; } }
+      if (!ok) continue;
+      plan.statics.push({ key: 'lm_floatdock', x: d[0], z: d[1], hdg: P.hdg + PI / 2, on: 'abs', y: 0, r: 130, name: 'Floating dock · 240 m · lift 28 000 t', alpha: .85,
+        lights: [{ p: [22, 18.5, 120], ch: 'F R', col: 'r', range: 4000 }, { p: [-22, 18.5, 120], ch: 'F R', col: 'r', range: 4000 }] });
+      break;
+    }
+  }
+  // the icebreaker in the channel: up the fjord and back on a loop (two tracks 150 m apart), a ship close astern
+  if (spec && spec.channel && spec.channel.length > 3) {
+    const ch = resample(spec.channel, 300);
+    // a line offset to its right by d (heading along it)
+    const right = (P, d) => P.map((p, i) => { const a = P[Math.max(0, i - 1)], b = P[Math.min(P.length - 1, i + 1)], dx = b[0] - a[0], dz = b[1] - a[1], L = Math.hypot(dx, dz) || 1; return [p[0] + dz / L * d, p[1] - dx / L * d]; });
+    const loop = round(right(ch, 75).concat(right(ch.slice().reverse(), 75)), 2);
+    let L = 0; for (let i = 1; i < loop.length; i++) L += Math.hypot(loop[i][0] - loop[i - 1][0], loop[i][1] - loop[i - 1][1]);
+    plan.ships.push({ key: 'lm_icebreaker', mode: 'loop', path: loop, speed: 7 * KN, phase: .18, name: 'Nuclear icebreaker · breaking the channel · 7 kn' });
+    plan.ships.push({ key: 'lm_cargo', mode: 'loop', path: loop, speed: 7 * KN, phase: .18 - 700 / Math.max(1, L), name: 'General cargo ship · under icebreaker escort · 7 kn' });
+    // leading lights on the shore behind the channel's outer leg
+    const n = spec.channel.length, a = spec.channel[n - 1], b = spec.channel[Math.max(0, n - 12)];
+    const dx = b[0] - a[0], dz = b[1] - a[1], Ll = Math.hypot(dx, dz) || 1, ux = dx / Ll, uz = dz / Ll;
+    let fr = null;
+    for (let d = 0; d < 30000; d += 50) { const x = a[0] + ux * d, z = a[1] + uz * d; if (hr(x, z) > 3) { fr = [x + ux * 60, z + uz * 60]; break; } }
+    if (fr && C.clear(fr[0], fr[1], 120)) {
+      const rr = [fr[0] + ux * 900, fr[1] + uz * 900];
+      plan.lights.push({ x: fr[0], z: fr[1], y: 12, on: 'ground', ch: 'Iso W 4s', col: 'w', range: 12 * 1852, name: 'Channel leading light · front · Iso W 4s' });
+      if (hr(rr[0], rr[1]) > 3) plan.lights.push({ x: rr[0], z: rr[1], y: 30, on: 'ground', ch: 'Oc W 6s', col: 'w', range: 14 * 1852, name: 'Channel leading light · rear · Oc W 6s' });
+      plan.statics.push({ key: 'lm_skerry_light', x: fr[0], z: fr[1], hdg: 0, on: 'ground', r: 10, name: 'Leading light · front' });
+    }
+  }
+  // the closed town's heating plant at its edge, the plume off the chimney
+  const town = plan.settlements.find(s => s.kind === 'town');
+  if (town) {
+    const cands = scan(C, [town.x - 3000, town.z - 3000, town.x + 3000, town.z + 3000], 100, (x, z) => {
+      if (!C.dry(x, z, 70, .12) || !C.clear(x, z, 300)) return -Infinity;
+      const d = Math.hypot(x - town.x, z - town.z); if (d < town.r + 60) return -Infinity;
+      return -Math.abs(d - town.r - 250) / 300 - C.A.slope(x, z) * 20;
+    }, 200);
+    const c = cands[0];
+    if (c) {
+      const hdg = Math.atan2(town.x - c.x, town.z - c.z);
+      plan.statics.push({ key: 'lm_heatstack', x: c.x, z: c.z, hdg, on: 'ground', r: 125, name: 'Heating plant · Zapolyarsk · chimney 120 m',
+        lights: [{ p: [0, 121, 0], ch: 'F R', col: 'r', range: 20000 }, { p: [0, 66, 0], ch: 'F R', col: 'r', range: 15000 }] });
+      plan.plumes.push({ kind: 'steam', x: c.x, z: c.z, on: 'ground', dy: 121, scale: .34, name: 'Heating plant · plume' });
+    }
+  }
+  // the ice road over the fjord above the base: shore to shore on the walkable fast ice
+  if (X.fjord && B && map.ice) {
+    const F = X.fjord;
+    let k0 = 0, bd = 1e9;
+    for (let i = 0; i < F.length; i++) { const d = Math.hypot(F[i][0] - B.x, F[i][1] - B.z); if (d < bd) { bd = d; k0 = i; } }
+    let road = null;
+    for (let i = Math.min(F.length - 2, k0 + 12); i < F.length - 2 && !road; i += 2) {
+      const p = F[i], q = F[i + 1], tx = q[0] - p[0], tz = q[1] - p[1], tl = Math.hypot(tx, tz) || 1, nx = -tz / tl, nz = tx / tl;
+      const ends = [];
+      for (const sg of [-1, 1]) { let e = null; for (let d = 0; d < 5000; d += 20) { const x = p[0] + nx * sg * d, z = p[1] + nz * sg * d; if (hr(x, z) > 1) { e = [x + nx * sg * 120, z + nz * sg * 120]; break; } if (map.ice(x, z) !== 4) break; } ends.push(e); }
+      if (!ends[0] || !ends[1] || !C.clear(ends[0][0], ends[0][1], 200) || !C.clear(ends[1][0], ends[1][1], 200)) continue;
+      road = ends;
+    }
+    if (road) {
+      const pts = [road[0], road[1]], mx = (road[0][0] + road[1][0]) / 2, mz = (road[0][1] + road[1][1]) / 2, L = Math.hypot(road[1][0] - road[0][0], road[1][1] - road[0][1]);
+      plan.builds.push({ kind: 'iceroad', key: 'iceroad', x: mx, z: mz, cx: mx, cz: mz, cy: 1, pts: resample(pts, 60), width: 12, y: .35, r: L / 2 + 40, name: `Ice road · over Guba Ledyanaya · ${(L / 1000).toFixed(1)} km` });
+    } else plan.notes.push('arctic: no ice road site');
+  }
+  // Rybnoye: boats hauled up for the winter, two trawlers frozen in off the quay
+  const ryb = (map.objectives || []).find(o => o.kind === 'port' && /Rybnoye/.test(o.name));
+  if (ryb) {
+    const wa = toWater(C, ryb.x, ryb.z, 400), r = rng(7301), px = Math.cos(wa), pz = -Math.sin(wa);
+    let k = 0;
+    for (let t = 0; t < 40 && k < 6; t++) {
+      const u = (r() - .5) * 700, x = ryb.x + px * u - Math.sin(wa) * (40 + r() * 60), z = ryb.z + pz * u - Math.cos(wa) * (40 + r() * 60), h = hr(x, z);
+      if (h < 1 || h > 8 || !C.clear(x, z, 20)) continue;
+      plan.statics.push({ key: 'lm_boat', x, z, hdg: wa + PI + (r() - .5) * .6, on: 'ground', dy: -.3, roll: (r() - .5) * .25, r: 8, name: 'Fishing boat · hauled up for the winter', alpha: .8 }); k++;
+    }
+    for (const u of [-260, 240]) {
+      const x = ryb.x + px * u + Math.sin(wa) * 420, z = ryb.z + pz * u + Math.cos(wa) * 420;
+      if (hr(x, z) > -5 || !map.ice || map.ice(x, z) < 3) continue;
+      plan.statics.push({ key: 'lm_trawler', x, z, hdg: wa + PI / 2 + (r() - .5) * .5, on: 'abs', y: -.4, roll: (r() - .5) * .08, pitch: (r() - .5) * .04, r: 30, name: 'Stern trawler · frozen in', alpha: .8 });
+    }
+  }
+  // Ostrov Medvezhiy: the polar station by the light, a Pomor cross on the far headland
+  const lh = (map.objectives || []).find(o => o.kind === 'lighthouse');
+  if (lh) {
+    const st = scan(C, [lh.x - 3000, lh.z - 3000, lh.x + 3000, lh.z + 3000], 100, (x, z) => {
+      if (!C.dry(x, z, 45, .25) || !C.clear(x, z, 150)) return -Infinity;
+      const d = Math.hypot(x - lh.x, z - lh.z); if (d < 350) return -Infinity;
+      return -Math.abs(d - 700) / 400 + hr(x, z) / 80;
+    }, 50)[0];
+    if (st) plan.statics.push({ key: 'lm_weather', x: st.x, z: st.z, hdg: Math.atan2(lh.x - st.x, lh.z - st.z), on: 'ground', r: 45, name: 'Polar station · Ostrov Medvezhiy', lights: [{ p: [8, 36.4, 22], ch: 'Fl R 2s', col: 'r', range: 12000 }] });
+    const hd = scan(C, [lh.x - 7000, lh.z - 5000, lh.x + 7000, lh.z + 5000], 150, (x, z) => {
+      const h = hr(x, z); if (h < 5 || C.A.coastDist(x, z) > 250 || !C.clear(x, z, 200)) return -Infinity;
+      return Math.hypot(x - lh.x, z - lh.z) / 3000 + C.A.seaFrac(x, z, 900);
+    }, 30)[0];
+    if (hd) plan.statics.push({ key: 'lm_cross', x: hd.x, z: hd.z, hdg: .7, on: 'ground', r: 5, small: true, name: 'Pomor cross · sea-mark' });
+  }
+};
+
+/* ================================================================ Bukhta Svetlaya
+   The city (its districts from the generator: blocks, slabs, private houses, industry; lit windows and street lights at
+   night), the container terminal on its reclaimed land with the gantries, the stacks and two ships at the berths, the
+   breakwater off it, the old harbour's quays and cranes in Gavan Zolotaya, the cable-stayed bridges over Gavan Zolotaya
+   and over the strait to Ostrov Zelyony, the oil pier and tank farm near the mouth, the TV mast on the hill, the ferry
+   across the bay. */
+PER_MAP.harbour = (C, plan) => {
+  const { map } = C, X = map.extra || {}, hr = map.hRaw || map.h;
+  // the city
+  for (const D of X.districts || []) { const S = cityDistrict(C, D); if (S) plan.settlements.push(S); }
+  // the container terminal: its quay face on the bay (the rectangle's +u side), the berths and two ships alongside
+  const T = X.terminal;
+  if (T) {
+    const c = Math.cos(T.rot), s = Math.sin(T.rot), W = (u, v) => [T.cx + u * c + v * s, T.cz - u * s + v * c];
+    const q = W(T.hx, 0), hdg = Math.atan2(c, -s), L = 2 * T.hz - 40, D = Math.min(720, 2 * T.hx - 30);
+    const cc = W(T.hx - D / 2, 0);
+    plan.builds.push({ kind: 'terminal', key: 'terminal', x: q[0], z: q[1], hdg, L, D, deck: 4.2, cranes: 8, seed: 21, cx: cc[0], cz: cc[1], cy: 20, r: Math.hypot(L, D) / 2 + 80, farParts: 4, name: `Container terminal · quay ${Math.round(L)} m · 8 gantries` });
+    for (const [v, k] of [[-L * .24, 0], [L * .22, 1]]) {
+      const p = W(T.hx + 26, v), q2 = W(T.hx + 120, v);
+      if (hr(q2[0], q2[1]) < -8) plan.statics.push({ key: 'lm_boxship', x: p[0], z: p[1], hdg: hdg + (k ? PI / 2 : -PI / 2), on: 'sea', float: true, r: 160, name: 'Container ship · 300 m · alongside', alpha: .85 });
+    }
+    // floodlights on the light masts (warm), the quay's ends
+    for (let u = -D + 120; u < 0; u += 220) for (let v = -L / 2 + 120; v < L / 2; v += 280) { const p = W(T.hx + u, v); plan.lights.push({ x: p[0], z: p[1], y: 45.5, on: 'abs', ch: 'F', col: 'y', range: 9000, name: 'Terminal floodlight' }); }
+    // the breakwater off the terminal's south end: out from its corner, then east, the light on its head
+    const pts = [W(T.hx - 20, -T.hz - 30)];
+    let p = pts[0];
+    for (const [du, dv, n] of [[0, -1, 5], [1, -.35, 9]]) {
+      const l = Math.hypot(du, dv);
+      for (let k = 0; k < n; k++) {
+        const ux = (du * c + dv * s) / l, uz = (-du * s + dv * c) / l, np = [p[0] + ux * 90, p[1] + uz * 90];
+        if (hr(np[0], np[1]) > -3) break;
+        pts.push(np); p = np;
+      }
+    }
+    if (pts.length > 4) {
+      let mx = 0, mz = 0; for (const a of pts) { mx += a[0] / pts.length; mz += a[1] / pts.length; }
+      let rr = 0; for (const a of pts) rr = Math.max(rr, Math.hypot(a[0] - mx, a[1] - mz));
+      plan.builds.push({ kind: 'breakwater', key: 'breakwater', x: mx, z: mz, cx: mx, cz: mz, cy: 2, pts, side: -1, r: rr + 60, name: `Breakwater · ${Math.round((pts.length - 1) * 90)} m · rubble mound` });
+      const e = pts[pts.length - 1];
+      plan.lights.push({ x: e[0], z: e[1], y: 14, on: 'abs', ch: 'Fl R 5s', col: 'r', range: 6 * 1852, name: 'Breakwater head · Fl R 5s' });
+    }
+  }
+  // the old harbour: a quay with its cranes along Gavan Zolotaya's north shore east of the port, ships alongside
+  const oh = (map.objectives || []).find(o => o.kind === 'port' && /Zolotaya/.test(o.name));
+  if (oh) {
+    const cands = scan(C, [oh.x - 3000, oh.z - 2000, oh.x + 3000, oh.z + 2000], 50, (x, z) => {
+      const h = hr(x, z); if (h < 1 || h > 8 || C.A.coastDist(x, z) > 150) return -Infinity;
+      const d = Math.hypot(x - oh.x, z - oh.z); if (d < 700 || d > 2600 || !C.clear(x, z, 350)) return -Infinity;
+      const wa = toWater(C, x, z, 150); if (hr(x + Math.sin(wa) * 120, z + Math.cos(wa) * 120) > -8) return -Infinity;
+      return -Math.abs(d - 1100) / 500;
+    }, 40);
+    const qq = cands[0];
+    if (qq) {
+      const wa = toWater(C, qq.x, qq.z, 150);
+      let fx = qq.x, fz = qq.z; for (let d = 0; d < 200; d += 5) { if (hr(qq.x + Math.sin(wa) * d, qq.z + Math.cos(wa) * d) < .2) { fx = qq.x + Math.sin(wa) * (d - 3); fz = qq.z + Math.cos(wa) * (d - 3); break; } }
+      plan.builds.push({ kind: 'quay', key: 'quay', x: fx, z: fz, hdg: wa, L: 520, r: 360, seed: 9, name: 'Commercial port · Gavan Zolotaya · quay 520 m' });
+      const px = Math.cos(wa), pz = -Math.sin(wa);
+      for (const [off, key] of [[-140, 'lm_cargo'], [120, 'lm_cargo']]) plan.statics.push({ key, x: fx + px * off + Math.sin(wa) * 13, z: fz + pz * off + Math.cos(wa) * 13, hdg: wa + PI / 2, on: 'sea', float: true, r: 65, name: 'General cargo ship · alongside', alpha: .85 });
+    }
+  }
+  // the bridges: over Gavan Zolotaya near its middle, and over the strait to the island
+  const bridge = (cands, o, name) => {
+    let best = null, bs = -1e18;
+    for (const c of cands) {
+      if (!C.clear(c.ax, c.az, 150) || !C.clear(c.bx, c.bz, 150)) continue;
+      const hs = Math.min(hr(c.ax - Math.sin(c.hdg) * 200, c.az - Math.cos(c.hdg) * 200), hr(c.bx + Math.sin(c.hdg) * 200, c.bz + Math.cos(c.hdg) * 200));
+      const sc = -c.w / (o.wScale || 1) - 2 * Math.max(0, 40 - hs) * 20 + (o.score ? o.score(c) : 0);
+      if (sc > bs) { bs = sc; best = c; }
+    }
+    if (!best) { plan.notes.push('harbour: no crossing for ' + name); return null; }
+    const B = bridgeSpec(C, best, o);
+    if (!B) { plan.notes.push('harbour: bridge failed ' + name); return null; }
+    B.width = o.width || 28;
+    plan.builds.push(Object.assign({ key: 'bridge', kind: 'bridge_cs', name: `${name} · cable-stayed · ${(B.L / 1000).toFixed(1)} km · main span ${Math.round(B.pylons[1].s - B.pylons[0].s)} m`, farParts: 4 }, B));
+    bridgeLights(plan, B, 50, name);
+    return B;
+  };
+  if (X.harbour) {
+    const P = X.harbour.pts, m = P[Math.floor(P.length / 2)], hx = m[0] * 1000, hz = m[1] * 1000;
+    bridge(crossings(C, { from: [hx, hz], R: 3500, minW: 350, maxW: 1700, dirs: 90 }), { type: 'cs', level: 62, main: 640, span: 90, maxRamp: 1400, width: 26 }, 'Most Zolotoy');
+  }
+  if (X.island) {
+    const [ix, iz] = X.island, L = labels(C), li = labAt(C, ix, iz);
+    const cands = crossings(C, {
+      from: [ix, iz + 2500], R: 6000, minW: 700, maxW: 3500, dirs: 120,
+      fromOk: (x, z) => labAt(C, x, z) === li,
+      toOk: (x, z) => { const l = labAt(C, x, z); return l && l !== li && L.sizes[l] > 20000; },
+    });
+    bridge(cands, { type: 'cs', level: 72, main: 1100, span: 110, maxRamp: 2400, width: 29, wScale: 3 }, 'Most Zelyony');
+  }
+  // the oil pier on the bay's east shore near the mouth, the tank farm behind it
+  if (X.bay) {
+    const Pb = X.bay.pts, m = [Pb[1][0] * 1000, Pb[1][1] * 1000];
+    const cands = scan(C, [m[0], m[1] - 5000, m[0] + 9000, m[1] + 6000], 100, (x, z) => {
+      const h = hr(x, z); if (h < 2 || h > 30 || C.A.coastDist(x, z) > 200 || !C.clear(x, z, 500)) return -Infinity;
+      const wa = toWater(C, x, z, 300); if (Math.sin(wa) > -.5) return -Infinity;           // the pier runs west, into the bay
+      if (hr(x + Math.sin(wa) * 650, z + Math.cos(wa) * 650) > -12) return -Infinity;
+      let land = 0; for (let k = 1; k <= 4; k++) if (hr(x - Math.sin(wa) * 120 * k, z - Math.cos(wa) * 120 * k) > 3) land++;
+      return land - Math.abs(z - m[1]) / 4000;
+    }, 40);
+    const o = cands[0];
+    if (o) {
+      const wa = toWater(C, o.x, o.z, 300), L = 620, sx = Math.sin(wa), sz = Math.cos(wa);
+      const tanks = [];
+      for (const [u, v] of [[-60, -140], [-60, -240], [60, -140], [60, -240], [-60, -340], [60, -340]]) {
+        const x = o.x + Math.cos(wa) * u + sx * v, z = o.z - Math.sin(wa) * u + sz * v;
+        if (C.dry(x, z, 30, .2)) tanks.push([u, v, 20]);
+      }
+      plan.builds.push({ kind: 'oilpier', key: 'oilpier', x: o.x, z: o.z, hdg: wa, L, tanks, cx: o.x + sx * L / 2, cz: o.z + sz * L / 2, cy: 8, r: L / 2 + 360, name: 'Oil pier · 620 m · tank farm' });
+      const tp = [o.x + sx * (L + 38), o.z + sz * (L + 38)];
+      plan.statics.push({ key: 'lm_tanker', x: tp[0], z: tp[1], hdg: wa + PI / 2, on: 'sea', float: true, r: 75, name: 'Product tanker · loading', alpha: .85 });
+      plan.lights.push({ x: o.x + sx * (L + 20), z: o.z + sz * (L + 20), y: 12, on: 'abs', ch: 'Fl(2) R 8s', col: 'r', range: 5 * 1852, name: 'Oil pier head' });
+    } else plan.notes.push('harbour: no oil pier site');
+  }
+  // the TV mast on the high ground over the city
+  tvMast(C, plan);
+  // the ferry across the bay: from the city's waterfront to the west shore
+  if (X.bay) {
+    const Pb = X.bay.pts, m = [Pb[4][0] * 1000, Pb[4][1] * 1000];
+    const cands = crossings(C, { from: [m[0] + 4000, m[1] - 2000], R: 6000, minW: 3000, maxW: 11000, dirs: 72 });
+    let fb = null, fs = -1e18;
+    for (const c of cands) {
+      const hA = hr(c.ax - Math.sin(c.hdg) * 100, c.az - Math.cos(c.hdg) * 100), hB = hr(c.bx + Math.sin(c.hdg) * 100, c.bz + Math.cos(c.hdg) * 100);
+      if (hA < 2 || hB < 2 || hA > 30 || hB > 30 || !C.clear(c.ax, c.az, 300) || !C.clear(c.bx, c.bz, 300)) continue;
+      const sc = -Math.abs(Math.cos(c.hdg)) * 3 - c.w / 4000;                         // across the bay (east-west)
+      if (sc > fs) { fs = sc; fb = c; }
+    }
+    if (fb) {
+      const h = fb.hdg, sx = Math.sin(h), sz = Math.cos(h);
+      const A = [fb.ax - sx * 6, fb.az - sz * 6], Bp = [fb.bx + sx * 6, fb.bz + sz * 6];
+      plan.statics.push({ key: 'lm_slip', x: A[0], z: A[1], hdg: h, on: 'abs', y: 0, r: 40, name: 'Ferry berth · linkspan', lights: [{ p: [0, 14.8, 17.7], ch: 'Iso G 4s', col: 'g', range: 5000 }] });
+      plan.statics.push({ key: 'lm_slip', x: Bp[0], z: Bp[1], hdg: h + PI, on: 'abs', y: 0, r: 40, name: 'Ferry berth · linkspan', lights: [{ p: [0, 14.8, 17.7], ch: 'Iso G 4s', col: 'g', range: 5000 }] });
+      const a = [A[0] + sx * 66, A[1] + sz * 66], b = [Bp[0] - sx * 66, Bp[1] - sz * 66];
+      const mid = [(a[0] + b[0]) / 2 + Math.cos(h) * 300, (a[1] + b[1]) / 2 - Math.sin(h) * 300];
+      plan.ships.push({ key: 'lm_ferry', mode: 'shuttle', path: round([a, mid, b], 2), speed: 12 * KN, dwell: [600, 600], phase: .4, name: 'Car ferry · 86 m · across the bay · 12 kn' });
+    } else plan.notes.push('harbour: no ferry crossing');
   }
 };
 

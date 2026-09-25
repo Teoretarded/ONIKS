@@ -12,7 +12,7 @@
                       lights: model-space lamps { p, col: 'w'|'g'|'r', arc: 'mast'|'stbd'|'port'|'stern'|'all', ch }
      buildLandmark(spec, ground) -> { parts }   the parametric builds (spec from world/landmarks.js), by spec.kind:
                       settlement, bridge_cs, bridge_susp, bridge_beam, powerline, penstock, jetty, quay, stacks, reeds,
-                      road, pipeline
+                      road, pipeline, naval_piers, iceroad (Guba Ledyanaya), terminal, breakwater, oilpier (Bukhta Svetlaya)
      settlementBase(S, ground), settlementLights(S, ground)   a settlement's ground heights, its windows and lamps
      mergeParts(parts, n)   the far version of a build (a few parts: few draw calls)
      spacingFor(spec) -> [s0, s1, s2, s3]   levels of detail for a parametric build
@@ -1003,7 +1003,10 @@ function settlementBuild(S, ground) {
     } else H.push(...house(x, z, b.yaw, b.w, b.d, y, b.e, b.r, { chimney: b.t === 'h' && (i % 3) !== 0, ov: b.t === 's' ? .25 : .5, found: 1 }));
   });
   out.push(...chunkParts(H, 240, `Houses · ${S.name}`, 'h'));
-  if (F.length) out.push(...chunkParts(F, 400, `Blocks of flats · ${S.name} · 5-9 floors`, 'f'));
+  if (F.length) {
+    let f0 = 99, f1 = 0; for (const b of S.buildings) if (b.t === 'f') { f0 = Math.min(f0, b.floors); f1 = Math.max(f1, b.floors); }
+    out.push(...chunkParts(F, 400, `Blocks of flats · ${S.name} · ${f0 === f1 ? f0 : f0 + '-' + f1} floors`, 'f'));
+  }
   if (S.church) {
     const c = S.church, y = Math.min(ground(c.x, c.z), ground(c.x + 6, c.z + 10), ground(c.x - 6, c.z - 10));
     const m = church(), T = Ty(c.yaw, [c.x - ox, y, c.z - oz]);
@@ -1018,15 +1021,17 @@ function settlementBuild(S, ground) {
 /* lit windows at night and the street lights: Float32Array [x, y, z, k, nx, nz] world (k: 0..1 a per-window hash,
    n: the wall's outward normal; 0 for a lamp) */
 export function settlementLights(S, ground) {
-  const base = S.base || settlementBase(S, ground), W = [], r = rng(S.buildings.length * 7919 + (S.x | 0));
+  const base = S.base || settlementBase(S, ground), W = [], r = rng(S.buildings.length * 7919 + (S.x | 0)), lit = S.lit || .3;
   S.buildings.forEach((b, i) => {
     const y = base[i], c = Math.cos(b.yaw), s = Math.sin(b.yaw);
     // [x, y, z, k, nx, nz]: the wall's outward normal, so only the windows facing the lens are drawn
     const put = (lx, ly, lz, nx, nz) => W.push(b.x + c * lx + s * lz, y + ly, b.z - s * lx + c * lz, r(), c * nx + s * nz, -s * nx + c * nz);
     if (b.t === 'f') {
-      for (let fl = 0; fl < b.floors; fl++) for (let zz = -b.d / 2 + 2; zz < b.d / 2 - 1; zz += 3.2) for (const sx of [-1, 1]) if (r() < .3) put(sx * (b.w / 2 + .12), 1.6 + fl * 2.8, zz, sx, 0);
+      for (let fl = 0; fl < b.floors; fl++) for (let zz = -b.d / 2 + 2; zz < b.d / 2 - 1; zz += 3.2) for (const sx of [-1, 1]) if (r() < lit) put(sx * (b.w / 2 + .12), 1.6 + fl * 2.8, zz, sx, 0);
+      // the ends (a tower seen end on still shows its lit rooms)
+      if (b.w > 14) for (let fl = 0; fl < b.floors; fl++) for (let xx = -b.w / 2 + 2; xx < b.w / 2 - 1; xx += 3.2) for (const sz of [-1, 1]) if (r() < lit) put(xx, 1.6 + fl * 2.8, sz * (b.d / 2 + .12), 0, sz);
     } else if (b.t === 'h') {
-      const n = r() < .25 ? 0 : r() < .6 ? 1 : 2;
+      const n = S.houseLit !== undefined ? (r() < S.houseLit ? 1 : 0) : r() < .25 ? 0 : r() < .6 ? 1 : 2;
       for (let k = 0; k < n; k++) {
         if (r() < .6) { const sx = r() < .5 ? -1 : 1; put(sx * (b.w / 2 + .12), 1.6 + (b.e > 5 && r() < .5 ? 2.9 : 0), (r() - .5) * b.d * .6, sx, 0); }
         else { const sz = r() < .5 ? -1 : 1; put((r() - .5) * b.w * .6, 1.6 + (b.e > 5 && r() < .5 ? 2.9 : 0), sz * (b.d / 2 + .12), 0, sz); }
@@ -1228,8 +1233,320 @@ BUILDERS.bridge_beam = (spec, ground) => {
   ] };
 };
 
+/* ================================================================ Guba Ledyanaya (the Arctic map)
+   A nuclear icebreaker (project 22220: 173 x 34 m), a harbour tug, the naval base's floating dock, the town's
+   heating-plant chimney, the base's floating piers (a build) and the ice road over the fjord (a build). */
+/* nuclear icebreaker, 173 m: the icebreaking bow, the tall block of the superstructure forward of midships with its
+   bridge wings, the mast, cranes, the hangar and the helideck over the stern */
+function icebreaker() {
+  const L = 173, B = 34, F = 8.2, H = hull(L, B, F, { bow: .38, transom: .93, sheerF: 3.4, sheerA: .4, flare: .86, deckDs: 1.6 });
+  const dk = z => H.at(z).y;
+  const S = [], C = [], A = [], M = [];
+  // the icebreaking stem: a raked cutwater down to the waterline
+  { const z0 = 72, b = H.at(z0).b; S.push(sheet([[-b * .6, dk(z0), z0], [b * .6, dk(z0), z0], [1.2, -1, 86.5], [-1.2, -1, 86.5]], [0, .5, 1])); }
+  // the forecastle, the superstructure: seven tiers stepping in, the bridge with full-width wings
+  { const z0 = 50, z1 = 80, b0 = H.at(z0).b, b1 = H.at(z1).b * .9; S.push(hex([[-b0, dk(z0), z0], [b0, dk(z0), z0], [b1, dk(z1), z1], [-b1, dk(z1), z1], [-b0, dk(z0) + 2.6, z0], [b0, dk(z0) + 2.6, z0], [b1, dk(z1) + 2.6, z1], [-b1, dk(z1) + 2.6, z1]], { ds: 1.3 })); }
+  const y0 = dk(28);
+  for (let k = 0; k < 7; k++) S.push(bx([-14 + k * .7, y0 + k * 2.9, 8 + k * .6], [14 - k * .7, y0 + (k + 1) * 2.9, 44 - k * .9], { ds: 1.25 }));
+  S.push(bx([-17, y0 + 20.3, 34], [17, y0 + 23.4, 39.5]));                        // the bridge and its wings
+  S.push(bx([-17.3, y0 + 23.4, 33.7], [17.3, y0 + 23.8, 39.8], fn()));
+  for (let x = -15; x <= 15; x += 1.6) S.push(bx([x - .5, y0 + 21, 39.5], [x + .5, y0 + 22.9, 39.6], fn()));   // the bridge windows' mullions
+  // the mast on the superstructure: a stub tower with the radar yards
+  M.push(bx([-1.6, y0 + 23.4, 26], [1.6, y0 + 31, 29.5]));
+  M.push(cyl([0, y0 + 31, 27.7], [0, y0 + 40, 27.7], .35, { n: 8, gen: 2 }));
+  for (const [yy, w] of [[y0 + 33.5, 4.2], [y0 + 36.5, 3]]) M.push(line([[-w, yy, 27.7], [w, yy, 27.7]], { w: .8 }));
+  M.push(bx([-2.4, y0 + 30.5, 30], [2.4, y0 + 31.1, 31.5], fn()));             // the radar scanner
+  // cranes either side forward of the superstructure, jibs stowed aft
+  for (const sx of [-1, 1]) {
+    const x = sx * 10, z = 50, y = dk(z) + 2.6;
+    C.push(cyl([x, y, z], [x, y + 6, z], 1.1, { n: 14, gen: 3, caps: true }), bx([x - 1.5, y + 6, z - 1.5], [x + 1.5, y + 8.5, z + 1.5]));
+    C.push(beam([x, y + 7.5, z - 1], [x, y + 10, z - 22], .8, .8));
+  }
+  // aft: the hangar, the helideck over the stern with its net and landing circle
+  const ya = dk(-55);
+  A.push(bx([-8, ya, -64], [8, ya + 7.5, -44]));
+  A.push(bx([-15, ya + 7.5, -84], [15, ya + 8.1, -63], { ds: 1.4 }));
+  A.push(hoop([0, ya + 8.2, -73.5], 5.5, 40, fn({ w: .6 })));
+  for (const sx of [-1, 1]) A.push(line([[sx * 15.4, ya + 8.4, -84], [sx * 15.4, ya + 8.4, -63]], fn({ w: .6 })));
+  // bitts, the towing notch in the stern (for escort work close astern)
+  A.push(bx([-3.2, dk(-85), -86.5], [3.2, dk(-85) + 1.2, -85.5]));
+  return {
+    name: 'lm_icebreaker', L, B,
+    parts: [
+      { name: 'hull', label: 'Hull · nuclear icebreaker · 173 × 34 m · ice belt', prims: H.P },
+      { name: 'super', label: 'Superstructure · 7 tiers · bridge wings 34 m', prims: S },
+      { name: 'mast', label: 'Mast · navigation radars', prims: M },
+      { name: 'cranes', label: 'Deck cranes · 2 × 28 t', prims: C },
+      { name: 'aft', label: 'Hangar · helideck · towing notch', prims: A },
+    ],
+  };
+}
+/* harbour tug, 32 m: high bow, the wheelhouse forward with all-round windows, the towing winch and the fendered push
+   knees at the bow */
+function tug() {
+  const L = 32, B = 11, F = 3.2, H = hull(L, B, F, { bow: .35, transom: .95, sheerF: 1.6, sheerA: .1, n: 18, flare: .9 });
+  const dk = z => H.at(z).y;
+  const S = [];
+  S.push(bx([-4, dk(5), 0], [4, dk(5) + 2.6, 10]));
+  S.push(bx([-3.2, dk(5) + 2.6, 3], [3.2, dk(5) + 5.2, 9]));
+  S.push(bx([-3.4, dk(5) + 5.2, 2.8], [3.4, dk(5) + 5.4, 9.2], fn()));
+  S.push(taper(0, -1, 1.1, .9, dk(0) + 2, .9, .7, dk(0) + 7.5));
+  S.push(cyl([0, dk(6) + 5.4, 6], [0, dk(6) + 10.5, 6], .12, { n: 6, gen: 0 }));
+  S.push(cyl([-1.8, dk(-8) + .9, -8], [1.8, dk(-8) + .9, -8], .9, { n: 12, gen: 3, caps: true }));
+  for (const sx of [-1, 1]) S.push(bx([sx * 3.2 - .6, dk(15), 14.5], [sx * 3.2 + .6, dk(15) + 2, 16.6], fn()));
+  return { name: 'lm_tug', L, B, parts: [{ name: 'hull', label: 'Hull · harbour tug · 32 × 11 m · 60 t bollard pull', prims: H.P }, { name: 'house', label: 'Wheelhouse · towing winch · push knees', prims: S }] };
+}
+/* floating dock, 240 x 44 m: the pontoon deck between two wing walls 15 m high, the walls' cranes on their rails, the
+   control house on the port wall. Origin midships on the waterline (the pontoon deck ~2.5 m out of the water) */
+function floatDock() {
+  const L = 240, B = 44, P = [], W = [], C = [];
+  P.push(hex([[-B / 2, -9, -L / 2], [B / 2, -9, -L / 2], [B / 2, -9, L / 2], [-B / 2, -9, L / 2], [-B / 2, 2.5, -L / 2], [B / 2, 2.5, -L / 2], [B / 2, 2.5, L / 2], [-B / 2, 2.5, L / 2]], { ds: 1.6 }));
+  for (let z = -L / 2 + 6; z < L / 2; z += 12) P.push(bx([-2, 2.5, z - .6], [2, 3.6, z + .6], fn()));          // keel blocks
+  for (const sx of [-1, 1]) {
+    const xa = sx > 0 ? B / 2 - 5.5 : -B / 2, xb = sx > 0 ? B / 2 : -B / 2 + 5.5;
+    W.push(bx([xa, 2.5, -L / 2], [xb, 17.5, L / 2], { ds: 1.4 }));
+    W.push(line([[sx * (B / 2 - 2.7), 18.4, -L / 2], [sx * (B / 2 - 2.7), 18.4, L / 2]], fn({ w: .6 })));
+    // a portal crane on each wall
+    const zc = sx * 40, xc = sx * (B / 2 - 2.7);
+    for (const dz of [-3, 3]) C.push(beam([xc - 2.2, 17.5, zc + dz], [xc, 29, zc + dz * .5], .7, .7), beam([xc + 2.2, 17.5, zc + dz], [xc, 29, zc + dz * .5], .7, .7));
+    C.push(bx([xc - 2, 29, zc - 2.5], [xc + 2, 32, zc + 2.5]), beam([xc, 31, zc], [xc - sx * 22, 38, zc + 6], .9, .9));
+  }
+  W.push(bx([-B / 2, 17.5, 60], [-B / 2 + 5.5, 22.5, 78]));
+  return { name: 'lm_floatdock', L, B, parts: [
+    { name: 'pontoon', label: 'Floating dock · 240 × 44 m · lift 28 000 t', prims: P },
+    { name: 'walls', label: 'Wing walls · 15 m · control house', prims: W },
+    { name: 'cranes', label: 'Wall cranes · 2 × 15 t', prims: C },
+  ] };
+}
+/* the heating plant: a boiler house 64 x 30 m, 26 m high, and its chimney, 120 m, tapered, galleries, banded */
+function heatStack() {
+  const S = [], B = [];
+  const H = 120;
+  S.push(lathe([0, 0, 0], FY, [[0, 4.6], [H * .5, 3.7], [H, 2.8]], { n: 30, gen: 6, rings: [0, 1, 2], ds: 1.2 }));
+  for (let k = 1; k <= 6; k++) S.push(hoop([0, H * k / 7, 0], 4.6 - 1.8 * k / 7 + .2, 30, fn({ w: .6 })));
+  for (const y of [H * .45, H * .8, H - 3]) S.push(hoop([0, y, 0], 4.6 - 1.8 * y / H + 1.3, 30, { w: .6 }));
+  B.push(ybox(-40, 0, 0, 32, 15, -1, 26, { ribs: { y: 3 }, ds: 1.3 }), ybox(-40, 0, 0, 32.3, 15.3, 26, 26.6, fn({ skip: [0] })));
+  B.push(ybox(-40, 22, 0, 8, 4, -1, 14), ybox(-74, 0, 0, 3, 3, -1, 34));                   // the coal hoist and the conveyor tower
+  B.push(beam([-74, 34, 0], [-56, 26, 0], 2, 2));
+  return { name: 'lm_heatstack', parts: [
+    { name: 'stack', label: 'Chimney · heating plant · 120 m', prims: S },
+    { name: 'plant', label: 'Boiler house · 64 × 30 m · conveyor', prims: B },
+  ] };
+}
+Object.assign(LM_MODELS, { lm_icebreaker: icebreaker, lm_tug: tug, lm_floatdock: floatDock, lm_heatstack: heatStack });
+Object.assign(LM_INFO, {
+  lm_icebreaker: { name: 'Nuclear icebreaker · 173 m', size: [173, 34, 40], s: [.16, .4, 1, 2.5], ship: true,
+    lights: [{ p: [0, 49, 27.7], col: 'w', arc: 'mast' }, { p: [0, 34, 60], col: 'w', arc: 'mast' }, { p: [17, 31, 37], col: 'g', arc: 'stbd' }, { p: [-17, 31, 37], col: 'r', arc: 'port' }, { p: [0, 10, -86], col: 'w', arc: 'stern' }] },
+  lm_tug: { name: 'Harbour tug · 32 m', size: [32, 11, 14], s: [.05, .12, .3, .75], ship: true,
+    lights: [{ p: [0, 13.5, 6], col: 'w', arc: 'mast' }, { p: [4, 8, 6], col: 'g', arc: 'stbd' }, { p: [-4, 8, 6], col: 'r', arc: 'port' }, { p: [0, 4.5, -15.5], col: 'w', arc: 'stern' }] },
+  lm_floatdock: { name: 'Floating dock · 240 m', size: [240, 44, 38], s: [.25, .6, 1.5, 3.8] },
+  lm_heatstack: { name: 'Heating plant · chimney 120 m', size: [90, 36, 120], s: [.14, .35, .9, 2.2] },
+});
+
+/* the naval base's piers: floating pontoon piers out from a quay wall. Origin on the shore at the quay's middle, +Z out
+   over the water (spec.hdg), +X along the quay. spec: { quayL, piers: [{ off (x along the quay), L, W }] } */
+BUILDERS.naval_piers = (spec) => {
+  const Q = [], P = [], C = [], r = rng(spec.seed || 5);
+  const qL = spec.quayL || 700, dk = 3.4;
+  Q.push(bx([-qL / 2, -3, -28], [qL / 2, dk, 0], { skip: [2], ds: 1.4 }));
+  for (let x = -qL / 2 + 8; x < qL / 2; x += 16) Q.push(bx([x - .4, dk, -1.4], [x + .4, dk + .8, -.6], fn()));
+  for (const z of [-5, -16]) Q.push(line([[-qL / 2 + 3, dk + .05, z], [qL / 2 - 3, dk + .05, z]], { w: .6 }));
+  const nc = Math.max(2, Math.round(qL / 180));
+  for (let k = 0; k < nc; k++) { const x = -qL / 2 + qL * (k + .5) / nc; C.push(...tps(T3([x, dk, -10.5]), portalCrane(-PI / 2 + (r() - .5) * 1.2, .5 + r() * .4))); }
+  for (const p of spec.piers || []) {
+    const W = p.W || 18, x0 = p.off, y = 2.3;
+    // the pontoons, the deck, bollards and service posts along both edges, the lamp posts
+    P.push(hex([[x0 - W / 2, -2.2, 0], [x0 + W / 2, -2.2, 0], [x0 + W / 2, -2.2, p.L], [x0 - W / 2, -2.2, p.L], [x0 - W / 2, y, 0], [x0 + W / 2, y, 0], [x0 + W / 2, y, p.L], [x0 - W / 2, y, p.L]], { ds: 1.5 }));
+    for (let z = 10; z < p.L; z += 20) for (const sx of [-1, 1]) {
+      P.push(cyl([x0 + sx * (W / 2 - .8), y, z], [x0 + sx * (W / 2 - .8), y + .7, z], .35, fn({ n: 8, gen: 0, caps: true })));
+      P.push(bx([x0 + sx * (W / 2 - 2.4) - .5, y, z + 8], [x0 + sx * (W / 2 - 2.4) + .5, y + 1.4, z + 9], fn()));
+    }
+    for (let z = 25; z < p.L; z += 50) P.push(line([[x0, y, z], [x0, y + 12, z], [x0 + 1.5, y + 12.4, z]], fn({ w: .6 })));
+    for (const sx of [-1, 1]) P.push(line([[x0 + sx * W / 2, y + .9, 0], [x0 + sx * W / 2, y + .9, p.L]], fn({ w: .5 })));
+    P.push(bx([x0 - 3, y, p.L - 8], [x0 + 3, y + 3.2, p.L - 2]));                   // the pier-head hut
+  }
+  return { name: 'naval_piers', parts: [
+    { name: 'quay', label: `Quay wall · ${Math.round(qL)} m · crane rails`, prims: Q },
+    { name: 'piers', label: `Floating piers · ${(spec.piers || []).length} × ${Math.round((spec.piers || [{ L: 0 }])[0].L)} m`, prims: P },
+    { name: 'cranes', label: `Portal cranes · ${nc} × 32 t`, prims: C },
+  ] };
+};
+/* an ice road over the fjord: the ploughed track between its snow berms, fir poles every 40 m on both sides, the sign
+   boards at the ends. spec.pts [[x, z], ...] world, spec.width. On the ice (spec.y, 0.3 m) */
+BUILDERS.iceroad = (spec) => {
+  const Pp = spec.pts, W = spec.width || 12, ox = spec.x, oz = spec.z, y0 = spec.y || .3, B = [], M = [];
+  let acc = 0;
+  for (let i = 0; i < Pp.length - 1; i++) {
+    const a = Pp[i], b = Pp[i + 1], L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1, nx = -(b[1] - a[1]) / L, nz = (b[0] - a[0]) / L;
+    for (const sd of [-1, 1]) {
+      const off = sd * (W / 2 + 1.2);
+      B.push(line([[a[0] + nx * off - ox, y0 + .55, a[1] + nz * off - oz], [b[0] + nx * off - ox, y0 + .55, b[1] + nz * off - oz]], { w: .9, ds: 1.2 }));
+      B.push(line([[a[0] + nx * off * 1.18 - ox, y0 + .3, a[1] + nz * off * 1.18 - oz], [b[0] + nx * off * 1.18 - ox, y0 + .3, b[1] + nz * off * 1.18 - oz]], fn({ w: .7 })));
+    }
+    for (let s = (40 - acc) % 40; s < L; s += 40) {
+      const px = a[0] + (b[0] - a[0]) * s / L, pz = a[1] + (b[1] - a[1]) * s / L;
+      for (const sd of [-1, 1]) { const qx = px + nx * sd * (W / 2 + 3) - ox, qz = pz + nz * sd * (W / 2 + 3) - oz; M.push(line([[qx, y0, qz], [qx, y0 + 2.2, qz]], { w: .8 }), line([[qx - .5, y0 + 1.5, qz], [qx + .5, y0 + 1.5, qz]], fn({ w: .6 }))); }
+    }
+    acc = (acc + L) % 40;
+  }
+  for (const e of [Pp[0], Pp[Pp.length - 1]]) M.push(bx([e[0] - ox - 1.5, y0 + 1.6, e[1] - oz - .06], [e[0] - ox + 1.5, y0 + 2.8, e[1] - oz + .06]), line([[e[0] - ox - 1.2, y0, e[1] - oz], [e[0] - ox - 1.2, y0 + 1.6, e[1] - oz]], { w: .6 }), line([[e[0] - ox + 1.2, y0, e[1] - oz], [e[0] - ox + 1.2, y0 + 1.6, e[1] - oz]], { w: .6 }));
+  return { name: 'iceroad', parts: [
+    { name: 'berms', label: 'Ice road · snow berms · 12 m track', prims: B },
+    { name: 'poles', label: 'Marker poles · every 40 m · sign boards', prims: M },
+  ] };
+};
+
+/* ================================================================ Bukhta Svetlaya (the harbour city)
+   A post-Panamax container ship (300 x 43 m), the container terminal (a build: quay, ship-to-shore gantries, the
+   stacks and their gantries, light masts), rubble breakwaters (a build), the oil pier with its tank farm (a build). */
+const TEU = [12.19, 2.44, 2.59];            // a 40 ft box: length, width, height (m)
+/* container ship, 300 m: the deckhouse two-fifths from the stern with the funnel abaft it, bays of 40 ft boxes stacked
+   6-7 high on deck across 17 rows, lashing bridges between the bays */
+function boxShip() {
+  const L = 300, B = 43, F = 11.5, H = hull(L, B, F, { bow: .5, transom: .9, sheerF: 3, sheerA: .3, flare: .9, deckDs: 1.8 });
+  const dk = z => H.at(z).y;
+  const S = [], C = [], M = [];
+  // the deckhouse: 9 tiers, the bridge with wings, the funnel aft of it
+  const zh = -58, y0 = dk(zh);
+  for (let k = 0; k < 9; k++) S.push(bx([-12 + k * .2, y0 + k * 2.9, zh - 8], [12 - k * .2, y0 + (k + 1) * 2.9, zh + 8], { ds: 1.3 }));
+  S.push(bx([-21.5, y0 + 26.1, zh + 2], [21.5, y0 + 28.6, zh + 8]));
+  S.push(taper(0, zh - 36, 4.5, 5, y0, 3.8, 4.4, y0 + 34, { ds: 1.2 }));
+  M.push(cyl([0, y0 + 28.6, zh], [0, y0 + 37, zh], .3, { n: 8, gen: 2 }), line([[-4, y0 + 34, zh], [4, y0 + 34, zh]], { w: .8 }));
+  M.push(cyl([0, dk(140), 140], [0, dk(140) + 16, 140], .3, { n: 8, gen: 2 }));
+  // the bays: 40 ft slots forward of the house and aft of the funnel; the stack's tiers and rows as ribs
+  const r = rng(301);
+  const bay = (zc, tiers) => {
+    const b = Math.min(H.at(zc - 6).b, H.at(zc + 6).b) - 1.2;
+    if (b < 6) return;
+    const rows = Math.max(3, Math.floor(b * 2 / TEU[1])), w = rows * TEU[1] / 2, y = dk(zc) + 1.6;
+    C.push(bx([-w, y, zc - TEU[0] / 2], [w, y + tiers * TEU[2], zc + TEU[0] / 2], { ribs: { x: rows, y: tiers }, ds: 1.25 }));
+    C.push(line([[-w, y + 7.8, zc + TEU[0] / 2 + .8], [w, y + 7.8, zc + TEU[0] / 2 + .8]], fn({ w: .6 })));
+  };
+  for (let z = zh + 16; z < 128; z += 13.4) bay(z, 5 + Math.floor(r() * 3));
+  for (let z = zh - 48; z > -140; z -= 13.4) bay(z, 4 + Math.floor(r() * 3));
+  return {
+    name: 'lm_boxship', L, B,
+    parts: [
+      { name: 'hull', label: 'Hull · container ship · 300 × 43 m · 8 500 TEU', prims: H.P },
+      { name: 'house', label: 'Deckhouse · 9 tiers · funnel', prims: S },
+      { name: 'boxes', label: 'Containers · 40 ft · 17 rows · 7 high', prims: C },
+      { name: 'masts', label: 'Masts', prims: M },
+    ],
+  };
+}
+/* ship-to-shore gantry crane: the portal (30.5 m gauge) on the quay rails, the boom 65 m out over the water and 22 m
+   back, the A-frame and its stays, the machinery house, the trolley with the cab. Origin on the waterside rail's
+   line at the quay deck, +Z out over the water */
+function stsPrims(up) {
+  const P = [], g = 30.5, lb = 18, yb = 48, zo = 65, zb = -22 - g;
+  // legs and the portal beams
+  for (const x of [-lb / 2, lb / 2]) for (const z of [0, -g]) P.push(beam([x, 0, z], [x, yb - 2, z], 1.4, 1.4));
+  for (const x of [-lb / 2, lb / 2]) { P.push(beam([x, 12, 0], [x, 12, -g], 1, 1.2)); P.push(beam([x, yb - 2, 0], [x, yb - 2, -g], 1.2, 1.6)); }
+  for (const z of [0, -g]) P.push(beam([-lb / 2, yb - 2, z], [lb / 2, yb - 2, z], 1.2, 1.6));
+  // the boom and the girder behind (the boom raised for a ship to pass: up)
+  const a = up ? .92 : 0, bz = zo * Math.cos(a), by = yb + zo * Math.sin(a);
+  for (const x of [-3, 3]) { P.push(beam([x, yb, 0], [x, by, bz], 1.2, 2.2)); P.push(beam([x, yb, 0], [x, yb, zb], 1.2, 2.2)); }
+  // the A-frame and the stays
+  const ay = yb + 30;
+  for (const x of [-lb / 2 + 1, lb / 2 - 1]) P.push(beam([x, yb, -g * .45], [0, ay, -g * .3], 1, 1));
+  for (const x of [-3, 3]) { P.push(line([[0, ay, -g * .3], [x, by, bz * .6]], { w: .7 })); P.push(line([[0, ay, -g * .3], [x, yb, zb + 4]], { w: .7 })); }
+  // machinery house, trolley and cab
+  P.push(bx([-5, yb, -g - 8], [5, yb + 6, -g + 4]));
+  if (!up) { P.push(bx([-2.6, yb - 3.5, 30], [2.6, yb - .2, 36])); P.push(line([[0, yb - 3.5, 33], [0, 18, 33]], fn({ w: .6 }))); }
+  return P;
+}
+function stsCrane() { return { name: 'lm_sts', parts: [{ name: 'sts', label: 'Ship-to-shore gantry · 65 t · outreach 65 m', prims: stsPrims(false) }] }; }
+Object.assign(LM_MODELS, { lm_boxship: boxShip, lm_sts: stsCrane });
+Object.assign(LM_INFO, {
+  lm_boxship: { name: 'Container ship · 300 m', size: [300, 43, 50], s: [.25, .6, 1.5, 3.8], ship: true,
+    lights: [{ p: [0, 55, -58], col: 'w', arc: 'mast' }, { p: [0, 31, 140], col: 'w', arc: 'mast' }, { p: [21.5, 43, -53], col: 'g', arc: 'stbd' }, { p: [-21.5, 43, -53], col: 'r', arc: 'port' }, { p: [0, 16, -150], col: 'w', arc: 'stern' }] },
+  lm_sts: { name: 'Ship-to-shore gantry', size: [120, 30, 80], s: [.12, .3, .75, 1.9] },
+});
+
+/* the container terminal: the quay wall along +X (spec.L) facing +Z, the ship-to-shore gantries on it, the yard behind:
+   blocks of stacked boxes (rows of 6, 4-5 high) with rubber-tyred gantries over them, light masts, the gate and the
+   workshop. Origin at the middle of the quay face at the water, turned by spec.hdg */
+BUILDERS.terminal = (spec, ground) => {
+  const L = spec.L || 1400, D = spec.D || 520, dk = spec.deck || 4.2, r = rng(spec.seed || 13);
+  const Q = [], G = [], Y = [], T = [], M = [];
+  Q.push(bx([-L / 2, -14, -30], [L / 2, dk, 0], { skip: [2], ds: 1.5 }));
+  for (let x = -L / 2 + 10; x < L / 2; x += 20) Q.push(bx([x - .6, -2, 0], [x + .6, dk - .2, .6], fn()));
+  for (const z of [-3, -33.5]) Q.push(line([[-L / 2 + 5, dk + .05, z], [L / 2 - 5, dk + .05, z]], { w: .7 }));
+  // the gantries along the quay (booms down over the berths, one raised)
+  const n = spec.cranes || Math.round(L / 180);
+  for (let k = 0; k < n; k++) {
+    const x = -L / 2 + L * (k + .5) / n + (r() - .5) * 20;
+    G.push(...tps(T3([x, dk, -3]), stsPrims(k === 1)));
+  }
+  // the yard: blocks of 40 ft boxes, 6 rows wide, 4-5 high, broken up; a rubber-tyred gantry over each few
+  const bw = 6 * TEU[1] + 3, bl = 10 * TEU[0] + 6;
+  for (let z = -80; z > -D + 30; z -= bw + 16) for (let x = -L / 2 + 40; x < L / 2 - bl; x += bl + 18) {
+    if (r() < .12) continue;
+    const tiers = 2 + Math.floor(r() * 3.5), len = bl * (.55 + .45 * r());
+    Y.push(bx([x, dk, z - bw], [x + len, dk + tiers * TEU[2], z], { ribs: { x: Math.round(len / TEU[0]), y: tiers }, ds: 1.3 }));
+    if (r() < .35) {
+      const gx = x + len * r();
+      for (const zz of [z + 1.5, z - bw - 1.5]) T.push(beam([gx - 4, dk, zz], [gx - 4, dk + 18, zz], .8, .8), beam([gx + 4, dk, zz], [gx + 4, dk + 18, zz], .8, .8));
+      T.push(bx([gx - 4.4, dk + 18, z - bw - 2], [gx + 4.4, dk + 19.6, z + 2]));
+    }
+  }
+  // light masts (40 m) in the yard, the workshop and the gate at the back
+  for (let x = -L / 2 + 120; x < L / 2; x += 280) for (const z of [-140, -D + 80]) M.push(line([[x, dk, z], [x, dk + 40, z]], { w: 1 }), bx([x - 2, dk + 40, z - .6], [x + 2, dk + 41.6, z + .6]));
+  M.push(...house(L / 2 - 150, -D + 40, 0, 40, 90, dk, 12, 16, { ov: .3 }));
+  for (let k = 0; k < 6; k++) M.push(bx([-L / 2 + 60 + k * 14, dk, -D + 10], [-L / 2 + 66 + k * 14, dk + 6, -D + 18]));
+  void ground;
+  return { name: 'terminal', parts: [
+    ...chunkParts(Q, 400, `Container terminal · quay ${Math.round(L)} m · depth 16 m`, 'q'),
+    ...chunkParts(G, 250, `Ship-to-shore gantries · ${n} × 65 t`, 'g'),
+    ...chunkParts(Y, 300, 'Container yard · 40 ft boxes · 2-5 high', 'y'),
+    ...chunkParts(T, 400, 'Rubber-tyred gantries', 't'),
+    ...chunkParts(M, 400, 'Light masts · 40 m · workshop · gate', 'm'),
+  ] };
+};
+/* a rubble-mound breakwater along spec.pts (world, root first): the mound (base 30 m at -10, crest 9 m at +5), the
+   concrete crown wall on the seaward side (spec.side: +1 right of the line, -1 left), the round head */
+BUILDERS.breakwater = (spec) => {
+  const Pp = spec.pts, ox = spec.x, oz = spec.z, side = spec.side || 1, P = [];
+  for (let i = 0; i < Pp.length - 1; i++) {
+    const a = [Pp[i][0] - ox, 0, Pp[i][1] - oz], b = [Pp[i + 1][0] - ox, 0, Pp[i + 1][1] - oz], d = V.norm(V.sub(b, a)), n = [-d[2], 0, d[0]];
+    const q = (p, s, y) => [p[0] + n[0] * s, y, p[2] + n[2] * s];
+    P.push(hex([q(a, -15, -8), q(a, 15, -8), q(b, 15, -8), q(b, -15, -8), q(a, -4.5, 5), q(a, 4.5, 5), q(b, 4.5, 5), q(b, -4.5, 5)], { ds: 1.5 }));
+    const wa = q(a, side * 3.2, 5), wb = q(b, side * 3.2, 5);
+    P.push(hex([[wa[0] - n[0] * .8, 5, wa[2] - n[2] * .8], [wa[0] + n[0] * .8, 5, wa[2] + n[2] * .8], [wb[0] + n[0] * .8, 5, wb[2] + n[2] * .8], [wb[0] - n[0] * .8, 5, wb[2] - n[2] * .8],
+      [wa[0] - n[0] * .8, 8.5, wa[2] - n[2] * .8], [wa[0] + n[0] * .8, 8.5, wa[2] + n[2] * .8], [wb[0] + n[0] * .8, 8.5, wb[2] + n[2] * .8], [wb[0] - n[0] * .8, 8.5, wb[2] - n[2] * .8]]));
+  }
+  const e = Pp[Pp.length - 1], hx0 = e[0] - ox, hz0 = e[1] - oz;
+  P.push(lathe([hx0, -8, hz0], FY, [[0, 17], [13, 6]], { n: 30, caps: true, ds: 1.5 }));
+  P.push(lathe([hx0, 5, hz0], FY, [[0, 1.4], [.4, 1.4], [.4, .9], [8, .75], [8, 1.2]], { n: 16, gen: 4, rings: [0, 2, 3], caps: true }));
+  return { name: 'breakwater', parts: chunkParts(P, 350, spec.name || 'Breakwater · rubble mound', 'b') };
+};
+/* the oil pier: a trestle out along +Z (spec.L) on piles, the pipelines on it, the T head with the loading arms; the
+   tank farm on the shore behind (spec.tanks, local [x, z, r]). Origin at the root on the shore, turned by spec.hdg */
+BUILDERS.oilpier = (spec, ground) => {
+  const L = spec.L || 700, P = [], H = [], K = [], sh = Math.sin(spec.hdg), ch = Math.cos(spec.hdg);
+  const gl = (x, z) => ground(spec.x + ch * x + sh * z, spec.z - sh * x + ch * z);
+  const y = 7.5;
+  P.push(bx([-3.5, y - .8, 0], [3.5, y, L], { ds: 1.5 }));
+  for (let z = 10; z < L; z += 24) for (const x of [-3, 3]) P.push(cyl([x, -10, z], [x, y - .8, z], .5, { n: 8, gen: 0 }));
+  for (const x of [-1.8, -.6, .6, 1.8]) P.push(cyl([x, y + .6, 0], [x, y + .6, L], .35, fn({ n: 8, gen: 0 })));
+  H.push(bx([-60, y - 1.2, L], [60, y, L + 24], { ds: 1.4 }));
+  for (let x = -54; x <= 54; x += 18) for (const z of [L + 4, L + 20]) H.push(cyl([x, -12, z], [x, y - 1.2, z], .7, { n: 8, gen: 0 }));
+  for (const x of [-30, -10, 10, 30]) { H.push(beam([x, y, L + 20], [x, y + 14, L + 22], .8, .8)); H.push(beam([x, y + 14, L + 22], [x, y + 9, L + 30], .6, .6)); }
+  for (const x of [-58, 58]) H.push(lathe([x, y, L + 34], FY, [[0, 5], [4, 5]], { n: 20, caps: true }));      // the mooring dolphins
+  for (const [tx, tz, tr] of spec.tanks || []) {
+    const g = gl(tx, tz);
+    K.push(lathe([tx, g - .5, tz], FY, [[0, tr], [15, tr], [15.6, tr * .98], [16.5, tr * .6], [16.9, 0]], { n: 40, gen: 10, rings: [1, 2, 3], ds: 1.3 }));
+    K.push(hoop([tx, g + 1.2, tz], tr + 6, 40, fn({ w: .6 })));
+  }
+  return { name: 'oilpier', parts: [
+    { name: 'trestle', label: `Oil pier · trestle ${Math.round(L)} m · 4 pipelines`, prims: P },
+    { name: 'head', label: 'Pier head · 120 m · loading arms · dolphins', prims: H },
+    ...chunkParts(K, 300, 'Tank farm · 6 × 20 000 m³', 'k'),
+  ] };
+};
+
 export function spacingFor(spec) {
-  const S = spec.lods || { settlement: [.3, .75, 1.9, 4.8], bridge_cs: [.3, .8, 2.2, 6], bridge_susp: [.25, .7, 1.9, 5], bridge_beam: [.12, .3, .8, 2], reeds: [.1, .25, .7, 1.8], road: [.2, .5, 1.3, 3.2], pipeline: [.12, .3, .8, 2], powerline: [.15, .4, 1, 2.6], penstock: [.2, .5, 1.3, 3.2], jetty: [.08, .2, .5, 1.3], quay: [.18, .45, 1.2, 3], stacks: [.25, .6, 1.5, 3.8] }[spec.kind] || [.3, .8, 2, 5];
+  const S = spec.lods || { terminal: [.3, .75, 1.9, 4.8], breakwater: [.3, .75, 1.9, 4.8], oilpier: [.2, .5, 1.3, 3.2], naval_piers: [.2, .5, 1.3, 3.2], iceroad: [.15, .4, 1, 2.5], settlement: [.3, .75, 1.9, 4.8], bridge_cs: [.3, .8, 2.2, 6], bridge_susp: [.25, .7, 1.9, 5], bridge_beam: [.12, .3, .8, 2], reeds: [.1, .25, .7, 1.8], road: [.2, .5, 1.3, 3.2], pipeline: [.12, .3, .8, 2], powerline: [.15, .4, 1, 2.6], penstock: [.2, .5, 1.3, 3.2], jetty: [.08, .2, .5, 1.3], quay: [.18, .45, 1.2, 3], stacks: [.25, .6, 1.5, 3.8] }[spec.kind] || [.3, .8, 2, 5];
   return S;
 }
 

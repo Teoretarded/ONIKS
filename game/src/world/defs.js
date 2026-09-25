@@ -1,8 +1,8 @@
-/* The six maps: identity, size, resolution, seed, weather and time. Generators live in gens/<gen>.js.
+/* The maps: identity, size, resolution, seed, weather and time. Generators live in gens/<gen>.js.
    DOM-free (imported by the Worker too). */
 
 // bump whenever a change in world/ changes what the generators produce (invalidates the IndexedDB cache)
-export const GEN_VERSION = 'w10';
+export const GEN_VERSION = 'w20';
 
 export const DEFS = [
   {
@@ -34,6 +34,18 @@ export const DEFS = [
     id: 'caldera', gen: 'caldera', name: 'Chyortova Past', blurb: 'Caldera · one gap · lagoon',
     size: [100000, 100000], cell: 100, seed: 7717,
     weather: { kind: 'storm', wind: [-9.0, -5.0], sea: 0.75 }, time: 'night',
+  },
+  // polar night over the sea ice: an offshore wind (from the land, toward the north) keeps the flaw lead open; ice damps
+  // the swell to nothing in the leads; light snow (weather.snow, drawn by the landmarks) in the haze
+  {
+    id: 'arctic', gen: 'arctic', name: 'Guba Ledyanaya', blurb: 'Sea ice · leads · naval base',
+    size: [120000, 120000], cell: 100, seed: 8821,
+    weather: { kind: 'haze', wind: [2.0, 5.5], sea: 0.05, snow: 0.55 }, time: 'night',
+  },
+  {
+    id: 'harbour', gen: 'harbour', name: 'Bukhta Svetlaya', blurb: 'Port city · breakwaters · bridges',
+    size: [120000, 120000], cell: 100, seed: 5309,
+    weather: { kind: 'calm', wind: [1.5, -2.5], sea: 0.22 }, time: 'night',
   },
 ];
 

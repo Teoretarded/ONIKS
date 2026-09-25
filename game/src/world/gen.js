@@ -112,13 +112,19 @@ export async function generate(def, gen, opts) {
     }
   }
   if (gen.post) gen.post(ctx, F, L);
+  // sea ice (the Arctic map): the analytic model's spec and the sim's class grid (world/ice.js)
+  const ice = gen.ice ? gen.ice(ctx, F, L) : null;
   const t3 = now();
-  return {
+  const r = {
     id: def.id, name: def.name, W, H, cell, cols: F.cols, rows: F.rows, heights: out,
     places: L.places.map(clean), objectives: L.objectives.map(clean), spawns: L.spawns, replenish: L.replenish,
     roads: L.roads, weather: def.weather, time: def.time,
     timing: { plan: t1 - t0, layout: t2 - t1, fine: t3 - t2, total: t3 - t0 },
   };
+  if (ice) { r.ice = ice.spec; r.iceCls = ice.cls; }
+  // generator-specific plan data for the landmarks (structured-clone safe), e.g. the harbour city's districts
+  if (L.extra) r.extra = L.extra;
+  return r;
 }
 
 function clean(p) { const o = {}; for (const k in p) if (k[0] !== '_' && k !== 'road') o[k] = p[k]; return o; }

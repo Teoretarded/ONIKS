@@ -1,4 +1,4 @@
-# world/: the six maps
+# world/: the maps
 
 ```js
 import { MAPS, loadMap } from './world/maps.js'
@@ -17,6 +17,8 @@ Static, no generation: `[{ id, name, blurb, size: [W, H] }]` in menu order.
 | `archipelago` | Belye Shkhery | 140 × 140 | 100 m | calm · day |
 | `delta` | Ust-Solyonaya | 130 × 110 | 100 m | haze · dusk |
 | `caldera` | Chyortova Past | 100 × 100 | 100 m | storm · night |
+| `arctic` | Guba Ledyanaya | 120 × 120 | 100 m | haze · night (snow) |
+| `harbour` | Bukhta Svetlaya | 120 × 120 | 100 m | calm · night |
 
 ## `await loadMap(id, opts?) -> Map`
 
@@ -53,13 +55,36 @@ The Map is exactly the contract in `game/ARCHITECTURE.md`:
 - `roads: [[[x, z], ...], ...]`: polylines on land linking towns, objectives and the coast spawn,
   A* over slope on a 500 m grid, simplified and smoothed. Short bridges over shallow water (delta
   channels, sounds) are allowed; roads never cross open sea.
-- `weather: { kind: 'calm'|'haze'|'rain'|'storm', wind: [dx, dz] m/s, sea: 0..1 }`, `time`.
+- `weather: { kind: 'calm'|'haze'|'rain'|'storm', wind: [dx, dz] m/s, sea: 0..1, snow?: 0..1 }`, `time`. `snow` (the
+  Arctic map) is drawn by the landmarks system (flakes round the lens); the engine ignores it.
+- `extra`: the generator's plan data for the landmarks, or null (`arctic`: the fjord's centre line and the naval base's
+  piers; `harbour`: the city's districts, the terminal, the bay, the harbour, the estuary, the island).
+- `hRaw(x, z)`: the true DEM (bilinear of `heights`). Equal to `h` on every map but the Arctic one.
+
+### Sea ice (`arctic`): `map.ice`, `map.iceModel()`, `map.iceSpec`
+
+The ice is not in `heights` (the terrain draws the seabed and the waterline from them); it is an analytic model
+(`ice.js`) of fast ice, the flaw lead, the pack with its floes, cracks, ridges and leads, the marginal ice zone and the
+icebreaker channel, shared by the generator, the preview and the renderer (`game/landmarks.js` draws it as dots).
+
+- `map.ice(x, z)`: the sim's class on a 200 m grid: 0 open (or land), 1 thin (brash, the marginal zone, the channel:
+  ships pass), 2 pack, 3 fast ice, 4 fast ice within 1.5 km of a shore (vehicles drive on it).
+- `map.h` and `map.slope` carry it, so every reader of the ground sees the ice with no change of its own: pack and
+  fast ice read as shoal water 6 m deep (ships and boats keep out: the nav grids, the movement rules, the order checks),
+  the walkable fast ice as flat ground 0.6 m above the sea (vehicles cross it; the nav's land grid includes it).
+  `map.water` follows `map.h`. `map.hRaw` and `heights` stay the true DEM.
+- `map.iceModel().at(x, z, s, o)`: the ice at a point with detail filtered to spacing `s` (m): `o.ice`, `o.y` (surface
+  height), `o.b` (brightness), `o.k` (kind), `o.cls`. `map.iceSpec`: its parameters (grids, zones, leads, channel).
+- The result carries `ice` (the spec) and `iceCls` (the class grid); `mapFromResult(r)` builds the Map (with the ice)
+  from a generation result (for callers that generate themselves, e.g. balance.js's spawn variants).
 - Extras (not in the contract): `genMs` (wall time of this load), `timing: { plan, layout, fine, total }` ms
   of the generation, `cached` (true when it came from IndexedDB).
 
 Heights are true metres (no vertical exaggeration): Krasnaya Kosa's plateau is 120-180 m behind a
 25-55 m clay bluff; the fjord's fjell reaches ~1000 m with fjords 150-460 m deep; the delta plain is
-0.3-5 m; the caldera rim 400-700 m around a lagoon 300-480 m deep.
+0.3-5 m; the caldera rim 400-700 m around a lagoon 300-480 m deep; Guba Ledyanaya's tundra 40-200 m with bald hills
+to ~450 m and a fjord 200 m deep; Bukhta Svetlaya's city hills 70-250 m under a ridge of 700-1000 m, the bay 16-32 m
+(dredged), the container terminal's reclaimed land 4.2 m.
 
 ## `renderPreview(map, canvas, opts?) -> { scale, ox, oy, toCanvas(x, z), toWorld(px, py) }`
 
@@ -74,9 +99,11 @@ ids + names), `places` (false), `roads` (false), `objectives` (true), `spawns` (
 | file | what |
 |---|---|
 | `maps.js` | public API, worker pool, the Map object |
-| `defs.js` | the six maps: names, sizes, seeds, weather, time |
-| `gen.js` | pipeline: plan grid (250 m, large shapes) → layout → fine grid (map cell) → pads |
-| `gens/*.js` | one generator per map (`plan`, `fine`, `layout`, optional `shape`) |
+| `defs.js` | the maps: names, sizes, seeds, weather, time |
+| `gen.js` | pipeline: plan grid (250 m, large shapes) → layout → fine grid (map cell) → pads → ice |
+| `gens/*.js` | one generator per map (`plan`, `fine`, `layout`, optional `shape`, `post`, `ice`; `layout` may return `extra`) |
+| `ice.js` | the sea-ice model (`makeIce`, `buildIceSpec`, `classGrid`) |
+| `landmarks.js` | each map's set pieces and ambient life, planned from the map (the harbour city's districts too) |
 | `theatre.js` | loads the real seed-1337 DEM without running the script (Worker-safe) |
 | `noise.js`, `grid.js`, `lines.js`, `analyze.js` | noise, grids (cubic, blur, distance, flow, carving), line fields, site search and roads |
 | `preview.js` | `renderPreview` |

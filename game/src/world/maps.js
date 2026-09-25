@@ -9,6 +9,7 @@
    world/ changes the output. */
 import { DEFS, DEF, GEN_VERSION } from './defs.js';
 import { generate } from './gen.js';
+import { makeIce, C as ICE_C } from './ice.js';
 
 export const MAPS = DEFS.map(d => ({ id: d.id, name: d.name, blurb: d.blurb, size: d.size.slice() }));
 
@@ -27,13 +28,16 @@ export function loadMap(id, opts) {
   const p = (async () => {
     const t0 = performance.now();
     const store = opts.cache === false ? null : await dbKey(key);
-    let r = store ? await dbGet(store) : null;
+    // the cache must be quicker than generating: a read held up (other pages writing big maps to the same store) is
+    // given up after 2.5 s, and that map is not written back (it is there already)
+    let r = store ? await dbGet(store) : null, slow = false;
+    if (r === SLOW) { r = null; slow = true; }
     const fromCache = !!r;
     if (!r && opts.worker !== false && typeof Worker !== 'undefined') {
       try { r = await viaWorker(id, { cell: opts.cell }); } catch (e) { console.warn('loadMap: worker failed, generating on the main thread', e); r = null; }
     }
     if (!r) r = await generate(def, await genFor(def.gen), { cell: opts.cell });
-    if (store && !fromCache) dbPut(store, key, r);
+    if (store && !fromCache && !slow) dbPut(store, key, r);
     const map = buildMap(r, performance.now() - t0);
     map.cached = fromCache;
     return map;
@@ -48,21 +52,29 @@ let dbp = null;
 function db() {
   if (dbp) return dbp;
   dbp = new Promise(res => {
+    // an open waits behind another page's delete or upgrade: never let that stall a map (no cache instead), and close
+    // our connection when someone else needs the database changed
+    const t = setTimeout(() => res(null), 1500);
     try {
       const rq = indexedDB.open('oniks-maps', 1);
       rq.onupgradeneeded = () => rq.result.createObjectStore('maps');
-      rq.onsuccess = () => res(rq.result);
-      rq.onerror = () => res(null);
-    } catch (e) { res(null); }
+      rq.onsuccess = () => { clearTimeout(t); const d = rq.result; d.onversionchange = () => { try { d.close(); } catch (e) { /* closed */ } dbp = null; }; res(d); };
+      rq.onerror = () => { clearTimeout(t); res(null); };
+      rq.onblocked = () => { clearTimeout(t); res(null); };
+    } catch (e) { clearTimeout(t); res(null); }
   });
   return dbp;
 }
 async function dbKey(key) { return typeof indexedDB === 'undefined' ? null : `${key}#${GEN_VERSION}`; }
+const SLOW = {};
 async function dbGet(k) {
   const d = await db(); if (!d) return null;
   return new Promise(res => {
-    try { const rq = d.transaction('maps').objectStore('maps').get(k); rq.onsuccess = () => res(rq.result || null); rq.onerror = () => res(null); }
-    catch (e) { res(null); }
+    let done = false;
+    const t = setTimeout(() => { if (!done) { done = true; res(SLOW); } }, 2500);
+    const fin = v => { if (done) return; done = true; clearTimeout(t); res(v); };
+    try { const rq = d.transaction('maps').objectStore('maps').get(k); rq.onsuccess = () => fin(rq.result || null); rq.onerror = () => fin(null); }
+    catch (e) { fin(null); }
   });
 }
 async function dbPut(k, key, r) {
@@ -103,6 +115,9 @@ function viaWorker(id, opts) {
 }
 
 /* ---------- the Map object ---------- */
+/* the Map over a generation result (gen.js generate()), for callers that generate themselves (balance.js's variants):
+   the same object loadMap returns, the sea ice included */
+export function mapFromResult(r) { return buildMap(r, 0); }
 function buildMap(r, ms) {
   const { W, H, cell, cols, rows, heights } = r;
   const x0 = -W / 2, z0 = -H / 2, inv = 1 / cell, cm = cols - 1, rm = rows - 1;
@@ -132,10 +147,41 @@ function buildMap(r, ms) {
     const s = Math.sqrt(gx * gx + gz * gz);
     return s > 1 ? 1 : s;
   }
-  return {
+  const map = {
     id: r.id, name: r.name, W, H, cell, cols, rows, heights, h, water, slope,
     places: r.places, objectives: r.objectives, spawns: r.spawns, replenish: r.replenish, roads: r.roads,
     weather: r.weather, time: r.time,
     genMs: Math.round(ms), timing: r.timing, cached: false,
+    hRaw: h, extra: r.extra || null, iceSpec: null, ice: null, iceModel: null,
   };
+  if (r.iceCls && r.ice) withIce(map, r, h, slope);
+  return map;
+}
+
+/* Sea ice (the Arctic map). map.ice(x, z) is the sim's class (world/ice.js C: 0 open, 1 thin, 2 pack, 3 fast,
+   4 walkable fast ice) on a 200 m grid, and map.h / map.slope carry it, so everything that reads the ground (the nav
+   grids, the movement rules, the order checks, the AI's sites) sees the ice without knowing about it: pack and fast
+   ice read as shoal water 6 m deep (ships and boats keep out, the torpedo still runs), the walkable fast ice as flat
+   ground 0.6 m above the sea (vehicles drive on it). map.heights and map.hRaw stay the true DEM (the terrain draws
+   the seabed and the waterline from them). map.iceModel() is the analytic model for the dots (lazy). */
+function withIce(map, r, hRaw, slopeRaw) {
+  const g = r.iceCls, D = g.data, gi = 1 / g.cell, cm = g.cols - 1, rm = g.rows - 1;
+  const cls = (x, z) => {
+    let i = Math.round((x - g.x0) * gi), j = Math.round((z - g.z0) * gi);
+    if (i < 0) i = 0; else if (i > cm) i = cm;
+    if (j < 0) j = 0; else if (j > rm) j = rm;
+    return D[j * g.cols + i];
+  };
+  map.h = (x, z) => {
+    const v = hRaw(x, z);
+    if (v >= 0) return v;
+    const c = cls(x, z);
+    return c === ICE_C.WALK ? .6 : c >= ICE_C.PACK ? (v < -6 ? -6 : v) : v;
+  };
+  map.water = (x, z) => map.h(x, z) < 0;
+  map.slope = (x, z) => (cls(x, z) === ICE_C.WALK && hRaw(x, z) < 0 ? 0 : slopeRaw(x, z));
+  map.ice = cls;
+  map.iceSpec = r.ice;
+  let M = null;
+  map.iceModel = () => M || (M = makeIce(r.ice, hRaw));
 }

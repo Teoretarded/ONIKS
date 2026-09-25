@@ -148,6 +148,260 @@ function shipAt(sh, t, o) {
   along(rt, 0, o); o.v = 0; return o;
 }
 
+/* ---------------------------------------------------------------- sea ice (the Arctic map)
+   The ice is not in the heightfield (the terrain draws the sea under it): it is drawn as the films' LiDAR returns, a
+   world-fixed jittered lattice of points on the analytic ice (world/ice.js), static on the GPU and lit, scanned and
+   thinned by the model renderer like every other structure:
+   - tiles of 64 x 64 lattice points (level L: spacing 12.5 cm x 2^L, 8 m .. 33 km across), built off the main thread
+     (world/ice_worker.js) and uploaded once; each tile is a model with four levels of detail (every 1st, 2nd, 4th, 8th
+     point, prefixes of one buffer) drawn with R.draw, the renderer picking the level per tile and thinning the returns
+     to a few pixels apart as it does a hull;
+   - a quadtree walk from the lens picks the tiles (each under ~330 px on screen: its lattice no sparser than the returns' 5 px; the grazing ones coarser), frustum
+     culled, empty ice skipped by a 1 km mask; a tile whose children are not built yet stands in for them; an LRU keeps
+     the GPU memory bounded;
+   - a point sits on the lattice jittered by its own (coarsest) level, so a coarser tile's points are the same world
+     points: a tile giving way to its children adds returns, never moves one. Snow faces up (tilted where darker),
+     broken blocks every way, young ice down (sparse, dim back faces).
+   From the strategic layer up (and in the Orbital style) the ice edges are hairlines: the limit of the ships' water
+   (pack and fast ice) and the fast-ice edge. The per-frame CPU is the walk (~0.1-0.3 ms). */
+const ICE_S0 = .125, ICE_LMAX = 12, ICE_N = 64;
+function createIceLayer(game, map, R, view) {
+  const IM = map.iceModel(), spec = IM.spec, MD = R.models, gl = MD.gl;
+  const hRaw = map.hRaw, far = spec.far, G = spec.g;
+  const dmAt = (x, z) => { const fx = Math.min(G.cols - 1.001, Math.max(0, (x - G.x0) / G.cell)), fz = Math.min(G.rows - 1.001, Math.max(0, (z - G.z0) / G.cell)), i = fx | 0, j = fz | 0, u = fx - i, v = fz - j, o = j * G.cols + i, D = spec.dm; return (D[o] * (1 - u) + D[o + 1] * u) * (1 - v) + (D[o + G.cols] * (1 - u) + D[o + G.cols + 1] * u) * v; };
+  // 1 km presence mask (water inside the ice belt), dilated, as a summed-area table
+  const mc = 1000, mcols = Math.ceil(map.W / mc), mrows = Math.ceil(map.H / mc), X0 = -map.W / 2, Z0 = -map.H / 2;
+  const raw = new Uint8Array(mcols * mrows);
+  for (let j = 0; j < mrows; j++) for (let i = 0; i < mcols; i++) {
+    const x = X0 + (i + .5) * mc, z = Z0 + (j + .5) * mc;
+    if (dmAt(x, z) > far + 1500) continue;
+    let w = false;
+    for (let a = -1; a <= 1 && !w; a++) for (let b = -1; b <= 1 && !w; b++) if (hRaw(x + a * mc * .5, z + b * mc * .5) < 0) w = true;
+    if (w) raw[j * mcols + i] = 1;
+  }
+  const SA = new Int32Array((mcols + 1) * (mrows + 1));
+  for (let j = 0; j < mrows; j++) for (let i = 0; i < mcols; i++) {
+    let v = 0; for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++) { const ii = i + a, jj = j + b; if (ii >= 0 && jj >= 0 && ii < mcols && jj < mrows && raw[jj * mcols + ii]) v = 1; }
+    SA[(j + 1) * (mcols + 1) + i + 1] = v + SA[j * (mcols + 1) + i + 1] + SA[(j + 1) * (mcols + 1) + i] - SA[j * (mcols + 1) + i];
+  }
+  const any = (x0, z0, x1, z1) => {
+    const i0 = Math.max(0, Math.floor((x0 - X0) / mc)), i1 = Math.min(mcols, Math.ceil((x1 - X0) / mc)), j0 = Math.max(0, Math.floor((z0 - Z0) / mc)), j1 = Math.min(mrows, Math.ceil((z1 - Z0) / mc));
+    if (i1 <= i0 || j1 <= j0) return false;
+    const W1 = mcols + 1;
+    return SA[j1 * W1 + i1] - SA[j0 * W1 + i1] - SA[j1 * W1 + i0] + SA[j0 * W1 + i0] > 0;
+  };
+  /* ---------- tiles: key -> { L, ti, tj, st: 0 asked | 1 ready | 2 empty, mk (model key), d (the draw), vao, vb, n, used } */
+  const tiles = new Map(), I3 = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  const key = (L, ti, tj) => (L * 65536 + (tj + 32768)) * 65536 + (ti + 32768);
+  const sizeOf = L => ICE_N * ICE_S0 * Math.pow(2, L);
+  let gpuPts = 0, inflight = 0, frameN = 0;
+  const CAP = 3e6, MAXQ = 10;
+  const st = { ms: 0, dots: 0, tiles: 0, built: 0, cached: 0, want: 0, pts: 0, worker: false };
+  /* a built tile -> a model with its four levels injected (one VBO, four prefixes) */
+  function upload(t, bytes, counts) {
+    const vao = gl.createVertexArray(), vb = gl.createBuffer();
+    gl.bindVertexArray(vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, vb);
+    gl.bufferData(gl.ARRAY_BUFFER, bytes, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 16, 0);
+    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 4, gl.BYTE, true, 16, 12);
+    gl.bindVertexArray(null);
+    const T = sizeOf(t.L), s = T / ICE_N, pts = new Float32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength >> 2);
+    const mk = 'lm_ice_' + t.L + '_' + t.ti + '_' + t.tj;
+    MD.registerModel(mk, () => ({ parts: [{ name: 'ice', label: 'Sea ice', prims: [window.GEO.line([[0, -.5, 0], [T, 3, T]], { pts: false })] }] }), { lods: [s, 2 * s, 4 * s, 8 * s] });
+    const e = MD.get(mk), P = e.parts[0];
+    P.clouds = [0, 1, 2, 3].map(k => ({ vao, vb, n: counts[k], sp: s * Math.pow(2, k), pts }));
+    t.vao = vao; t.vb = vb; t.n = counts[0]; t.mk = mk; t.st = 1;
+    t.d = { key: mk, T: [t.ti * T, 0, t.tj * T], R: I3, st: {}, tint: 'neutral', alpha: .29, bright: 3.2, dotSpacing: 5.2 };
+    gpuPts += t.n; MD.stats.points += t.n; MD.stats.gpuMB += t.n * 16 / 1048576;
+  }
+  function drop(k, t) {
+    if (t.st === 1) {
+      gl.deleteVertexArray(t.vao); gl.deleteBuffer(t.vb);
+      MD.entries.delete(t.mk); MD.factories.delete(t.mk); if (MD.opts) MD.opts.delete(t.mk);
+      gpuPts -= t.n; MD.stats.points -= t.n; MD.stats.gpuMB -= t.n * 16 / 1048576;
+    }
+    tiles.delete(k);
+  }
+  function landed(t, r) {
+    if (!r || !tiles.has(t.k)) return;
+    if (r.empty || !r.bytes) { t.st = 2; return; }
+    upload(t, r.bytes, r.counts); st.built++;
+    // the least recently drawn tiles go when the GPU share is spent (never the coarse ones: they cover everything)
+    if (gpuPts > CAP) {
+      const list = [...tiles.values()].filter(q => q.st === 1 && q.L < ICE_LMAX - 2).sort((p, q) => p.used - q.used);
+      for (const q of list) { if (gpuPts <= CAP * .85) break; if (frameN - q.used > 30) drop(q.k, q); }
+    }
+  }
+  /* the builder: a module worker, or the main thread within a budget when workers are not there */
+  let W = null;
+  const pending = new Map(), queue = [];
+  try {
+    W = new Worker(new URL('../world/ice_worker.js', import.meta.url), { type: 'module' });
+    W.postMessage({ init: { spec, W: map.W, H: map.H, cell: map.cell, cols: map.cols, rows: map.rows, heights: map.heights, N: ICE_N, S0: ICE_S0, LMAX: ICE_LMAX } });
+    W.onmessage = e => { const m = e.data, t = pending.get(m.key); pending.delete(m.key); inflight--; if (t) landed(t, m); };
+    W.onerror = e => {
+      console.warn('landmarks: ice worker failed, building on the main thread', e.message || e);
+      W = null; inflight = 0;
+      for (const t of pending.values()) queue.push(t);
+      pending.clear();
+    };
+    st.worker = true;
+  } catch (e) { W = null; }
+  let tileFn = null, loading = false;
+  const ask = (L, ti, tj) => {
+    const k = key(L, ti, tj);
+    if (tiles.has(k)) return;
+    const t = { k, L, ti, tj, st: 0, used: frameN };
+    tiles.set(k, t);
+    if (W) { pending.set(k, t); inflight++; W.postMessage({ key: k, tile: [L, ti, tj] }); }
+    else queue.push(t);
+  };
+  function syncBuild(budget) {
+    if (!queue.length) return;
+    if (!tileFn) { if (!loading) { loading = true; import('../world/ice.js').then(m => { tileFn = m.iceTile; }); } return; }
+    const t0 = performance.now();
+    while (queue.length && performance.now() - t0 < budget) { const t = queue.shift(); landed(t, tileFn(IM, t.L, t.ti, t.tj, ICE_N, ICE_S0, ICE_LMAX) || { empty: true }); }
+  }
+  // the coarse tiles at once: the far view, and what stands in for everything finer
+  const X1 = -X0, Z1 = -Z0;
+  for (let L = ICE_LMAX; L >= ICE_LMAX - 2; L--) {
+    const T = sizeOf(L);
+    for (let tj = Math.floor(Z0 / T); tj * T < Z1; tj++) for (let ti = Math.floor(X0 / T); ti * T < X1; ti++) if (any(ti * T, tj * T, (ti + 1) * T, (tj + 1) * T)) ask(L, ti, tj);
+  }
+
+  /* ---------- strategic hairlines: the limit of the ships' water, the fast-ice edge ---------- */
+  let edgeB = null, fastB = null;
+  function edges() {
+    if (edgeB !== null || !R.wire) return;
+    edgeB = fastB = undefined;
+    try {
+      const cg = map.iceSpec ? null : null; void cg;
+      const cell = 200, cols = Math.round(map.W / cell) + 1, rows = Math.round(map.H / cell) + 1;
+      const blocked = new Float32Array(cols * rows), fast = new Float32Array(cols * rows);
+      for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+        const x = X0 + i * cell, z = Z0 + j * cell, c = map.ice(x, z), wet = hRaw(x, z) < 0;
+        blocked[j * cols + i] = wet && c >= 2 ? 1 : 0;
+        fast[j * cols + i] = wet && c >= 3 ? 1 : 0;
+      }
+      const seg = (G2) => {
+        const out = [];
+        for (const lv of G2) for (const pl of lv.lines) for (let k = 0; k + 3 < pl.length; k += 2) out.push(pl[k], .5, pl[k + 1], pl[k + 2], .5, pl[k + 3]);
+        return new Float32Array(out);
+      };
+      import('../engine/contours.js').then(C => {
+        const o = { cols, rows, cell, x0: X0, z0: Z0, levels: [.5], tol: 40, smooth: 2, minLen: 900, blur: 1 };
+        const a = seg(C.extractContours(Object.assign({ heights: blocked }, o))), b = seg(C.extractContours(Object.assign({ heights: fast }, o)));
+        edgeB = a.length ? R.wire.batch(a) : null; fastB = b.length ? R.wire.batch(b) : null;
+      }).catch(e => console.warn('landmarks: ice edges', e));
+    } catch (e) { console.warn('landmarks: ice edges', e); }
+  }
+
+  /* ---------- the frame: the walk, the draws ---------- */
+  const want = [], SPLIT = 330;
+  function draw(C, DK) {
+    const t0 = performance.now();
+    frameN++;
+    if (R.pcOff) { st.dots = 0; return st; }
+    const cam = game.camera, e = cam.eye, ex = e[0], ey = e[1], ez = e[2], hEye = Math.max(1, ey - .3), fl = C.fl1080;
+    // from high up the plates read as surfaces and the cracks and leads as lines: finer tiles, brighter returns
+    const altK = ss(2000, 25000, hEye), split = SPLIT * Math.max(.6, Math.min(1.4, DK)) * (1 - .3 * altK), boost = 1 + .7 * altK;
+    let drawn = 0, pts = 0;
+    want.length = 0;
+    const walk = (L, ti, tj) => {
+      const T = sizeOf(L), x0 = ti * T, z0 = tj * T, x1 = x0 + T, z1 = z0 + T;
+      if (!any(x0, z0, x1, z1)) return;
+      const t = tiles.get(key(L, ti, tj));
+      if (!t) { want.push([L, ti, tj, 0]); return; }
+      t.used = frameN;
+      if (t.st !== 1) return;
+      if (view(C, (x0 + x1) / 2, 1, (z0 + z1) / 2, T * .7072 + 3) < 0) return;
+      const qx = ex < x0 ? x0 : ex > x1 ? x1 : ex, qz = ez < z0 ? z0 : ez > z1 ? z1 : ez;
+      const dmin = Math.max(1, Math.hypot(qx - ex, hEye, qz - ez));
+      // on-screen size, the grazing ones counted smaller (they need fewer returns)
+      const px = T * fl / dmin * Math.sqrt(Math.max(.18, hEye / dmin));
+      if (L > 0 && px > split) {
+        // the children when all four are built (or empty); else this tile stands in, and the missing ones are asked for
+        const c = 2 * ti, d = 2 * tj, Tc = T / 2;
+        let ready = true;
+        for (let q = 0; q < 4; q++) {
+          const a = c + (q & 1), b = d + (q >> 1);
+          if (!any(a * Tc, b * Tc, (a + 1) * Tc, (b + 1) * Tc)) continue;
+          const u = tiles.get(key(L - 1, a, b));
+          if (!u) { want.push([L - 1, a, b, dmin]); ready = false; }
+          else { u.used = frameN; if (u.st === 0) ready = false; }
+        }
+        if (ready) { for (let q = 0; q < 4; q++) walk(L - 1, c + (q & 1), d + (q >> 1)); return; }
+      }
+      // a plate seen low: its returns thinner and dimmer (the renderer lights a face seen edge-on as a hull's rim, which on
+      // a sheet of ice would read as a white band along the horizon)
+      // (the renderer's facing floor is .3: past that the spacing grows with 1 / sqrt(sin) so the returns keep their
+      // ~30 px^2 each on screen however low the view)
+      const sg = hEye / dmin, kg = ss(.04, .38, sg);
+      // the renderer keeps a return with (spacing^2 * max(facing, floor)) / dotSpacing^2, the floor 1 for a part under
+      // ~140 px falling to .3 past ~600 px: the dot spacing asked is set so every tile keeps ~27 px^2 a return on
+      // screen whatever its size and however low it is seen
+      const pc = Math.max(1, Math.hypot((x0 + x1) / 2 - ex, hEye, (z0 + z1) / 2 - ez)), kb = Math.min(1, Math.max(0, (T * .72 * fl / pc - 140) / 460));
+      const floor = 1 - .7 * kb * kb * (3 - 2 * kb), fs = Math.max(.02, sg);
+      t.d.bright = 3.2 * (.5 + .5 * kg) * boost; t.d.dotSpacing = 5.2 * Math.sqrt(Math.max(fs, floor) / fs);
+      // (and a small tile, which the renderer never thins much, seen low takes a coarser level)
+      t.d.lodBias = sg < .07 ? 2 : sg < .16 ? 1 : 0;
+      R.draw(t.d); drawn++; pts += t.n;
+    };
+    const TR = sizeOf(ICE_LMAX);
+    for (let tj = Math.floor(Z0 / TR); tj * TR < Z1; tj++) for (let ti = Math.floor(X0 / TR); ti * TR < X1; ti++) walk(ICE_LMAX, ti, tj);
+    // ask for the missing tiles, the nearest first, a few in flight at a time
+    if (want.length) {
+      want.sort((a, b) => a[3] - b[3]);
+      for (let k = 0; k < want.length && (W ? inflight < MAXQ : queue.length < 6); k++) ask(want[k][0], want[k][1], want[k][2]);
+    }
+    if (!W && queue.length) syncBuild(2.5 * Math.max(.5, DK));
+    // the ice edges as hairlines, from the strategic layer's map band up and in the Orbital style
+    const O = game.orbital, kMap = O ? O.kMap || 0 : 0, orb = R.style === 'orbital';
+    if ((kMap > .001 || orb) && R.wire) {
+      edges();
+      if (edgeB) R.wire.add(edgeB, { a: .5 * (orb ? Math.max(kMap, .7) : kMap), rgb: [246 / 255, 245 / 255, 242 / 255] });
+      if (fastB) R.wire.add(fastB, { a: .26 * (orb ? Math.max(kMap, .7) : kMap), rgb: [246 / 255, 245 / 255, 242 / 255] });
+    }
+    st.dots = pts; st.tiles = drawn; st.cached = tiles.size; st.want = want.length; st.pts = gpuPts;
+    st.ms = st.ms * .9 + (performance.now() - t0) * .1;
+    return st;
+  }
+
+  /* ---------- snow: flakes in two boxes round the lens (near, and a wider one while the lens is low), falling with the
+     wind, analytic in time (game.seaT) ---------- */
+  const SN = [{ B: 46, n: 900, v: 1.1, sz: -.012 }, { B: 420, n: 900, v: 1.1, sz: 1 }];
+  function snow(C, sink, k) {
+    if (!(k > 0)) return 0;
+    const e = C.e, t = game.seaT, W = (game.weather && game.weather.wind) || (map.weather && map.weather.wind) || [0, 0];
+    const alt = e[1] - Math.max(0, R.terrain ? R.terrain.heightAt(e[0], e[2]) : 0);
+    let n = 0;
+    for (let li = 0; li < SN.length; li++) {
+      const L = SN[li], B = L.B;
+      const vis = li === 0 ? 1 - ss(150, 600, alt) : 1 - ss(900, 2600, alt);
+      if (vis <= .01) continue;
+      const cnt = Math.round(L.n * k * vis);
+      for (let i = 0; i < cnt; i++) {
+        const u = hsh(i, 311 + li), v = hsh(i, 313 + li), w = hsh(i, 317 + li), sp = .75 + .5 * hsh(i, 319 + li);
+        // position in the box: wrapped round the lens
+        let x = u * B + W[0] * t * sp + Math.sin(t * .7 + i) * .6, y = v * B - L.v * sp * t, z = w * B + W[1] * t * sp + Math.cos(t * .6 + i * 1.3) * .6;
+        x = e[0] + ((((x - e[0]) % B) + B * 1.5) % B) - B / 2;
+        y = e[1] + ((((y - e[1]) % B) + B * 1.5) % B) - B / 2;
+        z = e[2] + ((((z - e[2]) % B) + B * 1.5) % B) - B / 2;
+        const dx = x - e[0], dy = y - e[1], dz = z - e[2], zc = dx * C.f[0] + dy * C.f[1] + dz * C.f[2];
+        if (zc < 1.5) continue;
+        const d = Math.sqrt(dx * dx + dy * dy + dz * dz), a = .55 * vis * (1 - d / (B * .75));
+        if (a < .03) continue;
+        sink.dot(x, y, z, li === 0 ? L.sz : (d < 150 ? 2 : 1), 236, 238, 236, a);
+        n++;
+      }
+    }
+    return n;
+  }
+  console.log(`ONIKS: sea ice on ${map.id}: ${tiles.size} coarse tiles asked, ${W ? 'built in a worker' : 'built on the main thread'}`);
+  return { draw, snow, stats: st, tiles, model: IM, dispose() { if (W) W.terminate(); for (const [k, t] of [...tiles]) drop(k, t); } };
+}
+
 /* ---------------------------------------------------------------- plumes */
 const PLUME = {
   steam: { rate: .8, life: 320, H: 520, tau: 60, climb: .8, r0: 30, grow: 8.5, B: .75, cap: 75, wk: .85, big: true, budget: 9000 },
@@ -183,17 +437,17 @@ export async function createLandmarks(game, ctx) {
   const built = new Map();
   const buildOnce = (key, spec) => { let m = built.get(key); if (!m) { const a = performance.now(); m = buildLandmark(spec, ground); built.set(key, m); stats.build += performance.now() - a; } return m; };
   const addBuild = (spec, i) => {
-    const key = 'lmb_' + map.id + '_' + i, lods = spacingFor(spec);
-    M.registerModel(key, () => buildOnce(key, spec), { lods });
+    const key = 'lmb_' + map.id + '_' + i, lods = spacingFor(spec), fac = () => buildOnce(key, spec);
+    M.registerModel(key, fac, { lods });
     M.registerModel(key + '_far', () => { const m = buildOnce(key, spec); return { parts: mergeParts(m.parts, spec.farParts || 3) }; }, { lods: [lods[2], lods[3], lods[3] * 2.5, lods[3] * 6] });
     const cx = spec.cx !== undefined ? spec.cx : spec.x, cz = spec.cz !== undefined ? spec.cz : spec.z;
     const cy = spec.cy !== undefined ? spec.cy : Math.max(0, ground(cx, cz));
     const d = { key: key + '_far', T: [spec.x, 0, spec.z], R: spec.hdg !== undefined ? attitude(spec.hdg, 0, 0) : I3, st: {}, tint: 'neutral', alpha: spec.alpha === undefined ? .9 : spec.alpha };
-    return addItem(d, spec.r, { cx, cy, cz, near: key, far: key + '_far', name: spec.name, spec });
+    return addItem(d, spec.r, { cx, cy, cz, near: key, far: key + '_far', name: spec.name, spec, fac, lods, lastNear: -1 });
   };
   const lit = [];                // settlements' windows and lamps
   plan.settlements.forEach((S, i) => {
-    S.kind = 'settlement'; S.base = settlementBase(S, ground); S.alpha = .62;
+    S.kind = 'settlement'; S.base = settlementBase(S, ground); S.alpha = S.alpha || .62;
     addBuild(S, 's' + i);
     const L = settlementLights(S, ground);
     lit.push({ S, windows: L.windows, lamps: L.lamps, cx: S.x, cz: S.z, r: S.r });
@@ -275,6 +529,7 @@ export async function createLandmarks(game, ctx) {
       const d = it.d;
       if (it.near) {
         d.key = dist - it.r < NEAR ? it.near : it.far;
+        if (d.key === it.near) it.lastNear = game.realT;
         // far off, a build thins to a haze of returns rather than a white blot
         const a0 = it.spec.alpha === undefined ? .9 : it.spec.alpha;
         d.alpha = a0 * (1 - .45 * ss(8000, 40000, dist));
@@ -529,17 +784,30 @@ export async function createLandmarks(game, ctx) {
     for (const Lt of lit) {
       const dist = view(C, Lt.cx, 20, Lt.cz, Lt.r);
       if (dist < 0 || dist > 110000) continue;
-      const W = Lt.windows, step = dist < 6000 ? 1 : dist < 15000 ? 2 : dist < 40000 ? 4 : 8, near = dist < 3500;
+      // a big town thins sooner (the city's districts hold tens of thousands of windows)
+      // the windows thin with the range so they stay points a few pixels apart (a wall's rooms are ~3 m apart), a big
+      // town sooner
+      const W = Lt.windows, city = W.length > 60000;
+      const step = city ? Math.max(1, Math.min(12, Math.floor(dist / 1300))) : dist < 6000 ? 1 : dist < 15000 ? 2 : dist < 40000 ? 4 : 8, near = dist < (city ? 2200 : 3500);
+      // near: additive (they glow); far: max blend, so a town's thousand windows never pile up into a blot. Straight into
+      // the effect streams (a city's windows are many)
+      const S = dist < (city ? 3500 : 7000) ? R.fx.sAdd : R.fx.sMax, ex = e[0], ey = e[1], ez = e[2], sz = near ? 2 : 1, af = dist < 30000 ? 1 : .8;
+      const nn = Math.ceil(W.length / (6 * step));
+      while (S.n + nn > S.cap) S.grow();
+      const F = S.f, B8 = S.b;
+      let sn = S.n;
       for (let i = 0; i < W.length; i += 6 * step) {
         const x = W[i], y = W[i + 1], z = W[i + 2], h = W[i + 3];
-        if (near && (e[0] - x) * W[i + 4] + (e[2] - z) * W[i + 5] < 0) continue;       // the wall faces away
-        const a = k * (.55 + .45 * h);
-        // near: additive (they glow); far: max blend, so a town's thousand windows never pile up into a blot
-        if (dist < 7000) sink.add(x, y, z, near ? 2 : 1, WARM[0], WARM[1], WARM[2], a > 1 ? 1 : a);
-        else sink.dot(x, y, z, 1, WARM[0], WARM[1], WARM[2], a * (dist < 30000 ? 1 : .8));
-        if (near && h > .82) sink.glow(x, y, z, -2.2, WARM[0], WARM[1], WARM[2], .1 * k);
+        if (near && (ex - x) * W[i + 4] + (ez - z) * W[i + 5] < 0) continue;       // the wall faces away
+        let a = k * (.55 + .45 * h) * af; if (a > 1) a = 1;
+        const so = sn * 5, sq = so * 4 + 16;
+        F[so] = x - ex; F[so + 1] = y - ey; F[so + 2] = z - ez; F[so + 3] = sz;
+        B8[sq] = WARM[0]; B8[sq + 1] = WARM[1]; B8[sq + 2] = WARM[2]; B8[sq + 3] = a * 255;
+        sn++;
+        if (near && h > .82) { S.n = sn; sink.glow(x, y, z, -2.2, WARM[0], WARM[1], WARM[2], .1 * k); }
         dots++;
       }
+      S.n = sn;
       const Lp = Lt.lamps;
       for (let i = 0; i < Lp.length; i += 6 * (dist < 15000 ? 1 : dist < 40000 ? 2 : 4)) {
         if (dist < 7000) sink.add(Lp[i], Lp[i + 1], Lp[i + 2], dist < 2500 ? -.8 : 1, 255, 222, 176, .6 * k);
@@ -551,16 +819,26 @@ export async function createLandmarks(game, ctx) {
     return dots;
   }
 
+  /* sea ice and snow (the Arctic map) */
+  let ice = null;
+  if (map.iceModel) { try { ice = createIceLayer(game, map, R, view); stats.ice = ice.stats; } catch (e) { console.warn('landmarks: sea ice', e); } }
+  const snowK = (map.weather && map.weather.snow) || 0;
+
   let DK = 1, minLight = 0, lsink = null;
   stats.init = Math.round(performance.now() - t0);
   console.log(`ONIKS: landmarks on ${map.id}: ${items.length} sites, ${plan.settlements.length} settlements, ${ships.length} ships, ${lights.length} lights, ${beams.length} lighthouses, ${plumes.length} plumes; plan ${plan.ms} ms, init ${stats.init} ms` + (plan.notes.length ? ' · ' + plan.notes.join('; ') : ''));
 
   return {
     name: 'landmarks', priority: (PRI.render || 10) + 2,
-    plan, items, ships, stats, lights, beams, plumes, flares, falls,
+    plan, items, ships, stats, lights, beams, plumes, flares, falls, get ice() { return ice; },
     update() {
       // pre-sample one model's coarse levels a frame (no stall at the start)
       if (warmI < warmList.length) { const k = warmList[warmI++]; try { if (M.has(k)) M.warm(k); } catch (e) { console.warn('landmarks: warm ' + k, e); } }
+      // a big build's near model (its fine levels, sampled as the lens came close) is let go 40 s after the lens left it:
+      // a flight low over a whole city never piles up its districts' finest dots on the GPU
+      if (((game.frameN || 0) & 127) === 0) for (const it of items) {
+        if (it.lastNear > 0 && game.realT - it.lastNear > 40 && it.r > 500) { try { M.registerModel(it.near, it.fac, { lods: it.lods }); } catch (e) { /* kept */ } it.lastNear = -1; }
+      }
     },
     draw3d(frame) {
       const a = performance.now();
@@ -582,6 +860,7 @@ export async function createLandmarks(game, ctx) {
       dots += drawWindows(C, sink, night);
       dots += drawFlares(C, sink, night);
       dots += drawFalls(C, sink, night);
+      if (ice) { try { ice.draw(C, DK); if (snowK) dots += ice.snow(C, sink, snowK * DK); } catch (e) { console.warn('landmarks: ice', e); ice = null; } }
       stats.dots = dots;
       stats.ms = stats.ms * .9 + (performance.now() - a) * .1;
     },

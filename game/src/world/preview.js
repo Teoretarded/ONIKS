@@ -5,7 +5,8 @@
    renderPreview(map, canvas, opts) -> { scale, ox, oy, toCanvas(x, z) -> [px, py], toWorld(px, py) -> [x, z] }
    opts: { fit: 'contain'|'cover' (contain), pad: px (12), labels: true, places: false, roads: false,
            objectives: true, spawns: true, contours: true, font: 'Geist Mono', dpr: 1 (canvas px per css px
-           for text and marks), bg: true, view: [x0, z0, x1, z1] world box to frame instead of the whole map }
+           for text and marks), bg: true, view: [x0, z0, x1, z1] world box to frame instead of the whole map,
+           ice: false to leave out the sea ice of a map that has it }
    Draws into the canvas's current pixel size. ~15-60 ms at 640x360. */
 
 const LIME = '#C6F432', CORAL = '#FF6A3D', BG = [11, 12, 10];
@@ -78,6 +79,24 @@ export function renderPreview(map, canvas, opts) {
   let cstep = steps[steps.length - 1]; for (const st of steps) if (hmax / st <= 14) { cstep = st; break; }
   const levels = opts.contours === false ? [] : [-5, -10, -20, -50, -100, -200, -400];
   const dens = opts.density || 1;
+  // sea ice: the analytic model at the pixel's footprint
+  const iceM = opts.ice !== false && map.iceModel ? map.iceModel() : null, IO = {};
+  const iceAt = (X, Y) => { iceM.at((X + 0.5 - ox) / scale, (oy - (Y + 0.5)) / scale, mpp, IO); return IO.ice; };
+  // the harbour city's districts: > 0 on a block (its density), < 0 on a street, 0 outside
+  const city = map.extra && map.extra.districts ? map.extra.districts : null;
+  const cityAt = (x, z) => {
+    let best = 0;
+    for (const d of city) {
+      const c = Math.cos(d.rot), s = Math.sin(d.rot), dx = x - d.x, dz = z - d.z, u = dx * c - dz * s, v = dx * s + dz * c;
+      const e = (u / d.a) ** 2 + (v / d.b) ** 2; if (e >= 1) continue;
+      const k = (1 - e) * (d.kind === 'centre' ? 1 : d.kind === 'mikro' ? .85 : d.kind === 'industrial' ? .7 : .6);
+      const bu = d.kind === 'centre' ? 150 : d.kind === 'private' ? 110 : 240, bv = d.kind === 'centre' ? 110 : d.kind === 'private' ? 80 : 180;
+      const su = ((u % bu) + bu) % bu, sv = ((v % bv) + bv) % bv;
+      if (mpp < 40 && (su < 18 || sv < 14)) return -1;
+      if (k > best) best = k;
+    }
+    return Math.min(1, best * 1.4);
+  };
   for (let y = 0; y < bh; y++) {
     for (let x = 0; x < bw; x++) {
       const k = (y + 1) * SW + x + 1, h = HS[k];
@@ -100,7 +119,17 @@ export function renderPreview(map, canvas, opts) {
           v = Math.max(0.03, Math.min(1.1, v));
           // stipple: brighter ground returns more dots
           if (r1 < (0.3 + 0.55 * v) * dens) b = 0.26 + 0.74 * v * (0.8 + 0.2 * r2);
+          // a built-up district (the harbour city): dense bright blocks between the dark lines of its streets
+          if (city) {
+            const q = cityAt((X + 0.5 - ox) / scale, (oy - (Y + 0.5)) / scale);
+            if (q > 0 && r1 < 0.35 + 0.6 * q) b = Math.max(b, q * (0.5 + 0.4 * r2));
+            else if (q < 0) b = Math.min(b, 0.18);
+          }
         }
+      } else if (iceM && iceAt(X, Y) > 0) {
+        // sea ice (the Arctic map): flat bright plates of returns, the leads between them dark
+        const v = IO.b;
+        if (r1 < (0.35 + 0.6 * v) * dens) b = 0.22 + 0.7 * v * (0.85 + 0.15 * r2);
       } else {
         // sea: sparse dim returns, denser over the shallows and along the surf; depth contours dotted
         // (only where the floor really slopes: flat noisy floors would scribble)
