@@ -566,7 +566,7 @@ export function stepProjectiles(sim) {
 }
 
 function stepOne(sim, p) {
-  const P = p.P, map = sim.map;
+  const P = p.P, map = sim.map, vert = P.vert || 0, boost = P.boost || 0;
   p.age += DT;
   if (P.mode === 'ballistic') {
     const b = p.ball, a = Math.min(p.age, b.T);
@@ -599,7 +599,7 @@ function stepOne(sim, p) {
       // lead: the target's position plus its velocity times the time to go (simple lead: the time at which a round at
       // this speed meets a target keeping its velocity, |r + v t| = s t), plus the track error
       const rx = tgt.pos[0] - p.pos[0], ry = tgt.pos[1] - p.pos[1], rz = tgt.pos[2] - p.pos[2];
-      const d = Math.sqrt(rx * rx + ry * ry + rz * rz), sp = Math.max(200, p.age < (P.boost || 0) ? P.speed * .8 : p.spd);
+      const d = Math.sqrt(rx * rx + ry * ry + rz * rz), sp = Math.max(200, p.age < boost ? P.speed * .8 : p.spd);
       const vx = (tgt.pos[0] - tgt.prev[0]) / DT, vy = (tgt.pos[1] - tgt.prev[1]) / DT, vz = (tgt.pos[2] - tgt.prev[2]) / DT;
       const qa = vx * vx + vy * vy + vz * vz - sp * sp, qb = 2 * (rx * vx + ry * vy + rz * vz);
       let tgo = d / sp;
@@ -633,13 +633,13 @@ function stepOne(sim, p) {
     else if (p.locked && !tgt) p.locked = false;
   }
   // speed
-  if (p.age < (P.boost || 0)) p.spd = p.spd0 + (P.speed - p.spd0) * ease(p.age / P.boost);
+  if (p.age < boost) p.spd = p.spd0 + (P.speed - p.spd0) * ease(p.age / P.boost);
   else p.spd = P.speed;
   // steering
   const dx = p.aim[0] - p.pos[0], dz = p.aim[2] - p.pos[2], dist = Math.sqrt(dx * dx + dz * dz);
-  if (p.age >= (P.vert || 0)) {
+  if (p.age >= vert) {
     let hT = Math.atan2(dx, dz);
-    const bend = ease((p.age - (P.vert || 0)) / 2.5);           // gentle, round pitch-over after the vertical rise
+    const bend = ease((p.age - vert) / 2.5);           // gentle, round pitch-over after the vertical rise
     // terrain ahead (2 s and 4 s, and the next 2 km of the track; refreshed 5x a second): everything keeps clear of
     // the ground until the last stretch
     const g0 = ground(map, p.pos[0], p.pos[2]);
@@ -660,7 +660,7 @@ function stepOne(sim, p) {
         if (fresh) p.gFl = clearAngle(p, 25, dist - 200);         // the floor 5x a second (the pitch rate smooths it)
         if (p.gFl > pT) pT = Math.min(p.gFl, 1.2);
       }
-      p.phase = p.age < (P.boost || 0) ? 'climb' : dist < 3000 ? 'final' : 'cruise';
+      p.phase = p.age < boost ? 'climb' : dist < 3000 ? 'final' : 'cruise';
     } else {
       const g = gA;
       const final = dist < P.finalDist;
@@ -683,7 +683,7 @@ function stepOne(sim, p) {
       if (fresh) p.gFl = P.look === 0 ? -9 : clearAngle(p, clr, dist - (dist < near ? 250 : 150));   // look: 0 switches it off (experiments)
       if (p.gFl > pT) pT = Math.min(p.gFl, P.pitchMax + .25);
     }
-    if (p.age < (P.vert || 0) + .01 && P.vert) p.phase = 'climb';
+    if (p.age < vert + .01 && P.vert) p.phase = 'climb';
     if (p.missed) { hT = p.hdg; pT = Math.min(pT, -.3); }
     // turn-rate limit, and the lateral-acceleration limit (gMax, m/s²) as a turn rate at this speed
     const gl = P.gMax ? P.gMax / Math.max(60, p.spd) : 99;
@@ -698,7 +698,7 @@ function stepOne(sim, p) {
     p.sep = true; p.st.booster = false;
     sim.emit('booster_sep', { proj: p.id, kind: p.kind, side: p.side, pos: p.pos.slice(), vel: p.vel.slice() });
   }
-  p.st.wing = ease((p.age - (P.vert || 0) - .5) / 1.5); p.st.fin = ease((p.age - (P.vert || 0)) / .8); p.st.cover = p.age < .3; p.st.inlet = p.st.wing;
+  p.st.wing = ease((p.age - vert - .5) / 1.5); p.st.fin = ease((p.age - vert) / .8); p.st.cover = p.age < .3; p.st.inlet = p.st.wing;
   // resolution: by geometry only. Interceptors (proximity fuze, PROJ.burst) go off when their path this tick passes
   // within the burst radius of the target's body; strike rounds hit when their path enters the target's part boxes.
   // A round that passes its target flies on (no circling back): an interceptor ends in the air, a strike round goes
@@ -715,7 +715,7 @@ function stepOne(sim, p) {
   }
   if (p.pos[1] < g + 1) {
     // interceptors skim, they never fly into the ground; strike rounds in their final dive (or past their target) do
-    if (!icpt && ((P.threat && p.age > (P.vert || 0) + 2 && p.phase === 'final') || p.missed || (!P.threat && p.age > 1.5))) {
+    if (!icpt && ((P.threat && p.age > vert + 2 && p.phase === 'final') || p.missed || (!P.threat && p.age > 1.5))) {
       let why = p.missed || 'terrain';
       if (!p.missed && tgt && p.locked) {
         // down short of a target ahead: the path met the surface before the body
