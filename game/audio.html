@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>ONIKS · Audio</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+  :root { --bg: #0B0C0A; --lime: #C6F432; --coral: #FF6A3D; --dim: rgba(255,255,255,.62); --faint: rgba(255,255,255,.36); --hair: rgba(255,255,255,.14);
+    --sans: 'Geist', 'Segoe UI', sans-serif; --mono: 'Geist Mono', Consolas, monospace; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: #fff; font-family: var(--mono); -webkit-font-smoothing: antialiased; }
+  body { padding: 34px 40px 60px; min-width: 1280px; }
+  .kick { display: flex; gap: 12px; align-items: center; font: 400 12.5px var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--dim); }
+  .kick i { width: 7px; height: 7px; background: var(--lime); flex: none; }
+  .kick b { color: #fff; font-weight: 500; }
+  .grid { display: grid; grid-template-columns: 560px 470px 1fr; gap: 36px; margin-top: 26px; align-items: start; }
+  h4 { font: 400 10.5px var(--mono); letter-spacing: .08em; color: var(--faint); margin: 22px 0 9px; text-transform: uppercase; font-weight: 400; }
+  h4:first-child { margin-top: 0; }
+  .row { display: grid; grid-template-columns: 200px repeat(4, 1fr); gap: 5px; align-items: center; height: 25px; }
+  .row .nm { font: 500 10.5px var(--mono); letter-spacing: .05em; text-transform: uppercase; color: rgba(255,255,255,.7); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .nm span { color: var(--faint); }
+  button, .chip { font: 500 10.5px/1 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); background: transparent; border: 1px solid var(--hair);
+    padding: 5px 7px 4px; cursor: pointer; user-select: none; white-space: nowrap; }
+  button:hover, .chip:hover { color: #fff; border-color: rgba(255,255,255,.34); }
+  button:active { border-color: var(--lime); color: var(--lime); }
+  .chip.on { color: #fff; border-color: rgba(198,244,50,.6); }
+  .chip.on::before { content: ''; display: inline-block; width: 6px; height: 6px; background: var(--lime); margin-right: 7px; vertical-align: 0; }
+  .wrap { display: flex; flex-wrap: wrap; gap: 5px; }
+  .ctl { display: grid; grid-template-columns: 110px 1fr; gap: 8px 12px; align-items: center; font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); }
+  input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 14px; background: transparent; cursor: pointer; }
+  input[type=range]::-webkit-slider-runnable-track { height: 1px; background: rgba(255,255,255,.28); }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 8px; height: 8px; margin-top: -4px; background: var(--lime); border: 0; }
+  canvas { display: block; background: #0B0C0A; border: 1px solid var(--hair); }
+  .meter { margin-top: 14px; font: 400 11px/1.75 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .meter b { color: #fff; font-weight: 400; }
+  .meter .l { color: var(--lime); }
+  .meter .c { color: var(--coral); }
+  .bar { position: relative; height: 5px; background: rgba(255,255,255,.08); margin: 6px 0 10px; }
+  .bar i { position: absolute; left: 0; top: 0; bottom: 0; background: #fff; }
+  .bar i.hold { background: none; border-right: 2px solid var(--lime); }
+  .res { margin-top: 10px; font: 400 11px/1.75 var(--mono); letter-spacing: .04em; color: var(--dim); white-space: pre; font-variant-numeric: tabular-nums; min-height: 20px; }
+  .res b { color: var(--lime); font-weight: 400; }
+  .note { font: 400 11.5px/1.5 var(--sans); color: rgba(255,255,255,.42); margin-top: 8px; max-width: 460px; }
+  .lock { position: fixed; left: 50%; top: 18px; transform: translateX(-50%); font: 500 11px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: #0B0C0A; background: var(--lime); padding: 6px 10px 5px; }
+  .lock.off { display: none; }
+</style></head>
+<body>
+<div class="lock" id="lock">Click anywhere to start sound</div>
+<div class="kick"><i></i><b>ONIKS</b><span>Audio · audition</span></div>
+
+<div class="grid">
+  <div id="left"></div>
+  <div>
+    <canvas id="top" width="470" height="470"></canvas>
+    <div class="meter" id="meter"></div>
+    <h4>Tests</h4>
+    <div class="wrap"><button id="salvo">Salvo test · 10 s</button><button id="worst">Worst case · point blank</button><button id="measure">Level sweep · 50 m</button></div>
+    <div class="res" id="res"></div>
+    <h4>Thunder after lightning</h4>
+    <div class="wrap" id="thunder"></div>
+    <div class="res" id="tres"></div>
+  </div>
+  <div id="right"></div>
+</div>
+
+<script type="module">
+import { createAudio, db, SPEC } from './src/audio/index.js';
+
+const $ = id => document.getElementById(id);
+const DEG = Math.PI / 180, TAU = Math.PI * 2;
+
+/* ---------------- a fake game: camera, sim, map ---------------- */
+const cam = { eye: [0, 40, 0], target: [0, 0, 400], f: [0, 0, 1], r: [1, 0, 0], u: [0, 1, 0], followFn: null };
+const setCam = h => {
+  cam.eye = [0, h, 0];
+  const p = Math.min(80, 8 + h / 60) * DEG;       // look a little down; straight down when high
+  cam.f = [0, -Math.sin(p), Math.cos(p)]; cam.r = [1, 0, 0]; cam.u = [0, Math.cos(p), Math.sin(p)];
+  cam.target = [0, 0, h / Math.tan(p)];
+};
+let surface = 'coast';
+const map = {
+  weather: { kind: 'calm', wind: [6, 3], sea: .35 },
+  h(x, z) { return surface === 'sea' ? -30 : surface === 'land' ? 20 : (z > 60 ? -20 : 8); },
+  water(x, z) { return this.h(x, z) < 0; },
+};
+const sim = { t: 0, units: new Map(), projectiles: new Map(), weather: { kind: 'calm', wind: [6, 3], sea: .35, squalls: [] } };
+const game = { camera: cam, sim, map, side: 'coast', timeRate: 1, paused: false, selection: new Set() };
+setCam(40);
+
+const audio = createAudio(game);
+audio.init(game);
+window.AUDIO = audio; window.GAME = game;
+
+let nextId = 1000;
+const DOM = { tel: 'land', radar: 'land', pantsir: 'land', transloader: 'land', ddg: 'sea', carrier: 'sea', helo: 'air', fighter: 'air', drone: 'air' };
+function unit(type, pos, o) {
+  const u = { id: nextId++, type, side: 'fleet', alive: true, dying: 0, pos: pos.slice(), prev: pos.slice(), hdg: 0, pitch: 0, speed: 0, def: { domain: DOM[type] || 'land' }, aboard: false, ...o };
+  sim.units.set(u.id, u); return u;
+}
+const SPEEDS = { oniks: 750, sm6: 1100, sam: 900, aam: 1200, tlam: 245, hellfire: 400, slam: 240, pdms: 1000 };
+const SEP = { oniks: 7, sm6: 6, sam: 2.4, aam: 3, tlam: 12, hellfire: 2.5, slam: 3, pdms: 3 };
+function proj(kind, pos, hdg, o) {
+  const p = { id: nextId++, kind, side: 'coast', alive: true, pos: pos.slice(), prev: pos.slice(), vel: [0, 30, 0], t0: sim.t, age: 0, hdg, pitch: Math.PI / 2,
+    P: { sepAt: SEP[kind], boost: SEP[kind], speed: SPEEDS[kind] || 600 }, vert: 1.4, life: 30, ...o };
+  sim.projectiles.set(p.id, p); return p;
+}
+
+/* the world ticks at the sim step so unit.prev -> unit.pos is one DT, like the real sim */
+const DT = .05; let acc = 0;
+const movers = [];              // fns(dt) for loops (orbiting helo etc.)
+function stepWorld(dt) {
+  for (const u of sim.units.values()) u.prev = u.pos.slice();
+  for (const p of sim.projectiles.values()) {
+    p.prev = p.pos.slice(); p.age += dt;
+    if (p.fly) { p.fly(p, dt); continue; }
+    const spd = p.age < p.P.boost ? 30 + (p.P.speed - 30) * Math.min(1, p.age / p.P.boost) : p.P.speed;
+    if (p.age > p.vert) p.pitch = Math.max(.02, p.pitch - dt * .45);
+    p.vel = [spd * Math.sin(p.hdg) * Math.cos(p.pitch), spd * Math.sin(p.pitch), spd * Math.cos(p.hdg) * Math.cos(p.pitch)];
+    for (let k = 0; k < 3; k++) p.pos[k] += p.vel[k] * dt;
+    if (p.age >= p.P.sepAt && !p.sepDone) { p.sepDone = true; audio.onEvent({ type: 'booster_sep', t: sim.t, proj: p.id, kind: p.kind, pos: p.pos.slice() }); }
+    if (p.age > p.life) { p.alive = false; }
+  }
+  for (const [id, p] of sim.projectiles) if (!p.alive) sim.projectiles.delete(id);
+  for (const m of movers) m(dt);
+  sim.t += dt;
+}
+
+/* ---------------- positions ---------------- */
+const at = (d, brg, y) => [Math.sin(brg * DEG) * d, y === undefined ? 2 : y, Math.cos(brg * DEG) * d];
+const air = (d, brg) => at(d, brg, Math.min(d * .35, 3000) + 40);
+const ev = (o) => audio.onEvent({ t: sim.t, ...o });
+
+/* ---------------- event rows: 50 m, 1 km, 10 km, 30 km ---------------- */
+const DISTS = [[50, '50 m'], [1000, '1 km'], [10000, '10 km'], [30000, '30 km']];
+const EVENTS = [
+  ['Launches', null],
+  ['launch · 3M55 <span>TEL cold</span>', d => { const pos = at(d, 20, 6); const p = proj('oniks', pos, 20 * DEG); ev({ type: 'launch', kind: 'oniks', proj: p.id, pos, side: 'coast' }); }],
+  ['launch · SM-6 <span>VLS</span>', d => { const pos = at(d, 20, 9); const p = proj('sm6', pos, 200 * DEG, { vert: 2 }); ev({ type: 'launch', kind: 'sm6', proj: p.id, pos, side: 'fleet' }); }],
+  ['launch · 57E6 <span>Pantsir</span>', d => { const pos = at(d, 20, 4); const p = proj('sam', pos, 20 * DEG, { vert: 0, pitch: .5 }); ev({ type: 'launch', kind: 'sam', proj: p.id, pos, side: 'coast' }); }],
+  ['launch · AIM-120 <span>rail</span>', d => { const pos = air(d, 20); const p = proj('aam', pos, 20 * DEG, { vert: 0, pitch: 0 }); ev({ type: 'launch', kind: 'aam', proj: p.id, pos, side: 'fleet' }); }],
+  ['booster sep', d => ev({ type: 'booster_sep', pos: air(d, 20), kind: 'oniks', proj: -1 })],
+  ['Guns', null],
+  ['gunfire · 5"/62', d => ev({ type: 'launch', kind: 'shell', pos: at(d, 20, 12), proj: -2 })],
+  ['gunfire · 30 mm <span>1 s</span>', d => ev({ type: 'gunfire', weapon: 'gun30', dur: 1, pos: at(d, 20, 4) })],
+  ['gunfire · Phalanx <span>1 s</span>', d => ev({ type: 'gunfire', weapon: 'ciws', dur: 1, pos: at(d, 20, 16) })],
+  ['Intercepts, hits', null],
+  ['intercept · SM-6', d => ev({ type: 'intercept', pos: air(d, 20), kind: 'oniks', byKind: 'sm6' })],
+  ['intercept · gun kill', d => ev({ type: 'intercept', pos: air(d, 20), kind: 'oniks', byKind: 'ciws' })],
+  ['hit · 3M55 on a ship', d => { const u = unit('ddg', at(d, 20, 0)); ev({ type: 'hit', pos: at(d, 20, 6), kind: 'oniks', target: u.id }); sim.units.delete(u.id); }],
+  ['hit · Hellfire on a TEL', d => ev({ type: 'hit', pos: at(d, 20, 2), kind: 'hellfire', target: -1 })],
+  ['hit · 30 mm on a drone', d => ev({ type: 'hit', pos: air(d, 20), kind: 'gun30', target: -1 })],
+  ['splash · miss at sea', d => ev({ type: 'splash', pos: at(d, 20, 0), kind: 'oniks', water: true })],
+  ['splash · self-destruct', d => ev({ type: 'splash', pos: air(d, 20), kind: 'sm6', air: true })],
+  ['destroyed · DDG', d => ev({ type: 'destroyed', pos: at(d, 20, 0), unit: -1, unitType: 'ddg', side: 'fleet' })],
+  ['destroyed · TEL', d => ev({ type: 'destroyed', pos: at(d, 20, 2), unit: -1, unitType: 'tel', side: 'fleet' })],
+  ['destroyed · F/A-18E', d => ev({ type: 'destroyed', pos: air(d, 20), unit: -1, unitType: 'fighter', side: 'fleet' })],
+  ['Weather, scan', null],
+  ['lightning <span>thunder</span>', d => ev({ type: 'lightning', pos: at(d, -30, 0), top: [...at(d, -30, 3500)] })],
+  ['scan · enemy', d => ev({ type: 'scan', phase: 'hit', side: 'fleet', pos: at(d, 20, 2), hits: [] })],
+  ['Machinery', null],
+  ['deploy · jacks down', d => ev({ type: 'deploy', what: 'jacks', pos: at(d, 20, 2) })],
+  ['deploy · erect', d => ev({ type: 'deploy', what: 'erect', pos: at(d, 20, 2) })],
+  ['deploy · lowered', d => ev({ type: 'deploy', what: 'lowered', pos: at(d, 20, 2) })],
+  ['deploy · mast up', d => ev({ type: 'deploy', what: 'mast_up', pos: at(d, 20, 2) })],
+  ['reload start', d => ev({ type: 'reload_start', pos: at(d, 20, 2), side: 'coast' })],
+  ['reload done', d => ev({ type: 'reload_done', pos: at(d, 20, 2), side: 'coast' })],
+  ['radar on', d => ev({ type: 'radar', on: true, pos: at(d, 20, 6), side: 'coast' })],
+  ['takeoff · F/A-18E', d => ev({ type: 'takeoff', pos: at(d, 20, 18), unit: -1, unitType: 'fighter' })],
+  ['takeoff · Orlan-10', d => ev({ type: 'takeoff', pos: at(d, 20, 4), unit: -1, unitType: 'drone' })],
+];
+{
+  const L = $('left');
+  for (const [name, fn] of EVENTS) {
+    if (!fn) { const h = document.createElement('h4'); h.textContent = name; L.appendChild(h); continue; }
+    const r = document.createElement('div'); r.className = 'row';
+    r.innerHTML = `<div class="nm">${name}</div>`;
+    for (const [d, lab] of DISTS) { const b = document.createElement('button'); b.textContent = lab; b.onclick = () => fn(d); r.appendChild(b); }
+    L.appendChild(r);
+  }
+}
+
+/* ---------------- right column: controls, interface sounds, loops ---------------- */
+const R = $('right');
+R.innerHTML = `
+  <h4>Time</h4><div class="wrap" id="rates"></div>
+  <h4>Camera</h4>
+  <div class="ctl"><span>Height</span><input type="range" id="h" min="0" max="1000" value="${Math.round(Math.log10(40 / 5) / Math.log10(50000 / 5) * 1000)}">
+  <span>Surface</span><div class="wrap" id="surf"></div>
+  <span>Weather</span><div class="wrap" id="wx"></div>
+  <span>Page trim</span><input type="range" id="trim" min="0" max="100" value="100"></div>
+  <div class="note" id="camnote"></div>
+  <h4>Interface and sensors</h4><div class="wrap" id="ui"></div>
+  <h4>Scan · own</h4><div class="wrap" id="scan"></div>
+  <h4>Loops</h4><div class="wrap" id="loops"></div>
+  <div class="note">Loops are fake units the audio finds in <code>sim.units</code> / <code>sim.projectiles</code>, like the game's. The flybys pass 30 m to the right of the camera; the supersonic one is silent until its Mach cone sweeps the camera.</div>`;
+
+function chips(el, list, get, set) {
+  const draw = () => { for (const c of el.children) c.classList.toggle('on', c.dataset.v === String(get())); };
+  for (const [v, lab] of list) { const c = document.createElement('span'); c.className = 'chip'; c.dataset.v = String(v); c.textContent = lab; c.onclick = () => { set(v); draw(); }; el.appendChild(c); }
+  draw(); return draw;
+}
+const drawRates = chips($('rates'), [[0, 'Pause'], [1, 'x1'], [2, 'x2'], [4, 'x4'], [8, 'x8'], [16, 'x16'], [32, 'x32']],
+  () => game.paused ? 0 : game.timeRate, v => { if (v === 0) game.paused = !game.paused; else { game.paused = false; game.timeRate = v; } });
+chips($('surf'), [['sea', 'Open sea'], ['coast', 'Coast'], ['land', 'Inland']], () => surface, v => surface = v);
+chips($('wx'), [['calm', 'Calm'], ['haze', 'Haze'], ['rain', 'Rain'], ['storm', 'Storm']], () => sim.weather.kind, v => {
+  sim.weather.kind = map.weather.kind = v;
+  sim.weather.squalls = v === 'rain' || v === 'storm' ? [{ x: 0, z: 0, r: 6000 }] : [];
+  sim.weather.wind = v === 'storm' ? [14, 6] : v === 'rain' ? [9, 4] : [5, 2];
+});
+const hOf = () => 5 * Math.pow(50000 / 5, +$('h').value / 1000);
+$('h').oninput = () => setCam(hOf());
+$('trim').oninput = () => audio.core.trim(+$('trim').value / 100);
+
+for (const n of ['select', 'order', 'invalid', 'pause', 'resume', 'alert', 'alarm', 'contact', 'contact_esm', 'classify', 'lost', 'sweep', 'confirm',
+  'objective', 'objective_lost', 'reinforce', 'radar_on', 'radar_off', 'damage', 'move', 'tick', 'enter', 'back', 'deny']) {
+  const b = document.createElement('button'); b.textContent = n.replace('_', ' '); b.onclick = () => audio.ui(n, { pos: at(2000, 60, 0) }); $('ui').appendChild(b);
+}
+{ const b = document.createElement('button'); b.textContent = 'rate x8 up'; b.onclick = () => audio.ui('rate', { rate: 8, up: true }); $('ui').appendChild(b); }
+{ const b = document.createElement('button'); b.textContent = 'rate drop to x1'; b.onclick = () => audio.ui('rate', { rate: 1, up: false }); $('ui').appendChild(b); }
+for (const [d, lab] of [[300, 'Scan 300 m'], [4000, 'Scan 4 km'], [25000, 'Scan 25 km']]) {
+  const b = document.createElement('button'); b.textContent = lab;
+  b.onclick = () => {
+    const pos = at(d, -15, 2);
+    ev({ type: 'scan', phase: 'start', side: 'coast', pos, from: [0, 0, 0], delay: 1.6 });
+    const t0 = sim.t;
+    const w = () => { if (sim.t - t0 >= 1.6) ev({ type: 'scan', phase: 'hit', side: 'coast', pos, hits: [1] }); else setTimeout(w, 10); };
+    w();
+  };
+  $('scan').appendChild(b);
+}
+
+/* ---------------- loops: fake units ---------------- */
+const LOOPS = {};
+function toggle(name, on, off) { LOOPS[name] = { on, off, active: false }; }
+toggle('Helo orbit 250 m', () => {
+  const u = unit('helo', [250, 60, 0], { speed: 60 }); let a = 0;
+  const m = dt => { a += dt * 60 / 250; u.pos = [Math.cos(a) * 250, 60, Math.sin(a) * 250]; u.hdg = -a; };
+  movers.push(m); return () => { sim.units.delete(u.id); movers.splice(movers.indexOf(m), 1); };
+});
+toggle('Jet passes 150 m', () => {
+  const u = unit('fighter', [150, 300, -9000], { speed: 250, ab: 0 });
+  const m = dt => { u.pos[2] += 250 * dt; if (u.pos[2] > 9000) u.pos[2] = -9000; };
+  movers.push(m); return () => { sim.units.delete(u.id); movers.splice(movers.indexOf(m), 1); };
+});
+toggle('Drone orbit 120 m', () => {
+  const u = unit('drone', [120, 150, 0], { speed: 30 }); let a = 0;
+  const m = dt => { a += dt * 30 / 120; u.pos = [Math.cos(a) * 120, 150, 250 + Math.sin(a) * 120]; };
+  movers.push(m); return () => { sim.units.delete(u.id); movers.splice(movers.indexOf(m), 1); };
+});
+const flyby = (kind, spd) => () => {
+  let p = null, on = true;
+  const spawn = () => {
+    p = proj(kind, [30, 25, -4000], 0, { fly: (q, dt) => { q.vel = [0, 0, spd]; q.pos[2] += spd * dt; if (q.pos[2] > 4000) { q.alive = false; if (on) setTimeout(spawn, 0); } } });
+    p.t0 = sim.t - 60; p.sepDone = true;
+  };
+  spawn();
+  return () => { on = false; sim.projectiles.delete(p.id); };
+};
+toggle('Tomahawk flyby 30 m', flyby('tlam', 245));
+toggle('3M55 flyby 30 m · Mach 2.2', flyby('oniks', 750));
+toggle('Burning TEL 80 m', () => {
+  const u = unit('tel', at(80, -40, 2), { alive: false, dying: 0 });
+  const m = dt => { u.dying += dt / 20; if (u.dying >= 1) u.dying = 0; };
+  movers.push(m); return () => { sim.units.delete(u.id); movers.splice(movers.indexOf(m), 1); };
+});
+toggle('Sinking DDG 1.2 km', () => {
+  const u = unit('ddg', at(1200, 10, 0), { alive: false, dying: 0 });
+  const m = dt => { u.dying += dt / 60; if (u.dying >= 1) u.dying = 0; };
+  movers.push(m); return () => { sim.units.delete(u.id); movers.splice(movers.indexOf(m), 1); };
+});
+toggle('TEL erect / lower 60 m', () => {
+  const u = unit('tel', at(60, 30, 2), { elev: 0, dep: 1, side: 'coast' }); let t = 0;
+  const m = dt => {
+    t += dt; const c = t % 40, was = u.elev;
+    u.elev = c < 15 ? 1.53 * c / 15 : c < 20 ? 1.53 : c < 35 ? 1.53 * (1 - (c - 20) / 15) : 0;
+    if (was < 1.53 && u.elev >= 1.53) ev({ type: 'deploy', what: 'erect', pos: u.pos });
+    if (was > 0 && u.elev <= 0) ev({ type: 'deploy', what: 'lowered', pos: u.pos });
+  };
+  movers.push(m); return () => { sim.units.delete(u.id); movers.splice(movers.indexOf(m), 1); };
+});
+toggle('Crane reload 40 m', () => {
+  const u = unit('transloader', at(40, -20, 2), { crane: 0, side: 'coast' }); let t = 0;
+  ev({ type: 'reload_start', pos: u.pos, side: 'coast' });
+  const m = dt => { t += dt; const c = t % 45; u.crane = Math.sin(Math.PI * c / 45); if (c < dt) ev({ type: 'reload_done', pos: u.pos, side: 'coast' }); };
+  movers.push(m); return () => { sim.units.delete(u.id); movers.splice(movers.indexOf(m), 1); };
+});
+toggle('Pantsir turret slew 50 m', () => {
+  const u = unit('pantsir', at(50, 70, 2), { tYaw: 0, tPitch: 0, side: 'coast' }); let t = 0;
+  const m = dt => { t += dt; const c = t % 5; if (c < 2) u.tYaw += dt * 1.6 * (Math.floor(t / 5) % 2 ? -1 : 1); };
+  movers.push(m); return () => { sim.units.delete(u.id); movers.splice(movers.indexOf(m), 1); };
+});
+toggle('Selected radar sweeping', () => {
+  const u = unit('radar', at(200, -70, 8), { side: 'coast', antA: 0, antW: TAU / 6, antT: sim.t });
+  game.selection.add(u.id);
+  return () => { game.selection.delete(u.id); sim.units.delete(u.id); };
+});
+for (const name in LOOPS) {
+  const c = document.createElement('span'); c.className = 'chip'; c.textContent = name;
+  c.onclick = () => { const L = LOOPS[name]; if (L.active) { L.stop(); L.active = false; } else { L.stop = L.on(); L.active = true; } c.classList.toggle('on', L.active); };
+  $('loops').appendChild(c);
+}
+
+/* ---------------- thunder demo ---------------- */
+let flash = 0, tdemo = null;
+for (const [d, lab] of [[800, '800 m'], [3000, '3 km'], [10000, '10 km'], [20000, '20 km']]) {
+  const b = document.createElement('button'); b.textContent = 'Lightning ' + lab;
+  b.onclick = () => {
+    const pos = at(d, -30, 0), top = [pos[0] + 500, 3500, pos[2] + 300];
+    ev({ type: 'lightning', pos, top });
+    flash = 1;
+    const e = audio.fronts().find(f => f.name === 'thunder');
+    tdemo = { real0: performance.now(), sim0: sim.t, d: e ? e.d : d, lab };
+  };
+  $('thunder').appendChild(b);
+}
+
+/* ---------------- tests ---------------- */
+const res = $('res');
+let test = null;
+function track() {
+  if (!test) return;
+  const s = audio.stats(), m = audio.core.now;
+  test.peak = Math.max(test.peak, m.out); test.pre = Math.max(test.pre, m.pre); test.gr = Math.max(test.gr, m.gr);
+  test.voices = Math.max(test.voices, s.voices); test.nodes = Math.max(test.nodes, s.nodes); test.pending = Math.max(test.pending, s.pending); test.loops = Math.max(test.loops, s.loops);
+}
+$('salvo').onclick = () => {
+  if (!audio.ready) { res.textContent = 'Click once to start sound first'; return; }
+  game.timeRate = 1; game.paused = false; drawRates();
+  surface = 'coast'; setCam(40);
+  audio.core.resetMeter();
+  test = { name: 'salvo', t0: performance.now(), peak: 0, pre: 0, gr: 0, voices: 0, nodes: 0, pending: 0, loops: 0, n: 0 };
+  const plan = [];
+  // eight 3M55 from four TELs 150-600 m behind and beside the camera, in pairs
+  const tels = [[-160, 12, -180], [220, 10, -260], [-420, 14, -420], [520, 16, -380]];
+  [0, .5, 1.3, 1.8, 2.9, 3.4, 4.4, 4.9].forEach((t, i) => plan.push([t, () => {
+    const pos = tels[i >> 1].slice(); pos[1] += 6;
+    const p = proj('oniks', pos, (10 + i * 3) * DEG); ev({ type: 'launch', kind: 'oniks', proj: p.id, pos, side: 'coast' }); test.n++;
+  }]));
+  // the fleet answers: SM-6 off ships far out, intercepts overhead and out to sea
+  [3.2, 3.6, 4.1, 5.0, 5.6].forEach((t, i) => plan.push([t, () => { const pos = at(14000 + i * 900, 5 + i * 8, 9); const p = proj('sm6', pos, 190 * DEG); ev({ type: 'launch', kind: 'sm6', proj: p.id, pos, side: 'fleet' }); test.n++; }]));
+  [[5.8, 2500, 15], [6.4, 1200, -10], [7.0, 4000, 30], [7.3, 700, 5], [8.1, 6000, 20], [8.6, 900, -25]].forEach(([t, d, b]) => plan.push([t, () => { ev({ type: 'intercept', pos: air(d, b), kind: 'oniks', byKind: 'sm6' }); test.n++; }]));
+  // counter-battery and leakers: hits near and far, Pantsir bursts, a Phalanx far out
+  [[5.1, 260, 60, 'hellfire', 'land'], [6.0, 180, -50, 'hellfire', 'land'], [8.9, 14000, 12, 'oniks', 'sea'], [9.4, 15500, 18, 'oniks', 'sea']].forEach(([t, d, b, k, dom]) => plan.push([t, () => {
+    const u = unit(dom === 'sea' ? 'ddg' : 'tel', at(d, b, 0)); ev({ type: 'hit', pos: at(d, b, 4), kind: k, target: u.id }); sim.units.delete(u.id); test.n++;
+  }]));
+  [[4.7, 1.2], [6.6, 1.0], [7.8, 1.4]].forEach(([t, dur]) => plan.push([t, () => { ev({ type: 'gunfire', weapon: 'gun30', dur, pos: at(150, 80, 4) }); test.n++; }]));
+  plan.push([7.9, () => { ev({ type: 'intercept', pos: air(350, 70), kind: 'oniks', byKind: 'gun30' }); test.n++; }]);
+  plan.push([8.4, () => { ev({ type: 'gunfire', weapon: 'ciws', dur: 1.2, pos: at(14500, 14, 16) }); test.n++; }]);
+  plan.push([9.6, () => { ev({ type: 'destroyed', pos: at(14000, 12, 0), unit: -1, unitType: 'ddg', side: 'fleet' }); test.n++; }]);
+  plan.sort((a, b) => a[0] - b[0]);
+  test.plan = plan; test.i = 0;
+  res.textContent = 'Running';
+};
+/* worst case: a dozen blasts, a thunder crack and guns inside 100 m within half a second (the limiter's job) */
+$('worst').onclick = () => {
+  if (!audio.ready) { res.textContent = 'Click once to start sound first'; return; }
+  game.timeRate = 1; game.paused = false; drawRates(); setCam(40);
+  audio.core.resetMeter();
+  test = { name: 'worst', t0: performance.now(), peak: 0, pre: 0, gr: 0, voices: 0, nodes: 0, pending: 0, loops: 0, n: 0, dur: 8 };
+  const plan = [];
+  for (let i = 0; i < 12; i++) plan.push([i * .04, () => { const u = unit(i % 3 ? 'tel' : 'ddg', at(30 + i * 6, i * 30, 0)); ev({ type: 'hit', pos: at(30 + i * 6, i * 30, 3), kind: 'oniks', target: u.id }); sim.units.delete(u.id); test.n++; }]);
+  plan.push([.1, () => { ev({ type: 'lightning', pos: at(90, -60, 0), top: at(400, -60, 3500) }); test.n++; }]);
+  plan.push([.15, () => { ev({ type: 'gunfire', weapon: 'ciws', dur: 1.5, pos: at(40, 100, 10) }); ev({ type: 'gunfire', weapon: 'gun30', dur: 1.5, pos: at(35, -100, 4) }); test.n += 2; }]);
+  plan.push([.2, () => { const pos = at(25, 150, 6); const p = proj('oniks', pos, 0); ev({ type: 'launch', kind: 'oniks', proj: p.id, pos, side: 'coast' }); ev({ type: 'launch', kind: 'shell', pos: at(45, 200, 12), proj: -3 }); test.n += 2; }]);
+  test.plan = plan; test.i = 0;
+  res.textContent = 'Running';
+};
+function runPlan() {
+  if (!test || !test.plan) return;
+  const t = (performance.now() - test.t0) / 1000;
+  while (test.i < test.plan.length && test.plan[test.i][0] <= t) test.plan[test.i++][1]();
+  if (t > (test.dur || 16)) {             // the events + their tails
+    const r = { events: test.n, peakOutDb: +db(test.peak).toFixed(2), preLimiterPeakDb: +db(test.pre).toFixed(2), maxLimiterReductionDb: +test.gr.toFixed(2),
+      maxVoices: test.voices, maxLoops: test.loops, maxNodes: test.nodes, maxPending: test.pending, clipped: test.peak >= .999 };
+    console.log(test.name.toUpperCase(), JSON.stringify(r));
+    if (test.name === 'worst') window.WORST = r;
+    res.innerHTML = `${test.name === 'worst' ? 'worst case' : 'salvo'}\nevents        <b>${r.events}</b>\npeak out      <b>${r.peakOutDb} dBFS</b>   ${r.clipped ? 'CLIPPED' : 'no clip'}\npre-chain     ${r.preLimiterPeakDb} dBFS\nlimiter       ${r.maxLimiterReductionDb} dB max reduction\nvoices        ${r.maxVoices} max · loops ${r.maxLoops}\nnodes         ${r.maxNodes} max · fronts ${r.maxPending}`;
+    if (test.name === 'salvo') window.SALVO = r;
+    test = null;
+  }
+}
+
+/* level sweep: every world sound once at 50 m, 1.6 s apart; peaks before and after the master chain */
+$('measure').onclick = async () => {
+  if (!audio.ready) { res.textContent = 'Click once to start sound first'; return; }
+  game.timeRate = 1; game.paused = false; drawRates();
+  const names = Object.keys(SPEC).filter(n => SPEC[n].cls === 'world'), ifc = Object.keys(SPEC).filter(n => SPEC[n].cls !== 'world');
+  const out = {}, sleep = ms => new Promise(r => setTimeout(r, ms)), amb = audio.core.bus.amb.gain, ambV = amb.value;
+  amb.value = 0; await sleep(400);                       // ambience off: each peak is the sound alone
+  for (const n of [...names, ...ifc]) {
+    res.textContent = 'Measuring ' + n;
+    audio.core.resetMeter();
+    if (SPEC[n].cls === 'world') audio.play(n, at(50, 20, 10), { delay: false, dur: 1, size: .8, on: true }); else audio.ui(n, { rate: 8, up: true });
+    await sleep(120);
+    for (let i = 0; i < 120 && audio.stats().voices > 0; i++) await sleep(100);   // until it has ended (tails included)
+    await sleep(150);
+    out[n] = [+db(audio.core.meter.pre).toFixed(1), +db(audio.core.meter.out).toFixed(1), +(audio.core.meter.gr).toFixed(1)];
+  }
+  amb.value = ambV;
+  console.log('LEVELS', JSON.stringify(out));
+  window.LEVELS = out;
+  res.textContent = 'Levels in the console (pre, out dBFS, limiter dB)';
+};
+
+/* ---------------- top view: camera at the centre, sources, sound fronts ---------------- */
+const cv = $('top'), cx = cv.getContext('2d'), CW = cv.width, C0 = CW / 2, RMAX = CW / 2 - 16;
+const rad = d => RMAX * Math.log10(1 + d / 50) / Math.log10(1 + 32000 / 50);
+const toXY = p => { const d = Math.hypot(p[0] - cam.eye[0], p[2] - cam.eye[2]), a = Math.atan2(p[0] - cam.eye[0], p[2] - cam.eye[2]), r = rad(d); return [C0 + Math.sin(a) * r, C0 - Math.cos(a) * r]; };
+function dotted(r, col, a, step) {
+  const n = Math.max(24, Math.floor(TAU * r / (step || 5)));
+  cx.fillStyle = col; cx.globalAlpha = a;
+  for (let i = 0; i < n; i++) { const t = i / n * TAU; cx.fillRect(C0 + Math.sin(t) * r - .75, C0 - Math.cos(t) * r - .75, 1.5, 1.5); }
+  cx.globalAlpha = 1;
+}
+function draw() {
+  cx.fillStyle = '#0B0C0A'; cx.fillRect(0, 0, CW, CW);
+  if (flash > 0) { cx.fillStyle = `rgba(255,255,255,${flash * .5})`; cx.fillRect(0, 0, CW, CW); flash = Math.max(0, flash - .06); }
+  cx.font = '500 9.5px "Geist Mono", monospace'; cx.textBaseline = 'middle';
+  for (const [d, lab] of [[100, '100 M'], [1000, '1 KM'], [10000, '10 KM'], [30000, '30 KM']]) {
+    const r = rad(d); dotted(r, '#fff', .22, 6);
+    cx.fillStyle = 'rgba(255,255,255,.36)'; cx.fillText(lab, C0 + r * .707 + 4, C0 + r * .707 + 4);   // labels down the south-east diagonal
+  }
+  // sources
+  for (const u of sim.units.values()) { const [x, y] = toXY(u.pos); cx.fillStyle = u.alive ? '#fff' : '#FF6A3D'; cx.fillRect(x - 2, y - 2, 4, 4); }
+  for (const p of sim.projectiles.values()) { const [x, y] = toXY(p.pos); cx.fillStyle = '#fff'; cx.fillRect(x - 1.5, y - 1.5, 3, 3); }
+  // fronts: each travelling sound, its source, and how far its front has come toward the camera
+  const labelled = [];
+  for (const f of audio.fronts()) {
+    const [sx, sy] = toXY(f.pos), k = Math.min(1, f.r / Math.max(1, f.d));
+    const fp = [f.pos[0] + (cam.eye[0] - f.pos[0]) * k, 0, f.pos[2] + (cam.eye[2] - f.pos[2]) * k], [fx, fy] = toXY(fp);
+    cx.strokeStyle = 'rgba(198,244,50,.28)'; cx.setLineDash([2, 4]); cx.beginPath(); cx.moveTo(sx, sy); cx.lineTo(C0, C0); cx.stroke(); cx.setLineDash([]);
+    cx.strokeStyle = '#C6F432'; cx.beginPath(); cx.moveTo(sx, sy); cx.lineTo(fx, fy); cx.stroke();
+    cx.fillStyle = '#C6F432'; cx.fillRect(sx - 2.5, sy - 2.5, 5, 5); cx.fillRect(fx - 1.5, fy - 1.5, 3, 3);
+    if (!labelled.some(([x, y]) => Math.abs(x - sx) < 70 && Math.abs(y - sy) < 12)) {     // one label per spot
+      labelled.push([sx, sy]); cx.fillStyle = 'rgba(198,244,50,.8)'; cx.fillText(f.name.toUpperCase(), sx + 6, sy);
+    }
+  }
+  // the camera
+  cx.fillStyle = '#C6F432'; cx.fillRect(C0 - 4, C0 - 4, 8, 8);
+  cx.strokeStyle = 'rgba(198,244,50,.5)'; cx.beginPath(); cx.moveTo(C0, C0); cx.lineTo(C0, C0 - 22); cx.stroke();
+  cx.fillStyle = 'rgba(255,255,255,.36)'; cx.fillText('N', C0 - 3, 10);
+}
+
+/* ---------------- meters ---------------- */
+let hold = 0, holdT = 0, logT = 0;
+function meters() {
+  const s = audio.stats(), m = audio.core.now;
+  if (audio.ready) $('lock').classList.add('off');
+  if (m.out >= hold || performance.now() - holdT > 1500) { hold = m.out; holdT = performance.now(); }
+  const w = x => Math.max(0, Math.min(100, (db(x) + 60) / 60 * 100));
+  let t = '';
+  if (tdemo) {
+    const el = (performance.now() - tdemo.real0) / 1000, pendingT = audio.fronts().some(f => f.name === 'thunder');
+    const due = tdemo.d / 343 / (game.paused ? 1 : game.timeRate);
+    if (!pendingT && tdemo.arr === undefined) tdemo.arr = el;
+    const note = due > 12 ? ' · waits past 12 s are shortened' : '';
+    $('tres').innerHTML = pendingT ? `flash at ${tdemo.lab} · channel ${Math.round(tdemo.d)} m · sound needs <b>${due.toFixed(1)} s</b> · ${el.toFixed(1)} s so far${note}` : `thunder arrived after <b>${tdemo.arr.toFixed(1)} s</b> (${Math.round(tdemo.d)} m / 343 m/s / x${game.timeRate} = ${due.toFixed(1)} s${note})`;
+  }
+  $('meter').innerHTML = `<div class="bar"><i style="width:${w(m.out)}%"></i><i class="hold" style="width:${w(hold)}%"></i></div>`
+    + `out <b>${db(m.out).toFixed(1)}</b> dBFS · hold <b>${db(hold).toFixed(1)}</b> · limiter <b class="${m.gr > .5 ? 'l' : ''}">${(-m.gr).toFixed(1)}</b> dB<br>`
+    + `voices <b>${s.voices}</b> (${s.world} world · ${s.sig} sig · ${s.ui} ui) · loops <b>${s.loops}</b> · fronts <b>${s.pending}</b> · nodes <b>${s.nodes}</b><br>`
+    + `context <b class="${s.state === 'running' ? 'l' : 'c'}">${s.state}</b> · x${game.timeRate}${game.paused ? ' paused' : ''} · camera <b>${Math.round(s.h || cam.eye[1])} m</b> · sea ${(s.sea * 100).toFixed(0)}%`;
+  $('camnote').textContent = `Eye ${Math.round(cam.eye[1])} m over ${surface}; sea wash fades by 1.5 km, wind thins and whistles with height.`;
+  if (performance.now() - logT > 2000 && (test || s.voices > 0)) { logT = performance.now(); console.log('audio', JSON.stringify(s)); }
+}
+
+/* ---------------- loop ---------------- */
+let last = performance.now(), lastRaf = 0;
+function tick(ts) {
+  const dt = Math.min(.1, (ts - last) / 1000); last = ts;
+  const dtSim = game.paused ? 0 : dt * game.timeRate;
+  acc += dtSim;
+  let n = 0;
+  while (acc >= DT && n++ < 200) { stepWorld(DT); acc -= DT; }
+  audio.update(dt, dtSim);
+  audio.core.measure();
+  track(); runPlan(); draw(); meters();
+}
+function frame(ts) { lastRaf = performance.now(); tick(performance.now()); requestAnimationFrame(frame); }
+requestAnimationFrame(frame);
+// a page in a background tab gets no animation frames: keep the loop (and the meters) going on a timer
+setInterval(() => { if (performance.now() - lastRaf > 100) tick(performance.now()); }, 16);
+addEventListener('pointerdown', () => $('lock').classList.add('off'), { once: true });
+</script>
+</body></html>
