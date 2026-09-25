@@ -1,0 +1,22 @@
+/* the visibility concepts' page chrome: Point Cloud tokens, nothing but a name, the keys and a readout */
+:root { --bg: #0B0C0A; --lime: #C6F432; --coral: #FF6A3D; --dim: rgba(255,255,255,.62); --faint: rgba(255,255,255,.36); --hair: rgba(255,255,255,.14);
+  --sans: 'Geist', 'Segoe UI', sans-serif; --mono: 'Geist Mono', Consolas, monospace; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: #fff; font-family: var(--sans); -webkit-font-smoothing: antialiased; user-select: none; }
+#view { position: fixed; inset: 0; }
+#gl, #ov { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: block; }
+#gl { image-rendering: pixelated; }
+#ov { pointer-events: none; }
+.t { position: absolute; left: 40px; top: 38px; font: 500 15px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: rgba(255,255,255,.85); }
+.row { position: absolute; left: 50%; bottom: 30px; transform: translateX(-50%); display: flex; gap: 8px; font: 500 11px/1 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); }
+.row span { display: flex; align-items: center; gap: 8px; padding: 6px 10px 5px 6px; border: 1px solid var(--hair); cursor: pointer; }
+.row b { color: var(--bg); background: rgba(255,255,255,.6); padding: 3px 5px 2px; font-weight: 500; }
+.row span.on { color: #fff; border-color: rgba(198,244,50,.55); }
+.row span.on b { background: var(--lime); }
+.read { position: absolute; left: 40px; bottom: 30px; display: flex; gap: 18px; font: 400 11px/1 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); font-variant-numeric: tabular-nums; }
+.read b { color: #fff; font-weight: 400; }
+.keys { position: absolute; right: 40px; bottom: 30px; display: flex; gap: 14px; font: 400 10.5px/1 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); }
+.keys span { display: flex; align-items: center; gap: 4px; }
+.keys b { color: var(--bg); background: rgba(255,255,255,.5); padding: 3px 4px 2px; font-weight: 500; margin-right: 2px; }
+.noui .row, .noui .read, .noui .keys { display: none; }
+@media (max-width: 1100px) { .keys { display: none; } }
