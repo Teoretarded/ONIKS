@@ -6,9 +6,9 @@ import { moveUnit } from './movement.js';
 import { separate } from './dynamics.js';
 import { issue, processOrders } from './orders.js';
 import { mechanics, carrierOps } from './mech.js';
-import { senseTick, resolveScans, esmTick, sonarTick } from './sensors.js';
+import { senseTick, resolveScans, esmTick, sonarTick, getContact } from './sensors.js';
 import { depthGoal } from './subs.js';
-import { weaponsTick, stepProjectiles } from './weapons.js';
+import { weaponsTick, stepProjectiles, launch } from './weapons.js';
 import { stepDying } from './damage.js';
 import { economyTick, buy, checkResult } from './economy.js';
 import { Weather } from './weather.js';
@@ -19,8 +19,62 @@ import { DT, SENSE_EVERY } from './consts.js';
 
 export { DT, SENSE_EVERY };
 
+/* Object layouts, primed once per page / Worker. JS engines give every unit (projectile, contact, model state) a
+   hidden layout that records how each field is stored; the first time a field holding whole numbers gets a fraction
+   (or a number lands where null was), that layout is replaced and the optimised code of everything that touches
+   units is thrown away. In the first match of a page this happens again and again as the battle reaches new code
+   paths, and costs about a third of the sim's time for many minutes. Here one throwaway unit of every type, a round
+   and a contact are made through the same code on a tiny private sim, and every field that can take a fraction is
+   given one: the layouts start general, as they would be after a long match. Nothing of the game's state is touched
+   (the values are put back; the private sim is dropped). */
+// the fields that take fractions (or both a number and null / false / undefined) in play: sampled over full AI
+// battles on every map. A field missing here only costs speed, never correctness.
+const FRAC = {
+  unit: 'hdg prevHdg pitch roll speed dying dep elev elevT mast antA antW antT tYaw tPitch aimP cSpin fireT odo gimYaw '
+    + 'gimPitch crane carriage spool rearmT nextLaunch fuel reloadP reloadU refillU wantElev lastFire born depth mastUp propA sonarT',
+  unitMixed: 'aimB landing aboardOf repaths vy _ax _az _ah',
+  proj: 't0 age spd spd0 hdg pitch maxT gLx gLz gLmax gFl gh roll', projMixed: 'gA',
+  contact: 'conf err lastSeen firstSeen lastEmit pingT deadT',
+};
+const LISTS = {};
+for (const k in FRAC) LISTS[k] = FRAC[k].split(' ');
+function primeFields(o, keys, mixed) {
+  if (!o || typeof o !== 'object') return;
+  for (const k of keys || Object.keys(o)) {
+    const v = o[k];
+    if (typeof v === 'number' || (keys && v === undefined)) { o[k] = .5; o[k] = .25; o[k] = v; }
+  }
+  if (mixed) for (const k of mixed) { const v = o[k]; o[k] = .5; o[k] = null; o[k] = v; }
+}
+let primed = false;
+function primeLayouts() {
+  if (primed) return;
+  primed = true;
+  try {
+    const sp = { x: 0, z: 0, r: 1000, hdg: 0 };
+    const map = { id: 'prime', W: 4000, H: 4000, cell: 400, h: () => -60, slope: () => 0, water: () => true, objectives: [], roads: [],
+      spawns: { coast: sp, fleet: sp }, replenish: sp, weather: { kind: 'calm', wind: [0, 0], sea: .2 } };
+    const sim = new Sim(map, { seed: 1 });
+    let shooter = null, foe = null;
+    for (const type in UNITS) {
+      const u = sim.spawn(type, UNITS[type].side || 'coast', 0, 0, {});
+      UNITS[type].modelState(u, .5);
+      primeFields(u, LISTS.unit, LISTS.unitMixed); primeFields(u.st); primeFields(u.cooldowns); primeFields(u.refillP); primeFields(u.parts);
+      if (!shooter && u.def.weapons.strike) shooter = u;
+      if (!foe && u.side === 'coast') foe = u;
+    }
+    if (foe) primeFields(getContact(sim, 'fleet', foe), LISTS.contact);
+    if (shooter && foe) {
+      const p = launch(sim, shooter, shooter.def.weapons.strike, foe.id, 'unit', foe.pos);
+      p.st.wing = .5; p.st.fin = .5; p.st.cover = false; p.st.inlet = .5;       // the fields stepProjectiles adds, in its order
+      primeFields(p, LISTS.proj, LISTS.projMixed); primeFields(p.st); primeFields(p.seen);
+    }
+  } catch (e) { /* priming is only an optimisation */ }
+}
+
 export class Sim {
   constructor(map, opts) {
+    primeLayouts();
     opts = opts || {};
     this.map = map;
     this.opts = opts;
@@ -55,6 +109,8 @@ export class Sim {
     for (const side of opts.aiSides || []) this.ai[side] = new AI(this, side, (opts.ai && opts.ai[side]) || opts.difficulty || 'normal');
     this._list = []; this._dirty = true; this._alive = { coast: [], fleet: [] };
     this._subBase = undefined;                                     // the coast boats' base (mech.replenishPoint)
+    // set later by weapons.js / amphib.js (declared, unset, so the sim object keeps one layout; see primeLayouts)
+    this.bursts = undefined; this.nextBurst = undefined; this._beaches = undefined; this.prof = undefined;
   }
 
   /* ---------- units ---------- */
@@ -85,6 +141,15 @@ export class Sim {
       task: null, born: this.t,
       depth: 0, dive: 0, mastUp: 0, propA: 0, sonarT: -1,                  // submarines (sim/subs.js); a listening sonar
       well: 0, wellT: 0, transit: 0, slot: -1, dockT: null, cushion: def.hover ? 1 : 0, rampB: 0, lift: 0,   // amphibious (sim/amphib.js)
+      // fields other modules set later, declared (unset) here so every unit keeps one object layout: property reads
+      // across the sim stay fast (a unit that grows its own fields later forks the layout, and the reads that see many
+      // layouts slow down everywhere). undefined reads exactly as a missing field.
+      mag: undefined, aboardOf: undefined, repaths: undefined, fuelOut: undefined, recovered: undefined, salvo: undefined,
+      vy: undefined, _ax: undefined, _az: undefined, _ah: undefined,
+      cargoN: undefined, cushionT: undefined, fanA: undefined, idleT: undefined,
+      loadT: undefined, nextWell: undefined, rampT: undefined, rud: undefined,
+      wellHost: undefined, wellReq: undefined, wellUse: undefined,
+      shoreX: undefined, shoreZ: undefined, shore: undefined,               // sensors.js nearShore cache
     };
     for (const w in def.weapons) { u.ammo[w] = def.weapons[w].ammo; u.cooldowns[w] = 0; u.refillP[w] = 0; }
     for (const p of def.partNames) u.parts[p] = 0;

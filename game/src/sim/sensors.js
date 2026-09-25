@@ -106,7 +106,11 @@ function nearShore(map, e) {
 }
 
 /* ---------- contacts ---------- */
+/* bumped by everything here that adds, drops or updates a contact: a cache of a side's picture (weapons.js, within
+   one weapons tick) is good while it has not moved */
+export const PICTURE = { v: 0 };
 export function getContact(sim, side, e) {
+  PICTURE.v++;
   const S = sim.sides[side];
   let c = S.contacts.get(e.id);
   if (!c) {
@@ -124,6 +128,7 @@ export function getContact(sim, side, e) {
 /* a detection with measurement noise sigma (m) and confidence gain; hold: s the contact is held against decay */
 export function detect(sim, side, e, sigma, gain, how, hold) {
   if (!e.alive || e.aboard) return null;
+  PICTURE.v++;
   const S = sim.sides[side], isNew = !S.contacts.has(e.id);
   const c = getContact(sim, side, e), r = sim.rng.sense, t = sim.t;
   const mx = e.pos[0] + gauss(r) * sigma, mz = e.pos[2] + gauss(r) * sigma;
@@ -160,6 +165,7 @@ function classify(sim, side, c, e, how) {
    position alone, a cross-fix holds it) */
 export function roughContact(sim, side, e, err, gain, cap, keep) {
   if (!e.alive || e.aboard) return null;
+  PICTURE.v++;
   const S = sim.sides[side], isNew = !S.contacts.has(e.id), c = getContact(sim, side, e), r = sim.rng.sense;
   c.dom = domOf(e);
   // fuse the fix by accuracy (a precise track barely moves; repeated rough fixes average down, not below err / 3)
@@ -179,8 +185,53 @@ export function roughContact(sim, side, e, err, gain, cap, keep) {
   return c;
 }
 
-/* ---------- the sensor tick (every SENSE_EVERY ticks) ---------- */
+/* ---------- the sensor tick (every SENSE_EVERY ticks) ----------
+   Hot path. Per side and tick the enemy units are copied once into flat tables (position, range class, what a
+   submerged boat still shows) and the per-foe terms every sensor would recompute (weather at the target, its
+   height, rcs^.25) are cached on first use; each sensor then scans the tables. Only pure tests are cached or
+   reordered: the seeded draws (sim.rng.sense) happen for the same pairs in the same order as a plain loop. */
 const SENSORS = [];
+const FE = [];                                          // the foes (not aboard), in sim.alive() order
+let FCAP = 0, FX, FZ, FDOM, FSVR, FSVC, FK4, FWR, FWC, FTOP;
+function foeTables(foes) {
+  if (foes.length > FCAP) {
+    FCAP = Math.max(64, foes.length * 2);
+    FX = new Float64Array(FCAP); FZ = new Float64Array(FCAP); FDOM = new Uint8Array(FCAP);
+    FSVR = new Float64Array(FCAP); FSVC = new Float64Array(FCAP); FK4 = new Float64Array(FCAP);
+    FWR = new Float64Array(FCAP); FWC = new Float64Array(FCAP); FTOP = new Float64Array(FCAP);
+  }
+  let n = 0;
+  for (let j = 0; j < foes.length; j++) {
+    const e = foes[j];
+    if (e.aboard) continue;
+    FE[n] = e; FX[n] = e.pos[0]; FZ[n] = e.pos[2];
+    const dom = e.def.domain;
+    FDOM[n] = dom === 'air' ? 0 : dom === 'land' ? 1 : 2;
+    FSVR[n] = subVis(e, false); FSVC[n] = subVis(e, true);
+    FK4[n] = NaN; FWR[n] = NaN; FWC[n] = NaN; FTOP[n] = NaN;       // computed on first use
+    n++;
+  }
+  FE.length = n;
+  return n;
+}
+/* the side's looking units, flattened (seeProjectiles reuses them) */
+let SCAP = 0, SX, SZ, SY, SHA, SAIR, SSKIM, SCAM, SRAD;
+function sensorTables(own) {
+  if (own.length > SCAP) {
+    SCAP = Math.max(64, own.length * 2);
+    SX = new Float64Array(SCAP); SZ = new Float64Array(SCAP); SY = new Float64Array(SCAP); SHA = new Float64Array(SCAP);
+    SAIR = new Float64Array(SCAP); SSKIM = new Float64Array(SCAP); SCAM = new Float64Array(SCAP); SRAD = new Uint8Array(SCAP);
+  }
+  for (let i = 0; i < own.length; i++) {
+    const u = own[i], Sd = u.def.sensors;
+    SX[i] = u.pos[0]; SZ[i] = u.pos[2]; SY[i] = u.pos[1];
+    const R = Sd.radar, on = !!R && radarWorks(u);
+    SRAD[i] = on ? 1 : 0;
+    SAIR[i] = on ? R.air : 0; SHA[i] = on ? antH(u, R) : 0; SSKIM[i] = on && R.skim ? R.skim : 0;
+    SCAM[i] = Sd.camera && !u.off.camera ? Sd.camera.range : 0;
+  }
+}
+const SQ4120 = 4120;
 export function senseTick(sim, dt) {
   const t = sim.t, map = sim.map, wx = sim.weather;
   // fog off (sandbox): both pictures are ground truth, silently, so attacks work on anything in view
@@ -192,37 +243,43 @@ export function senseTick(sim, dt) {
     if (!c.cls) { c.cls = e.def.cls; c.type = e.type; c.name = e.def.name; }
   }
   for (const side of ['coast', 'fleet']) {
-    const all = sim.alive(side), foes = sim.alive(ENEMY[side]);
+    const all = sim.alive(side), nf = foeTables(sim.alive(ENEMY[side]));
     // only units that carry a radar or a camera look
     const own = SENSORS; own.length = 0;
     for (let i = 0; i < all.length; i++) { const u = all[i], Sd = u.def.sensors; if (!u.aboard && (Sd.radar || Sd.camera || Sd.pod)) own.push(u); }
+    sensorTables(own);
     for (let i = 0; i < own.length; i++) {
       const u = own[i];
-      if (u.aboard) continue;
-      const Sd = u.def.sensors;
+      const Sd = u.def.sensors, ux = SX[i], uz = SZ[i];
       // radar sweep: world-bearing sector covered since the last tick
-      if (Sd.radar && radarWorks(u)) {
-        const R = Sd.radar, ha = antH(u, R);
+      if (SRAD[i]) {
+        const R = Sd.radar, ha = SHA[i], sha = Math.sqrt(ha > 0 ? ha : 0);
         const a1 = u.hdg + u.antA + u.antW * (t - u.antT), sweep = u.antW * dt, a0 = a1 - sweep;
         const full = sweep >= TAU - 1e-6;
-        const rmax = Math.max(R.air, R.surf);
-        for (let j = 0; j < foes.length; j++) {
-          const e = foes[j];
-          if (e.aboard) continue;
-          const dx = e.pos[0] - u.pos[0], dz = e.pos[2] - u.pos[2];
+        const rmax = Math.max(R.air, R.surf), rA = R.air, rS = R.surf;
+        // a cheap pre-test of the sector: the angle from the sector's centre, well outside its half-width (the
+        // margin dwarfs the rounding of either test), rejects the pair; anything near the edge takes the exact test
+        const hw = sweep * .5, pre = !full && hw + 1e-3 < Math.PI;
+        const cs = pre ? Math.sin(a0 + hw) : 0, cc = pre ? Math.cos(a0 + hw) : 0, cl = pre ? Math.cos(hw + 1e-3) : 0;
+        for (let j = 0; j < nf; j++) {
+          const dx = FX[j] - ux, dz = FZ[j] - uz;
           if (Math.abs(dx) > rmax || Math.abs(dz) > rmax) continue;
-          const d = Math.sqrt(dx * dx + dz * dz);
-          let rng = rangeVs(R, e, map) * subVis(e, false);
+          const d = Math.sqrt(dx * dx + dz * dz), dm = FDOM[j];
+          let rng = (dm === 0 ? rA : dm === 1 ? rangeVs(R, FE[j], map) : rS) * FSVR[j];   // land: shore / gmti factors
           if (!rng || d > rng) continue;
           if (!full) {
+            if (pre && dx * cs + dz * cc < cl * d) continue;
             const b = Math.atan2(dx, dz), off = wrapPi(b - a0);
             if ((off < 0 ? off + TAU : off) > sweep) continue;
           }
-          rng *= Math.pow(e.def.rcs, .25) * wx.radar(e.pos[0], e.pos[2]);
+          const e = FE[j];
+          let k4 = FK4[j]; if (k4 !== k4) k4 = FK4[j] = Math.pow(e.def.rcs, .25);
+          let wr = FWR[j]; if (wr !== wr) wr = FWR[j] = wx.radar(FX[j], FZ[j]);
+          rng *= k4 * wr;
           if (d > rng) continue;
-          const ht = topH(e);
-          if (d > horizon(ha, ht)) continue;
-          if (!los(map, u.pos[0], ha, u.pos[2], e.pos[0], ht, e.pos[2])) continue;
+          let ht = FTOP[j]; if (ht !== ht) ht = FTOP[j] = topH(e);
+          if (d > SQ4120 * (sha + Math.sqrt(ht > 0 ? ht : 0))) continue;          // horizon(ha, ht)
+          if (!los(map, ux, ha, uz, FX[j], ht, FZ[j])) continue;
           const f = d / rng, pd = .95 - .55 * f * f;
           if (sim.rng.sense() > pd) continue;
           detect(sim, side, e, 30 + .004 * d, e.def.domain === 'land' && R.landGain ? R.gain * R.landGain : R.gain, 'radar', R.hold || 0);
@@ -231,14 +288,17 @@ export function senseTick(sim, dt) {
       // targeting pod: land and sea units the aircraft passes within a few km of are seen, classified at once
       if (Sd.pod && !u.off.pod) {
         const P = Sd.pod, ha = u.pos[1];
-        for (let j = 0; j < foes.length; j++) {
-          const e = foes[j];
-          if (e.aboard || e.def.domain === 'air' || submerged(e)) continue;
-          const dx = e.pos[0] - u.pos[0], dz = e.pos[2] - u.pos[2];
+        for (let j = 0; j < nf; j++) {
+          if (FDOM[j] === 0) continue;                                    // not aircraft
+          const dx = FX[j] - ux, dz = FZ[j] - uz;
           if (Math.abs(dx) > P.range || Math.abs(dz) > P.range) continue;
+          const e = FE[j];
+          if (submerged(e)) continue;
           const d = Math.sqrt(dx * dx + dz * dz);
-          if (d > P.range * wx.camera(e.pos[0], e.pos[2])) continue;
-          if (!los(map, u.pos[0], ha, u.pos[2], e.pos[0], topH(e), e.pos[2])) continue;
+          let wc = FWC[j]; if (wc !== wc) wc = FWC[j] = wx.camera(FX[j], FZ[j]);
+          if (d > P.range * wc) continue;
+          let ht = FTOP[j]; if (ht !== ht) ht = FTOP[j] = topH(e);
+          if (!los(map, ux, ha, uz, FX[j], ht, FZ[j])) continue;
           if (sim.rng.sense() > .9) continue;
           const c = detect(sim, side, e, 6 + .001 * d, P.gain, 'camera');
           if (c && c.conf >= .9) c.identified = true;               // held in the pod: known well enough to inspect
@@ -246,15 +306,16 @@ export function senseTick(sim, dt) {
       }
       // camera: every tick, all around, short range
       if (Sd.camera && !u.off.camera && !(Sd.camera.mast && (u.mastUp || 0) < .8)) {
-        const C = Sd.camera, ha = u.def.sub ? mastTop(u) : u.pos[1];
-        for (let j = 0; j < foes.length; j++) {
-          const e = foes[j];
-          if (e.aboard) continue;
-          const dx = e.pos[0] - u.pos[0], dz = e.pos[2] - u.pos[2];
-          if (Math.abs(dx) > C.range || Math.abs(dz) > C.range) continue;
-          const d = Math.sqrt(dx * dx + dz * dz), rng = C.range * wx.camera(e.pos[0], e.pos[2]) * subVis(e, true);
+        const C = Sd.camera, ha = u.def.sub ? mastTop(u) : u.pos[1], CR = C.range;
+        for (let j = 0; j < nf; j++) {
+          const dx = FX[j] - ux, dz = FZ[j] - uz;
+          if (Math.abs(dx) > CR || Math.abs(dz) > CR) continue;
+          let wc = FWC[j]; if (wc !== wc) wc = FWC[j] = wx.camera(FX[j], FZ[j]);
+          const d = Math.sqrt(dx * dx + dz * dz), rng = CR * wc * FSVC[j];
           if (d > rng) continue;
-          if (!los(map, u.pos[0], ha, u.pos[2], e.pos[0], topH(e), e.pos[2])) continue;
+          const e = FE[j];
+          let ht = FTOP[j]; if (ht !== ht) ht = FTOP[j] = topH(e);
+          if (!los(map, ux, ha, uz, FX[j], ht, FZ[j])) continue;
           if (sim.rng.sense() > .92 - .3 * (d / rng)) continue;
           detect(sim, side, e, 8 + .002 * d, C.gain, 'camera');
           u.aimB = Math.atan2(dx, dz);
@@ -266,39 +327,49 @@ export function senseTick(sim, dt) {
   }
 }
 
-/* projectiles are not contacts; a side "sees" one while any of its radars or cameras covers it */
+/* projectiles are not contacts; a side "sees" one while any of its radars or cameras covers it (the sensor tables
+   of senseTick: filled for this side just before) */
 function seeProjectiles(sim, side, own) {
-  const t = sim.t, map = sim.map;
+  const t = sim.t, map = sim.map, n = own.length, wx = sim.weather;
   for (const p of sim.projectiles.values()) {
     if (p.side === side || !p.alive || p.P.torpedo) continue;
     if (t - p.seen[side] < .3) continue;
     const rcs = p.P.rcs || .1, k = Math.pow(rcs, .25);
-    for (let i = 0; i < own.length; i++) {
-      const u = own[i];
-      if (u.aboard) continue;
-      const Sd = u.def.sensors;
+    const px = p.pos[0], py = p.pos[1], pz = p.pos[2], sp = Math.sqrt(py > 0 ? py : 0);
+    // whether any sensor covers the round does not depend on the order they are asked in (nothing is drawn): ask
+    // first the one that covered it last time (its index in this side's table), then the rest
+    const last = side === 'coast' ? p._seeC : p._seeF;
+    let wr = NaN, hit = -1;
+    for (let q = -1; q < n; q++) {
+      const i = q < 0 ? last : q;
+      if (i < 0 || i >= n || (q >= 0 && i === last)) continue;
       let rng = 0, ha = 0;
-      if (Sd.radar && radarWorks(u)) {
-        rng = Sd.radar.air * k * sim.weather.radar(p.pos[0], p.pos[2]); ha = antH(u, Sd.radar);
+      if (SRAD[i]) {
+        if (wr !== wr) wr = wx.radar(px, pz);
+        rng = SAIR[i] * k * wr; ha = SHA[i];
         // a look-down radar (the E-2D's) loses sea-skimmers in the sea clutter: skim = its range factor under 80 m
-        if (Sd.radar.skim && p.pos[1] < 80) rng *= Sd.radar.skim;
+        if (SSKIM[i] && py < 80) rng *= SSKIM[i];
       }
-      if (Sd.camera && !u.off.camera && Sd.camera.range > rng) { rng = Sd.camera.range; ha = u.pos[1]; }
+      if (SCAM[i] > rng) { rng = SCAM[i]; ha = SY[i]; }
       if (!rng) continue;
-      const dx = p.pos[0] - u.pos[0], dz = p.pos[2] - u.pos[2];
+      const dx = px - SX[i], dz = pz - SZ[i];
       if (Math.abs(dx) > rng || Math.abs(dz) > rng) continue;
       const d = Math.sqrt(dx * dx + dz * dz);
-      if (d > rng || d > horizon(ha, p.pos[1])) continue;
-      if (!los(map, u.pos[0], ha, u.pos[2], p.pos[0], p.pos[1], p.pos[2])) continue;
-      if (p.seen[side] < 0) sim.emit('detect', { side, proj: p.id, kind: p.kind, pos: p.pos.slice(), how: 'radar', dom: 'missile' });
-      p.seen[side] = t;
+      if (d > rng || d > SQ4120 * (Math.sqrt(ha > 0 ? ha : 0) + sp)) continue;     // horizon(ha, p.pos[1])
+      if (!los(map, SX[i], ha, SZ[i], px, py, pz)) continue;
+      hit = i;
       break;
     }
+    if (hit < 0) continue;
+    if (side === 'coast') p._seeC = hit; else p._seeF = hit;
+    if (p.seen[side] < 0) sim.emit('detect', { side, proj: p.id, kind: p.kind, pos: p.pos.slice(), how: 'radar', dom: 'missile' });
+    p.seen[side] = t;
   }
 }
 
 function decay(sim, side, dt) {
   const S = sim.sides[side], t = sim.t;
+  PICTURE.v++;
   for (const [id, c] of S.contacts) {
     c.pos[0] += c.vel[0] * dt; c.pos[2] += c.vel[2] * dt;
     if (c.dom === 'air') c.pos[1] += c.vel[1] * dt;
@@ -319,26 +390,42 @@ function decay(sim, side, dt) {
 
 /* ---------- emitters (1 Hz): radiating units are heard by the other side ---------- */
 const EARS = [], ESM_EARS = 10;
+const LU = [];
+let LCAP = 0, LX, LZ, LTOP, LH, LR;
 export function esmTick(sim) {
   for (const side of ['coast', 'fleet']) {
     const own = sim.alive(side), foes = sim.alive(ENEMY[side]);
+    // the listeners, flattened once (roughContact below changes contacts only, never a unit)
+    let n = 0;
+    if (own.length > LCAP) {
+      LCAP = Math.max(64, own.length * 2);
+      LX = new Float64Array(LCAP); LZ = new Float64Array(LCAP); LTOP = new Float64Array(LCAP); LH = new Float64Array(LCAP); LR = new Float64Array(LCAP);
+    }
+    for (const u of own) {
+      if (u.aboard || deep(u)) continue;                          // a deep boat has no mast up to listen with
+      const h = topH(u), Es = u.def.sensors.esm;
+      LU[n] = u; LX[n] = u.pos[0]; LZ[n] = u.pos[2]; LH[n] = h; LTOP[n] = Math.sqrt(h > 0 ? h : 0);
+      LR[n] = Es && typeof Es === 'object' && !u.off.esm ? Es.reach || 1 : 0;   // an ESM ear: its reach factor, else 0
+      n++;
+    }
+    LU.length = n;
     for (const e of foes) {
       if (!emitting(e)) continue;
       const er = e.def.emits ? e.def.emits.range : 0;
       if (!er) continue;
       const he = e.def.domain === 'air' ? e.pos[1] : e.pos[1] + (e.def.sensors.radar ? e.def.sensors.radar.h || 5 : 10);
+      const ex = e.pos[0], ez = e.pos[2], she = Math.sqrt(he > 0 ? he : 0);
       let best = 1e18, tries = 0;
       EARS.length = 0;
-      for (const u of own) {
-        if (u.aboard || deep(u)) continue;                        // a deep boat has no mast up to listen with
-        const d = dxz(u.pos[0], u.pos[2], e.pos[0], e.pos[2]);
-        const Es = u.def.sensors.esm, ear = !!Es && typeof Es === 'object' && !u.off.esm;
-        if (d > (ear && Es.reach ? er * Es.reach : er) || (d >= best && !ear)) continue;   // esm.reach: hears farther
-        const hu = topH(u);
-        if (d > horizon(he, hu) * 1.15) continue;
+      for (let i = 0; i < n; i++) {
+        const ax = LX[i], az = LZ[i], ear = LR[i], rr = ear ? er * ear : er;   // esm.reach: hears farther
+        if (Math.abs(ex - ax) > rr || Math.abs(ez - az) > rr) continue;
+        const d = Math.sqrt((ex - ax) ** 2 + (ez - az) ** 2);              // dxz(u, e)
+        if (d > rr || (d >= best && !ear)) continue;
+        if (d > 4120 * (she + LTOP[i]) * 1.15) continue;                   // horizon(he, topH(u))
         if (d < best) best = d;
         // a bearing needs line of sight to the emitter (terrain masks it as it masks a radar); up to ESM_EARS tries
-        if (ear && tries < ESM_EARS) { tries++; if (los(sim.map, u.pos[0], hu, u.pos[2], e.pos[0], he, e.pos[2])) EARS.push(u); }
+        if (ear && tries < ESM_EARS) { tries++; if (los(sim.map, ax, LH[i], az, ex, he, ez)) EARS.push(LU[i]); }
       }
       if (best === 1e18) continue;
       const c0 = EARS.length ? sim.sides[side].contacts.get(e.id) : null;
@@ -445,6 +532,7 @@ export function startScan(sim, u, x, z) {
 }
 export function resolveScans(sim) {
   const t = sim.t;
+  PICTURE.v++;
   for (let i = sim.scans.length - 1; i >= 0; i--) {
     const s = sim.scans[i];
     if (t < s.at) continue;

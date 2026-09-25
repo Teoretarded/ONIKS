@@ -2,7 +2,13 @@
 export const TAU = Math.PI * 2;
 export const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 export const sat = v => v < 0 ? 0 : v > 1 ? 1 : v;
-export const wrapPi = a => { a = (a + Math.PI) % TAU; if (a < 0) a += TAU; return a - Math.PI; };
+/* (a + PI) % TAU is exact (fmod), and within (-TAU, TAU) it is a + PI itself: skip the division there */
+export const wrapPi = a => {
+  let x = a + Math.PI;
+  if (!(x > -TAU && x < TAU)) x %= TAU;
+  if (x < 0) x += TAU;
+  return x - Math.PI;
+};
 export const angTo = (from, to) => wrapPi(to - from);
 export const bearing = (ax, az, bx, bz) => Math.atan2(bx - ax, bz - az);
 export const d2 = (a, b) => Math.sqrt((b[0] - a[0]) ** 2 + (b[2] - a[2]) ** 2);

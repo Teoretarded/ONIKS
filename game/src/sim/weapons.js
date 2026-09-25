@@ -7,10 +7,10 @@
    that does not destroy it outright loses control and tumbles down (spinout).
    Defensive weapons fire by themselves at incoming rounds and aircraft in range; offensive weapons fire at an
    explicit attack target, or pick their own targets when the unit is on hold. */
-import { PROJ, CLASSIFY, ENEMY, TEL_ELEV } from '../data/units.js';
+import { PROJ, CLASSIFY, ENEMY, TEL_ELEV, UNITS } from '../data/units.js';
 import { DT } from './consts.js';
 import { applyDamage } from './damage.js';
-import { launchSeen, radarWorks, torpedoHeard } from './sensors.js';
+import { launchSeen, radarWorks, torpedoHeard, PICTURE } from './sensors.js';
 import { gauss } from './rand.js';
 import { clamp, angTo, local, closest, ground, dxz, d3 } from './util.js';
 import { atPD, submerged, isSub, domOf } from './subs.js';
@@ -45,10 +45,22 @@ function dispAt(p, range) {
 }
 
 /* ---------- target choice and firing (every SENSE_EVERY ticks) ---------- */
+/* what a weapon engages, from its `vs` list (cached on the weapon's table entry; `vs` is never changed at run time) */
+function vsOf(w) {
+  let f = w._vs;
+  if (f === undefined) {
+    const v = w.vs;
+    f = w._vs = (v.includes('land') || v.includes('sea') || v.includes('sub') ? 1 : 0) | (v.includes('missile') ? 2 : 0) | (v.includes('air') ? 4 : 0);
+  }
+  return f;
+}
+const VS_SURF = 1, VS_MISSILE = 2, VS_AIR = 4;
+for (const k in UNITS) for (const wn in UNITS[k].weapons) vsOf(UNITS[k].weapons[wn]);   // now, not mid-match (layouts)
 const THREATS = { coast: [], fleet: [] }, INB = { coast: new Map(), fleet: new Map() };
 export function weaponsTick(sim) {
   const list = sim.list(), t = sim.t;
   THREATS.coast.length = 0; THREATS.fleet.length = 0; INB.coast.clear(); INB.fleet.clear();
+  AIRC.coast.v = AIRC.fleet.v = TRKS.coast.v = TRKS.fleet.v = -1;   // the pictures may have changed since the last tick (scripts, UI)
   for (const p of sim.projectiles.values()) {
     if (!p.alive || !(p.P.threat || p.P.torpedo)) continue;
     const foe = p.side === 'coast' ? 'fleet' : 'coast';
@@ -62,19 +74,20 @@ export function weaponsTick(sim) {
     for (const wn in W) {
       const w = W[wn];
       if (u.ammo[wn] <= 0 || u.cooldowns[wn] > 0 || u.off[wn]) continue;
-      if (w.mounts && w.mounts.every(m => u.off[m])) continue;
+      if (w.mounts && allOff(u, w.mounts)) continue;
       if (w.needsRadar && !radarWorks(u)) continue;
       if (w.sub && isSub(u) && !atPD(u)) continue;               // missiles leave a boat from periscope depth
       if (w.auto && autoFire(sim, u, w)) continue;
-      if (w.vs.includes('land') || w.vs.includes('sea') || w.vs.includes('sub')) offensive(sim, u, w);
+      if (vsOf(w) & VS_SURF) offensive(sim, u, w);
     }
   }
 }
+function allOff(u, mounts) { for (let i = 0; i < mounts.length; i++) if (!u.off[mounts[i]]) return false; return true; }
 
 function threatsFor(sim, u, w) {
   const side = u.side, t = sim.t, ux = u.pos[0], uy = u.pos[1], uz = u.pos[2];
   let best = null, bs = 1e18;
-  if (!w.vs.includes('missile')) return null;
+  if (!(vsOf(w) & VS_MISSILE)) return null;
   const list = THREATS[side];
   for (let i = 0; i < list.length; i++) {
     const p = list[i];
@@ -89,14 +102,42 @@ function threatsFor(sim, u, w) {
   }
   return best;
 }
+/* the side's engageable air tracks (fresh, classified, the aircraft airborne), in the picture's order: made once per
+   weapons tick and again whenever the picture changes under it (a launch shows the shooter to the other side) */
+const AIRC = { coast: { v: -1, list: [] }, fleet: { v: -1, list: [] } };
+function airTracks(sim, side) {
+  const A = AIRC[side];
+  if (A.v !== PICTURE.v) {
+    A.v = PICTURE.v;
+    const L = A.list, t = sim.t;
+    L.length = 0;
+    for (const c of sim.sides[side].contacts.values()) {
+      if (c.dom !== 'air' || c.dead || c.conf < CLASSIFY || t - c.lastSeen > 5) continue;
+      const e = sim.units.get(c.unitId);
+      if (!e || !e.alive || e.aboard) continue;
+      L.push(c, e);
+    }
+  }
+  return A.list;
+}
+/* the side's classified live tracks, in the picture's order (the same lifetime as airTracks) */
+const TRKS = { coast: { v: -1, list: [] }, fleet: { v: -1, list: [] } };
+function tracks(sim, side) {
+  const A = TRKS[side];
+  if (A.v !== PICTURE.v) {
+    A.v = PICTURE.v;
+    const L = A.list;
+    L.length = 0;
+    for (const c of sim.sides[side].contacts.values()) if (!c.dead && c.conf >= CLASSIFY) L.push(c);
+  }
+  return A.list;
+}
 function aircraftFor(sim, u, w) {
-  if (!w.vs.includes('air')) return null;
-  const S = sim.sides[u.side], t = sim.t;
+  if (!(vsOf(w) & VS_AIR)) return null;
+  const L = airTracks(sim, u.side);
   let best = null, bd = 1e18;
-  for (const c of S.contacts.values()) {
-    if (c.dom !== 'air' || c.dead || c.conf < CLASSIFY || t - c.lastSeen > 5) continue;
-    const e = sim.units.get(c.unitId);
-    if (!e || !e.alive || e.aboard) continue;
+  for (let i = 0; i < L.length; i += 2) {
+    const c = L[i], e = L[i + 1];
     const d = Math.sqrt((c.pos[0] - u.pos[0]) ** 2 + (c.pos[1] - u.pos[1]) ** 2 + (c.pos[2] - u.pos[2]) ** 2);
     if (d > (w.airRange || w.range) || d < (w.min || 0)) continue;
     if (!w.gun && e.eng >= (w.maxEng || 1)) continue;
@@ -125,8 +166,10 @@ function offensive(sim, u, w) {
     if (!o.hot || (o.fired || 0) >= (o.vn || 1)) return;
   } else if (u.hold) {
     let bs = -1e18;
-    for (const cc of S.contacts.values()) {
-      if (cc.dead || cc.conf < CLASSIFY || !w.vs.includes(cc.dom)) continue;
+    const L = tracks(sim, u.side);
+    for (let i = 0; i < L.length; i++) {
+      const cc = L[i];
+      if (!w.vs.includes(cc.dom)) continue;
       if (cc.cls === 'LCAC' && PROJ[w.proj] && PROJ[w.proj].torpedo) continue;
       const d = dxz(u.pos[0], u.pos[2], cc.pos[0], cc.pos[2]);
       if (d > w.range || d < (w.min || 0)) continue;
@@ -437,6 +480,7 @@ export function launch(sim, u, w, target, tk, aimAt) {
     // physics: under control (false: tumbling, see spinout), gun hits taken (real rounds), roll, the tumbling frame
     // (fw forward, up) and angular velocity w (rad/s, world axes), the track-error seeds (dispersion), a missed pass
     ctrl: true, gh: 0, roll: 0, fw: null, up: null, w: null, dsp: null, missed: null,
+    _seeC: -1, _seeF: -1,                  // sensors.js: the sensor (table index) that saw it last, per side
   };
   if (P.sig0 || P.sigR) {
     const r = sim.rng.fire;
@@ -522,7 +566,7 @@ export function stepProjectiles(sim) {
 }
 
 function stepOne(sim, p) {
-  const P = p.P, map = sim.map;
+  const P = p.P, map = sim.map, vert = P.vert || 0, boost = P.boost || 0;
   p.age += DT;
   if (P.mode === 'ballistic') {
     const b = p.ball, a = Math.min(p.age, b.T);
@@ -555,7 +599,7 @@ function stepOne(sim, p) {
       // lead: the target's position plus its velocity times the time to go (simple lead: the time at which a round at
       // this speed meets a target keeping its velocity, |r + v t| = s t), plus the track error
       const rx = tgt.pos[0] - p.pos[0], ry = tgt.pos[1] - p.pos[1], rz = tgt.pos[2] - p.pos[2];
-      const d = Math.sqrt(rx * rx + ry * ry + rz * rz), sp = Math.max(200, p.age < (P.boost || 0) ? P.speed * .8 : p.spd);
+      const d = Math.sqrt(rx * rx + ry * ry + rz * rz), sp = Math.max(200, p.age < boost ? P.speed * .8 : p.spd);
       const vx = (tgt.pos[0] - tgt.prev[0]) / DT, vy = (tgt.pos[1] - tgt.prev[1]) / DT, vz = (tgt.pos[2] - tgt.prev[2]) / DT;
       const qa = vx * vx + vy * vy + vz * vz - sp * sp, qb = 2 * (rx * vx + ry * vy + rz * vz);
       let tgo = d / sp;
@@ -589,13 +633,13 @@ function stepOne(sim, p) {
     else if (p.locked && !tgt) p.locked = false;
   }
   // speed
-  if (p.age < (P.boost || 0)) p.spd = p.spd0 + (P.speed - p.spd0) * ease(p.age / P.boost);
+  if (p.age < boost) p.spd = p.spd0 + (P.speed - p.spd0) * ease(p.age / P.boost);
   else p.spd = P.speed;
   // steering
   const dx = p.aim[0] - p.pos[0], dz = p.aim[2] - p.pos[2], dist = Math.sqrt(dx * dx + dz * dz);
-  if (p.age >= (P.vert || 0)) {
+  if (p.age >= vert) {
     let hT = Math.atan2(dx, dz);
-    const bend = ease((p.age - (P.vert || 0)) / 2.5);           // gentle, round pitch-over after the vertical rise
+    const bend = ease((p.age - vert) / 2.5);           // gentle, round pitch-over after the vertical rise
     // terrain ahead (2 s and 4 s, and the next 2 km of the track; refreshed 5x a second): everything keeps clear of
     // the ground until the last stretch
     const g0 = ground(map, p.pos[0], p.pos[2]);
@@ -616,7 +660,7 @@ function stepOne(sim, p) {
         if (fresh) p.gFl = clearAngle(p, 25, dist - 200);         // the floor 5x a second (the pitch rate smooths it)
         if (p.gFl > pT) pT = Math.min(p.gFl, 1.2);
       }
-      p.phase = p.age < (P.boost || 0) ? 'climb' : dist < 3000 ? 'final' : 'cruise';
+      p.phase = p.age < boost ? 'climb' : dist < 3000 ? 'final' : 'cruise';
     } else {
       const g = gA;
       const final = dist < P.finalDist;
@@ -639,7 +683,7 @@ function stepOne(sim, p) {
       if (fresh) p.gFl = P.look === 0 ? -9 : clearAngle(p, clr, dist - (dist < near ? 250 : 150));   // look: 0 switches it off (experiments)
       if (p.gFl > pT) pT = Math.min(p.gFl, P.pitchMax + .25);
     }
-    if (p.age < (P.vert || 0) + .01 && P.vert) p.phase = 'climb';
+    if (p.age < vert + .01 && P.vert) p.phase = 'climb';
     if (p.missed) { hT = p.hdg; pT = Math.min(pT, -.3); }
     // turn-rate limit, and the lateral-acceleration limit (gMax, m/s²) as a turn rate at this speed
     const gl = P.gMax ? P.gMax / Math.max(60, p.spd) : 99;
@@ -654,7 +698,7 @@ function stepOne(sim, p) {
     p.sep = true; p.st.booster = false;
     sim.emit('booster_sep', { proj: p.id, kind: p.kind, side: p.side, pos: p.pos.slice(), vel: p.vel.slice() });
   }
-  p.st.wing = ease((p.age - (P.vert || 0) - .5) / 1.5); p.st.fin = ease((p.age - (P.vert || 0)) / .8); p.st.cover = p.age < .3; p.st.inlet = p.st.wing;
+  p.st.wing = ease((p.age - vert - .5) / 1.5); p.st.fin = ease((p.age - vert) / .8); p.st.cover = p.age < .3; p.st.inlet = p.st.wing;
   // resolution: by geometry only. Interceptors (proximity fuze, PROJ.burst) go off when their path this tick passes
   // within the burst radius of the target's body; strike rounds hit when their path enters the target's part boxes.
   // A round that passes its target flies on (no circling back): an interceptor ends in the air, a strike round goes
@@ -671,7 +715,7 @@ function stepOne(sim, p) {
   }
   if (p.pos[1] < g + 1) {
     // interceptors skim, they never fly into the ground; strike rounds in their final dive (or past their target) do
-    if (!icpt && ((P.threat && p.age > (P.vert || 0) + 2 && p.phase === 'final') || p.missed || (!P.threat && p.age > 1.5))) {
+    if (!icpt && ((P.threat && p.age > vert + 2 && p.phase === 'final') || p.missed || (!P.threat && p.age > 1.5))) {
       let why = p.missed || 'terrain';
       if (!p.missed && tgt && p.locked) {
         // down short of a target ahead: the path met the surface before the body

@@ -149,20 +149,48 @@ function autoReturn(sim, u) {
 
 /* where an aircraft lands: drones at a catapult; others on a deck that takes their type (carrier; helos also a DDG) */
 function homeOf(sim, u) {
-  let best = null, bd = 1e18;
-  for (const v of sim.alive(u.side)) {
-    if (u.type === 'drone') { if (v.type !== 'catapult') continue; }
-    else if (!v.def.air || !v.def.air.types.includes(u.type) || v.off.air) continue;
-    else if (v.type !== 'carrier' && v !== sim.units.get(u.aboardOf || 0) && deckFull(sim, v)) continue;
+  let best = null, bd = 1e18, occ = null;
+  const own = u.type !== 'drone' ? sim.units.get(u.aboardOf || 0) : null, al = hostsOf(sim, u.side, u.type);
+  for (let i = 0; i < al.length; i++) {
+    const v = al[i];
+    if (u.type !== 'drone') {
+      if (v.off.air) continue;
+      if (v.type !== 'carrier' && v !== own && (occ || (occ = deckCounts(sim, u.side)))[v.id] >= v.def.air.cap) continue;
+    }
     const dd = dxz(u.pos[0], u.pos[2], v.pos[0], v.pos[2]);
     if (dd < bd) { bd = dd; best = v; }
   }
   return best;
 }
 
-function deckFull(sim, v) {
-  let n = 0; for (const w of sim.alive(v.side)) if (w.def.domain === 'air' && (w.aboard === v.id || w.landing === v.id)) n++;
-  return n >= v.def.air.cap;
+/* the side's units an aircraft of this type can land on (a drone: catapults; else decks that take the type), in
+   sim.alive() order: rebuilt whenever sim.alive() gives a new array */
+const HOSTS = { coast: { al: null, by: {} }, fleet: { al: null, by: {} } };
+function hostsOf(sim, side, type) {
+  const al = sim.alive(side), H = HOSTS[side];
+  if (H.al !== al) { H.al = al; H.by = {}; }
+  let L = H.by[type];
+  if (!L) {
+    L = H.by[type] = [];
+    for (let i = 0; i < al.length; i++) {
+      const v = al[i];
+      if (type === 'drone' ? v.type === 'catapult' : v.def.air && v.def.air.types.includes(type)) L.push(v);
+    }
+  }
+  return L;
+}
+
+/* aircraft on or landing on each deck of a side, by host id (deckFull for every deck in one pass) */
+let OCC = new Int32Array(256);
+function deckCounts(sim, side) {
+  if (OCC.length < sim.nextId) OCC = new Int32Array(sim.nextId * 2);
+  else OCC.fill(0, 0, sim.nextId);
+  for (const w of sim.alive(side)) {
+    if (w.def.domain !== 'air') continue;                             // aircraft only (not boats in a well deck)
+    if (w.aboard) OCC[w.aboard]++;
+    if (w.landing && w.landing !== w.aboard) OCC[w.landing]++;
+  }
+  return OCC;
 }
 
 function requestLaunch(sim, u) {

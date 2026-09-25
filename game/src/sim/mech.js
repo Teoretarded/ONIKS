@@ -1,7 +1,7 @@
 /* Per-unit timers and animations that are game state: TEL jacks and erector, radar mast, reloads from a
    transloader, refills at depots and at the replenishment point, turret slews, VLS hatches, aircraft rearm,
    carrier flight deck launches. */
-import { TEL_ELEV } from '../data/units.js';
+import { TEL_ELEV, UNITS } from '../data/units.js';
 import { DT } from './consts.js';
 import { clamp, angTo, wrapPi, dxz, local } from './util.js';
 import { subStep } from './subs.js';
@@ -13,9 +13,26 @@ export const erectW = d => d.erectW || (d.erectW = Object.keys(d.weapons).find(k
 
 const SLEW = 1.6;   // rad/s turret slew
 
+/* the timers a unit has ('scan' and one per weapon, sim.spawn: the same keys for every unit of a type) count down:
+   one small function per type, so each reads its own fixed fields (a loop over keys reads them generically, slowly) */
+function cdStepper(cd) {
+  const ks = Object.keys(cd);
+  if (!ks.every(k => /^[A-Za-z_$][\w$]*$/.test(k))) return c => { for (const k in c) if (c[k] > 0) c[k] -= DT; };
+  try { return new Function('DT', `return c => { ${ks.map(k => `if (c.${k} > 0) c.${k} -= DT;`).join(' ')} }`)(DT); }
+  catch (e) { return c => { for (const k in c) if (c[k] > 0) c[k] -= DT; }; }     // no eval allowed (CSP): the plain loop
+}
+
+// the per-type caches, made now rather than mid-match (adding a field to a unit type's table changes its layout)
+for (const k in UNITS) {
+  const d = UNITS[k], cd = { scan: 0 };
+  for (const w in d.weapons) cd[w] = 0;                     // the keys sim.spawn gives u.cooldowns
+  d._cdStep = cdStepper(cd);
+  erectW(d);
+}
+
 export function mechanics(sim, u) {
-  const d = u.def, t = sim.t;
-  for (const k in u.cooldowns) if (u.cooldowns[k] > 0) u.cooldowns[k] -= DT;
+  const d = u.def, t = sim.t, cd = u.cooldowns;
+  (d._cdStep || (d._cdStep = cdStepper(cd)))(cd);
 
   // TEL / Bal: jacks down, then erect (the Bal raises its pack); lower before raising the jacks
   if (d.deploy) {
@@ -181,7 +198,7 @@ function replenish(sim, u) {
   const R = replenishPoint(sim, u);
   if (!R || u.speed > 4 || dxz(u.pos[0], u.pos[2], R.x, R.z) > R.r) return;
   refillWeapons(sim, u);
-  if (u.mag) for (const k in u.def.magazine) if (u.mag[k] < u.def.magazine[k] && sim.tick % 60 === 0) u.mag[k]++;
+  if (u.mag && sim.tick % 60 === 0) for (const k in u.def.magazine) if (u.mag[k] < u.def.magazine[k]) u.mag[k]++;
 }
 export function ammoFull(u) { for (const w in u.def.weapons) if (u.ammo[w] < u.def.weapons[w].ammo) return false; return true; }
 
