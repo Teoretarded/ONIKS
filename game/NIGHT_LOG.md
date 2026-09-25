@@ -152,3 +152,10 @@ Every mission's first beat now comes within minutes; a passive player loses ever
 each was won on the first try by a scripted player (grades S/A). M2 has a hide-and-seek structure (their helicopter
 takes off at 6:00 and its radar gives you a bearing), M5 is fire-and-move with a depot ring to refill Pantsirs,
 M6's storm cell is how you get rounds through to the carrier. Results only count in unlock order.
+
+## 07:05 · First-run polish done
+A loading screen in the menu's style with the real steps (MAP, TERRAIN, FORCES, SYSTEMS, MODELS) that fades into the
+opening shot; every model pre-sampled at load (the 40 ms close-up stalls are gone); F1 help lists every control from
+the real bindings; quit/continue fade to black; the pause menu's Settings row opens live settings; a render-style
+setting (Point Cloud / Orbital) is in Settings. The dev server now answers on the IPv6 loopback too, so the game
+loads in ~3 s instead of ~14 s on Windows. Film maker agent started (compose camera takes over a live match).
