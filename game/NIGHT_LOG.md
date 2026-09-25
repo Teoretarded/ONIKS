@@ -175,3 +175,8 @@ range rings labelled by what reaches, and one yellow: your salvo in flight with 
 Zoom back in and the dots re-condense. The whole game can also be played in the Orbital style (Settings → Graphics
 → Render style, or `?style=orbital`): hairline models, wire swell rows, contour terrain. Stills: `orb_*.png`.
 Review 2 started.
+
+## 07:50 · Polish pass 2 done
+World tags now scale with the HUD (1440p/4K look like 1080p, larger), sensor tags never run off screen, the Effects
+quality setting really changes the effect budget, a hit-replay setting, combat grades reflect play (a win with
+nothing destroyed is C at best), inspect labels no longer collide, sandbox side switch moved to M (J = replay).
