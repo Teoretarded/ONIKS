@@ -14,7 +14,11 @@
    weapons held and fire on an attack order; H sets weapons free (they pick tracks in reach themselves) and back.
    Defensive weapons (SAM, SM-6, ESSM, Phalanx, 30 mm, AIM-120) always engage incoming rounds and aircraft.
    Scan: the nearest scanner that reaches the point fires (the selection's first, else any on the side); nothing ever
-   drives toward a scan point: beyond every scanner's reach the click is refused ("OUT OF REACH · 82 / 70 KM").
+   drives toward a scan point. While X is armed every own scanner's reach is a dotted lime ring on the ground, labelled
+   ("02 MONOLITH-B · SCAN 85 KM"); beyond every reach the click is refused, said at the cursor, as a toast and in the
+   engagement log ("OUT OF SCAN REACH · 86 / 85 KM · MOVE THE MONOLITH-B CLOSER"). A hostile track in reach of the
+   side's weapons that no scanner reaches, and so cannot be classified, raises one alert ("IN WEAPON REACH · NOT SCANNED
+   · TRK 21 · 88 / 85 KM"; bus 'unscanned').
    Feedback in the world: a dotted lime path and marker for moves, a coral dotted line for attacks, fading; the
    remaining route of selected units; weapon range of the selection. Targeting modes (scan, drone, launch, helo) run
    as a second system above the selection. */
@@ -24,6 +28,7 @@ import { buyable } from '../data/units.js';
 import { scanBlocked } from '../sim/sensors.js';
 
 const LIME = [198, 244, 50], CORAL = [255, 106, 61], WH = [238, 238, 228];
+const WH1 = [246 / 255, 245 / 255, 242 / 255], CO1 = [1, 106 / 255, 61 / 255];        // hairline colours (0..1)
 const sat = v => v < 0 ? 0 : v > 1 ? 1 : v;
 const km = m => (m < 10000 ? (m / 1000).toFixed(1) : String(Math.round(m / 1000)));
 const pad2 = n => String(n).padStart(2, '0');
@@ -185,6 +190,47 @@ export function createOrders(game) {
       if (!slowed && game.slowFor) { slowed = true; game.slowFor('engage', { unit: id }); }
     }
   }
+  /* a hostile track (classified before or not) that is in reach of the side's weapons but not firm enough to attack, and
+     that no scanner reaches: say it once per track (the HUD's alert and log; a toast without a HUD; bus 'unscanned'),
+     naming the scanner that comes closest ("IN WEAPON REACH · NOT SCANNED · TRK 21 · 88 / 85 KM") */
+  const noScanTold = new Map();
+  let noScanRow = null;
+  game.bus.on('side', () => { noScanTold.clear(); noScanRow = null; });
+  function checkUnscanned() {
+    const S = sim.sides[game.side];
+    if (!S || !sim.fog || sim.result) return;
+    const t = sim.t;
+    for (const id of noScanTold.keys()) if (!S.contacts.has(id)) noScanTold.delete(id);
+    let list = null;
+    for (const [id, c] of S.contacts) {
+      // under the water no scan reaches; aircraft are tracked by radar, not scanned
+      if (noScanTold.has(id) || c.dead || c.conf >= game.CLASSIFY || c.dom === 'air' || c.dom === 'sub' || t - c.lastSeen > 30) continue;
+      if (!list) list = scanners();
+      let near = null, reached = false;
+      for (const u of list) {
+        const d = Math.hypot(u.pos[0] - c.pos[0], u.pos[2] - c.pos[2]), reach = u.def.scan.reach;
+        if (d <= reach) { reached = true; break; }
+        if (!near || d - reach < near.d - near.u.def.scan.reach) near = { u, d };
+      }
+      if (reached) continue;
+      const us = reachOf(c);
+      if (!us.length) continue;
+      noScanTold.set(id, t);
+      const how = near ? reachNums(near) : 'no scanner';
+      const text = `Not scanned · ${c.track} · ${how}`;
+      game.bus.emit('unscanned', { unit: id, track: c.track, cls: c.cls, conf: c.conf, units: us.map(u => u.id), scanner: near ? near.u.id : null, d: near ? near.d : 0, pos: c.pos.slice(), text });
+      const H = game.getSystem('hud');
+      if (H && H.alerts && H.alerts.push) {
+        H.alerts.push('noscan', 'In weapon reach', text, 'w', { track: id, pos: c.pos.slice(), merge: 4, dur: 12, dist: 14000,
+          textN: k => `Not scanned · ${k} tracks · ${how}` });
+      } else game.bus.emit('toast', { text: `IN WEAPON REACH · ${text.toUpperCase()}` });
+      if (H && H.log && H.log.add) {
+        // a group coming in together is one line
+        if (noScanRow && game.realT - noScanRow.at < 4) { noScanRow.n++; noScanRow.r.text = `${noScanRow.n} tracks · not scanned · ${how}`; noScanRow.at = game.realT; }
+        else { const r = H.log.add('Reach', `${c.track} · not scanned · ${how}`, ''); noScanRow = r ? { r, n: 1, at: game.realT } : null; }
+      }
+    }
+  }
 
   /* ~: the next salvo size for the selection's launchers: 1 -> 2 -> ALL -> 1 (Shift: back) */
   function cycleSalvo(back) {
@@ -297,7 +343,39 @@ export function createOrders(game) {
     if (b.u) return { u: b.u, alt: true, near: b.near };
     return { u: null, alt: false, near: a.near || b.near };
   }
-  const reachTxt = n => `OUT OF REACH · ${km(n.d)} / ${km(n.u.def.scan.reach)} KM`;
+  /* "86 / 85": a distance just past a reach keeps a decimal, so it never reads "85 / 85" */
+  const kmPast = (d, reach) => d > reach && Math.round(d / 1000) <= Math.round(reach / 1000) ? (d / 1000).toFixed(1) : km(d);
+  const reachNums = n => `${kmPast(n.d, n.u.def.scan.reach)} / ${km(n.u.def.scan.reach)} KM`;
+  const reachTxt = n => `OUT OF SCAN REACH · ${reachNums(n)}`;
+  /* the side's scanners that can fire (on a deck they cannot) */
+  const scanners = () => sim.alive(game.side).filter(u => u.def.scan && !u.off.scan && !u.aboard);
+  /* a scanner as the player would name it: "THE MONOLITH-B" (the only one), "DDG 04" (one of several) */
+  const SCAN_NAME = { radar: 'MONOLITH-B', ddg: 'DDG', helo: 'MH-60R', drone: 'ORLAN-10', hq: 'K380R CP' };
+  function scanName(u) {
+    const nm = SCAN_NAME[u.type] || SHORT[u.type] || u.def.name.toUpperCase();
+    return sim.alive(game.side).filter(v => v.type === u.type && !v.aboard).length > 1 ? `${nm} ${pad2(u.id)}` : `THE ${nm}`;
+  }
+  /* a refused scan point, said as a toast and a log line: the numbers of the scanner that comes closest (a mobile one
+     first: it can be moved there) and what to do */
+  let refusedAt = -1e9, refusedLog = '';
+  function refuse(w, near) {
+    let mv = null;
+    for (const u of scanners()) {
+      if (!(u.def.speed > 0)) continue;
+      const d = Math.hypot(u.pos[0] - w[0], u.pos[2] - w[2]);
+      if (!mv || d - u.def.scan.reach < mv.d - mv.u.def.scan.reach) mv = { u, d };
+    }
+    const n = mv || near, nums = reachNums(n);
+    const text = `OUT OF SCAN REACH · ${nums}${mv ? ` · MOVE ${scanName(mv.u)} CLOSER` : ''}`;
+    game.bus.emit('toast', { text, bad: true });
+    // the log (its line is short): one line, not one per click
+    const H = game.getSystem('hud');
+    if (H && H.log && H.log.add && (text !== refusedLog || game.realT - refusedAt > 6)) {
+      H.log.add('No scan', `${nums}${mv ? ` · ${scanName(mv.u).replace(/^THE /, '')} closer` : ''}`, 'c');
+      refusedLog = text;
+    }
+    refusedAt = game.realT;
+  }
 
   /* ---------- reinforcements (B) ---------- */
   function buyList() { return buyable(game.side).map(t => ({ type: t, def: game.UNITS[t] })); }
@@ -334,8 +412,10 @@ export function createOrders(game) {
     const side = sim.sides[game.side];
     const s = scanFor(w[0], w[2]);
     if (!s.u) {
-      // never drive toward it: the cursor tag says why (it blinks), and the mode stays
+      // never drive toward it: the cursor tag says why (it blinks), a toast and the log say what would reach it; the
+      // mode stays
       if (!s.near) say('NO SCANNER', ev.x, ev.y);
+      else refuse(w, s.near);
       bad(); mode.flash = game.realT;
       marks.push({ kind: 'no', at: w.slice(), t0: game.realT, dur: 1.2 });
       return false;
@@ -369,6 +449,41 @@ export function createOrders(game) {
     game.bus.emit('toast', { text: `LAUNCH · ${pkgName(pk.units)} · ${mode.kind === 'helo' ? 'SEARCH' : 'PATROL'}` });
     marks.push({ kind: 'move', at: w.slice(), ids: pk.units.map(u => u.id), t0: game.realT, dur: 2.6 });
     return true;
+  }
+
+  /* ---------- the scan's reach rings: each labelled where it runs nearest the lens in view ---------- */
+  const LQ = [0, 0, 0], LS = [0, 0, 0], placed = [];
+  function ringLabels(ov) {
+    const A = mode.aim && mode.aim.f === game.frameN ? mode.aim : null, s = A && A.s;
+    const act = s ? (s.u || (s.near && s.near.u)) : mode.units[0], out = !!(s && !s.u && s.near);
+    const W = cam.W, H = cam.H, k = ov.ui || 1, orb = R.style === 'orbital' || (game.orbital && game.orbital.k > .5);
+    const hor = Math.sqrt(2 * 6371000 * Math.max(1, cam.eye[1])) * 1.02;     // past this the ground is under the horizon
+    const hr = game.hudRects || [], lw = 120 * k, lh = 40 * k;               // a label's half width, height above the ring
+    const onPanel = (x, y) => { for (const r of hr) if (x + lw > r[0] && x - lw < r[2] && y > r[1] && y - lh < r[3]) return true; return false; };
+    const taken = (x, y) => { for (const b of placed) if (Math.abs(b[0] - x) < 2 * lw && Math.abs(b[1] - y) < 26 * k) return true; return false; };
+    placed.length = 0;
+    for (const u of mode.all || scanners()) {
+      if (!u.alive || u.aboard) continue;
+      const p = game.unitPose(u).pos, rr = u.def.scan.reach;
+      // the label sits on the ring low and central in the view (near the lens, not at an edge). Fine steps: close to the
+      // lens one step of a ring tens of km round crosses the whole view
+      let bx = 0, by = -1, bs = -1e9;
+      for (let i = 0; i < 540; i++) {
+        const a = i / 540 * Math.PI * 2, x = p[0] + Math.sin(a) * rr, z = p[2] + Math.cos(a) * rr;
+        if (Math.hypot(x - cam.eye[0], z - cam.eye[2]) > hor) continue;
+        LQ[0] = x; LQ[1] = Math.max(0, T.heightAt(x, z)) + 2; LQ[2] = z;
+        const q = cam.project(LQ, LS);
+        if (!q || q[0] < lw + 16 * k || q[0] > W - lw - 16 * k || q[1] < 60 * k || q[1] > H * .8) continue;
+        const sc = q[1] - Math.abs(q[0] - W / 2) * .5;
+        if (sc <= bs || onPanel(q[0], q[1]) || taken(q[0], q[1])) continue;
+        bs = sc; by = q[1]; bx = q[0];
+      }
+      if (by < 0) continue;
+      placed.push([bx, by]);
+      const on = u === act;
+      ov.tag(bx, by - 26 * k, pad2(u.id), SCAN_NAME[u.type] || SHORT[u.type] || u.def.name, `SCAN ${km(rr)} KM`,
+        { kind: on && out ? 'coral' : orb ? 'white' : 'lime', size: 10, a: on ? 1 : .7, align: 'center', fit: false });
+    }
   }
 
   /* ---------- the targeting system (above selection) ---------- */
@@ -415,6 +530,7 @@ export function createOrders(game) {
         const w = game.mouse.in ? cam.pickGround(game.mouse.x, game.mouse.y) : null;
         const s = w ? scanFor(w[0], w[2]) : null, u = s && (s.u || (s.near && s.near.u));
         mode.aim = { w, s, f: game.frameN };           // this frame's ground point and scanner (draw3d / draw2d)
+        if (game.frameN % 10 === 0 || !mode.all) mode.all = scanners();   // every reach ring (draw3d / draw2d)
         if (u) { if (mode.units.length !== 1 || mode.units[0] !== u) mode.units = [u]; }
         else if (mode.units !== mode.pref) mode.units = mode.pref;
       }
@@ -429,19 +545,22 @@ export function createOrders(game) {
       const w = A ? A.w : game.mouse.in ? cam.pickGround(game.mouse.x, game.mouse.y) : null;
       if (mode.kind === 'scan') {
         const s = A && A.s ? A.s : w ? scanFor(w[0], w[2]) : { u: mode.units[0] };
-        if (s.u) {
-          const p = game.unitPose(s.u).pos;
-          R.fx.ring([p[0], 0, p[2]], s.u.def.scan.reach, { rgb: LIME, a: .45, step: 6, drape: true, lift: 2, mode: 'over' });
-          if (w) {
-            R.fx.ring(w, s.u.def.scan.r, { rgb: LIME, a: .8, step: 4, drape: true, lift: 2, mode: 'over' });
-            R.fx.line([p[0], p[1] + 10, p[2]], [w[0], w[1] + 30, w[2]], { rgb: LIME, a: .5, step: 7, mode: 'over' });
-          }
-        } else if (s.near) {
-          // out of reach: the nearest scanner's reach in coral, and the refused point
-          const p = game.unitPose(s.near.u).pos;
-          R.fx.ring([p[0], 0, p[2]], s.near.u.def.scan.reach, { rgb: CORAL, a: .5, step: 6, drape: true, lift: 2, mode: 'over' });
-          if (w) R.fx.ring(w, s.near.u.def.scan.r, { rgb: CORAL, a: .7, step: 4, drape: true, lift: 2, mode: 'over' });
+        const act = s.u || (s.near && s.near.u), out = !s.u && !!s.near;
+        // every own scanner's reach on the ground: the one this click would use brighter (out of reach: the nearest
+        // one's in coral). Pulled out into the strategic layer (and in the Orbital style) they are dashed hairlines.
+        const ok = game.orbital ? game.orbital.k || 0 : 0, orb = R.style === 'orbital', wk = orb ? 1 : ok, fk = orb ? 0 : 1 - ok;
+        for (const u of mode.all || scanners()) {
+          if (!u.alive || u.aboard) continue;
+          const p = game.unitPose(u).pos, on = u === act;
+          // (max blend: far off, tens of km out, alpha-over dots lose to the sea's depth mesh)
+          if (fk > .01) R.fx.ring([p[0], 0, p[2]], u.def.scan.reach, { rgb: on && out ? CORAL : LIME, a: (on ? .9 : .6) * fk, step: on ? 5 : 6, size: on ? 2 : 1.5, drape: true, lift: 2, mode: 'max' });
+          if (wk > .01 && R.wire) R.wire.ring(p[0], 0, p[2], u.def.scan.reach, { rgb: on && out ? CO1 : WH1, a: (on ? .55 : .3) * wk, n: 256, dash: [2, 3] });
         }
+        if (s.u && w) {
+          const p = game.unitPose(s.u).pos;
+          R.fx.ring(w, s.u.def.scan.r, { rgb: LIME, a: .8, step: 4, drape: true, lift: 2, mode: 'over' });
+          R.fx.line([p[0], p[1] + 10, p[2]], [w[0], w[1] + 30, w[2]], { rgb: LIME, a: .5, step: 7, mode: 'over' });
+        } else if (out && w) R.fx.ring(w, s.near.u.def.scan.r, { rgb: CORAL, a: .7, step: 4, drape: true, lift: 2, mode: 'over' });
       } else if (mode.kind === 'drone' && w) {
         R.fx.ring(w, 1500, { rgb: LIME, a: .7, step: 5, drape: true, lift: 2, mode: 'over' });
       } else if (mode.kind === 'launch' || mode.kind === 'helo') {
@@ -465,6 +584,7 @@ export function createOrders(game) {
     },
     draw2d(ov) {
       if (buyOpen) { if (game.frameN % 15 === 0) renderBuy(); }
+      if (mode && mode.kind === 'scan') ringLabels(ov);
       if (!mode || !game.mouse.in) return;
       const x = game.mouse.x, y = game.mouse.y, LI = '#C6F432', CO = '#FF6A3D';
       let key = 'X', txt = '', col = LI, sub = '', subCol = LI;
@@ -530,7 +650,7 @@ export function createOrders(game) {
     },
     update() {
       for (let i = marks.length - 1; i >= 0; i--) if (game.realT - marks[i].t0 > marks[i].dur) marks.splice(i, 1);
-      if (sim.t - reachT >= 1 || sim.t < reachT) { reachT = sim.t; checkReach(); }
+      if (sim.t - reachT >= 1 || sim.t < reachT) { reachT = sim.t; checkReach(); checkUnscanned(); }
       // combat: say once, when the opening shot has settled, that the first shot waits for the player
       if (!told && game.mode === 'combat' && game.realT > 3) {
         told = true;
