@@ -91,6 +91,8 @@ export function createMatchFlow(game) {
       time: r.win ? 'Ahead at the time limit' : 'Behind at the time limit', mission: r.win ? 'Objectives complete' : 'Mission failed' }[r.reason] || '';
     const objs = (game.objectives || []).map(o => `<div class="ob ${o.state}"><i></i><span>${o.text}${o.optional ? ' <em>optional</em>' : ''}</span></div>`).join('');
     const fmt = game.fmtTime || (t => Math.round(t) + ' s');
+    // the Debrief (game/debrief.js): the match filmed again from its record, when there is one
+    const dbf = !!(game.debrief && game.debrief.available && game.debrief.available());
     endEl.innerHTML = `
       <div class="blk">
         <div class="kick"><i></i>${title}</div>
@@ -101,10 +103,11 @@ export function createMatchFlow(game) {
         ${objs ? `<div class="obs">${objs}</div>` : ''}
         <div class="acts">
           <span class="btn on" data-a="continue"><i class="sq"></i><span class="lab">Continue</span></span>
+          ${dbf ? '<span class="btn" data-a="debrief"><i class="sq"></i><span class="lab">Debrief</span></span>' : ''}
           <span class="btn" data-a="watch"><i class="sq"></i><span class="lab">Watch</span></span>
           <span class="btn" data-a="restart"><i class="sq"></i><span class="lab">Replay</span></span>
         </div>
-        <div class="keys"><span><b>Enter</b>Continue</span><span><b>W</b>Watch</span><span><b>R</b>Replay</span></div>
+        <div class="keys"><span><b>Enter</b>Continue</span>${dbf ? '<span><b>D</b>Debrief</span>' : ''}<span><b>W</b>Watch</span><span><b>R</b>Replay</span></div>
       </div>`;
     endEl.addEventListener('click', e => { const b = e.target.closest('[data-a]'); if (b) act(b.dataset.a); });
     endEl.querySelectorAll('.btn').forEach(b => b.addEventListener('mouseenter', () => { endEl.querySelectorAll('.btn').forEach(x => x.classList.remove('on')); b.classList.add('on'); }));
@@ -116,6 +119,7 @@ export function createMatchFlow(game) {
     if (a === 'continue') leave(back());
     else if (a === 'restart') leave(null);
     else if (a === 'watch') { if (endEl) endEl.classList.toggle('min'); }
+    else if (a === 'debrief') { if (game.debrief && game.debrief.open) game.debrief.open(); }
     else if (a === 'resume') openMenu(false);
     else if (a === 'settings') settings();
     else if (a === 'quit') leave(back());
@@ -199,6 +203,7 @@ export function createMatchFlow(game) {
         if (e.code === 'ArrowUp' || e.code === 'ArrowDown' || e.code === 'Enter' || e.code === 'NumpadEnter') { nav(endEl, e); return true; }
         else if (e.code === 'KeyW' || e.code === 'Escape') act('watch');
         else if (e.code === 'KeyR') act('restart');
+        else if (e.code === 'KeyD' && endEl.querySelector('[data-a="debrief"]')) act('debrief');
         return true;
       }
       if (endShown && endEl && endEl.classList.contains('min') && e.type === 'keydown' && (e.code === 'Escape' || e.code === 'Enter')) { endEl.classList.remove('min'); return true; }

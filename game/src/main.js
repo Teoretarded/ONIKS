@@ -43,6 +43,7 @@ const OPTIONAL = [
   [['./game/orbital.js'], 'createOrbital', 'orbital'],
   [['./ui/help/index.js'], 'createHelp', 'help'],
   [['./game/filmmaker.js'], 'createFilmmaker', 'filmmaker'],
+  [['./game/debrief.js'], 'createDebrief', 'debrief'],
 ];
 
 async function getMap(id) {
