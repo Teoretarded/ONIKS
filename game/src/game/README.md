@@ -10,6 +10,7 @@ and calls `game.addSystem(await createX(game, ctx))`:
 | `render.js` | `createRender(game, DM)` | `render` (10): units, projectiles, wakes, sites (registered first, directly) |
 | `select.js` | `createSelect` | `selection` (40): click / box / groups / follow, brackets and tags; `order-notes` (55): a right-click on an unclassified contact's cloud answers "NOT TRACKED · SCAN IT (X)" and which scanner reaches it (no move order), R says why nothing reloads |
 | `orders.js` | `createOrders` | `orders` (50) + `targeting` (80): right-click and hotkey orders, the scan / launch aim modes |
+| `amphib.js` | (via `createOrders`) | `amphib` (55): the landing force: T Land (LHD / LCAC: click a beach or inland), Unload / Dock / Board by the selection; right-click board / dock / land; landing events to the HUD log and alerts |
 | `time.js` | `createTime` | `time` (30): Space, + / -, F10; rate readout and toasts without a HUD |
 | `director.js` | `createDirector` | `director` (20): the cinematic camera (C; it also takes the picture when the match ends, holding the last kill to the result screen); also loads `replay.js` and returns both |
 | `replay.js` | `createReplay` (via director) | `replay` (110): a decisive hit in slow motion with the X-ray sweep; J the last one again, Shift J (or the Hit replay setting) auto on / off |
@@ -26,6 +27,8 @@ and calls `game.addSystem(await createX(game, ctx))`:
 | `orbital.js` | `createOrbital(game)` | `orbital` (16) + `orbital-pre` (14): past ~40 km the picture fades into the Orbital hairlines; the Orbital render style |
 | `src/ui/help/index.js` | `createHelp(game)` | `help` (130): F1 controls (from `KEYBINDS`), the pause menu's in-game settings, settings applied live |
 | `filmmaker.js` | `createFilmmaker(game)` | `filmmaker` (125): F9 compose a camera take over the live match and play it clean; F8 stills |
+| `debris.js` + `debris/` | `createDebris(game)` | `debris` (11): hit things come apart as rigid bodies: a round stopped in the air snaps at the hit into two sections, its fins and wings tumble off, the struck part shatters into shards; a round knocked out of control (`spinout`, `p.ctrl === false`) is drawn tumbling (plume and smoke swinging round with it) and sheds fins, wings, then its tail section; an aircraft shot down comes apart as it falls (rotor, wings, tails; the fuselage sinks or lies where it fell); a ship or vehicle destroyed throws off masts (toppling over the side), arrays, mounts, turrets, cranes, boats (pieces strike hulls, land on decks, splash, skip, sink, float, bounce and rest as wreck pieces). Deterministic from the event, cap 400 bodies. Bullet time on a spectacular break-up near the camera (the Hit replay setting). Render hooks `game.debris.unit(u, d)` / `proj(p, d)`, FX hook `head(p, t, out)`, replay hook `gone(id)`, bus `breakup`; console `game.debris.demo(kind, { mode: 'breakup' \| 'spin' })` |
+| `perfguard.js` | `createPerfGuard(game)` | `perfguard` (0, registered last: it wraps `game.frame`): Auto quality (Settings): the frame-time watchdog that holds 60 fps. It times each frame (main thread and GPU), sets `game.stepBudgetMs` to what drawing leaves of 14 ms, and above 14 ms for a second steps the effects budget, then (only while the GPU carries the frame) the dot density and the render scale down, back up with headroom, never oscillating. `game.quality` (level, label for the FPS readout, log); the perf suite holds it (`game.quality.hold`) |
 
 A factory may return one system, an array of systems, a Promise of either, or null. `ctx = { DM /* data/models.js */,
 params, mission, match }`. `?nosys=fx,audio` skips optional systems (debugging).
@@ -62,6 +65,9 @@ game = {
   order(ids, order) -> bool      // sim.order for the player's own units + bus 'order'
   unitPose(u) -> { pos, hdg, pitch, roll, speed }   // the drawn pose: interpolated, land on the drawn ground,
                                                      // ships on the swell (and sinking), aircraft banked; cached per frame
+                                                     // (game/pose.js: vehicles on their wheel stations + springs, ships'
+                                                     // closed-form response to the drawn waves (sim/sea.js) + heel,
+                                                     // squat, list, trim; aircraft on a deck in the ship's frame)
   projPose(p) -> { pos, hdg, pitch }                 // interpolated, along the velocity
   setRate(r), stepRate(±1), pause(on?), setAutoSlow(on), slowFor(why, event) /* auto x1 now, if the setting is on */,
   setUiHidden(on?), setSide(side),
@@ -96,7 +102,7 @@ frame = { game, R, cam, fx /* R.fx */, sink, t, alpha, dt, dtSim, realT, seaT }
 Priorities (`PRI` in game.js; input goes high to low, drawing low to high):
 help 130 · filmmaker 125 · menu 120 · replay 110 · inspect 100 · targeting 80 · hud 70 · sandbox 60 · order-notes 55 · orders 50 · selection 40 ·
 time 30 · director 20 · orbital 16 · sensors 15 · sonar / orbital-pre 14 · landmarks 12 · render 10 · fx 5 · objectives 3 ·
-escape 2 · audio 1. The camera takes its own keys (WASD / arrows pan, Q E rotate, PageUp / PageDown pitch, wheel zoom,
+escape 2 · audio 1 · perfguard 0. The camera takes its own keys (WASD / arrows pan, Q E rotate, PageUp / PageDown pitch, wheel zoom,
 right-drag rotate, middle-drag pan) below everything; a system that needs the keys for itself sets
 `game.camera.keys = false` while it is active.
 
@@ -138,6 +144,8 @@ sink.cam = { eye, f, r, u, fl /* px at 1080p */, tanX, tanY, near, W, H, dist }
 | `group` | `{ n, ids }` a group was set |
 | `buy` / `spawned` | `{ type, ok }` reinforcement ordered / `{ unit, type, side }` placed in the sandbox |
 | `weather` | the new weather (sandbox) |
+| `breakup` | `{ t, pos, id, kind, key, L, heavy, spin, side, w, px, dist, onScreen, unit? }` something came apart (debris.js): a round broken up or knocked out of control, an aircraft shot down; the director weighs the moment by `w` |
+| `bullet` | `{ on, b }` a break-up's bullet time starts / ends (debris/slowmo.js: x0.25, the rate emitted with why 'bullet'; `game.bulletTime.take()` hands a replay starting meanwhile the rate to return to) |
 
 A HUD that draws the objectives itself sets `drawsObjectives: true` on its system (objectives.js then stays off
 screen); while a system named `hud` exists, time.js and director.js leave the rate readout, toasts and the
@@ -179,4 +187,4 @@ frames under it, then fades it over the opening shot; the Inspect cutaways are s
 waves, sandbox AI wake / sleep) · `render.js` (units, projectiles, wakes, sites) · `select.js` · `orders.js` ·
 `time.js` · `director.js` (cinematic camera) · `replay.js` (hit replay) · `objectives.js` (campaign objectives, combat /
 sandbox summary) · `match.js` (end overlay, pause menu, result, combat grade) · `sandbox.js` (spawn palette and tools) ·
-`sonar.js` · `landmarks.js` · `orbital.js` · `filmmaker.js` + `filmmaker/` · `labels.js` (designations) · `campaign/`.
+`sonar.js` · `landmarks.js` · `orbital.js` · `filmmaker.js` + `filmmaker/` · `debris.js` + `debris/` (rigid-body debris: `world.js` the solver, `plans.js` how each model comes apart, `geom.js` module boxes and masks, `shards.js`, `slowmo.js` bullet time, `math.js`) · `labels.js` (designations) · `campaign/`.

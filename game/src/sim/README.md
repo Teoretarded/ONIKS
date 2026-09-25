@@ -50,7 +50,51 @@ Unit = { id, type, side, def /* UNITS[type] */, pos, prev, hdg, prevHdg, pitch (
   name the model keys (aliases in data/models.js).
 - Damage per part: `unit.parts[name]` 0..1; a part at 1 is destroyed and switches off `UNITS[type].parts[name].disables`
   (tokens in `unit.off`: 'move', 'radar', 'camera', 'scan', 'deploy', 'air', 'reload', 'launch', weapon names).
-- Dying: ships list and settle over 60 s, vehicles burn 20 s, aircraft fall; then the unit is removed ('removed').
+- Dying: ships flood and sink over 60 s, vehicles burn 20 s, aircraft fall; then the unit is removed ('removed').
+
+## Motion (dynamics.js, sea.js, the sinking in damage.js)
+
+How units move is physical, per tick, deterministic and allocation-free; the numbers per type are `UNITS[type].mot`.
+
+- **Vehicles**: power to weight (`mot.power` kW, `mot.mass` t) against rolling resistance (road / off road) and the
+  grade along the heading (a K340P TEL: 8 m/s off road on the flat, ~3 m/s up a 20 % slope); the driver's acceleration
+  (`accel`) and braking; a bicycle model steering on the turning circle (`mot.turnR`, an 8x8 13.5 m) and the grip he
+  keeps (~0.25 g): trucks slow for bends and never pivot. `u.grade` / `u.cross` (slopes under it), `u.kap` (curvature),
+  `u.sp` / `u.sr` the body's pitch / roll on its springs (sitting back under power, diving braking, rolling out of turns;
+  part of `u.pitch` / `u.roll`; the render pose adds them to the drawn ground).
+- **Ships**: thrust against drag ~ v^2 (a DDG ~3 min to 28 kn, the carrier ~5.5), astern at 60 % to stop; Nomoto yaw
+  (`mot.yawT`) under a helmsman with counter-rudder, turning circle `mot.td` ship lengths (DDG 3.5, CVN 4.5), speed lost in
+  a hard turn (~30 %); heel out of the turn after a brief lean in (a damped roll at `mot.rollT`); submerged boats lean
+  in. `u.yawR` (rad/s), `u.rud` (-1..1), `u.heel`, `u.squat` (m) and `u.trimS` (by the stern with the Froude number, more
+  in shallow water), `u.bow` (bow wave height, m: for the wake). Flooding: every hit on a ship notes where it struck
+  (the `hit` event's point, else the side facing the shooter): `u.fSide` (-1 port .. 1 starboard), `u.fEnd` (-1 stern
+  .. 1 bow), `u.flood` (0..0.5 afloat; a torpedo lets in three times as much): she lists toward it (`u.list`) and trims
+  by that end (`u.trim`), both part of `u.roll` / `u.pitch`. The swell is not the sim's: the render pose rides the
+  drawn waves (`sea.js`, below).
+- **Sinking**: when she is lost (`u.sinkP`): she settles, listing and trimming, until her deck edge is at the water,
+  then goes down by the flooded end (the other rising) or, flooded down one side, rolls over, floats keel up and goes;
+  faster the harder she was hit. `u.pos[1]`, `u.roll` = `u.list`, `u.pitch` = `u.trim`, `u.flood` (0..1). Vehicle
+  wrecks skid to a stop, slide down slopes steeper than ~19 deg and settle onto their axles (`u.settle`, `u.wtP`,
+  `u.wtR`); aircraft fall under drag, nose down (a helicopter spins).
+- **Aircraft**: bank to turn (turn rate g tan(bank) / v; `mot.bank` in an attack or a reversal, `mot.bankC` for routine
+  turns, never more than the wing lifts at this speed: `mot.vs` stall speed), energy (thrust from the table's climb
+  rate against drag, the induced drag of the load factor, the climb: hard turns and zooms cost speed), pitch = flight
+  path + angle of attack, `u.vy` vertical speed. Carrier launches ride the waist catapult's 94 m (`mot.cat` end speed,
+  ~2.5 s) and climb away wings level; landings fly to 5 km astern on the angled deck's axis, down the 3.5 deg glide
+  slope (pursuit led by the ship's motion), trap on the wires (90 m roll-out) or wave off and go round (`u.appr`).
+  On a deck `u.deck` = `{ cv, mode: 'cat' | 'trap' | 'held', x, y, z (ship frame), hd }` (the render places her in the
+  ship's drawn frame); `u.trapped` = the ship's id once she is down (orders' `return` then takes her aboard: `onDeck`).
+  Helicopters fly a velocity vector (`u.hvx`, `u.hvz`): the rotor tilts to accelerate and flares to stop, drifts in the
+  hover, holds station over the deck spot (`mot.spot`) at the ship's speed and sets down.
+- **Separation** (every 0.2 s, `separate`): hulls are capsules; a unit with another ahead gives way (ships: to
+  starboard meeting or crossing, looking ahead to the closest point of approach; vehicles: away from it) and slows
+  (`u.avH` heading bias, `u.avS` speed factor); a unit whose goal is taken by a stopped one stops short; overlaps are
+  pushed apart (the lighter more). Aircraft whose paths cross climb 160 m apart (`u.sepY`).
+- **The swell** (`sea.js`): `swellOf(weather)` builds the wave trains exactly as engine/terrain.js draws them
+  (`T.waves`, `T.seaAmp`); `hullMotion(waves, amp, x, z, hdg, vx, vz, hull, t, out)` is a hull's closed-form response
+  (heave, pitch, roll averaged over its waterplane, each through a damped oscillator at the encounter frequency; no
+  state), used by the render pose so ships ride the waves that are drawn: a carrier nearly still, a destroyer rolling
+  beam-on. `hullOf(def)` the hull's periods from `mot`.
 - Aircraft on the carrier have `aboard = carrierId` (position follows the deck; draw them parked or not at all).
   Any move/patrol/attack/scan order launches them (one off the deck every 20 s). Drones launch from a catapult.
   The E-2D (`aew`) flies off the carrier like the fighters (it spreads its wings first: `spool`); its rotodome is its
@@ -110,9 +154,9 @@ Orders queue with `queue: true`. The AI uses the same orders.
   `cls`/`type` are set once conf ≥ `CLASSIFY` (0.6). `identified` after a scan (inspect allowed). `classify` events
   carry `how` ('radar', 'esm', 'scan', ...).
 - Emitters (radars on, the command post's comms) are heard by the other side within their `emits.range`: a rough
-  contact (conf ≤ .45, error ≥ 2.5 km). ESM CROSS-FIX: the fleet's listeners (`sensors.esm`: E-2D, F/A-18E, DDG) in
-  line of sight take bearings (the E-2D hears 1.3× farther, `esm.reach`); bearings ≥ ~12° apart within 3 min (two
-  listeners, or one that flew across) fix the emitter (`xfix` = sine of the crossing, 0 when none; error ≈ range ×
+  contact (conf ≤ .45, error ≥ 2.5 km). ESM CROSS-FIX: the fleet's listeners (`sensors.esm`: E-2D, DDG; the
+  F/A-18E has the pod instead) in line of sight take bearings (the E-2D hears 1.3× farther, `esm.reach`); bearings
+  ≥ ~12° apart within 3 min (two listeners, or one that flew across) fix the emitter (`xfix` = sine of the crossing, 0 when none; error ≈ range ×
   0.02 / xfix) and raise its confidence at the listener's `esm.gain` per second (× the emitter's `emits.fix`, the
   command post's bursty comms .3) up to .8: a radar that keeps radiating is classified after 1-2 min of cross-fixed
   listening, the command post after 4-10 min. The confidence holds while the unit is still heard; a silent (EMCON)
@@ -227,8 +271,9 @@ sites it would choose.
 
 ## Files
 
-`sim.js` (state, step, visible, hash) · `nav.js` (grids, A*) · `movement.js` · `orders.js` · `mech.js` (deploy,
+`sim.js` (state, step, visible, hash) · `nav.js` (grids, A*) · `movement.js` · `dynamics.js` (vehicle, ship and
+aircraft dynamics, separation) · `sea.js` (the swell and a hull's response to it) · `orders.js` · `mech.js` (deploy,
 reload, refill, turrets, carrier deck) · `sensors.js` (radar, camera, ESM, contacts, scan) · `weapons.js` · `bodies.js`
 (part boxes, collision tests) · `damage.js`
 · `economy.js` · `weather.js` · `ai.js` · `setup.js` · `amphib.js` (well deck, LCAC, landings, overrun) · `stubmap.js` (Map-contract test coast) · `probe.js` (headless
-battle for the console) · `tests.js` (game/tests.html) · `consts.js`, `util.js`, `rand.js`.
+battle for the console) · `tests.js`, `tests_physics.js` (game/tests.html) · `consts.js`, `util.js`, `rand.js`.

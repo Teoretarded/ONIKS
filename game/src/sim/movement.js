@@ -5,23 +5,27 @@ import { clamp, angTo, ground } from './util.js';
 import { DT } from './consts.js';
 import { kill } from './damage.js';
 import { subSpeed, submerged } from './subs.js';
+import { hoverOK, dockMove, followHost } from './amphib.js';
+import { drive, passWaypoint, attitudeLand, attitudeShip, flyAir } from './dynamics.js';
 
 /* the nav grid a unit plans on: boats keep to the deep-water grid */
-export const navDom = u => u.def.sub ? 'sub' : u.def.domain;
+export const navDom = u => u.def.hover ? 'hover' : u.def.sub ? 'sub' : u.def.domain;
 
 const G = 9.81;
 
 export function canMove(u) {
-  return u.alive && !u.def.static && !u.off.move && u.dep === 0 && u.elev === 0 && u.mast === 0 && !u.reloader && !u.busy;
+  return u.alive && !u.def.static && !u.off.move && u.dep === 0 && u.elev === 0 && u.mast === 0 && !u.reloader && !u.busy && !u.dockT && !(u.lift > 0);
 }
 /* lower everything so the unit can drive (TEL: launcher down then jacks up; radar: mast down) */
 export function stow(sim, u) {
   if (u.dep > 0 || u.elev > 0) { u.elevT = 0; u.depT = 0; }
   if (u.mast > 0) u.mastT = 0;
+  if (u.lift > 0 || u.def.lift) u.stowT = sim.t;              // the Kornet's launcher comes down (mech.js)
 }
 
 export function moveUnit(sim, u) {
   if (u.aboard) return followCarrier(sim, u);
+  if (u.dockT) return dockMove(sim, u);                   // an LCAC passing the LHD's stern gate
   const dom = u.def.domain;
   if (dom === 'air') return moveAir(sim, u);
   if (u.def.static) { u.speed = 0; return; }
@@ -31,6 +35,7 @@ export function moveUnit(sim, u) {
 function followCarrier(sim, u) {
   const cv = sim.units.get(u.aboard);
   if (!cv) return;
+  if (u.def.domain !== 'air' && cv.def.carry) return followHost(sim, u);   // a craft in the well, a vehicle on a deck
   u.pos[0] = cv.pos[0]; u.pos[1] = cv.pos[1] + (cv.def.air ? cv.def.air.deckY : 10); u.pos[2] = cv.pos[2]; u.hdg = cv.hdg; u.speed = 0; u.pitch = 0; u.roll = 0;
 }
 
@@ -38,9 +43,13 @@ function speedCap(sim, u, dom) {
   const d = u.def;
   let v;
   if (dom === 'land') {
-    const road = sim.nav.isRoad(u.pos[0], u.pos[2]);
-    v = road ? d.road : d.speed * (1 - .6 * Math.min(1, sim.map.slope(u.pos[0], u.pos[2]) / .45));
+    // road / off-road governor; the grade along the heading and the side slope are the dynamics' (dynamics.js)
+    const road = u.onRoad = sim.nav.isRoad(u.pos[0], u.pos[2]);
+    v = road ? d.road : d.hover ? d.speed * (1 - .6 * Math.min(1, sim.map.slope(u.pos[0], u.pos[2]) / .45)) : d.speed;
   } else v = d.sub ? subSpeed(u) : d.speed;
+  // a hovercraft: slower over land, and only on cushion; a ship with its well deck open keeps to a few knots
+  if (d.hover) { if (sim.map.h(u.pos[0], u.pos[2]) > 0) v = Math.min(v, d.landSpeed || v); v *= Math.max(0, Math.min(1, ((u.cushion || 0) - .5) * 2)); }
+  if (d.well && (u.well > 0 || u.wellT > 0)) v = Math.min(v, d.well.slow);
   for (const p in u.parts) if (u.parts[p] >= 1 && d.parts[p].slow) v *= d.parts[p].slow;
   if (u.hp < u.hpMax * .35) v *= .7;
   if (u.spdCap > 0 && u.spdCap < v) v = u.spdCap;
@@ -48,6 +57,9 @@ function speedCap(sim, u, dom) {
 }
 
 function valid(sim, u, dom, x, z) {
+  // never off the map (a goal beyond its edge is sailed toward and stopped at the edge; aircraft are clamped to it)
+  if (Math.abs(x) > sim.map.W / 2 - 300 || Math.abs(z) > sim.map.H / 2 - 300) return false;
+  if (u.def.hover) return hoverOK(sim, x, z);
   const h = sim.map.h(x, z);
   if (dom === 'land') return h >= .3;
   if (u.def.sub) return h <= -u.def.sub.water;
@@ -55,14 +67,14 @@ function valid(sim, u, dom, x, z) {
 }
 
 function moveSurface(sim, u, dom) {
-  const d = u.def, map = sim.map;
+  const d = u.def, map = sim.map, hov = !!d.hover;
   let vT = 0, turnTo = null, last = false, dist = 0;
   if (u.path && u.wi < u.path.length && canMove(u)) {
     const wp = u.path[u.wi];
     const dx = wp[0] - u.pos[0], dz = wp[1] - u.pos[2];
     dist = Math.sqrt(dx * dx + dz * dz); last = u.wi === u.path.length - 1;
-    const arr = last ? (dom === 'land' ? 20 : 150) : (dom === 'land' ? sim.nav.cell * .45 : sim.nav.cell * .9);
-    if (dist < arr) {
+    const arr = last ? (dom === 'land' || hov ? 20 : 150) : (dom === 'land' || hov ? sim.nav.cell * .45 : sim.nav.cell * .9);
+    if (dist < arr || passWaypoint(u, dist)) {
       u.wi++;
       if (u.wi >= u.path.length) { u.path = null; }
     } else {
@@ -71,16 +83,18 @@ function moveSurface(sim, u, dom) {
       if (last) vT = Math.min(vT, Math.sqrt(2 * d.accel * Math.max(0, dist - arr * .5)) + .5);
     }
   }
-  // steering
-  if (turnTo !== null) {
+  // steering and speed: physical for vehicles and ships (dynamics.js); the hovercraft keeps the plain rules below
+  const phys = drive(sim, u, dom, vT, turnTo, dist, last);
+  if (!phys && turnTo !== null) {
     const err = angTo(u.hdg, turnTo);
     let rate = d.turn;
-    if (dom === 'sea') rate *= .35 + .65 * Math.min(1, u.speed / (d.speed * .5));
+    if (dom === 'sea' && !hov) rate *= .35 + .65 * Math.min(1, u.speed / (d.speed * .5));
+    else if (hov && Math.abs(err) > 1.0) vT *= .3;              // a hovercraft yaws round nearly in place
     u.hdg += clamp(err, -rate * DT, rate * DT);
     if (dom === 'land' && Math.abs(err) > .9) vT *= .25;
     else if (dom === 'sea' && Math.abs(err) > 1.2) vT *= .7;
   }
-  u.speed += clamp(vT - u.speed, -d.accel * 2 * DT, d.accel * DT);
+  if (!phys) u.speed += clamp(vT - u.speed, -d.accel * 2 * DT, d.accel * DT);
   if (u.speed < .01 && vT === 0) u.speed = 0;
   if (u.speed > 0) {
     const step = u.speed * DT;
@@ -106,25 +120,22 @@ function moveSurface(sim, u, dom) {
     u.pos[0] = nx; u.pos[2] = nz;
   }
   // attitude (recomputed only when the unit moved or turned)
-  if (dom === 'land') {
-    if (u._ax !== u.pos[0] || u._az !== u.pos[2] || u._ah !== u.hdg) {
-      u._ax = u.pos[0]; u._az = u.pos[2]; u._ah = u.hdg;
-      const x = u.pos[0], z = u.pos[2], s = Math.sin(u.hdg), c = Math.cos(u.hdg), L = d.size[0] * .4, W = d.size[1] * .5;
-      const hf = map.h(x + s * L, z + c * L), hb = map.h(x - s * L, z - c * L), hr = map.h(x + c * W, z - s * W), hl = map.h(x - c * W, z + s * W);
-      u.pos[1] = Math.max(0, map.h(x, z));
-      u.pitch = Math.atan2(hf - hb, 2 * L);
-      u.roll = Math.atan2(hl - hr, 2 * W);
-    }
-  } else if (d.sub && submerged(u)) {
-    // under water: level at its depth (the model's origin is the surfaced waterline), a slight bow-down while diving
-    u.pos[1] = -(u.depth - d.draught);
-    u.pitch = clamp((u.pos[1] - u.prev[1]) / DT * -.02, -.06, .06);
-    u.roll = u.speed > 2 && u.path ? clamp(angTo(u.prevHdg, u.hdg) / DT * -1.2, -.05, .05) : 0;
+  if (hov && map.h(u.pos[0], u.pos[2]) > -.5) {
+    // a hovercraft over the beach rides level over the ground under its skirt
+    const x = u.pos[0], z = u.pos[2], s = Math.sin(u.hdg), c = Math.cos(u.hdg), L = d.size[0] * .4, W = d.size[1] * .4;
+    const g = q => Math.max(0, map.h(q[0], q[1]));
+    u.pos[1] = g([x, z]);
+    u.pitch = Math.atan2(g([x + s * L, z + c * L]) - g([x - s * L, z - c * L]), 2 * L) * .8;
+    u.roll = Math.atan2(g([x - c * W, z + s * W]) - g([x + c * W, z - s * W]), 2 * W) * .8;
+  } else if (dom === 'land') {
+    // the ground under the wheels and the body on its springs (dynamics.js)
+    attitudeLand(sim, u);
+  } else if (!hov) {
+    // heel, squat, trim, flooding; a boat's depth and dive angle; an LHD's ballast (dynamics.js). The swell is the
+    // render pose's (sim/sea.js: the same waves the sea is drawn with)
+    attitudeShip(sim, u);
   } else {
-    const sea = (sim.map.weather && sim.map.weather.sea) || .2, t = sim.t + u.id * 3.1;
-    u.pos[1] = Math.sin(t * .7) * .3 * sea - (d.sub ? u.depth - d.draught : 0);
-    u.pitch = Math.sin(t * .45) * .006 * sea * (160 / d.size[0]);
-    u.roll = Math.sin(t * .31) * .02 * sea + (u.speed > 2 && u.path ? clamp(angTo(u.prevHdg, u.hdg) / DT * -2, -.08, .08) : 0);
+    u.pos[1] = 0; u.pitch = 0; u.roll = 0;
   }
   if (u.path === null && u.orders.length === 0) u.spdCap = 0;
 }
@@ -139,46 +150,8 @@ function escapePoint(sim, u) {
 }
 
 function moveAir(sim, u) {
-  const d = u.def, map = sim.map;
-  if (!u.goal) u.goal = [u.pos[0] + Math.sin(u.hdg) * 2000, u.pos[2] + Math.cos(u.hdg) * 2000];
-  const gx = u.goal[0], gz = u.goal[1], dx = gx - u.pos[0], dz = gz - u.pos[2], dist = Math.sqrt(dx * dx + dz * dz);
-  const R = u.orbitR;
-  let want, vT = d.speed;
-  for (const p in u.parts) if (u.parts[p] >= 1 && d.parts[p].slow) vT *= d.parts[p].slow;
-  if (R > 0 && dist < R * 1.6) {
-    // orbit clockwise around the goal
-    const b = Math.atan2(-dx, -dz);                  // bearing from goal to aircraft
-    want = b + Math.PI / 2 + clamp((dist - R) / R, -1, 1) * .9;
-    if (u.type === 'drone' || u.type === 'helo') vT *= .8;
-  } else {
-    want = Math.atan2(dx, dz);
-    if (u.type === 'helo' && R === 0) vT = Math.min(vT, dist * .12);
-    if (u.type === 'drone' && R === 0 && dist < 600) { want = Math.atan2(dx, dz) + Math.PI / 2; }
-  }
-  if (u.type === 'fighter' && u.speed < 150) vT = Math.max(vT, 150);
-  if (u.type === 'aew' && u.speed < 95) vT = Math.max(vT, 95);
-  const err = angTo(u.hdg, want);
-  const rate = d.turn * (u.type === 'helo' && u.speed < 20 ? 3 : 1);
-  const turn = clamp(err, -rate * DT, rate * DT);
-  u.hdg += turn;
-  u.speed += clamp(vT - u.speed, -d.accel * DT * 1.5, d.accel * DT);
-  if (u.speed < 0) u.speed = 0;
-  const omega = turn / DT;
-  u.roll += clamp(Math.atan(u.speed * omega / G) - u.roll, -.8 * DT, .8 * DT);
-  // altitude band: terrain-following for helos and drones
-  const s = Math.sin(u.hdg), c = Math.cos(u.hdg);
-  let g = ground(map, u.pos[0], u.pos[2]);
-  if (u.type !== 'fighter' && u.type !== 'aew') g = Math.max(g, ground(map, u.pos[0] + s * u.speed * 8, u.pos[2] + c * u.speed * 8));
-  let yT = g + u.altT;
-  if (u.landing) {
-    const cv = sim.units.get(u.landing);
-    if (cv && dist < 12000) yT = Math.max(cv.pos[1] + (cv.def.air ? cv.def.air.deckY : 10) + 30, g + 30) + (u.altT - 30) * clamp((dist - 1500) / 10500, 0, 1);
-  }
-  const vy = clamp((yT - u.pos[1]) * .4, -d.climb, d.climb);
-  u.pos[0] += s * u.speed * DT; u.pos[2] += c * u.speed * DT; u.pos[1] += vy * DT;
-  if (u.pos[1] < g + 10) u.pos[1] = g + 10;
-  u.pitch = Math.atan2(vy, Math.max(u.speed, 5));
-  u.odo += u.speed * DT;
+  // bank to turn, energy, the catapult, the approach and the wires, the rotor's tilt (dynamics.js)
+  flyAir(sim, u);
   u.fuel -= DT;
   if (u.def.endurance && u.fuel < -600) { kill(sim, u, null); return; }     // nowhere to land: ditches
   const W = sim.map.W / 2, H = sim.map.H / 2;

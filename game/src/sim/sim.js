@@ -3,6 +3,7 @@
 import { UNITS, PROJ, SIDES, ENEMY, CLASSIFY, TEL_ELEV } from '../data/units.js';
 import { Nav } from './nav.js';
 import { moveUnit } from './movement.js';
+import { separate } from './dynamics.js';
 import { issue, processOrders } from './orders.js';
 import { mechanics, carrierOps } from './mech.js';
 import { senseTick, resolveScans, esmTick, sonarTick } from './sensors.js';
@@ -12,6 +13,7 @@ import { stepDying } from './damage.js';
 import { economyTick, buy, checkResult } from './economy.js';
 import { Weather } from './weather.js';
 import { AI } from './ai.js';
+import { loadStart } from './amphib.js';
 import { rng as mkRng } from './rand.js';
 import { DT, SENSE_EVERY } from './consts.js';
 
@@ -82,6 +84,7 @@ export class Sim {
       reloader: 0, reloadP: 0, reloadU: 0, refillU: 0, wantElev: 0, refillP: {}, eng: 0, lastFire: -1e9, busy: false, depotLoad: false,
       task: null, born: this.t,
       depth: 0, dive: 0, mastUp: 0, propA: 0, sonarT: -1,                  // submarines (sim/subs.js); a listening sonar
+      well: 0, wellT: 0, transit: 0, slot: -1, dockT: null, cushion: def.hover ? 1 : 0, rampB: 0, lift: 0,   // amphibious (sim/amphib.js)
     };
     for (const w in def.weapons) { u.ammo[w] = def.weapons[w].ammo; u.cooldowns[w] = 0; u.refillP[w] = 0; }
     for (const p of def.partNames) u.parts[p] = 0;
@@ -103,6 +106,8 @@ export class Sim {
     this.units.set(id, u);
     this._dirty = true;
     def.modelState(u, this.t);
+    // an LHD comes with its landing force aboard (LCACs in the well, ACVs in them); o.loaded = false: empty
+    if (def.carry && def.carry.start && o.loaded !== false) loadStart(this, u);
     return u;
   }
 
@@ -179,6 +184,7 @@ export class Sim {
       if (u.launchQ) carrierOps(this, u);
       moveUnit(this, u);
     }
+    separate(this);                    // units of a domain keep clear of each other (dynamics.js)
     if (this.scans.length) resolveScans(this);
     if (tick % SENSE_EVERY === 0) senseTick(this, SENSE_EVERY * DT);
     if (tick % 20 === 10) esmTick(this);

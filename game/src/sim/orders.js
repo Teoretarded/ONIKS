@@ -14,9 +14,11 @@
    also drops attack orders, so nothing fires until the next order). 'stop' also takes an aircraft off the launch queue. */
 import { CLASSIFY, TEL_ELEV, UNITS } from '../data/units.js';
 import { canMove, stow, navDom } from './movement.js';
+import { onDeck } from './dynamics.js';
 import { startScan, scanBlocked } from './sensors.js';
 import { ammoFull, atDepot, elevOf, replenishPoint } from './mech.js';
 import { atPD } from './subs.js';
+import { ORDERS as AMPH, requestWell } from './amphib.js';
 import { dxz, clamp } from './util.js';
 
 /* orbit radius of an aircraft loitering (after a move), on patrol, idle */
@@ -105,6 +107,8 @@ function cancel(sim, u) {
 }
 
 export function processOrders(sim, u) {
+  // a vehicle carried aboard waits with its orders until it is ashore (a craft in the well asks for the gate itself)
+  if (u.aboard && u.def.domain !== 'air' && !u.def.hover) return;
   let o = u.orders[0];
   if (!o) { idle(sim, u); return; }
   let guard = 0;
@@ -157,7 +161,7 @@ function homeOf(sim, u) {
 }
 
 function deckFull(sim, v) {
-  let n = 0; for (const w of sim.alive(v.side)) if (w.aboard === v.id || w.landing === v.id) n++;
+  let n = 0; for (const w of sim.alive(v.side)) if (w.def.domain === 'air' && (w.aboard === v.id || w.landing === v.id)) n++;
   return n >= v.def.air.cap;
 }
 
@@ -182,6 +186,7 @@ function moveTo(sim, u, o, x, z, arrive) {
     u.goal = [x, z]; u.orbitR = 0;
     return dxz(u.pos[0], u.pos[2], x, z) < (arrive || (u.type === 'fighter' || u.type === 'aew' ? 2500 : 400));
   }
+  if (u.aboard && u.def.hover) { requestWell(sim, u); return false; }      // out of the well first
   if (u.def.static || u.off.move) return true;
   if (!canMove(u)) { stow(sim, u); return false; }
   if (!o._p || (o._gx !== x || o._gz !== z) && !u.path) {
@@ -207,6 +212,7 @@ const H = {
       u.orbitR = o.r || (ORBIT[u.type] || ORBIT.drone)[1];
       return autoReturn(sim, u) ? false : false;
     }
+    if (u.aboard && u.def.hover) { requestWell(sim, u); return false; }
     if (!o.pts) { o.pts = [[u.pos[0], u.pos[2]], [o.x, o.z]]; o.i = 1; }
     if (!canMove(u)) { stow(sim, u); return false; }
     if (!u.path) {
@@ -308,7 +314,7 @@ const H = {
       u.path = null;
       return ammoFull(u) && magFull;
     }
-    if (u.type === 'pantsir' || u.type === 'bal') {
+    if (u.type === 'pantsir' || u.type === 'bal' || u.type === 'kornet') {
       if (ammoFull(u)) return true;
       if (u.type === 'bal' && (u.dep > 0 || u.elev > 0)) { u.depT = 0; u.elevT = 0; u.wantElev = 0; if (!canMove(u)) return false; }
       if (atDepot(sim, u)) { u.path = null; return ammoFull(u); }
@@ -383,7 +389,7 @@ const H = {
         return false;
       }
       u.landing = home.id;
-      if (dist < 1500 && u.pos[1] < home.pos[1] + 400) {
+      if (onDeck(sim, u, home, dist)) {                          // trapped on the wires / set down on the spot (dynamics.js)
         u.aboard = home.id; u.aboardOf = home.id; u.landing = false; u.speed = 0; u.orbitR = 0;
         u.rearmT = sim.t + d.rearm; u.goal = null; u.roll = 0; u.pitch = 0;
         sim.emit('land', { unit: u.id, side: u.side, type: u.type, to: home.id, pos: u.pos.slice() });
@@ -402,6 +408,9 @@ const H = {
   radar(sim, u, o) { if (u.def.sensors.radar) sim.setRadar(u, o.on === undefined ? !u.radarOn : o.on); return true; },
   dive(sim, u, o) { give(sim, u, Object.assign({}, o, { queue: false })); return true; },
 };
+
+/* the amphibious orders (sim/amphib.js): land, unload, dock (LCAC), embark (vehicles) */
+Object.assign(H, { land: AMPH.land, unload: AMPH.unload, dock: AMPH.dock, embark: AMPH.embark });
 
 /* ---------- attack helpers ---------- */
 const GRACE = 300;          // s a persistent attack holds a lost track before it ends

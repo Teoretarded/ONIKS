@@ -9,6 +9,7 @@
    `game.*` every frame (never cache game.side: sandbox can switch it). Render poses come from game.unitPose(). */
 import { DT } from '../sim/consts.js';
 import { ENEMY, CLASSIFY, UNITS, PROJ } from '../data/units.js';
+import { landPose, seaPose, deckPose } from './pose.js';
 
 export const RATES = [1, 2, 4, 8, 16, 32];
 /* suggested priorities (input goes high -> low; draw goes low -> high, so high draws on top) */
@@ -128,25 +129,13 @@ export function createGame(o) {
     const x = Q[0] + (P[0] - Q[0]) * a, z = Q[2] + (P[2] - Q[2]) * a;
     let y = Q[1] + (P[1] - Q[1]) * a;
     const hdg = u.prevHdg + wrapPi(u.hdg - u.prevHdg) * a;
-    let pitch = u.pitch, roll = u.roll;
-    if (d.domain === 'land') {
-      // the drawn ground carries metre-scale relief the sim's map.h does not: settle on it, four feet
-      const s = Math.sin(hdg), c = Math.cos(hdg), L = Math.max(2, d.size[0] * .4), W = Math.max(1, d.size[1] * .5);
-      const hf = T.heightAt(x + s * L, z + c * L), hb = T.heightAt(x - s * L, z - c * L);
-      const hr = T.heightAt(x + c * W, z - s * W), hl = T.heightAt(x - c * W, z + s * W);
-      y = Math.max(0, (hf + hb + hr + hl) * .25);
-      pitch = Math.atan2(hf - hb, 2 * L); roll = Math.atan2(hl - hr, 2 * W);
-    } else if (d.domain === 'sea') {
-      // heave, pitch and roll on the drawn swell (big hulls ride it less); the sim adds the heel and the sinking
-      const s = Math.sin(hdg), c = Math.cos(hdg), L = d.size[0], B = d.size[1], t = game.seaT;
-      const sb = T.seaAt(x + s * L * .35, z + c * L * .35, t).y, ss = T.seaAt(x - s * L * .35, z - c * L * .35, t).y;
-      const sp = T.seaAt(x - c * B * .5, z + s * B * .5, t).y, sst = T.seaAt(x + c * B * .5, z - s * B * .5, t).y;
-      const k = Math.min(1, 60 / L);
-      const heave = (sb + ss + sp + sst) * .25 * k;
-      if (u.alive) { y = heave; pitch = Math.atan2(sb - ss, L * .7) * k; roll = Math.atan2(sp - sst, B) * k * 1.5 + (u.roll || 0) * .6; }
-      else { y = heave * (1 - u.dying) + y; pitch = Math.atan2(sb - ss, L * .7) * k * (1 - u.dying) + u.pitch; roll = u.roll; }
-    }
-    p.pos[0] = x; p.pos[1] = y; p.pos[2] = z; p.hdg = hdg; p.pitch = pitch; p.roll = roll; p.speed = u.speed;
+    // per domain (game/pose.js): vehicles on the drawn ground and their springs, ships on the drawn swell (the same
+    // waves the sea is drawn with) with the sim's heel, squat, list and sinking, aircraft on a deck in the ship's frame
+    if (d.domain === 'land') landPose(u, x, z, hdg, T, p);
+    else if (d.domain === 'sea') seaPose(u, x, z, hdg, y, T, game.seaT, game.paused ? 1 : game.timeRate / Math.min(game.timeRate, 2), p);
+    else if (u.deck && sim.units.get(u.deck.cv)) deckPose(u.deck, game.unitPose(sim.units.get(u.deck.cv), alpha), a, p);
+    else { p.pos[0] = x; p.pos[1] = y; p.pos[2] = z; p.hdg = hdg; p.pitch = u.pitch; p.roll = u.roll; }
+    p.speed = u.speed;
     if (cache) p.f = game.frameN;
     return p;
   };
