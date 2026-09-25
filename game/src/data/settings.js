@@ -16,6 +16,8 @@
      dotDensity  * 'low' | 'medium' | 'high' | 'ultra'
      effects     * 'low' | 'medium' | 'high'    smoke, debris and spark dots, dynamic lights, landmark detail
                                                  (fx/index.js FX_LEVELS, game/landmarks.js DETAIL; read live)
+     autoQuality * bool                          hold 60 fps: effects, dot density, then render scale step down under load
+                                                 and back up with headroom (game/perfguard.js; the FPS readout shows it)
      showFps     * bool
      volume      * 0..1 (steps of 0.1)          master volume (films, UI, game)
      uiSound       bool                          menu / HUD clicks
@@ -50,6 +52,7 @@ export const SETTINGS = [
   { key: 'renderScale', group: 'Graphics', label: 'Render scale', def: 1, choices: [[.5, '50%'], [.67, '67%'], [.75, '75%'], [1, '100%']] },
   { key: 'dotDensity', group: 'Graphics', label: 'Dot density', def: 'high', choices: [['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['ultra', 'Ultra']] },
   { key: 'effects', group: 'Graphics', label: 'Effects', def: 'high', choices: [['low', 'Low'], ['medium', 'Medium'], ['high', 'High']] },
+  { key: 'autoQuality', group: 'Graphics', label: 'Auto quality', def: true, choices: [[false, 'Off'], [true, 'On']] },
   { key: 'showFps', group: 'Graphics', label: 'Show FPS', def: false, choices: [[false, 'Off'], [true, 'On']] },
   { key: 'volume', group: 'Sound', label: 'Master volume', def: .8, meter: true, choices: [0, .1, .2, .3, .4, .5, .6, .7, .8, .9, 1].map(v => [v, Math.round(v * 100) + '']) },
   { key: 'uiSound', group: 'Sound', label: 'UI sound', def: true, choices: [[false, 'Off'], [true, 'On']] },
@@ -67,6 +70,7 @@ export const NOTES = {
   renderScale: v => v < 1 ? `Draws at ${Math.round(v * 100)}% of the screen's pixels and scales up. Faster.` : 'Draws at the full resolution of the screen.',
   dotDensity: v => ({ low: 'Fewer dots per model and per square of ground. Fastest.', medium: 'A lighter cloud.', high: 'The films\' density.', ultra: 'Denser than the films. Needs a strong GPU.' }[v]),
   effects: v => ({ low: 'Sparse smoke and debris; only the strongest flashes light the world. Fastest.', medium: 'Lighter smoke and debris, fewer dynamic lights.', high: 'Smoke, debris, sparks and dynamic light, as in the films.' }[v]),
+  autoQuality: v => v ? 'Holds 60 fps: under load effects, then dots, then render scale step down, and come back.' : 'Quality stays as set, whatever the frame rate.',
   showFps: v => v ? 'Frame rate and frame time on screen.' : 'No frame counter.',
   volume: v => `Master volume ${Math.round(v * 100)}%. Films, interface and battle.`,
   uiSound: v => v ? 'Clicks and blips on the menus and the HUD.' : 'Silent menus and HUD.',

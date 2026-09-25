@@ -494,6 +494,10 @@ export function createAudio(game) {
             } else if (ty === 'aew' && d < LSPEC.prop.max && (!u.aboard || u.spool > 0)) {
               const dp = doppler(u.pos, uvel(u)), sp = LSPEC.prop, on = u.aboard ? clamp(u.spool || 0, 0, 1) : 1;
               cand.prop.push({ key: u.id, score: law(sp, d) * (.3 + .7 * on), sp: spatial(sp, d, u.pos), params: { k: dp.k * pf, on } });
+            } else if (u.def && u.def.hover && !u.aboard && d < LSPEC.prop.max * .5 && (u.cushion || 0) > .05) {
+              // an LCAC on cushion: gas turbines and the ducted propellers' roar (the turboprop voice, pitched down)
+              const dp = doppler(u.pos, uvel(u)), sp = LSPEC.prop, on = clamp(u.cushion || 0, 0, 1);
+              cand.prop.push({ key: u.id, score: law(sp, d) * (.3 + .7 * on), sp: spatial(sp, d, u.pos), params: { k: dp.k * pf * .78, on } });
             }
             if (u.def && u.def.sub) boat(u, d, cand.wash);
             const So = u.def && u.def.sensors && u.def.sensors.sonar;

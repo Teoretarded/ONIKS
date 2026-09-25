@@ -16,7 +16,15 @@
                white to the units they reveal (both sides), which flash with a white bracket and tag
    Keys: V radar view. Everything else follows the sim's events and the orders system's targeting mode.
    Cost: its own dots go through R.fx (no per-frame allocation in the hot loops), the clutter field and the cloud
-   ceiling are GPU point passes drawn right after the engine's frame (sensors/gpu.js). */
+   ceiling are GPU point passes drawn right after the engine's frame (sensors/gpu.js).
+   The Orbital render style (R.style 'orbital', read every frame: S.orb): the same layers in the Orbital films' language
+   (sensors/orb.js): the rings, lines and arcs (S.ring / S.line / S.arc) are hairlines through R.wire, the beam a draped
+   hairline edge with a fan of afterglow lines, a contact's cloud short hairline returns along the line of sight and a
+   dashed 2-sigma ellipsoid, the scan's bolt, forks, sparks and uplink white hairlines (the enemy's coral), the tendrils a
+   white network over the hull, the part boxes white hairline boxes, the storm's cells hairline billows and rain curtains;
+   every tag, bracket and mark goes through the Orbital overlay (catalog labels: square, designation, barcode). No GPU
+   point passes (the orbital system veils them). installOrbitalPaths(R) makes every system's R.fx.path dotted lines
+   hairlines in that style (orders, sonar). The Point Cloud style is untouched. */
 import { View, ringDots, lineDots, sat } from './sensors/core.js';
 import { TagLayer } from './sensors/tags.js';
 import { createContacts } from './sensors/contacts.js';
@@ -26,6 +34,7 @@ import { createScope } from './sensors/scope.js';
 import { createWeather } from './sensors/weather.js';
 import { createGPU } from './sensors/gpu.js';
 import { createInset } from './sensors/inset.js';
+import { orbOn, orbOverlay, ringW, lineW, installOrbitalPaths } from './sensors/orb.js';
 
 export async function createSensors(game) {
   const R = game.R;
@@ -41,11 +50,19 @@ export async function createSensors(game) {
       OPT.rgb = rgb; OPT.a = a; OPT.step = step || 5; OPT.size = size || 1; OPT.mode = mode || 'max'; OPT.drape = drape || null; OPT.lift = lift || 0; OPT.max = 4000;
       return OPT;
     },
-    ring(x, y, z, r, o) { return ringDots(R.fx, S.V, x, y, z, r, o); },
-    arc(x, y, z, r, a0, a1, o) { return ringDots(R.fx, S.V, x, y, z, r, o, a0, a1); },
-    line(ax, ay, az, bx, by, bz, o) { return lineDots(R.fx, S.V, ax, ay, az, bx, by, bz, o); },
+    // S.orb (the Orbital render style, set every frame): the same calls draw hairlines through R.wire (sensors/orb.js)
+    orb: false,
+    ring(x, y, z, r, o) { return S.orb ? ringW(S.W, S.V, x, y, z, r, o) : ringDots(R.fx, S.V, x, y, z, r, o); },
+    arc(x, y, z, r, a0, a1, o) { return S.orb ? ringW(S.W, S.V, x, y, z, r, o, a0, a1) : ringDots(R.fx, S.V, x, y, z, r, o, a0, a1); },
+    line(ax, ay, az, bx, by, bz, o) { return S.orb ? lineW(S.W, S.V, ax, ay, az, bx, by, bz, o) : lineDots(R.fx, S.V, ax, ay, az, bx, by, bz, o); },
+    // the hairlines go through S.W: R.wire, fading as the strategic layer comes up (its glyphs stand for them, as the
+    // orbital system fades the wire models: 1 - ss(.3, .9, k))
+    orbFade: 1,
+    W: { seg(ax, ay, az, bx, by, bz, r, g, b, a) { if (R.wire) R.wire.seg(ax, ay, az, bx, by, bz, r, g, b, a * S.orbFade); } },
     scanOwns: id => scan.owns.has(id) || weather.owns.has(id),
   };
+  // every system's dotted world lines (R.fx.path: orders, sonar...) become hairlines in the Orbital style
+  installOrbitalPaths(R, () => S.orbFade);
   const contacts = S.contacts = createContacts(S);
   const radar = createRadar(S);
   const inset = createInset(S, AN);
@@ -91,6 +108,8 @@ export async function createSensors(game) {
     draw3d() {
       const t0 = performance.now();
       S.V.set(R.camera);
+      S.orb = orbOn(R);
+      { const k = game.orbital ? game.orbital.k || 0 : 0, u = Math.min(1, Math.max(0, (k - .3) / .6)); S.orbFade = 1 - u * u * (3 - 2 * u); }
       radar.draw3d();
       contacts.draw3d();
       scan.draw3d();
@@ -102,8 +121,10 @@ export async function createSensors(game) {
     },
     draw2d(ov) {
       const t0 = performance.now();
+      S.orb = orbOn(R);
       // GPU passes over the finished frame: the scope's clutter field / the squalls' rain speckle, the ceiling
-      if (gpu.ok) {
+      // (the Orbital style has none: the orbital system veils the point passes away; its hairlines stand for them)
+      if (gpu.ok && !S.orb) {
         const cp = scope.clutterParams(gpu, weather);
         const ce = weather.ceilingParams();
         let sp = null;
@@ -122,20 +143,22 @@ export async function createSensors(game) {
       // the scan inset: its own picture over the finished frame
       if (inset.prepare()) inset.drawGPU();
       if (!game.ui.hidden) {
+        // the Orbital style: the same calls through the Orbital overlay (catalog labels, hairline brackets)
+        const O = S.orb ? orbOverlay(ov) : ov;
         TL.begin();
         S.keepOut.length = 0;
-        contacts.draw2d(ov, TL);
-        scan.draw2d(ov, TL);
-        scan.reticle2d(ov, TL);
-        weather.draw2d(ov, TL);
-        scope.draw2d(ov, TL);
+        contacts.draw2d(O, TL);
+        scan.draw2d(O, TL);
+        scan.reticle2d(O, TL);
+        weather.draw2d(O, TL);
+        scope.draw2d(O, TL);
         // world tags keep out of the HUD's panels and the inset
         OBST.length = 0;
         const hr = game.hudRects; if (hr) for (let i = 0; i < hr.length; i++) OBST.push(hr[i]);
         const ir = inset.rect; if (ir) OBST.push(ir);
         for (let i = 0; i < S.keepOut.length; i++) OBST.push(S.keepOut[i]);
-        TL.flush(ov, R.camera.W, R.camera.H, OBST);
-        inset.draw2d(ov, TL);
+        TL.flush(O, R.camera.W, R.camera.H, OBST);
+        inset.draw2d(O, TL);
       }
       const ms = tA + performance.now() - t0;
       stats.ms = stats.ms * .92 + ms * .08; stats.last = ms;

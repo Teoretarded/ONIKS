@@ -5,6 +5,8 @@
    carrier) is destroyed; optional: objective hold timer, time limit. */
 import { UNITS, SIDES, ENEMY } from '../data/units.js';
 import { dxz } from './util.js';
+import { hostFor, embark, overrunTick } from './amphib.js';
+import { kill } from './damage.js';
 
 export const BASE_INCOME = 1.2;                       // SUP per second
 export const OBJ_INCOME = { port: 1.0, depot: .8, radar_hill: .6, airfield: 1.0, lighthouse: .4 };
@@ -24,6 +26,9 @@ export function economyTick(sim) {
       sim.emit('objective', { id: o.id, name: o.name, owner, prev, pos: [o.x, 0, o.z] });
     }
   }
+  // the landing force holding the ground round the command post takes it (amphib.js)
+  const by = overrunTick(sim);
+  if (by) { const hq = sim.hq('coast'); if (hq) kill(sim, hq, by); }
   for (const side of SIDES) {
     const S = sim.sides[side];
     let inc = BASE_INCOME;
@@ -45,6 +50,7 @@ export function buy(sim, side, type) {
   if (!d || d.side !== side || !d.cost) return false;
   if (S.supply < d.cost) return false;
   if (sim.result) return false;
+  if (d.embark && !hostFor(sim, side, type)) return false;      // LCACs and ACVs need room aboard an LHD
   S.supply -= d.cost;
   S.queue.push({ type, at: sim.t + d.buildTime, ordered: sim.t });
   sim.emit('order_unit', { side, type, at: sim.t + d.buildTime });
@@ -54,7 +60,13 @@ export function buy(sim, side, type) {
 function arrive(sim, side, type) {
   const d = UNITS[type], sp = sim.map.spawns[side];
   let u = null;
-  if (d.domain === 'air' && side === 'fleet') {
+  if (d.embark) {
+    // the landing force joins an LHD: an LCAC in its well, a vehicle in an LCAC there or on its vehicle decks
+    const h = hostFor(sim, side, type);
+    if (!h) { sim.sides[side].supply += d.cost; sim.emit('reinforce', { side, type, unit: 0, lost: true, pos: [sp.x, 0, sp.z] }); return; }
+    u = sim.spawn(type, side, h.pos[0], h.pos[2], { hdg: h.hdg });
+    embark(sim, u, h);
+  } else if (d.domain === 'air' && side === 'fleet') {
     const cv = deckFor(sim, side, type);
     if (cv) u = sim.spawn(type, side, cv.pos[0], cv.pos[2], { aboard: cv.id });
     else u = sim.spawn(type, side, sp.x, sp.z, { hdg: sp.hdg });
@@ -73,7 +85,7 @@ function arrive(sim, side, type) {
 export function deckFor(sim, side, type) {
   const al = sim.alive(side);
   const decks = al.filter(v => v.def.air && v.def.air.types.includes(type) && !v.off.air).sort((a, b) => b.def.air.cap - a.def.air.cap);
-  for (const v of decks) { let n = 0; for (const w of al) if (w.aboard === v.id) n++; if (n < v.def.air.cap) return v; }
+  for (const v of decks) { let n = 0; for (const w of al) if (w.aboard === v.id && w.def.domain === 'air') n++; if (n < v.def.air.cap) return v; }
   return null;
 }
 

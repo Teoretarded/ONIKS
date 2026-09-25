@@ -1,12 +1,15 @@
 /* Coarse navigation grids (land / sea) and A* with a path cache. Pure logic, no DOM.
 
    Land cells: every sample on land, slope under the limit (or a road). Roads cost less (trucks drive faster).
-   Sea cells: every sample deeper than SEA_DEPTH; 'sub' cells (submarines): deeper than SUB_DEPTH. Connected
+   Sea cells: every sample deeper than SEA_DEPTH; 'sub' cells (submarines): deeper than SUB_DEPTH. 'hover' cells (the
+   LCAC): every sample water, or flat low ground (under HOVER_H, slope under HOVER_SLOPE) within HOVER_SHORE of the
+   water: the beaches a hovercraft runs up onto. Connected
    components let unreachable goals be snapped to the nearest reachable cell without a failed search. */
 
 export const SEA_DEPTH = 16;          // m: deepest draught (CVN 11.3 m) plus margin
 export const SUB_DEPTH = 36;          // m: boats keep to deep water (room to dive under a ship's keel)
 const LAND_SLOPE = .42;               // tan: steepest off-road cell
+export const HOVER_H = 14, HOVER_SLOPE = .14, HOVER_SHORE = 1500;   // m, tan, m: the beaches of the 'hover' grid
 const ROAD_COST = .5, SHORE_COST = 1.6;
 
 class Heap {
@@ -71,6 +74,16 @@ export class Nav {
         const sl = map.slope(x, z);
         if (road[k]) cost[k] = ROAD_COST;
         else if (sl <= LAND_SLOPE) cost[k] = 1 + sl * 3;
+      } else if (dom === 'hover') {
+        let ok = true, land = 0;
+        for (let s = 0; s < 9 && ok; s++) {
+          const px = x + ((s % 3) - 1) * q, pz = z + (Math.floor(s / 3) - 1) * q, h = map.h(px, pz);
+          if (h < 0) continue;
+          land++;
+          if (h > HOVER_H || map.slope(px, pz) > HOVER_SLOPE) ok = false;
+        }
+        if (ok && land && this.shoreDist()[k] > HOVER_SHORE) ok = false;
+        if (ok) cost[k] = land ? 1.4 : 1;
       } else {
         let ok = true, shore = false;
         const D = dom === 'sub' ? SUB_DEPTH : SEA_DEPTH;

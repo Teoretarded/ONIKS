@@ -8,9 +8,11 @@ import { findSpot, deckFor } from './economy.js';
 import { AI } from './ai.js';
 import { UNITS } from '../data/units.js';
 
+/* the fleet's LHD comes with its landing force aboard (3 LCAC, 8 ACV, and the fleet's 2 MH-60R on its flight deck:
+   sim/amphib.js loadStart); the coast answers with two Kornet-EM beach-defence teams */
 export const ROSTER = {
-  coast: [['hq', 1], ['radar', 1], ['tel', 4], ['pantsir', 3], ['catapult', 1], ['transloader', 2]],
-  fleet: [['carrier', 1], ['ddg', 3], ['fighter', 4], ['helo', 2]],
+  coast: [['hq', 1], ['radar', 1], ['tel', 4], ['pantsir', 3], ['catapult', 1], ['transloader', 2], ['kornet', 2]],
+  fleet: [['carrier', 1], ['ddg', 3], ['fighter', 4], ['lhd', 1]],
 };
 
 export function setupBattle(sim, opts) {
@@ -44,6 +46,13 @@ export function setupBattle(sim, opts) {
           const bz = Math.max(-map.H / 2 + 3000, Math.min(map.H / 2 - 3000, sp.z - (cs.z - sp.z) / L * 15000));
           const p = findSpot(sim, 'sea', bx, bz, 2000, r);
           u = sim.spawn(type, side, p[0], p[1], { hdg: Math.atan2(cs.x - sp.x, cs.z - sp.z) });
+        } else if (type === 'lhd') {
+          // the LHD keeps 18 km behind the spawn and 10 km to one side of the carrier's track, out of the screen's way
+          const cs = map.spawns.coast, L = Math.hypot(cs.x - sp.x, cs.z - sp.z) || 1, fx = (cs.x - sp.x) / L, fz = (cs.z - sp.z) / L;
+          const ax = Math.max(-map.W / 2 + 3000, Math.min(map.W / 2 - 3000, sp.x - fx * 18000 + fz * 10000 * (i % 2 ? -1 : 1)));
+          const az = Math.max(-map.H / 2 + 3000, Math.min(map.H / 2 - 3000, sp.z - fz * 18000 - fx * 10000 * (i % 2 ? -1 : 1)));
+          const p = findSpot(sim, 'sea', ax, az, 2500, r);
+          u = sim.spawn(type, side, p[0], p[1], { hdg: Math.atan2(fx, fz) });
         } else if (type === 'ddg') {
           // destroyers screen 12 km ahead of the carrier toward the coast, 6 km apart
           const cs = map.spawns.coast, L = Math.hypot(cs.x - sp.x, cs.z - sp.z) || 1, fx = (cs.x - sp.x) / L, fz = (cs.z - sp.z) / L;

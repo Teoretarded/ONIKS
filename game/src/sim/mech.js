@@ -5,6 +5,7 @@ import { TEL_ELEV } from '../data/units.js';
 import { DT } from './consts.js';
 import { clamp, angTo, wrapPi, dxz, local } from './util.js';
 import { subStep } from './subs.js';
+import { wellStep, hoverStep } from './amphib.js';
 
 /* the erect angle and the weapon of a launcher that deploys (K340P TEL, Bal) */
 export const elevOf = d => (d.deploy && d.deploy.elev) || TEL_ELEV;
@@ -42,6 +43,15 @@ export function mechanics(sim, u) {
     if (u.mast <= 0 && was > 0) sim.emit('deploy', { unit: u.id, side: u.side, what: 'mast_down', pos: u.pos.slice() });
     u.deployed = u.mast >= 1;
   }
+  // Kornet-EM: the launcher rises through the roof while the vehicle stands with its weapons free or an attack order
+  // (lift s), and comes down to drive (stow() holds it down for 2 s)
+  if (d.lift) {
+    const o = u.orders[0], was = u.lift;
+    const want = (u.hold || (o && o.kind === 'attack')) && !u.path && u.speed < .3 && t - (u.stowT || -1e9) > 2 && !u.off.move;
+    u.lift = clamp(u.lift + (want ? DT : -DT) / d.lift, 0, 1);
+    if (u.lift >= 1 && was < 1) sim.emit('deploy', { unit: u.id, side: u.side, what: 'lift_up', pos: u.pos.slice() });
+    if (u.lift <= 0 && was > 0) sim.emit('deploy', { unit: u.id, side: u.side, what: 'lift_down', pos: u.pos.slice() });
+  }
   // radar antenna turns only while radiating and able to
   const R = d.sensors.radar;
   if (R) {
@@ -50,7 +60,7 @@ export function mechanics(sim, u) {
     if (w !== u.antW) { const a = u.antA + u.antW * (t - u.antT); u.antA = a - Math.PI * 2 * Math.floor(a / (Math.PI * 2)); u.antT = t; u.antW = w; }
   }
   // turret (Pantsir module, DDG gun) slews toward the last aim bearing, back to fore when idle
-  if (d.model === 'pantsir' || d.model === 'destroyer') {
+  if (d.model === 'pantsir' || d.model === 'destroyer' || d.turret) {
     const idle = t - u.lastFire > 12;
     const yT = idle ? 0 : wrapPi(u.aimB - u.hdg), pT = idle ? 0 : u.aimP;
     u.tYaw += clamp(angTo(u.tYaw, yT), -SLEW * DT, SLEW * DT);
@@ -77,8 +87,10 @@ export function mechanics(sim, u) {
     if (!u.busy) u.crane = Math.max(0, u.crane - DT / 4);
     refillTransloader(sim, u);
   }
-  if (u.type === 'pantsir' || u.type === 'bal') refillAtDepot(sim, u);
+  if (u.type === 'pantsir' || u.type === 'bal' || u.type === 'kornet') refillAtDepot(sim, u);
   if (d.domain === 'sea') replenish(sim, u);
+  if (d.well) wellStep(sim, u);                                // LHD: the stern gate, the crafts through it, loading
+  if (d.hover) hoverStep(sim, u);                              // LCAC: cushion, ramp, propellers
   if (u.aboard) aboardStep(sim, u);
 }
 

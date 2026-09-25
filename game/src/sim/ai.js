@@ -12,7 +12,12 @@
    reach and goes deep again, torpedoes what it hears close (weapons free). The fleet flies one E-2D on a station
    behind its screen, keeps a Virginia deep ahead of the destroyers (weapons free: torpedoes at a boat it hears; its
    Tomahawks join the strikes from periscope depth), and sends a helicopter to hover and dip its sonar over a boat
-   it has only heard (the destroyer and helicopter Mk 54s take a classified boat). */
+   it has only heard (the destroyer and helicopter Mk 54s take a classified boat).
+   The landing (sim/amphib.js): the fleet's LHD holds back with the carrier until the push and a fighter on CAP, then
+   stands off the beach nearest a coast objective (away from the launchers it knows), sends its LCACs in once and
+   lets them shuttle what is left on its vehicle decks; ashore the ACVs (weapons free) take that objective, then the
+   next, then close on the command post. The coast keeps its Kornet-EM teams (weapons free) a little inland of the
+   beaches by its command post and its objectives, and sends them at landing craft and vehicles in its picture. */
 import { UNITS, CLASSIFY, TEL_ELEV } from '../data/units.js';
 import { inbound as inboundSlow } from './weapons.js';
 import { scanBlocked, los } from './sensors.js';
@@ -20,6 +25,7 @@ import { atPD } from './subs.js';
 import { elevOf } from './mech.js';
 import { dxz } from './util.js';
 import { nearestDepot } from './orders.js';
+import { beaches, carried } from './amphib.js';
 
 /* every: ticks between decisions · salvo: rounds the coast waits to gather (up to `wait` s) · cvn / ddg: rounds it wants
    in the air at a carrier / another ship, + firm on a scanned or high-confidence track · fresh: s a track stays
@@ -198,6 +204,7 @@ export class AI {
     this.coastScan();
     this.coastFire(by.tel, by.bal || []);
     this.coastBoats(by.ssk || []);
+    this.coastBeach(by.kornet || []);
     this.coastBuy(by);
   }
 
@@ -457,7 +464,7 @@ export class AI {
     const all = tels.concat(bals || []), open = t < L.open;
     for (const c of this.contacts().values()) if (!c.dead && c.cls === 'CVN' && t - c.lastSeen < 600 && all.some(u => reach(u, c))) cvn = true;
     for (const c of this.contacts().values()) {
-      if (c.dead || c.dom !== 'sea' || c.conf < CLASSIFY || t - c.lastSeen > L.fresh) continue;
+      if (c.dead || c.dom !== 'sea' || c.conf < CLASSIFY || t - c.lastSeen > L.fresh || c.cls === 'LCAC') continue;   // not an Oniks for a hovercraft
       if (c.cls === 'CVN' && open) continue;
       if (c.cls !== 'CVN' && cvn && !open && !ready.some(u => dxz(u.pos[0], u.pos[2], c.pos[0], c.pos[2]) < 45000)) continue;
       targets.push(c);
@@ -497,7 +504,8 @@ export class AI {
     const tl = Math.max(1, Math.ceil(count('tel') / 2));
     // pressing (the fleet is lost): eyes before more launchers: drones on the rail and a boat to go and listen
     const eyes = this.pressing ? ((stock < 3 && (by.catapult || []).length && sim.t - (this.lastDrone || -1e9) > 120 ? 'drone' : null) || want('ssk', 1)) : null;
-    const next = want('radar', 1) || want('tel', 3) || eyes || want('pantsir', 2) || want('transloader', 1) || want('catapult', 1) || want('transloader', Math.min(tl, 2))
+    // a landing in the picture: beach defence first
+    const next = want('radar', 1) || want('tel', 3) || (this.landed ? want('kornet', 4) : null) || eyes || want('pantsir', 2) || want('kornet', 2) || want('transloader', 1) || want('catapult', 1) || want('transloader', Math.min(tl, 2))
       || (stock < 2 && (by.catapult || []).length && sim.t - (this.lastDrone || -1e9) > 240 ? 'drone' : null)
       || want('pantsir', 3) || want('tel', 5) || want('bal', 1) || want('radar', 2) || want('transloader', tl) || want('tel', 6) || want('ssk', 1) || want('pantsir', 4) || want('bal', 2)
       || want('transloader', tl) || want('tel', 8) || want('pantsir', 5) || want('tel', 10);
@@ -538,7 +546,7 @@ export class AI {
       if (u.ammo.klub > 0 && !u.off.klub) {
         let best = null, bs = -1e18;
         for (const c of this.contacts().values()) {
-          if (c.dead || c.dom !== 'sea' || c.conf < CLASSIFY || t - c.lastSeen > 60) continue;
+          if (c.dead || c.dom !== 'sea' || c.conf < CLASSIFY || t - c.lastSeen > 60 || c.cls === 'LCAC') continue;
           const d = dxz(u.pos[0], u.pos[2], c.pos[0], c.pos[2]);
           if (d > u.def.weapons.klub.range * .95 || d < u.def.weapons.klub.min) continue;
           const s = (c.cls === 'CVN' ? 3 : 1) - d / 100000 - this.inbound(c.unitId) * .5;
@@ -567,6 +575,63 @@ export class AI {
     }
   }
 
+  /* ---------- beach defence ---------- */
+  /* where the Kornet-EM teams wait: 1.2 km inland of the beach nearest the command post, then of the beaches nearest
+     the objectives (on the coast's land, 3 km apart at least), the command post's first */
+  beachSites() {
+    if (this._beachSites) return this._beachSites;
+    const sim = this.sim, map = sim.map, nav = sim.nav, B = beaches(sim), Lg = nav.grid('land');
+    const hq = this.own('hq')[0], sp = map.spawns.coast, hqp = hq ? [hq.pos[0], hq.pos[2]] : [sp.x, sp.z];
+    const comp = this.comp !== undefined ? this.comp : this.compOf('land', hqp[0], hqp[1]);
+    const keys = [hqp].concat(sim.objectives.filter(o => dxz(o.x, o.z, hqp[0], hqp[1]) < 45000).sort((a, b) => dxz(a.x, a.z, hqp[0], hqp[1]) - dxz(b.x, b.z, hqp[0], hqp[1])).map(o => [o.x, o.z]));
+    const out = [];
+    for (const k of keys) {
+      let best = null, bd = 20000;
+      for (const b of B) { if (Lg.comp[nav.cellOf(b.x, b.z)] !== comp) continue; const d = dxz(b.x, b.z, k[0], k[1]); if (d < bd) { bd = d; best = b; } }
+      if (!best) continue;
+      const L = Math.max(1, bd), f = Math.min(1200, bd * .6) / L;
+      const s = this.snap('land', best.x + (k[0] - best.x) * f, best.z + (k[1] - best.z) * f, comp);
+      if (s && !out.some(o => dxz(o[0], o[1], s[0], s[1]) < 3000)) out.push(s);
+      if (out.length >= 4) break;
+    }
+    return (this._beachSites = out);
+  }
+  beachSite(u) {
+    const S = this.beachSites(), m = this.m(u);
+    if (!S.length) return null;
+    if (!m.beach) {
+      const taken = this.own('kornet').filter(v => v !== u).map(v => this.m(v).beach).filter(Boolean);
+      m.beach = S.find(s => !taken.includes(s)) || S[this.own('kornet').indexOf(u) % S.length];
+    }
+    return m.beach;
+  }
+  /* Kornet-EM: weapons free on its beach site; landing craft or vehicles in the picture within 16 km: closes to 5 km of
+     the nearest (it fires by itself inside 8 km with the launcher up); empty: to a depot */
+  coastBeach(ks) {
+    const sim = this.sim, t = sim.t;
+    const foes = [];
+    for (const c of this.contacts().values()) if (!c.dead && t - c.lastSeen < 90 && (c.dom === 'land' || c.cls === 'LCAC')) foes.push(c);
+    this.landed = foes.some(c => c.dom === 'land');
+    for (const u of ks) {
+      const m = this.m(u), k = this.cur(u);
+      u.hold = true;
+      if (k === 'reload' || k === 'attack') continue;
+      if (u.ammo.kornet === 0) { this.order(u, { kind: 'reload' }); continue; }
+      let tgt = null, bd = 16000;
+      for (const c of foes) { const d = dxz(u.pos[0], u.pos[2], c.pos[0], c.pos[2]); if (d < bd) { bd = d; tgt = c; } }
+      if (tgt) {
+        if (bd > 6000 && (m.chase !== tgt.unitId || t - (m.chaseT || -1e9) > 45 || !k)) {
+          const f = (bd - 5000) / bd, p = this.snap('land', u.pos[0] + (tgt.pos[0] - u.pos[0]) * f, u.pos[2] + (tgt.pos[2] - u.pos[2]) * f, this.comp);
+          if (p) { m.chase = tgt.unitId; m.chaseT = t; this.order(u, { kind: 'move', x: p[0], z: p[1] }); }
+        } else if (bd <= 6000 && k === 'move') this.order(u, { kind: 'stop' });
+        continue;
+      }
+      m.chase = null;
+      const site = this.beachSite(u);
+      if (site) this.station(u, site, 300);
+    }
+  }
+
   /* start of a battle: put the battery straight onto its sites, emplaced (TELs erect, radar mast up) */
   emplace() {
     const sim = this.sim;
@@ -584,6 +649,7 @@ export class AI {
       else if (u.type === 'pantsir' && si < this.samSites.length) { this.samOwner[si] = u.id; this.m(u).sam = si; put(u, this.samSites[si++]); }
       else if (u.type === 'catapult') put(u, this.catSite);
       else if (u.type === 'transloader') put(u, [this.park[0] + (u.id % 3) * 60, this.park[1]]);
+      else if (u.type === 'kornet') { const s = this.beachSite(u); if (s) put(u, s); }
     }
   }
 
@@ -627,6 +693,7 @@ export class AI {
     this.fleetFighters(by.fighter, by.ddg);
     this.fleetAew(by.aew || []);
     this.fleetBoats(by.ssn || []);
+    this.fleetLanding(by);
     this.fleetBuy(by);
   }
 
@@ -853,6 +920,118 @@ export class AI {
       }
       this.station(u, m.st, 3000);
     });
+  }
+
+  /* ---------- the landing (sim/amphib.js) ---------- */
+  /* the objective to land for and its beach: objectives the fleet does not hold with a beach on the same land within
+     15 km that the LHD's crafts reach, scored by the drive from the beach, the run from the ship, the fleet's side and the coast
+     launchers known near the beach; the launch point is deep water 20 km off the beach toward the fleet (or the
+     nearest deep water) -> { obj, bp, launch } */
+  landingPlan(h) {
+    const sim = this.sim, map = sim.map, nav = sim.nav, B = beaches(sim), H = nav.grid('hover'), Lg = nav.grid('land');
+    const hk = nav.nearestOpen('hover', nav.cellOf(h.pos[0], h.pos[2]), -1, 12);
+    if (hk < 0) return null;
+    const hc = H.comp[hk], fs = map.spawns.fleet, threats = [];
+    for (const c of this.contacts().values()) if (!c.dead && c.dom === 'land' && (c.cls === 'SAM' || c.cls === 'ATGM' || c.cls === 'TEL')) threats.push(c);
+    let best = null, bs = -1e18;
+    for (const o of sim.objectives) {
+      if (o.owner === 'fleet') continue;
+      const oc = Lg.comp[nav.nearestOpen('land', nav.cellOf(o.x, o.z), -1, 8)];
+      for (const b of B) {
+        if (b.comp !== hc || b.lcomp !== oc) continue;
+        const d = dxz(b.x, b.z, o.x, o.z);
+        if (d > 15000) continue;
+        let s = -d / 1000 - dxz(b.x, b.z, fs.x, fs.z) / 8000 - dxz(b.x, b.z, h.pos[0], h.pos[2]) / 4000;
+        for (const c of threats) if (dxz(c.pos[0], c.pos[2], b.x, b.z) < 10000) s -= c.cls === 'ATGM' ? 6 : 3;
+        if (s > bs) { bs = s; best = { obj: o, bp: [b.x, b.z] }; }
+      }
+    }
+    if (!best) return null;
+    // deep water 20 km off the beach toward the fleet, else the nearest the ship can reach
+    const dx = fs.x - best.bp[0], dz = fs.z - best.bp[1], L = Math.hypot(dx, dz) || 1;
+    let launch = null;
+    for (let r = 20000; r <= 45000 && !launch; r += 2500) {
+      const x = best.bp[0] + dx / L * r, z = best.bp[1] + dz / L * r;
+      if (nav.open('sea', x, z) && map.h(x, z) < -30) launch = this.snap('sea', x, z, this.comp);
+    }
+    best.launch = launch || this.snap('sea', best.bp[0], best.bp[1], this.comp);
+    return best.launch ? best : null;
+  }
+  fleetLanding(by) {
+    const lhds = by.lhd || [], sim = this.sim, t = sim.t, L = this.L;
+    this.fleetAshore((by.acv || []).filter(u => !u.aboard));
+    if (!lhds.length) return;
+    // air cover: an F/A-18E up (not on its way home) within the last 2 min
+    if ((by.fighter || []).some(f => !f.aboard && this.cur(f) !== 'return')) this.coverT = t;
+    const cap = t - (this.coverT || -1e9) < 120;
+    const home = this.at(Math.min(this.D, 62000), 12000);
+    for (const h of lhds) {
+      const m = this.m(h);
+      // EMCON like the destroyers (skirmish): silent until rounds or aircraft come at the fleet
+      if (this.L.ddgEmcon && sim.mode === 'combat') {
+        const quiet = t - this.lastEnemyLaunch > 300 && !this.threatNear(h.pos, 60000);
+        if (h.radarOn === quiet) this.order(h, { kind: 'radar', on: !quiet });
+      }
+      if (!m.plan) {
+        // one wave, under air cover, from 6 min in (normal; the push's timing sets it); until then behind the screen
+        if (t < Math.max(300, L.pushT * .25) || !cap || t - (m.tried || -1e9) < 600) { this.station(h, home, 3000); continue; }
+        m.tried = t;
+        m.plan = this.landingPlan(h); m.planT = t;
+        if (!m.plan) { this.station(h, home, 3000); continue; }
+        this.note(`landing: ${m.plan.obj.name || m.plan.obj.id} over the beach ${m.plan.bp.map(v => Math.round(v / 100) / 10).join(',')} km`);
+      }
+      const P = m.plan;
+      if (!m.sent) {
+        // the crafts go once the ship is within 40 km of the beach on its way to the launch point, or after 10 min of
+        // sailing (a hovercraft at 40 kn gets there sooner than the ship at 22)
+        const there = this.station(h, P.launch, 2500) || dxz(h.pos[0], h.pos[2], P.bp[0], P.bp[1]) < 40000 || t - m.planT > 600;
+        if (!there) continue;
+        const crafts = carried(sim, h, 'craft');
+        m.sent = t;
+        if (!crafts.length) continue;
+        sim.order(crafts.map(c => c.id), { kind: 'land', x: P.bp[0], z: P.bp[1], then: { kind: 'move', x: P.obj.x, z: P.obj.z }, hold: true });
+        this.note(`landing: LCAC x${crafts.length} away`);
+        continue;
+      }
+      // the crafts shuttle what is left on the vehicle decks; the ship waits at the launch point, then goes home
+      const out = sim.alive(h.side).some(c => c.def.hover && c.aboardOf === h.id && !c.aboard);
+      this.station(h, out || t - m.sent < 900 ? P.launch : home, 3000);
+    }
+  }
+  /* ACVs ashore (weapons free): two hold each objective they take (it is held only while they are in it); the others
+     go on to the nearest objective the fleet does not hold on their land, then close on the command post */
+  fleetAshore(acvs) {
+    const sim = this.sim, t = sim.t, nav = sim.nav, Lg = nav.grid('land');
+    if (!acvs.length) return;
+    let hqc = null;
+    for (const c of this.contacts().values()) if (!c.dead && c.cls === 'HQ') hqc = c;
+    const objAt = u => sim.objectives.find(o => dxz(u.pos[0], u.pos[2], o.x, o.z) < o.r * .8);
+    const inside = new Map(), holders = new Set();
+    for (const u of acvs) { const o = objAt(u); if (o) { if (!inside.has(o)) inside.set(o, []); inside.get(o).push(u); } }
+    for (const us of inside.values()) us.sort((a, b) => a.id - b.id).slice(0, 2).forEach(u => holders.add(u));
+    for (const u of acvs) {
+      const m = this.m(u), k = this.cur(u);
+      u.hold = true;
+      if (k === 'attack') continue;
+      if (holders.has(u)) { if (k === 'move' && u.orders.length === 1) this.order(u, { kind: 'stop' }); continue; }
+      if ((k === 'move' && u.orders.length > 1) || (k && t - (m.nextT || -1e9) < 60)) continue;
+      m.nextT = t;
+      const uc = Lg.comp[nav.cellOf(u.pos[0], u.pos[2])];
+      let best = null, bd = 1e18;
+      for (const o of sim.objectives) {
+        if (o.owner === 'fleet' || (inside.get(o) || []).length >= 2) continue;
+        if (Lg.comp[nav.nearestOpen('land', nav.cellOf(o.x, o.z), -1, 8)] !== uc) continue;
+        const d = dxz(u.pos[0], u.pos[2], o.x, o.z);
+        if (d < bd) { bd = d; best = o; }
+      }
+      let goal = best ? [best.x, best.z] : null;
+      if (!goal) { const sp = sim.map.spawns.coast; goal = hqc ? [hqc.pos[0], hqc.pos[2]] : [sp.x, sp.z]; }
+      if (dxz(u.pos[0], u.pos[2], goal[0], goal[1]) < 300) continue;
+      // spread round the goal so they do not stack on one point
+      const a = (u.id % 6) / 6 * Math.PI * 2, r = best ? Math.min(best.r * .4, 500) : 500;
+      const x = goal[0] + Math.sin(a) * r, z = goal[1] + Math.cos(a) * r;
+      if (k !== 'move' || dxz(u.orders[0].x, u.orders[0].z, x, z) > 300) this.order(u, { kind: 'move', x, z });
+    }
   }
 
   fleetBuy(by) {

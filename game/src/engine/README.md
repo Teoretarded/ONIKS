@@ -216,3 +216,13 @@ contract).
 `play.html` debug: `?map=<id>|stub`, `?scale=`, `?bench=1` (logs `BENCH {...}` after 6 s), `?t=` (freeze),
 `?cam=x,z,dist,yawDeg,pitchDeg`, `?ui=0`; console `ONIKS.benchSync(n)` (GPU-synced ms per frame),
 `ONIKS.still(name)` (saves `game/shots/<name>.png`), `ONIKS.advance(sec)`; keys 1-9 fly to the showcase units.
+
+**The stress suite** (`src/perf.js`): `await ONIKS.perf({ only: ['battle'], scale })` in play.html, or `game/perf.html`
+(every map at three heights, every scenario on the first, the Debrief film; open it at 1920 x 1080). Frames back to
+back at a fixed dt, each GPU-synced, per frame the main thread (`cpu`), the synced cost (`sync`), the GPU's own time
+(timer query) and every system's time (`game.profile`); avg / p95 / p99 / max per scenario, the worst frames and where
+their time went. `o.events` times each system's onEvent (otherwise counted in `sim`); `o.probe(ctx)` wraps any object's
+methods (`ctx.probe(R.terrain, 'T', ['prepare'])`). Budget: 16.7 ms p99 and max, 8 ms average. The auto-quality guard
+(`game/perfguard.js`) is held at full quality while it runs. Costs to know: a 2D canvas resize goes through the GPU
+process (up to ~0.9 s behind a busy GPU: size canvases once, clear them with `ctx.reset()`); a hidden page runs its
+timers once a second (the suite yields through messages).

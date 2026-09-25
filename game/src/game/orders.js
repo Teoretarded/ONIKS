@@ -26,6 +26,7 @@ import { PRI } from './game.js';
 import { SHORT, offensive } from './labels.js';
 import { buyable } from '../data/units.js';
 import { scanBlocked } from '../sim/sensors.js';
+import { createAmphib } from './amphib.js';
 
 const LIME = [198, 244, 50], CORAL = [255, 106, 61], WH = [238, 238, 228];
 const WH1 = [246 / 255, 245 / 255, 242 / 255], CO1 = [1, 106 / 255, 61 / 255];        // hairline colours (0..1)
@@ -46,6 +47,7 @@ export function createOrders(game) {
   const canGo = (u, x, z) => {
     const h = game.map.h(x, z), dom = u.def.domain;
     if (dom === 'air') return true;
+    if (u.def.hover) return h < 0 || sim.nav.open('hover', x, z);          // an LCAC: water, or a beach
     if (dom === 'land') return h > .5 && game.map.slope(x, z) < (u.def.slopeMax || .4) + .15;
     return h < -(u.def.draught || 5) - 2;
   };
@@ -280,7 +282,7 @@ export function createOrders(game) {
         }
         return true;
       }
-      case 'reload': { const r = us.filter(u => u.type === 'tel' || u.type === 'bal' || u.type === 'transloader' || u.def.domain === 'sea' || u.type === 'pantsir'); game.order(r.map(u => u.id), { kind: 'reload' }); return true; }
+      case 'reload': { const r = us.filter(u => u.type === 'tel' || u.type === 'bal' || u.type === 'transloader' || u.def.domain === 'sea' || u.type === 'pantsir' || u.type === 'kornet'); game.order(r.map(u => u.id), { kind: 'reload' }); return true; }
       case 'radar': {
         const rs = us.filter(u => u.def.sensors && u.def.sensors.radar);
         if (!rs.length) return true;
@@ -724,7 +726,8 @@ export function createOrders(game) {
       }
     },
   };
-  return [targeting, orders];
+  // the landing force's orders (T Land for the fleet, right-click board / dock): game/amphib.js
+  return [targeting, orders, createAmphib(game, orders)];
 }
 
 function addStyle() {
