@@ -708,6 +708,11 @@ export function createAudio(game) {
           gg.bus.on('sound', d => d && sys.play(d.name, d.pos, d.opts));
           gg.bus.on('rate', onRate);
           gg.bus.on('replay', d => { rpBus = rpOn = !!(d && d.on); });
+          // acknowledgements: a click when a selection is made, a blip when an order goes out (throttled)
+          let lastAck = -1;
+          const ack = name => { const n = performance.now(); if (n - lastAck < 90) return; lastAck = n; sys.ui(name); };
+          gg.bus.on('select', sel => { if (sel && sel.size) ack('select'); });
+          gg.bus.on('order', () => ack('order'));
           busRate = true; bRate = +gg.timeRate || 1; bPaused = !!gg.paused;
         } catch (e) { /* optional */ }
       }
