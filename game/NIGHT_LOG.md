@@ -223,3 +223,9 @@ every flash; white lightning (lime stays the player's scan) with a stepped leade
 at 40 km, attracted to masts; rain as slanted streaks inside the cells only; the sea rougher under them. In Combat a
 squall line of 5-8 cells crosses the map every 8-12 game-minutes: inside a cell radars see less, strikes reveal both
 sides, and a player scan fired into a cell reaches up to x1.5 farther. Stills: `game/shots/storm/final_*.png`.
+
+## 10:05 · Salvo board done
+When two or more rounds of a salvo are in the air, a strip opens above the command card like the Salvo film: one
+lane per round on a shared time-to-impact axis (`R1 3M55 … T–0:11 M 2.2 7.8 KM`), interceptor ticks rising under each
+round, lanes ending HIT / DOWN (`SM-6 · 25 KM`) / MISS / SPENT; incoming raids in coral with their targets
+(`RAID 01 · 4 × TLAM · → SAM 06`). Click a lane to ride behind that round. Stills: `game/shots/salvo_board/`.
