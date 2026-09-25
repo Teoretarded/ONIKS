@@ -8,7 +8,7 @@
      ?mode=museum[&from=sandbox|campaign&key=<model>]   the Anatomy walk alone (ui/inspect/museum.js)
    Debug: ?seed=, ?rate=, ?scale=<render scale>, ?cam=x,z,dist,yawDeg,pitchDeg, ?ui=0, ?fps=1, ?bench=1 (BENCH after 6 s),
    ?nosys=fx,audio (skip optional systems). Console: ONIKS.game / sim / R, ONIKS.benchSync(n), ONIKS.still(name),
-   ONIKS.advance(sec), ONIKS.shot(name), ONIKS.perf(o) (the stress suite, src/perf.js; game/perf.html runs every map). */
+   ONIKS.advance(sec), ONIKS.ff(sec), ONIKS.shot(name), ONIKS.hudShot(name) (ui/hud), ONIKS.perf(o) (the stress suite, src/perf.js; game/perf.html runs every map). */
 import { Renderer } from './engine/renderer.js';
 import { stubMap } from './engine/stubmap.js';
 import { createGame } from './game/game.js';
@@ -251,9 +251,9 @@ async function boot() {
     advance(sec, n) { n = n || Math.max(1, Math.ceil(sec * 10)); for (let i = 0; i < n; i++) step(performance.now(), sec / n); return sim.t; },
     /* run the sim alone for `sec` sim seconds (fast-forward, no rendering) */
     ff(sec) { const n = Math.round(sec / game.DT); for (let i = 0; i < n; i++) { sim.step(); if (sim.events.length > 2000) game.dispatchEvents(); } game.dispatchEvents(); return sim.t; },
-    /* render one frame now and save it */
     /* the stress suite (src/perf.js): await ONIKS.perf({ only: ['battle'] }) -> { env, rows }, a table in the console */
     perf: o => import('./perf.js').then(m => m.run(window, o)),
+    /* render one frame now (after `warm` frames at dt 0) and save it */
     still: (name, dt, warm) => new Promise(done => {
       for (let i = 0; i < (warm === undefined ? 30 : warm); i++) step(performance.now(), 0);
       shots.push({ name, done }); step(performance.now(), dt === undefined ? 0 : dt);
