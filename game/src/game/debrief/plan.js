@@ -16,7 +16,7 @@
 import { PROJ, UNITS } from '../../data/units.js';
 import { DT } from '../../sim/consts.js';
 
-const XRAY = { oniks: 1, tlam: 1, slam: 1 };
+const XRAY = { oniks: 1, tlam: 1, slam: 1, uran: 1, kalibr: 1 };
 const W8 = { carrier: 30, hq: 30, ddg: 22, ssn: 18, ssk: 18, tel: 12, radar: 10, pantsir: 8, transloader: 6, bal: 10, catapult: 3 };
 const heavy = k => !!(PROJ[k] && PROJ[k].threat);
 export const major = t => { const d = UNITS[t]; return !!d && (d.domain === 'sea' || !!d.hq || t === 'tel' || t === 'radar' || t === 'pantsir' || t === 'transloader'); };
@@ -44,7 +44,13 @@ export function makePlan(rec, side) {
 
   /* the decisive hit */
   const hits = E.filter(e => e.k === 'hit' && heavy(e.kind) && byId.has(e.id));
-  const finalDest = result ? [...dests].reverse().find(d => d.tick <= result.tick + 2 && result.tick - d.tick <= sec(12)) : null;
+  // the kill that decided it: among the losses just before the result, the heaviest (a carrier or HQ, never an aircraft
+  // parked on its deck that dies on the same tick)
+  let finalDest = null;
+  if (result) for (const d of dests) {
+    if (d.tick > result.tick + 2 || result.tick - d.tick > sec(12)) continue;
+    if (!finalDest || (W8[d.type] || 0) > (W8[finalDest.type] || 0) || ((W8[d.type] || 0) === (W8[finalDest.type] || 0) && d.tick > finalDest.tick)) finalDest = d;
+  }
   let decisive = null, best = -1;
   for (const h of hits) {
     const k = killOf(h);
