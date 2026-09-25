@@ -325,3 +325,17 @@ Started on request: a physics pass (acceleration and turning circles, ships heel
 renderer draws, aircraft banking with energy, flooding-based sinking with list and trim, debris ballistics, no
 overlapping units) and a performance guard (a stress suite over the worst scenes, spike fixes, and automatic quality
 scaling so the game holds 60 fps).
+
+## 12:15 · Look 3 done; your request: physics, not dice
+X-ray interiors and wings no longer saturate into white slabs (inside parts thinned on screen, highlights roll off
+like the Anatomy · Ship film); the stall after camera jumps is gone (model detail is sampled a few primitives per
+frame inside a 5 ms budget; the worst 30-frame average after a jump fell from 26-34 ms to 10 ms); the near sea
+shows world-fixed swell rows.
+Per your note (no dice rolls; rigid bodies; the gun stream that makes a missile spin out and shed its modules):
+- **Hit physics**: every hit-chance roll is being replaced by collision tests: gun bursts as real rounds with
+  dispersion, gravity and drag flown against the target's moving body; interceptors and missiles with simple
+  turn-rate-limited steering that hit only when their path meets the body; damage lands on the part the impact
+  point is in. A missile grazed but not destroyed loses control and spins out.
+- **Rigid-body break-ups**: when something is hit, its modules (nose, body sections, wings, fins, booster, rotor
+  blades, masts, radar arrays) separate as rigid bodies with mass, spin, drag and splashes, burning pieces trailing
+  smoke; a spun-out round tumbles and sheds fins, then wings, then the booster, until it hits the sea.
