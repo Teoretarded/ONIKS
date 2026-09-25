@@ -197,3 +197,13 @@ Four new units with film-quality models and X-ray interiors:
   (O dive / come up, Shift+O surface). X-ray shows launch cells, torpedo rooms, reactor / battery and diesels.
 - **Bal** (coast): 8 Kh-35U in a pack that tilts up, faster to deploy than the TEL, shorter range.
 Rounds now terrain-follow with look-ahead (no more flying into the fjord cliffs). 17/17 sim tests pass.
+
+## 08:45 · Review 2: 7.5 / 10 (passes)
+`game/reviews/review_2.md`. Up from 6.5. Best: the hit replay ("the Anatomy film happening to your enemy"), the
+scan payoff, campaign mission 4 ("the best 10 minutes in the game", won with grade S), the Orbital map, Inspect (9/10).
+Weakest: skirmish Combat is thin without scripts (attack orders fire once, the coast AI doesn't press), storms read as
+static and natural lightning is a small lime squiggle, big hulls saturate into white slabs up close, a few bugs.
+Wave 3 launched: combat depth (attack orders persist, salvo size, "in reach" alerts, a coast AI that presses),
+storm fronts crossing the map with white lightning lighting a dot cloud ceiling, a bugfix sweep. Next: hull dot
+saturation and the mid-altitude sea, and a salvo board (the Salvo film's lanes when rounds are in the air).
+`game/README.md` is the player's guide.
