@@ -346,3 +346,9 @@ Mission 6: the task group waits out of every reach under a heavy storm cell; aro
 launch the fleet answers on the launch point (SLAM-ERs from the jets on station, Tomahawk waves of 4, 4, 8), so TELs
 must move. S needs the storm, moving after every launch, and the carrier down by 22:00. Scripted tests: passive D,
 the plain loop B/C (A at best), storm + fire-and-move S on two seeds.
+
+## 12:35 · Museum and films from the menus
+"Anatomy · All models" on the Sandbox screen and "Anatomy" on the Campaign screen open the museum on its own
+(42 models including the new ones; ← → walk, E explode, X x-ray). On the Campaign screen, F replays a passed
+mission's whole film, and a Films row lists the ten favourites to watch full screen with the films' timeline bar
+and keys. The main menu still has exactly its five entries.
