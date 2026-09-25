@@ -15,6 +15,7 @@ import { submerged, deep } from '../sim/subs.js';
 const sat = v => v < 0 ? 0 : v > 1 ? 1 : v;
 const ss = (a, b, v) => { const t = sat((v - a) / (b - a)); return t * t * (3 - 2 * t); };
 const TAU = Math.PI * 2;
+const NOZ = [0, 0, 0], NOZ_RGB = [255, 220, 170];   // the stop-gap trail's nozzle glow (scratch: fx.glow copies it)
 
 export function createRender(game, DM) {
   const sim = game.sim, R = game.R, T = R.terrain;
@@ -265,8 +266,8 @@ export function createRender(game, DM) {
       if (pr && pr.alive) {
         // the nozzle: a hot point (the booster's brighter)
         const hot = pr.age < tr.boost, v = pr.vel, l = Math.hypot(v[0], v[1], v[2]) || 1, k = pr.kind === 'kalibr' ? 4.3 : 2.4;
-        const p = [pr.pos[0] - v[0] / l * k, pr.pos[1] - v[1] / l * k, pr.pos[2] - v[2] / l * k];
-        fx.glow(p, hot ? 6 : 3, [255, 220, 170], hot ? .7 : .35);
+        const p = NOZ; p[0] = pr.pos[0] - v[0] / l * k; p[1] = pr.pos[1] - v[1] / l * k; p[2] = pr.pos[2] - v[2] / l * k;
+        fx.glow(p, hot ? 6 : 3, NOZ_RGB, hot ? .7 : .35);
       }
     }
   }
