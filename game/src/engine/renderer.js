@@ -45,6 +45,7 @@ export class Renderer {
     this.bg = [11 / 255, 12 / 255, 10 / 255]; this.vignette = .62;
     this.sun = norm([-.5, .62, -.6]);          // low moon from the south-west (films)
     this.worldBright = 1; this.modelBright = 1.3; this.skyBright = 1;
+    this.seaOcclude = true;                    // the sea surface hides what is below it (Inspect turns it off)
     this.fadeScale = 1;
     this.queue = []; this.lights = [];
     this.scans = [{ mode: 0 }, { mode: 0 }];
@@ -218,7 +219,7 @@ export class Renderer {
     this.terrain.drawSeabed();
     // occluder: the sea surface
     gl.depthMask(true); gl.colorMask(false, false, false, false); gl.disable(gl.BLEND);
-    this.terrain.drawDepth(1);
+    if (this.seaOcclude !== false) this.terrain.drawDepth(1);     // false: the Inspect x-ray sees below the waterline
     gl.colorMask(true, true, true, true); gl.depthMask(false);
     gl.enable(gl.BLEND); gl.blendEquation(gl.MAX);
     this.terrain.drawSky(this.skyBright);

@@ -23,6 +23,9 @@ uniform vec3 uT;          // part origin, relative to the eye
 uniform vec4 uTint;       // rgb, strength at the silhouette
 uniform vec4 uP;          // alpha, x-ray, damage, sample spacing (m)
 uniform vec4 uQ;          // no back faces, tint on the faces (fraction), brightness, dissolve
+uniform vec4 uG;          // x-ray gate (Inspect): x mode (0 off, 1 shell: x-ray only behind the front, 2 hidden: drawn
+                          // only behind it, 3 part: always drawn), z front band width (m), w afterglow (m)
+uniform vec4 uGP;         // gate plane: xyz unit normal (world), w: the front as n.p_rte
 out vec3 vCol;
 void main() {
   vec3 p = uR * aPos + uT;
@@ -38,6 +41,15 @@ void main() {
   float xr = uP.y, dmg = uP.z;
   if (uQ.w > 0.0 && hr < uQ.w) { ${CULL} return; }
   if (dmg > 0.0 && hr > 1.0 - dmg * 0.22) { ${CULL} return; }
+  // the Inspect x-ray slice: a plane front along the model; lime band on this model only
+  float gk = 0.0;
+  if (uG.x > 0.5) {
+    float gd = uGP.w - dot(uGP.xyz, p);
+    if (gd <= 0.0) { if (uG.x > 1.5 && uG.x < 2.5) { ${CULL} return; } if (uG.x < 1.5) xr = 0.0; }
+    float gw = max(1e-3, uG.z);
+    if (gd > -gw * 0.25 && gd < gw) gk = gd < 0.0 ? 1.0 + gd / (gw * 0.25) : 1.0;
+    else if (gd >= gw) gk = exp(-(gd - gw) / max(1e-3, uG.w)) * 0.8;
+  }
   vec3 n = uR * aNrm.xyz;
   float b, rim = 0.0;
   bool two = dot(aNrm.xyz, aNrm.xyz) < 0.01;
@@ -71,6 +83,7 @@ void main() {
   vec3 rgb = col * b;
   if (sc.x > 0.01) rgb = max(mix(rgb, uScanC[0].rgb * max(b, 0.95), sc.x), rgb);
   if (sc.y > 0.0) rgb = mix(rgb, rgb * 0.6 + uScanC[0].rgb * b * 0.5, 0.3 * sc.y);
+  if (gk > 0.01) rgb = max(mix(rgb, LIME * max(b, 0.95), gk), rgb);
   rgb += lightsAt(p, two ? vec3(0.0) : n) * (0.35 + 0.65 * lit) * uP.x;
   vCol = min(rgb, vec3(1.0));
   gl_PointSize = dotPx(uP.w * uCam.x / c.w * (0.8 + 0.4 * hr));
@@ -273,6 +286,10 @@ export class ModelLib {
     const tint = d._rgb || [1, 1, 1];
     gl.uniform4f(u.uTint, tint[0], tint[1], tint[2], d._k || 0);
     gl.uniform4f(u.uQ, d.noBack ? 1 : 0, d._face || 0, d.bright === undefined ? 1 : d.bright, d.dissolve || 0);
+    // Inspect x-ray gate: d.gate = { n: world unit normal, d: n.p of the front (world), w: band (m), g: afterglow (m),
+    // mode: default per part }, d.partGate = { part: mode } (0 off, 1 shell, 2 hidden, 3 part; see the shader)
+    const G = d.gate || null;
+    if (G) gl.uniform4f(u.uGP, G.n[0], G.n[1], G.n[2], G.d - (G.n[0] * eye[0] + G.n[1] * eye[1] + G.n[2] * eye[2]));
     let drawn = 0;
     const ex = d.explode || 0;
     for (const Pt of e.parts) {
@@ -308,6 +325,8 @@ export class ModelLib {
       const xr = d.partXray && d.partXray[Pt.name] !== undefined ? d.partXray[Pt.name] : (d.xray || 0);
       const dm = d.damage && d.damage[Pt.name] ? d.damage[Pt.name] : 0;
       gl.uniform4f(u.uP, pa, xr, dm, cl.sp);
+      const gm = G ? (d.partGate && d.partGate[Pt.name] !== undefined ? d.partGate[Pt.name] : (G.mode || 0)) : 0;
+      gl.uniform4f(u.uG, gm, 0, G ? G.w || 1 : 1, G ? G.g || 1 : 1);
       gl.bindVertexArray(cl.vao);
       gl.drawArrays(gl.POINTS, 0, cl.n);
       drawn += cl.n;
