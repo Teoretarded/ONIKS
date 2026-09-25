@@ -311,3 +311,8 @@ With usage to spare, nine agents now: first impressions, the finale, the radar-s
 rebalance, two new maps (an Arctic coast with sea ice, and rias or a harbour city), museum mode + film rewatch from
 the menus, an amphibious expansion (LHD, LCAC hovercraft, landing vehicles, beach defence), save/continue built on the
 deterministic recorder + kill stills on the end screen.
+
+## 11:55 · Radar-scope minimap
+The minimap is now a radar scope by default (click the header for the map): centred on your main radar, a lime sweep
+turning at the real antenna rate (Monolith-B 12 rpm), sea and rain clutter lighting as the beam passes, "?" clouds
+collapsing into coral ticks with "TRK 41 · 0.99", emitter bearing lines, white sonar rings, rounds, your units in lime.
