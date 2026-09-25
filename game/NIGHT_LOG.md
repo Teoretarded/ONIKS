@@ -99,3 +99,13 @@ Agent retries used so far: 1 of 100 (the balance agent tripped the safety filter
   counter-fire, hold 15 min), 6 Strike (a storm cell over the lagoon hides your rounds; lightning reveals both
   sides). Grades S-D, rounds carry over between missions.
 - Running now: world look polish, balance, landmark set pieces per map, first scored review.
+
+## 05:40 · Review 1: 6.5 / 10
+`game/reviews/review_1.md`. Best: Inspect/Anatomy (8.5), the lime scan bolt, the radar picture, engagement
+moments, performance (2-5 ms/frame, no console errors anywhere). Weakest: the RTS layer takes decisions away
+(the opening salvo fired by itself, the fleet couldn't launch its aircraft), first contact comes too late, two
+missions didn't fight back, and the scan's payoff happens on a speck.
+Fix wave launched: gameplay fixes (player fires first, weapons free/hold fire, carrier air wing launch, scans out of
+reach refused, HUD collisions, clickable alerts, look up at launches), scan payoff (chain lightning that forks to
+every contact, part boxes and decoding labels on the hulls in the normal view, a magnified EO inset like the films),
+campaign pacing and threat. The world-look agent also got the "units must pop over the ground" note.
