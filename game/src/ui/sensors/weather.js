@@ -110,14 +110,14 @@ export function createWeather(S) {
   }
   /* the white bracket and tag on each unit the flash showed */
   function draw2d(ov, TL) {
-    const cam = R.camera;
+    const cam = R.camera, K = ov.ui || 1;
     for (const rv of reveals) {
       const b = S.clock - rv.t0 - rv.tF; if (b < 0 || b > 2.4) continue;
       const u = rv.u, p = game.unitPose(u).pos;
       if (!cam.project(p, q) || q[0] < -20 || q[1] < -20 || q[0] > cam.W + 20 || q[1] > cam.H + 20) continue;
       const al = sat(b / .08) * (1 - sat((b - 1.8) / .6)) * (b < .5 && Math.sin(b * 50) < -.5 ? .4 : 1);
       const mpp = q[2] / cam.fl, e = R.models.has(u.def.model) ? R.models.get(u.def.model) : null, rpx = e ? e.radius / mpp : 4;
-      const hw = Math.max(8, rpx * .9), hh = Math.max(7, rpx * .55);
+      const hw = Math.max(8 * K, rpx * .9), hh = Math.max(7 * K, rpx * .55);
       BX[0] = q[0] - hw; BX[1] = q[1] - hh; BX[2] = q[0] + hw; BX[3] = q[1] + hh;
       ov.bracket(BX, '#FFFFFF', al, 3, 8);
       let id, label, value, kind;
@@ -128,7 +128,7 @@ export function createWeather(S) {
         label = c && c.conf >= CLASSIFY ? (TRACK[u.type] || u.def.name) : '? · LIGHTNING';
         value = c ? c.conf.toFixed(2) : '';
       }
-      TL.add({ x: BX[2] + 12, y: BX[1] - 24, ax: BX[2], ay: BX[1], id, label, value, kind, a: al, size: 10, pri: 4, valCol: 'rgba(255,255,255,.72)' });
+      TL.add({ x: BX[2] + 12 * K, y: BX[1] - 24 * K, ax: BX[2], ay: BX[1], id, label, value, kind, a: al, size: 10, pri: 4, valCol: 'rgba(255,255,255,.72)' });
     }
   }
   /* the flicker of a flash in the cloud (return strokes with dips) */

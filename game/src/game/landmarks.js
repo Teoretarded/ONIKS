@@ -15,7 +15,9 @@
    - plumes (volcanic steam, fumaroles, mud volcanoes), gas flares that light what is near, waterfalls, lit
      windows and street lights at night.
    Clocks: ships game.t (sim), plumes and water game.seaT (the swell clock, at most x2), lights game.realT.
-   Cost target: under 1 ms of CPU a frame. stats: { ms, inst, dots, ships }. */
+   Detail follows the Effects setting (game.settings.effects, live; DETAIL): plume, flare and waterfall dots and
+   the weakest dynamic lights (nav lights, beam fill, vent glow) thin out on medium and low.
+   Cost target: under 1 ms of CPU a frame. stats: { ms, inst, dots, ships, detail }. */
 import { PRI } from './game.js';
 import { planLandmarks } from '../world/landmarks.js';
 import { LM_MODELS, LM_INFO, buildLandmark, spacingFor, mergeParts, settlementBase, settlementLights, PLAT } from '../data/landmark_models.js';
@@ -29,6 +31,8 @@ const TIME_K = { night: 1, dusk: .72, day: .28 };
 const COL = { w: [255, 250, 236], g: [198, 244, 50], r: [255, 196, 178], y: [255, 236, 170] };
 const WARM = [255, 226, 184], STEAM = [226, 229, 222];
 const NEAR = 3500;                    // m: inside this (from the build's bounding sphere) the chunked model, else the far one
+/* the Effects setting -> dot share of the plumes, flares and falls, and the weakest dynamic light cast */
+const DETAIL = { low: { k: .35, light: .3 }, medium: { k: .65, light: .1 }, high: { k: 1, light: 0 } };
 
 /* hash -> [0, 1) */
 function hsh(a, b) {
@@ -420,7 +424,7 @@ export async function createLandmarks(game, ctx) {
         PB[o + 3] = rad; PB[o + 4] = nd; PB[o + 5] = a; PB[o + 6] = idx; PB[o + 7] = h;
         want += nd; n++;
       }
-      const q = Math.min(1, K.budget / Math.max(1, want)), qa = 1 / Math.sqrt(q);
+      const q = Math.min(1, K.budget * DK / Math.max(1, want)), qa = 1 / Math.sqrt(q);
       // pass 2: draw
       for (let i = 0; i < n; i++) {
         const o = i * 8, rad = PB[o + 3], a = PB[o + 5], idx = PB[o + 6], h = PB[o + 7], rp = rad * pxm;
@@ -462,7 +466,7 @@ export async function createLandmarks(game, ctx) {
         sink.glow(F.x, F.y + 5, F.z, 10, 240, 255, 190, (.16 + .22 * night) * fl);
         dots += 2; continue;
       }
-      const nF = Math.round(Math.min(900, 90 + (16 * pxm * F.k) ** 2 * .12)), big = pxm > 1.2 ? 2 : 1;
+      const nF = Math.round(Math.min(900, 90 + (16 * pxm * F.k) ** 2 * .12) * DK), big = pxm > 1.2 ? 2 : 1;
       for (let j = 0; j < nF; j++) {
         const H = (9 + 15 * Math.pow(hsh(j, F.seed + 3), 1.3)) * F.k, ph = tr * (1.1 + 1.1 * hsh(j, F.seed + 5)) + hsh(j, F.seed + 6), u = ph - Math.floor(ph);
         const sr = (1 + u * 2.6) * Math.sqrt(F.k), a0 = hsh(j, F.seed + 1) * TAU, rr = Math.sqrt(hsh(j, F.seed + 2)) * sr;
@@ -486,7 +490,7 @@ export async function createLandmarks(game, ctx) {
     for (const F of falls) {
       const dist = view(C, F.cx, F.cy, F.cz, F.r);
       if (dist < 0 || dist > 40000) continue;
-      const q = dist < 2500 ? 1 : dist < 7000 ? 2 : dist < 16000 ? 4 : 8, rate = 110, P = F.P, T = F.T;
+      const q = Math.max(1, Math.round((dist < 2500 ? 1 : dist < 7000 ? 2 : dist < 16000 ? 4 : 8) / DK)), rate = 110, P = F.P, T = F.T;
       const i0 = Math.floor(t * rate), N = Math.ceil(F.total * rate);
       const bright = .5 + .15 * night, sz = dist < 1200 ? -.45 : 1;
       let k = 0;
@@ -507,7 +511,7 @@ export async function createLandmarks(game, ctx) {
         dots++;
       }
       // spray at the foot: drifting with the wind, rising a little, fading
-      const e = (F.n - 1) * 3, bx = P[e], by = P[e + 1], bz = P[e + 2], nM = dist < 6000 ? 320 : 80, big = Math.min(1.8, Math.max(.6, (P[1] - by) / 300));
+      const e = (F.n - 1) * 3, bx = P[e], by = P[e + 1], bz = P[e + 2], nM = Math.round((dist < 6000 ? 320 : 80) * DK), big = Math.min(1.8, Math.max(.6, (P[1] - by) / 300));
       for (let m = 0; m < nM; m++) {
         const life = 7, ph = (t / life + hsh(m, F.seed + 9)) % 1, a = ph * life;
         const ang = hsh(m, F.seed + 10) * TAU, rad = (3 + 22 * Math.sqrt(ph)) * big * (.5 + hsh(m, F.seed + 11));
@@ -547,6 +551,7 @@ export async function createLandmarks(game, ctx) {
     return dots;
   }
 
+  let DK = 1, minLight = 0, lsink = null;
   stats.init = Math.round(performance.now() - t0);
   console.log(`ONIKS: landmarks on ${map.id}: ${items.length} sites, ${plan.settlements.length} settlements, ${ships.length} ships, ${lights.length} lights, ${beams.length} lighthouses, ${plumes.length} plumes; plan ${plan.ms} ms, init ${stats.init} ms` + (plan.notes.length ? ' · ' + plan.notes.join('; ') : ''));
 
@@ -559,7 +564,15 @@ export async function createLandmarks(game, ctx) {
     },
     draw3d(frame) {
       const a = performance.now();
-      const C = camInfo(), sink = frame.sink, night = TIME_K[T.time] !== undefined ? TIME_K[T.time] : 1;
+      // the Effects setting: dot share and the weakest light cast (the sink's lights go through a filter)
+      const lvl = (game.settings && game.settings.effects) || 'high', D = DETAIL[lvl] || DETAIL.high;
+      DK = D.k; minLight = D.light; stats.detail = lvl;
+      if (!lsink || lsink.base !== frame.sink) {
+        const base = frame.sink;
+        lsink = Object.create(base); lsink.base = base;
+        lsink.light = (x, y, z, r, g, b, i, rad) => { if (i >= minLight) base.light(x, y, z, r, g, b, i, rad); };
+      }
+      const C = camInfo(), sink = lsink, night = TIME_K[T.time] !== undefined ? TIME_K[T.time] : 1;
       let dots = 0;
       stats.inst = drawItems(C);
       dots += drawShips(C, sink, night);

@@ -338,7 +338,8 @@ export function createInset(S, AN) {
   /* ---------- placement ---------- */
   function over(a, b, pad) { return a[0] < b[2] + pad && b[0] < a[2] + pad && a[1] < b[3] + pad && b[1] < a[3] + pad; }
   function place(slot) {
-    const cam = R.camera, W = cam.W, H = cam.H, k = clamp(H / 1080, .72, 1.3), w = Math.round(IW * k), h = Math.round(IH * k);
+    // the HUD's scale (the overlay's ui: 1 at 1080p, never below .8); its text is drawn at that scale (raw sizes)
+    const cam = R.camera, W = cam.W, H = cam.H, k = R.overlay ? R.overlay.ui : clamp(H / 1080, .8, 1.6), w = Math.round(IW * k), h = Math.round(IH * k);
     const rects = game.hudRects || [];
     const keep = [];
     for (const it of slot.sc.idents || []) { const p = game.unitPose(it.u).pos; if (cam.project(p, q)) keep.push(q[0], q[1], it.u === slot.u ? 14 : 5); }
@@ -563,8 +564,8 @@ export function createInset(S, AN) {
     const C = st.cam;
     const mag = C.mag, mags = mag >= 100 ? Math.round(mag / 10) * 10 : mag >= 10 ? Math.round(mag) : mag.toFixed(1);
     const lab = `SCAN ${pad2(s.sc.n)} · ${track}` + (C.inView ? ` · ×${mags}` : '');
-    ov.text(x0, y0 - 9 * k, lab, { size: 11 * k, col: 'rgba(255,255,255,.62)', a: 1 });
-    ov.text(x1, y0 - 9 * k, `${(C.range / 1000).toFixed(1)} KM`, { size: 11 * k, col: '#C6F432', a: 1, align: 'right' });
+    ov.text(x0, y0 - 9 * k, lab, { size: 11 * k, col: 'rgba(255,255,255,.62)', a: 1, raw: true });
+    ov.text(x1, y0 - 9 * k, `${(C.range / 1000).toFixed(1)} KM`, { size: 11 * k, col: '#C6F432', a: 1, align: 'right', raw: true });
     ctx.save();
     ctx.beginPath(); ctx.rect(x0, y0, w, h); ctx.clip();
     // the director's marks: a gapped cross
@@ -588,17 +589,17 @@ export function createInset(S, AN) {
       const lab2 = TRACK[u.type] || u.def.name;
       const text = k1 <= 0 ? '?' : decode(lab2, k1, S.clock, s.seed);
       const kind = a < 1.25 ? 'white' : a < 1.6 && Math.sin(a * 30) > -.2 ? 'lime' : 'coral';
-      ov.tag(x0 + 8 * k, y0 + 8 * k, track, text, conf.toFixed(2), { kind, a: ta, size: 10 * k });
+      ov.tag(x0 + 8 * k, y0 + 8 * k, track, text, conf.toFixed(2), { kind, a: ta, size: 10 * k, raw: true });
     }
     // the slice's readout, top right, while it runs
     if (sw.k > 0 && sw.k < 1) {
       const zf = sw.front, st2 = stationAt(subj, zf);
-      ov.text(x1 - 8 * k, y0 + 22 * k, `X-RAY · Z ${zf >= 0 ? '+' : '−'}${Math.abs(zf).toFixed(1)} M${st2 ? ' · ' + st2 : ''}`, { size: 9.5 * k, col: '#C6F432', a: .95, align: 'right' });
+      ov.text(x1 - 8 * k, y0 + 22 * k, `X-RAY · Z ${zf >= 0 ? '+' : '−'}${Math.abs(zf).toFixed(1)} M${st2 ? ' · ' + st2 : ''}`, { size: 9.5 * k, col: '#C6F432', a: .95, align: 'right', raw: true });
     }
     // part boxes: each pops as the slice passes it, grows in, holds, goes; its placard in a row above or below
     const d = unitXf(u);
     for (let r = 0; r < ROWS.length; r++) ROWS[r].length = 0;
-    const fs = 9.5 * k, hB = Math.round(fs + 9);
+    const fs = 9.5 * k, hB = Math.round(fs + 9 * k);
     for (const en of subj.shown) {
       if (!d) break;
       const tPass = .22 + 1.35 * outCubicInv(sat((subj.z1 + subj.L * .04 - en.zc) / (subj.L * 1.08)));
@@ -646,7 +647,7 @@ export function createInset(S, AN) {
       if (row < 3) for (let yy = ly + hB + 2; yy < ty - 2; yy += 3) ctx.fillRect(sx, Math.round(yy), 1, 1);
       else for (let yy = by + 3; yy < ly - 2; yy += 3) ctx.fillRect(sx, Math.round(yy), 1, 1);
       ctx.globalAlpha = 1;
-      ov.tag(lx, ly, en.id, text, val, { kind: 'lime', a: al, size: fs });
+      ov.tag(lx, ly, en.id, text, val, { kind: 'lime', a: al, size: fs, raw: true });
     }
     ctx.restore();
     // scale bar, under the frame on the right (at the hull's range in the picture)
@@ -658,7 +659,7 @@ export function createInset(S, AN) {
       for (let i = 0; i <= len; i += 3) ctx.fillRect(Math.round(bx + i), Math.round(by2), 1, 1);
       ctx.fillRect(Math.round(bx), Math.round(by2 - 3), 1, 7); ctx.fillRect(Math.round(bx + len), Math.round(by2 - 3), 1, 7);
       ctx.globalAlpha = 1;
-      ov.text(bx - 8, by2 + 4, sb + ' M', { size: 9.5 * k, col: 'rgba(255,255,255,.55)', align: 'right' });
+      ov.text(bx - 8 * k, by2 + 4 * k, sb + ' M', { size: 9.5 * k, col: 'rgba(255,255,255,.55)', align: 'right', raw: true });
     }
     // the thread back to the hull in the world: a dotted leader to a small lime bracket on it
     const tp = game.unitPose(u).pos, cam = R.camera;
@@ -672,7 +673,7 @@ export function createInset(S, AN) {
   const ROWS = [[], [], [], [], []];
   const outCubicInv = v => 1 - Math.cbrt(1 - v);
   function tagWidth(ov, id, label, value, px) {
-    if (ov.tagSize) return ov.tagSize(id, label, value, { size: px })[0];
+    if (ov.tagSize) return ov.tagSize(id, label, value, { size: px, raw: true })[0];
     const cw = px * .62, pX = px * .61, pL = px * .7;
     return (id ? id.length * cw + pX * 2 : 0) + (label ? label.length * cw + pL * 2 : 0) + (value ? String(value).length * cw + pL * 2 : 0);
   }

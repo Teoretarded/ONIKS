@@ -168,23 +168,23 @@ export function createScope(S) {
 
   function draw2d(ov, TL) {
     if (st.k <= .02) return;
-    const k = st.k, r = radarNow(), RM = r.RM;
+    const k = st.k, r = radarNow(), RM = r.RM, K = ov.ui || 1;
     // ring ranges, on the right of the view
     const lb = cam.yaw + 38 * DEG, step = ringStep(RM);
     for (let rr = step; rr <= RM + 1; rr += step) {
       const last = rr + step > RM + 1, R0 = last ? RM : rr;
       RC[0] = r.x + Math.sin(lb) * R0; RC[1] = 2; RC[2] = r.z + Math.cos(lb) * R0;
-      if (cam.project(RC, q)) ov.text(q[0] + 6, q[1] - 5, Math.round(R0 / 1000) + (last ? ' KM' : ''), { size: 10.5, col: 'rgba(255,255,255,.42)', a: k });
+      if (cam.project(RC, q)) ov.text(q[0] + 6 * K, q[1] - 5 * K, Math.round(R0 / 1000) + (last ? ' KM' : ''), { size: 10.5, col: 'rgba(255,255,255,.42)', a: k });
       if (last) break;
     }
     for (let b = 0; b < 360; b += 30) {
       const a = b * DEG;
       RC[0] = r.x + Math.sin(a) * RM * 1.085; RC[1] = 2; RC[2] = r.z + Math.cos(a) * RM * 1.085;
-      if (cam.project(RC, q)) ov.text(q[0], q[1] + 4, String(b).padStart(3, '0'), { size: 10, col: 'rgba(255,255,255,.45)', a: k, align: 'center' });
+      if (cam.project(RC, q)) ov.text(q[0], q[1] + 4 * K, String(b).padStart(3, '0'), { size: 10, col: 'rgba(255,255,255,.45)', a: k, align: 'center' });
     }
     // the radar
     RC[0] = r.x; RC[1] = r.y + RM * .012; RC[2] = r.z;
-    if (st.radar && cam.project(RC, q)) TL.add({ x: q[0] + 14, y: q[1] - 9, id: 'RDR', label: r.name, value: r.on ? (60 / Math.max(.1, TAU / Math.abs(st.radar.antW || 1e-6))).toFixed(0) + ' RPM' : 'EMCON', kind: 'lime', a: k, size: 10, pri: 9, lead: false });
+    if (st.radar && cam.project(RC, q)) TL.add({ x: q[0] + 14 * K, y: q[1] - 9 * K, id: 'RDR', label: r.name, value: r.on ? (60 / Math.max(.1, TAU / Math.abs(st.radar.antW || 1e-6))).toFixed(0) + ' RPM' : 'EMCON', kind: 'lime', a: k, size: 10, pri: 9, lead: false });
     // tracks and contacts: every one a glyph, the ones nearest the middle of the screen a tag too
     let nT = 0, nC = 0;
     const S0 = sim.sides[game.side];
@@ -206,7 +206,7 @@ export function createScope(S) {
     for (let i = 0; i < GL.length && i < 22; i++) {
       const g = GL[i], c = g.c, u = g.u, trk = g.trk;
       const label = trk ? (TRACK[u.type] || c.cls || '?') : (c.emitting && c.conf < .3 ? 'ESM' : '');
-      TL.add({ x: g.x + 16, y: g.y - 30, ax: g.x + 3, ay: g.y - 3, id: c.track, label, value: 'P ' + c.conf.toFixed(2), kind: trk ? 'coral' : 'white', a: k, size: 10, pri: trk ? 3 : 2, valCol: trk ? undefined : 'rgba(255,255,255,.72)' });
+      TL.add({ x: g.x + 16 * K, y: g.y - 30 * K, ax: g.x + 3 * K, ay: g.y - 3 * K, id: c.track, label, value: 'P ' + c.conf.toFixed(2), kind: trk ? 'coral' : 'white', a: k, size: 10, pri: trk ? 3 : 2, valCol: trk ? undefined : 'rgba(255,255,255,.72)' });
     }
     for (const u of sim.alive(game.side)) {
       if (u.aboard) continue;
@@ -216,7 +216,7 @@ export function createScope(S) {
     // the readout under the clock
     const sweepN = r.on ? Math.floor(r.ph / TAU) : 0;
     const txt = `RADAR VIEW · ${r.name || 'NO RADAR'} · ${r.on ? 'SWEEP ' + (sweepN % 1000) : 'EMCON'} · ${nT} TRK · ${nC} UNK · V EXIT`;
-    ov.text(cam.W / 2, 64, txt, { size: 10.5, col: 'rgba(255,255,255,.7)', a: k, align: 'center' });
+    ov.text(cam.W / 2, 64 * K, txt, { size: 10.5, col: 'rgba(255,255,255,.7)', a: k, align: 'center' });
   }
 
   /* the GPU clutter field for this frame (drawn after the engine) */

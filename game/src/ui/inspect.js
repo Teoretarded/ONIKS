@@ -14,6 +14,9 @@
    its long axis (engine hook d.gate: shells go ghost behind it, interior parts and container contents appear
    behind it, the band lights this model only), tags condense in the order the slice reaches them and sit in
    clean columns beside the model with dotted leaders to their parts; brackets fit what is drawn.
+   The 2D layer is laid out at 1080p and scaled with the HUD (the overlay's ui: 1 at 1080p, never below .8).
+   What the x-ray finds in a container: on an enemy it is an identification (? 0.37 -> MK 41? -> the load, with the
+   Empty / Inert / round bars); on your own units, rounds and the museum it is simply named (you know your load).
    game.inspect = { open(id), openProj(id), museum(key), close(), can(unit), get active() } for the HUD. */
 import { attitude } from '../engine/models.js';
 import { makeSubject, toWorld } from './inspect/subject.js';
@@ -55,8 +58,12 @@ export async function createInspect(game, ctx) {
   let hideTags = false;
   const touched = new Set();           // queued instances we dimmed (alpha restored on close)
   const mine = new Set();              // our own instances
-  const hits = [];                     // tag boxes this frame: { box, ent }
+  const hits = [];                     // tag boxes this frame: { box, ent } (1080p layout px, as everything in 2D)
+  const tagBoxes = [];                 // every placard's box this frame (the slice tags keep clear of them)
   const q3 = [0, 0, 0], w3 = [0, 0, 0], s3 = [0, 0, 0];
+  /* the 2D layer is laid out in 1080p px and drawn scaled by the UI scale K: projections go through pcam */
+  let K = 1;
+  const pcam = { project(p, o) { const r = cam.project(p, o); if (r) { r[0] /= K; r[1] /= K; } return r; } };
   let paletteStop = null;
 
   function subjectOf(key) {
@@ -547,8 +554,13 @@ export async function createInspect(game, ctx) {
 
   /* ------------------------------------------------------------ 2D */
   function draw2d(ov) {
-    hits.length = 0;
-    const ctx = ov.ctx, W = ov.W, H = ov.H;
+    hits.length = 0; tagBoxes.length = 0;
+    K = ov.ui || 1;
+    const ctx = ov.ctx, W = ov.W / K, H = ov.H / K;
+    ctx.save(); ctx.scale(K, K);
+    try { layer2d(ov, ctx, W, H); } finally { ctx.restore(); }
+  }
+  function layer2d(ov, ctx, W, H) {
     if (note) drawNote(ov, ctx);
     if (!S) return;
     const V = S, subj = V.subj, A = V.uiA;
@@ -559,11 +571,11 @@ export async function createInspect(game, ctx) {
     let mb = null;
     for (const ent of subj.entries) {
       let b = null;
-      for (const p of ent.parts) b = subj.partBox(p, V.R0, V.T0, cam, b);
+      for (const p of ent.parts) b = subj.partBox(p, V.R0, V.T0, pcam, b);
       ent.box = b;
       if (b) mb = mb ? [Math.min(mb[0], b[0]), Math.min(mb[1], b[1]), Math.max(mb[2], b[2]), Math.max(mb[3], b[3])] : b.slice();
     }
-    if (!mb) for (const p of subj.parts) mb = subj.partBox(p, V.R0, V.T0, cam, mb);
+    if (!mb) for (const p of subj.parts) mb = subj.partBox(p, V.R0, V.T0, pcam, mb);
     V.mbox = mb;
     const readBottom = drawReadout(ctx, W, H, A);
     drawTags(ctx, W, H, A, readBottom);
@@ -586,15 +598,17 @@ export async function createInspect(game, ctx) {
       let ts = V.tags.get(ent);
       if (!ts) { if ((xk > 0 && front > ent.az) || t > scanEnd || ent.k > .6) V.tags.set(ent, ts = { t0: t }); else continue; }
       const age = t - ts.t0;
-      if (!cam.project(ent.world, s3) || offScreen(s3, W, H)) continue;
+      if (!pcam.project(ent.world, s3) || offScreen(s3, W, H)) continue;
       let dm = 0; if (dmg) for (const p of ent.parts) dm = Math.max(dm, dmg[p.name] || 0);
       const lab = O.condense(ent.label.toUpperCase(), sat(age / .9), t, ent.id.length + ent.label.length);
       const val = dm > 0 ? (dm >= .99 ? 'Destroyed' : `Dmg ${Math.round(dm * 100)} %`) : ent.size;
       const w = O.tagWidth(ctx, ent.id, ent.label, val);
       rows.push({ o: ts, ent, p: [s3[0], s3[1]], w, h: 20, pref: ent.side, a: ss(0, .35, age) * A, lab, val, kind: dm > 0 ? 'coral' : 'lime', dm, id: ent.id, age });
     }
-    // what the x-ray found in the containers: identification ticking up to its confidence (bars on the first)
+    // what the x-ray found in the containers: on an enemy, identification ticking up to its confidence (bars on the
+    // first); on what is yours (and the museum's exhibits) the load is simply named
     let barsOn = false;
+    const known = V.kind !== 'unit' || !V.u || V.u.side === game.side;
     for (const c of contentGroups(V)) {
       q3[0] = c.anc[0]; q3[1] = c.anc[1]; q3[2] = c.anc[2];
       const pp = c.parent ? subj.byName.get(c.parent) : null;
@@ -602,14 +616,20 @@ export async function createInspect(game, ctx) {
       if (!c.t0 && xk > 0 && front > c.anc[subj.axis.i]) c.t0 = t;
       if (!c.t0 || xk <= 0) continue;
       toWorld(V.R0, V.T0, q3, c.world);
-      if (!cam.project(c.world, s3) || offScreen(s3, W, H)) continue;
-      const age = t - c.t0, bl = belief(c, age), conf = c.present ? bl[2] : bl[0];
-      const cid = c.cid || c.where.toUpperCase();
+      if (!pcam.project(c.world, s3) || offScreen(s3, W, H)) continue;
+      const age = t - c.t0, cid = c.cid || c.where.toUpperCase(), loadLab = c.label.replace(/×\d+/, '×' + c.xs.length);
+      if (known) {
+        // your own load: named as the slice reaches it (no guessing, no bars)
+        const lab = c.present ? O.condense(loadLab.toUpperCase(), sat(age / .9), t, c.gi + 3) : 'Empty';
+        rows.push({ o: c, p: [s3[0], s3[1]], w: O.tagWidth(ctx, cid, c.present ? loadLab : 'Empty', ''), h: 20, pref: null, a: ss(0, .35, age) * A, lab, val: '', kind: c.present ? 'lime' : 'white', id: cid, content: c, age });
+        continue;
+      }
+      const bl = belief(c, age), conf = c.present ? bl[2] : bl[0];
       let lab, kind;
-      if (!c.present) { lab = conf < .9 ? `Obj in ${c.where}` : `${c.where} · empty`; kind = conf < .9 ? 'white' : 'lime'; }
-      else if (conf < .45) { lab = `Obj in ${c.where}`; kind = 'white'; }
-      else if (conf < .9) { lab = `Obj in ${c.where} · ${c.name}?`; kind = 'white'; }
-      else { lab = c.label.replace(/×\d+/, '×' + c.xs.length); kind = 'lime'; }
+      if (!c.present) { lab = conf < .9 ? '?' : 'Empty'; kind = conf < .9 ? 'white' : 'lime'; }
+      else if (conf < .45) { lab = '?'; kind = 'white'; }
+      else if (conf < .9) { lab = `${c.name}?`; kind = 'white'; }
+      else { lab = loadLab; kind = 'lime'; }
       const showBars = age < 3.2 && !barsOn; if (showBars) barsOn = true;
       const w = O.tagWidth(ctx, cid, lab, conf.toFixed(2));
       rows.push({ o: c, p: [s3[0], s3[1]], w: Math.max(w, 190), h: showBars ? 20 + 6 + 56 : 20, pref: null, a: ss(0, .35, age) * A, lab, val: conf.toFixed(2), kind, id: cid, bars: showBars ? bl : null, content: c, age, barsA: 1 - ss(2.6, 3.2, age) });
@@ -667,10 +687,11 @@ export async function createInspect(game, ctx) {
       O.adot(ctx, r.p[0], r.p[1], col, a);
       const box = O.tag(ctx, L ? x - 6 : x + 6, r.y, r.id, r.lab, r.val, { kind: r.kind, a, align: L ? 'right' : 'left', hi: !!r.ent && (r.ent === focus || r.ent === hov), valCol: r.kind === 'white' ? 'rgba(255,255,255,.8)' : undefined });
       if (box && r.ent) hits.push({ box, ent: r.ent });
+      if (box) tagBoxes.push(box);
       if (r.bars && box) {
         const rowsB = [['Empty', r.bars[0]], ['Inert', r.bars[1]], [r.content.name, r.bars[2]]];
         const bw = 190, bx = L ? box[2] - bw : box[0];
-        O.bars(ctx, bx, box[3] + 6, rowsB, a * r.barsA);
+        tagBoxes.push(O.bars(ctx, bx, box[3] + 6, rowsB, a * r.barsA));
       }
     }
   }
@@ -697,20 +718,33 @@ export async function createInspect(game, ctx) {
     const inside = z > ax.z0 && z < ax.z1;
     const a = A * ss(ax.z0, ax.z0 + ax.L * .06, z) * (1 - ss(ax.z1 - ax.L * .06, ax.z1, z));
     if (!inside || a < .02) return;
-    const top = subj.topAt(z);
+    const top = subj.topAt(z), zs = `${ax.name} ${z >= 0 ? '+' : '−'}${Math.abs(z).toFixed(ax.L > 60 ? 1 : 2)} m`;
     q3[0] = 0; q3[1] = 0; q3[2] = 0; q3[ax.i] = z; q3[ax.u] = top + ax.L * .006; toWorld(V.R0, V.T0, q3, w3);
-    const p = cam.project(w3, [0, 0, 0]);
+    const p = pcam.project(w3, [0, 0, 0]);
     if (p) {
+      // above the roof line and clear of the placards: it climbs over any it would sit on (gone when there is no room)
+      const lab = `${subj.shortTitle} · ${subj.scanWord}`, w = O.tagWidth(ctx, 'X-ray', lab, zs);
+      const x = Math.min(W - 24 - w, Math.max(24, p[0] - 6));
       const L = Math.max(34, Math.min(90, (V.mbox ? (V.mbox[3] - V.mbox[1]) * .22 : 60)));
-      const qy = Math.max(62, p[1] - L);
-      O.leader(ctx, p[0], p[1], p[0], qy, LIME, .8 * a);
-      const zs = `${ax.name} ${z >= 0 ? '+' : '−'}${Math.abs(z).toFixed(ax.L > 60 ? 1 : 2)} m`;
-      O.tag(ctx, Math.min(W - 24 - 300, Math.max(24, p[0] - 6)), qy - 22, 'X-ray', `${subj.shortTitle} · ${subj.scanWord}`, zs, { kind: 'lime', a });
+      let qy = Math.max(62, p[1] - L);
+      for (let it = 0; it < 8; it++) {
+        let hit = null;
+        for (const b of tagBoxes) if (b && x < b[2] + 6 && x + w > b[0] - 6 && qy - 22 < b[3] + 4 && qy > b[1] - 4) { hit = b; break; }
+        if (!hit) break;
+        qy = hit[1] - 8;
+      }
+      if (qy >= 48) {
+        O.leader(ctx, p[0], p[1], p[0], qy, LIME, .8 * a);
+        O.tag(ctx, x, qy - 22, 'X-ray', lab, zs, { kind: 'lime', a });
+      }
     }
     const en = subj.stationAt(z);
     if (en) {
-      const zs = `${ax.name} ${z >= 0 ? '+' : '−'}${Math.abs(z).toFixed(ax.L > 60 ? 1 : 2)} m`;
-      O.tag(ctx, W / 2, H - 138, zs, en.label, en.size || '', { kind: 'lime', a: a * .95, align: 'center' });
+      // the station it is cutting, centred low (below the columns when one reaches down there)
+      const w = O.tagWidth(ctx, zs, en.label, en.size || ''), x0 = W / 2 - w / 2;
+      let y = H - 138;
+      for (const b of tagBoxes) if (b && x0 < b[2] + 6 && x0 + w > b[0] - 6 && y < b[3] + 4 && y + 20 > b[1] - 4) { y = H - 96; break; }
+      O.tag(ctx, W / 2, y, zs, en.label, en.size || '', { kind: 'lime', a: a * .95, align: 'center' });
     }
   }
 
@@ -791,7 +825,7 @@ export async function createInspect(game, ctx) {
     const c = sim.contact(game.side, u.id), v = game.vis(u);
     if (!c && v !== 'track') return;
     const pos = c && v !== 'track' ? c.pos : game.unitPose(u).pos;
-    if (!cam.project(pos, s3)) return;
+    if (!pcam.project(pos, s3)) return;
     O.adot(ctx, s3[0], s3[1], CORAL, a);
     O.leader(ctx, s3[0], s3[1], s3[0] + 22, s3[1] + 30, CORAL, .8 * a);
     O.tag(ctx, s3[0] + 26, s3[1] + 30, c ? c.track : 'TRK', note.text, 'Scan · X', { kind: 'coral', a });
@@ -862,20 +896,20 @@ export async function createInspect(game, ctx) {
         const dx = ev.x - V.drag.x, dy = ev.y - V.drag.y; V.drag.x = ev.x; V.drag.y = ev.y;
         cam.goal.yaw += dx * .0055 * (cam.invert ? -1 : 1); cam.goal.pitch = clamp(cam.goal.pitch + dy * .0045, cam.minPitch, cam.maxPitch);
         if (V.fly) V.fly = null;
-      } else V.hover = hoverAt(ev.x, ev.y);
+      } else V.hover = hoverAt(ev.x / K, ev.y / K);
       return true;
     }
     if (ev.type === 'up') { V.drag = null; return true; }
     if (ev.type === 'click') {
       if (ev.button !== 0) return true;
-      const ent = hoverAt(ev.x, ev.y);
+      const ent = hoverAt(ev.x / K, ev.y / K);
       setFocus(ent && ent !== V.focus ? ent : null);
       return true;
     }
     if (ev.type === 'dblclick') return true;
     return true;
   }
-  /* the tag under the cursor, else the smallest part box under it */
+  /* the tag under the cursor, else the smallest part box under it (x, y in the 2D layer's 1080p px) */
   function hoverAt(x, y) {
     for (const h of hits) { const b = h.box; if (x >= b[0] - 2 && x <= b[2] + 2 && y >= b[1] - 2 && y <= b[3] + 2) return h.ent; }
     let best = null, ba = 1e18;

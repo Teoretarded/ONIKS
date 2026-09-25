@@ -145,15 +145,15 @@ export function createOrders(game) {
         return true;
       }
       case 'deploy': {
-        const dep = us.filter(u => u.type === 'tel' || u.type === 'radar');
+        const dep = us.filter(u => u.type === 'tel' || u.type === 'bal' || u.type === 'radar');
         if (!dep.length) return true;
         for (const u of dep) {
-          const up = u.type === 'tel' ? (u.dep > 0 || u.depT > 0 || u.elevT > 0) : (u.mast > 0 || u.mastT > 0);
+          const up = u.type !== 'radar' ? (u.dep > 0 || u.depT > 0 || u.elevT > 0) : (u.mast > 0 || u.mastT > 0);
           game.order([u.id], { kind: up ? 'undeploy' : 'deploy' });
         }
         return true;
       }
-      case 'reload': { const r = us.filter(u => u.type === 'tel' || u.type === 'transloader' || u.def.domain === 'sea' || u.type === 'pantsir'); game.order(r.map(u => u.id), { kind: 'reload' }); return true; }
+      case 'reload': { const r = us.filter(u => u.type === 'tel' || u.type === 'bal' || u.type === 'transloader' || u.def.domain === 'sea' || u.type === 'pantsir'); game.order(r.map(u => u.id), { kind: 'reload' }); return true; }
       case 'radar': {
         const rs = us.filter(u => u.def.sensors && u.def.sensors.radar);
         if (!rs.length) return true;
@@ -410,12 +410,13 @@ export function createOrders(game) {
         const wait = mode.units.filter(u => !ready(u));
         if (wait.length) { sub = `${wait.length} REARMING · OFF THE DECK WHEN READY`; subCol = 'rgba(255,255,255,.7)'; }
       }
+      const k = ov.ui || 1, r0 = 8 * k, r1 = 18 * k;
       ov.mark(x, y, 11, col, 1);
-      ov.dline(x - 18, y, x - 8, y, 3, 1, col, 1); ov.dline(x + 8, y, x + 18, y, 3, 1, col, 1);
-      ov.dline(x, y - 18, x, y - 8, 3, 1, col, 1); ov.dline(x, y + 8, x, y + 18, 3, 1, col, 1);
+      ov.dline(x - r1, y, x - r0, y, 3, 1, col, 1); ov.dline(x + r0, y, x + r1, y, 3, 1, col, 1);
+      ov.dline(x, y - r1, x, y - r0, 3, 1, col, 1); ov.dline(x, y + r0, x, y + r1, 3, 1, col, 1);
       const fl = mode.flash !== undefined && game.realT - mode.flash < .6 ? (Math.floor((game.realT - mode.flash) * 10) % 2 ? .25 : 1) : 1;
-      const b = ov.tag(x + 16, y + 14, key, txt, '', { kind: col === CO ? 'coral' : 'lime', size: 10, fit: [], a: fl });
-      if (sub && b) ov.text(b[0], b[3] + 15, sub, { size: 10, col: subCol });
+      const b = ov.tag(x + 16 * k, y + 14 * k, key, txt, '', { kind: col === CO ? 'coral' : 'lime', size: 10, fit: [], a: fl });
+      if (sub && b) ov.text(b[0], b[3] + 15 * k, sub, { size: 10, col: subCol });
     },
   };
 
@@ -509,7 +510,8 @@ export function createOrders(game) {
     draw2d(ov) {
       for (const m of marks) if (m.kind === 'say') {
         const a = sat(1 - (game.realT - m.t0) / m.dur);
-        ov.text(Math.min(m.sx + 14, ov.W - 12 - m.text.length * 7.4), Math.max(18, m.sy - 10), m.text, { size: 10.5, col: '#FF6A3D', a });
+        const k = ov.ui || 1;
+        ov.text(Math.min(m.sx + 14 * k, ov.W - 12 * k - m.text.length * 7.4 * k), Math.max(18 * k, m.sy - 10 * k), m.text, { size: 10.5, col: '#FF6A3D', a });
       }
     },
   };

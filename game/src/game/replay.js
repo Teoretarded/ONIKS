@@ -12,9 +12,9 @@
    6-10 s of real time. One at a time, with a cooldown (a kill waits less; the final blow never). Only what the player
    can see. Esc / Space skip; any camera input hands the camera back at once; C, I and other keys end it and go on.
    A hit seen too late to be caught on the way in (high rates) is picked up just after, the beats played on arrival.
-   J replays the last decisive hit (the round comes in again on the hull, the flash, the same beats). Shift + J turns
-   the automatic replay off / on (on by default in combat and campaign, off in the sandbox; settings.hitReplay wins).
-   In the sandbox, while the palette is open, J stays its side switch (hide the palette with P to replay).
+   J replays the last decisive hit (the round comes in again on the hull, the flash, the same beats). The automatic
+   replay is the Hit replay setting (data/settings.js hitReplay, on by default; the Settings screen, the pause menu's
+   settings, or Shift + J here, which saves it).
 
    game.replay = { active, auto, last, play(), skip(), setAuto(on) }; bus 'replay' { on, id }.
    Built from the Inspect pieces (ui/inspect/subject.js: the cutaway, its parts, anchors and boxes;
@@ -25,6 +25,7 @@ import { makeSubject, toWorld, apX } from '../ui/inspect/subject.js';
 import * as O from '../ui/inspect/overlay.js';
 import { TRACK } from './labels.js';
 import { DEG, clamp, sat, ss, ease, wrapPi, newPose, lookFrom, blendPose, bumpOf, glideDur, putCam, camState, acrossView, blockedBy } from './director.js';
+import { setSetting, onSettings } from '../data/settings.js';
 
 const RATE = .25;                          // the replay's time rate
 const RAMP_IN = .35, RAMP_OUT = .55;       // real s
@@ -55,19 +56,22 @@ export async function createReplay(game, ctx) {
   const want = newPose(), cur = newPose();
   const follow = () => cur.T;
   const boxes = [];                // the placards drawn this frame (the slice's tag keeps clear of them)
+  /* the 2D layer is laid out in 1080p px and drawn scaled by the HUD's scale K (the overlay's ui): projections go
+     through pcam */
+  let K = 1;
+  const pcam = { project(p, o) { const r = cam.project(p, o); if (r) { r[0] /= K; r[1] /= K; } return r; } };
 
   function readAuto() {
     const s = game.settings || {};
-    if (s.hitReplay !== undefined) return !!s.hitReplay;
-    try { const v = localStorage.getItem(autoKey()); if (v === '0' || v === '1') return v === '1'; } catch (e) { /* */ }
-    return game.mode !== 'sandbox';
+    return s.hitReplay === undefined ? true : !!s.hitReplay;
   }
-  function autoKey() { return 'oniks.hitReplay.' + (game.mode === 'sandbox' ? 'sandbox' : 'play'); }
+  /* the setting, saved (the Settings screen and the in-game panel show it); changes from there come back here */
   function setAuto(on) {
     auto = !!on;
-    try { localStorage.setItem(autoKey(), auto ? '1' : '0'); } catch (e) { /* */ }
+    setSetting('hitReplay', auto);
     bus.emit('toast', { text: auto ? 'HIT REPLAY ON' : 'HIT REPLAY OFF' });
   }
+  const offSettings = onSettings(s => { auto = s.hitReplay === undefined ? true : !!s.hitReplay; });
   function subjectOf(key) {
     if (!subjects.has(key)) {
       let s = null;
@@ -339,7 +343,9 @@ export async function createReplay(game, ctx) {
       const val = changed[sp];
       const label = best ? best.label : ((def => def && def.parts[sp] && def.parts[sp].label)(V.def) || sp);
       let tg = V.tags.find(g => best ? g.ent === best : g.sp === sp);
-      if (!tg) { tg = { ent: best, sp, label, id: best ? best.id : '··', t0: V.t, v: 0, local: il.slice(), o: {} }; V.tags.push(tg); }
+      // a part without a placard of its own gets the next number after the placards (as the films number them)
+      const extra = () => String(subj.entries.length + 1 + V.tags.filter(g => !g.ent).length).padStart(2, '0');
+      if (!tg) { tg = { ent: best, sp, label, id: best ? best.id : extra(), t0: V.t, v: 0, local: il.slice(), o: {} }; V.tags.push(tg); }
       tg.v = Math.max(tg.v, val); tg.t1 = V.t;
     }
   }
@@ -678,11 +684,16 @@ export async function createReplay(game, ctx) {
   function draw2d(ov) {
     const V = S; if (!V) return;
     const A = V.uiA; if (A <= .01) return;
-    const ctx = ov.ctx, W = ov.W, H = ov.H, subj = V.subj;
+    K = ov.ui || 1;
+    ov.ctx.save(); ov.ctx.scale(K, K);
+    try { layer2d(ov, V, A); } finally { ov.ctx.restore(); }
+  }
+  function layer2d(ov, V, A) {
+    const ctx = ov.ctx, W = ov.W / K, H = ov.H / K, subj = V.subj;
     const endUp = !!endShift();
     // the hull on screen: the tagged assemblies' boxes
     let mb = null;
-    for (const ent of subj.entries) { let b = null; for (const p of ent.parts) b = subj.partBox(p, V.R0, V.T0, cam, b); ent.box = b; if (b) mb = mb ? [Math.min(mb[0], b[0]), Math.min(mb[1], b[1]), Math.max(mb[2], b[2]), Math.max(mb[3], b[3])] : b.slice(); }
+    for (const ent of subj.entries) { let b = null; for (const p of ent.parts) b = subj.partBox(p, V.R0, V.T0, pcam, b); ent.box = b; if (b) mb = mb ? [Math.min(mb[0], b[0]), Math.min(mb[1], b[1]), Math.max(mb[2], b[2]), Math.max(mb[3], b[3])] : b.slice(); }
     const readBottom = endUp ? 0 : readout(ctx, V, A);
     boxes.length = 0;
     tags(ctx, V, W, H, A, mb, readBottom, endUp);
@@ -720,8 +731,8 @@ export async function createReplay(game, ctx) {
     const coralEnts = new Set();
     for (const g of V.tags) {
       const age = t - g.t0;
-      if (g.ent) { if (!cam.project(g.ent.world, s3)) continue; coralEnts.add(g.ent); }
-      else { toWorld(V.R0, V.T0, g.local, w3); if (!cam.project(w3, s3)) continue; }
+      if (g.ent) { if (!pcam.project(g.ent.world, s3)) continue; coralEnts.add(g.ent); }
+      else { toWorld(V.R0, V.T0, g.local, w3); if (!pcam.project(w3, s3)) continue; }
       if (s3[0] < -20 || s3[1] < -20 || s3[0] > W + 20 || s3[1] > H + 20) continue;
       const val = g.v >= .99 ? 'Out' : `Dmg ${Math.round(g.v * 100)} %`;
       const lab = O.condense(g.label.toUpperCase(), sat(age / .9), t, g.id.length + g.label.length);
@@ -733,7 +744,7 @@ export async function createReplay(game, ctx) {
     pass.sort((a, b) => b[1] - a[1]);
     for (let i = 0; i < Math.min(5, pass.length); i++) {
       const [ent, t0] = pass[i], age = t - t0;
-      if (!cam.project(ent.world, s3) || s3[0] < -20 || s3[1] < -20 || s3[0] > W + 20 || s3[1] > H + 20) continue;
+      if (!pcam.project(ent.world, s3) || s3[0] < -20 || s3[1] < -20 || s3[0] > W + 20 || s3[1] > H + 20) continue;
       let o = V.rows.get(ent); if (!o) V.rows.set(ent, o = {});
       const lab = O.condense(ent.label.toUpperCase(), sat(age / .7), t, ent.id.length + ent.label.length);
       rows.push({ o, ent, p: [s3[0], s3[1]], id: ent.id, lab, val: ent.size, kind: 'lime', a: ss(0, .2, age) * (1 - ss(1.2, 1.7, age)) * A * .9, w: O.tagWidth(ctx, ent.id, ent.label, ent.size) });
@@ -780,7 +791,7 @@ export async function createReplay(game, ctx) {
     if (a < .02) return;
     q3[0] = 0; q3[1] = 0; q3[2] = 0; q3[ax.i] = z; q3[ax.u] = subj.topAt(z) + ax.L * .006;
     toWorld(V.R0, V.T0, q3, w3);
-    if (!cam.project(w3, s3)) return;
+    if (!pcam.project(w3, s3)) return;
     const zs = `${ax.name} ${z >= 0 ? '+' : '−'}${Math.abs(z).toFixed(ax.L > 60 ? 1 : 2)} m`, lab = `${subj.shortTitle} · ${subj.scanWord}`;
     const w = O.tagWidth(ctx, 'X-ray', lab, zs), x = Math.min(W - 24 - w, Math.max(24, s3[0] - 6));
     // above the roof line, and clear of the placards (it climbs over any it would sit on)
@@ -802,8 +813,6 @@ export async function createReplay(game, ctx) {
     const V = S && S.phase !== 'out' ? S : null;
     if (!V) {
       if (!down || e.repeat || e.code !== 'KeyJ' || e.ctrlKey || e.metaKey || e.altKey) return false;
-      // the sandbox palette, while it is open, keeps J for its side switch (its key chip says so)
-      if (game.mode === 'sandbox' && document.querySelector('.oniks-sbx [data-k="side"]')) return false;
       if (e.shiftKey) { setAuto(!auto); return true; }
       if (!last) { bus.emit('toast', { text: 'NO HIT TO REPLAY', bad: true }); return true; }
       if (busy()) return false;
@@ -903,7 +912,7 @@ export async function createReplay(game, ctx) {
       setTimeout(() => { for (const u of sim.list()) if (major(u) && u.def.domain === 'sea') subjectOf(u.def.model); }, 2500);
     },
     update, draw3d, draw2d, onKey, onPointer, onEvent,
-    dispose() { if (S) { finish(true); done(); } },
+    dispose() { offSettings(); if (S) { finish(true); done(); } },
   };
   return sys;
 }

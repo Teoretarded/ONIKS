@@ -146,12 +146,12 @@ export function createLines(game) {
       }
     },
     draw2d(ov) {
-      const cam = game.camera, sim = game.sim;
+      const cam = game.camera, sim = game.sim, K = ov.ui || 1;
       for (const A of areas.values()) {
         if (!A.label) continue;
         const p = [A.c[0] + Math.sin(-.6) * A.r, 10, A.c[1] + Math.cos(-.6) * A.r];
         if (!cam.project(p, q)) continue;
-        ov.tag(q[0] + 6, q[1] - 22, '', A.label, '', { kind: A.kind === 'coral' ? 'coral' : 'ghost', a: .85, size: 10.5 });
+        ov.tag(q[0] + 6 * K, q[1] - 22 * K, '', A.label, '', { kind: A.kind === 'coral' ? 'coral' : 'ghost', a: .85, size: 10.5 });
       }
       if (!marks.size) return;
       for (const mk of marks.values()) {
@@ -174,10 +174,10 @@ export function createLines(game) {
         if (x < -50 || y < -50 || x > ov.W + 50 || y > ov.H + 50) continue;
         const a = sat((game.realT - mk.t0) / .35) * (mk.until < 1e17 ? sat((mk.until - game.realT) / .5) : 1);
         const col = mk.kind === 'coral' ? '#FF6A3D' : mk.kind === 'white' ? '#FFFFFF' : '#C6F432';
-        const dx = mk.dx !== undefined ? mk.dx : 34, dy = mk.dy !== undefined ? mk.dy : -46;
+        const dx = (mk.dx !== undefined ? mk.dx : 34) * K, dy = (mk.dy !== undefined ? mk.dy : -46) * K;
         ov.mark(x, y, 6, col, a, false);
-        ov.leader(x + Math.sign(dx) * 5, y + Math.sign(dy) * 5, x + dx, y + dy, col, .8 * a);
-        ov.tag(x + dx + (dx < 0 ? -2 : 2), y + dy - 10, mk.chip, mk.label, '', { kind: mk.kind, a, size: 11, align: dx < 0 ? 'right' : 'left' });
+        ov.leader(x + Math.sign(dx) * 5 * K, y + Math.sign(dy) * 5 * K, x + dx, y + dy, col, .8 * a);
+        ov.tag(x + dx + (dx < 0 ? -2 : 2) * K, y + dy - 10 * K, mk.chip, mk.label, '', { kind: mk.kind, a, size: 11, align: dx < 0 ? 'right' : 'left' });
       }
     },
     dispose() { root.remove(); },

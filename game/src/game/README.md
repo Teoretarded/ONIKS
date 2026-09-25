@@ -1,17 +1,31 @@
 # game: the running match
 
 `game/src/game/game.js` owns the match. `main.js` builds the map, renderer, sim and `game`, then registers the
-systems. Other agents plug in by exporting a factory from their module; `main.js` imports it if the file exists
-(a missing file is skipped, a broken one is logged) and calls `game.addSystem(await createX(game, ctx))`:
+systems: the game's own first (`OWN`, in this order), then the optional ones. Other agents plug in by exporting a
+factory from their module; `main.js` imports it if the file exists (a missing file is skipped, a broken one is logged)
+and calls `game.addSystem(await createX(game, ctx))`:
 
-| Module | Export | Name |
+| Module | Export | Name (priority): what it is |
 |---|---|---|
-| `src/fx/index.js` | `createFx(game, ctx)` | `fx` |
-| `src/ui/sensors.js` or `src/ui/sensors/index.js` | `createSensors(game, ctx)` | `sensors` |
-| `src/ui/inspect.js` or `src/ui/inspect/index.js` | `createInspect(game, ctx)` | `inspect` |
-| `src/audio/index.js` | `createAudio(game, ctx)` | `audio` |
-| `src/ui/hud/index.js` or `src/ui/hud.js` | `createHud(game, ctx)` | `hud` |
-| `src/ui/help/index.js` | `createHelp(game)` | `help` (F1 controls, the pause menu's in-game settings, settings applied live) |
+| `render.js` | `createRender(game, DM)` | `render` (10): units, projectiles, wakes, sites (registered first, directly) |
+| `select.js` | `createSelect` | `selection` (40): click / box / groups / follow, brackets and tags |
+| `orders.js` | `createOrders` | `orders` (50) + `targeting` (80): right-click and hotkey orders, the scan / launch aim modes |
+| `time.js` | `createTime` | `time` (30): Space, + / -, F10; rate readout and toasts without a HUD |
+| `director.js` | `createDirector` | `director` (20): the cinematic camera (C); also loads `replay.js` and returns both |
+| `replay.js` | `createReplay` (via director) | `replay` (110): a decisive hit in slow motion with the X-ray sweep; J the last one again, Shift J (or the Hit replay setting) auto on / off |
+| `objectives.js` | `createObjectives` | `objectives` (3; + the campaign script, `campaign/`): objectives, waves |
+| `match.js` | `createMatchFlow` | `menu` (120) + `escape` (2): result, grade, end overlay, pause menu |
+| `sandbox.js` | `createSandbox` | `sandbox` (60): spawn palette and tools (sandbox only) |
+| `sonar.js` | `createSonar` | `sonar` (14): sonar rings, heard contacts, torpedo tracks; O dive (boats) |
+| `src/fx/index.js` | `createFx(game, ctx)` | `fx` (5): launches, plumes, trails, hits, fires, wakes, weather; detail = the Effects setting |
+| `src/ui/sensors.js` or `src/ui/sensors/index.js` | `createSensors(game, ctx)` | `sensors` (15): radar picture, contacts, the SCAN, radar view (V), storms |
+| `src/ui/inspect.js` or `src/ui/inspect/index.js` | `createInspect(game, ctx)` | `inspect` (100): Inspect / Anatomy (I), X-ray, exploded view |
+| `src/audio/index.js` | `createAudio(game, ctx)` | `audio` (1) |
+| `src/ui/hud/index.js` or `src/ui/hud.js` | `createHud(game, ctx)` | `hud` (70) |
+| `landmarks.js` | `createLandmarks(game, ctx)` | `landmarks` (12): each map's set pieces, civilian ships, nav lights, plumes, flares; detail = the Effects setting |
+| `orbital.js` | `createOrbital(game)` | `orbital` (16) + `orbital-pre` (14): past ~40 km the picture fades into the Orbital hairlines; the Orbital render style |
+| `src/ui/help/index.js` | `createHelp(game)` | `help` (130): F1 controls (from `KEYBINDS`), the pause menu's in-game settings, settings applied live |
+| `filmmaker.js` | `createFilmmaker(game)` | `filmmaker` (125): F9 compose a camera take over the live match and play it clean; F8 stills |
 
 A factory may return one system, an array of systems, a Promise of either, or null. `ctx = { DM /* data/models.js */,
 params, mission, match }`. `?nosys=fx,audio` skips optional systems (debugging).
@@ -78,10 +92,11 @@ frame = { game, R, cam, fx /* R.fx */, sink, t, alpha, dt, dtSim, realT, seaT }
 ```
 
 Priorities (`PRI` in game.js; input goes high to low, drawing low to high):
-help 130 · menu 120 · inspect 100 · targeting 80 · hud 70 · sandbox 60 · orders 50 · selection 40 · time 30 · director 20 ·
-sensors 15 · render 10 · fx 5 · audio 1. The camera takes its own keys (WASD / arrows pan, Q E rotate, PageUp /
-PageDown pitch, wheel zoom, right-drag rotate, middle-drag pan) below everything; a system that needs the keys
-for itself sets `game.camera.keys = false` while it is active.
+help 130 · filmmaker 125 · menu 120 · replay 110 · inspect 100 · targeting 80 · hud 70 · sandbox 60 · orders 50 · selection 40 ·
+time 30 · director 20 · orbital 16 · sensors 15 · sonar / orbital-pre 14 · landmarks 12 · render 10 · fx 5 · objectives 3 ·
+escape 2 · audio 1. The camera takes its own keys (WASD / arrows pan, Q E rotate, PageUp / PageDown pitch, wheel zoom,
+right-drag rotate, middle-drag pan) below everything; a system that needs the keys for itself sets
+`game.camera.keys = false` while it is active.
 
 ## FX sink
 
@@ -139,8 +154,13 @@ defence is always automatic), T deploy / undeploy, R reload, X scan (then click;
 point beyond every reach is refused, nothing drives), Y radar on / off, L launch (coast: the Orlan-10; fleet: the
 strike package off the deck, then click a track to strike or a point to patrol), U launch an MH-60R (fleet),
 B reinforcements, Esc cancel / pause menu.
-Time: Space pause, + / - rate. View: C cinematic camera, F10 hide the UI, I inspect (Inspect system), V radar view
-(Sensors system), F1 every control (help; the list is `KEYBINDS` in data/settings.js: keep it true when a key changes).
+Time: Space pause, + / - rate. View: C cinematic camera, J replay the last decisive hit (Shift J: automatic replays on /
+off), F10 hide the UI, I inspect (Inspect system), V radar view (Sensors system), F1 every control (help; the list is
+`KEYBINDS` in data/settings.js: keep it true when a key changes). Sandbox: P palette, G fog, K enemy AI, M switch side,
+N weather, Del delete.
+
+2D overlay: world tags and labels scale with the HUD (`ov.ui`: 1 at 1080p, never below .8); sizes given to
+`ov.tag` / `ov.text` are px at 1080p, a caller's own offsets are multiplied by `ov.ui` (engine/overlay.js).
 
 Loading (`src/ui/loading`): play.html shows the loading screen from its first paint; main.js reports the real steps
 (map, terrain, forces, systems, models), pre-samples every level of the models in play (`warmLists`), renders two
@@ -150,5 +170,6 @@ frames under it, then fades it over the opening shot; the Inspect cutaways are s
 
 `game.js` (the object, systems, time, input, sink) · `setup.js` (URL params, starting forces, campaign forces and
 waves, sandbox AI wake / sleep) · `render.js` (units, projectiles, wakes, sites) · `select.js` · `orders.js` ·
-`time.js` · `director.js` (cinematic camera) · `objectives.js` (campaign objectives, combat / sandbox summary) ·
-`match.js` (end overlay, pause menu, result) · `sandbox.js` (spawn palette and tools).
+`time.js` · `director.js` (cinematic camera) · `replay.js` (hit replay) · `objectives.js` (campaign objectives, combat /
+sandbox summary) · `match.js` (end overlay, pause menu, result, combat grade) · `sandbox.js` (spawn palette and tools) ·
+`sonar.js` · `landmarks.js` · `orbital.js` · `filmmaker.js` + `filmmaker/` · `labels.js` (designations) · `campaign/`.

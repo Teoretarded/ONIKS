@@ -1,7 +1,8 @@
-/* Match flow: the result (the sim's HQ / objectives / time rule, or the campaign objectives), the grade and the
-   short stats, localStorage `oniks.lastResult` = { mode, mission, win, grade, stats }, the end overlay in the
-   films' style over the live battle (it keeps playing behind, the cinematic camera takes it), the pause menu
-   (Esc: resume / auto x1 / settings / restart / quit to the menu).
+/* Match flow: the result (the sim's HQ / objectives / time rule, or the campaign objectives), the grade (combat:
+   gradeCombat below; campaign: campaign/grade.js rewrites it) and the short stats, localStorage `oniks.lastResult` =
+   { mode, mission, win, grade, stats }, the end overlay in the films' style over the live battle (it keeps playing
+   behind, the cinematic camera takes it), the pause menu (Esc: resume / auto x1 / settings / restart / quit to the
+   menu).
    While the end block or the pause menu is up the stage is theirs: body.oniks-veiled hides the HUD, the sandbox
    palette, the reinforcement list and the mission lines, and the world tags under the block are wiped from the
    overlay (the block's own dark gradient, so nothing reads through it). */
@@ -9,6 +10,27 @@ import { PRI } from './game.js';
 import { GRADES } from '../data/campaign.js';
 
 const MAPNAME = id => id ? id.replace(/_/g, ' ') : '';
+const PAR_T = 35 * 60;          // s of game time: a combat won inside it was fast
+/* what a unit is worth to the side that loses it (the sim's own kill value: sim/damage.js kill()) */
+const worth = u => u.def.hq ? 3000 : (u.def.cost || 100);
+
+/* Combat grade from how the battle was fought (a won match; a lost one is D):
+     +1  the sim decided it (enemy command destroyed, force destroyed, objectives or the time rule), not a forced end
+     +1 / +2  a quarter / half of the enemy's worth destroyed (their command counts 3000, as in the sim's score)
+     +1  no losses (5 % of your worth: a spent drone does not count); -1 for losing over 40 % of it
+     +1  won inside 35 game-minutes; -1 beyond three times that
+   S 5+ · A 4 · B 2-3 · C below; nothing destroyed at all is C at best (a battle sat out never grades well). */
+export function gradeCombat(g) {
+  if (!g.win) return 'D';
+  const kr = g.enemyWorth > 0 ? g.destroyed / g.enemyWorth : 0, lr = g.ownWorth > 0 ? g.lostWorth / g.ownWorth : 0;
+  let p = g.decided ? 1 : 0;
+  if (kr >= .5) p += 2; else if (kr >= .25) p++;
+  if (lr <= .05) p++; else if (lr > .4) p--;
+  if (g.t <= PAR_T) p++; else if (g.t > PAR_T * 3) p--;
+  let gr = p >= 5 ? 'S' : p === 4 ? 'A' : p >= 2 ? 'B' : 'C';
+  if (g.destroyed <= 0) gr = 'C';
+  return gr;
+}
 
 export function createMatchFlow(game) {
   const { sim } = game;
@@ -30,8 +52,15 @@ export function createMatchFlow(game) {
       ammo: { tel: tel.reduce((a, u) => a + (u.ammo.oniks || 0), 0), telCap: tel.length * 2, cargo: tl.reduce((a, u) => a + (u.cargo || 0), 0), cargoCap: tl.length * 2 },
     };
   }
+  /* the worth destroyed on each side: the sim's own tally (sim.sides[x].value, the HQ at 3000) against what is left */
+  function worthOf(side) { let v = 0; for (const u of sim.alive(side)) v += worth(u); return v; }
   function grade(win, st) {
     if (!win) return 'D';
+    if (game.mode === 'combat') {
+      const S = sim.sides[game.side], E = sim.sides[game.enemy];
+      const destroyed = S.value || 0, lostWorth = E.value || 0;
+      return gradeCombat({ win, decided: !forced && !!sim.result, t: sim.t, destroyed, enemyWorth: destroyed + worthOf(game.enemy), lostWorth, ownWorth: lostWorth + worthOf(game.side) });
+    }
     let p = 2;
     const objs = game.objectives || [];
     const opt = objs.filter(o => o.optional);

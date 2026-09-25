@@ -14,6 +14,7 @@
 import { LIME, CORAL, WH, TAU, sat, clamp, ss, hsh, gH, outCubic, pad2, wrapPi } from './core.js';
 import { sampleOf } from './samples.js';
 import { TRACK } from '../../game/labels.js';
+import { barsW } from './tags.js';
 
 const CLS_SHOW = { HQ: 'CP' };
 const CANDS = { sea: ['DDG', 'CVN'], land: ['TEL', 'RADAR', 'SAM', 'TLV', 'CP', 'UAV-L'], air: ['FTR', 'HELO', 'UAV'] };
@@ -311,7 +312,7 @@ export function createContacts(S) {
   function draw2d(ov, TL) {
     const cam = R.camera, side = game.side, scope = S.scopeK;
     if (scope > .5) return;                          // the scope draws its own glyphs and tags
-    const cxs = cam.W / 2, cys = cam.H / 2;
+    const cxs = cam.W / 2, cys = cam.H / 2, k = ov.ui || 1;
     tagList.length = 0;
     const L = sim.list();
     for (let i = 0; i < L.length; i++) {
@@ -343,21 +344,24 @@ export function createContacts(S) {
         const a = (lost ? 1 - sat((S.clock - cv.tLost - .6) / 1.2) : sat((S.clock - cv.born) / .3)) * blink * (1 - 2 * scope);
         if (rpx < 4 || !full) ov.mark(t.x, t.y, 6, 'rgba(238,238,228,.9)', a * (full ? 1 : .7));
         if (!full) continue;
-        const ax = t.x + Math.min(rpx * .72, 160), ay = t.y - Math.min(rpx * .3, 90) - 4;
-        const label = lost ? 'LOST' : cv.c.emitting && cv.conf < .3 ? '? · ESM' : '?';
+        const label = lost ? 'LOST' : cv.c.emitting && cv.conf < .3 ? '? · ESM' : '?', value = lost ? '' : cv.conf.toFixed(2);
         let B = null;
         if (!lost && bars > 0 && rpx > 12) { probsOf(cv); B = barsOf(cv); bars--; }
-        TL.add({ x: ax + 14, y: ay - 26, ax, ay, id, label, value: lost ? '' : cv.conf.toFixed(2), kind: lost ? 'ghost' : 'white', a, size: 10.5, valCol: 'rgba(255,255,255,.72)', pri: 1, bars: B });
+        // the anchor on the cloud's upper right edge, the tag beyond it (both on the left where the right runs out)
+        const off = Math.min(rpx * .72, 160 * k), tw = Math.max(ov.tagSize(id, label, value, { size: 10.5 })[0], B ? barsW(B, k) : 0);
+        const right = t.x + off + 14 * k + tw < cam.W - 8 * k, ax = right ? t.x + off : t.x - off, ay = t.y - Math.min(rpx * .3, 90 * k) - 4 * k;
+        TL.add({ x: right ? ax + 14 * k : ax - 14 * k, align: right ? null : 'right', y: ay - 26 * k, ax, ay, id, label, value, kind: lost ? 'ghost' : 'white', a, size: 10.5, valCol: 'rgba(255,255,255,.72)', pri: 1, bars: B });
       } else {
         const e = R.models.has(u.def.model) ? R.models.get(u.def.model) : null;
         const rpx = e ? e.radius / mpp : 0;
         if (rpx < 3 || !full) ov.mark(t.x, t.y, 6, '#FF6A3D', full ? .95 : .7);
         if (!full) continue;
-        const ax = t.x + Math.max(4, rpx * .75), ay = t.y - Math.max(4, rpx * .45);
         const flash = cv && S.clock - cv.flashT < 1.1;
         const conf = c ? c.conf : 1;
-        const value = !u.alive ? (u.def.domain === 'sea' ? 'SINKING' : 'KILLED') : conf.toFixed(2);
-        TL.add({ x: ax + 14, y: ay - 26, ax, ay, id, label: TRACK[u.type] || (c && c.cls) || u.def.name, value, kind: flash && Math.sin((S.clock - cv.flashT) * 22) > -.3 ? 'lime' : 'coral', a: (u.alive ? 1 : .6) * (1 - 2 * scope), size: 10.5, pri: 2 });
+        const value = !u.alive ? (u.def.domain === 'sea' ? 'SINKING' : 'KILLED') : conf.toFixed(2), label = TRACK[u.type] || (c && c.cls) || u.def.name;
+        const off = Math.max(4 * k, rpx * .75), tw = ov.tagSize(id, label, value, { size: 10.5 })[0];
+        const right = t.x + off + 14 * k + tw < cam.W - 8 * k, ax = right ? t.x + off : t.x - off, ay = t.y - Math.max(4 * k, rpx * .45);
+        TL.add({ x: right ? ax + 14 * k : ax - 14 * k, align: right ? null : 'right', y: ay - 26 * k, ax, ay, id, label, value, kind: flash && Math.sin((S.clock - cv.flashT) * 22) > -.3 ? 'lime' : 'coral', a: (u.alive ? 1 : .6) * (1 - 2 * scope), size: 10.5, pri: 2 });
       }
     }
   }
@@ -365,7 +369,7 @@ export function createContacts(S) {
   const IDX = [];
   function barsOf(cv) {
     let b = BARS.get(cv.id);
-    if (!b) { b = { rows: [['UNKNOWN', 0]], top: 0, h: 0, wL: 62 }; BARS.set(cv.id, b); }
+    if (!b) { b = { rows: [['UNKNOWN', 0]], top: 0, wL: 62 }; BARS.set(cv.id, b); }
     if (BARS.size > 64) for (const k of BARS.keys()) if (!vis.has(k)) BARS.delete(k);
     const sh = cv.shown, cands = cv.cands;
     // unknown + the three most likely classes
@@ -383,7 +387,6 @@ export function createContacts(S) {
     }
     b.rows.length = k + 1;
     b.top = tv > sh[0] ? top : -1;
-    b.h = b.rows.length * 12 + 12;
     return b;
   }
 

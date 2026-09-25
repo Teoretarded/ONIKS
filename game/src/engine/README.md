@@ -128,6 +128,9 @@ yaw, `=` / `-` zoom, PageUp / PageDown pitch. Smooth damping; the lens never goe
 `bracket(box, col, a, pad, len)` · `box(box, col, a, dash)` · `leader(x0, y0, x1, y1, col, a)` ·
 `mark(x, y, size, col, a, fill)` · `text(x, y, s, { size, col, a, align, weight, sans })` ·
 `dline(x0, y0, x1, y1, step, size, col, a)`. `COL` has the tokens (lime, coral, dim, faint, hair).
+UI scale: `ui` = the HUD's (`uiScaleOf(W, H)`: 1 at 1080p, never below .8, up to 1.6; `uiScale` pins it). Tag, text,
+mark and bracket sizes are px at 1080p multiplied by it (`o.raw` draws at the size given); `tagSize`, `fitBox` agree.
+Callers multiply their own offsets by `ov.ui`.
 
 ## Hairlines: the Orbital language (`R.wire`, engine/wire.js, orbital.js, wire_models.js, wire_sea.js)
 

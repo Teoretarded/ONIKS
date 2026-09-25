@@ -225,14 +225,14 @@ export function createSelect(game) {
     const d = game.drawn.get(u.id);
     const e = R.models.has(u.def.model) ? R.models.get(u.def.model) : null;
     const rpx = e ? cam.fl * e.radius / q[2] : 0;
-    const tg = unitTag(game, u);
+    const tg = unitTag(game, u), k = ov.ui || 1;
     // a unit just off the edge keeps its mark on the edge
     const sx = Math.max(5, Math.min(cam.W - 5, q[0])), sy = Math.max(5, Math.min(cam.H - 5, q[1]));
     if (!sel) {
       // hover: thin white corners, the name only
       if (d && rpx > 16) { const b = ov.clampBox(R.screenBox(d), 6); if (b) ov.bracket(b, 'rgba(255,255,255,.8)', a, 5, 9); }
       else ov.mark(sx, sy, 9, 'rgba(255,255,255,.85)', a);
-      ov.text(Math.max(8, Math.min(sx + 10, cam.W - 12 - tg.label.length * 7.2)), Math.max(18, sy - 12), tg.label, { size: 10.5, col: '#fff', a: .75 });
+      ov.text(Math.max(8 * k, Math.min(sx + 10 * k, cam.W - 12 * k - tg.label.length * 7.2 * k)), Math.max(18 * k, sy - 12 * k), tg.label, { size: 10.5, col: '#fff', a: .75 });
       return;
     }
     if (full !== false && d && rpx > 16) {
@@ -240,14 +240,14 @@ export function createSelect(game) {
       if (b) {
         ov.bracket(b, col, a, 5, 12);
         // above the top-left corner; below the bracket when the top is off screen or under a panel
-        tagFree(ov, tg, kind, { x: b[0] - 5, y: b[1] - 26, ax: b[0] - 5, ay: b[1] - 5 }, { x: b[0] - 5, y: b[3] + 9, ax: b[0] - 5, ay: b[3] + 5 });
+        tagFree(ov, tg, kind, { x: b[0] - 5 * k, y: b[1] - 26 * k, ax: b[0] - 5 * k, ay: b[1] - 5 * k }, { x: b[0] - 5 * k, y: b[3] + 9 * k, ax: b[0] - 5 * k, ay: b[3] + 5 * k });
         return;
       }
     }
     ov.mark(sx, sy, 8, col, a);
     if (full === false || (many && placed.length >= 12)) return;
-    tagFree(ov, tg, kind, { x: sx + 16, y: sy - 35, ax: sx + 4, ay: sy - 4, lead: [sx + 4, sy - 4, sx + 16, sy - 16] },
-      { x: sx + 16, y: sy + 16, ax: sx + 4, ay: sy + 4, lead: [sx + 4, sy + 4, sx + 16, sy + 16] });
+    tagFree(ov, tg, kind, { x: sx + 16 * k, y: sy - 35 * k, ax: sx + 4 * k, ay: sy - 4 * k, lead: [sx + 4 * k, sy - 4 * k, sx + 16 * k, sy - 16 * k] },
+      { x: sx + 16 * k, y: sy + 16 * k, ax: sx + 4 * k, ay: sy + 4 * k, lead: [sx + 4 * k, sy + 4 * k, sx + 16 * k, sy + 16 * k] });
   }
 }
 

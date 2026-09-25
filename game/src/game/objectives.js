@@ -222,22 +222,24 @@ function objectivesSystem(game) {
       if (!list.length) return;
       const hud = game.getSystem('hud');
       if (hud && hud.drawsObjectives) return;
-      let x = 24, y = 64;
+      // (the fallback for a game without the HUD: px at 1080p times the UI scale)
+      const K = ov.ui || 1;
+      let x = 24 * K, y = 64 * K;
       const title = m ? `${String(m.n).padStart(2, '0')} · ${m.title}` : game.mode === 'combat' ? 'Combat' : '';
       // the dark backing (the only allowed panel), sized to the list
-      let h = 30, w = 0;
-      for (const o of list) { h += 18 + (o.state === 'active' && o.hint ? 16 : 0); w = Math.max(w, measure(ov, o.text + (o.optional ? ' · optional' : ''), 11) + (o.prog ? measure(ov, o.prog, 11) + 8 : 0), o.state === 'active' && o.hint ? measure(ov, o.hint, 10) : 0); }
-      ov.ctx.fillStyle = 'rgba(11,12,10,.72)'; ov.ctx.fillRect(x - 12, y - 20, w + 44, h + 8);
-      ov.ctx.fillStyle = '#C6F432'; ov.ctx.fillRect(x, y - 8, 7, 7);
-      ov.text(x + 16, y, title, { size: 11.5, col: 'rgba(255,255,255,.62)' });
-      y += 24;
+      let h = 30 * K, w = 0;
+      for (const o of list) { h += (18 + (o.state === 'active' && o.hint ? 16 : 0)) * K; w = Math.max(w, measure(ov, o.text + (o.optional ? ' · optional' : ''), 11 * K) + (o.prog ? measure(ov, o.prog, 11 * K) + 8 * K : 0), o.state === 'active' && o.hint ? measure(ov, o.hint, 10 * K) : 0); }
+      ov.ctx.fillStyle = 'rgba(11,12,10,.72)'; ov.ctx.fillRect(x - 12 * K, y - 20 * K, w + 44 * K, h + 8 * K);
+      ov.ctx.fillStyle = '#C6F432'; ov.ctx.fillRect(x, y - 8 * K, 7 * K, 7 * K);
+      ov.text(x + 16 * K, y, title, { size: 11.5, col: 'rgba(255,255,255,.62)' });
+      y += 24 * K;
       for (const o of list) {
         const c = o.state === 'done' ? '#C6F432' : o.state === 'failed' ? '#FF6A3D' : 'rgba(255,255,255,.5)';
-        ov.mark(x + 4, y - 4, 8, c, 1, o.state !== 'active');
-        ov.text(x + 16, y, o.text + (o.optional ? ' · optional' : ''), { size: 11, col: o.state === 'active' ? '#fff' : o.state === 'failed' ? '#FF6A3D' : 'rgba(255,255,255,.5)' });
-        if (o.prog) ov.text(x + 16 + 8 + measure(ov, o.text + (o.optional ? ' · optional' : ''), 11), y, o.prog, { size: 11, col: '#C6F432' });
-        y += 18;
-        if (o.state === 'active' && o.hint) { ov.text(x + 16, y - 3, o.hint, { size: 10, col: 'rgba(255,255,255,.36)' }); y += 16; }
+        ov.mark(x + 4 * K, y - 4 * K, 8, c, 1, o.state !== 'active');
+        ov.text(x + 16 * K, y, o.text + (o.optional ? ' · optional' : ''), { size: 11, col: o.state === 'active' ? '#fff' : o.state === 'failed' ? '#FF6A3D' : 'rgba(255,255,255,.5)' });
+        if (o.prog) ov.text(x + 24 * K + measure(ov, o.text + (o.optional ? ' · optional' : ''), 11 * K), y, o.prog, { size: 11, col: '#C6F432' });
+        y += 18 * K;
+        if (o.state === 'active' && o.hint) { ov.text(x + 16 * K, y - 3 * K, o.hint, { size: 10, col: 'rgba(255,255,255,.36)' }); y += 16 * K; }
       }
     },
   };

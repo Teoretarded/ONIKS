@@ -605,7 +605,7 @@ function makeDirector(game) {
     },
     draw2d(ov) {
       if (!on || game.getSystem('hud') || (game.replay && game.replay.active)) return;
-      ov.text(ov.W - 24, 30, 'CINEMATIC · C', { size: 10.5, col: '#C6F432', align: 'right' });
+      ov.text(ov.W - 24 * ov.ui, 30 * ov.ui, 'CINEMATIC · C', { size: 10.5, col: '#C6F432', align: 'right' });
     },
   };
 }

@@ -4,7 +4,11 @@
    game.addSystem(createFx(game));        // system { name: 'fx', onEvent, update, draw3d }
 
    Renderer-agnostic: draw3d(frame) draws into frame.sink (see README.md), or, when the frame has none, into the
-   engine through engineSink(renderer). Every particle is an analytic function of its age plus a seeded index;
+   engine through engineSink(renderer).
+   Quality: the Effects setting (game.settings.effects, read every frame so a change applies live; setLevel(l) by
+   hand) sets the dot budget, the ceiling of the thinning factor q and which dynamic lights are cast:
+   high = the films (every light), medium = lighter smoke and debris and fewer, stronger lights, low = sparse smoke
+   and debris and only the strongest flashes lighting the world. Every particle is an analytic function of its age plus a seeded index;
    the only records kept are emission data (where a puff, a wake row or a smoke parcel was laid, and when). */
 import { View, TAU, dirOf, norm3, hsh, sat, clamp, LIME } from './lib/core.js';
 import { Trail, STAGE } from './lib/smoke.js';
@@ -54,13 +58,20 @@ const SPLASH_H = { shell: 26, oniks: 46, tlam: 36, slam: 34, hellfire: 12, sm6: 
 const HIT_SC = { oniks: 1, tlam: .7, slam: .65, hellfire: .3, shell: .2, sm6: .35, pdms: .3, sam: .3, aam: .3, ciws: .05, gun30: .06 };
 const GUNS = { ciws: 1, gun30: 1 };
 const NOZ = { oniks: 4.5, sm6: 3.3, tlam: 3.1, slam: 2.2, pdms: 1.8, sam: 1.7, aam: 1.8, hellfire: .85 };
+/* Effects quality (data/settings.js `effects`): budget share, q ceiling, dynamic lights (min intensity, max a frame) */
+export const FX_LEVELS = {
+  low: { budget: .35, q: .4, lightMin: .45, lights: 4 },
+  medium: { budget: .65, q: .7, lightMin: .12, lights: 10 },
+  high: { budget: 1, q: 1, lightMin: .01, lights: 99 },
+};
 
 class FxSystem {
   constructor(game, o) {
     o = o || {};
     this.name = 'fx'; this.priority = 5;
     this.game = game;
-    this.budget = o.budget || 150000;
+    this.baseBudget = this.budget = o.budget || 150000;
+    this.level = null; this.qMax = 1;
     this.wakes = o.wakes !== false;
     this.fog = o.fog !== false;
     this.q = 1; this.lastN = 0; this.tr = 0; this.stats = { dots: 0, q: 1, effects: 0, trails: 0, ms: 0 };
@@ -82,12 +93,21 @@ class FxSystem {
     const self = this;
     // the frame context every effect draws through (dot counting and the hard cap live here)
     this.C = {
-      V: this.V, t: 0, tr: 0, q: 1, wind: [0, 0, 0], n: 0, cap: this.budget, sink: null,
+      V: this.V, t: 0, tr: 0, q: 1, wind: [0, 0, 0], n: 0, cap: this.budget, sink: null, nl: 0, lmin: .01, lmax: 99,
       ground: (x, z) => self.groundAt(x, z),
       dot: null, glow: null, halo: null, light: null, lift: null,
     };
   }
   init(game) { if (game) this.game = game; }
+  /* the Effects quality: 'low' | 'medium' | 'high' (FX_LEVELS) */
+  setLevel(l) {
+    const P = FX_LEVELS[l] || FX_LEVELS.high;
+    this.level = FX_LEVELS[l] ? l : 'high';
+    this.budget = Math.round(this.baseBudget * P.budget);
+    this.qMax = P.q; this.q = Math.min(this.q, P.q);
+    this.C.lmin = P.lightMin; this.C.lmax = P.lights;
+    this.stats.level = this.level;
+  }
 
   /* ---------- helpers onto the game ---------- */
   get sim() { return this.game && this.game.sim; }
@@ -352,7 +372,7 @@ class FxSystem {
     C.dot = (x, y, z, s, r, gg, b, a) => { if (C.n < C.cap) { C.n++; sdot(x, y, z, s, r, gg, b, a); } };
     C.glow = (x, y, z, s, r, gg, b, a) => { if (C.n < C.cap) { C.n++; sadd(x, y, z, s, r, gg, b, a); } };
     C.halo = sdisc ? (x, y, z, s, r, gg, b, a) => { C.n++; sdisc(x, y, z, s, r, gg, b, a); } : (x, y, z, s, r, gg, b, a) => { C.n++; sadd(x, y, z, Math.max(2, Math.round((s > 0 ? s : -s * V.pxm(x, y, z)) * .9)), r, gg, b, a * .35); };
-    C.light = sink.light ? (x, y, z, r, gg, b, i, rad) => { if (i > .01) sink.light(x, y, z, r, gg, b, i, rad); } : () => {};
+    C.light = sink.light ? (x, y, z, r, gg, b, i, rad) => { if (i > C.lmin && C.nl < C.lmax) { C.nl++; sink.light(x, y, z, r, gg, b, i, rad); } } : () => {};
     C.lift = sink.lift ? (v, r, gg, b) => { if (v > .002) sink.lift(v, r, gg, b); } : () => {};
     C.model = sink.model ? sink.model : RR && RR.draw && RR.models ? (key, pos, R9, a) => {
       if (!RR.models.has || !RR.models.has(key)) return false;
@@ -373,15 +393,18 @@ class FxSystem {
       sink = this._es.refresh();
     }
     const C = this.C, V = this.V;
+    // the Effects setting, live
+    const lvl = (g && g.settings && g.settings.effects) || 'high';
+    if (lvl !== this.level) this.setLevel(lvl);
     V.set(sink.cam);
     // render time: between the last two ticks, like the models
     const DT = (sim && sim.DT) || .05;
     const alpha = frame && frame.alpha !== undefined ? frame.alpha : g && g.alpha !== undefined ? g.alpha : 1;
     const t = frame && frame.t !== undefined ? frame.t : sim ? sim.t - (1 - alpha) * DT : 0;
-    C.t = t; C.tr = frame && frame.tr !== undefined ? frame.tr : frame && frame.realT !== undefined ? frame.realT : this.tr; C.q = this.q;
+    C.t = t; C.tr = frame && frame.tr !== undefined ? frame.tr : frame && frame.realT !== undefined ? frame.realT : this.tr; C.q = Math.min(this.q, this.qMax);
     const wnd = sim && sim.weather ? sim.weather.wind : (g && g.wind) || [0, 0];
     C.wind[0] = wnd[0] || 0; C.wind[1] = 0; C.wind[2] = wnd.length > 2 ? wnd[2] : (wnd[1] || 0);
-    C.n = 0; C.cap = this.budget; C.sink = sink;
+    C.n = 0; C.nl = 0; C.cap = this.budget; C.sink = sink;
     // the sink: dot (max), add (additive square dot), glow (soft additive disc) as the game's frame.sink has them;
     // a minimal sink with only dot / glow (glow = additive dot) works too (the discs become additive dots)
     // models (a tumbling booster casing): the sink's own, or the engine's R.draw when it knows the key
@@ -446,7 +469,7 @@ class FxSystem {
     // (the budget is also the hard cap: a spike frame loses its last-drawn smoke, never a flash or a head)
     const n = C.n, aim = this.budget * .85;
     if (n > aim) this.q = Math.max(.12, this.q * Math.max(.6, aim / n));
-    else if (n < aim * .8) this.q = Math.min(1, this.q * 1.04 + .005);
+    else if (n < aim * .8) this.q = Math.min(this.qMax, this.q * 1.04 + .005);
     this.lastN = n;
     this.stats.dots = n; this.stats.q = this.q; this.stats.effects = this.fx.length; this.stats.trails = this.trk.size + this.ghost.length; this.stats.ms = performance.now() - t0;
   }

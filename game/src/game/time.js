@@ -32,21 +32,21 @@ export function createTime(game) {
     },
     draw2d(ov) {
       if (game.ui.hidden || game.getSystem('hud')) return;
-      const W = ov.W, x = W / 2, y = 22;
+      const W = ov.W, K = ov.ui || 1, x = W / 2, y = 22 * K;
       const rate = game.paused ? 'PAUSED' : 'x' + game.timeRate;
       const b = ov.tag(x, y, rate, 'T+' + fmt(game.sim.t), '', { kind: game.paused ? 'white' : 'lime', size: 11, align: 'center' });
       const k = game.realT - blip;
       if (k < 3 && b) {
         const a = sat(1 - k / 3);
-        ov.mark(b[0] - 14, (b[1] + b[3]) / 2, 7, '#C6F432', a, Math.floor(k * 6) % 2 === 0);
-        ov.text(x, b[3] + 16, blipWhy + ' · x1', { size: 10, col: '#C6F432', a, align: 'center' });
+        ov.mark(b[0] - 14 * K, (b[1] + b[3]) / 2, 7, '#C6F432', a, Math.floor(k * 6) % 2 === 0);
+        ov.text(x, b[3] + 16 * K, blipWhy + ' · x1', { size: 10, col: '#C6F432', a, align: 'center' });
       }
-      let yy = ov.H - 120;
+      let yy = ov.H - 120 * K;
       for (let i = toasts.length - 1; i >= 0; i--) {
         const t = toasts[i], age = game.realT - t.t0;
         if (age > 2.2) { toasts.splice(i, 1); continue; }
         ov.text(x, yy, t.text, { size: 11, col: t.bad ? '#FF6A3D' : '#C6F432', a: sat((2.2 - age) / .5), align: 'center' });
-        yy -= 18;
+        yy -= 18 * K;
       }
     },
   };

@@ -4,10 +4,12 @@ import { CLASSIFY } from '../data/units.js';
 export const SHORT = {
   hq: 'K380R CP', tel: 'K340P TEL', radar: 'MONOLITH-B', pantsir: 'PANTSIR-S1', catapult: 'ORLAN-10 RAIL', drone: 'ORLAN-10',
   transloader: 'K342P TLV', carrier: 'CVN NIMITZ', ddg: 'DDG ARLEIGH BURKE', helo: 'MH-60R', fighter: 'F/A-18E',
+  bal: 'BAL 3K60', ssk: 'KILO 636.3', aew: 'E-2D', ssn: 'VIRGINIA SSN',
 };
 /* the class line a track shows once classified (the sensors' `cls` + the type's short name) */
 export const TRACK = { hq: 'CP · K380R', tel: 'TEL · K340P', radar: 'RADAR · MONOLITH-B', pantsir: 'SAM · PANTSIR-S1', catapult: 'UAV-L · ORLAN-10',
-  drone: 'UAV · ORLAN-10', transloader: 'TLV · K342P', carrier: 'CVN · NIMITZ', ddg: 'DDG · ARLEIGH BURKE', helo: 'HELO · MH-60R', fighter: 'FTR · F/A-18E' };
+  drone: 'UAV · ORLAN-10', transloader: 'TLV · K342P', carrier: 'CVN · NIMITZ', ddg: 'DDG · ARLEIGH BURKE', helo: 'HELO · MH-60R', fighter: 'FTR · F/A-18E',
+  bal: 'TEL · BAL', ssk: 'SSK · KILO', aew: 'AEW · E-2D', ssn: 'SSN · VIRGINIA' };
 
 const pad2 = n => String(n).padStart(2, '0');
 
@@ -34,8 +36,17 @@ export function status(u) {
     case 'drone': return `ALT ${Math.round(u.pos[1] / 10) * 10} M`;
     case 'ddg': return `SM-6 ${u.ammo.sm6} · TLAM ${u.ammo.strike}`;
     case 'carrier': return 'CVN';
-    case 'helo': return u.aboard ? 'DECK' : `${u.ammo.hellfire} AGM`;
+    case 'helo': return u.aboard ? 'DECK' : u.speed < 6 && u.def.sensors.sonar && !u.off.sonar ? `DIPPING · ${u.ammo.mk54} TORP` : `${u.ammo.hellfire} AGM`;
     case 'fighter': return u.aboard ? 'DECK' : `${u.ammo.slam} SLAM`;
+    case 'aew': return u.aboard ? 'DECK' : u.radarOn && !u.off.radar ? 'RADIATING' : 'EMCON';
+    case 'bal': {
+      const s = u.elev >= .5 ? 'UP' : u.dep >= 1 && u.elevT > 0 ? 'RAISING' : u.dep > 0 && u.depT > 0 ? 'JACKS' : u.dep > 0 ? 'STOWING' : 'STOWED';
+      return `${s} · ${u.ammo.uran} RD`;
+    }
+    case 'ssk': case 'ssn': {
+      const d = !(u.depth > u.def.draught + 2.5) ? 'SURFACED' : u.depth > u.def.sub.pd + 4 ? `DEEP ${Math.round(u.depth / 10) * 10} M` : 'PERISCOPE';
+      return u.type === 'ssn' ? `${d} · TLAM ${u.ammo.strike}` : `${d} · ${u.ammo.klub} KALIBR`;
+    }
     case 'hq': return k ? k.toUpperCase() : 'CP';
   }
   return k ? k.toUpperCase() : '';

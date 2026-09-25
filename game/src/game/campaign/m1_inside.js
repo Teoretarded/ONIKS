@@ -123,7 +123,7 @@ export function run(S) {
       { skip: () => false, then: () => ['Classified · DDG · Arleigh Burke'], after: 1.2 },
       { prompt: 'Scan · then click the track', key: 'X', done: () => { const c = S.contact(ddg); return !!(c && c.identified); },
         then: 'Identified · 0.97 · every part tagged', after: 2.2 },
-      { prompt: () => ddg.alive ? 'Inspect · click the track, then' : 'Inspect · select the TEL, then', key: 'I', skip: () => !game.getSystem('inspect'),
+      { prompt: () => ddg.alive ? 'Inspect · select the track first' : 'Inspect · select the TEL first', key: 'I', skip: () => !game.getSystem('inspect'),
         done: () => !!inspectState() },
       { prompt: 'X-ray', key: 'X', skip: () => !inspectState(), done: () => { const s = inspectState(); return !s || (s.xr && s.xr.on); }, min: 2.5, after: 3.5 },
       { prompt: 'Exploded view', key: 'E', skip: () => !inspectState(), done: () => { const s = inspectState(); return !s || (s.ex && s.ex.on); }, after: 5 },

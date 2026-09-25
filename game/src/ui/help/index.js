@@ -6,8 +6,9 @@
    gradient, the battle still moving on the right). Rows for the other side and for the sandbox only are left out.
    Combat and campaign pause while it is up (sandbox runs on). F1 or Esc closes it; a click on its key chips too.
 
-   The pause menu's Settings row opens openSettings(): the key settings (render scale, dot density, show FPS, master
-   volume, edge pan, auto x1) as the Settings screen's rows, applied live and saved through data/settings.js.
+   The pause menu's Settings row opens openSettings(): the key settings (render scale, dot density, effects, show FPS,
+   master volume, edge pan, auto x1, hit replay) as the Settings screen's rows, applied live and saved through
+   data/settings.js (effects: the FX and landmarks systems read game.settings each frame; hit replay: replay.js).
    This system also applies them live for everyone: render scale (R.renderScale), dot density (the terrain's dot
    budget), auto x1 (game.setAutoSlow, kept in step with the pause menu's own row); show FPS, edge pan and volume are
    applied by main.js and the audio system.
@@ -17,7 +18,7 @@
 import { KEYBINDS, SETTINGS, NOTES, DOT_DENSITY, getSettings, setSetting, onSettings } from '../../data/settings.js';
 
 const PRI_HELP = 130;
-const IN_GAME = ['renderScale', 'dotDensity', 'showFps', 'volume', 'edgePan', 'autoSlow'];
+const IN_GAME = ['renderScale', 'dotDensity', 'effects', 'showFps', 'volume', 'edgePan', 'autoSlow', 'hitReplay'];
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const pad2 = n => String(n).padStart(2, '0');
 const same = (a, b) => typeof a === 'number' && typeof b === 'number' ? Math.abs(a - b) < 1e-6 : a === b;

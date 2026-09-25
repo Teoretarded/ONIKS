@@ -14,13 +14,15 @@
      renderStyle   'pointcloud' | 'orbital'     the look: Point Cloud (graphite, white dots) or Orbital (black, hairlines)
      renderScale * 0.5 | 0.67 | 0.75 | 1        fraction of the device-pixel canvas size
      dotDensity  * 'low' | 'medium' | 'high' | 'ultra'
-     effects       'low' | 'medium' | 'high'    particles, smoke, debris, dynamic lights
+     effects     * 'low' | 'medium' | 'high'    smoke, debris and spark dots, dynamic lights, landmark detail
+                                                 (fx/index.js FX_LEVELS, game/landmarks.js DETAIL; read live)
      showFps     * bool
      volume      * 0..1 (steps of 0.1)          master volume (films, UI, game)
      uiSound       bool                          menu / HUD clicks
      edgePan     * bool                          camera pans at the screen edges
      invertRotate  bool                          right-drag / Q E rotate the other way
      autoSlow    * bool                          drop to x1 on a launch or a new contact (game.autoSlow; was 'oniks.autoSlow')
+     hitReplay   * bool                          a decisive hit replays in slow motion (game/replay.js; Shift+J too)
      timeRate      1 | 2 | 4 | 8 | 16 | 32       time rate a match starts at
      menuFilm      'random' | film id           the film behind the main menu */
 
@@ -54,6 +56,7 @@ export const SETTINGS = [
   { key: 'edgePan', group: 'Controls', label: 'Edge pan', def: true, choices: [[false, 'Off'], [true, 'On']] },
   { key: 'invertRotate', group: 'Controls', label: 'Invert rotate', def: false, choices: [[false, 'Off'], [true, 'On']] },
   { key: 'autoSlow', group: 'Controls', label: 'Auto ×1', def: true, choices: [[false, 'Off'], [true, 'On']] },
+  { key: 'hitReplay', group: 'Controls', label: 'Hit replay', def: true, choices: [[false, 'Off'], [true, 'On']] },
   { key: 'timeRate', group: 'Controls', label: 'Start time rate', def: 4, choices: [1, 2, 4, 8, 16, 32].map(v => [v, 'x' + v]) },
   { key: 'menuFilm', group: 'Menu', label: 'Menu film', def: 'random', cycle: true, choices: MENU_FILMS },
 ];
@@ -63,13 +66,14 @@ export const NOTES = {
   renderStyle: v => v === 'orbital' ? 'Black, white hairline wireframe, one yellow. The Orbital films.' : 'Graphite, white LiDAR dots, lime and coral. The Point Cloud films.',
   renderScale: v => v < 1 ? `Draws at ${Math.round(v * 100)}% of the screen's pixels and scales up. Faster.` : 'Draws at the full resolution of the screen.',
   dotDensity: v => ({ low: 'Fewer dots per model and per square of ground. Fastest.', medium: 'A lighter cloud.', high: 'The films\' density.', ultra: 'Denser than the films. Needs a strong GPU.' }[v]),
-  effects: v => ({ low: 'Flashes and trails only.', medium: 'Smoke and sparks, fewer lights.', high: 'Smoke, debris, sparks and dynamic light, as in the films.' }[v]),
+  effects: v => ({ low: 'Sparse smoke and debris; only the strongest flashes light the world. Fastest.', medium: 'Lighter smoke and debris, fewer dynamic lights.', high: 'Smoke, debris, sparks and dynamic light, as in the films.' }[v]),
   showFps: v => v ? 'Frame rate and frame time on screen.' : 'No frame counter.',
   volume: v => `Master volume ${Math.round(v * 100)}%. Films, interface and battle.`,
   uiSound: v => v ? 'Clicks and blips on the menus and the HUD.' : 'Silent menus and HUD.',
   edgePan: v => v ? 'The camera pans when the pointer touches a screen edge.' : 'Pan with W A S D or the middle button only.',
   invertRotate: v => v ? 'Right-drag and Q E turn the camera the other way.' : 'Right-drag and Q E turn the camera as the pointer moves.',
   autoSlow: v => v ? 'A launch or a new contact drops time to x1, so it is watched at real speed.' : 'Time stays at the rate you set.',
+  hitReplay: v => v ? 'A decisive hit plays again in slow motion, the X-ray sweeping the hull. J replays the last one.' : 'No automatic replays. J still replays the last decisive hit.',
   timeRate: v => `Matches start at x${v}.`,
   menuFilm: v => v === 'random' ? 'A different favourite film behind the menu each time.' : 'This film plays behind the menu.',
 };
@@ -90,16 +94,16 @@ export const KEYBINDS = [
     ['Right click', 'Move · attack a track'], ['Shift', 'Queue the order'], ['Z', 'Stop'], ['H', 'Weapons free / hold'],
     ['T', 'Deploy / undeploy', { side: 'coast' }], ['R', 'Reload'], ['X', 'Scan, then click'], ['Y', 'Radar on / off'],
     ['L', 'Launch Orlan-10', { side: 'coast' }], ['L', 'Launch strike package', { side: 'fleet' }], ['U', 'Launch MH-60R', { side: 'fleet' }],
-    ['B', 'Reinforcements'] ] },
+    ['O', 'Boats: dive / come up · Shift: surface'], ['B', 'Reinforcements'] ] },
   { group: 'Inspect', binds: [
     ['I', 'Inspect the selection'], ['Alt click', 'Inspect a unit or round'], ['E', 'Exploded view'], ['X', 'X-ray on / off'],
     ['H', 'Hide the tags'], ['Esc', 'Leave'], ['Shift I', 'Anatomy browser', { mode: 'sandbox' }] ] },
   { group: 'View and time', binds: [
-    ['C', 'Cinematic camera'], ['V', 'Radar view'], ['F10', 'Hide the interface'], ['F1', 'Help'],
-    ['Space', 'Pause'], ['+ −', 'Time rate'], ['Esc', 'Menu'] ] },
+    ['C', 'Cinematic camera'], ['J', 'Replay the last hit'], ['Shift J', 'Hit replay on / off'], ['V', 'Radar view'],
+    ['F10', 'Hide the interface'], ['F1', 'Help'], ['Space', 'Pause'], ['+ −', 'Time rate'], ['Esc', 'Menu'] ] },
   { group: 'Sandbox', mode: 'sandbox', binds: [
-    ['P', 'Spawn palette'], ['1-7 ⇧1-4', 'Pick a unit to place'], ['Del', 'Delete selected'], ['G', 'Fog'], ['K', 'Enemy AI'],
-    ['J', 'Switch side'], ['N', 'Weather'] ] },
+    ['P', 'Spawn palette'], ['1-9 ⇧1-9', 'Pick a unit to place'], ['Del', 'Delete selected'], ['G', 'Fog'], ['K', 'Enemy AI'],
+    ['M', 'Switch side'], ['N', 'Weather'] ] },
 ];
 
 const spec = k => SETTINGS.find(s => s.key === k);

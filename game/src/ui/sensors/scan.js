@@ -15,7 +15,7 @@
    A hull too small to read its parts on screen (< ~140 px) keeps its tag and bracket, and gets the scan inset (inset.js).
    An enemy scan on the player's units is the same in coral-white: forks to each unit, a warning.
    Also: the scan targeting reticle while the orders system aims a scan (X). */
-import { LIME, CORAL, WH, HOT, TAU, sat, clamp, ss, outCubic, outExpo, pad2, rng, tagW } from './core.js';
+import { LIME, CORAL, WH, HOT, TAU, sat, clamp, ss, outCubic, outExpo, pad2, rng } from './core.js';
 import { Bolt } from './bolt.js';
 import { Fork, reachOf } from './chain.js';
 import { sampleOf, revealFrom } from './samples.js';
@@ -430,11 +430,11 @@ export function createScan(S, AN, inset) {
 
   /* ---------- 2D ---------- */
   function draw2d(ov, TL) {
-    const cam = R.camera, ctx = ov.ctx;
+    const cam = R.camera, ctx = ov.ctx, k = ov.ui || 1;
     for (const sc of scans) {
       const P = sc.pos;
       if (sc.Ehit === null) {
-        if (cam.project(P, q) && sc.own) TL.add({ x: q[0] + 18, y: q[1] - 44, ax: q[0], ay: q[1], id: 'SCAN ' + pad2(sc.n), label: 'STRIKE', value: (sc.r / 1000).toFixed(1) + ' KM', kind: 'lime', size: 10.5, pri: 5 });
+        if (cam.project(P, q) && sc.own) TL.add({ x: q[0] + 18 * k, y: q[1] - 44 * k, ax: q[0], ay: q[1], id: 'SCAN ' + pad2(sc.n), label: 'STRIKE', value: (sc.r / 1000).toFixed(1) + ' KM', kind: 'lime', size: 10.5, pri: 5 });
         continue;
       }
       const tr = S.clock - sc.Ehit;
@@ -443,19 +443,19 @@ export function createScan(S, AN, inset) {
         if (tr < 6.5 && cam.project(P, q)) {
           const n = sc.hits.length, a = sat(tr / .3) * (1 - sat((tr - 5.5) / 1));
           const lab = n ? decode(n + ' IDENTIFIED', sat((tr - sc.tAll) / .4), S.clock, sc.n) : 'NO RETURNS';
-          TL.add({ x: q[0] + 18, y: q[1] - 44, ax: q[0], ay: q[1], id: 'SCAN ' + pad2(sc.n), label: tr < sc.tAll ? 'CHAIN · ' + n : lab, value: tr < TF ? 'SWEEP' : '', kind: n ? 'lime' : 'ghost', a, size: 10.5, pri: 5 });
+          TL.add({ x: q[0] + 18 * k, y: q[1] - 44 * k, ax: q[0], ay: q[1], id: 'SCAN ' + pad2(sc.n), label: tr < sc.tAll ? 'CHAIN · ' + n : lab, value: tr < TF ? 'SWEEP' : '', kind: n ? 'lime' : 'ghost', a, size: 10.5, pri: 5 });
         }
         for (const it of sc.idents) identify2d(ov, ctx, TL, sc, it, tr - it.tF);
       } else {
         if (tr < 5.5 && cam.project(P, q)) {
           const a = sat(tr / .2) * (1 - sat((tr - 4.5) / 1)) * (Math.sin(tr * 14) > -.2 ? 1 : .55);
-          TL.add({ x: q[0] + 18, y: q[1] - 44, ax: q[0], ay: q[1], id: '!', label: 'HOSTILE SCAN', value: (sc.r / 1000).toFixed(1) + ' KM', kind: 'coral', a, size: 10.5, pri: 6 });
+          TL.add({ x: q[0] + 18 * k, y: q[1] - 44 * k, ax: q[0], ay: q[1], id: '!', label: 'HOSTILE SCAN', value: (sc.r / 1000).toFixed(1) + ' KM', kind: 'coral', a, size: 10.5, pri: 6 });
         }
         for (const w of sc.warned) {
           const a = tr - w.tA; if (a < 0 || a > 5 || !w.u.alive) continue;
           const p = game.unitPose(w.u).pos; if (!cam.project(p, q)) continue;
           const al = sat(a / .15) * (1 - sat((a - 4) / 1));
-          TL.add({ x: q[0] + 16, y: q[1] - 34, ax: q[0], ay: q[1] - 4, id: 'SCANNED', label: SHORT[w.u.type] || w.u.def.name, value: '', kind: 'coral', a: al, size: 10, pri: 4 });
+          TL.add({ x: q[0] + 16 * k, y: q[1] - 34 * k, ax: q[0], ay: q[1] - 4 * k, id: 'SCANNED', label: SHORT[w.u.type] || w.u.def.name, value: '', kind: 'coral', a: al, size: 10, pri: 4 });
         }
       }
     }
@@ -507,7 +507,7 @@ export function createScan(S, AN, inset) {
     return any;
   }
   function identify2d(ov, ctx, TL, sc, it, a) {
-    const u = it.u, cam = R.camera;
+    const u = it.u, cam = R.camera, K = ov.ui || 1;
     if (a < -.02 || a > ID_END || !it.s) return;
     const d = unitXf(u, it), M = d.R, Tt = d.T, s = it.s;
     const pp = game.unitPose(u).pos;
@@ -556,20 +556,19 @@ export function createScan(S, AN, inset) {
         ROWS.push(r);
       }
       if (hb && ROWS.length) {
-        const fs = 9.5, rh = 22, n = ROWS.length;
+        const fs = 9.5, rh = 22 * K, n = ROWS.length;
         // right of the hull unless that runs off screen or into a panel / the inset
-        const colW = 250, right = hb[2] + 22 + colW < cam.W - 12 && !blocked(hb[2] + 22, hb[1], colW, n * rh);
+        const colW = 250 * K, right = hb[2] + 22 * K + colW < cam.W - 12 * K && !blocked(hb[2] + 22 * K, hb[1], colW, n * rh);
         // rows in the order of their anchors down the screen (leaders cross least)
         for (const r of ROWS) r.ty = right ? r.ry : r.ly;
         ROWS.sort(byTy);
-        const cx = right ? hb[2] + 22 : hb[0] - 22;
+        const cx = right ? hb[2] + 22 * K : hb[0] - 22 * K;
         let y0 = (hb[1] + hb[3]) / 2 - n * rh / 2;
-        y0 = Math.max(12, Math.min(cam.H - 12 - n * rh, y0));
+        y0 = Math.max(12 * K, Math.min(cam.H - 12 * K - n * rh, y0));
         for (let k = 0; k < n; k++) {
           const r = ROWS[k], p = r.p;
           const text = decode(p.label.toUpperCase(), sat((r.ak - .05) / .5), S.clock, p.seed), val = r.ak > .5 ? p.size : '';
-          const w = tagW(p.id, text, val, fs);
-          TL.add({ x: right ? cx : cx - w, y: y0 + k * rh, ax: right ? r.rx : r.lx, ay: right ? r.ry : r.ly, id: p.id, label: text, value: val, kind: 'lime', a: r.al, size: fs, pri: 3, leadCol: '#C6F432', far: true });
+          TL.add({ x: cx, align: right ? null : 'right', y: y0 + k * rh, ax: right ? r.rx : r.lx, ay: right ? r.ry : r.ly, id: p.id, label: text, value: val, kind: 'lime', a: r.al, size: fs, pri: 3, leadCol: '#C6F432', far: true });
         }
       }
       // its placards keep off the hull
@@ -588,7 +587,7 @@ export function createScan(S, AN, inset) {
         BX[0] = cx - hw; BX[1] = cy - hh; BX[2] = cx + hw; BX[3] = cy + hh;
         ov.bracket(BX, col, ba * (big && a < 2.4 ? .5 : 1), 5, 12);
       } else if (!inInset) {
-        BX[0] = qx - 9; BX[1] = qy - 9; BX[2] = qx + 9; BX[3] = qy + 9;
+        BX[0] = qx - 9 * K; BX[1] = qy - 9 * K; BX[2] = qx + 9 * K; BX[3] = qy + 9 * K;
         ov.bracket(BX, col, ba, 2, 5);
       }
     }
@@ -598,12 +597,12 @@ export function createScan(S, AN, inset) {
       const c = sim.contact(game.side, u.id), id = c ? c.track : 'TRK ' + pad2(u.id);
       const e = R.models.has(u.def.model) ? R.models.get(u.def.model) : null;
       const rpx = e ? e.radius / mpp : 0;
-      const ax = qx + Math.max(4, rpx * .75), ay = qy - Math.max(4, rpx * .45);
+      const ax = qx + Math.max(4 * K, rpx * .75), ay = qy - Math.max(4 * K, rpx * .45);
       const lab = TRACK[u.type] || u.def.name, k1 = sat((a - .35) / .85);
       const text = k1 <= 0 ? '?' : decode(lab, k1, S.clock, it.seed & 1023);
       const conf = it.conf0 + (.97 - it.conf0) * outCubic(sat((a - .3) / 1.2));
       const kind = a < 1.35 ? 'white' : a < 1.9 && Math.sin((a - 1.35) * 26) > -.3 ? 'lime' : 'coral';
-      TL.add({ x: ax + 14, y: ay - 26, ax, ay, id, label: text, value: conf.toFixed(2), kind, a: ta, size: 10.5, pri: 8, valCol: kind === 'white' ? 'rgba(255,255,255,.72)' : undefined });
+      TL.add({ x: ax + 14 * K, y: ay - 26 * K, ax, ay, id, label: text, value: conf.toFixed(2), kind, a: ta, size: 10.5, pri: 8, valCol: kind === 'white' ? 'rgba(255,255,255,.72)' : undefined });
     }
   }
   const ROWS = [], ROWP = [];
@@ -666,15 +665,15 @@ export function createScan(S, AN, inset) {
     if (!aim.on || !aim.u) return;
     const cam = R.camera, x = game.mouse.x, y = game.mouse.y, u = aim.u;
     const cd = Math.max(sim.sides[game.side].scanCd || 0, u.cooldowns.scan || 0);
-    const col = aim.inReach ? '#C6F432' : '#FF6A3D';
-    ov.text(x + 16, y + 62, `${SHORT[u.type] || u.def.name} · ${(aim.dist / 1000).toFixed(1)} / ${(u.def.scan.reach / 1000).toFixed(0)} KM${aim.inReach ? '' : ' · OUT OF REACH'}`, { size: 10, col, a: .95 });
-    ov.text(x + 16, y + 76, `R ${(u.def.scan.r / 1000).toFixed(1)} KM · ${aim.n} CONTACT${aim.n === 1 ? '' : 'S'} INSIDE${cd > 0 ? ` · READY IN ${Math.ceil(cd)} S` : ''}`, { size: 10, col: cd > 0 ? '#FF6A3D' : 'rgba(255,255,255,.7)', a: .9 });
+    const col = aim.inReach ? '#C6F432' : '#FF6A3D', k = ov.ui || 1;
+    ov.text(x + 16 * k, y + 62 * k, `${SHORT[u.type] || u.def.name} · ${(aim.dist / 1000).toFixed(1)} / ${(u.def.scan.reach / 1000).toFixed(0)} KM${aim.inReach ? '' : ' · OUT OF REACH'}`, { size: 10, col, a: .95 });
+    ov.text(x + 16 * k, y + 76 * k, `R ${(u.def.scan.r / 1000).toFixed(1)} KM · ${aim.n} CONTACT${aim.n === 1 ? '' : 'S'} INSIDE${cd > 0 ? ` · READY IN ${Math.ceil(cd)} S` : ''}`, { size: 10, col: cd > 0 ? '#FF6A3D' : 'rgba(255,255,255,.7)', a: .9 });
     // corner marks on what it would catch
     for (const id of aim.ids) {
       const cv = S.contacts.vis.get(id), un = sim.units.get(id);
       const p = cv && cv.state !== 'track' ? cv.ctr : un ? game.unitPose(un).pos : null;
       if (!p || !cam.project(p, q)) continue;
-      const s = 9;
+      const s = 9 * k;
       ov.bracket([q[0] - s, q[1] - s, q[0] + s, q[1] + s], '#C6F432', .9, 2, 5);
     }
   }
