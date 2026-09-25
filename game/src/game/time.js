@@ -11,7 +11,7 @@ export function createTime(game) {
   const toasts = [];
   let blip = -99, blipWhy = '';
   game.bus.on('toast', d => { toasts.push({ text: d.text, bad: !!d.bad, t0: game.realT }); if (toasts.length > 4) toasts.shift(); });
-  game.bus.on('autoslow', d => { blip = game.realT; blipWhy = d.why === 'launch' ? 'LAUNCH' : 'NEW CONTACT'; });
+  game.bus.on('autoslow', d => { blip = game.realT; blipWhy = d.why === 'launch' ? 'LAUNCH' : d.why === 'engage' ? 'IN REACH' : 'NEW CONTACT'; });
 
   const fmt = t => { t = Math.max(0, Math.floor(t)); const h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, s = t % 60; return (h ? h + ':' : '') + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0'); };
   game.fmtTime = fmt;
