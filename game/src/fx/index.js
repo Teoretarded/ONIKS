@@ -19,7 +19,7 @@ import { Splash, Dirt, Blast, Fire, Sinking } from './lib/impact.js';
 import { TracerStream, Muzzle } from './lib/guns.js';
 import { Wake, Downwash } from './lib/water.js';
 import { drawJet } from './lib/air.js';
-import { Lightning, drawRain, drawShafts } from './lib/weather.js';
+import { Lightning, drawRain } from './lib/weather.js';
 
 export { engineSink };
 
@@ -85,7 +85,8 @@ class FxSystem {
     this.falls = new Map();       // unit id -> Trail (aircraft going down / trailing smoke)
     this.hitAt = new Map();       // unit id -> last hit, unit frame [along, up, across]
     this.abUntil = new Map();     // unit id -> sim time the afterburner stays lit to (takeoffs)
-    this.bolts = [];
+    this.bolts = [];              // natural lightning (real time: this.wclk, which stops while the game is paused)
+    this.wclk = 0; this.lastBig = -9; this.lastBigIc = -9; this.lastCg = -9;
     this.groundFires = [];
     this.down = new Downwash({});
     this.V = new View();
@@ -226,11 +227,8 @@ class FxSystem {
         this.add(new Muzzle({ t0: t, mz: ev.pos, dir: s.D, dur: s.a1, seed, weapon: w }), 2);
         return;
       }
-      case 'lightning': {
-        const b = this.add(new Lightning({ t0: t, pos: ev.pos, top: ev.top, seed, s: 1 }), 4);
-        this.bolts.push(b);
-        return;
-      }
+      case 'lightning':
+      case 'lightning_ic': return this.onLightning(ev, seed);
       case 'takeoff': {
         if (ev.type === 'takeoff' && (ev.unit !== undefined)) {
           const u = sim && sim.units.get(ev.unit);
@@ -242,6 +240,26 @@ class FxSystem {
       }
       default: return;
     }
+  }
+  /* natural lightning: white, drawn in real time. A flash that comes too soon after the last one (high time rates)
+     is drawn without the frame lift and with a weaker light (no strobing); past six at once it is only heard. */
+  onLightning(ev, seed) {
+    const ic = ev.type === 'lightning_ic', now = this.wclk;
+    if (this.bolts.length >= 6 || !ev.pos) return;
+    // at high time rates the flashes come faster than the eye takes them: at most ~5 bolts a second, the frame lift
+    // at most every .7 s; the rest are only heard (the sim's events and their reveals are untouched)
+    let big = false;
+    if (ic) { if (now - this.lastBigIc > .5 && now - this.lastBig > .35) { big = true; this.lastBigIc = now; } }
+    else { if (now - this.lastCg < .2) return; this.lastCg = now; if (now - this.lastBig > .7) { big = true; this.lastBig = now; } }
+    if (ic && !big) return;
+    const cell = this.cellOf(ev.cell);
+    this.bolts.push(new Lightning({ t0: now, pos: ev.pos, top: ic ? ev.pos : ev.top, base: cell ? cell.base : 1250, seed: ev.seed !== undefined ? ev.seed : seed, s: ev.s || 1, kind: ic ? 'ic' : 'cg', big }));
+  }
+  cellOf(id) {
+    const W = this.sim && this.sim.weather;
+    if (id === undefined || !W || !W.cells) return null;
+    for (const c of W.cells()) if (c.id === id) return c;
+    return null;
   }
   onHit(ev, t, seed) {
     const sim = this.sim, u = sim && sim.units.get(ev.target), pos = ev.pos, k = ev.kind, sc = HIT_SC[k] || .3;
@@ -284,6 +302,7 @@ class FxSystem {
   /* ---------- per frame: feed the persistent effects from the sim ---------- */
   update(dtReal, dtSim) {
     this.tr += dtReal || 0;
+    if (!(this.game && this.game.paused)) this.wclk += dtReal || 0;
     const sim = this.sim; if (!sim) return;
     const t = sim.t;
     // projectiles: puffs laid along the flight since the last frame
@@ -358,7 +377,7 @@ class FxSystem {
       const over = e instanceof Fire ? e.done(t) : t - e.t0 > (e.durAll || e.dur) + .5;
       if (over) fx.splice(i, 1);
     }
-    for (let i = this.bolts.length - 1; i >= 0; i--) if (t - this.bolts[i].t0 > this.bolts[i].dur) this.bolts.splice(i, 1);
+    for (let i = this.bolts.length - 1; i >= 0; i--) if (this.wclk - this.bolts[i].t0 > this.bolts[i].dur) this.bolts.splice(i, 1);
     this.lastT = t;
   }
 
@@ -412,13 +431,14 @@ class FxSystem {
     if (sink !== this._sink || RR !== this._RR) this.bind(sink, RR);
     // lightning in the air freezes the rain
     let flash = 0;
-    for (const b of this.bolts) flash = Math.max(flash, b.level(t - b.t0));
+    for (const b of this.bolts) flash = Math.max(flash, b.level(this.wclk - b.t0));
     C.flash = flash;
     const P = this.prof ? (this.profD = this.profD || {}) : null;
     let tp = P ? performance.now() : 0;
     const mark = k => { if (!P) return; const n = performance.now(); P[k] = (P[k] || 0) * .9 + (n - tp) * .1; tp = n; };
     // 1. flashes, heads and flames first: the budget never cuts them
     for (const e of this.fx) if (e.layer >= 3 || e.layer === 1) { const a = t - e.t0; if (a >= -.001) e.draw(C, a); }
+    for (const b of this.bolts) b.draw(C, this.wclk - b.t0);
     mark('flash');
     if (sim) {
       const fr = Math.floor(C.tr * 60);
@@ -456,14 +476,17 @@ class FxSystem {
     mark('fires');
     if (this.wakes) for (const w of this.wk.values()) if (w.vis !== false) w.draw(C, 1);
     mark('wakes');
+    // the rain round the lens, only inside a cell (the shafts and the cloud are SENSORS', on the GPU)
     if (sim && sim.weather) {
-      const W = sim.weather, k = W.kind === 'storm' ? 1 : W.kind === 'rain' ? .6 : 0;
-      if (k) {
-        const ex = V.eye; let inRain = 0;
+      const W = sim.weather, ex = V.eye;
+      let inRain = 0, base = 1500;
+      if (W.rainAt) {
+        inRain = W.rainAt(ex[0], ex[2]);
+        if (inRain > .01) for (const c of W.cells()) { const d = Math.hypot(ex[0] - c.x, ex[2] - c.z); if (d < c.r * 1.05 && c.base < base) base = c.base; }
+      } else if (W.kind === 'storm' || W.kind === 'rain') {
         for (const s of W.squalls || []) { const d = Math.hypot(ex[0] - s.x, ex[2] - s.z); inRain = Math.max(inRain, sat((s.r - d) / 800 + 1) * (d < s.r + 800 ? 1 : 0)); }
-        drawRain(C, k * Math.max(.15, inRain), flash);
-        drawShafts(C, W.squalls, k);
       }
+      if (inRain > .01) drawRain(C, (W.kind === 'rain' ? .75 : 1) * inRain, flash, base);
     }
     // the budget: thin everything next frame if this one ran over, recover slowly
     // (the budget is also the hard cap: a spike frame loses its last-drawn smoke, never a flash or a head)
