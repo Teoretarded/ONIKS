@@ -74,7 +74,7 @@ export function createSalvo(game, hud, bc) {
   const ticks = new Map();       // interceptor proj id -> tick
   const groups = [];             // salvos and raids, oldest first
   let gid = 0, nOwn = 0, nIn = 0, dirty = false, pickAt = -1, anyCut = false;
-  let open = false, dim = false, clockT = 0, geoAt = -1, cw = 0, ch = 0, dpr = 1, calmRy = 0, calmRx = 0;
+  let open = false, dim = false, clockT = 0, geoAt = -1, cw = 0, ch = 0, dpr = 1, cvDpr = 0, calmRy = 0, calmRx = 0;
   let followId = 0, followT = -1, pendingReplay = null, replayEnd = -1e9, sens = null;
   const lastF = [0, 0, 0];
   const stats = { ms: 0, draw: 0, lanes: 0, asked: 0 };
@@ -258,7 +258,7 @@ export function createSalvo(game, hud, bc) {
     // the strip: the cinematic camera, the replay handing back, the radar view
     if (sens === null || (!sens && game.frameN % 60 === 0)) sens = game.getSystem('sensors') || 0;
     const sw = !!(game.cinematic || (R && R.state) || (sens && sens.scopeOn));
-    if (sw !== strip) { strip = sw; el.classList.toggle('strip', sw); place(); geoAt = -1; marg = 1e9; el.style.marginLeft = el.style.marginRight = ''; for (const g of groups) { g.rtK = -1; g.verL = -1; } dirty = true; }
+    if (sw !== strip) { strip = sw; el.classList.toggle('strip', sw); if (cw) { cx.setTransform(1, 0, 0, 1, 0, 0); cx.clearRect(0, 0, cw, ch); } place(); geoAt = -1; marg = 1e9; el.style.marginLeft = el.style.marginRight = ''; for (const g of groups) { g.rtK = -1; g.verL = -1; } dirty = true; }
     if (dirty || (anyCut && game.realT - pickAt > .5)) restructure();
     // the board is up while a salvo is on it
     let any = false, n = 0;
@@ -277,7 +277,7 @@ export function createSalvo(game, hud, bc) {
   function setOpen(on) {
     open = on;
     el.style.display = on ? '' : 'none';
-    if (!on) { dropRect(); cw = ch = 0; }
+    if (!on) dropRect();             // (the canvas keeps its size: the next board draws into it without a resize)
     geoAt = -1;
   }
 
@@ -466,8 +466,15 @@ export function createSalvo(game, hud, bc) {
     const b = el.getBoundingClientRect();
     if (b.width < 2) return;
     dpr = window.devicePixelRatio || 1;
+    // the lanes' canvas only grows, in steps of 96 device px, and is sized in CSS to its own pixels (not the board's):
+    // a canvas resize reallocates its surface through the GPU process, and every lane that came or went was one
+    // (up to ~0.9 s behind a busy GPU in a big battle). The rows are drawn at their own offsets either way.
     const w = Math.round(b.width * dpr), h = Math.round(b.height * dpr);
-    if (w !== cw || h !== ch) { cv.width = cw = w; cv.height = ch = h; }
+    if (w > cw || h > ch || dpr !== cvDpr) {
+      const W2 = Math.max(cw, Math.ceil(w / 96) * 96), H2 = Math.max(ch, Math.ceil(h / 96) * 96);
+      cv.width = cw = W2; cv.height = ch = H2; cvDpr = dpr;
+      cv.style.width = (W2 / dpr) + 'px'; cv.style.height = (H2 / dpr) + 'px';
+    }
     rect[0] = Math.floor(b.left) - 10; rect[1] = Math.floor(b.top) - 10; rect[2] = Math.ceil(b.right) + 10; rect[3] = Math.ceil(b.bottom) + 4;
     // the calm under it grows with the board (1080p px)
     const ry = Math.round(b.height / (hud.scale || 1) * .5 + (strip ? 26 : 70)), rx = Math.round(b.width / (hud.scale || 1) * .5 + (strip ? 160 : 190));

@@ -67,7 +67,7 @@ export function createScan(S, AN, inset) {
         const u = sim.units.get(c.unitId); if (u) keys.add(u.def.model);
       }
       for (const u of sim.alive(game.enemy)) if (!u.aboard && u.def.domain !== 'air') keys.add(u.def.model);
-      sc.warm = [...keys].filter(k => !revCache.has(k));
+      sc.warm = [...keys].filter(k => !revCache.has(k) || needParts(k));
     }
     scans.push(sc);
     return sc;
@@ -131,7 +131,7 @@ export function createScan(S, AN, inset) {
     if (s) {
       it.strike = strikeOf(s);
       it.rev = revealOf(s, key);
-      it.parts = partsOf(u, s, it.rev);
+      it.parts = partsFor(u, s, it.rev);
       // is it big enough on screen now to read its parts in the world?
       const p = game.unitPose(u).pos;
       const zc = S.V.depth(p[0], p[1], p[2]);
@@ -175,6 +175,17 @@ export function createScan(S, AN, inset) {
     let r = revCache.get(key);
     if (!r) { r = revealFrom(s, strikeOf(s), 71 + key.length * 13, .62); revCache.set(key, r); }
     return r;
+  }
+  /* the part boxes of a model and type, built once (the charge builds them for what it may catch, so the hit never
+     waits: six hulls at ~1.5 ms each were a spike). Shared by every hull of that type: nothing per hull is kept on
+     them (partBox refits a moving part's box from the hull's own state right before it is drawn) */
+  const partsCache = new Map();
+  const needParts = key => sim.alive(game.enemy).some(u => u.def.model === key && !partsCache.has(key + '|' + u.type));
+  function partsFor(u, s, rev) {
+    const k = u.def.model + '|' + u.type;
+    let p = partsCache.get(k);
+    if (!p) { p = partsOf(u, s, rev); partsCache.set(k, p); }
+    return p;
   }
   /* the parts to box: anatomy placards whose parts the unit model has, then the sim's part labels; never the whole
      hull; in the order the tendrils reach them (p1: a part is boxed once most of its returns are in) */
@@ -234,7 +245,12 @@ export function createScan(S, AN, inset) {
       // the charge: warm what the scan will catch (tendril graphs, one model a frame; cutaways for the inset)
       if (sc.Ehit === null && sc.warm && sc.warm.length) {
         const key = sc.warm.shift();
-        const s = sampleOf(R, key); if (s) revealOf(s, key);
+        const s = sampleOf(R, key);
+        if (s) {
+          const rev = revealOf(s, key);
+          // and the part boxes of each type the other side has on that model
+          for (const u of sim.alive(game.enemy)) if (u.def.model === key && !partsCache.has(key + '|' + u.type)) partsFor(u, s, rev);
+        }
         if (inset) inset.warm(key);
       }
       if (sc.Ehit !== null && age > TF + 1.4 && !sc.frontOff) { sc.frontOff = true; if (sc.own && !S.inspecting && !frontBusy(sc)) R.setScan(0, null); }
@@ -742,7 +758,7 @@ export function createScan(S, AN, inset) {
   return {
     scans, owns, update, draw3d, draw2d, reticle3d, reticle2d,
     /* the tendril graph of a model, ahead of any scan (idle time) */
-    prewarm(key) { const s = sampleOf(R, key); if (s) revealOf(s, key); },
+    prewarm(key) { const s = sampleOf(R, key); if (s) { const rev = revealOf(s, key); for (const u of sim.alive(game.enemy)) if (u.def.model === key && !partsCache.has(key + '|' + u.type)) partsFor(u, s, rev); } },
     onEvent(e) {
       if (e.type !== 'scan') return;
       if (e.phase === 'start') start(e);

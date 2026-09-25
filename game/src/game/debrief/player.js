@@ -154,6 +154,9 @@ export async function createPlayer(game, ctx, role) {
     if (n) game.dispatchEvents();
     return n;
   }
+  /* the sim's share of a frame: what the frame leaves it (game.stepBudgetMs: the auto-quality guard sets it to what the
+     drawing leaves of the frame; 9 ms without it), so a heavy stretch runs a little behind instead of stuttering */
+  const simBudget = () => Math.max(4, game.stepBudgetMs || 9);
   function setAlpha() {
     const a = clamp(1 - (sim.t - F.simT) / DT, 0, 1);
     game.alpha = a; game.t = sim.t - DT * (1 - a);
@@ -481,13 +484,13 @@ export async function createPlayer(game, ctx, role) {
       const left = sh.ff * DT - sim.t;
       const want = Math.min(left, Math.max(64 * dt, left * dt / Math.max(dt, 2.2 - (sh.t - sh.dur))));
       F.simT = sim.t + want;
-      advance(F.simT, 11);
+      advance(F.simT, Math.min(11, simBudget()));
       F.simT = Math.min(F.simT, sim.t);
     } else {
       if (muted && !F.paused && rate <= 8) mute(false);
       F.simT = Math.max(F.simT, sim.t - DT) + rate * dt;
       if (sh.ff !== undefined) F.simT = Math.min(F.simT, sh.ff * DT);
-      advance(F.simT, 30);
+      advance(F.simT, simBudget());
       if (sim.t < F.simT - DT) F.simT = sim.t;
     }
     setAlpha();

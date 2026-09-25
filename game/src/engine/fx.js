@@ -172,6 +172,19 @@ export class FX {
   line(a, b, o) { this.path([a, b], o); }
   /* circle of radius r about c (horizontal); arc from bearing a0 to a1 (rad, clockwise from north) */
   arc(c, r, a0, a1, o) {
+    // a circle wholly outside the view draws nothing (its dots would all be clipped): skip its 360 segments of
+    // projections and ground heights (a sonar ring or a reach ring round a unit off screen cost ~0.07 ms each)
+    const fi = this.R.frameInfo, e = this.eye;
+    if (fi && fi.sphereVisible && e && r > 0) {
+      const T = this.R.terrain, lift = (o && o.lift) || 0;
+      let y0 = (c[1] || 0) + lift, y1 = y0;
+      if (o && o.drape && T && T.rangeOver) { const h = T.rangeOver(c[0] - r, c[2] - r, c[0] + r, c[2] + r); y0 = Math.max(0, h[0]) + lift; y1 = Math.max(0, h[1]) + lift + 40; }
+      const V = this._v || (this._v = [0, 0, 0]);
+      V[0] = c[0] - e[0]; V[1] = (y0 + y1) / 2 - e[1]; V[2] = c[2] - e[2];
+      // (the Earth's curvature drops the ring's far side more than its centre: that much more room)
+      const dh = Math.hypot(V[0], V[2]), drop = r * (2 * dh + r) / (2 * 6371000);
+      if (!fi.sphereVisible(V, Math.hypot(r, (y1 - y0) / 2) * 1.02 + 10 + drop)) return;
+    }
     const n = Math.max(24, Math.min(720, Math.ceil(Math.abs(a1 - a0) / (2 * Math.PI) * 360))), pts = [];
     for (let k = 0; k <= n; k++) { const a = a0 + (a1 - a0) * k / n; pts.push([c[0] + Math.sin(a) * r, c[1] || 0, c[2] + Math.cos(a) * r]); }
     this.path(pts, o);

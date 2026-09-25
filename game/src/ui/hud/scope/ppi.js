@@ -171,12 +171,20 @@ export function createPPI(game, hud) {
   }
 
   /* ---------------- cached layers ---------------- */
+  /* a layer afresh: resized only when its size changes (a canvas resize reallocates it through the GPU process, a
+     stall behind a busy GPU); the same size is cleared and its state reset in place */
+  function fresh(cv, w, h) {
+    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; return; }
+    const c = cv.getContext('2d');
+    if (c.reset) c.reset();
+    else { c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = 1; c.globalCompositeOperation = 'source-over'; c.filter = 'none'; c.clearRect(0, 0, w, h); }
+  }
   /* the compass ring of the display (rim, ticks, numbers), the range rings round the radar with their km */
   function rings() {
     const key = bw + '|' + bh + '|' + C.ri + '|' + pal.orb + '|' + rx + '|' + ry;
     if (key === ringKey) return;
     ringKey = key;
-    ringC.width = bw; ringC.height = bh;
+    fresh(ringC, bw, bh);
     const c = ringC.getContext('2d'), step = RING[C.ri] * 1000, RM = C.RM;
     c.clearRect(0, 0, bw, bh);
     c.lineCap = 'butt'; c.strokeStyle = pal.wh; c.fillStyle = pal.wh;
@@ -230,7 +238,7 @@ export function createPPI(game, hud) {
     const m = k / s, L = Rw * 1.25, N = Math.ceil(2 * L / m);
     const i0 = Math.floor((Dx - L) / m), j0 = Math.floor((Dz + L) / m);
     coastI0 = i0; coastJ0 = j0; coastN = N; coastM = m;
-    coastC.width = N; coastC.height = N;
+    fresh(coastC, N, N);
     const c = coastC.getContext('2d');
     if (lines) {
       // the Orbital style: the engine's coast polylines as a hairline
@@ -286,7 +294,7 @@ export function createPPI(game, hud) {
     const R = Math.ceil(rho * (1 + C.off)) + 2, key = R + '|' + pal.orb;
     if (key === wedgeKey) return;
     wedgeKey = key; wedgeR = R;
-    wedgeC.width = wedgeC.height = 2 * R;
+    fresh(wedgeC, 2 * R, 2 * R);
     const c = wedgeC.getContext('2d'), WW = .85, f = WW / TAU;
     const g = c.createConicGradient(-Math.PI / 2 - WW, R, R);
     for (let j = 0; j <= 12; j++) { const t = j / 12; g.addColorStop(f * t, `rgba(${pal.rgb},${(pal.wedge * Math.pow(t, 3)).toFixed(4)})`); }
@@ -342,7 +350,12 @@ export function createPPI(game, hud) {
   let pctx = null, phKey = '', phPh = 0, phValid = false, phFast = -1, phAcc = 0;
   function phosphor() {
     const key = bw + '|' + bh + '|' + clKey + '|' + pal.orb;
-    if (key !== phKey || !pctx) { phKey = key; phC.width = bw; phC.height = bh; pctx = phC.getContext('2d'); phValid = false; }
+    if (key !== phKey || !pctx) {
+      // a new size reallocates the layer; a new clutter field (the radar moved) or palette only starts it afresh: a
+      // canvas resize goes through the GPU process, and a moving radar changed the key every few seconds
+      fresh(phC, bw, bh); if (!pctx) pctx = phC.getContext('2d');
+      phKey = key; phValid = false;
+    }
     if (C.fast) { if (!phValid || phFast !== fastN) { phFast = fastN; repaint(); } return; }
     const dA = C.ph - phPh;
     if (!phValid || phFast >= 0 || dA < 0 || dA >= TAU) { phFast = -1; repaint(); return; }

@@ -18,13 +18,18 @@ export const STAGE = {
   damaged: { id: 7, cap: 16, dens: .6, B: .45, tau: 10, life: 22, spr: .9, ds: 3, v0: 0, kd: 1, rise: .4, hot: .3, col: 1 },  // a hit aircraft trailing smoke
   kh:      { id: 8, cap: 32, dens: .85, B: .72, tau: 15, life: 48, spr: 1.25, ds: .6, v0: 30, kd: 2.6, rise: .4, hot: 1.2, col: 1 },  // Kh-35U booster: a short solid motor, 2 s
   fan:     { id: 9, cap: 2, dens: .3, B: .14, tau: 1.5, life: 4, spr: .28, ds: 7, v0: 0, kd: 1, rise: 0, hot: 0, col: 0 },       // turbofans (Kh-35U, Kalibr cruise): a faint thread
+  brand:   { id: 10, cap: 7, dens: .5, B: .5, tau: 4, life: 11, spr: .4, ds: 2.2, v0: 0, kd: 1, rise: .35, hot: .5, col: 1 },     // a burning fragment (game/debris.js): a thin thread
 };
 const BY_ID = Object.values(STAGE).sort((a, b) => a.id - b.id);
 const S = 12;  // record stride: birth, x, y, z, vx, vy, vz, stage, k, ground under it at birth, spacing, path length
 
 export class Trail {
   constructor(cap, seed, ground) {
-    this.cap = cap || 4096; this.R = new Float32Array(this.cap * S); this.ground = ground || null;
+    // the records grow (doubling, before the ring first wraps) up to cap: most trails are short, and a salvo's
+    // hundred rounds must not allocate megabytes at their launch (a garbage-collector pause at x32)
+    this.cap = cap || 4096; this.size = Math.min(this.cap, 256); this.R = new Float32Array(this.size * S); this.ground = ground || null;
+    // per slot: the puff number (k) that began its run of one stage (draw skips a dead run in one step)
+    this.RK = new Int32Array(this.size); this.runSt = -1; this.runK = 0;
     this.n = 0; this.head = 0; this.k = 0; this.seed = (seed | 0) * 7919;
     this.lx = NaN; this.ly = 0; this.lz = 0; this.lt = 0; this.carry = 0; this.len = 0;
     this.last = -1e9; this.maxLife = 0; this.t0 = 0; this.cx = 0; this.cy = 0; this.cz = 0; this.rad = 0; this.bk = 0;
@@ -40,17 +45,27 @@ export class Trail {
     this.len += L;
     let s = ds - this.carry;
     while (s <= L) {
+      if (this.head >= this.size) this.grow();
       const f = s / L, i = this.head, o = i * S, R = this.R, k = this.k++;
       const j = (this.seed + k * 3) & GM, v0 = st.v0 * (.8 + .5 * hsh(k, this.seed));
       R[o] = this.lt + dt * f; R[o + 1] = this.lx + dx * f; R[o + 2] = this.ly + dy * f; R[o + 3] = this.lz + dz * f;
       R[o + 4] = -ax * v0 + GT[j] * v0 * .12; R[o + 5] = -ay * v0 + GT[(j + 1) & GM] * v0 * .12; R[o + 6] = -az * v0 + GT[(j + 2) & GM] * v0 * .12;
       R[o + 7] = st.id; R[o + 8] = k; R[o + 9] = this.ground ? this.ground(R[o + 1], R[o + 3]) : 0; R[o + 10] = ds; R[o + 11] = this.len - L + s;
+      if (st.id !== this.runSt) { this.runSt = st.id; this.runK = k; }
+      this.RK[i] = this.runK;
       this.head = (i + 1) % this.cap; if (this.n < this.cap) this.n++;
       s += ds;
     }
     this.carry = L - (s - ds);
     this.lx = x; this.ly = y; this.lz = z; this.lt = t;
     this.last = t; if (st.life > this.maxLife) this.maxLife = st.life;
+  }
+  /* twice the room (up to cap); only before the ring has wrapped, so the records stay in order at the front */
+  grow() {
+    const size = Math.min(this.cap, this.size * 2);
+    const R = new Float32Array(size * S); R.set(this.R);
+    const RK = new Int32Array(size); RK.set(this.RK);
+    this.R = R; this.RK = RK; this.size = size;
   }
   /* nothing left to draw at time t */
   done(t) { return t - this.last > this.maxLife + 1; }
@@ -62,19 +77,24 @@ export class Trail {
     this.cx = (mnx + mxx) / 2; this.cy = (mny + mxy) / 2; this.cz = (mnz + mxz) / 2; this.rad = Math.hypot(mxx - mnx, mxy - mny, mxz - mnz) / 2 + 200;
   }
   draw(C, k) {
-    const t = C.t, R = this.R, V = C.V, dot = C.dot, n = this.n, cap = this.cap, q = C.q;
-    if (!n || t - this.last > this.maxLife) return;
+    const t = C.t, R = this.R, V = C.V, dot = C.dot, n = this.n, cap = this.cap, q = C.q, qi = C.qi === undefined ? 1 : C.qi;
+    if (!n || t - this.last > this.maxLife || C.n >= C.cap) return;
     if (this.k - this.bk >= 16 || this.rad === 0) { this.bounds(); this.bk = this.k; }
     if (!V.vis(this.cx, this.cy, this.cz, this.rad)) return;
     const wx = C.wind[0], wz = C.wind[2], wsp = Math.hypot(wx, wz), e = V.eye, f = V.f, fl = V.fl, near = V.near;
     k = k === undefined ? 1 : k;
     // newest first: the hot head is never the part a budget cuts
     for (let c = 0; c < n; c++) {
+      if (C.n >= C.cap) return;               // the frame's dot budget is spent: nothing more of it would draw
       const i = (this.head - 1 - c + cap) % cap, o = i * S, birth = R[o], age = t - birth;
       if (age < 0) continue;
       const st = BY_ID[R[o + 7]];
-      if (age > st.life) continue;
       const kk = R[o + 8];
+      // past its life: so is every older puff of its run (same stage, laid earlier): skip the run at once
+      if (age > st.life) { c += kk - this.RK[i]; continue; }
+      // the auto-quality guard's effects step (C.qi < 1, game/perfguard.js; 1 at full quality): a share of the older
+      // puffs is left out before any of their maths (the smoke's cost is its puff count), the hot head never
+      if (qi < 1 && c > 40 && (Math.imul(kk | 0, 0x9E3779B1) >>> 0) > qi * 4294967296) continue;
       if (st.col === 2) {
         // ramjet: the lime line of air behind the round
         const px = R[o + 1], py = R[o + 2], pz = R[o + 3], zc = (px - e[0]) * f[0] + (py - e[1]) * f[1] + (pz - e[2]) * f[2];

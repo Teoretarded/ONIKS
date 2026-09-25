@@ -32,28 +32,39 @@ export class TracerStream {
     this.n = Math.max(1, Math.floor((this.a1 - this.a0) * g.rate)) * g.rounds;
     this.life = this.a1 + g.burn + 1.5;
     this.TL = g.v0 / g.kd;
+    // per round, filled on first use: the stream's wander (two noise lookups, the same every frame) and whether the
+    // round is over for good (ended on the target, or its splash has faded): the loop skips those at once
+    this.W = null; this.over = null;
   }
   get durAll() { return this.life; }
   /* the gun is firing now (for the muzzle and the mount's light) */
   firing(age) { return age >= 0 && age <= this.a1; }
   draw(C, age) {
-    if (age > this.life) return;
+    if (age > this.life || C.n >= C.cap) return;
     const g = this.g, V = C.V, dot = C.dot, M = this.mz, D = this.D, B = this.B, TL = this.TL;
     const mid = [M[0] + D[0] * this.R * .5, M[1] + D[1] * this.R * .5, M[2] + D[2] * this.R * .5];
     if (!V.vis(mid[0], mid[1], mid[2], this.R * .7 + 60)) return;
     const q = C.q, rounds = g.rounds;
+    if (!this.W) { this.W = new Float64Array(this.n * 2).fill(NaN); this.over = new Uint8Array(this.n); this.lastAge = age; }
+    if (age < this.lastAge) this.over.fill(0);          // time went back (a scrub): every round may show again
+    this.lastAge = age;
+    const W = this.W, over = this.over;
     for (let i = 0; i < this.n; i++) {
+      if (over[i]) continue;
+      if (C.n >= C.cap) return;             // the frame's dot budget is spent (dot and glow draw nothing more)
       const gun = i % rounds, j = Math.floor(i / rounds), tk = this.a0 + j / g.rate + gun * .004, a = age - tk;
       if (a < 0) break;
       if (q < 1 && hsh(i, 3) > q + .1) continue;
       // the stream walks onto the round from short, then wanders a little round it
-      const walk = .004 * Math.exp(-(tk - this.a0) / .4), wx = .0011 * noise(tk * 1.7, 3.3, this.seed), wy = .0011 * noise(tk * 1.9, 8.1, this.seed);
+      if (W[i * 2] !== W[i * 2]) { W[i * 2] = .0011 * noise(tk * 1.7, 3.3, this.seed); W[i * 2 + 1] = .0011 * noise(tk * 1.9, 8.1, this.seed); }
+      const walk = .004 * Math.exp(-(tk - this.a0) / .4), wx = W[i * 2], wy = W[i * 2 + 1];
       const ex = GT[(i * 2 + this.seed) & GM] * g.disp + wx, ey = GT[(i * 2 + 1 + this.seed) & GM] * g.disp + wy - walk;
       const dx = D[0] + B[0] * ex + B[3] * ey, dy = D[1] + B[1] * ex + B[4] * ey, dz = D[2] + B[2] * ex + B[5] * ey;
       const off = rounds > 1 ? (gun ? 1 : -1) * g.sep : 0;
       const mx = M[0] + this.side[0] * off, my = M[1] + this.side[1] * off, mz = M[2] + this.side[2] * off;
       // about half the rounds that reach the round end there (they read as strikes); the rest fly on
       const endHit = this.hit && tk + this.tof <= .05 && hsh(i, 9) < .5 ? this.tof : 99;
+      if (endHit < 50 && a >= endHit) { over[i] = 1; continue; }     // it ended on the round: nothing more of it
       const ex2 = Math.exp(-g.kd * a), h = TL * (1 - ex2), v = g.v0 * ex2;
       const y = my + dy * h - G2 * a * a;
       if (a < endHit && y > this.gy) {
@@ -69,7 +80,7 @@ export class TracerStream {
         for (let m = 1; m <= nt; m++) { const d = .0228 * m / nt; dot(x - vx * d, y - vy * d, z - vz * d, zc < 1500 ? 2 : 1, LIME[0], LIME[1], LIME[2], al * (1 - .85 * m / (nt + 1))); }
       } else if (y <= this.gy && endHit > 50) {
         // into the sea: a little white splash
-        const aw = this.landAge(i, a, dy, my), w = a - aw; if (w < 0 || w > .9) continue;
+        const aw = this.landAge(i, a, dy, my), w = a - aw; if (w > .9) over[i] = 1; if (w < 0 || w > .9) continue;
         const hw = TL * (1 - Math.exp(-g.kd * aw)), x = mx + dx * hw, z = mz + dz * hw, al = .7 * (1 - w / .9), rn = hsh(i, 5);
         for (let m = 0; m < 3; m++) { const vs = 2.5 + m * 2 + rn * 2, yy = vs * w - G2 * w * w; if (yy > 0) dot(x + (m - 1) * .3, this.gy + yy, z, 1, WH[0], WH[1], WH[2], al); }
       }
