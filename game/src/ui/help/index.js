@@ -220,8 +220,6 @@ export function createHelp(game) {
     if ((!key || key === 'autoSlow') && s.autoSlow !== undefined && !!s.autoSlow !== game.autoSlow) game.setAutoSlow(!!s.autoSlow);
   }
   const offSettings = onSettings(apply);
-  // the pause menu's Auto x1 row (game.setAutoSlow) saves through the settings as well
-  const offAuto = game.bus.on('autoslow_setting', on => { if (getSettings().autoSlow !== on) setSetting('autoSlow', on); });
 
   const onResize = () => { fit(helpEl); fit(setEl); };
   addEventListener('resize', onResize);
@@ -230,11 +228,6 @@ export function createHelp(game) {
     name: 'help', priority: PRI_HELP, always2d: true,
     get active() { return open || !!setOpen; },
     open: toggle, openSettings, closeSettings,
-    init() {
-      // the stored auto x1 wins over the game's old key (they agree after the first change)
-      const s = getSettings();
-      if (s.autoSlow !== undefined && !!s.autoSlow !== game.autoSlow) game.setAutoSlow(!!s.autoSlow);
-    },
     onKey(e) {
       const down = e.type === 'keydown';
       if (setOpen) {
@@ -273,7 +266,7 @@ export function createHelp(game) {
       if (hide !== chipEl.classList.contains('off')) chipEl.classList.toggle('off', hide);
     },
     dispose() {
-      offSettings(); offAuto(); removeEventListener('resize', onResize);
+      offSettings(); removeEventListener('resize', onResize);
       [helpEl, setEl, chipEl].forEach(el => el && el.remove());
       document.body.classList.remove('oniks-helping');
     },
