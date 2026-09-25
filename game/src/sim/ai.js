@@ -30,7 +30,7 @@ import { nearestDepot } from './orders.js';
 export const LEVELS = {
   easy: { every: 100, drones: 1, salvo: 2, cvn: 5, ddg: 3, firm: 0, fresh: 30, wait: 150, press: 1800, open: 600, dodge: false, buyK: 1.6, scanP: .4, relocate: 0, helos: 1, cap: 1, strikeK: 0, pushT: 2400, emcon: false, ddgEmcon: false },
   normal: { every: 40, drones: 2, salvo: 4, cvn: 8, ddg: 4, firm: 2, fresh: 60, wait: 60, press: 600, open: 300, dodge: true, buyK: 1.0, scanP: .9, relocate: .7, helos: 2, cap: 1, strikeK: 1, pushT: 1500, emcon: true, ddgEmcon: true },
-  hard: { every: 20, drones: 3, salvo: 6, cvn: 10, ddg: 5, firm: 3, fresh: 90, wait: 30, press: 300, open: 0, dodge: true, buyK: 1.0, scanP: 1, relocate: 1, helos: 2, cap: 2, strikeK: 2, pushT: 1000, emcon: true, ddgEmcon: true },
+  hard: { every: 20, drones: 3, salvo: 6, cvn: 10, ddg: 5, firm: 3, fresh: 90, wait: 30, press: 300, open: 180, dodge: true, buyK: 1.0, scanP: 1, relocate: 1, helos: 2, cap: 2, strikeK: 2, pushT: 1000, emcon: true, ddgEmcon: true },
 };
 const PRIO_LAND = { HQ: 10, TEL: 8, RADAR: 6, SAM: 5, TLV: 4, 'UAV-L': 3 };
 
