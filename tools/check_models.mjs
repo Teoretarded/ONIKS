@@ -8,7 +8,8 @@
      - ANATOMY: validateAnatomy passes for every entry (every model part in exactly one entry), the X-ray models exist
    The film kit (classic scripts setting window.M3 / GEO / HD) is evaluated with vm into this global scope, whose
    `window` is the global itself.
-   Usage: node tools/check_models.mjs [key ...]      (no keys: every model)   --all-sizes  also fail on MODEL_INFO
+   Usage: node tools/check_models.mjs [key ...]      (no keys: every model)   --boxes key ...  print sim/bodies.js BOX
+   lines for those models   --all-sizes  also fail on MODEL_INFO
    size mismatches and budget overruns of the older models (reported as warnings by default). Exit code 0 when nothing failed. */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -75,6 +76,34 @@ function sampleModel(model, s, st, fine, forBox) {
   return { n, nan, box: mn[0] <= mx[0] ? [mn, mx] : null };
 }
 const f1 = v => v.toFixed(1), f2 = v => v.toFixed(2);
+
+/* --boxes key ...: print sim/bodies.js BOX lines (part bounds at the default state: primitive points, lathe
+   stations ± their radius, part.xf applied; rounded to cm) and exit */
+if (argv.includes('--boxes')) {
+  const r2 = v => Math.round(v * 100) / 100;
+  for (const key of ONLY) {
+    const m = makeModel(key), st = defaultState(key), rows = [];
+    for (const p of m.parts) {
+      if (p.inside) continue;
+      // exact extents: every primitive point (a lathe's station circles: r·√(1 − d_k²) along each axis) through xf
+      const T = p.xf ? p.xf(st) : null, mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
+      const add = q0 => { const q = T ? X.ap(T, q0) : q0; for (let k = 0; k < 3; k++) { mn[k] = Math.min(mn[k], q[k]); mx[k] = Math.max(mx[k], q[k]); } };
+      for (const pr of GEO.primsOf(p, st)) {
+        if (pr.t === 'line' || pr.pts === false) continue;
+        if (pr.t === 'hex' || pr.t === 'panel') pr.p.forEach(add);
+        else if (pr.t === 'blades') GEO.bladeQuads(pr).forEach(q => q.forEach(add));
+        else if (pr.t === 'lathe') {
+          const [U, W] = GEO.perp(pr.d);
+          for (const [sv, r] of pr.st) { const c = [pr.a[0] + pr.d[0] * sv, pr.a[1] + pr.d[1] * sv, pr.a[2] + pr.d[2] * sv]; for (let j = 0; j < 16; j++) { const th = j / 16 * Math.PI * 2, cs = Math.cos(th) * r, sn = Math.sin(th) * r; add([c[0] + U[0] * cs + W[0] * sn, c[1] + U[1] * cs + W[1] * sn, c[2] + U[2] * cs + W[2] * sn]); } }
+        }
+      }
+      if (!(mn[0] <= mx[0])) continue;
+      rows.push(`['${p.name}', ${[...mn, ...mx].map(r2).join(', ')}]`);
+    }
+    console.log(`  ${key}: [${rows.join(', ')}],`);
+  }
+  process.exit(0);
+}
 
 /* ---------------------------------------------------------------- models */
 const keys = Object.keys(ALL_MODELS).filter(k => typeof ALL_MODELS[k] === 'function' && (!ONLY.length || ONLY.includes(k) || REFS.includes(k)));

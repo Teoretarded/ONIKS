@@ -47,7 +47,7 @@ export function topH(e) {
   if (e.def.domain === 'air') return e.pos[1];
   if (e.def.sub) return mastTop(e);
   if (e.dying > 0) return e.pos[1] + e.def.top * (1 - e.dying);
-  return e.pos[1] + (e.type === 'tel' && e.elev > .3 ? e.def.topErect : e.def.top);
+  return e.pos[1] + ((e.type === 'tel' || e.type === 's400') && e.elev > .3 ? e.def.topErect : e.def.top);
 }
 
 export function radarWorks(u) {

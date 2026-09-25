@@ -260,6 +260,92 @@ export const UNITS = {
     modelState(u, t) { const s = u.st; s.mast = u.mastUp; s.prop = wrap((u.propA || 0)); return s; },
   },
 
+  /* the third wave (data/models_units3.js): the S-400 pair and the Bereg gun */
+  s400: {
+    type: 's400', side: 'coast', name: '5P85SM2-01', cls: 'SAM', label: 'S-400 · 5P85SM2-01 launcher',
+    domain: 'land', model: 's400',
+    size: [16.5, 3.2, 3.9], top: 3.9, topErect: 10,
+    speed: 7, road: 16.7, turn: .4, accel: 1.0, slopeMax: .35,
+    hp: 28, rcs: 0.5, dieTime: 20,
+    deploy: { jacks: 12, erect: 18, elev: Math.PI / 2 },          // ~30 s from driving to containers vertical
+    // the container mouths when vertical (models_units3.js S400.mouth(k, π/2)), in the firing order: outboard first
+    tubes: [[-1.14, 9.5, -8.65], [1.14, 9.5, -8.65], [-.38, 9.5, -8.65], [.38, 9.5, -8.65]],
+    depotRefill: true,                                            // restocks at a depot / the spawn, like the Pantsir
+    sensors: {},
+    weapons: {
+      // cued by a radiating 92N6E of its side within cue.r; long reach against aircraft only
+      sam48: { proj: 'sam48', ammo: 4, range: 70000, min: 3000, cd: 3.0, vs: ['air'], auto: true, maxEng: 1, maxShots: 2,
+               needs: 'erect', cue: { type: 's400r', r: 40000 }, refill: 60 },
+    },
+    cost: 480, buildTime: 120,
+    parts: {
+      tractor: { label: 'BAZ-64022 tractor', w: 1.5, slow: .6 },
+      chassis: { label: 'Semi-trailer', w: 2.5, slow: .6 },
+      wheelsT: { label: 'Tractor wheels', w: 1, disables: ['move'] },
+      wheelsS: { label: 'Trailer wheels', w: 1, slow: .5 },
+      cabin: { label: 'Equipment cabin', w: 1.2, disables: ['sam48'] },
+      pack: { label: '48N6 containers ×4', w: 2, lose: { sam48: .5 }, disables: ['reload'] },
+      ram: { label: 'Erector ram', w: .8, disables: ['sam48'] },
+      jacks: { label: 'Outriggers', w: .8, disables: ['deploy', 'sam48'] },
+    },
+    modelState(u, t) { const s = u.st; s.elev = u.elev; s.dep = u.dep; s.n = u.ammo.sam48; s.wheel = wrap(u.odo / .66); return s; },
+  },
+
+  s400r: {
+    type: 's400r', side: 'coast', name: '92N6E', cls: 'RADAR', label: 'S-400 · 92N6E engagement radar',
+    domain: 'land', model: 's400r',
+    size: [13.8, 3.2, 4.0], top: 8,
+    speed: 8, road: 16.7, turn: .45, accel: 1.2, slopeMax: .4,
+    hp: 25, rcs: 0.5, dieTime: 20,
+    mast: { time: 20, h: 6.3 },                                   // raise the array before radiating
+    sensors: { radar: { surf: 0, air: 90000, land: 0, period: 2, gain: .2, h: 6.3, needsMast: true } },
+    emits: { range: 140000 },
+    weapons: {},
+    cost: 380, buildTime: 120,
+    parts: {
+      chassis: { label: 'MZKT-7930 · 8×8', w: 3, slow: .6 },
+      wheelsL: { label: 'Wheels ×4 · L', w: 1, disables: ['move'] },
+      wheelsR: { label: 'Wheels ×4 · R', w: 1, disables: ['move'] },
+      cab: { label: 'Cab', w: 1, slow: .7 },
+      shelter: { label: 'Equipment shelter', w: 2, disables: ['radar'] },
+      pedestal: { label: 'Antenna pedestal', w: 1, disables: ['radar'] },
+      array: { label: '92N6E phased array', w: 1.2, disables: ['radar'] },
+    },
+    // the array turns only raised (models_units3.js: it swings to the bearing over the last of the raise)
+    modelState(u, t) { const s = u.st; s.mast = u.mast; s.ant = antAt(u, t); s.wheel = wrap(u.odo / .66); return s; },
+  },
+
+  bereg: {
+    type: 'bereg', side: 'coast', name: 'A-222', cls: 'GUN', label: 'A-222 Bereg · 130 mm coastal gun',
+    domain: 'land', model: 'bereg',
+    size: [11.8, 3.1, 3.5], top: 3.5,
+    speed: 9, road: 16.7, turn: .45, accel: 1.2, slopeMax: .4,
+    hp: 32, rcs: 0.5, dieTime: 20,
+    turret: true,                                                 // the turret slews to the last aim bearing (sim/mech.js)
+    sensors: { radar: { surf: 26000, air: 0, land: 0, period: 2, gain: .2, h: 4 } },   // its fire-control radar
+    emits: { range: 50000 },
+    depotRefill: true,
+    weapons: {
+      gun130: { proj: 'shell130', ammo: 40, range: 20000, min: 800, cd: 5.0, vs: ['sea'], salvo: 4, muzzle: [0, 2.6, 6.0],
+                prefer: ['LCAC', 'LHD'], refill: 5 },
+    },
+    cost: 300, buildTime: 90,
+    parts: {
+      chassis: { label: 'MAZ-543M · 8×8', w: 3, slow: .6 },
+      wheelsL: { label: 'Wheels ×4 · L', w: 1, disables: ['move'] },
+      wheelsR: { label: 'Wheels ×4 · R', w: 1, disables: ['move'] },
+      cabs: { label: 'Cabs ×2', w: 1, slow: .7 },
+      body: { label: 'Fire-control compartment', w: 1.5, disables: ['radar'] },
+      turret: { label: 'Turret', w: 2, disables: ['gun130'] },
+      gun: { label: '130 mm gun', w: 1, disables: ['gun130'] },
+      jacks: { label: 'Hydraulic jacks', w: .5 },
+    },
+    modelState(u, t) {
+      const s = u.st, f = t - u.fireT; s.yaw = u.tYaw; s.pitch = u.tPitch; s.fire = f >= 0 && f < .6 ? 1 - f / .6 : 0;
+      s.dep = t - u.lastFire < 30 ? 1 : 0; s.wheel = wrap(u.odo / .75); return s;
+    },
+  },
+
   /* ------------------------------------------------------------------ FLEET */
   carrier: {
     type: 'carrier', side: 'fleet', name: 'CVN-68', cls: 'CVN', label: 'Nimitz · CVN',
@@ -464,6 +550,104 @@ export const UNITS = {
       return s;
     },
   },
+  /* the third wave: the Aegis cruiser and the littoral combat ship */
+  cg: {
+    type: 'cg', side: 'fleet', name: 'CG-47', cls: 'CG', label: 'Ticonderoga · CG',
+    domain: 'sea', model: 'cg', turret: true,
+    size: [172.8, 16.8, 40.5], top: 40, draught: 9.5,
+    speed: 32.5 * KN, turn: .026, accel: .14,
+    hp: 125, rcs: 1.1, dieTime: 60,
+    sensors: { radar: { surf: 45000, air: 120000, land: .3, period: 1, gain: .1, h: 21 }, sonar: { sub: 11000, ship: 0, gain: .12, hull: true } },
+    emits: { range: 160000 },
+    scan: { reach: 60000, r: 4000, cd: 90 },
+    air: { cap: 2, launchGap: 30, deckY: 6.0, types: ['helo'], spot: [0, 6.0, -46], park: [[0, 6.0, -46], [0, 6.0, -30]] },   // twin hangars
+    // air-defence heavy: more SM-6 and quad-packed ESSM than a DDG, fewer strike rounds (122 Mk 41 cells)
+    weapons: {
+      sm6: { proj: 'sm6', ammo: 48, range: 60000, airRange: 35000, min: 2000, cd: .8, vs: ['missile', 'air'], auto: true, maxEng: 2, maxShots: 2, needsRadar: true,
+             vls: true, refill: 20 },
+      pdms: { proj: 'pdms', ammo: 32, range: 15000, min: 1000, cd: 1.5, vs: ['missile', 'air'], auto: true, maxEng: 2, maxShots: 3, needsRadar: true,
+              vls: true, refill: 20 },
+      strike: { proj: 'tlam', ammo: 4, range: 120000, min: 10000, cd: 2.0, vs: ['land'], salvo: 2, vls: true, refill: 30 },
+      gun5: { proj: 'shell', ammo: 600, range: 24000, min: 1500, cd: 2.0, vs: ['land', 'sea'], salvo: 6, muzzle: [0, 8.9, 70], refill: 2 },   // Mk 45 ×2
+      ciws: { gun: true, ammo: 40, range: 2000, cd: 1.0, vs: ['missile', 'air'], auto: true, mounts: ['ciwsF', 'ciwsA'],
+              mountAt: [[3.9, 17.6, 22.2], [-4.7, 13.5, -32.6]], pk: { missile: .12, air: .3 }, dmg: 4, burst: .9, refill: 8 },
+      svtt: { proj: 'mk54', ammo: 6, range: 8000, min: 500, cd: 6, vs: ['sub'], salvo: 1, muzzle: [6.6, 7.2, -9.5], refill: 30 },
+    },
+    // Mk 41 cell tops (ship frame; models_units3.js CG.cell): 61 forward (ids 0..60), 61 aft (61..121); the crane
+    // module has 5 cells
+    vlsAt: (() => {
+      const out = [], deck = z => { const u = z / 86.4; return 6.1 + .45 * u + 3.1 * Math.pow(Math.max(0, (u - .25) / .75), 2); };
+      for (const zc of [51, -61]) for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
+        if (c === 0 && r < 3) continue;
+        out.push([(-3 + 2 * (c >> 1)) * 1.05 + (c & 1 ? .72 : -.72), deck(zc) + .1, zc + (3.5 - r) * .85]);
+      }
+      return out;
+    })(),
+    cost: 1600, buildTime: 270,
+    parts: {
+      hull: { label: 'Hull', w: 5, slow: .7 },
+      houseF: { label: 'Forward deckhouse · bridge', w: 2 },
+      houseA: { label: 'Aft deckhouse', w: 1.5 },
+      houseM: { label: 'Midships deckhouse', w: .8 },
+      spy: { label: 'AN/SPY-1B ×4', w: 2, disables: ['radar', 'sm6', 'pdms'] },
+      stacks: { label: 'Funnels · LM2500', w: 1, slow: .5 },
+      mastF: { label: 'Foremast', w: .6, disables: ['scan'] },
+      mastM: { label: 'Main mast', w: .5 },
+      sps: { label: 'AN/SPS-49', w: .5 },
+      gunF: { label: 'Mk 45 5"/54 · fwd', w: .8, disables: ['gun5'] },
+      gunA: { label: 'Mk 45 5"/54 · aft', w: .8 },
+      vlsF: { label: 'Mk 41 VLS · 61 cells fwd', w: 1.2, lose: { sm6: .5, pdms: .5, strike: .5 } },
+      vlsA: { label: 'Mk 41 VLS · 61 cells aft', w: 1.2, lose: { sm6: .5, pdms: .5, strike: .5 } },
+      ciwsF: { label: 'Phalanx 1B · stbd', w: .6, disables: ['ciwsF'] },
+      ciwsA: { label: 'Phalanx 1B · port', w: .6, disables: ['ciwsA'] },
+      harpoon: { label: 'Harpoon launchers', w: .5 },
+      hangar: { label: 'Hangars', w: 1, disables: ['air'] },
+      arms: { label: 'Mk 32 SVTT', w: .3, disables: ['svtt'] },
+      boats: { label: 'RHIB', w: .3 },
+    },
+    modelState(u, t) {
+      const s = u.st; s.radar = spin(u, t, TAU / 10); s.gunYaw = u.tYaw; s.gunPitch = u.tPitch;
+      const aftOk = Math.abs(wrap(u.tYaw + Math.PI) - Math.PI) > 1.2;   // the aft gun follows targets abaft the beam
+      s.gunYawA = t - u.lastFire < 12 && aftOk ? u.tYaw : Math.PI; s.gunPitchA = s.gunYawA === Math.PI ? 0 : u.tPitch;
+      if (!s.ciwsYaw) { s.ciwsYaw = [0, Math.PI]; s.ciwsPitch = [.35, .35]; }
+      s.ciwsYaw[0] = u.cYaw[0]; s.ciwsYaw[1] = u.cYaw[1]; s.ciwsPitch[0] = u.cPitch[0]; s.ciwsPitch[1] = u.cPitch[1];
+      s.ciwsSpin = u.cSpin; s.vlsOpen = u.vlsOpen; return s;
+    },
+  },
+
+  lcs: {
+    type: 'lcs', side: 'fleet', name: 'LCS-2', cls: 'LCS', label: 'Independence · LCS',
+    domain: 'sea', model: 'lcs', turret: true,
+    size: [127.4, 31.6, 32], top: 32, draught: 4.5,
+    speed: 44 * KN, turn: .05, accel: .35,                        // 44 kn: the fleet's scout
+    hp: 60, rcs: .7, dieTime: 45,
+    sensors: { radar: { surf: 40000, air: 60000, land: .3, period: 1, gain: .12, h: 30 }, camera: { range: 12000, gain: .3 } },
+    emits: { range: 90000 },
+    scan: { reach: 45000, r: 4000, cd: 90 },
+    air: { cap: 1, launchGap: 30, deckY: 9.2, types: ['helo'], spot: [0, 9.2, -36.5], park: [[0, 9.2, -36.5]] },
+    weapons: {
+      gun57: { proj: 'shell57', ammo: 400, range: 12000, min: 300, cd: 1.5, vs: ['sea', 'land'], salvo: 8, muzzle: [0, 10.7, 44.8],
+               prefer: ['LCAC', 'SSK'], refill: 2 },
+      searam: { proj: 'ram', ammo: 11, range: 8000, min: 500, cd: 1.5, vs: ['missile', 'air'], auto: true, maxEng: 2, maxShots: 2, needsRadar: true,
+                muzzle: [0, 17.2, -22.8], refill: 20 },
+    },
+    cost: 700, buildTime: 180,
+    parts: {
+      hull: { label: 'Main hull', w: 3, slow: .6 },
+      cross: { label: 'Cross-structure · flight deck', w: 3, disables: ['air'] },
+      outriggers: { label: 'Outriggers', w: 1, slow: .7 },
+      bridge: { label: 'Bridge · integrated mast', w: 2, disables: ['scan'] },
+      hangar: { label: 'Hangar', w: 1.5, disables: ['air'] },
+      radar: { label: 'Sea Giraffe AMB', w: .6, disables: ['radar', 'searam'] },
+      gun: { label: 'Mk 110 57 mm', w: .8, disables: ['gun57'] },
+      searam: { label: 'SeaRAM', w: .6, disables: ['searam'] },
+      jets: { label: 'Waterjets ×4', w: .8, slow: .4 },
+    },
+    modelState(u, t) {
+      const s = u.st; s.radar = spin(u, t, TAU / 2); s.gunYaw = u.tYaw; s.gunPitch = u.tPitch;
+      s.ramYaw = t - u.fireT < 8 && u.aimB !== null ? wrap(u.aimB - u.hdg) : Math.PI; return s;
+    },
+  },
 };
 
 /* Projectiles and gun rounds (kind -> stats). mode: 'cruise' holds an altitude profile and flies to the
@@ -496,6 +680,13 @@ export const PROJ = {
   kalibr: { name: '3M-54 Kalibr', cls: 'ASCM', model: 'kalibr', boosterModel: null, mode: 'cruise', threat: true, speed: 280, dmg: 55, pk: .85, reach: 4000,
             rcs: .15, vert: 1.6, v0: 25, boost: 5, sepAt: 5, alt: 30, seaAlt: 15, pitchMax: .5, pitchRate: .35, turn: .2,
             finalDist: 20000, finalAlt: 8 },
+  /* the third wave's rounds (closed shells; data/models_units3.js) */
+  sam48: { name: '48N6E3', cls: 'SAM', model: 's400_msl', mode: 'direct', speed: 1400, dmg: 16, pk: { air: .8, missile: .1 },
+           vert: 1.2, v0: 30, boost: 8, turn: .3, pitchRate: .3, body: [7.5, .52, 1835] },
+  ram: { name: 'RIM-116 RAM', cls: 'SAM', model: 'rim116', mode: 'direct', speed: 700, dmg: 8, pk: { missile: .3, air: .6 },
+         vert: 0, v0: 40, boost: 2.5, turn: .7, pitchRate: .7, body: [2.79, .13, 74] },
+  shell130: { name: '130 mm round', cls: 'SHELL', model: 'shell130', mode: 'ballistic', speed: 850, dmg: 8, pk: 1, sigma: 35 },
+  shell57: { name: '57 mm round', cls: 'SHELL', model: 'shell57', mode: 'ballistic', speed: 1000, dmg: 2.5, pk: 1, sigma: 18 },
   /* torpedoes run under water (not drawn; heard by sonar): mode 'run' holds a depth and closes on the target once it
      is near the aim point (reach). drop: released from an aircraft, it falls into the sea first */
   mk48: { name: 'Mk 48 torpedo', cls: 'TORP', model: null, mode: 'run', torpedo: true, speed: 28, dmg: 60, pk: .8, reach: 2500, depth: 60, noise: 3 },

@@ -308,9 +308,9 @@ const H = {
       u.path = null;
       return ammoFull(u) && magFull;
     }
-    if (u.type === 'pantsir' || u.type === 'bal') {
+    if (u.type === 'pantsir' || u.type === 'bal' || d.depotRefill) {
       if (ammoFull(u)) return true;
-      if (u.type === 'bal' && (u.dep > 0 || u.elev > 0)) { u.depT = 0; u.elevT = 0; u.wantElev = 0; if (!canMove(u)) return false; }
+      if ((u.type === 'bal' || d.deploy) && (u.dep > 0 || u.elev > 0)) { u.depT = 0; u.elevT = 0; u.wantElev = 0; if (!canMove(u)) return false; }
       if (atDepot(sim, u)) { u.path = null; return ammoFull(u); }
       const dp = nearestDepot(sim, u); if (!dp) return true;
       moveTo(sim, u, o, dp[0], dp[1], 300); return false;

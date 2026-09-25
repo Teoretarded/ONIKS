@@ -50,14 +50,14 @@ export function mechanics(sim, u) {
     if (w !== u.antW) { const a = u.antA + u.antW * (t - u.antT); u.antA = a - Math.PI * 2 * Math.floor(a / (Math.PI * 2)); u.antT = t; u.antW = w; }
   }
   // turret (Pantsir module, DDG gun) slews toward the last aim bearing, back to fore when idle
-  if (d.model === 'pantsir' || d.model === 'destroyer') {
+  if (d.model === 'pantsir' || d.model === 'destroyer' || d.turret) {
     const idle = t - u.lastFire > 12;
     const yT = idle ? 0 : wrapPi(u.aimB - u.hdg), pT = idle ? 0 : u.aimP;
     u.tYaw += clamp(angTo(u.tYaw, yT), -SLEW * DT, SLEW * DT);
     u.tPitch += clamp(pT - u.tPitch, -SLEW * DT, SLEW * DT);
   }
   if (d.sub) subStep(sim, u);
-  if (d.model === 'destroyer' || d.model === 'carrier' || d.model === 'ssn') {
+  if (d.model === 'destroyer' || d.model === 'carrier' || d.model === 'ssn' || d.model === 'cg') {
     if (t - u.fireT < 1.2) u.cSpin = (u.cSpin + 75 * DT) % (Math.PI * 2);
     // VLS hatches: open .5 s, stay 2 s, close 1 s
     for (let i = u.vlsOpen.length - 1; i >= 0; i--) {
@@ -77,7 +77,7 @@ export function mechanics(sim, u) {
     if (!u.busy) u.crane = Math.max(0, u.crane - DT / 4);
     refillTransloader(sim, u);
   }
-  if (u.type === 'pantsir' || u.type === 'bal') refillAtDepot(sim, u);
+  if (u.type === 'pantsir' || u.type === 'bal' || d.depotRefill) refillAtDepot(sim, u);
   if (d.domain === 'sea') replenish(sim, u);
   if (u.aboard) aboardStep(sim, u);
 }
@@ -205,7 +205,7 @@ export function carrierOps(sim, cv) {
   if (u.type === 'aew' && u.spool < 1) return;               // wings spreading
   cv.launchQ.shift();
   cv.nextLaunch = sim.t + (u.type === 'helo' ? cv.def.air.launchGap * .5 : cv.def.air.launchGap);
-  const spot = cv.type === 'ddg' ? [0, 8, -65] : u.type === 'helo' ? [-8, 20, -120] : [-18, 20, 60];
+  const spot = cv.def.air.spot || (cv.type === 'ddg' ? [0, 8, -65] : u.type === 'helo' ? [-8, 20, -120] : [-18, 20, 60]);
   const p = local(cv, spot);
   u.aboard = 0; u.pos = p; u.prev = p.slice();
   u.hdg = cv.hdg + (u.type === 'fighter' || u.type === 'aew' ? -.157 : 0);
