@@ -26,6 +26,7 @@ export class RTSCamera {
     this.goal = { target: this.target.slice(), yaw: this.yaw, pitch: this.pitch, dist: this.dist };
     this.rate = { pan: 12, rot: 12, zoom: 9 };
     this.keys = true;                                // the game can switch keyboard control off
+    this.invert = false;                             // settings.invertRotate: right-drag and Q / E turn the other way
     this.edge = opts.edge !== false;
     this.edgePx = 10;
     this.W = 1920; this.H = 1080;                    // CSS px of the view
@@ -69,7 +70,7 @@ export class RTSCamera {
       if (m.btn < 0) return;
       const dx = x - m.lx, dy = y - m.ly; m.lx = x; m.ly = y; m.drag += Math.abs(dx) + Math.abs(dy);
       if (m.btn === 2 && m.drag > 4) {
-        this.goal.yaw += dx * .0055;
+        this.goal.yaw += dx * .0055 * (this.invert ? -1 : 1);
         this.goal.pitch = clamp(this.goal.pitch + dy * .0045, this.minPitch, this.maxPitch);
       } else if (m.btn === 1 && m.grab) this._dragPan(x, y);
     });
@@ -184,8 +185,9 @@ export class RTSCamera {
         g.target[0] += (s * pz + c * px) * sp; g.target[2] += (c * pz - s * px) * sp;
         this.followFn = null; this.fly = null;
       }
-      if (has('KeyQ')) { g.yaw -= 1.6 * dt; this.fly = null; }
-      if (has('KeyE')) { g.yaw += 1.6 * dt; this.fly = null; }
+      const inv = this.invert ? -1 : 1;
+      if (has('KeyQ')) { g.yaw -= 1.6 * dt * inv; this.fly = null; }
+      if (has('KeyE')) { g.yaw += 1.6 * dt * inv; this.fly = null; }
       if (has('Equal') || has('NumpadAdd')) this.zoomAt(undefined, undefined, Math.exp(-2.2 * dt));
       if (has('Minus') || has('NumpadSubtract')) this.zoomAt(undefined, undefined, Math.exp(2.2 * dt));
       if (has('PageUp')) g.pitch = clamp(g.pitch - 1.1 * dt, this.minPitch, this.maxPitch);

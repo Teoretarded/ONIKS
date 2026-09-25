@@ -59,14 +59,20 @@ export const DEFAULTS = Object.fromEntries(SETTINGS.map(s => [s.key, s.def]));
 export const KEYBINDS = [
   { group: 'Camera', binds: [
     ['W A S D', 'Pan'], ['Edges', 'Pan'], ['Middle drag', 'Pan'],
-    ['Right drag', 'Rotate 360°'], ['Q E', 'Rotate'], ['Wheel', 'Zoom'], ['F', 'Follow'] ] },
+    ['Right drag', 'Rotate 360°'], ['Q E', 'Rotate'], ['PgUp PgDn', 'Pitch'], ['Wheel', 'Zoom'], ['F', 'Follow'] ] },
   { group: 'Select', binds: [
-    ['Click', 'Select'], ['Drag', 'Box select'], ['Ctrl 1-9', 'Set group'], ['1-9', 'Recall group'] ] },
+    ['Click', 'Select'], ['Shift click', 'Add / remove'], ['Drag', 'Box select'], ['Double click', 'All of a type'],
+    ['Ctrl / Alt 1-9', 'Set group'], ['1-9', 'Recall group'], ['Tab', 'Next unit'] ] },
   { group: 'Orders', binds: [
-    ['Right click', 'Move / attack'], ['S', 'Stop'], ['H', 'Hold'], ['D', 'Deploy'], ['R', 'Reload'],
-    ['X', 'Scan'], ['I', 'Inspect'], ['E', 'Exploded view'] ] },
+    ['Right click', 'Move / attack / reload'], ['Shift', 'Queue'], ['Z', 'Stop'], ['H', 'Hold'], ['T', 'Deploy'],
+    ['R', 'Reload'], ['X', 'Scan'], ['Y', 'Radar on / off'], ['L', 'Launch drone'], ['B', 'Reinforce'],
+    ['I', 'Inspect'], ['E', 'Exploded view'] ] },
   { group: 'Time and view', binds: [
-    ['Space', 'Pause'], ['+ −', 'Time rate'], ['C', 'Cinematic camera'], ['V', 'Radar view'], ['F10', 'Hide UI'] ] },
+    ['Space', 'Pause'], ['+ −', 'Time rate'], ['C', 'Cinematic camera'], ['V', 'Radar view'], ['F10', 'Hide UI'],
+    ['Esc', 'Menu'] ] },
+  { group: 'Sandbox', binds: [
+    ['P', 'Spawn palette'], ['1-7 ⇧1-4', 'Pick a unit'], ['Del', 'Delete'], ['G', 'Fog'], ['K', 'Enemy AI'],
+    ['J', 'Switch side'], ['N', 'Weather'] ] },
 ];
 
 const spec = k => SETTINGS.find(s => s.key === k);
