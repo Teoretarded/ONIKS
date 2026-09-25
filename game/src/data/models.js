@@ -12,10 +12,11 @@
                     transloader hq depot port lighthouse radar_hill airfield · tlc pantsir_missile
                     strike_missile essm slam hellfire aam shell mk41_can · oniks oniks_booster sm6 mk72 (HD) ·
                     aew (E-2D) ssn (Virginia) ssk (Kilo 636.3) bal (3K60) · kh35 kalibr torpedo533 vpt_can ·
+                    carrier (the film-quality Nimitz: takes over from the engine's built-in HD.carrier) ·
                     aliases for data/units.js: tomahawk sam57e6 aim120 (MODEL_ALIASES)
      CUT_MODELS     key -> factory for the Inspect / Anatomy cutaways (tel_cut radar_cut pantsir_cut
                     destroyer_cut helo_cut fighter_cut drone_cut oniks_cut sm6_cut aew_cut ssn_cut ssk_cut
-                    bal_cut): the unit model
+                    bal_cut carrier_cut): the unit model
                     re-partitioned into the assemblies the exploded view pulls apart (same frame, same
                     state) plus interior parts. Interior parts carry inside:true and show(st) = !!st.xray:
                     set st.xray while the X-ray or the exploded view is on. Heavier; build lazily.
@@ -28,7 +29,8 @@
      LIGHTHOUSE     LAMP, beam(st) -> {origin, dirs[4]};  PORT (crane positions);  DEPOT_SLOTS() (TLCs in
                     the magazines);  DDG (VLS cells, helo spot);  PANTSIR (tubes, turret / pitch frames);
                     SUBS (SSN VPT cells, SSK tubes, hull axes);  BAL (pack pivot, container centres, raise frame);
-                    E2D (rotodome centre, gear height) */
+                    E2D (rotodome centre, gear height);  CVN (the carrier's deck, catapults, wires, elevators,
+                    radars, weapons) */
 const M3 = window.M3, GEO = window.GEO, HD = window.HD;
 if (!M3 || !GEO || !HD || !HD.READY_LAND || !HD.READY_SEA_AIR) throw new Error('models.js needs m3.js, geo.js, hd_land.js and hd_sea_air.js loaded first');
 const { V, R, X } = M3;
@@ -2129,6 +2131,769 @@ function vptCan() {
   return { name: 'vpt_can', LEN: L, parts: [{ name: 'canister', label: 'Cell canister · Tomahawk · closed', prims: P }] };
 }
 
+/* ================================================================ CVN-68 Nimitz class (film quality)
+   332.8 m overall, 317 m on the waterline, beam 40.8 m on the waterline and 76.8 m across the flight deck,
+   draught 11.3 m, flight deck 19.5 m above the waterline (the height game/render.js parks the air wing at).
+   Origin midships on the waterline, bow +Z, +X starboard. Takes over from HD.carrier under the same key
+   (EXTRA_MODELS.carrier: the engine's registerAll puts it over its built-in HD.carrier), same frame and deck.
+   Hull: flared, enclosed bow, the sponson skirts under the overhanging flight deck, hangar-deck openings behind
+   the elevators, the fantail; below the waterline the full midbody, the bulbous bow, four shafts on struts with
+   5-blade propellers (Ø 6.4 m) and two rudders. Flight deck: the 9° angled deck, notches for the four deck-edge
+   elevators (three starboard, one port), markings (landing area, centre line, foul line, ramp, hull number),
+   catwalks. Four C-13-1 catapults (two bow, two waist) with jet blast deflectors (st.jbd 0 flush .. 1 raised),
+   Mk 7 arresting gear (three pendants) and the IFLOLS. The island: 05-07 levels, flag and navigation bridges with
+   their window rows and wings, Pri-Fly with its sloped glazing, the exhaust housing, the lattice masts with
+   AN/SPS-48E and AN/SPS-49 (st.radar, turning), URN-25 TACAN, SATCOM domes. Mk 29 (NSSM / ESSM ×2), Mk 49 RAM
+   (×2) and Phalanx (×3) on the quarter sponsons; liferaft racks, boats in the fantail; two bow anchors.
+   Public-reference level: external shapes, public designations, sizes. The cutaway (carrier_cut) adds the
+   hangar (three bays) and, as closed volumes, the reactor compartments, machinery rooms and magazines. */
+const CV = {
+  L: 332.8, ZB: 166.4, ZS: -166.4, DECK: 19.5, GAL: 17.3, HGR: 8.3, HTOP: 16.4,
+  ZSTEM: 157.5, ZTOP: 165.6, ZTR: -160, BWL: 20.4, BTOP: 22.6, T: 11.3,
+  ANG: { x0: 6, deg: 9, half: 11.5 },
+  ISL: { x0: 23.4, x1: 32.2, z0: -46, z1: -8 }, IX: -1.8,                  // IX: the island's x against its first layout
+  EL_IN: 22.8, EL_OUT: 36.2,
+  ELEV: [[1, 40, 66], [1, 4, 30], [1, -80, -54], [-1, -132, -106]],        // side, aft end, forward end (26 × 13.4 m)
+  HANGAR: { x: 16.5, z0: -130, z1: 78, doors: [-60.7, 8.6] },
+  PORTS: [[1, 84, 96], [1, -112, -100], [-1, 42, 54], [-1, -68, -56]],      // replenishment stations: openings at the hangar deck
+  P48: [27.85, 45.4, -16.5], P49: [26.6, 41.4, -41.0], POLE: [27.85, 45.4, -23.2],
+  WIRES: [58, 70, 82],
+  PROPS: [{ x: 17.0, z: -128.5, zx: -92 }, { x: 7.0, z: -143.5, zx: -110 }], PROP_Y: -7.4, PROP_R: 3.2,
+};
+/* flight deck outline (x, z): starboard from the bow aft, across the round-down, port forward */
+const CV_OUT = (() => {
+  // starboard: the edge ~31 m out (the elevators 5 m past it), the island flush with it; port: the angled deck's
+  // sponson to 40.6 m, its corner abreast of the waist catapults' ends, the long leading edge to the bow
+  const E = CV.EL_IN, W = 31.4, WI = 32.2;
+  return [[11.0, 166.4], [14.8, 163.2], [19.0, 158], [22.8, 151], [26.0, 142], [28.4, 131], [30.0, 118], [30.9, 104], [31.3, 90], [W, 80],
+    [W, 66], [E, 66], [E, 40], [W, 40], [W, 30], [E, 30], [E, 4], [W, 4], [WI, 0], [WI, -50], [W, -54], [E, -54], [E, -80], [W, -80],
+    [31.2, -100], [30.4, -122], [29.0, -140], [27.0, -153], [25.0, -162], [23.8, -166.4],
+    [-23.0, -166.4], [-26.0, -162], [-29.2, -152], [-31.6, -140], [-33.0, -132], [-E, -132], [-E, -106], [-34.2, -106],
+    [-36.0, -80], [-37.8, -50], [-39.2, -20], [-40.2, 10], [-40.6, 34], [-37.0, 44], [-33.2, 54], [-29.5, 64], [-26.4, 74],
+    [-25.4, 84], [-25.0, 96], [-24.8, 108], [-24.6, 120], [-24.2, 132], [-23.0, 142], [-21.0, 151], [-18.0, 158], [-14.2, 163.2], [-11.0, 166.4]];
+})();
+const CV_AREA = (() => { let a = 0; for (let i = 0, n = CV_OUT.length; i < n; i++) { const p = CV_OUT[i], q = CV_OUT[(i + 1) % n]; a += p[0] * q[1] - q[0] * p[1]; } return a / 2; })();
+/* the deck's extent across at z: [port edge x, starboard edge x] */
+function cvSpan(z) {
+  let lo = 1e9, hi = -1e9;
+  for (let i = 0, n = CV_OUT.length; i < n; i++) {
+    const a = CV_OUT[i], b = CV_OUT[(i + 1) % n];
+    if (a[1] === b[1]) continue;
+    const t = (z - a[1]) / (b[1] - a[1]);
+    if (t < 0 || t > 1) continue;
+    const x = a[0] + (b[0] - a[0]) * t;
+    if (x < lo) lo = x; if (x > hi) hi = x;
+  }
+  return lo > hi ? [0, 0] : [lo, hi];
+}
+const cvEdgeX = (s, z) => cvSpan(z)[s > 0 ? 1 : 0];
+function cvInside(x, z) {
+  let c = false;
+  for (let i = 0, n = CV_OUT.length, j = n - 1; i < n; j = i++) { const a = CV_OUT[i], b = CV_OUT[j]; if ((a[1] > z) !== (b[1] > z) && x < (b[0] - a[0]) * (z - a[1]) / (b[1] - a[1]) + a[0]) c = !c; }
+  return c;
+}
+/* the angled deck: t metres along its axis from the round-down, off metres to its starboard */
+const CV_D = [-Math.sin(CV.ANG.deg * DEG), 0, Math.cos(CV.ANG.deg * DEG)], CV_N = [CV_D[2], 0, -CV_D[0]];
+const cvAxXZ = (t, off) => [CV.ANG.x0 + CV_D[0] * t + CV_N[0] * off, CV.ZS + CV_D[2] * t + CV_N[2] * off];
+const cvAx = (t, off, y) => { const p = cvAxXZ(t, off); return [p[0], y === undefined ? CV.DECK + .04 : y, p[1]]; };
+function cvAxEnd(off, t0, margin) { let t = t0; while (t < 420) { const p = cvAxXZ(t + margin, off); if (!cvInside(p[0], p[1])) break; t += .25; } return t; }
+/* hull form: waterline half-breadth, stem, the half-breadth at the gallery (under the flight deck), keel, fullness */
+function cvWL(z) {
+  if (z >= CV.ZSTEM || z < CV.ZTR) return 0;
+  if (z > 40) { const u = (z - 40) / (CV.ZSTEM - 40); return CV.BWL * Math.pow(Math.max(0, 1 - Math.pow(u, 2.1)), .72); }
+  if (z < -90) { const u = (-90 - z) / (-90 - CV.ZTR); return CV.BWL - 5.2 * Math.pow(u, 1.7); }
+  return CV.BWL;
+}
+const cvStemY = z => z <= CV.ZSTEM ? 0 : CV.GAL * Math.pow(Math.min(1, (z - CV.ZSTEM) / (CV.ZTOP - CV.ZSTEM)), 1 / 1.6);
+function cvTop(z) {
+  if (z < CV.ZTR || z > CV.ZTOP) return 0;
+  const [lo, hi] = cvSpan(z);
+  let w = Math.min(CV.BTOP, Math.min(-lo, hi) - .2);
+  if (z > 158) w *= Math.sqrt(Math.max(0, 1 - Math.pow((z - 158) / (CV.ZTOP - 158), 2)));
+  return Math.max(0, w);
+}
+function cvHW(z, y) {
+  const ys = cvStemY(z); if (y < ys - 1e-6) return 0;
+  const t = (y - ys) / Math.max(.01, CV.GAL - ys), b = cvWL(z), w1 = cvTop(z);
+  const p = z > 60 ? mix(1, 1.9, sat((z - 60) / 90)) : z < -100 ? mix(1, 1.3, sat((-100 - z) / 60)) : 1;
+  return b + (w1 - b) * Math.pow(sat(t), p);
+}
+const cvLevels = z => { const ys = cvStemY(z), out = []; for (let k = 0; k <= 4; k++) { const y = ys + (CV.GAL - ys) * k / 4; out.push([cvHW(z, y), y]); } return out; };
+function cvKeel(z) {
+  if (z < -80) { const t = sat((-80 - z) / (-80 - CV.ZTR)); return -CV.T + 8.2 * (1 - (1 - t) * (1 - t)); }
+  if (z > 112) { const t = sat((z - 112) / (CV.ZSTEM - 112)); return -CV.T + 6.1 * t * t; }
+  return -CV.T;
+}
+const cvE = z => z > 40 ? mix(7, 2.6, sat((z - 40) / 117)) : z < -70 ? mix(7, 4.2, sat((-70 - z) / 90)) : 7;
+function cvSecPt(z, th) { const b = cvWL(z), k = cvKeel(z), e = cvE(z), s = Math.max(0, Math.sin(th)), c = Math.max(0, Math.cos(th)); return [b * Math.pow(s, 2 / e), k * Math.pow(c, 2 / e)]; }
+const cvOpenAt = (s, z) => CV.ELEV.some(([es, z0, z1]) => es === s && z > z0 && z < z1);
+const cvPortAt = (s, z) => CV.PORTS.some(([es, z0, z1]) => es === s && z > z0 && z < z1);
+/* hull stations above the waterline: every 6 m, finer at the bow, the elevator openings' ends, the outline's corners */
+const CV_ZH = (() => {
+  const Z = [CV.ZTR, CV.ZTOP];
+  for (let z = -156; z < 150; z += 6) Z.push(z);
+  for (let z = 150; z < CV.ZTOP; z += 1.2) Z.push(z);
+  for (const [, z0, z1] of CV.ELEV.concat(CV.PORTS)) Z.push(z0, z1);
+  for (const p of CV_OUT) if (p[1] > 80 || p[1] < -120) Z.push(p[1]);
+  const S = Z.filter(z => z >= CV.ZTR && z <= CV.ZTOP).sort((a, b) => a - b), keep = new Set(CV.ELEV.concat(CV.PORTS).flatMap(e => [e[1], e[2]])), out = [];
+  for (const z of S) { if (out.length && z - out[out.length - 1] < .4) { if (keep.has(z)) out[out.length - 1] = z; continue; } out.push(z); }
+  return out;
+})();
+
+/* ---------------------------------------------------------------- building blocks */
+/* facing-aware polyline, two segments per hex (hd_sea_air's fl2 / fpoly): N a normal or (i, a, b) -> normal */
+function cvFl2(A, B, C, n, o) {
+  const ab = V.sub(B, A), e = V.cross(n, ab), le = V.len(e);
+  if (le < 1e-9 || V.len(ab) < 1e-6 || V.dist(B, C) < 1e-6) return null;
+  const B2 = V.mad(B, e, 1e-4 / le), q = [A, B, C, B2];
+  return hex([...q, ...q], O({ pts: false }, o));
+}
+function cvPoly(P, N, o, closed) {
+  const out = [], Q = closed ? P.concat([P[0]]) : P, m = Q.length - 1, nAt = i => typeof N === 'function' ? N(i, Q[i], Q[i + 1]) : N;
+  for (let i = 0; i < m; i += 2) {
+    if (i + 1 < m) {
+      const h = cvFl2(Q[i], Q[i + 1], Q[i + 2], V.norm(V.add(nAt(i), nAt(i + 1))), o);
+      if (h) { out.push(h); continue; }
+      out.push(SA.fl(Q[i], Q[i + 1], nAt(i), o), SA.fl(Q[i + 1], Q[i + 2], nAt(i + 1), o));
+    } else out.push(SA.fl(Q[i], Q[i + 1], nAt(i), o));
+  }
+  return out;
+}
+/* outward horizontal normal of a side line a -> b on side s */
+const cvSideN = (a, b, s, up) => { let n = [b[2] - a[2], 0, -(b[0] - a[0])]; if (n[0] * s < 0) n = V.mul(n, -1); n = V.norm(n); return V.norm([n[0], up || 0, n[2]]); };
+/* a flat wall b0-b1 (bottom edge) to t0-t1 (top edge) in dots, window rows left open (the films' dark glass):
+   bands [[v0, v1, u0, u1, n]] (v up the wall, u along it, n panes outlined in wire) */
+function cvWall(b0, b1, t1, t0, out, bands, P, o) {
+  const at = (u, v) => V.lerp(V.lerp(b0, b1, u), V.lerp(t0, t1, u), v), B = bands || [];
+  const vs = [...new Set([0, 1, ...B.flatMap(b => [b[0], b[1]])])].sort((a, b) => a - b);
+  for (let i = 0; i < vs.length - 1; i++) {
+    const v0 = vs[i], v1 = vs[i + 1], vm = (v0 + v1) / 2, band = B.find(b => vm > b[0] && vm < b[1]);
+    for (const [u0, u1] of band ? [[0, band[2]], [band[3], 1]] : [[0, 1]]) if (u1 - u0 > .004) P.push(SA.plate([at(u0, v0), at(u1, v0), at(u1, v1), at(u0, v1)], out, o));
+  }
+  const nn = V.norm(out), lift = p => V.mad(p, nn, .04);
+  for (const [v0, v1, u0, u1, n] of B) {
+    const du = (u1 - u0) / n, g = Math.min(.08, du * .1);
+    for (let k = 0; k < n; k++) P.push(panel([at(u0 + k * du + g, v0), at(u0 + (k + 1) * du - g, v0), at(u0 + (k + 1) * du - g, v1), at(u0 + k * du + g, v1)].map(lift), fn({ pts: false, al: .55 })));
+    P.push(line([at(u0, v0), at(u1, v0)].map(lift), { pts: false, w: .6 }), line([at(u0, v1), at(u1, v1)].map(lift), { pts: false, w: .6 }));
+  }
+}
+/* an axis-aligned block: wire edges, dots on the walls listed ('f' +z, 'a' -z, 'p' -x, 's' +x, 't' top) */
+function cvBlock(a, b, faces, P, bands, o) {
+  P.push(box(a, b, O({ pts: false }, o)));
+  const [x0, y0, z0] = a, [x1, y1, z1] = b, W = bands || {};
+  if (faces.includes('f')) cvWall([x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1], FZ, W.f, P, o);
+  if (faces.includes('a')) cvWall([x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0], [0, 0, -1], W.a, P, o);
+  if (faces.includes('p')) cvWall([x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0], [-1, 0, 0], W.p, P, o);
+  if (faces.includes('s')) cvWall([x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1], FX, W.s, P, o);
+  if (faces.includes('t')) P.push(SA.plate([[x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1]], FY, o));
+}
+const cvRoof = (x0, x1, z0, z1, y, P) => { if (x1 - x0 > .1 && z1 - z0 > .1) P.push(SA.plate([[x0, y, z0], [x1, y, z0], [x1, y, z1], [x0, y, z1]], FY)); };
+/* box centred at c, long axis d (horizontal unit), half sizes across / up / along */
+function cvObox(c, d, hw, hh, hl, o) {
+  const n = [d[2], 0, -d[0]], q = (a, b, e) => [c[0] + n[0] * a + d[0] * e, c[1] + b, c[2] + n[2] * a + d[2] * e];
+  return hex([q(-hw, -hh, -hl), q(hw, -hh, -hl), q(hw, -hh, hl), q(-hw, -hh, hl), q(-hw, hh, -hl), q(hw, hh, -hl), q(hw, hh, hl), q(-hw, hh, hl)], o);
+}
+/* the hull's bottom height at (x, z) under the waterline (0 outside the waterline's half-breadth) */
+function cvBottomY(z, x) {
+  const b = cvWL(z), ax = Math.abs(x); if (ax >= b) return 0;
+  const e = cvE(z), s = Math.pow(ax / b, e / 2), c = Math.sqrt(Math.max(0, 1 - s * s));
+  return cvKeel(z) * Math.pow(c, 2 / e);
+}
+/* a painted stripe on the deck from a to b, w wide: a dense strip of dots (paint returns more than the non-skid
+   round it) and a hairline in wire */
+function cvStripe(a, b, w, o) {
+  o = o || {};
+  const d = V.norm(V.sub(b, a)), n = [d[2] * w / 2, 0, -d[0] * w / 2];
+  return [line([a, b], { pts: false, w: o.w === undefined ? .55 : o.w, fine: o.fine }),
+    SA.plate([V.sub(a, n), V.add(a, n), V.add(b, n), V.sub(b, n)], FY, { ds: o.ds || .4, fine: o.fine })];
+}
+/* seven-segment numerals (the hull number) centred at c: ux the reading direction, uy up the digit, h tall,
+   strokes sw wide, painted on the surface whose outward normal is o.n */
+const CV_SEG = { '6': 'acdefg', '8': 'abcdefg' };
+function cvDigits(str, c, ux, uy, h, o) {
+  const w = h * .55, gap = h * .24, n = str.length, tot = n * w + (n - 1) * gap, P = [], sw = o.sw || 1, hw = sw / 2, nn = o.n || FY;
+  const at = (x, y) => V.mad(V.add(c, V.add(V.mul(ux, x), V.mul(uy, y))), nn, .04);
+  str.split('').forEach((ch, i) => {
+    const x0 = -tot / 2 + i * (w + gap), x1 = x0 + w, y0 = -h / 2, y1 = h / 2;
+    const S = { a: [x0, x1, y1 - hw, y1 + hw], b: [x1 - hw, x1 + hw, 0, y1], c: [x1 - hw, x1 + hw, y0, 0], d: [x0, x1, y0 - hw, y0 + hw], e: [x0 - hw, x0 + hw, y0, 0], f: [x0 - hw, x0 + hw, 0, y1], g: [x0, x1, -hw, hw] };
+    for (const key of CV_SEG[ch]) {
+      const [a0, a1, b0, b1] = S[key], q = [at(a0, b0), at(a1, b0), at(a1, b1), at(a0, b1)];
+      P.push(SA.plate(q, nn, { ds: o.ds || .45, fine: o.fine }), line(q.concat([q[0]]), { pts: false, w: o.w || .45, fine: o.fine }));
+    }
+  });
+  return P;
+}
+
+/* ---------------------------------------------------------------- hull (split starboard / port for the cutaway) */
+function cvHull() {
+  const S = [], P = [], Z = CV_ZH, LV = Z.map(cvLevels);
+  for (const s of [1, -1]) {
+    const H = s > 0 ? S : P;
+    for (let i = 0; i < Z.length - 1; i++) {
+      const za = Z[i], zb = Z[i + 1], A = LV[i], B = LV[i + 1], zm = (za + zb) / 2, open = cvOpenAt(s, zm);
+      const out = [s, 0, zm > 140 ? .7 : zm < -150 ? -.25 : 0];
+      const port = cvPortAt(s, zm);
+      for (let k = 0; k < 3; k++) {
+        if ((open || port) && k >= 2) continue;
+        if (Math.max(A[k][0], A[k + 1][0], B[k][0], B[k + 1][0]) < .05) continue;
+        H.push(SA.plate([[s * A[k][0], A[k][1], za], [s * B[k][0], B[k][1], zb], [s * B[k + 1][0], B[k + 1][1], zb], [s * A[k + 1][0], A[k + 1][1], za]], out, { ds: .85 }));
+      }
+      if (open) continue;
+      // the skirt under the overhanging flight deck: from the hull at the 03 level out to the deck's edge
+      const ea = cvEdgeX(s, za + 1e-3), eb = cvEdgeX(s, zb - 1e-3);
+      H.push(SA.plate([[s * A[3][0], A[3][1], za], [s * B[3][0], B[3][1], zb], [eb, CV.GAL, zb], [ea, CV.GAL, za]], [s, -1.2, 0]));
+    }
+    // the skirt's end walls either side of each elevator opening, the openings' outlines
+    for (const [es, z0, z1] of CV.ELEV) {
+      if (es !== s) continue;
+      for (const [z, dz] of [[z0, -1e-3], [z1, 1e-3]]) {
+        const y3 = CV.GAL * .75, h3 = cvHW(z, y3), e = cvEdgeX(s, z + dz);
+        H.push(SA.plate([[s * h3, y3, z], [s * CV.BTOP, CV.GAL, z], [e, CV.GAL, z], [e, CV.GAL, z]], [0, 0, -dz]));
+        H.push(line([[s * h3, y3, z], [e, CV.GAL, z]], { pts: false, w: .55 }));
+      }
+      const x = s * (cvHW((z0 + z1) / 2, CV.GAL * .5) + .03);
+      H.push(SA.fquad([[x, CV.GAL * .5, z0], [x, CV.GAL * .5, z1], [x, CV.GAL - .1, z1], [x, CV.GAL - .1, z0]], [s, 0, 0], { al: .75 }));
+      H.push(line([[s * (CV.HANGAR.x + .2), CV.HGR + .02, z0 + .5], [s * (CV.HANGAR.x + .2), CV.HGR + .02, z1 - .5]], fn({ w: .4, pts: false })));
+    }
+    // replenishment stations: the opening, its sill, a kingpost
+    for (const [es, z0, z1] of CV.PORTS) {
+      if (es !== s) continue;
+      const zm = (z0 + z1) / 2, L = cvLevels(zm), x = s * (L[2][0] + .03), x3 = s * (L[3][0] + .03);
+      H.push(SA.fquad([[x, L[2][1], z0], [x, L[2][1], z1], [x3, L[3][1], z1], [x3, L[3][1], z0]], [s, 0, 0], { al: .7 }));
+      H.push(line([[x - s * 1.6, L[2][1], z0 + .5], [x - s * 1.6, L[2][1], z1 - .5]], { w: .4, ds: .6 }));
+      H.push(cyl([x - s * 1.2, L[2][1], zm], [x - s * .8, L[3][1] + 3.2, zm], .22, fn({ n: 6, gen: 0 })));
+    }
+    // transom above the waterline, the fantail openings (|x| 5..15.5 m, hangar deck to gallery)
+    const T0 = LV[0], eT = cvEdgeX(s, CV.ZTR + 1e-3);
+    for (let k = 0; k < 4; k++) {
+      const [w0, y0] = T0[k], [w1, y1] = T0[k + 1], z = CV.ZTR, bk = [0, 0, -1];
+      if (k < 2) { H.push(SA.plate([[0, y0, z], [s * w0, y0, z], [s * w1, y1, z], [0, y1, z]], bk)); continue; }
+      H.push(SA.plate([[0, y0, z], [s * 5, y0, z], [s * 5, y1, z], [0, y1, z]], bk));
+      const xo1 = k === 3 ? eT : s * w1;
+      H.push(SA.plate([[s * 15.5, y0, z], [s * w0, y0, z], [xo1, y1, z], [s * 15.5, y1, z]], bk));
+    }
+    H.push(SA.fquad([[s * 5, T0[2][1], CV.ZTR - .03], [s * 15.5, T0[2][1], CV.ZTR - .03], [s * 15.5, CV.GAL - .1, CV.ZTR - .03], [s * 5, CV.GAL - .1, CV.ZTR - .03]], [0, 0, -1], { al: .7 }));
+    H.push(...cvPoly([[0, 0, CV.ZTR], [s * T0[0][0], 0, CV.ZTR], [s * T0[3][0], T0[3][1], CV.ZTR], [eT, CV.GAL, CV.ZTR]], [0, 0, -1], { al: .85 }));
+    // lines: waterline, 03 level (the skirt's root), hangar-deck level, frames
+    const wl = [], k3 = [], k2 = [];
+    Z.forEach((z, i) => {
+      if (z <= CV.ZSTEM) wl.push([s * cvWL(z), 0, z]);
+      if (!cvOpenAt(s, z)) k3.push([s * LV[i][3][0], LV[i][3][1], z]); else if (k3.length) { H.push(...cvPoly(k3.splice(0), (j, a, b) => cvSideN(a, b, s, -.4), { al: .5 })); }
+      k2.push([s * LV[i][2][0], LV[i][2][1], z]);
+    });
+    wl.push([0, 0, CV.ZSTEM]);
+    if (k3.length > 1) H.push(...cvPoly(k3, (j, a, b) => cvSideN(a, b, s, -.4), { al: .5 }));
+    H.push(...cvPoly(wl, (j, a, b) => cvSideN(a, b, s, 0), { al: .85 }));
+    H.push(...cvPoly(k2, (j, a, b) => cvSideN(a, b, s, 0), fn({ al: .3 })));
+    for (let z = -144; z < 150; z += 24) { const L = cvLevels(z); H.push(...cvPoly(L.slice(0, cvOpenAt(s, z) ? 3 : 4).map(q => [s * q[0], q[1], z]), [s, 0, z > 120 ? .5 : 0], fn({ al: .2 }))); }
+  }
+  // stem (starboard half carries the centre lines)
+  const stem = []; for (let k = 0; k <= 10; k++) { const y = CV.GAL * k / 10; stem.push([0, y, CV.ZSTEM + (CV.ZTOP - CV.ZSTEM) * Math.pow(y / CV.GAL, 1.6)]); }
+  S.push(line(stem, { w: 1, pts: false }));
+  return { S, P };
+}
+/* below the waterline: the full midbody, the forefoot, the run up to the transom; the bulbous bow */
+function cvBelow() {
+  const S = [], P = [], NQ = 9, Z = [CV.ZTR];
+  for (let z = -156; z < 120; z += 6) Z.push(z);
+  for (let z = 120; z < CV.ZSTEM - .05; z += 3) Z.push(z);
+  Z.push(CV.ZSTEM - .02);
+  for (let i = 0; i < Z.length - 1; i++) {
+    const za = Z[i], zb = Z[i + 1], km = cvKeel((za + zb) / 2);
+    for (let j = 0; j < NQ; j++) {
+      const t0 = j / NQ * PI / 2, t1 = (j + 1) / NQ * PI / 2;
+      const a0 = cvSecPt(za, t0), a1 = cvSecPt(za, t1), b0 = cvSecPt(zb, t0), b1 = cvSecPt(zb, t1);
+      if (Math.max(a1[0], b1[0]) < .08) continue;
+      for (const s of [1, -1]) {
+        const q = [[s * a0[0], a0[1], za], [s * a1[0], a1[1], za], [s * b1[0], b1[1], zb], [s * b0[0], b0[1], zb]], c = avg(q);
+        (s > 0 ? S : P).push(SA.plate(q, [c[0], c[1] - km * .5, 0], { ds: 1.35 }));
+      }
+    }
+  }
+  for (const s of [1, -1]) {
+    const H = s > 0 ? S : P;
+    for (let j = 0; j < NQ; j++) {
+      const a = cvSecPt(CV.ZTR, j / NQ * PI / 2), b = cvSecPt(CV.ZTR, (j + 1) / NQ * PI / 2);
+      if (Math.max(a[0], b[0]) > .05) H.push(SA.plate([[0, a[1], CV.ZTR], [s * a[0], a[1], CV.ZTR], [s * b[0], b[1], CV.ZTR], [0, b[1], CV.ZTR]], [0, 0, -1], { ds: 1.35 }));
+    }
+    for (const th of [.55, 1.05]) H.push(line(Z.map(z => { const p = cvSecPt(z, th); return [s * p[0], p[1], z]; }), fn({ w: .3, pts: false })));
+    const tr = []; for (let j = 0; j <= NQ; j++) { const p = cvSecPt(CV.ZTR, j / NQ * PI / 2); tr.push([s * p[0], p[1], CV.ZTR]); }
+    H.push(line(tr, { w: .5, pts: false }));
+  }
+  S.push(line(Z.map(z => [0, cvKeel(z), z]), { w: .6, pts: false }));
+  const BULB = [lathe([0, -6.4, 127], FZ, [[0, .3], [6, 2.2], [14, 3.2], [22, 3.35], [28, 3.0], [32, 2.2], [34.5, 1.0], [35.5, 0]], { n: 28, gen: 8, rings: [2, 4, 6], ds: 1.2 })];
+  return { S, P, BULB };
+}
+/* sponsons for the self-defence weapons: side, z range, how far out past the deck edge */
+const CV_SPONS = [{ s: 1, z0: 101, z1: 115, out: 6.2 }, { s: -1, z0: 109, z1: 127, out: 7.4 }, { s: 1, z0: -149, z1: -131, out: 6.6 }, { s: -1, z0: -159, z1: -141, out: 7.0 }];
+function cvSponsons() {
+  const S = [], P = [];
+  for (const sp of CV_SPONS) {
+    const s = sp.s, e = cvEdgeX(s, (sp.z0 + sp.z1) / 2), xi = e - s * 1.0, xo = e + s * sp.out, yt = 16.9;
+    const q = [[xi, 13.6, sp.z0], [xo, 15.6, sp.z0], [xo, 15.6, sp.z1], [xi, 13.6, sp.z1], [xi, yt, sp.z0], [xo, yt, sp.z0], [xo, yt, sp.z1], [xi, yt, sp.z1]];
+    const H = s > 0 ? S : P;
+    H.push(hex(q, { bottom: true, skip: [5] }));
+    H.push(line([[xi, yt + 1.05, sp.z0], [xo, yt + 1.05, sp.z0], [xo, yt + 1.05, sp.z1], [xi, yt + 1.05, sp.z1]], fn({ w: .35 })));
+  }
+  return { S, P };
+}
+
+/* ---------------------------------------------------------------- flight deck */
+function cvDeck() {
+  const P = [], y = CV.DECK, I = CV.ISL, n = CV_OUT.length, sg = CV_AREA > 0 ? 1 : -1;
+  // top: strips between the outline's corners (every 6 m), the island's footprint left out
+  const zs = [CV.ZS, CV.ZB, I.z0, I.z1, ...CV_OUT.map(p => p[1])]; for (let z = -162; z < 166; z += 6) zs.push(z);
+  const Z = [...new Set(zs.map(z => +z.toFixed(3)))].sort((a, b) => a - b);
+  for (let i = 0; i < Z.length - 1; i++) {
+    const za = Z[i] + 1e-3, zb = Z[i + 1] - 1e-3; if (zb - za < .05) continue;
+    const A = cvSpan(za), B = cvSpan(zb), isl = (za + zb) / 2 > I.z0 && (za + zb) / 2 < I.z1;
+    const ar = isl ? I.x0 : A[1], br = isl ? I.x0 : B[1];
+    P.push(SA.plate([[A[0], y, za], [ar, y, za], [br, y, zb], [B[0], y, zb]], FY, { ds: 1.55 }));
+    if (isl && A[1] - I.x1 > .1) P.push(SA.plate([[I.x1, y, za], [A[1], y, za], [B[1], y, zb], [I.x1, y, zb]], FY, { ds: 1.55 }));
+    // the overhang's underside where no hull is below it (the round-down aft, the bow's tip)
+    const zm = (za + zb) / 2;
+    if (zm < CV.ZTR || zm > CV.ZTOP) P.push(SA.plate([[A[0], CV.GAL, za], [A[1], CV.GAL, za], [B[1], CV.GAL, zb], [B[0], CV.GAL, zb]], [0, -1, 0], { ds: 1.6 }));
+  }
+  // the edge: fascia (gallery to flight deck) all round, outline on top and below
+  const outN = i => { const a = CV_OUT[i], b = CV_OUT[(i + 1) % n], dx = b[0] - a[0], dz = b[1] - a[1], l = Math.hypot(dx, dz) || 1; return [sg * dz / l, 0, -sg * dx / l]; };
+  for (let i = 0; i < n; i++) {
+    const a = CV_OUT[i], b = CV_OUT[(i + 1) % n];
+    if (Math.hypot(b[0] - a[0], b[1] - a[1]) < .01) continue;
+    P.push(SA.plate([[a[0], CV.GAL, a[1]], [b[0], CV.GAL, b[1]], [b[0], y, b[1]], [a[0], y, a[1]]], outN(i)));
+  }
+  P.push(...cvPoly(CV_OUT.map(p => [p[0], y, p[1]]), (i) => V.norm(V.add(outN(i % n), [0, 1.3, 0])), { al: 1 }, true));
+  P.push(...cvPoly(CV_OUT.map(p => [p[0], CV.GAL, p[1]]), (i) => outN(i % n), { al: .35 }, true));
+  // catwalks just below the edge (outer rail), where the edge runs straight
+  for (const [s, z0, z1] of [[1, 68, 92], [1, 32, 40], [1, -52, 4], [1, -120, -80], [-1, -104, 30], [-1, 58, 100]]) {
+    const r = []; for (let z = z0; z <= z1 + 1e-6; z += 2) r.push([cvEdgeX(s, z) + s * 1.35, 18.2, z]);
+    P.push(line(r, fn({ w: .35, ds: .9 })));
+    P.push(line(r.map(p => [p[0], 18.7, p[2]]), fn({ w: .25, pts: false })));
+  }
+  // markings: the landing area, its centre line, the foul line, the ramp; the bow's hull number; helicopter spots
+  const yM = y + .03, h = CV.ANG.half, ax = (off, t0, t1, w, o) => cvStripe(cvAx(t0, off, yM), cvAx(t1, off, yM), w, o);
+  const tP = cvAxEnd(-h, 120, 1.2);
+  P.push(...ax(-h, 2.5, tP, 1.0, { w: .6 }), ...ax(h, 2.5, 212, 1.0, { w: .6 }), ...ax(h + 4.3, 1, 168, .8, { w: .5 }));
+  for (let t = 6; t < tP - 6; t += 12) P.push(...ax(0, t, t + 6, .7, { w: .45, fine: true }));
+  for (const t of [2.5, 30]) P.push(...cvStripe(cvAx(t, -h, yM), cvAx(t, h, yM), .6, { w: .4, fine: true }));
+  for (let k = -3; k <= 3; k++) { const p = cvAx(1.2, k * 1.4, yM); P.push(...cvStripe(p, V.add(p, [CV_D[0] * 9, 0, CV_D[2] * 9]), .6, { w: .35, fine: true })); }     // ramp stripes
+  P.push(...cvDigits('68', [-1.0, yM, 126], FX, FZ, 9, { sw: 1.3, w: .5, fine: true }));
+  for (const [x, z] of [[24.5, -100], [24.5, -124], [-19, 100]]) P.push(circle([x, yM, z], FY, 5.2, 40, fn({ w: .45, ds: .5 })));
+  // safe-parking line along the island
+  P.push(...cvStripe([I.x0 - 3, yM, I.z0 - 30], [I.x0 - 3, yM, I.z1 + 44], .5, { w: .35, fine: true }));
+  return P;
+}
+/* catapults: the bow pair, the waist pair on the angled deck (their forward ends at its edge), 94 m tracks */
+const CV_CATS = (() => {
+  const y = CV.DECK + .05, cat = (a, b) => ({ a: [a[0], y, a[1]], b: [b[0], y, b[1]] });
+  const waist = off => { const t1 = cvAxEnd(off, 150, 2.2); return cat(cvAxXZ(t1 - 94, off), cvAxXZ(t1, off)); };
+  return [cat([6.4, 69], [4.4, 163]), cat([-6.2, 69], [-9.0, 162.5]), waist(3.8), waist(-8.6)];
+})();
+function cvCats() {
+  const P = [];
+  CV_CATS.forEach((c, i) => {
+    const d = V.norm(V.sub(c.b, c.a)), sd = [d[2], 0, -d[0]];
+    for (const o of [-.34, .34]) P.push(line([V.mad(c.a, sd, o), V.mad(c.b, sd, o)], { pts: false, w: .8 }));
+    P.push(...cvStripe(c.a, c.b, .9, { w: 0, ds: .35 }));
+    P.push(line([V.mad(c.a, sd, -1.1), V.mad(c.a, sd, 1.1)], { ds: .5, w: .6 }), line([V.mad(c.b, sd, -1.1), V.mad(c.b, sd, 1.1)], { ds: .5, w: .6 }));
+    // shuttle at the launch end, the hold-back fitting behind it, the water brake at the far end
+    const sh = V.mad(c.a, d, 2.2);
+    P.push(cvObox([sh[0], sh[1] + .22, sh[2]], d, .45, .22, .8));
+    P.push(box(V.add(V.mad(c.a, d, -1.4), [-.35, 0, -.35]), V.add(V.mad(c.a, d, -1.4), [.35, .3, .35]), fn()));
+    for (let k = 1; k < 6; k++) { const p = V.mad(c.a, d, k * 94 / 6); P.push(line([V.mad(p, sd, -.9), V.mad(p, sd, .9)], fn({ w: .3, pts: false }))); }
+    // bow cats: the cat number, a short lead-in line
+    P.push(line([V.mad(c.a, d, -6), c.a], fn({ w: .4, ds: .6 })));
+  });
+  return P;
+}
+/* jet blast deflectors: four hinged panels behind each launch position (st.jbd 0 flush .. 1 raised to 55°) */
+function cvJbd(st) {
+  const f = st.jbd === undefined ? 0 : sat(st.jbd), P = [], ang = f * 55 * DEG, y = CV.DECK + .12;
+  for (const c of CV_CATS) {
+    const d = V.norm(V.sub(c.b, c.a)), sd = [d[2], 0, -d[0]], hg = V.mad([c.a[0], y, c.a[2]], d, -2.4), W = 5.8, Dp = 4.4;
+    const e = V.add(V.mul(d, -Math.cos(ang) * Dp), [0, Math.sin(ang) * Dp, 0]);
+    for (let k = 0; k < 4; k++) {
+      const u0 = -W + k * W / 2 + .06, u1 = -W + (k + 1) * W / 2 - .06;
+      const q = [V.mad(hg, sd, u0), V.mad(hg, sd, u1), V.add(V.mad(hg, sd, u1), e), V.add(V.mad(hg, sd, u0), e)];
+      P.push(slab2(q, .28));
+      if (f > .1) P.push(line([V.mad(V.mad(hg, sd, (u0 + u1) / 2), d, -Dp * .9), V.add(V.mad(hg, sd, (u0 + u1) / 2), V.mul(e, .55))], fn({ w: .45 })));
+    }
+    P.push(line([V.mad(hg, sd, -W), V.mad(hg, sd, W)], { w: .5, pts: false }));
+  }
+  return P;
+}
+/* Mk 7 arresting gear: three pendants across the landing area, deck sheaves; the IFLOLS on its port sponson */
+function cvWires() {
+  const P = [], y = CV.DECK + .1;
+  for (const t of CV.WIRES) {
+    P.push(line([cvAx(t, -15.5, y), cvAx(t, 15.5, y)], { ds: .4, w: .85 }));
+    for (const off of [-10.5, -5, 0, 5, 10.5]) { const p = cvAx(t, off, CV.DECK); P.push(line([V.add(p, [CV_D[0] * -.6, 0, CV_D[2] * -.6]), [p[0], y + .06, p[2]], V.add(p, [CV_D[0] * .6, 0, CV_D[2] * .6])], fn({ w: .35, pts: false }))); }
+    for (const off of [-16.2, 16.2]) { const p = cvAx(t, off, CV.DECK); P.push(box([p[0] - .7, CV.DECK, p[2] - .7], [p[0] + .7, CV.DECK + .32, p[2] + .7], fn())); }
+  }
+  // IFLOLS: the lens box and its datum arms on a small sponson off the port edge, abreast of the wires
+  const zl = cvAx(118, 0)[2], xe = cvEdgeX(-1, zl), c = [xe - 2.2, 19.6, zl], bk = V.mul(CV_D, -1);
+  P.push(box([xe - 4.4, 16.8, zl - 3], [xe + .6, 17.2, zl + 3]));
+  P.push(cvObox(c, CV_D, .8, 2.4, .6, { bottom: true }));
+  P.push(line([V.mad([c[0], 20.4, c[2]], CV_N, -3.8), V.mad([c[0], 20.4, c[2]], CV_N, 3.8)], { w: .6, ds: .5 }));
+  for (let k = -6; k <= 6; k++) { const p = V.mad([c[0], c[1] + k * .3, c[2]], bk, .62); P.push(line([V.mad(p, CV_N, -.7), V.mad(p, CV_N, .7)], fn({ w: .3, pts: false }))); }
+  return P;
+}
+/* deck-edge elevators (47 t lift, flight deck to hangar deck): platforms in the deck's notches, raised */
+function cvElevators(side) {
+  const P = [], y1 = CV.DECK - .02, y0 = y1 - 1.9, ch = 4.2;
+  for (const [s, z0, z1] of CV.ELEV) {
+    if (side && s !== side) continue;
+    const xi = s * CV.EL_IN, xo = s * CV.EL_OUT, xc = xo - s * ch;
+    // plan: the outboard corner away from the ship's middle chamfered
+    const pl = s > 0 ? [[xi, z0], [xo, z0], [xo, z1 - ch], [xc, z1], [xi, z1]] : [[xi, z1], [xo, z1], [xo, z0 + ch], [xc, z0], [xi, z0]];
+    const top = pl.map(p => [p[0], y1, p[1]]), bot = pl.map(p => [p[0], y0, p[1]]);
+    const dk = { ds: 1.55 };      // the same non-skid as the flight deck
+    if (s > 0) { P.push(SA.plate([top[0], top[1], top[2], [xi, y1, z1 - ch]], FY, dk), SA.plate([[xi, y1, z1 - ch], top[2], top[3], top[4]], FY, dk)); }
+    else { P.push(SA.plate([top[0], top[1], top[2], [xi, y1, z0 + ch]], FY, dk), SA.plate([[xi, y1, z0 + ch], top[2], top[3], top[4]], FY, dk)); }
+    for (let i = 0; i < 4; i++) { const a = pl[i], b = pl[i + 1], m = [(a[0] + b[0]) / 2 - xi, 0, (a[1] + b[1]) / 2 - (z0 + z1) / 2]; P.push(SA.plate([bot[i], bot[i + 1], top[i + 1], top[i]], m)); }
+    P.push(SA.plate([bot[0], bot[1], bot[2], bot[3]], [0, -1, 0], { ds: 1.8 }), SA.plate([bot[0], bot[3], bot[4], bot[4]], [0, -1, 0], { ds: 1.8 }));
+    P.push(...cvPoly(top, (i, a, b) => V.norm(V.add(cvSideN(a, b, s, 0), [0, 1.2, 0])), { al: .9 }, true));
+    P.push(line(bot.concat([bot[0]]), fn({ w: .4, pts: false })));
+    // the painted border (inset 0.8 m) and the stanchions along the outboard edge
+    const cx = (xi + xo) / 2, cz = (z0 + z1) / 2;
+    const bd = top.map(p => [p[0] + (cx - p[0]) * .08, y1 + .03, p[2] + (cz - p[2]) * .07]);
+    for (let i = 0; i < bd.length; i++) P.push(...cvStripe(bd[i], bd[(i + 1) % bd.length], .6, { w: .5 }));
+    for (let z = z0 + 1; z < z1 - (s > 0 ? ch : 0); z += 3) if (s < 0 ? z > z0 + ch : true) P.push(line([[xo, y1, z], [xo, y1 + 1.0, z]], fn({ w: .35, pts: false })));
+    P.push(line([[xo, y1 + 1.0, s > 0 ? z0 : z0 + ch], [xo, y1 + 1.0, s > 0 ? z1 - ch : z1]], fn({ w: .35 })));
+  }
+  return P;
+}
+
+/* ---------------------------------------------------------------- island */
+function cvIsland() {
+  // laid out at x 25.2 .. 34.0 and moved by CV.IX to stand flush with the starboard edge
+  const A = [], B = [], C = [], D = CV.DECK, I = { x0: 25.2, x1: 34.0, z0: CV.ISL.z0, z1: CV.ISL.z1 }, yA = 27.9, yB = 33.6, yC = 36.6;
+  // 05-07 levels: the block on the deck edge
+  const dI = { ds: .8 };
+  cvBlock([I.x0, D, I.z0], [I.x1, yA, I.z1], 'fasp', A, { f: [[.66, .78, .18, .82, 4]] }, dI);
+  for (const z of [-40, -24, -12]) A.push(panel([[I.x0 - .03, D, z - .6], [I.x0 - .03, D, z + .6], [I.x0 - .03, D + 2.1, z + .6], [I.x0 - .03, D + 2.1, z - .6]], fn({ pts: false, al: .6 })));
+  A.push(panel([[I.x1 + .03, D, -30.6], [I.x1 + .03, D, -29.4], [I.x1 + .03, D + 2.1, -29.4], [I.x1 + .03, D + 2.1, -30.6]], fn({ pts: false, al: .6 })));
+  for (const s of [1, -1]) {
+    const x0 = s > 0 ? I.x1 : I.x0 - 1.6, x1 = s > 0 ? I.x1 + 1.6 : I.x0;
+    A.push(box([x0, 23.8, -26], [x1, 27.0, -18.5]));                                              // AN/SLQ-32 arrays
+    A.push(panel([[s > 0 ? x1 + .03 : x0 - .03, 24.1, -25.7], [s > 0 ? x1 + .03 : x0 - .03, 24.1, -18.8], [s > 0 ? x1 + .03 : x0 - .03, 26.7, -18.8], [s > 0 ? x1 + .03 : x0 - .03, 26.7, -25.7]], fn({ pts: false, hatch: 5, hatch2: 3, al: .45 })));
+  }
+  for (const [x, ux, n] of [[I.x1, FZ, FX], [I.x0, [0, 0, -1], [-1, 0, 0]]]) A.push(...cvDigits('68', [x, 23.4, -35.5], ux, FY, 4.4, { sw: .6, n, ds: .5, fine: true }));
+  for (const y of [22.3, 25.1]) A.push(line([[I.x0 - .02, y, I.z0], [I.x0 - .02, y, I.z1], [I.x1 + .02, y, I.z1], [I.x1 + .02, y, I.z0]], fn({ w: .22, pts: false })));
+  // 08 flag bridge, 09 navigation bridge: window rows round the front, bridge wings
+  const bx0 = 25.5, bx1 = 33.7, bz0 = -46, bz1 = -8.8, rows = [[.2, .42], [.66, .9]];
+  cvBlock([bx0, yA, bz0], [bx1, yB, bz1], 'fasp', B, {
+    f: [[...rows[0], .05, .95, 7], [...rows[1], .03, .97, 8]],
+    p: [[...rows[0], .74, .985, 4], [...rows[1], .7, .985, 5]], s: [[...rows[0], .015, .26, 4], [...rows[1], .015, .3, 5]] }, dI);
+  for (const [x0, x1, z0, z1] of [[bx0, bx1, -10.5, bz1], [bx0, 26.3, -26, -10.5], [33.0, bx1, -26, -10.5], [bx0, 27.0, -33.2, -26.5], [32.2, bx1, -33.2, -26.5], [33.2, bx1, -46, -33.5]]) cvRoof(x0, x1, z0, z1, yB, B);
+  for (const s of [1, -1]) {
+    const x0 = s > 0 ? bx1 : bx0 - 2.0, x1 = s > 0 ? bx1 + 2.0 : bx0, xo = s > 0 ? x1 : x0;
+    B.push(box([x0, 30.6, -14.6], [x1, 30.85, -9.4], { bottom: true }));
+    B.push(panel([[xo, 30.85, -14.6], [xo, 30.85, -9.4], [xo, 31.95, -9.4], [xo, 31.95, -14.6]], { ds: .8 }));
+    B.push(panel([[xo, 30.85, -9.4], [xo - s * 1.9, 30.85, -9.4], [xo - s * 1.9, 31.95, -9.4], [xo, 31.95, -9.4]], fn({ ds: .8 })));
+  }
+  B.push(line([[bx0 - .02, 30.75, bz0], [bx0 - .02, 30.75, bz1], [bx1 + .02, 30.75, bz1], [bx1 + .02, 30.75, bz0]], fn({ w: .22, pts: false })));
+  // 010 level: Pri-Fly aft (sloped glazing to port and aft), the mast house forward, the exhaust housing between
+  const pf = [[24.6, yB, -46.5], [33.2, yB, -46.5], [33.2, yB, -33.5], [24.6, yB, -33.5], [23.6, yC, -47.2], [33.2, yC, -47.2], [33.2, yC, -33.5], [23.6, yC, -33.5]];
+  C.push(hex(pf, { pts: false }));
+  cvWall(pf[0], pf[3], pf[7], pf[4], [-1, -.3, 0], [[.2, .9, .02, .98, 8]], C, dI);
+  cvWall(pf[1], pf[0], pf[4], pf[5], [0, -.2, -1], [[.2, .9, .03, .97, 6]], C, dI);
+  cvWall(pf[2], pf[1], pf[5], pf[6], FX, [[.25, .85, .5, .97, 3]], C, dI);
+  cvWall(pf[3], pf[2], pf[6], pf[7], FZ, [[.25, .85, .06, .45, 2]], C, dI);
+  C.push(SA.plate([pf[4], pf[5], pf[6], pf[7]], FY));
+  C.push(SA.plate([[24.6, yB, -46], [bx0, yB, -46], [bx0, yB, -33.5], [24.6, yB, -33.5]], [0, -1, 0]), SA.plate([[24.6, yB, -46.5], [33.2, yB, -46.5], [33.2, yB, -46], [24.6, yB, -46]], [0, -1, 0]));
+  C.push(line([[23.5, yC + 1.0, -47.3], [33.3, yC + 1.0, -47.3], [33.3, yC + 1.0, -33.4], [23.5, yC + 1.0, -33.4], [23.5, yC + 1.0, -47.3]], fn({ w: .35 })));
+  cvBlock([26.3, yB, -26], [33.0, 36.4, -10.5], 'fasp' + 't', C, null, dI);
+  const ex = [[27.0, yB, -33.2], [32.2, yB, -33.2], [32.2, yB, -26.5], [27.0, yB, -26.5], [27.3, 38.8, -33.9], [31.9, 38.8, -33.9], [31.9, 38.8, -27.6], [27.3, 38.8, -27.6]];
+  C.push(hex(ex));
+  C.push(panel([[27.5, 38.82, -33.6], [31.7, 38.82, -33.6], [31.7, 38.82, -27.9], [27.5, 38.82, -27.9]], fn({ pts: false, hatch: 8, al: .5 })));
+  for (const [x, z] of [[28.4, -32.6], [30.8, -32.6], [28.4, -29.0], [30.8, -29.0]]) C.push(lathe([x, 38.8, z], FY, [[0, .45], [1.3, .45], [1.42, .52]], { n: 12, gen: 3, rings: [1, 2] }));
+  // walkways round the 08 / 09 levels and the Pri-Fly roof, whip antennas
+  for (const [x0, x1, z0, z1, y] of [[bx0 - .9, bx1 + .9, bz0 - .2, -15, yA + .05], [26.0, 33.0, -26, -10.5, 36.4 + 1.0]]) B.push(line([[x0, y + 1.0, z0], [x0, y + 1.0, z1], [x1, y + 1.0, z1], [x1, y + 1.0, z0]], fn({ w: .3 })));
+  for (const [x, z, h] of [[33.9, -12, 6], [33.9, -44, 7], [25.3, -44, 6]]) C.push(line([[x, yB, z], [x + (x > 30 ? .8 : -.8), yB + h, z]], fn({ w: .45, pts: false })));
+  const Tx = T3([CV.IX, 0, 0]);
+  return { A: tps(Tx, A), B: tps(Tx, B), C: tps(Tx, C) };
+}
+/* masts: the main lattice mast (SPS-48E platform, pole with yard, TACAN, ESM), the SPS-49 mast aft, SATCOM domes
+   (laid out with the island's first x, moved by CV.IX like it) */
+function cvMast() {
+  const P = [], c = [29.65, 36.4, -20.5], yT = 45.2, leg = (sx, sz, r) => [c[0] + sx * r, 0, c[2] + sz * r];
+  const LEGS = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+  for (const [sx, sz] of LEGS) { const a = leg(sx, sz, 2.7), b = leg(sx, sz, 1.5); P.push(cyl([a[0], c[1], a[2]], [b[0], yT, b[2]], .3, { n: 6, gen: 0 })); }
+  const at = (y) => { const r = mix(2.7, 1.5, (y - c[1]) / (yT - c[1])); return LEGS.map(([sx, sz]) => { const p = leg(sx, sz, r); return [p[0], y, p[2]]; }); };
+  for (const y of [39.3, 42.2]) P.push(line(at(y), { closed: true, w: .6, pts: false }));
+  const lv = [c[1], 39.3, 42.2, yT];
+  for (let l = 0; l < 3; l++) { const A = at(lv[l]), B = at(lv[l + 1]); for (let k = 0; k < 4; k++) P.push(line([A[k], B[(k + 1) % 4]], fn({ w: .3, pts: false })), line([A[(k + 1) % 4], B[k]], fn({ w: .3, pts: false }))); }
+  P.push(box([26.9, yT - .25, -25.2], [32.4, yT + .2, -13.0], { bottom: true }));
+  P.push(line([[26.9, yT + 1.1, -25.2], [32.4, yT + 1.1, -25.2], [32.4, yT + 1.1, -13.0], [26.9, yT + 1.1, -13.0], [26.9, yT + 1.1, -25.2]], fn({ w: .35 })));
+  // pole mast: yard, lights, URN-25 TACAN, ESM dome, whip
+  const pl = [CV.POLE[0] - CV.IX, CV.POLE[1], CV.POLE[2]];
+  P.push(lathe([pl[0], yT, pl[2]], FY, [[0, .5], [4, .42], [10, .3], [16.3, .14]], { n: 10, gen: 3, rings: [1, 2] }));
+  P.push(cyl([pl[0] - 5.6, 51.5, pl[2]], [pl[0] + 5.6, 51.5, pl[2]], .13, { n: 6, gen: 0 }));
+  for (const s of [-1, 1]) { P.push(line([[pl[0] + s * 5.6, 51.5, pl[2]], [pl[0] + s * .4, 48.6, pl[2]]], fn({ w: .35 }))); for (const x of [2.2, 3.8, 5.2]) P.push(line([[pl[0] + s * x, 51.5, pl[2]], [pl[0] + s * x, 50.2, pl[2]]], fn({ w: .45, pts: false }))); }
+  P.push(lathe([pl[0], 55.2, pl[2]], FY, [[0, .82], [1.45, .82], [1.6, .5], [1.65, 0]], { n: 16, gen: 6, rings: [0, 1] }));
+  P.push(lathe([pl[0], 57.6, pl[2]], FY, [[0, .42], [.3, .46], [.62, .3], [.8, 0]], { n: 12, gen: 4, rings: [1] }));
+  P.push(line([[pl[0], 61.7, pl[2]], [pl[0], 64.2, pl[2]]], { w: .7 }));
+  P.push(line([[pl[0] - .8, 53.3, pl[2]], [pl[0] + .8, 53.3, pl[2]]], fn({ w: .5 })), line([[pl[0], 53.3, pl[2] - .8], [pl[0], 53.3, pl[2] + .8]], fn({ w: .5 })));
+  // SPS-49 mast on the Pri-Fly roof
+  const p9 = [CV.P49[0] - CV.IX, CV.P49[1], CV.P49[2]], y9 = 36.6;
+  for (const a of [0, 2.1, 4.2]) { const dx = Math.cos(a), dz = Math.sin(a); P.push(cyl([p9[0] + dx * 1.7, y9, p9[2] + dz * 1.7], [p9[0] + dx * .55, p9[1] - .2, p9[2] + dz * .55], .22, { n: 6, gen: 0 })); }
+  P.push(line([0, 2.1, 4.2].map(a => [p9[0] + Math.cos(a) * 1.1, 39.0, p9[2] + Math.sin(a) * 1.1]), fn({ closed: true, w: .4, pts: false })));
+  P.push(lathe([p9[0], p9[1] - .3, p9[2]], FY, [[0, .75], [.3, .75]], { n: 12, gen: 0, caps: true }));
+  // SATCOM domes: on the mast house, on the Pri-Fly roof; SPN-46 dishes on Pri-Fly's port corner
+  for (const d of [[31.6, 36.4, -12.4], [31.8, 36.6, -45.4]]) { P.push(cyl(d, V.add(d, [0, .6, 0]), .5, { n: 8, gen: 0 })); P.push(lathe(V.add(d, [0, .6, 0]), FY, [[0, 1.3], [.8, 1.5], [1.7, 1.3], [2.4, .8], [2.75, 0]], { n: 18, gen: 6, rings: [1, 3] })); }
+  for (const z of [-37.5, -43.5]) P.push(lathe([24.4, 36.6, z], FY, [[0, .4], [.5, .45], [.9, .3], [1.05, 0]], fn({ n: 10, gen: 3 })));
+  return tps(T3([CV.IX, 0, 0]), P);
+}
+/* AN/SPS-48E: planar array (5.3 × 5.3 m), tilted back 15°, on its rotary housing; turns with st.radar */
+function cvSps48(st) {
+  const c = CV.P48, P = [];
+  P.push(cyl(c, V.add(c, [0, .9, 0]), .6, { n: 14, gen: 0 }), box(V.add(c, [-.9, .9, -.8]), V.add(c, [.9, 1.55, .8])));
+  const w = 2.65, yb = c[1] + 1.75, yt = c[1] + 7.05, zb = c[2] + .7, tl = Math.tan(15 * DEG);
+  const at = (x, y, dz) => [c[0] + x, y, zb - (y - yb) * tl + (dz || 0)];
+  const face = [at(-w, yb), at(w, yb), at(w, yt), at(-w, yt)];
+  P.push(slab2(face, .42, { ds: .75 }));
+  P.push(panel([at(-w, yb, .25), at(w, yb, .25), at(w, yt, .25), at(-w, yt, .25)], fn({ pts: false, hatch: 16, al: .4 })));
+  P.push(hex([at(-w - .5, yb, .2), at(-w, yb, .2), at(-w, yb, -.25), at(-w - .5, yb, -.25), at(-w - .5, yt, .2), at(-w, yt, .2), at(-w, yt, -.25), at(-w - .5, yt, -.25)]));   // serpentine feed
+  for (const x of [-1.6, 1.6]) P.push(line([at(x, yt - .6, -.3), [c[0] + x * .4, c[1] + 1.55, c[2] - .6]], { w: .5 }), line([at(x, yb + .6, -.3), [c[0] + x * .4, c[1] + 1.4, c[2] - .2]], fn({ w: .4 })));
+  P.push(box(at(-w + .3, yt + .05, .05), at(w - .3, yt + .4, -.2), fn()));                       // IFF strip
+  return tps(about(R.y(st.radar || 0), c), P);
+}
+/* AN/SPS-49: the open-mesh reflector (7.3 × 4.3 m) and its feed on a boom; turns with st.radar */
+function cvSps49(st) {
+  const c = CV.P49, P = [], f = 2.7, y0 = c[1] + 1.2, y1 = c[1] + 5.5, zr = c[2] + .6;
+  P.push(cyl(c, V.add(c, [0, 1.0, 0]), .45, { n: 12, gen: 0 }));
+  const xs = [-3.65, -2.45, -1.2, 0, 1.2, 2.45, 3.65], zz = x => zr - x * x / (4 * f);
+  for (let k = 0; k < xs.length - 1; k++) { const a = xs[k], b = xs[k + 1]; P.push(panel([[c[0] + a, y0, zz(a)], [c[0] + b, y0, zz(b)], [c[0] + b, y1, zz(b)], [c[0] + a, y1, zz(a)]], { hatch: 5, ds: 1.1 })); }
+  P.push(cyl([c[0] - 3.6, c[1] + 1.0, zr - 1.3], [c[0] + 3.6, c[1] + 1.0, zr - 1.3], .14, { n: 6, gen: 0 }));
+  const fd = [c[0], (y0 + y1) / 2, zr + f - .4];
+  P.push(box(V.add(fd, [-.35, -.3, -.25]), V.add(fd, [.35, .3, .25])));
+  for (const [dx, y] of [[-1.3, y0], [1.3, y0], [0, y1]]) P.push(line([[c[0] + dx, y, zz(dx) + .05], fd], { w: .5 }));
+  P.push(box([c[0] - 3.3, y1 + .1, zr - .55], [c[0] + 3.3, y1 + .4, zr - .25]));
+  return tps(about(R.y(-(st.radar || 0) * .7 + 1.1), c), P);
+}
+
+/* ---------------------------------------------------------------- self-defence, boats, anchors */
+/* Mk 29 launcher (NSSM / ESSM, 8 cells): origin on its sponson, launcher toward +Z */
+function cvMk29() {
+  const P = [lathe([0, 0, 0], FY, [[0, .95], [.25, .95], [.3, .75], [1.0, .7]], { n: 18, gen: 5, rings: [0, 2] })];
+  P.push(box([-1.2, .95, -.4], [1.2, 1.25, .4]));
+  for (const s of [-1, 1]) P.push(box([s * 1.33 - .13, .95, -.55], [s * 1.33 + .13, 2.25, .55]));
+  const L = [box([-1.12, 1.2, -2.15], [1.12, 2.7, 2.15], { bottom: true })];
+  for (let i = 1; i < 4; i++) L.push(line([[-1.12 + i * .56, 1.2, 2.17], [-1.12 + i * .56, 2.7, 2.17]], fn({ w: .4, pts: false })));
+  L.push(line([[-1.12, 1.95, 2.17], [1.12, 1.95, 2.17]], fn({ w: .4, pts: false })));
+  return P.concat(tps(about(R.x(-18 * DEG), [0, 1.95, 0]), L));
+}
+/* Mk 49 RAM launcher (21 rounds): origin on its sponson, launcher toward +Z */
+function cvMk49() {
+  const P = [lathe([0, 0, 0], FY, [[0, .9], [.3, .9], [.36, .72], [.9, .66]], { n: 18, gen: 5, rings: [0, 2] })];
+  P.push(box([-.95, .9, -.9], [.95, 1.5, .9]));
+  for (const s of [-1, 1]) P.push(box([s * 1.03 - .13, 1.1, -.45], [s * 1.03 + .13, 2.4, .5]));
+  const L = [box([-.88, 1.15, -1.3], [.88, 2.95, 1.55], { bottom: true })];
+  for (let r = 0; r < 3; r++) for (let k = 0; k < 7; k++) L.push(ringW([-.66 + k * .22, 1.5 + r * .55, 1.57], FZ, .085, fn({ n: 8 })));
+  return P.concat(tps(about(R.x(-12 * DEG), [0, 2.0, .1]), L));
+}
+/* Phalanx CIWS Block 1B: origin on its sponson, gun toward +Z */
+function cvPhalanx() {
+  return [
+    lathe([0, 0, 0], FY, [[0, .95], [.15, .95], [.22, .8], [.55, .78]], { n: 20, gen: 6 }),
+    box([-.8, .55, -.42], [-.6, 1.85, .42]), box([.6, .55, -.42], [.8, 1.85, .42]),
+    lathe([0, 1.9, -.3], FY, [[0, .62], [.55, .64], [1.05, .57], [1.42, .39], [1.62, .15], [1.68, 0]], { n: 20, gen: 8, rings: [0, 2, 4] }),
+    box([-.56, 1.45, -.95], [.56, 1.95, .45]),
+    lathe([0, 1.2, -1.05], FZ, [[0, .38], [1.4, .38]], { n: 16, gen: 4 }),
+    lathe([0, 1.36, .1], FZ, [[0, .22], [.6, .2], [.68, .14], [2.1, .13]], { n: 12, gen: 3 }),
+    box([-1.02, 2.0, -.25], [-.66, 2.44, .3], fn()),
+  ];
+}
+/* where they stand: [kind, sponson index, x out from the deck edge, z, yaw] */
+const CV_WPN = [['nssm', 0, 3.4, 108, 50], ['ciws', 1, 4.3, 121.5, -40], ['ram', 1, 3.6, 113.5, -60], ['nssm', 2, 3.6, -136.5, 125], ['ciws', 2, 4.2, -145.2, 145], ['ram', 3, 3.8, -146.0, -125], ['ciws', 3, 4.2, -154.5, -150]];
+const cvWpnAt = w => { const sp = CV_SPONS[w[1]], s = sp.s; return [cvEdgeX(s, w[3]) + s * w[2], 16.9, w[3]]; };
+function cvWeapons() {
+  const out = { nssm: [], ram: [], ciws: [] }, G = { nssm: cvMk29(), ram: cvMk49(), ciws: cvPhalanx() };
+  for (const w of CV_WPN) out[w[0]].push(...tps(X.make(R.y(w[4] * DEG), cvWpnAt(w)), G[w[0]]));
+  return out;
+}
+/* 11 m RHIB: origin on the keel at mid-length, bow +Z */
+function cvRhib() {
+  const P = [];
+  for (const s of [-1, 1]) { P.push(cyl([s * 1.45, .75, -5.0], [s * 1.45, .75, 2.4], .36, { n: 10, gen: 3 })); P.push(cyl([s * 1.45, .75, 2.4], [s * .15, 1.05, 5.3], .36, { n: 10, gen: 3 })); }
+  P.push(hex([[-.3, 0, -5], [.3, 0, -5], [.06, .35, 5.1], [-.06, .35, 5.1], [-1.3, .7, -5], [1.3, .7, -5], [.25, .9, 5.1], [-.25, .9, 5.1]], { al: .7 }));
+  P.push(box([-.5, .75, -.6], [.5, 1.8, .7], fn()));
+  return P;
+}
+function cvBoats() {
+  const P = [], R6 = cvRhib();
+  for (const s of [-1, 1]) {
+    P.push(...tps(T3([s * 10.2, CV.HGR + .45, -151]), R6));
+    for (const dz of [-3.2, 2.6]) P.push(box([s * 10.2 - 1.2, CV.HGR, -151 + dz - .3], [s * 10.2 + 1.2, CV.HGR + .5, -151 + dz + .3], fn()));
+  }
+  // liferaft racks under the deck edge: a platform, two tiers of four canisters
+  for (const [s, z] of [[1, 95], [1, -96], [1, -116], [-1, -62], [-1, -90], [-1, 88], [-1, 20]]) {
+    const e = cvEdgeX(s, z);
+    P.push(box([Math.min(e, e + s * 2.0), 16.15, z - 3.4], [Math.max(e, e + s * 2.0), 16.4, z + 3.4], { bottom: true }));
+    for (const y of [16.8, 17.45]) for (const dz of [-2.4, -.8, .8, 2.4]) P.push(lathe([e + s * .2, y, z + dz], [s, 0, 0], [[0, .31], [1.5, .31]], fn({ n: 8, gen: 0, caps: true, rings: [0, 1] })));
+  }
+  return P;
+}
+/* stockless bow anchors in their hawse pockets on the flare */
+function cvAnchors() {
+  const P = [], AN = [box([-.28, -4.2, -.28], [.28, 0, .28]),
+    hex([[-.35, -4.7, -1.7], [.35, -4.7, -1.7], [.35, -4.7, 1.7], [-.35, -4.7, 1.7], [-.3, -4.1, -1.35], [.3, -4.1, -1.35], [.3, -4.1, 1.35], [-.3, -4.1, 1.35]], { bottom: true })];
+  for (const s of [-1, 1]) AN.push(hex([[-.25, -4.6, s * 1.2], [.25, -4.6, s * 1.2], [.25, -4.6, s * 1.75], [-.25, -4.6, s * 1.75], [-.15, -2.5, s * .7], [.15, -2.5, s * .7], [.15, -2.5, s * 1.0], [-.15, -2.5, s * 1.0]], { bottom: true }));
+  AN.push(ringW([0, .25, 0], FX, .42, { n: 12 }));
+  for (const s of [-1, 1]) {
+    const z = 146, y = 9.4, x = s * (cvHW(z, y) + .6);
+    // crown along the hull's waterline tangent, the shank leaning in with the flare
+    P.push(...tps(X.make(R.mul(R.y(-s * 23 * DEG), R.z(-s * 25 * DEG)), [x, y, z]), AN));
+    P.push(ringW([x - s * .3, y + .1, z], [s, .35, .45], .95, { n: 16 }));
+  }
+  return P;
+}
+/* four shafts on struts, 5-blade propellers (outboard pair forward), two rudders behind the inboard props */
+function cvProps() {
+  const PR = [], RU = [], y = CV.PROP_Y;
+  for (const s of [-1, 1]) for (const p of CV.PROPS) {
+    const c = [s * p.x, y, p.z];
+    PR.push(lathe([s * p.x, y, p.zx], [0, 0, -1], [[0, .5], [p.zx - p.z - 1.0, .5]], { n: 12, gen: 3 }));
+    PR.push(blades(c, FZ, 5, .9, CV.PROP_R, { chord: .95, taper: 1.05, pitch: .42, rot: s > 0 ? 0 : .6 }));
+    PR.push(lathe(V.add(c, [0, 0, 1.1]), [0, 0, -1], [[0, .55], [.25, .85], [1.0, .95], [1.9, .85], [2.5, .55], [2.85, .2], [2.9, 0]], { n: 20, gen: 6, rings: [2] }));
+    // struts: a V-strut ahead of the propeller, an intermediate one on the long outboard shafts
+    for (const zs of p.x > 10 ? [p.z + 6, p.z + 16] : [p.z + 5.5]) {
+      const sc = [s * p.x, y, zs], xo = p.x + (p.x > 10 ? 1.2 : 2.4), xi = p.x - 3.0;
+      PR.push(lathe(V.add(sc, [0, 0, .8]), [0, 0, -1], [[0, .75], [1.6, .75]], { n: 14, gen: 3, caps: true }));
+      PR.push(strutLeg(sc, [s * xo, cvBottomY(zs, xo) + .25, zs]), strutLeg(sc, [s * xi, cvBottomY(zs, xi) + .25, zs]));
+    }
+  }
+  for (const s of [-1, 1]) {
+    const x = s * CV.PROPS[1].x, zf = -151.8, za = -159.2, top = cvKeel(-155.5) + .1, bot = -10.4;
+    RU.push(hex([[x - .55, top, zf], [x + .55, top, zf], [x + .15, top, za], [x - .15, top, za], [x - .4, bot, zf + .6], [x + .4, bot, zf + .6], [x + .1, bot, za + .4], [x - .1, bot, za + .4]], { bottom: true }));
+    RU.push(cyl([x, top, -154.2], [x, top + 3.5, -154.2], .38, { n: 10, gen: 0 }));
+    RU.push(line([[x, top - .5, -154.2], [x, bot + .5, -154.2]], fn({ w: .35, pts: false })));
+  }
+  return { PR, RU };
+}
+
+/* ---------------------------------------------------------------- the interior (cutaway): closed volumes */
+/* a closed volume: sparse dots on its faces, its twelve edges in dense dots (reads as a LiDAR box, not a slab) */
+function cvVolume(a, b, P, ds) {
+  P.push(box(a, b, { bottom: true, ds: ds || 2.6 }));
+  const c = (i, j, k) => [i ? b[0] : a[0], j ? b[1] : a[1], k ? b[2] : a[2]];
+  for (const [p, q] of [[c(0, 0, 0), c(1, 0, 0)], [c(0, 1, 0), c(1, 1, 0)], [c(0, 0, 1), c(1, 0, 1)], [c(0, 1, 1), c(1, 1, 1)],
+    [c(0, 0, 0), c(0, 1, 0)], [c(1, 0, 0), c(1, 1, 0)], [c(0, 0, 1), c(0, 1, 1)], [c(1, 0, 1), c(1, 1, 1)],
+    [c(0, 0, 0), c(0, 0, 1)], [c(1, 0, 0), c(1, 0, 1)], [c(0, 1, 0), c(0, 1, 1)], [c(1, 1, 0), c(1, 1, 1)]]) P.push(line([p, q], { pts: true, w: 0, ds: .45 }));
+}
+function cvInterior() {
+  const HG = [], RX = [], MM = [], MG = [], SH = [], II = [], H = CV.HANGAR, y0 = CV.HGR, y1 = CV.HTOP;
+  // hangar: the hangar deck, its walls (openings to the elevators), two divisional doors: three bays
+  HG.push(box([-H.x, y0 - .3, H.z0], [H.x, y0, H.z1], { ds: 1.5 }));
+  HG.push(SA.plate([[-H.x, y0, H.z0], [-H.x, y0, H.z1], [-H.x, y1, H.z1], [-H.x, y1, H.z0]], FX, { ds: 2.6 }));
+  const sw = [H.z0]; for (const [s, z0, z1] of CV.ELEV) if (s > 0) sw.push(z0, z1); sw.push(H.z1); sw.sort((a, b) => a - b);
+  for (let i = 0; i < sw.length - 1; i += 2) HG.push(SA.plate([[H.x, y0, sw[i]], [H.x, y0, sw[i + 1]], [H.x, y1, sw[i + 1]], [H.x, y1, sw[i]]], [-1, 0, 0], { ds: 2.6 }));
+  for (const [z, n] of [[H.z0, FZ], [H.z1, [0, 0, -1]]]) HG.push(SA.plate([[-H.x, y0, z], [H.x, y0, z], [H.x, y1, z], [-H.x, y1, z]], n, { ds: 2.6 }));
+  for (const z of H.doors) HG.push(panel([[-H.x, y0, z], [H.x, y0, z], [H.x, y1, z], [-H.x, y1, z]], { hatch: 6, ds: 2.0 }));
+  HG.push(line([[-H.x, y1, H.z0], [-H.x, y1, H.z1], [H.x, y1, H.z1], [H.x, y1, H.z0]], { closed: true, w: .5, ds: .5 }));
+  HG.push(line([[-H.x, y0 + .05, H.z0], [-H.x, y0 + .05, H.z1], [H.x, y0 + .05, H.z1], [H.x, y0 + .05, H.z0]], { closed: true, w: .5, ds: .5 }));
+  // two reactor compartments, each with its main machinery room aft of it; the shafts from the rooms aft
+  const lo = -9.6, hi = 6.4;
+  for (const [z0, z1] of [[22, 38], [-24, -8]]) { cvVolume([-12, lo, z0], [12, hi, z1], RX, 2.0); for (const y of [-3, 2]) RX.push(line([[-12.03, y, z0], [-12.03, y, z1], [12.03, y, z1], [12.03, y, z0]], fn({ w: .3, pts: false }))); }
+  for (const [z0, z1] of [[2, 20], [-44, -26]]) { cvVolume([-16.5, lo, z0], [16.5, hi, z1], MM, 2.4); MM.push(line([[-16.53, 0, z0], [-16.53, 0, z1], [16.53, 0, z1], [16.53, 0, z0]], fn({ w: .3, pts: false }))); }
+  for (const [z0, z1] of [[56, 70], [70, 84], [84, 98], [-104, -90], [-90, -76], [-76, -62]]) cvVolume([-14.5, lo, z0], [14.5, 4.8, z1], MG, 2.8);
+  for (const [x0, z0, p] of [[9, 2, CV.PROPS[0]], [5, -44, CV.PROPS[1]]]) for (const s of [-1, 1]) {
+    const a = [s * x0, CV.PROP_Y, z0], b = [s * p.x, CV.PROP_Y, p.zx];
+    SH.push(cyl(a, b, .45, { n: 12, gen: 3, ds: 1.8 }));
+    SH.push(lathe(V.mad(a, V.norm(V.sub(b, a)), 1.5), V.sub(b, a), [[0, 1.0], [2.2, 1.0]], { n: 14, gen: 3, caps: true, ds: 1.2 }));      // thrust bearing
+  }
+  // island decks: the 05-07 levels' floors and the ladder trunk
+  for (const y of [22.3, 25.1]) II.push(SA.plate([[CV.ISL.x0 + .3, y, CV.ISL.z0 + .3], [CV.ISL.x1 - .3, y, CV.ISL.z0 + .3], [CV.ISL.x1 - .3, y, CV.ISL.z1 - .3], [CV.ISL.x0 + .3, y, CV.ISL.z1 - .3]], FY, { ds: 1.6 }));
+  II.push(box([28.6, CV.DECK, -30], [30.6, 27.6, -27], { ds: 1.4 }));
+  return { HG, RX, MM, MG, SH, II };
+}
+
+const CV_GEO = memo(() => {
+  const hu = cvHull(), bl = cvBelow(), sp = cvSponsons(), is = cvIsland(), wp = cvWeapons(), pr = cvProps();
+  return {
+    HUS: hu.S.concat(sp.S), HUP: hu.P.concat(sp.P), BLS: bl.S, BLP: bl.P, BULB: bl.BULB,
+    DK: cvDeck(), CT: cvCats(), WR: cvWires(), ELS: cvElevators(1), ELP: cvElevators(-1),
+    ISA: is.A, ISB: is.B, ISC: is.C, MAST: cvMast(), NS: wp.nssm, RA: wp.ram, CI: wp.ciws,
+    BO: cvBoats(), AN: cvAnchors(), PR: pr.PR, RU: pr.RU,
+  };
+});
+const CV_IN = memo(cvInterior);
+const cvRadars = st => cvSps48(st).concat(cvSps49(st));
+/* anchors for effects and the director (ship frame) */
+export const CVN = {
+  DECK_Y: CV.DECK, L: CV.L, B: 76.8, ISLAND: CV.ISL, HANGAR: CV.HANGAR, ELEV: CV.ELEV,
+  ANGLED: { origin: [CV.ANG.x0, CV.DECK, CV.ZS], dir: CV_D.slice() },
+  CATS: CV_CATS.map(c => [c.a.slice(), c.b.slice()]),
+  WIRES: CV.WIRES.map(t => [cvAx(t, -15.5), cvAx(t, 15.5)]),
+  SPS48: CV.P48.slice(), SPS49: CV.P49.slice(), mastTop: [CV.POLE[0], 64.2, CV.POLE[2]], bridge: [29.6, 32.4, -8.6], priFly: [23.8, 35.2, -40],
+  weapons: CV_WPN.map(w => ({ kind: w[0], at: cvWpnAt(w), yaw: w[4] * DEG })),
+  inside: cvInside, span: cvSpan,
+};
+function carrier() {
+  const g = CV_GEO();
+  return {
+    name: 'carrier', L: CV.L, B: 76.8, D: CV.T, DECK_Y: CV.DECK, A: CVN,
+    parts: [
+      { name: 'hull', label: 'Hull · CVN-68 Nimitz class', prims: g.HUS.concat(g.HUP) },
+      { name: 'below', label: 'Underwater hull · bulbous bow', prims: g.BLS.concat(g.BLP, g.BULB) },
+      { name: 'props', label: 'Shafts ×4 · 5-blade propellers · rudders ×2', prims: g.PR.concat(g.RU) },
+      { name: 'deck', label: 'Flight deck · 9° angled deck', prims: g.DK },
+      { name: 'island', label: 'Island · bridges · Pri-Fly', prims: g.ISA.concat(g.ISB, g.ISC) },
+      { name: 'mast', label: 'Masts · URN-25 TACAN · SATCOM', prims: g.MAST },
+      { name: 'radars', label: 'AN/SPS-48E · AN/SPS-49', prims: cvRadars({}), dyn: cvRadars },
+      { name: 'cats', label: 'C-13-1 catapults ×4 · blast deflectors', prims: g.CT.concat(cvJbd({})), dyn: st => g.CT.concat(cvJbd(st)) },
+      { name: 'wires', label: 'Mk 7 arresting gear · IFLOLS', prims: g.WR },
+      { name: 'elevators', label: 'Deck-edge elevators ×4', prims: g.ELS.concat(g.ELP) },
+      { name: 'nssm', label: 'Mk 29 · NSSM ×2', prims: g.NS },
+      { name: 'ram', label: 'Mk 49 RAM ×2', prims: g.RA },
+      { name: 'ciws', label: 'Phalanx CIWS ×3', prims: g.CI },
+      { name: 'boats', label: 'Boats · liferaft racks', prims: g.BO },
+      { name: 'anchors', label: 'Anchors ×2', prims: g.AN },
+    ],
+  };
+}
+carrier.DECK_Y = CV.DECK; carrier.ANGLED = CVN.ANGLED; carrier.CATS = CVN.CATS; carrier.A = CVN;
+/* cutaway: the unit model re-partitioned for the exploded view (island by levels, radars apart, the hull split
+   into bow, midbody and stern) plus the hangar and the closed machinery volumes (interior parts show with st.xray) */
+function carrierCut() {
+  const g = CV_GEO(), I = CV_IN(), H = { bow: [], mid: [], stern: [] };
+  // the hull in three: bow and stern come away fore and aft of the midbody (the split on a station line)
+  for (const pr of g.HUS.concat(g.HUP, g.BLS, g.BLP)) { const z = bboxOf(pr).c[2]; H[z > 100 ? 'bow' : z < -100 ? 'stern' : 'mid'].push(pr); }
+  return {
+    name: 'carrier_cut', L: CV.L, B: 76.8, D: CV.T, DECK_Y: CV.DECK, A: CVN,
+    parts: [
+      { name: 'radars48', label: 'AN/SPS-48E · 3-D air search', prims: cvSps48({}), dyn: cvSps48 },
+      { name: 'radars49', label: 'AN/SPS-49 · 2-D air search', prims: cvSps49({}), dyn: cvSps49 },
+      { name: 'mast', label: 'Masts · URN-25 TACAN · SATCOM', prims: g.MAST },
+      { name: 'islandTop', label: 'Primary Flight Control · 010 level', prims: g.ISC },
+      { name: 'islandBridge', label: 'Navigation bridge · flag bridge', prims: g.ISB },
+      { name: 'islandBase', label: 'Island · 05–07 levels', prims: g.ISA },
+      O({ name: 'islandIn', label: 'Island decks', prims: I.II }, hidden),
+      { name: 'cats', label: 'C-13-1 catapults ×4', prims: g.CT },
+      { name: 'catsJbd', label: 'Jet blast deflectors ×4', prims: cvJbd({}), dyn: cvJbd },
+      { name: 'wires', label: 'Mk 7 arresting gear · IFLOLS', prims: g.WR },
+      { name: 'elevatorsS', label: 'Deck-edge elevators 1–3', prims: g.ELS },
+      { name: 'elevatorsP', label: 'Elevator 4 · port', prims: g.ELP },
+      { name: 'deck', label: 'Flight deck · 9° angled deck', prims: g.DK },
+      { name: 'nssm', label: 'Mk 29 · NSSM ×2', prims: g.NS },
+      { name: 'ram', label: 'Mk 49 RAM ×2', prims: g.RA },
+      { name: 'ciws', label: 'Phalanx CIWS ×3', prims: g.CI },
+      { name: 'boats', label: 'Boats · liferaft racks', prims: g.BO },
+      O({ name: 'hangar', label: 'Hangar deck · 3 bays', prims: I.HG }, hidden),
+      O({ name: 'reactors', label: 'A4W reactor ×2', prims: I.RX }, hidden),
+      O({ name: 'machinery', label: 'Main machinery rooms ×2', prims: I.MM }, hidden),
+      O({ name: 'magazines', label: 'Magazines · forward · aft', prims: I.MG }, hidden),
+      O({ name: 'shaftsIn', label: 'Shaft lines ×4 · thrust bearings', prims: I.SH }, hidden),
+      { name: 'props', label: 'Shafts ×4 · 5-blade propellers', prims: g.PR },
+      { name: 'rudders', label: 'Rudders ×2', prims: g.RU },
+      { name: 'anchors', label: 'Anchors ×2', prims: g.AN },
+      { name: 'hullBow', label: 'Bow · bulbous bow', prims: H.bow.concat(g.BULB) },
+      { name: 'hullMid', label: 'Hull · midbody', prims: H.mid },
+      { name: 'hullStern', label: 'Stern · fantail', prims: H.stern },
+    ],
+  };
+}
+
 /* ================================================================ wrecks
    wreckOf(model, {seed, k}) -> the same model with every part displaced and tilted about its centre
    (heavy tall parts fall further), the whole settled and listed. st.wreck (0..1, default k or 1)
@@ -2165,7 +2930,7 @@ export function wreckOf(model, o) {
 }
 
 /* ================================================================ registry */
-export const UNIT_MODELS = { tel: HD.tel, radar: HD.radar, pantsir: HD.pantsir, drone: HD.drone, catapult: HD.catapult, destroyer: HD.destroyer, carrier: HD.carrier, helo: HD.helo, fighter: HD.fighter };
+export const UNIT_MODELS = { tel: HD.tel, radar: HD.radar, pantsir: HD.pantsir, drone: HD.drone, catapult: HD.catapult, destroyer: HD.destroyer, carrier, helo: HD.helo, fighter: HD.fighter };
 export const EXTRA_MODELS = {
   transloader, hq, depot, port, lighthouse, radar_hill: radarHill, airfield,
   tlc, pantsir_missile: pantsirMissile, strike_missile: strikeMissile, aam, shell, mk41_can: mk41Can,
@@ -2173,6 +2938,8 @@ export const EXTRA_MODELS = {
   oniks: HD.oniks, oniks_booster: HD.oniksBooster, sm6: HD.sm6, mk72: HD.mk72,
   // the second wave of units and their munitions
   aew, ssn, ssk, bal, kh35, kalibr, torpedo533, vpt_can: vptCan,
+  // the film-quality Nimitz: registered over the engine's built-in HD.carrier (same key, frame and deck height)
+  carrier,
   // the projectile names data/units.js uses
   tomahawk: strikeMissile, sam57e6: pantsirMissile, aim120: aam,
 };
@@ -2182,6 +2949,7 @@ export const CUT_MODELS = {
   tel_cut: cache(telCut), radar_cut: cache(radarCut), pantsir_cut: cache(pantsirCut), destroyer_cut: cache(destroyerCut),
   helo_cut: cache(heloCut), fighter_cut: cache(fighterCut), drone_cut: cache(droneCut), oniks_cut: cache(oniksCut), sm6_cut: cache(sm6Cut),
   aew_cut: cache(aewCut), ssn_cut: cache(ssnCut), ssk_cut: cache(sskCut), bal_cut: cache(balCut),
+  carrier_cut: cache(carrierCut),
 };
 export const ALL_MODELS = O(UNIT_MODELS, EXTRA_MODELS, CUT_MODELS);
 export function makeModel(key) { const f = ALL_MODELS[key]; if (!f) throw new Error('unknown model ' + key); return f(); }
@@ -2195,7 +2963,7 @@ export const MODEL_STATES = {
   drone: { prop: [0, TAU, 0], gimYaw: ANG, gimPitch: [-1.5, .3, -.4] },
   catapult: { carriage: [0, 1, 0] },
   destroyer: { sps: ANG, gunYaw: [-2.6, 2.6, 0], gunPitch: [-.1, 1.12, 0], ciwsSpin: [0, TAU, 0], hangar: [0, 1, 0] },
-  carrier: { radar: ANG },
+  carrier: { radar: ANG, jbd: [0, 1, 0] },
   helo: { rotor: [0, TAU, 0], trotor: [0, TAU, 0], droop: [0, 1, 0] },
   fighter: { fan: [0, TAU, 0], nozzle: [0, 1, 0], ab: [0, 1, 0] },
   oniks: { wing: [0, 1, 1], fin: [0, 1, 1], booster: true, cover: false },
@@ -2217,6 +2985,7 @@ export const MODEL_STATES = {
 };
 for (const k of ['tel', 'radar', 'pantsir', 'destroyer', 'helo', 'fighter', 'drone', 'oniks', 'sm6', 'aew', 'ssn', 'ssk', 'bal']) MODEL_STATES[k + '_cut'] = O(MODEL_STATES[k], { xray: false });
 MODEL_STATES.tomahawk = MODEL_STATES.strike_missile; MODEL_STATES.sam57e6 = MODEL_STATES.pantsir_missile;
+MODEL_STATES.carrier_cut = O(MODEL_STATES.carrier, { xray: false });
 MODEL_STATES.depot = { xray: false }; MODEL_STATES.radar_hill.xray = false;
 
 export const MODEL_INFO = {
@@ -2226,7 +2995,7 @@ export const MODEL_INFO = {
   drone: { name: 'Orlan-10', kind: 'unit', size: [2.0, 3.1, .6], s: [.008, .02, .06] },
   catapult: { name: 'Orlan-10 launch rail', kind: 'unit', size: [4.9, 1.9, 2.3], s: [.015, .04, .1] },
   destroyer: { name: 'DDG-51 Arleigh Burke Flight IIA', kind: 'unit', size: [155.1, 20, 47.1], s: [.3, .7, 2] },
-  carrier: { name: 'CVN Nimitz class', kind: 'unit', size: [332.8, 76.8, 61.5], s: [.8, 2, 5] },
+  carrier: { name: 'CVN-68 Nimitz class', kind: 'unit', size: [332.8, 76.8, 64.2], s: [.4, 1.0, 2.6] },
   helo: { name: 'MH-60R Seahawk', kind: 'unit', size: [19.8, 16.4, 5.2], s: [.04, .1, .3] },
   fighter: { name: 'F/A-18E Super Hornet', kind: 'unit', size: [18.3, 13.6, 4.9], s: [.04, .1, .3] },
   transloader: { name: 'K342P transloader', kind: 'unit', size: [14.0, 3.1, 3.6], s: [.035, .08, .25] },
