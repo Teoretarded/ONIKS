@@ -84,3 +84,18 @@ Agent retries used so far: 1 of 100 (the balance agent tripped the safety filter
   order and come home in reverse, the films' timing), damage shows coral per part. Click a missile in flight:
   bullet time (x0.05) and orbit the round. Sandbox: Shift+I opens an anatomy museum of all 29 models.
   Stills: `game/shots/final_*.png`.
+
+## 05:30 · Sensors and campaign done
+- **Radar picture**: radars paint the sea with a lime-edged sweep; contacts are clouds of dots taken from the
+  unit's own model around the *estimated* position, pulled tighter on each radar hit, snapping onto the hull with a
+  lime flash when classified (`TRK 22 · DDG · ARLEIGH BURKE 0.97`, coral). Heard radars show as coral bearing fans.
+- **Lightning SCAN (X, click)**: aiming reticle with the contacts it would catch, then a branching lime bolt comes
+  down, flickers, lights the world, and a lime front sweeps the radius; every enemy it passes lights up in tendrils,
+  is X-rayed for a moment (rounds in the containers, VLS canisters) and gets part placards. Enemy scans on you show
+  coral-white. **Radar view (V)**: the world becomes the scope (clutter height field, rings, bearing ticks, tracks).
+- **Campaign**: a mission-script system (camera openings, one line at a time, triggered beats, raids, weather) and six
+  crafted missions: 1 Inside (guided tutorial), 2 Scale (hide and find with drones, radars silent), 3 Battery (air
+  raids, radar discipline), 4 Engagement (the big salvo, the cinematic camera takes it), 5 Ring (fire and move under
+  counter-fire, hold 15 min), 6 Strike (a storm cell over the lagoon hides your rounds; lightning reveals both
+  sides). Grades S-D, rounds carry over between missions.
+- Running now: world look polish, balance, landmark set pieces per map, first scored review.
