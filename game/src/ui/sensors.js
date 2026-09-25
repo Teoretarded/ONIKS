@@ -91,6 +91,7 @@ export async function createSensors(game) {
 
   const sys = {
     name: 'sensors', priority: 15, always2d: true, stats,
+    tagAt: (x, y) => TL.at(x, y),        // the point a sensor tag under (x, y) names (orders.js: a scan click on a tag)
     S, contacts, radar, scan, scope, weather, gpu, inset,
     get scopeOn() { return scope.st.on; },
     toggleScope: () => scope.toggle(),

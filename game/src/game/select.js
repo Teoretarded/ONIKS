@@ -59,7 +59,7 @@ export function createSelect(game) {
     return best;
   }
   /* the unit under a screen point: drawn instances first, then own units' specks and tracks by their screen point */
-  function pickUnit(x, y) {
+  function pickUnit(x, y, noTag) {
     const d = R.pick(x, y);
     if (d && d.id !== undefined && sim.units.has(d.id)) {
       const u = sim.units.get(d.id);
@@ -80,6 +80,11 @@ export function createSelect(game) {
         const c = sim.contact(game.side, u.id);
         if (c && c.pos && cam.project(c.pos, q)) { const dd = (q[0] - x) ** 2 + (q[1] - y) ** 2; if (dd < bd) { bd = dd; best = u; } }
       }
+    }
+    // a click on a track's tag (it may sit well away from the track, e.g. pinned under the top band) picks the track
+    if (!best && !noTag) {
+      const sens = game.getSystem && game.getSystem('sensors'), a = sens && sens.tagAt ? sens.tagAt(x, y) : null;
+      if (a) return pickUnit(a[0], a[1], true);
     }
     return best;
   }

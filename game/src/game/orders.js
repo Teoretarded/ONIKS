@@ -596,7 +596,18 @@ export function createOrders(game) {
       if (ev.type === 'click' && ev.button === 0) {
         const w = cam.pickGround(ev.x, ev.y);
         let done = true;
-        if (mode.kind === 'scan') { if (!w) return true; done = scanClick(ev, w); }
+        if (mode.kind === 'scan') {
+          // a click on a contact (its cloud, or its tag, which may sit well away from it) scans the contact
+          const sens = game.getSystem('sensors'), ta = sens && sens.tagAt ? sens.tagAt(ev.x, ev.y) : null;
+          const pc = game.pickContact ? game.pickContact(ta ? ta[0] : ev.x, ta ? ta[1] : ev.y) : null;
+          let at = pc ? pc.at : w;
+          if (!pc && ta) {
+            const t = game.pickUnit ? game.pickUnit(ta[0], ta[1]) : null, c = t && t.side !== game.side ? sim.contact(game.side, t.id) : null;
+            at = c && c.pos ? c.pos : cam.pickGround(ta[0], ta[1]) || w;
+          }
+          if (!at) return true;
+          done = scanClick(ev, [at[0], Math.max(0, T.heightAt(at[0], at[2])), at[2]]);
+        }
         else if (mode.kind === 'drone') {
           if (!w) return true;
           const cs = mode.units.filter(u => u.alive && u.drones > 0);

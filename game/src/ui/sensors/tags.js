@@ -85,6 +85,18 @@ export class TagLayer {
   }
 }
 
+/* the tag drawn at a screen point (the last flush; the one on top) -> [ax, ay], the point it names, or null. The
+   orders system aims a scan click on a track's tag at the track (a far contact's tag sits away from it). */
+TagLayer.prototype.at = function (x, y) {
+  const L = this.sorted;
+  for (let i = 0; i < L.length; i++) {
+    const t = L[i];
+    if (t.skip || t.ax === undefined || t.a <= .05) continue;
+    if (x >= t.x - 2 && x <= t.x + t.fw + 2 && y >= t.y - 2 && y <= t.y + t.hh + 2) return [t.ax, t.ay];
+  }
+  return null;
+};
+
 /* stack tag i (t) clear of the panels and of the tags placed before it -> placed? */
 function place(L, i, t, obst, W, H, k) {
   const hh = t.hh, g = 6 * k;
