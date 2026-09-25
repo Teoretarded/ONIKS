@@ -27,6 +27,7 @@ import { Fork, reachOf } from './chain.js';
 import { sampleOf } from './samples.js';
 import { TRACK, SHORT } from '../../game/labels.js';
 import { CLASSIFY } from '../../data/units.js';
+import { submerged } from '../../sim/subs.js';
 import { flashLevel, flashLead } from '../../fx/lib/weather.js';
 import { HEAD, FRAME, COMMON, CULL } from '../../engine/shaders.js';
 import { program } from '../../engine/gl.js';
@@ -515,10 +516,10 @@ export function createWeather(S) {
       flashes.push({ kind: ic ? 'ic' : 'cg', x: top[0], y: top[1], z: top[2], gx: e.pos[0], gy: e.pos[1], gz: e.pos[2], top, t0: now, seed, s: e.s || 1, r: ic ? (e.r || 5000) * 1.15 : 9000, bolt: null, big, base: cell ? cell.base : 1250 });
     }
     if (ic) return;
-    // what the flash shows: every unit near it, both sides (nearest first, a few)
+    // what the flash shows: every unit near it, both sides (nearest first, a few); not a boat under water (sim flashReveal)
     const r = e.r || 3000, list = [];
     for (const u of sim.list()) {
-      if (!u.alive || u.aboard) continue;
+      if (!u.alive || u.aboard || submerged(u)) continue;
       const d = Math.hypot(u.pos[0] - e.pos[0], u.pos[2] - e.pos[2]);
       if (d < r) list.push({ u, d });
     }
