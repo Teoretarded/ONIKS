@@ -1,0 +1,380 @@
+/* In-browser tests for the sim (game/tests.html). Writes PASS / FAIL lines and sets document.title = 'TESTS n/m'.
+   URL params: ?only=<substring> runs matching tests, ?map=<id> runs the battle tests on a maps.js map too,
+   ?long=1 runs the full AI battle on every difficulty. */
+import { Sim, DT } from './sim.js';
+import { UNITS, TEL_ELEV, CLASSIFY } from '../data/units.js';
+import { stubMap } from './stubmap.js';
+import { setupBattle } from './setup.js';
+import { horizon, los } from './sensors.js';
+
+const Q = new URLSearchParams(location.search);
+const out = document.getElementById('out');
+const results = [];
+const line = (cls, html) => { const d = document.createElement('div'); d.className = 'l ' + cls; d.innerHTML = html; out.appendChild(d); return d; };
+const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+const yieldUI = () => new Promise(r => setTimeout(r, 0));
+const fmt = (x, n = 1) => Number(x).toFixed(n);
+
+let MAP = null;
+const map = () => MAP || (MAP = stubMap());
+
+class Fail extends Error {}
+function ok(cond, msg) { if (!cond) throw new Fail(msg); }
+
+async function test(name, fn) {
+  if (Q.get('only') && !name.includes(Q.get('only'))) return;
+  const t0 = performance.now();
+  try {
+    const info = await fn();
+    const ms = performance.now() - t0;
+    results.push(true);
+    line('pass', `<b>PASS</b> ${esc(name)} <span class="info">· ${esc(info || '')} · ${fmt(ms / 1000, 2)} s</span>`);
+  } catch (e) {
+    results.push(false);
+    line('fail', `<b>FAIL</b> ${esc(name)} <span class="info">· ${esc(e instanceof Fail ? e.message : (e.stack || e))}</span>`);
+    console.error(name, e);
+  }
+  document.title = `TESTS ${results.filter(Boolean).length}/${results.length}`;
+  await yieldUI();
+}
+
+/* run ticks in chunks so the page stays alive; cb(sim) each tick may return true to stop */
+async function run(sim, ticks, cb) {
+  for (let i = 0; i < ticks; i++) {
+    sim.step();
+    if (cb && cb(sim)) return i + 1;
+    if (i % 4000 === 3999) await yieldUI();
+  }
+  return ticks;
+}
+
+function battle(seed, level, m) {
+  const sim = new Sim(m || map(), { seed, fog: true, mode: 'combat', aiSides: ['coast', 'fleet'], difficulty: level || 'normal' });
+  setupBattle(sim);
+  return sim;
+}
+
+/* a land point near the coast and a sea point offshore on the stub map */
+function coastPoints(m) {
+  const z = 0;
+  let xc = null;
+  for (let x = -m.W / 2; x < m.W / 2; x += 100) if (m.h(x, z) > 0) { xc = x; break; }
+  return { shoreX: xc, z };
+}
+
+/* ------------------------------------------------------------------ tests */
+async function main() {
+  await test('radar horizon math', () => {
+    ok(Math.abs(horizon(0, 0)) < 1e-9, 'horizon(0,0) != 0');
+    ok(Math.abs(horizon(25, 0) - 20600) < 1, `horizon(25,0) = ${horizon(25, 0)}`);
+    ok(Math.abs(horizon(100, 25) - 61800) < 1, `horizon(100,25) = ${horizon(100, 25)}`);
+    ok(Math.abs(horizon(20, 45) / 1000 - 4.12 * (Math.sqrt(20) + Math.sqrt(45))) < 1e-6, 'formula');
+    // a flat sea: LOS with earth bulge must agree with the horizon formula
+    const flat = { h: () => -50 };
+    const d = horizon(20, 10);
+    ok(los(flat, 0, 20, 0, d * .97, 10, 0), 'LOS blocked inside the horizon');
+    ok(!los(flat, 0, 20, 0, d * 1.08, 10, 0), 'LOS clear beyond the horizon');
+    return `4.12(√h1+√h2): 25 m → ${fmt(horizon(25, 0) / 1000)} km · 20 m vs 10 m → ${fmt(d / 1000)} km`;
+  });
+
+  await test('radar horizon in the sim (sea-skimmer vs mast height)', async () => {
+    const m = map();
+    const sim = new Sim(m, { seed: 7, fog: true });
+    const ddg = sim.spawn('ddg', 'fleet', -45000, -30000, { hdg: 0 });
+    // helos at 60 m over the sea: horizon 4.12 (sqrt 20 + sqrt 60) = 50.3 km; one at 49 km, one at 55 km
+    const near = sim.spawn('helo', 'coast', -45000, -30000 + 49000, { alt: 60 });
+    const far = sim.spawn('helo', 'coast', -45000 + 22000, -30000 + 50400, { alt: 60 });
+    for (const h of [near, far]) { sim.setRadar(h, false, true); h.altT = 60; }
+    await run(sim, 20 * 30);
+    const cN = sim.contact('fleet', near.id), cF = sim.contact('fleet', far.id);
+    const hz = horizon(20, 60);
+    ok(!cF, `helo beyond the horizon (${fmt(Math.hypot(far.pos[0] - ddg.pos[0], far.pos[2] - ddg.pos[2]) / 1000)} km > ${fmt(hz / 1000)} km) was detected`);
+    ok(cN && cN.conf > .3, 'helo inside the horizon not detected');
+    return `horizon ${fmt(hz / 1000)} km: 49 km seen (conf ${fmt(cN.conf, 2)}), 55 km unseen`;
+  });
+
+  await test('determinism: same seed -> same state hash after 5000 ticks', async () => {
+    const a = battle(4242), b = battle(4242), c = battle(4243);
+    await run(a, 5000); await run(b, 5000); await run(c, 5000);
+    const ha = a.hash(), hb = b.hash(), hc = c.hash();
+    ok(ha === hb, `hash differs: ${ha} vs ${hb}`);
+    ok(ha !== hc, 'different seeds gave the same hash (state not seeded?)');
+    return `hash ${ha} (seed 4242) · ${hc} (seed 4243) · ${a.units.size} units, ${Object.values(a.counts).reduce((x, y) => x + y, 0)} events`;
+  });
+
+  await test('land units never enter water, ships never cross land', async () => {
+    const m = map(), sim = battle(99, 'hard');
+    const { shoreX } = coastPoints(m);
+    // provoke: a TEL told to drive into the sea, a DDG told to sail inland, both across the coastline
+    const tel = sim.spawn('tel', 'coast', shoreX + 3000, 5000, { hdg: -Math.PI / 2 });
+    const ddg = sim.spawn('ddg', 'fleet', shoreX - 6000, -3000, { hdg: Math.PI / 2 });
+    sim.order([tel.id], { kind: 'move', x: shoreX - 8000, z: 5000 });
+    sim.order([ddg.id], { kind: 'move', x: shoreX + 9000, z: -3000 });
+    let bad = null, checks = 0, minDepth = 1e9;
+    await run(sim, 24000, s => {
+      for (const u of s.list()) {
+        if (!u.alive || u.aboard) continue;
+        const dom = u.def.domain, h = s.map.h(u.pos[0], u.pos[2]);
+        if (dom === 'land' && h < 0) { bad = `${u.type} #${u.id} in water at ${u.pos.map(Math.round)} (h ${fmt(h)})`; return true; }
+        if (dom === 'sea') { if (h >= 0) { bad = `${u.type} #${u.id} on land at ${u.pos.map(Math.round)}`; return true; } minDepth = Math.min(minDepth, -h - u.def.draught); }
+        checks++;
+      }
+    });
+    ok(!bad, bad);
+    ok(s0(tel) >= 0, 'TEL ended in water');
+    return `${checks} unit-ticks checked over ${fmt(sim.t / 60, 0)} min · TEL stopped ${fmt(Math.abs(tel.pos[0] - shoreX))} m from the shore line · least keel clearance ${fmt(minDepth)} m`;
+    function s0(u) { return m.h(u.pos[0], u.pos[2]); }
+  });
+
+  await test('pathfinding: land around a bay, sea around a cape', () => {
+    const m = map(), sim = new Sim(m, { seed: 1 });
+    const t0 = performance.now();
+    const pl = sim.nav.path('land', m.spawns.coast.x, m.spawns.coast.z, m.objectives[0].x, m.objectives[0].z);
+    const ps = sim.nav.path('sea', m.spawns.fleet.x, m.spawns.fleet.z, -8000, -40000);
+    const ms = performance.now() - t0;
+    ok(pl && pl.length > 1, 'no land path to the port');
+    ok(ps && ps.length >= 1, 'no sea path');
+    for (const p of pl) ok(m.h(p[0], p[1]) > 0, `land waypoint in water ${p.map(Math.round)}`);
+    for (const p of ps) ok(m.h(p[0], p[1]) < 0, `sea waypoint on land ${p.map(Math.round)}`);
+    const t1 = performance.now(); sim.nav.path('land', m.spawns.coast.x, m.spawns.coast.z, m.objectives[0].x, m.objectives[0].z); const cached = performance.now() - t1;
+    return `${pl.length} land / ${ps.length} sea waypoints · ${fmt(ms, 1)} ms first (grids built), ${fmt(cached, 2)} ms cached · cell ${sim.nav.cell} m`;
+  });
+
+  await test('detection -> classification -> engagement', async () => {
+    const m = map(), sim = new Sim(m, { seed: 11, fog: true, weather: { kind: 'calm', wind: [0, 0], sea: .2 } });
+    const { shoreX } = coastPoints(m);
+    // coast: a radar on the bluff and an erect TEL on hold; fleet: one DDG 45 km out, one Pantsir-less shore
+    const rs = sim.spawn('radar', 'coast', shoreX + 2500, 0, { deployed: true, hdg: -Math.PI / 2 });
+    const tel = sim.spawn('tel', 'coast', shoreX + 6000, -2000, { deployed: true, hold: true, hdg: -Math.PI / 2 });
+    const ddg = sim.spawn('ddg', 'fleet', shoreX - 45000, 0, { hdg: Math.PI / 2 });
+    let tDet = null, tCls = null, tFire = null, tSm6 = null, fired = 0;
+    await run(sim, 20 * 400, s => {
+      for (const e of s.drainEvents()) {
+        if (e.type === 'detect' && e.side === 'coast' && e.unit === ddg.id && tDet === null) tDet = s.t;
+        if (e.type === 'classify' && e.side === 'coast' && e.unit === ddg.id) tCls = s.t;
+        if (e.type === 'launch' && e.kind === 'oniks') { tFire = tFire || s.t; fired++; }
+        if (e.type === 'launch' && e.kind === 'sm6' && tSm6 === null) tSm6 = s.t;
+      }
+      return tSm6 !== null && fired >= 2;
+    });
+    ok(tDet !== null, 'DDG never detected by the coast radar');
+    ok(tCls !== null && tCls >= tDet, 'DDG never classified');
+    const c = sim.contact('coast', ddg.id);
+    ok(c && c.cls === 'DDG', 'contact class wrong');
+    ok(tFire !== null && tFire >= tCls, `TEL did not fire after classification (fire ${tFire}, cls ${tCls})`);
+    ok(fired === 2, `expected a 2-round salvo, got ${fired}`);
+    ok(tSm6 !== null, 'DDG did not engage the incoming rounds');
+    return `detect ${fmt(tDet)} s → classify ${fmt(tCls)} s (${c.track}) → salvo ${fmt(tFire)} s → SM-6 ${fmt(tSm6)} s`;
+  });
+
+  await test('fog of war: visible() follows the picture', async () => {
+    const m = map(), sim = new Sim(m, { seed: 5, fog: true, weather: { kind: 'calm' } });
+    const { shoreX } = coastPoints(m);
+    const rs = sim.spawn('radar', 'coast', shoreX + 2500, 0, { deployed: true });
+    const ddg = sim.spawn('ddg', 'fleet', shoreX - 30000, 0, {});
+    const far = sim.spawn('ddg', 'fleet', -m.W / 2 + 2000, m.H / 2 - 2000, {});
+    ok(sim.visible('coast', rs) === 'own', 'own');
+    ok(sim.visible('coast', ddg) === null, 'unseen enemy visible at t=0');
+    let saw = null;
+    await run(sim, 20 * 120, s => { const v = s.visible('coast', ddg); if (v === 'contact' && !saw) saw = s.t; return v === 'track'; });
+    ok(saw !== null, 'never a contact before becoming a track');
+    ok(sim.visible('coast', ddg) === 'track', 'never a track');
+    ok(sim.visible('coast', far) === null, 'far unit (beyond horizon) visible');
+    const nf = new Sim(m, { seed: 5, fog: false }); const u2 = nf.spawn('ddg', 'fleet', 0, 0, {});
+    ok(nf.visible('coast', u2) === 'track', 'fog off must show everything');
+    return `contact at ${fmt(saw)} s → track at ${fmt(sim.t)} s; beyond-horizon ship stays hidden`;
+  });
+
+  await test('ammo use: a TEL fires its 2 rounds, then stops', async () => {
+    const m = map(), sim = new Sim(m, { seed: 3, fog: false });
+    const { shoreX } = coastPoints(m);
+    const tel = sim.spawn('tel', 'coast', shoreX + 5000, 0, { deployed: true, hold: true, hdg: -Math.PI / 2 });
+    const d1 = sim.spawn('ddg', 'fleet', shoreX - 50000, 8000, {}), d2 = sim.spawn('ddg', 'fleet', shoreX - 50000, -8000, {});
+    // no fog: contacts still come from sensors, so give the coast a picture by scan-free means: a radar
+    sim.spawn('radar', 'coast', shoreX + 2000, 0, { deployed: true });
+    let launches = 0, gaps = [], last = null;
+    await run(sim, 20 * 300, s => { for (const e of s.drainEvents()) if (e.type === 'launch' && e.kind === 'oniks') { launches++; if (last !== null) gaps.push(s.t - last); last = s.t; } });
+    ok(launches === 2, `launched ${launches} rounds`);
+    ok(tel.ammo.oniks === 0, `ammo left ${tel.ammo.oniks}`);
+    ok(gaps.length === 1 && gaps[0] >= 2.4 && gaps[0] <= 3.1, `salvo interval ${gaps}`);
+    ok(tel.st.capL === 1 && tel.st.capR === 1, 'TLC caps not gone after firing');
+    return `2 rounds ${fmt(gaps[0], 2)} s apart, ammo 0, caps off, no further launches in ${fmt(sim.t, 0)} s`;
+  });
+
+  await test('reload: transloader beside a deployed TEL, ~45 s per round', async () => {
+    const m = map(), sim = new Sim(m, { seed: 3, fog: true });
+    const { shoreX } = coastPoints(m);
+    const tel = sim.spawn('tel', 'coast', shoreX + 6000, 1000, { deployed: true, hdg: -Math.PI / 2 });
+    tel.ammo.oniks = 0; tel.caps = [1, 1];
+    const tl = sim.spawn('transloader', 'coast', shoreX + 7500, 1600, { hdg: -Math.PI / 2 });
+    sim.order([tl.id], { kind: 'reload', target: tel.id });
+    let start = null, done = [], ends = 0, lowered = null;
+    await run(sim, 20 * 400, s => {
+      for (const e of s.drainEvents()) {
+        if (e.type === 'reload_start' && start === null) start = s.t;
+        if (e.type === 'reload_done') done.push(s.t);
+        if (e.type === 'deploy' && e.what === 'lowered' && lowered === null) lowered = s.t;
+        if (e.type === 'reload_end') ends++;
+      }
+      return tel.ammo.oniks === 2 && tel.elev >= TEL_ELEV;
+    });
+    ok(start !== null, 'reload never started');
+    ok(done.length === 2, `reload_done x${done.length}`);
+    ok(tel.ammo.oniks === 2 && tl.cargo === 0, `TEL ammo ${tel.ammo.oniks}, transloader cargo ${tl.cargo}`);
+    ok(Math.abs(done[1] - done[0] - 45) < 1, `round time ${done[1] - done[0]}`);
+    ok(tel.elev >= TEL_ELEV, 'TEL did not re-erect');
+    ok(tel.st.capL === 0 && tel.st.capR === 0, 'caps not refitted');
+    // the transloader refills at the depot
+    sim.order([tl.id], { kind: 'reload' });
+    let refilled = false;
+    await run(sim, 20 * 1800, s => { for (const e of s.drainEvents()) if (e.type === 'resupply' && e.unit === tl.id && tl.cargo === 2) refilled = true; return refilled; });
+    ok(refilled, `transloader did not refill at a depot (cargo ${tl.cargo})`);
+    return `launcher lowered ${fmt(lowered)} s, rounds at ${done.map(x => fmt(x)).join(' / ')} s, re-erected; refilled at depot by ${fmt(sim.t / 60)} min`;
+  });
+
+  await test('scan: identify everything in the radius, cooldown, scanner revealed', async () => {
+    const m = map(), sim = new Sim(m, { seed: 21, fog: true, weather: { kind: 'calm' } });
+    const { shoreX } = coastPoints(m);
+    const rs = sim.spawn('radar', 'coast', shoreX + 2500, 0, { deployed: true });
+    rs.radarOn = true;
+    const a = sim.spawn('ddg', 'fleet', shoreX - 60000, 20000, {}), b = sim.spawn('ddg', 'fleet', shoreX - 58000, 21500, {});
+    const out = sim.spawn('ddg', 'fleet', shoreX - 60000, 30000, {});
+    sim.step();
+    ok(!sim.contact('coast', a.id) || sim.contact('coast', a.id).conf < .5, 'pre-condition');
+    sim.order([rs.id], { kind: 'scan', x: shoreX - 59000, z: 20500 });
+    let start = null, hit = null;
+    await run(sim, 20 * 5, s => { for (const e of s.drainEvents()) { if (e.type === 'scan' && e.phase === 'start') start = e; if (e.type === 'scan' && e.phase === 'hit') hit = e; } return hit; });
+    ok(start && hit, 'no scan events');
+    ok(hit.hits.includes(a.id) && hit.hits.includes(b.id) && !hit.hits.includes(out.id), `hits ${hit.hits}`);
+    const ca = sim.contact('coast', a.id);
+    ok(ca.conf >= .97 && ca.identified && ca.cls === 'DDG', `contact ${ca.conf} ${ca.identified} ${ca.cls}`);
+    ok(/^TRK \d+$/.test(ca.track), 'track number');
+    const rev = sim.contact('fleet', rs.id);
+    ok(rev && rev.conf > 0, 'scanner not revealed to the enemy');
+    // cooldown: a second scan waits
+    sim.order([rs.id], { kind: 'scan', x: shoreX - 59000, z: 30000 });
+    let second = null;
+    await run(sim, 20 * 25, s => { for (const e of s.drainEvents()) if (e.type === 'scan' && e.phase === 'start') second = s.t; });
+    ok(second === null, 'second scan fired during cooldown');
+    return `delay ${fmt(hit.t - start.t, 2)} s, ${hit.hits.length} identified (${ca.track} conf ${fmt(ca.conf, 2)}), scanner seen by fleet (conf ${fmt(rev.conf, 2)}), cooldown holds`;
+  });
+
+  await test('EMCON: a radiating radar is heard, a silent one is not', async () => {
+    const m = map();
+    const mk = on => {
+      const sim = new Sim(m, { seed: 8, fog: true, weather: { kind: 'calm' } });
+      const { shoreX } = coastPoints(m);
+      const rs = sim.spawn('radar', 'coast', shoreX + 2500, 0, { deployed: true });
+      sim.order([rs.id], { kind: 'radar', on });
+      const d = sim.spawn('ddg', 'fleet', shoreX - 62000, 0, {});
+      sim.setRadar(d, false, true);
+      return { sim, rs };
+    };
+    const A = mk(true), B = mk(false);
+    await run(A.sim, 20 * 30); await run(B.sim, 20 * 30);
+    const ca = A.sim.contact('fleet', A.rs.id), cb = B.sim.contact('fleet', B.rs.id);
+    ok(ca && ca.emitting && ca.conf < CLASSIFY, `radiating radar: ${ca && ca.conf}`);
+    ok(ca.err >= 600, `ESM error too small ${ca.err}`);
+    ok(!cb, 'silent radar was found');
+    return `heard at 62 km: ${ca.track} conf ${fmt(ca.conf, 2)} err ${fmt(ca.err / 1000)} km (unclassified); EMCON radar unseen`;
+  });
+
+  await test('reinforcements: buy -> arrive after build time', async () => {
+    const m = map(), sim = new Sim(m, { seed: 2, supply: 3000 });
+    const cv = sim.spawn('carrier', 'fleet', m.spawns.fleet.x, m.spawns.fleet.z, {});
+    ok(sim.buy('fleet', 'fighter'), 'buy fighter failed');
+    ok(sim.buy('coast', 'tel'), 'buy tel failed');
+    ok(!sim.buy('coast', 'ddg'), 'coast bought a DDG');
+    let arrived = [];
+    await run(sim, 20 * 100, s => { for (const e of s.drainEvents()) if (e.type === 'reinforce') arrived.push([e.type, s.units.get(e.unit), s.t]); });
+    ok(arrived.length === 2, `arrivals ${arrived.length}`);
+    const f = arrived.find(a => a[1].type === 'fighter')[1], t = arrived.find(a => a[1].type === 'tel');
+    ok(f.aboard === cv.id, 'fighter not aboard the carrier');
+    ok(Math.abs(t[2] - UNITS.tel.buildTime) < 1.1, `TEL arrived at ${t[2]}`);
+    ok(m.h(t[1].pos[0], t[1].pos[2]) > 0, 'TEL spawned in water');
+    return `fighter on deck at ${fmt(arrived.find(a => a[1].type === 'fighter')[2])} s, TEL at spawn at ${fmt(t[2])} s`;
+  });
+
+  await test('storm: lightning strikes and reveals', async () => {
+    const m = map(), sim = new Sim(m, { seed: 31, fog: true, weather: { kind: 'storm', wind: [8, 3], sea: .8 } });
+    for (let i = 0; i < 60; i++) sim.spawn('ddg', 'fleet', (i % 10 - 5) * 9000 - 20000, (Math.floor(i / 10) - 3) * 12000, {});
+    let bolts = 0, reveals = 0;
+    await run(sim, 20 * 240, s => { for (const e of s.drainEvents()) { if (e.type === 'lightning') bolts++; if (e.type === 'detect' && e.how === 'lightning') reveals++; } });
+    ok(bolts >= 10, `only ${bolts} strikes in 4 min`);
+    ok(sim.weather.squalls.length === 6, 'squalls');
+    return `${bolts} strikes in 4 min, ${reveals} ships revealed by flashes, ${sim.weather.squalls.length} squalls`;
+  });
+
+  const battleLevels = Q.get('long') ? ['easy', 'normal', 'hard'] : ['normal'];
+  for (const lvl of battleLevels) await battleTest(lvl, map(), 'stub');
+  if (Q.get('map')) {
+    try {
+      const { loadMap } = await import('../world/maps.js');
+      const mm = await loadMap(Q.get('map'));
+      await battleTest('normal', mm, mm.id);
+    } catch (e) { await test(`battle on map ${Q.get('map')}`, () => { throw e; }); }
+  }
+
+  await test('perf: 200 units, ms per sim-second', async () => {
+    const m = map(), sim = new Sim(m, { seed: 77, fog: true, aiSides: ['coast', 'fleet'] });
+    setupBattle(sim);
+    const r = sim.rng.place;
+    const mix = { coast: ['tel', 'tel', 'pantsir', 'radar', 'transloader', 'catapult', 'drone'], fleet: ['ddg', 'ddg', 'helo', 'fighter'] };
+    const { shoreX } = coastPoints(m);
+    let n = sim.units.size;
+    while (n < 200) {
+      const side = n % 2 ? 'coast' : 'fleet', type = mix[side][Math.floor(r() * mix[side].length)];
+      let x, z;
+      if (side === 'coast') { x = shoreX + 3000 + r() * 25000; z = (r() - .5) * 60000; if (m.h(x, z) < 2) continue; }
+      else { x = shoreX - 20000 - r() * 40000; z = (r() - .5) * 70000; if (m.h(x, z) > -40) continue; }
+      sim.spawn(type, side, x, z, { hold: true, deployed: true, alt: type === 'fighter' ? 6000 : undefined });
+      n++;
+    }
+    await run(sim, 200);
+    // best of three one-minute windows (the machine is shared; the minimum is the honest cost)
+    const T = 20 * 60;
+    let perSec = 1e9;
+    for (let k = 0; k < 3; k++) { const t0 = performance.now(); await run(sim, T); perSec = Math.min(perSec, (performance.now() - t0) / (T * DT)); }
+    const units = sim.units.size;
+    ok(perSec < 10, `${fmt(perSec, 2)} ms per sim-second: too heavy for x32 (budget 10 ms per sim-second)`);
+    return `${units} units, ${sim.projectiles.size} missiles in flight at the end: ${fmt(perSec, 2)} ms per sim-second → x32 costs ${fmt(perSec * 32 / 10, 2)}% of a core · ${fmt(perSec * 32 / 60, 2)} ms per 60 Hz frame`;
+  });
+
+  const pass = results.filter(Boolean).length;
+  document.getElementById('sum').textContent = `${pass}/${results.length} passed`;
+  document.title = `TESTS ${pass}/${results.length}`;
+  window.__done = { pass, total: results.length };
+}
+
+async function battleTest(level, m, mapName) {
+  await test(`AI vs AI battle ends (${level}, ${mapName} map)`, async () => {
+    const sim = battle(1337, level, m);
+    const t0 = performance.now();
+    const limit = 20 * 3600 * 2.5;
+    const tally = {};
+    let firstLaunch = null, firstCls = null;
+    await run(sim, limit, s => {
+      for (const e of s.drainEvents()) {
+        const k = e.type === 'launch' ? 'launch:' + e.kind : e.type;
+        tally[k] = (tally[k] || 0) + 1;
+        if (e.type === 'launch' && firstLaunch === null && (e.kind === 'oniks' || e.kind === 'tlam')) firstLaunch = s.t;
+        if (e.type === 'classify' && firstCls === null) firstCls = s.t;
+      }
+      return !!s.result;
+    });
+    const ms = performance.now() - t0;
+    const speed = sim.t / (ms / 1000);
+    ok(sim.result, `no result after ${fmt(sim.t / 60, 0)} min`);
+    ok(sim.t <= 3600 * 2 + 1, `took ${fmt(sim.t / 60, 0)} min of sim time`);
+    ok(speed >= 32, `sim ran at x${fmt(speed, 0)} only`);
+    const s = sim.summary();
+    const L = [];
+    for (const side of ['coast', 'fleet']) L.push(`${side}: ${s.sides[side].units} left, lost ${s.sides[side].lost}, fired ${s.sides[side].fired}`);
+    const shots = ['oniks', 'tlam', 'slam', 'sm6', 'sam', 'pdms', 'hellfire', 'aam', 'shell'].map(k => tally['launch:' + k] ? `${k} ${tally['launch:' + k]}` : '').filter(Boolean).join(', ');
+    console.log('battle', level, mapName, sim.result, tally, sim.ai.coast.log, sim.ai.fleet.log);
+    window.__battle = window.__battle || {}; window.__battle[level + ':' + mapName] = { result: sim.result, tally, summary: s, coastLog: sim.ai.coast.log, fleetLog: sim.ai.fleet.log };
+    return `${sim.result.winner} wins (${sim.result.reason}) at ${fmt(sim.t / 60, 1)} min · first classify ${fmt(firstCls)} s, first strike ${fmt(firstLaunch)} s · ${shots} · intercepts ${tally.intercept || 0}, hits ${tally.hit || 0}, destroyed ${tally.destroyed || 0}, scans ${(tally.scan || 0) / 2} · ${L.join(' · ')} · ran at x${fmt(speed, 0)}`;
+  });
+}
+
+main();

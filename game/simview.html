@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ONIKS · simview</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #0B0C0A; --ink: rgba(255,255,255,.82); --dim: rgba(255,255,255,.42); --faint: rgba(255,255,255,.14); --lime: #C6F432; --coral: #FF6A3D; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 11px/1.45 'Geist Mono', ui-monospace, monospace; overflow: hidden; }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; }
+  canvas:active { cursor: grabbing; }
+  #bar { position: fixed; left: 16px; top: 14px; display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; max-width: calc(100% - 32px); }
+  #bar .g { display: flex; gap: 2px; align-items: center; }
+  #bar .k { color: var(--dim); margin-right: 6px; letter-spacing: .08em; }
+  button, select, input { font: inherit; color: var(--ink); background: transparent; border: 0; border-bottom: 1px dotted var(--faint); padding: 2px 6px; cursor: pointer; }
+  select option { background: #151714; }
+  input { width: 64px; cursor: text; }
+  button.on { color: var(--lime); border-bottom-color: var(--lime); }
+  button:hover, select:hover { color: #fff; }
+  #hud { position: fixed; right: 16px; top: 14px; text-align: right; white-space: pre; color: var(--dim); }
+  #hud b { color: var(--ink); font-weight: 500; }
+  #log { position: fixed; right: 16px; bottom: 12px; text-align: right; white-space: pre; color: var(--dim); max-width: 46vw; overflow: hidden; }
+  #res { position: fixed; left: 50%; top: 46%; transform: translate(-50%, -50%); font-size: 13px; letter-spacing: .3em; color: var(--lime); display: none; }
+  #help { position: fixed; left: 16px; bottom: 12px; color: var(--dim); }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="bar">
+  <div class="g"><span class="k">MAP</span><select id="map"></select></div>
+  <div class="g"><span class="k">SEED</span><input id="seed" value="1337"></div>
+  <div class="g"><span class="k">AI</span><select id="lvl"><option>easy</option><option selected>normal</option><option>hard</option></select></div>
+  <div class="g"><button id="restart">restart</button></div>
+  <div class="g" id="rates"><span class="k">TIME</span></div>
+  <div class="g" id="views"><span class="k">VIEW</span></div>
+  <div class="g"><span class="k">SHOW</span><button id="tLabels" class="on">labels</button><button id="tRings">ranges</button><button id="tPaths">paths</button></div>
+</div>
+<div id="hud"></div>
+<div id="log"></div>
+<div id="res"></div>
+<div id="help">drag pan · wheel zoom · space pause · 1-8 rate · v view · f fit</div>
+<script src="../reference/menus/common/m3.js"></script>
+<script type="module" src="src/simview.js"></script>
+</body>
+</html>
