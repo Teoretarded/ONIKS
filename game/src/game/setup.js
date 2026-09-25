@@ -9,7 +9,7 @@ import { setupBattle } from '../sim/setup.js';
 import { findSpot } from '../sim/economy.js';
 import { AI } from '../sim/ai.js';
 import { UNITS, ENEMY, TEL_ELEV } from '../data/units.js';
-import { getProgress } from '../data/campaign.js';
+import { applyCarry } from './campaign/grade.js';
 
 const WEATHERS = ['calm', 'haze', 'rain', 'storm'];
 const SEA = { calm: .2, haze: .3, rain: .55, storm: .85 };
@@ -100,7 +100,8 @@ function campaignForces(sim, m) {
       u.def.modelState(u, sim.t);
     }
   }
-  applyCarry(sim, m, out.coast);
+  // the rounds carried from the last battle (campaign/grade.js; the mission script reports them)
+  sim.campaignCarry = applyCarry(sim, m, out.coast);
   return out;
 }
 
@@ -132,15 +133,6 @@ function place(sim, side, type, i, n, cv, r) {
   return sim.spawn(type, side, p[0], p[1], { hdg: sp.hdg });
 }
 
-/* rounds fired in the last mission and not reloaded stay missing (the progress keeps what was left) */
-function applyCarry(sim, m, coast) {
-  if (!m.carry) return;
-  const c = getProgress().carry;
-  if (!c || c.after !== m.n - 1 || !c.ammo) return;
-  let missing = Math.max(0, (c.ammo.telCap || 0) - (c.ammo.tel || 0));
-  const tels = coast.filter(u => u.type === 'tel');
-  for (const u of tels) { if (missing <= 0) break; const k = Math.min(missing, u.ammo.oniks); u.ammo.oniks -= k; missing -= k; }
-}
 
 /* ---------- reinforcement waves (campaign) ---------- */
 export function spawnWave(sim, side, units) {
