@@ -34,6 +34,7 @@ import { DT } from './consts.js';
 import { clamp, angTo, wrapPi, ground } from './util.js';
 import { submerged } from './subs.js';
 import { hullOf } from './sea.js';
+import { endStrike } from './airstrike.js';
 
 const G = 9.81, TAU = Math.PI * 2, TAN_GS = Math.tan(3.5 * Math.PI / 180);
 
@@ -266,7 +267,9 @@ export function flyAir(sim, u) {
   if (!u.goal) u.goal = [u.pos[0] + Math.sin(u.hdg) * 2000, u.pos[2] + Math.cos(u.hdg) * 2000];
   const gx = u.goal[0], gz = u.goal[1], dx = gx - u.pos[0], dz = gz - u.pos[2], dist = Math.sqrt(dx * dx + dz * dz);
   const R = u.orbitR, N = NAV;
-  let vT = d.speed;
+  // a strike profile (sim/airstrike.js) sets the height and speed while its attack order lasts
+  if (u.strk) { const o0 = u.orders[0]; if (!o0 || (o0.kind !== 'attack' && o0.kind !== 'strike')) endStrike(u); }
+  let vT = u.vAir > 0 ? u.vAir : d.speed;
   const sl = d._slowP || (d._slowP = d.partNames.filter(p => d.parts[p].slow));
   for (let i = 0; i < sl.length; i++) if (u.parts[sl[i]] >= 1) vT *= d.parts[sl[i]].slow;
   N.hold = false; N.vyFF = 0; N.down = false; N.low = false;
@@ -316,7 +319,7 @@ function wing(sim, u, P, N, floor, homing) {
   // never more than the wing can lift at this speed (load factor (ve / stall)^2: tan^2 = n^2 - 1; flaps down on the
   // approach), and wings nearly level climbing away from the ship
   const e = angTo(u.hdg, N.want), o0 = u.orders[0];
-  let tb = (e > 1.2 || e < -1.2 || (o0 !== undefined && o0.kind === 'attack')) ? P.tanB : P.tanBC;
+  let tb = (e > 1.2 || e < -1.2 || (o0 !== undefined && (o0.kind === 'attack' || o0.kind === 'strike'))) ? P.tanB : P.tanBC;
   const vs = u.landing ? P.vs * .85 : P.vs, nL = (ve / vs) * (ve / vs);
   if (nL * nL - 1 < tb * tb) tb = nL > 1.03 ? Math.sqrt(nL * nL - 1) : .245;
   if (u.aboardOf && u.pos[1] < 300 && sim.t - u.born < 25 && tb > .267) tb = .267;
@@ -474,6 +477,8 @@ function heli(sim, u, P, N, floor) {
     cx = N.hvx + clamp(ex * .35, -8, 8); cz = N.hvz + clamp(ez * .35, -8, 8); hT = N.hh;
   } else {
     cx = Math.sin(N.want) * N.vT; cz = Math.cos(N.want) * N.vT; hT = N.want;
+    // slowing to fire: the nose onto the target (a pedal turn in the hover)
+    if (u.faceTo) { hT = Math.atan2(u.faceTo[0] - u.pos[0], u.faceTo[1] - u.pos[2]); if (N.vT < 3) { cx = 0; cz = 0; } }
     if (N.vT < 3) {
       // the hover: she wanders a metre or two with the gusts
       const ph = u.id * 1.7;
@@ -489,7 +494,7 @@ function heli(sim, u, P, N, floor) {
   u.hvx += ax * DT; u.hvz += az * DT;
   const V = Math.hypot(u.hvx, u.hvz);
   // heading: along the flight path at speed, else toward the wanted heading (pedal turn)
-  if (V > 12 && !N.hold) hT = Math.atan2(u.hvx, u.hvz);
+  if (V > 12 && !N.hold && !u.faceTo) hT = Math.atan2(u.hvx, u.hvz);
   u.hdg += clamp(angTo(u.hdg, hT) * .8, -P.yawRate * DT, P.yawRate * DT);
   // the rotor tilt: forward to accelerate and to hold speed against drag, back to flare; into the lateral acceleration
   const s = Math.sin(u.hdg), c = Math.cos(u.hdg), dr = 1.75e-4 * V;

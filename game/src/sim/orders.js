@@ -24,6 +24,7 @@ import { atPD, isSub } from './subs.js';
 import { ORDERS as AMPH, requestWell } from './amphib.js';
 import { dxz, clamp, angTo, wrapPi } from './util.js';
 import { DT } from './consts.js';
+import { airEngage, airReady, airEgress } from './airstrike.js';
 
 /* orbit radius of an aircraft loitering (after a move), on patrol, idle */
 const ORBIT = { fighter: [6000, 9000], aew: [12000, 15000], helo: [0, 3500], drone: [1500, 2500] };
@@ -475,17 +476,13 @@ const H = {
     if (w.needs === 'lift' && u.lift < 1) return false;
     if (w.sub && isSub(u) && !atPD(u)) return false;
     if (w.needsRadar && !radarWorks(u)) return strikeEnd(sim, u, o, 'radar');
-    if (air) {
-      // nose on the point, wings near level, past the first seconds after take-off
-      const e = angTo(u.hdg, Math.atan2(o.x - u.pos[0], o.z - u.pos[2]));
-      const lined = Math.abs(e) <= (u.type === 'helo' ? .45 : .2) && Math.abs(u.roll || 0) <= .4 && sim.t - (u.born || 0) >= 10;
-      if (!lined || u.type !== 'helo') { u.goal = [o.x, o.z]; u.orbitR = 0; }
-      if (!lined) return false;
-    }
+    // aircraft: released on the strike profile only (sim/airstrike.js: nose on the point, level, in the envelope)
+    if (air && !airReady(sim, u, w, o.x, o.z)) return false;
     if ((u.cooldowns[o.w] || 0) > 0) return false;
     o.st = 'fire';
     launch(sim, u, w, 0, 'point', P.pos);
     o.fired++;
+    if (air && (o.fired >= (o.n || 1) || u.ammo[o.w] <= 0)) airEgress(sim, u, o.x, o.z);
     return o.fired >= (o.n || 1) ? strikeEnd(sim, u, o, 'done') : false;
   },
 
@@ -575,6 +572,8 @@ export function volleySize(u, o, w) {
 
 /* close to the weapon's range, then stop, erect, come up to periscope depth: 'close' | 'fire' | 'end' */
 function engageFrom(sim, u, o, w, c) {
+  // aircraft fly a strike profile: climb out, ingress low to a release point clear of known SAMs, face the target
+  if (u.def.domain === 'air' && !u.aboard) return airEngage(sim, u, o, w, c.pos[0], c.pos[2]);
   const d = dxz(u.pos[0], u.pos[2], c.pos[0], c.pos[2]);
   if (d > w.range * .97) {
     // close to 85% of range along the line to the target
@@ -709,11 +708,7 @@ function persistAttack(sim, u, o) {
    way it came) and loiters there; say it */
 function strikeEnd(sim, u, o, why) {
   if (o._dive !== undefined && u.def.sub) { u.dive = o._dive; o._dive = undefined; }
-  if (u.def.domain === 'air' && !u.aboard) {
-    const d = dxz(u.pos[0], u.pos[2], o.x, o.z) || 1;
-    if (o.fired > 0 && u.type !== 'helo') { u.goal = [u.pos[0] + (u.pos[0] - o.x) / d * 20000, u.pos[2] + (u.pos[2] - o.z) / d * 20000]; u.orbitR = 0; }
-    else { u.goal = [u.pos[0], u.pos[2]]; u.orbitR = u.type === 'helo' ? 0 : 1500; }
-  }
+  if (u.def.domain === 'air' && !u.aboard && !(o.fired > 0)) { u.goal = [u.pos[0], u.pos[2]]; u.orbitR = u.type === 'helo' ? 0 : 1500; }   // (after firing: airEgress)
   o.st = 'done';
   sim.emit('strike', { unit: u.id, side: u.side, weapon: o.w, n: o.fired || 0, why, x: o.x, z: o.z, pos: u.pos.slice() });
   return true;

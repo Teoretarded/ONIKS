@@ -164,6 +164,67 @@ export class Burst {
   }
 }
 
+/* ---------------- a warhead's fragment belt ----------------
+   The fragments of an interceptor's burst leave in a belt round its axis (the sim's PROJ.cone, off the nose), fast
+   and slowing hard in the air: a thin cone of white specks flashing out through the burst radius (the sim's reach for
+   a kill) and a little past it, going lime as they die; a faint lime ring marks where the belt reaches the burst
+   radius for a moment (what counts as a hit). o: { t0, pos, ax (unit), lo, hi (rad off the nose), R (m), seed,
+   mom (the round's velocity: the belt moves on with it, a little) } */
+export class FragBelt {
+  constructor(o) {
+    const r = rng(o.seed || 77), a = o.ax, n = o.n || 320;
+    this.t0 = o.t0; this.p = o.pos.slice(); this.R = o.R || 10; this.dur = .6; this.seed = o.seed || 77;
+    this.mom = (o.mom || [0, 0, 0]).slice();
+    // a frame round the axis
+    const up = Math.abs(a[1]) < .95 ? [0, 1, 0] : [1, 0, 0];
+    let x = [up[1] * a[2] - up[2] * a[1], up[2] * a[0] - up[0] * a[2], up[0] * a[1] - up[1] * a[0]]; const l = Math.hypot(x[0], x[1], x[2]) || 1; x = [x[0] / l, x[1] / l, x[2] / l];
+    const y = [a[1] * x[2] - a[2] * x[1], a[2] * x[0] - a[0] * x[2], a[0] * x[1] - a[1] * x[0]];
+    const lo = o.lo !== undefined ? o.lo : .7, hi = o.hi !== undefined ? o.hi : 1.92;
+    this.D = new Float32Array(n * 4); this.n = n;
+    for (let i = 0; i < n; i++) {
+      const th = lo + (hi - lo) * (.5 + .5 * (r() + r() - 1)), ph = r() * TAU, st = Math.sin(th), ct = Math.cos(th), cp = Math.cos(ph), sp = Math.sin(ph);
+      this.D[i * 4] = a[0] * ct + (x[0] * cp + y[0] * sp) * st;
+      this.D[i * 4 + 1] = a[1] * ct + (x[1] * cp + y[1] * sp) * st;
+      this.D[i * 4 + 2] = a[2] * ct + (x[2] * cp + y[2] * sp) * st;
+      this.D[i * 4 + 3] = .75 + .5 * r();                              // reach factor (x R)
+    }
+    // the ring at the burst radius, at the belt's middle angle
+    const tm = (lo + hi) / 2, NR = 120;
+    this.RG = new Float32Array(NR * 3); this.nr = NR;
+    for (let i = 0; i < NR; i++) {
+      const ph = i / NR * TAU, st = Math.sin(tm), ct = Math.cos(tm), cp = Math.cos(ph), sp = Math.sin(ph);
+      this.RG[i * 3] = a[0] * ct + (x[0] * cp + y[0] * sp) * st; this.RG[i * 3 + 1] = a[1] * ct + (x[1] * cp + y[1] * sp) * st; this.RG[i * 3 + 2] = a[2] * ct + (x[2] * cp + y[2] * sp) * st;
+    }
+  }
+  draw(C, a) {
+    if (a < 0 || a > this.dur) return;
+    const V = C.V, dot = C.dot, p = this.p, R = this.R;
+    if (!V.vis(p[0], p[1], p[2], R * 3 + 20)) return;
+    const zc = V.depth(p[0], p[1], p[2]); if (zc <= V.near) return;
+    // the belt drifts on with the round's momentum a little (the fragments carry it)
+    const m = this.mom, dm = .03 * (1 - Math.exp(-a * 6)), cx = p[0] + m[0] * dm, cy = p[1] + m[1] * dm, cz = p[2] + m[2] * dm;
+    // out through the radius in ~25 ms, slowing hard: s(a) = 2.2 R (1 - e^(-a / .035))
+    const s0 = 2.2 * R * (1 - Math.exp(-a / .035)), w = 1 - a / this.dur, big = zc < 1500 ? 2 : 1, n = Math.max(24, Math.round(this.n * C.q));
+    const tails = a < .15 ? 5 : 2, v = 2.2 * R / .035 * Math.exp(-a / .035);   // speed now (m/s): the streak behind each speck
+    for (let i = 0; i < n; i++) {
+      const o = i * 4, k = this.D[o + 3], s = s0 * k, dx = this.D[o], dy = this.D[o + 1], dz = this.D[o + 2];
+      const hot = Math.exp(-a * 7 * k), rr = 255 - (255 - LIME[0]) * (1 - hot), gg = 255 - (255 - LIME[1]) * (1 - hot), bb = 240 - (240 - LIME[2]) * (1 - hot);
+      const al = Math.min(1, w * (.6 + .6 * hot));
+      dot(cx + dx * s, cy + dy * s, cz + dz * s, big, rr, gg, bb, al);
+      for (let m = 1; m < tails; m++) {
+        const sb = Math.max(0, s - m * Math.min(R * .25, v * k * .004));
+        dot(cx + dx * sb, cy + dy * sb, cz + dz * sb, 1, 255, 255, 235, al * (1 - m / tails) * .8);
+      }
+    }
+    // the lethal reach: a lime ring at R (the belt's middle angle), lit as the belt passes it, fading
+    const ra = sat((a - .008) / .02) * (1 - ss(.15, .55, a)) * .9;
+    if (ra > .01) for (let i = 0; i < this.nr; i++) {
+      const o = i * 3;
+      dot(p[0] + this.RG[o] * R, p[1] + this.RG[o + 1] * R, p[2] + this.RG[o + 2] * R, big, LIME[0], LIME[1], LIME[2], ra);   // where the burst was
+    }
+  }
+}
+
 /* ---------------- a booster casing tumbling off after burnout ---------------- */
 /* local points of a closed cylinder along +Z (radius, length), with its nozzle ring */
 const CASE = {};

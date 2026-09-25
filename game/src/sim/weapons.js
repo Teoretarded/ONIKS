@@ -15,6 +15,7 @@ import { gauss } from './rand.js';
 import { clamp, angTo, local, closest, ground, dxz, d3 } from './util.js';
 import { atPD, submerged, isSub, domOf } from './subs.js';
 import { elevOf } from './mech.js';
+import { airReady, airEgress } from './airstrike.js';
 import { HIT, bodyOf, segUnit, distUnit, pointUnit, segAxis, partNear, projPart, toWorld } from './bodies.js';
 
 const G = 9.81;
@@ -33,10 +34,22 @@ function axisOf(p, o) {
   o[0] = Math.sin(p.hdg) * cp; o[1] = Math.sin(p.pitch); o[2] = Math.cos(p.hdg) * cp; return o;
 }
 const velOf = (e, o) => { if (e.vel) { o[0] = e.vel[0]; o[1] = e.vel[1]; o[2] = e.vel[2]; } else { o[0] = (e.pos[0] - e.prev[0]) / DT; o[1] = (e.pos[1] - e.prev[1]) / DT; o[2] = (e.pos[2] - e.prev[2]) / DT; } return o; };
-/* the fire-control track error a guided round steers by: a slow wander around a seeded offset, sig0 + range x sigR
-   metres (PROJ[kind].sig0 / sigR), into DSP */
-function dispAt(p, range) {
-  const P = p.P, s = (P.sig0 || 0) + range * (P.sigR || 0), D = p.dsp;
+/* the track error a guided round steers by: a slow wander around a seeded offset, sig0 + range x sigR metres
+   (PROJ[kind].sig0 / sigR: the launcher's fire-control track in midcourse), into DSP. A round with its own seeker
+   (PROJ.seek, m) takes over from the ship's track once its target is that close: the error then closes on the
+   seeker's own (PROJ.sigT, m) over PROJ.seekT s (default .8). The round still has to turn onto the corrected point,
+   at its own turn rate: a seeker that takes over too late, or a round that cannot pull hard enough, still misses. */
+function dispAt(p, range, low) {
+  const P = p.P, D = p.dsp;
+  let s = (P.sig0 || 0) + range * (P.sigR || 0);
+  if (P.seek && range < P.seek) {
+    if (p.tSeek === undefined) { p.tSeek = p.age; p.sSeek = s; }
+    const T = P.sigT || 0;
+    s = T + (p.sSeek - T) * Math.exp(-(p.age - p.tSeek) / (P.seekT || .8));
+  }
+  // a target skimming the sea: its echo off the water blurs the track (multipath), the more the lower (P.lowK: the
+  // extra error at the wave tops, x the error above; nothing above ~40 m)
+  if (low !== undefined && P.lowK && low < 40) s *= 1 + P.lowK * clamp((40 - low) / 30, 0, 1);
   if (!D || s <= 0) { DSP[0] = DSP[1] = DSP[2] = 0; return; }
   const t = p.age;
   DSP[0] = s * (D[0] + .4 * Math.sin(D[3] + t * D[6]));
@@ -100,7 +113,7 @@ function threatsFor(sim, u, w) {
     const p = list[i];
     if (!p.alive) continue;
     const d = Math.sqrt((p.pos[0] - ux) ** 2 + (p.pos[1] - uy) ** 2 + (p.pos[2] - uz) ** 2);
-    if (d > w.range || d < (w.min || 0)) continue;
+    if (d > (w.gun && w.open ? w.open : w.range) || d < (w.min || 0)) continue;
     if (!w.gun && (p.eng >= (w.maxEng || 2) || p.shots >= (w.maxShots || 99))) continue;
     if (w.gun && dxz(p.aim[0], p.aim[2], ux, uz) > w.range * 3 && d > w.range * .6) continue;   // guns guard the ship itself
     const tgo = Math.sqrt((p.aim[0] - p.pos[0]) ** 2 + (p.aim[2] - p.pos[2]) ** 2) / Math.max(50, p.spd);
@@ -190,7 +203,7 @@ function offensive(sim, u, w) {
   if (d > w.range || d < (w.min || 0)) return;
   if (w.needs === 'erect' && (u.elev < elevOf(u.def) - 1e-6 || u.dep < 1 || u.reloader)) return;
   if (w.needs === 'lift' && u.lift < 1) return;                 // the Kornet's launcher up
-  if (u.def.domain === 'air' && u.aboard) return;
+  if (u.def.domain === 'air' && (u.aboard || !airReady(sim, u, w, c.pos[0], c.pos[2]))) return;   // released on the profile only
   if (w.gun) {
     // a gun at a ground target (the ACV's remote weapon station): a burst, resolved at once
     const e = sim.units.get(c.unitId);
@@ -202,6 +215,11 @@ function offensive(sim, u, w) {
   const p = launch(sim, u, w, c.unitId, 'unit', c.pos);
   if (p.P.threat || p.P.torpedo) INB[u.side].set(c.unitId, (INB[u.side].get(c.unitId) || 0) + 1);
   if (o && o.kind === 'attack') o.fired = (o.fired || 0) + 1;
+  // an aircraft's volley is away (or its rack empty): it turns for home the way it came
+  if (u.def.domain === 'air' && (!o || o.kind !== 'attack' || o.fired >= (o.vn || 1) || u.ammo[w.name] <= 0)) {
+    airEgress(sim, u, c.pos[0], c.pos[2]);
+    if (o && o._air) o._air.ph = 'in';
+  }
 }
 
 /* missiles already flying at a unit (side's own count) */
@@ -349,6 +367,7 @@ function stepBursts(sim) {
     const k = w.drag || 0;
     let nh = 0, hj = -1, hpart = null, hx = 0, hy = 0, hz = 0;
     let tvx = 0, tvy = 0, tvz = 0, R = 0, h = 0, qP = null;
+    const fr = w.frag || 0, fk = w.fragK || .35;
     if (tOk) {
       velOf(T, VT); tvx = VT[0]; tvy = VT[1]; tvz = VT[2];
       if (B.tk === 'proj') { const bd = T.P.body || DEFBODY; h = bd[0] / 2; R = bd[1] / 2 + .01; axisOf(T, F); qP = T.P; }
@@ -370,10 +389,12 @@ function stepBursts(sim) {
         const ax = B.p[j] - T.prev[0], ay = B.p[j + 1] - T.prev[1], az = B.p[j + 2] - T.prev[2];
         const bx = x - T.pos[0], by = y - T.pos[1], bz = z - T.pos[2];
         if (qP) {
-          if (segAxis(ax, ay, az, bx, by, bz, F[0], F[1], F[2], h) <= R) {
-            // the round met the missile: where on its skin (relative to the missile at that instant), which part
+          const dq = segAxis(ax, ay, az, bx, by, bz, F[0], F[1], F[2], h);
+          if (dq <= R + fr) {
+            // the round met the missile (or, a high-explosive round, burst on passing within w.frag of its skin: a
+            // fraction w.fragK of a hit): where on its skin (relative to the missile at that instant), which part
             const s = HIT.s, t = HIT.t;
-            nh++; done = true;
+            nh += dq <= R ? 1 : fk; done = true;
             B.hk[i] = 1; B.ef[i] = s;
             if (hj < 0) {
               hj = i;
@@ -448,8 +469,11 @@ export function launch(sim, u, w, target, tk, aimAt) {
     else pos = local(u, w.muzzle ? [(before % 2 ? -1 : 1) * w.muzzle[0], 0, w.muzzle[2]] : [0, 0, 0]);
     pitch = 0; spd = u.def.domain === 'air' ? 0 : 12;
   } else if (u.def.domain === 'air') {
-    pos = [u.pos[0], u.pos[1] - 2, u.pos[2]]; pitch = Math.min(0, u.pitch) - .03; spd = Math.max(spd, u.speed);
-    if (P.mode === 'direct') hdg = u.hdg + clamp(angTo(u.hdg, hdg), -.6, .6); else hdg = u.hdg;
+    // off a pylon (a wing station, alternating sides) or a helicopter's rail: along the aircraft's axis at its speed,
+    // a touch nose down; it turns for its target after it has left (a dropped round falls clear first, P.drop)
+    const sd = (before % 2 ? -1 : 1) * (u.type === 'helo' ? 1.6 : 2.6);
+    pos = local(u, [sd, u.type === 'helo' ? -.9 : -.8, u.type === 'helo' ? .6 : -.5]);
+    pitch = clamp(u.pitch, -.2, .15) - .03; spd = Math.max(spd, u.speed); hdg = u.hdg;
   } else if (w.vls && u.def.vlsAt) {
     // a boat's vertical tubes: the round broaches from the cell and climbs out of the water
     const cell = u.vlsNext++ % u.def.vlsAt.length;
@@ -498,7 +522,7 @@ export function launch(sim, u, w, target, tk, aimAt) {
     gA: undefined, gL: null, gLx: 0, gLz: 0, gLmax: 0, gFl: -9, depth: 0,    // terrain look-ahead; torpedo depth
     // physics: under control (false: tumbling, see spinout), gun hits taken (real rounds), roll, the tumbling frame
     // (fw forward, up) and angular velocity w (rad/s, world axes), the track-error seeds (dispersion), a missed pass
-    ctrl: true, gh: 0, roll: 0, fw: null, up: null, w: null, dsp: null, missed: null,
+    ctrl: true, gh: 0, roll: 0, fw: null, up: null, w: null, dsp: null, missed: null, tSeek: undefined, sSeek: 0,
     _seeC: -1, _seeF: -1,                  // sensors.js: the sensor (table index) that saw it last, per side
   };
   if (P.sig0 || P.sigR) {
@@ -656,7 +680,7 @@ function stepOne(sim, p) {
       tgo = clamp(tgo, 0, 25);
       p.aim[0] = tgt.pos[0] + vx * tgo; p.aim[1] = tgt.pos[1] + vy * tgo; p.aim[2] = tgt.pos[2] + vz * tgo;
       if (p.tk === 'unit') bodyAim(tgt, p.aim);
-      dispAt(p, d);
+      dispAt(p, d, p.tk === 'proj' ? tgt.pos[1] - ground(map, tgt.pos[0], tgt.pos[2]) : undefined);
       p.aim[0] += DSP[0]; p.aim[1] += DSP[1]; p.aim[2] += DSP[2];
       // interceptors never lead into the ground or the sea (sea-skimmers); strike rounds fly into what they aim at
       if (p.tk === 'proj' || tgt.def.domain === 'air') {
@@ -740,6 +764,10 @@ function stepOne(sim, p) {
       if (p.gFl > pT) pT = Math.min(p.gFl, P.pitchMax + .25);
     }
     if (p.age < vert + .01 && P.vert) p.phase = 'climb';
+    // a terminal weave (P.weave = [heading amplitude rad, period s, from m, to m]): the round snakes on its last
+    // stretch (lateral acceleration v x amplitude x 2 pi / period), then flies straight in for the strike
+    const Wv = P.weave;
+    if (Wv && P.mode !== 'direct' && p.phase === 'final' && dist < Wv[2] && dist > Wv[3]) hT += Wv[0] * Math.sin(p.age * TAU / Wv[1] + p.id * 1.7);
     if (p.missed) { hT = p.hdg; pT = Math.min(pT, -.3); }
     // turn-rate limit, and the lateral-acceleration limit (gMax, m/s²) as a turn rate at this speed
     const gl = P.gMax ? P.gMax / Math.max(60, p.spd) : 99;
@@ -770,6 +798,9 @@ function stepOne(sim, p) {
     if (tgt && fuse(sim, p, tgt)) return;
   } else if (tgt && p.tk === 'unit' && (p.locked || P.mode === 'direct')) {
     if (strike(sim, p, tgt)) return;
+  } else if (p.tk === 'point' && p.phase === 'final' && dist < Math.max(30, p.spd * DT * 1.2)) {
+    pointBurst(sim, p, [p.aim[0], Math.max(0, map.h(p.aim[0], p.aim[2])), p.aim[2]]);
+    return;
   } else if (P.threat && !p.locked && !p.missed && p.phase === 'final' && dist < Math.max(30, p.spd * DT * 1.2) && p.age > 3) {
     splash(sim, p, [p.aim[0], Math.max(0, map.h(p.aim[0], p.aim[2])), p.aim[2]], false, tgt ? 'moved' : 'lost');
     return;
@@ -783,6 +814,9 @@ function stepOne(sim, p) {
         const rx = tgt.pos[0] - p.pos[0], rz = tgt.pos[2] - p.pos[2];
         if (rx * p.vel[0] + rz * p.vel[2] > 0 && rx * rx + rz * rz < 2000 * 2000) why = 'short';
       }
+      // a round fired at a point, or a direct-fire round whose target was destroyed on the way (the salvo's first
+      // round got it): it bursts where it was aimed, on the wreck
+      if ((p.tk === 'point' || (!tgt && P.mode === 'direct' && p.tk === 'unit')) && dxz(p.pos[0], p.pos[2], p.aim[0], p.aim[2]) < 80) { pointBurst(sim, p, [p.pos[0], g, p.pos[2]]); return; }
       splash(sim, p, [p.pos[0], g, p.pos[2]], false, why); return;
     }
     p.pos[1] = g + 1;
@@ -826,24 +860,25 @@ function impact(sim, p, tgt) {
 }
 
 /* an interceptor's proximity fuze: its path this tick against the target's body (a missile's capsule, a unit's
-   boxes). Within the burst radius -> it goes off at the closest point (if that point is still ahead at the end of
-   the tick and nothing touched, it waits a tick). Past the target and opening -> a miss: it ends in the air. */
+   boxes). The fuze sees the target within P.fuze m (default 2.5 x the burst radius) and fires at the closest point
+   of the pass (if that point is still ahead at the end of the tick, it waits a tick). Passing wider than that: a
+   miss, it ends in the air. */
 function fuse(sim, p, tgt) {
-  const P = p.P, Rb = P.burst || 5;
+  const P = p.P, Rb = P.burst || 5, Rf = P.fuze || Rb * 2.5;
   let d, s, t = 0;
   const ax = p.prev[0] - tgt.prev[0], ay = p.prev[1] - tgt.prev[1], az = p.prev[2] - tgt.prev[2];
   const bx = p.pos[0] - tgt.pos[0], by = p.pos[1] - tgt.pos[1], bz = p.pos[2] - tgt.pos[2];
-  const far = bx * bx + by * by + bz * bz > (Rb + 120 + p.spd * DT * 2) ** 2 && ax * ax + ay * ay + az * az > (Rb + 120 + p.spd * DT * 2) ** 2;
+  const far = bx * bx + by * by + bz * bz > (Rf + 120 + p.spd * DT * 2) ** 2 && ax * ax + ay * ay + az * az > (Rf + 120 + p.spd * DT * 2) ** 2;
   if (far) { d = Infinity; s = 1; }
   else if (p.tk === 'proj') {
     const bd = tgt.P.body || DEFBODY;
     axisOf(tgt, F);
     d = Math.max(0, segAxis(ax, ay, az, bx, by, bz, F[0], F[1], F[2], bd[0] / 2) - bd[1] / 2); s = HIT.s; t = HIT.t;
-  } else { d = distUnit(tgt, ax, ay, az, bx, by, bz, Rb); s = d === Infinity ? 1 : HIT.s; }
+  } else { d = distUnit(tgt, ax, ay, az, bx, by, bz, Rf); s = d === Infinity ? 1 : HIT.s; }
   velOf(tgt, VT);
   const rvx = p.vel[0] - VT[0], rvy = p.vel[1] - VT[1], rvz = p.vel[2] - VT[2];
   const closing = bx * rvx + by * rvy + bz * rvz < 0;
-  if (d <= Rb) {
+  if (d <= Rf) {
     if (s >= .999 && d > 0 && closing) return false;             // the closest point is still ahead
     detonate(sim, p, tgt, d, s, t);
     return true;
@@ -856,9 +891,26 @@ function fuse(sim, p, tgt) {
   }
   return false;
 }
-/* the burst: fragments over its radius. A missile within KILL x radius breaks up (intercept); farther out it is
-   knocked out of control (spinout; one already tumbling breaks up). A unit takes the round's damage on the part
-   nearest the burst (half beyond KILL x radius). */
+/* the warhead's fragments leave in a belt round its axis, P.cone = [from, to] rad off the nose (default 40-110 deg:
+   thrown sideways, swept forward by the round's own speed). How far the belt reaches a target at miss distance d: the
+   full burst radius inside the belt, falling to a third of it well outside (blast only). Returns d scaled up by
+   that: compare with the burst radius. Into CONE: the burst axis (unit) and the belt. */
+const CONE = { ax: [0, 0, 1], lo: .7, hi: 1.92, off: 0 };
+function beltMiss(p, d, dx, dy, dz) {
+  const P = p.P, C = CONE, sp = p.spd || 1;
+  C.ax = [p.vel[0] / sp, p.vel[1] / sp, p.vel[2] / sp];
+  C.lo = P.cone ? P.cone[0] : .7; C.hi = P.cone ? P.cone[1] : 1.92;
+  const l = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  if (l < 1e-3) { C.off = 0; return d; }
+  const a = Math.acos(clamp((dx * C.ax[0] + dy * C.ax[1] + dz * C.ax[2]) / l, -1, 1));
+  const off = a < C.lo ? C.lo - a : a > C.hi ? a - C.hi : 0;       // rad outside the belt
+  C.off = off;
+  return d * (1 + 2 * Math.min(1, off / .5));
+}
+/* the burst: fragments over its radius (in its belt). A missile within KILL x radius breaks up (intercept); farther
+   out, inside the radius, it is knocked out of control (spinout; one already tumbling breaks up); beyond it the burst
+   is seen but does nothing. A unit takes the round's damage on the part nearest the burst (half beyond KILL x radius,
+   none beyond the radius). */
 function detonate(sim, p, tgt, d, s, t) {
   const P = p.P, Rb = P.burst || 5;
   const bp = [p.prev[0] + (p.pos[0] - p.prev[0]) * s, p.prev[1] + (p.pos[1] - p.prev[1]) * s, p.prev[2] + (p.pos[2] - p.prev[2]) * s];
@@ -869,23 +921,31 @@ function detonate(sim, p, tgt, d, s, t) {
     const qx = q.prev[0] + (q.pos[0] - q.prev[0]) * s + F[0] * t, qy = q.prev[1] + (q.pos[1] - q.prev[1]) * s + F[1] * t, qz = q.prev[2] + (q.pos[2] - q.prev[2]) * s + F[2] * t;
     let ix = qx - bp[0], iy = qy - bp[1], iz = qz - bp[2];
     const il = Math.sqrt(ix * ix + iy * iy + iz * iz);
+    const de = beltMiss(p, d, ix, iy, iz), belt = { ax: CONE.ax, cone: [CONE.lo, CONE.hi], R: Rb, off: +CONE.off.toFixed(2) };
     const rel = [p.vel[0] - q.vel[0], p.vel[1] - q.vel[1], p.vel[2] - q.vel[2]];
     if (il < 1e-3) { const rl = Math.hypot(rel[0], rel[1], rel[2]) || 1; ix = rel[0] / rl; iy = rel[1] / rl; iz = rel[2] / rl; } else { ix /= il; iy /= il; iz /= il; }
     // the part: the skin point facing the burst, at t along the axis
     const r = (q.P.body || DEFBODY)[1] / 2;
     const part = partOnSkin(q, F[0] * t - ix * r, F[1] * t - iy * r, F[2] * t - iz * r, t);
-    const info = { by: p.id, byKind: p.kind, unit: p.from, part, pos: [qx - ix * r, qy - iy * r, qz - iz * r], rel, imp: [ix, iy, iz], cause: 'burst', miss: +d.toFixed(2), burst: bp };
+    const info = { by: p.id, byKind: p.kind, unit: p.from, part, pos: [qx - ix * r, qy - iy * r, qz - iz * r], rel, imp: [ix, iy, iz], cause: 'burst', miss: +d.toFixed(2), burst: bp, belt };
     killProj(sim, p, null);
-    if (d <= Rb * KILL || !q.ctrl) breakup(sim, q, info);
+    if (de > Rb) {
+      // the fuze fired, the fragments went wide: a burst in the air near it
+      sim.emit('splash', { pos: bp, kind: p.kind, side: p.side, proj: p.id, air: true, miss: +d.toFixed(2), why: 'wide', target: q.id, belt });
+      return;
+    }
+    if (de <= Rb * KILL || !q.ctrl) breakup(sim, q, info);
     else {
-      sim.emit('splash', { pos: bp, kind: p.kind, side: p.side, proj: p.id, air: true, why: 'burst', target: q.id, miss: info.miss });
+      sim.emit('splash', { pos: bp, kind: p.kind, side: p.side, proj: p.id, air: true, why: 'burst', target: q.id, miss: info.miss, belt });
       spinout(sim, q, info);
     }
   } else {
     const part = HIT.part, lx = HIT.x, ly = HIT.y, lz = HIT.z, pos = toWorld(tgt, lx, ly, lz, [0, 0, 0]);
-    sim.emit('hit', { pos, target: tgt.id, kind: p.kind, side: p.side, from: p.from, proj: p.id, part, miss: +d.toFixed(2), burst: bp });
+    const de = beltMiss(p, d, pos[0] - bp[0], pos[1] - bp[1], pos[2] - bp[2]), belt = { ax: CONE.ax, cone: [CONE.lo, CONE.hi], R: Rb, off: +CONE.off.toFixed(2) };
     killProj(sim, p, null);
-    applyDamage(sim, tgt, P.dmg * (d <= Rb * KILL ? 1 : .5), sim.units.get(p.from), { part, part2: partNear(tgt.def, lx, ly, lz, part), pos });
+    if (de > Rb) { sim.emit('splash', { pos: bp, kind: p.kind, side: p.side, proj: p.id, air: true, miss: +d.toFixed(2), why: 'wide', target: tgt.id, belt }); return; }
+    sim.emit('hit', { pos, target: tgt.id, kind: p.kind, side: p.side, from: p.from, proj: p.id, part, miss: +d.toFixed(2), burst: bp, belt });
+    applyDamage(sim, tgt, P.dmg * (de <= Rb * KILL ? 1 : .5), sim.units.get(p.from), { part, part2: partNear(tgt.def, lx, ly, lz, part), pos });
   }
 }
 
@@ -1045,7 +1105,7 @@ function retarget(sim, p) {
     const d = Math.sqrt((q.pos[0] - p.pos[0]) ** 2 + (q.pos[1] - p.pos[1]) ** 2 + (q.pos[2] - p.pos[2]) ** 2);
     if (d < bd) { bd = d; best = q; }
   }
-  if (best) { p.target = best.id; best.eng++; best.shots++; p.minD = 1e9; }
+  if (best) { p.target = best.id; best.eng++; best.shots++; p.minD = 1e9; p.tSeek = undefined; }
   return best;
 }
 
@@ -1066,6 +1126,23 @@ function shellImpact(sim, p) {
   splash(sim, p, b.imp.slice(), false, 'short');
 }
 
+/* a round fired at a map point (the 'strike' order: no target) bursts there: every unit within its blast reach (P.blast,
+   else 2 m per hp of damage, 20-60 m) takes damage falling off with distance, on the part nearest the burst */
+function pointBurst(sim, p, pos) {
+  const P = p.P, R = P.blast || clamp(P.dmg * 2, 20, 60);
+  sim.emit('splash', { pos, kind: p.kind, side: p.side, proj: p.id, air: false, water: sim.map.h(pos[0], pos[2]) < 0, why: 'point' });
+  killProj(sim, p, null);
+  const from = sim.units.get(p.from);
+  for (const e of sim.units.values()) {
+    if (!e.alive || e.aboard || e.side === p.side || e.def.domain === 'air' || submerged(e)) continue;
+    if (Math.abs(e.pos[0] - pos[0]) > R + 150 || Math.abs(e.pos[2] - pos[2]) > R + 150) continue;
+    const d = pointUnit(e, pos[0] - e.pos[0], pos[1] - e.pos[1], pos[2] - e.pos[2]);
+    if (d > R) continue;
+    const part = HIT.part, lx = HIT.x, ly = HIT.y, lz = HIT.z;
+    sim.emit('hit', { pos: pos.slice(), target: e.id, kind: p.kind, side: p.side, from: p.from, proj: p.id, part, blast: +d.toFixed(1) });
+    applyDamage(sim, e, P.dmg * (1 - .7 * d / R), from, { part, part2: partNear(e.def, lx, ly, lz, part), pos: pos.slice() });
+  }
+}
 function splash(sim, p, pos, air, why) {
   sim.emit('splash', { pos, kind: p.kind, side: p.side, proj: p.id, air: !!air, water: !air && sim.map.h(pos[0], pos[2]) < 0, why: why || '' });
   killProj(sim, p, null);
@@ -1084,7 +1161,7 @@ export function killProj(sim, p, how, info) {
     // destroyed outright: what a break-up (debris) system needs rides on the event (README: Events)
     sim.emit('intercept', { pos: info.pos || p.pos.slice(), proj: p.id, kind: p.kind, side: p.side, by: info.by, byKind: info.byKind, unit: info.unit, target: p.target,
       breakup: true, at: p.pos.slice(), vel: p.vel.slice(), rel: info.rel || null, imp: info.imp || null, w: p.w ? p.w.slice() : [0, 0, 0],
-      model: p.P.model, part: info.part || null, cause: info.cause || null, miss: info.miss, burst: info.burst || null,
+      model: p.P.model, part: info.part || null, cause: info.cause || null, miss: info.miss, burst: info.burst || null, belt: info.belt || null,
       hdg: p.hdg, pitch: p.pitch, roll: p.roll || 0, seed: seedOf(sim, p), tk: p.tk });
   }
 }

@@ -843,6 +843,37 @@ async function main() {
     return `${a.n} outcome events, state hash ${a.h} both times`;
   });
 
+  await test('air strike: a Hornet climbs out, then releases level, nose on the target, inside the envelope; a Seahawk hovers, nose on', async () => {
+    const out = [];
+    for (const type of ['fighter', 'helo']) {
+      const m = map(), { shoreX } = coastPoints(m), sim = new Sim(m, { seed: 9, fog: false, weather: calm });
+      const host = sim.spawn(type === 'fighter' ? 'carrier' : 'ddg', 'fleet', shoreX - (type === 'fighter' ? 60000 : 12000), 0, { hdg: 0 });   // heading away from the target's bearing
+      const u = sim.spawn(type, 'fleet', host.pos[0], host.pos[2], { aboard: host.id });
+      const tgt = sim.spawn('tel', 'coast', shoreX + 3000, 0, { deployed: true });
+      tgt.hp = tgt.hpMax = 1e5;
+      for (const k in host.ammo) host.ammo[k] = 0;
+      sim.run(10);
+      sim.order([u.id], { kind: 'attack', target: tgt.id, n: 2 });
+      const rel = [];
+      await run(sim, 20 * 600, s => {
+        for (const e of s.drainEvents()) if (e.type === 'launch' && e.from === u.id) {
+          const b = Math.atan2(tgt.pos[0] - u.pos[0], tgt.pos[2] - u.pos[2]);
+          rel.push({ err: Math.abs(Math.atan2(Math.sin(b - u.hdg), Math.cos(b - u.hdg))), roff: Math.abs(e.hdg - u.hdg), bank: Math.abs(u.roll), age: s.t - u.born, v: u.speed, d: Math.hypot(tgt.pos[0] - u.pos[0], tgt.pos[2] - u.pos[2]) });
+        }
+        return rel.length >= 2;
+      });
+      ok(rel.length === 2, `${type}: ${rel.length} rounds released`);
+      const w = u.def.weapons[type === 'fighter' ? 'slam' : 'hellfire'];
+      for (const r of rel) {
+        ok(r.err < .15 && r.roff < 1e-9 && r.bank < .35, `${type}: released ${fmt(r.err * 57.3)} deg off the target's bearing, round ${fmt(r.roff * 57.3)} deg off the nose, bank ${fmt(r.bank * 57.3)} deg`);
+        ok(r.d <= w.range && r.d >= w.min, `${type}: released at ${fmt(r.d / 1000)} km (envelope ${w.min / 1000}-${w.range / 1000})`);
+        ok(type === 'helo' ? r.v < 15 : r.age > 14 && r.v > u.def.speed * .75, `${type}: released ${fmt(r.age)} s after take-off at ${fmt(r.v)} m/s`);
+      }
+      out.push(`${type}: ${fmt(rel[0].age, 0)} s after launch, ${fmt(rel[0].d / 1000)} km, ${fmt(rel[0].err * 57.3)} deg off, ${fmt(rel[0].v, 0)} m/s`);
+    }
+    return out.join(' · ');
+  });
+
   // motion physics: ships, vehicles, aircraft, separation, sinking, the swell (tests_physics.js)
   await physicsTests({ test, run, ok, fmt, map });
 

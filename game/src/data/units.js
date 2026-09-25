@@ -4,7 +4,9 @@
    Units: metres, seconds, m/s, radians. Real sizes and speeds; weapon and sensor ranges are scaled to the
    80-160 km maps. Combat: range, speed, reload time, ammo, damage; hits are physical (a path crossing a body, see
    PROJ and sim/bodies.js), nothing is rolled. Guns: v0 m/s, rpm, rounds = representative rounds per burst, disp = the
-   rounds' angular dispersion (rad), drag = dv/dx per m, dmgR = hp per real round that strikes a unit.
+   rounds' angular dispersion (rad), drag = dv/dx per m, dmgR = hp per real round that strikes a unit; open = the range it
+   opens fire on a missile (default range); frag = a high-explosive round's burst reach (m past a missile's skin: a
+   fragK share of a hit).
 
    import { UNITS, PROJ, SIDES, typesOf } from './data/units.js'
    UNITS[type].modelState(unit, t) writes the model state into unit.st (no allocation) and returns it. The sim
@@ -112,10 +114,11 @@ export const UNITS = {
     sensors: { radar: { surf: 0, air: 32000, land: 0, period: 1.5, gain: .28, h: 6 } },
     emits: { range: 45000 },
     weapons: {
-      sam: { proj: 'sam', ammo: 12, range: 18000, min: 1000, cd: 2.0, vs: ['missile', 'air'], auto: true, maxEng: 2, maxShots: 3, needsRadar: true,
+      sam: { proj: 'sam', ammo: 12, range: 18000, min: 1000, cd: 2.0, vs: ['missile', 'air'], auto: true, maxEng: 1, maxShots: 1, needsRadar: true,
              muzzle: [1.3, 3.6, .5], refill: 50 },
-      gun30: { gun: true, ammo: 28, range: 4000, cd: 1.0, vs: ['missile', 'air'], auto: true, needsRadar: true,
-               v0: 960, rpm: 5000, rounds: 24, disp: .0022, drag: 1.6e-4, dmgR: .15, muzzle: [0, 3.4, 2.2], burst: 1.0, refill: 10 },   // balance: disp .0028 -> .0022
+      gun30: { gun: true, ammo: 17, range: 4000, cd: 1.0, vs: ['missile', 'air'], auto: true, needsRadar: true,
+               v0: 960, rpm: 5000, rounds: 24, disp: .0018, drag: 1.6e-4, dmgR: .15, muzzle: [0, 3.4, 2.2], burst: 1.0, refill: 10,
+               open: 3200, frag: .3, fragK: .35 },   // 17 one-second bursts: ~1400 rounds; HE-frag: a pass within .3 m of the skin is a third of a hit
     },
     cost: 380, buildTime: 80,
     parts: {
@@ -410,7 +413,7 @@ export const UNITS = {
     air: { cap: 12, launchGap: 20, deckY: 19.5, types: ['fighter', 'helo', 'aew'] },   // launches F/A-18E, MH-60R and E-2D
     magazine: { slam: 60, aam: 40, hellfire: 32 },                // aircraft stores aboard; refilled at the replenishment point
     weapons: {
-      pdms: { proj: 'pdms', ammo: 16, range: 15000, min: 1000, cd: 2.0, vs: ['missile', 'air'], auto: true, maxEng: 2, maxShots: 4,
+      pdms: { proj: 'pdms', ammo: 16, range: 15000, min: 1000, cd: 2.0, vs: ['missile', 'air'], auto: true, maxEng: 1, maxShots: 2,
               muzzle: [30, 21, -140], vert: false, refill: 30 },
       ciws: { gun: true, ammo: 60, range: 2000, cd: 2.5, vs: ['missile', 'air'], auto: true,   // balance: cd 1.0 -> 2.5, disp .0022 -> .007
               v0: 1100, rpm: 4500, rounds: 24, disp: .007, drag: 2.2e-4, dmgR: .15, muzzle: [-34, 20, 120], burst: .9, refill: 8 },
@@ -446,7 +449,7 @@ export const UNITS = {
     scan: { reach: 60000, r: 4000, cd: 90 },
     air: { cap: 2, launchGap: 30, deckY: 8, types: ['helo'] },       // Flight IIA hangar: two MH-60R
     weapons: {
-      sm6: { proj: 'sm6', ammo: 32, range: 60000, airRange: 35000, min: 2000, cd: 1.0, vs: ['missile', 'air'], auto: true, maxEng: 2, maxShots: 2, needsRadar: true,
+      sm6: { proj: 'sm6', ammo: 32, range: 60000, airRange: 35000, min: 2000, cd: 1.0, vs: ['missile', 'air'], auto: true, maxEng: 1, maxShots: 1, needsRadar: true,
              vls: true, refill: 20 },
       strike: { proj: 'tlam', ammo: 8, range: 120000, min: 10000, cd: 2.0, vs: ['land'], salvo: 2, vls: true, refill: 30 },
       gun5: { proj: 'shell', ammo: 300, range: 24000, min: 1500, cd: 3.0, vs: ['land', 'sea'], salvo: 6,
@@ -642,7 +645,7 @@ export const UNITS = {
     carry: { craft: 3, veh: 8, types: ['lcac', 'acv'], start: [['lcac', 3], ['acv', 8], ['helo', 2]] },
     well: { open: 45, slow: 2.6, ballast: 2.4, gap: 30, load: 20, y: 1.0, z0: -127.85, slots: [-114.25, -87.35, -60.45] },   // = data/models.js LHD.WELL, SLOTS
     weapons: {
-      pdms: { proj: 'pdms', ammo: 16, range: 15000, min: 1000, cd: 2.0, vs: ['missile', 'air'], auto: true, maxEng: 2, maxShots: 4,
+      pdms: { proj: 'pdms', ammo: 16, range: 15000, min: 1000, cd: 2.0, vs: ['missile', 'air'], auto: true, maxEng: 1, maxShots: 2,
               muzzle: [12, 17, 105], vert: false, refill: 30 },
       ciws: { gun: true, ammo: 50, range: 2000, cd: 2.5, vs: ['missile', 'air'], auto: true,   // balance: cd 1.0 -> 2.5, disp .0022 -> .007
               v0: 1100, rpm: 4500, rounds: 24, disp: .007, drag: 2.2e-4, dmgR: .15, muzzle: [13, 24, 10], burst: .9, refill: 8 },
@@ -743,9 +746,9 @@ export const UNITS = {
     air: { cap: 2, launchGap: 30, deckY: 6.0, types: ['helo'], spot: [0, 6.0, -46], park: [[0, 6.0, -46], [0, 6.0, -30]] },   // twin hangars
     // air-defence heavy: more SM-6 and quad-packed ESSM than a DDG, fewer strike rounds (122 Mk 41 cells)
     weapons: {
-      sm6: { proj: 'sm6', ammo: 48, range: 60000, airRange: 35000, min: 2000, cd: .8, vs: ['missile', 'air'], auto: true, maxEng: 2, maxShots: 2, needsRadar: true,
+      sm6: { proj: 'sm6', ammo: 48, range: 60000, airRange: 35000, min: 2000, cd: .8, vs: ['missile', 'air'], auto: true, maxEng: 1, maxShots: 1, needsRadar: true,
              vls: true, refill: 20 },
-      pdms: { proj: 'pdms', ammo: 32, range: 15000, min: 1000, cd: 1.5, vs: ['missile', 'air'], auto: true, maxEng: 2, maxShots: 3, needsRadar: true,
+      pdms: { proj: 'pdms', ammo: 32, range: 15000, min: 1000, cd: 1.5, vs: ['missile', 'air'], auto: true, maxEng: 1, maxShots: 2, needsRadar: true,
               vls: true, refill: 20 },
       strike: { proj: 'tlam', ammo: 4, range: 120000, min: 10000, cd: 2.0, vs: ['land'], salvo: 2, vls: true, refill: 30 },
       gun5: { proj: 'shell', ammo: 600, range: 24000, min: 1500, cd: 2.0, vs: ['land', 'sea'], salvo: 6, muzzle: [0, 8.9, 70], refill: 2 },   // Mk 45 ×2
@@ -809,7 +812,7 @@ export const UNITS = {
     weapons: {
       gun57: { proj: 'shell57', ammo: 400, range: 12000, min: 300, cd: 1.5, vs: ['sea', 'land'], salvo: 8, muzzle: [0, 10.7, 44.8],
                prefer: ['LCAC', 'SSK'], refill: 2 },
-      searam: { proj: 'ram', ammo: 11, range: 8000, min: 500, cd: 1.5, vs: ['missile', 'air'], auto: true, maxEng: 2, maxShots: 2, needsRadar: true,
+      searam: { proj: 'ram', ammo: 11, range: 8000, min: 500, cd: 1.5, vs: ['missile', 'air'], auto: true, maxEng: 1, maxShots: 2, needsRadar: true,
                 muzzle: [0, 17.2, -22.8], refill: 20 },
     },
     cost: 700, buildTime: 180,
@@ -842,13 +845,18 @@ export const UNITS = {
    Physics (sim/bodies.js, sim/weapons.js; nothing is rolled): body = [length m, diameter m, mass kg] (public sizes),
    the capsule gun rounds and bursts strike and the tumbling flight's area and mass; turn / pitchRate = turn-rate
    limits (rad/s), gMax = lateral-acceleration limit (m/s²); sig0 + sigR x range = the track error the round steers
-   by (m: what makes it miss); burst = proximity-fuze radius (m: a missile within half of it breaks up, farther in it
-   tumbles out of control; a unit takes the damage, half beyond half the radius); tough = real 20-30 mm hits that
+   by in midcourse (m: what makes it miss); seek = the range (m) its own seeker takes over, closing the error on sigT
+   (m) over seekT s (default .8; it must still turn onto the corrected point); lowK = the extra error against a
+   target skimming the sea (x the error at the wave tops, fading out by 40 m: multipath); burst = the fragments' lethal reach (m:
+   a missile within half of it breaks up, farther in it tumbles out of control; a unit takes the damage, half beyond
+   half the radius), in a belt cone = [from, to] rad off the nose (default .7-1.92); fuze = how near the proximity
+   fuze fires at the closest point of the pass (m, default 2.5 x burst: a wider burst is seen and does nothing); tough = real 20-30 mm hits that
    break the round up (fewer: it tumbles); blast = a shell's fragment reach (m) where it bursts on the ground. */
 export const PROJ = {
   oniks: { name: '3M55 Oniks', cls: 'ASCM', model: 'oniks', boosterModel: 'oniks_booster', mode: 'cruise', threat: true, speed: 750, dmg: 80, reach: 4000,
            rcs: .3, vert: 1.4, v0: 30, ign: .38, boost: 6, vb: 640, sepAt: 7, sus: [7.35, 14, 1e9], alt: 40, seaAlt: 15, pitchMax: .55, pitchRate: .35, turn: .25,
-           finalDist: 25000, finalAlt: 10, body: [8.9, .7, 3000], sig0: 3, sigR: .0005, tough: 5 },
+           finalDist: 25000, finalAlt: 10, body: [8.9, .7, 3000], sig0: 3, sigR: .0005, tough: 5,
+           weave: [.06, 3, 18000, 700] },   // the terminal snake: ~10 g, 3 s a cycle, from 18 km to the last 700 m
   tlam: { name: 'RGM-109 Tomahawk', cls: 'LACM', model: 'tomahawk', boosterModel: null, mode: 'cruise', threat: true, speed: 245, dmg: 45, reach: 1500,
           rcs: .15, vert: 3.0, po: 1.0, poRate: .8, v0: 25, boost: 10, sepAt: 10, wingAt: 9.2, wingT: 1, alt: 60, pitchMax: .5, pitchRate: .3, turn: .12,
           finalDist: 4000, finalAlt: 25, body: [5.56, .52, 1300], sig0: 1.5, sigR: .0003, tough: 3 },
@@ -858,13 +866,13 @@ export const PROJ = {
   hellfire: { name: 'AGM-114 Hellfire', cls: 'ATGM', model: 'hellfire', mode: 'direct', threat: true, speed: 400, dmg: 25, reach: 400,
               rcs: .03, vert: 0, v0: 0, boost: 2.5, turn: .6, pitchRate: .6, body: [1.63, .178, 45], sig0: .6, sigR: .0002, tough: 1 },
   sm6: { name: 'RIM-174 SM-6', cls: 'SAM', model: 'sm6', boosterModel: 'mk72', mode: 'direct', speed: 1190, dmg: 15,
-         vert: 2.3, po: 3, poRate: .22, v0: 40, boost: 6, vb: 960, sepAt: 6, sus: [6.4, 9.5, 18], cd: 8e-6, vMin: 400, turn: .35, pitchRate: .28, gMax: 300, body: [6.55, .34, 1500], burst: 8, sig0: 14, sigR: .0008 },   // balance: sig0 16 -> 14
+         vert: 2.3, po: 3, poRate: .22, v0: 40, boost: 6, vb: 960, sepAt: 6, sus: [6.4, 9.5, 18], cd: 8e-6, vMin: 400, turn: .35, pitchRate: .28, gMax: 300, body: [6.55, .34, 1500], burst: 12, sig0: 14, sigR: .0008, seek: 12000, sigT: 6, lowK: 1.2 },
   pdms: { name: 'RIM-162 ESSM', cls: 'SAM', model: 'essm', mode: 'direct', speed: 1300, dmg: 12,
-          vert: .6, po: 1, poRate: 1.2, v0: 30, boost: 3.5, cd: 2.5e-5, vMin: 350, turn: .5, pitchRate: .45, gMax: 400, body: [3.66, .254, 280], burst: 7, sig0: 34, sigR: .0008 },   // balance: sig0 16 -> 34
+          vert: .6, po: 1, poRate: 1.2, v0: 30, boost: 3.5, cd: 2.5e-5, vMin: 350, turn: .5, pitchRate: .45, gMax: 400, body: [3.66, .254, 280], burst: 10, sig0: 16, sigR: .0008, seek: 8000, sigT: 6, lowK: 1 },
   sam: { name: '57E6', cls: 'SAM', model: 'sam57e6', mode: 'direct', speed: 1300, dmg: 12,
-         vert: 0, v0: 60, boost: 2.4, sepAt: 2.4, cd: 2.84e-5, vMin: 300, turn: .6, pitchRate: .6, gMax: 350, body: [3.2, .17, 90], burst: 5, sig0: 7, sigR: .0006 },   // balance: sig0 10 -> 7
+         vert: 0, v0: 60, boost: 2.4, sepAt: 2.4, cd: 2.84e-5, vMin: 300, turn: .6, pitchRate: .6, gMax: 350, body: [3.2, .17, 90], burst: 9, sig0: 8, sigR: .0015, lowK: .6 },      // radio command, optical track: no seeker
   aam: { name: 'AIM-120D', cls: 'AAM', model: 'aim120', mode: 'direct', speed: 1300, dmg: 15,
-         vert: 0, v0: 0, boost: 4, cd: 8e-6, vMin: 400, turn: .5, pitchRate: .5, gMax: 400, body: [3.66, .178, 152], burst: 7, sig0: 6, sigR: .0003 },
+         vert: 0, v0: 0, boost: 4, cd: 8e-6, vMin: 400, turn: .5, pitchRate: .5, gMax: 400, body: [3.66, .178, 152], burst: 9, sig0: 6, sigR: .0003, seek: 15000, sigT: 3 },
   shell: { name: '5"/62 round', cls: 'SHELL', model: 'shell', mode: 'ballistic', speed: 810, dmg: 6, sigma: 40, body: [.66, .127, 32], blast: 10 },
   uran: { name: 'Kh-35U', cls: 'ASCM', model: 'kh35', boosterModel: null, mode: 'cruise', threat: true, speed: 270, dmg: 35, reach: 3000,
           rcs: .1, vert: 0, v0: 35, boost: 2, sepAt: 2, alt: 25, seaAlt: 10, pitchMax: .45, pitchRate: .35, turn: .3,
@@ -874,9 +882,9 @@ export const PROJ = {
             finalDist: 20000, finalAlt: 8, body: [8.22, .533, 1780], sig0: 3, sigR: .0005, tough: 4 },
   /* the third wave's rounds (closed shells; data/models_units3.js) */
   sam48: { name: '48N6E3', cls: 'SAM', model: 's400_msl', mode: 'direct', speed: 1700, dmg: 16,
-           vert: 1.2, po: .8, poRate: 1.0, v0: 30, ign: .5, boost: 8, cd: 6e-6, vMin: 450, turn: .3, pitchRate: .3, gMax: 300, body: [7.5, .52, 1835], burst: 10, sig0: 14, sigR: .0008 },
+           vert: 1.2, po: .8, poRate: 1.0, v0: 30, ign: .5, boost: 8, cd: 6e-6, vMin: 450, turn: .3, pitchRate: .3, gMax: 300, body: [7.5, .52, 1835], burst: 16, sig0: 14, sigR: .0008, seek: 15000, sigT: 5 },
   ram: { name: 'RIM-116 RAM', cls: 'SAM', model: 'rim116', mode: 'direct', speed: 750, dmg: 8,
-         vert: 0, v0: 40, boost: 2, cd: 3e-5, vMin: 250, turn: .7, pitchRate: .7, gMax: 400, body: [2.79, .127, 74], burst: 5, sig0: 8, sigR: .0006 },
+         vert: 0, v0: 40, boost: 2, cd: 3e-5, vMin: 250, turn: .7, pitchRate: .7, gMax: 400, body: [2.79, .127, 74], burst: 5, sig0: 8, sigR: .0006, seek: 6000, sigT: 2.5, lowK: .3 },
   shell130: { name: '130 mm round', cls: 'SHELL', model: 'shell130', mode: 'ballistic', speed: 850, dmg: 8, sigma: 35, body: [.68, .13, 33.4], blast: 11 },
   shell57: { name: '57 mm round', cls: 'SHELL', model: 'shell57', mode: 'ballistic', speed: 1000, dmg: 2.5, sigma: 18, body: [.3, .057, 2.7], blast: 5 },
   /* torpedoes run under water (not drawn; heard by sonar): mode 'run' holds a depth and closes on the target once it

@@ -140,8 +140,11 @@ export class FakeSim {
       const d = Math.hypot(r0x + ddx * sc, r0y + ddy * sc, r0z + ddz * sc);
       if (d < 45) {
         const mid = [(p.pos[0] + tgt.pos[0]) / 2, (p.pos[1] + tgt.pos[1]) / 2, (p.pos[2] + tgt.pos[2]) / 2];
-        if (p.kill) { this.emit('intercept', { pos: mid, proj: tgt.id, kind: tgt.kind, side: tgt.side, by: p.id, byKind: p.kind, unit: p.from, target: tgt.target }); this.kill(tgt); this.kill(p); }
-        else { this.emit('splash', { pos: p.pos.slice(), kind: p.kind, side: p.side, proj: p.id, air: true, miss: true }); this.kill(p); }
+        // the warhead's burst point and fragment belt, as the game's sim reports them (weapons.js detonate)
+        const sp = Math.hypot(p.vel[0], p.vel[1], p.vel[2]) || 1, bp = [p.prev[0] + (p.pos[0] - p.prev[0]) * sc, p.prev[1] + (p.pos[1] - p.prev[1]) * sc, p.prev[2] + (p.pos[2] - p.prev[2]) * sc];
+        const belt = { ax: [p.vel[0] / sp, p.vel[1] / sp, p.vel[2] / sp], cone: [.7, 1.92], R: p.kind === 'sam' ? 9 : 12 };
+        if (p.kill) { this.emit('intercept', { pos: mid, proj: tgt.id, kind: tgt.kind, side: tgt.side, by: p.id, byKind: p.kind, unit: p.from, target: tgt.target, burst: bp, belt }); this.kill(tgt); this.kill(p); }
+        else { this.emit('splash', { pos: bp, kind: p.kind, side: p.side, proj: p.id, air: true, miss: true, why: 'wide', belt }); this.kill(p); }
         return;
       }
     }

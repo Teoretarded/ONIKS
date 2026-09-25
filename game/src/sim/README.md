@@ -223,6 +223,27 @@ it enters (the smallest box holding the point a little past the entry); the near
   until it comes down (`splash`, why `'spinout'`) or falls on its target (`hit`, `spin: true`, reduced damage).
   Tumbling rounds are no longer engaged by defences.
 - `fireGun(sim, u, weapon, target)` and `spinout(sim, proj, info)` are exported from weapons.js (tests, scripts).
+- **Interceptor end game.** A guided round steers by the launcher's track (`sig0 + sigR x range`) until its own
+  seeker takes over at `PROJ.seek` m; the error then closes on `sigT` over `seekT` s, and the round must still turn
+  onto the corrected point within its `turn` / `gMax` (a late correction misses). Against a target skimming the sea
+  the error grows (`lowK`: multipath, fading out by 40 m). The proximity fuze fires at the closest point of the pass
+  within `fuze` m (default 2.5 x `burst`); the warhead's fragments leave in a belt `cone` = [from, to] rad off the nose
+  (default 40-110 deg): inside the belt a missile within `KILL` (.5) x `burst` breaks up, within `burst` it is knocked
+  out of control; outside the belt the reach falls to a third. A wider burst is seen (`splash`, why `'wide'`) and
+  does nothing. `intercept`, `spinout` bursts and these splashes carry `burst` (the point) and `belt` { ax, cone, R }
+  (fx/lib/burst.js FragBelt draws it). Doctrine per weapon: `maxEng` rounds in the air at one threat (1: shoot, look,
+  shoot), `maxShots` in all (counted over the side's weapons: an SM-6's `maxShots: 1` leaves the second shot to the
+  inner layer). Guns: `open` (the range a gun opens on a missile), `frag` / `fragK` (a high-explosive round passing
+  within `frag` m of the skin counts `fragK` of a hit: the Pantsir's 30 mm). A threat may weave on its last stretch
+  (`PROJ.weave` = [heading amplitude, period s, from m, to m]: the 3M55).
+- **Air strikes** (airstrike.js): an aircraft's `attack` or point `strike` flies a profile: climb-out (straight on,
+  to height and ~cruise speed), ingress fast and low (`u.altT`, `u.vAir`) to a release point inside the weapon's
+  envelope and clear of the classified SAM rings it knows of, then release only when `airReady` (nose on the target
+  within ~8 deg, wings near level, level flight, fast enough; a helicopter hovers, nose on, and pops up until it sees
+  the target over the ground). Rounds leave a pylon / rail along the aircraft's axis and turn after. After the volley
+  `airEgress` turns it away the way it came. `u.strk` / `u.strkPh` ('out' | 'in' | 'rel') while the profile runs;
+  dynamics.js drops it when the order ends. A round fired at a point (`tk: 'point'`) bursts there (`splash` why
+  `'point'`; units within `P.blast`, else 2 m per hp, 20-60 m, take damage falling off with distance).
 
 ### Break-up events (for a rigid-body debris system)
 
@@ -258,7 +279,7 @@ units a planner put on one spot (game/setup.js runs it on the starting forces).
 | `intercept` | pos, proj (the round killed), kind, side, by (interceptor id / gun unit), byKind, unit; break-up fields (see Projectiles: Break-up events) |
 | `spinout` | a round knocked out of control (see Projectiles: Break-up events) |
 | `hit` | pos (the struck point), target, kind, side, from, proj, part (the part it struck), vel; `n` (gun: real rounds), `burst` / `miss` (a burst near an aircraft), `blast` (a shell's fragments, m), `spin` (a tumbling round fell on it), `under` / `depth` (torpedo) |
-| `splash` | pos, kind, side, proj, air, water, miss, why ('moved'\|'terrain'\|'selfdestruct'\|'short'\|'lost'\|'miss' (an interceptor passed its target)\|'burst' (it went off near its target without destroying it)\|'wide'\|'over' (a strike round passed its target)\|'spinout'); kind 'crash' for aircraft |
+| `splash` | pos, kind, side, proj, air, water, miss, why ('moved'\|'terrain'\|'selfdestruct'\|'short'\|'lost'\|'miss' (an interceptor passed its target)\|'burst' (it went off near its target, knocking it out of control)\|'wide' (a strike round passed its target; an interceptor whose burst was out of reach)\|'over' (a strike round passed its target)\|'point' (a round fired at a map point burst there)\|'spinout'); kind 'crash' for aircraft |
 | `gunfire` | unit, side, weapon, pos (muzzle), to, aim (where the burst is pointed), tof (s), dur, n (real rounds), hit (always false: rounds resolve in flight, see `gunhit` / `hit`), target, tk, mount, burst (id in `sim.bursts`) |
 | `gunhit` | unit, side, weapon, target (a round), tk, pos, n, part, vel, burst |
 | `damage` / `part` | unit, part, hp / label, disables |

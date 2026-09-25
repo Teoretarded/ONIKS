@@ -16,7 +16,7 @@ import { View, TAU, dirOf, norm3, hsh, sat, ss, clamp, LIME } from './lib/core.j
 import { Trail, STAGE } from './lib/smoke.js';
 import { drawPlume, drawHead, PLUME } from './lib/plume.js';
 import { ColdLaunch, VlsLaunch, HotLaunch, GunBlast, BalLaunch, SubLaunch, TorpLaunch } from './lib/launch.js';
-import { Burst, BoosterSep } from './lib/burst.js';
+import { Burst, BoosterSep, FragBelt } from './lib/burst.js';
 import { Splash, Dirt, Blast, Fire, Sinking, TorpedoHit } from './lib/impact.js';
 import { TracerStream, GunStream, Muzzle } from './lib/guns.js';
 import { Wake, Downwash, Bubbles, SubWater } from './lib/water.js';
@@ -201,6 +201,12 @@ class FxSystem {
     return sim.projVisible(g.side, p);
   }
   add(e, layer) { e.layer = layer || 0; this.fx.push(e); return e; }
+  /* an interceptor's warhead: its fragment belt at the burst point (sim: ev.burst, ev.belt { ax, cone, R }) */
+  belt(ev, t, seed, vel) {
+    const B = ev.belt, at = ev.burst || ev.pos;
+    if (!B || !at) return;
+    this.add(new FragBelt({ t0: t, pos: at, ax: B.ax, lo: B.cone[0], hi: B.cone[1], R: B.R, seed: seed + 11, mom: vel || [0, 0, 0] }), 3);
+  }
   tracker(id) { return this.trk.get(id) || this.gone.get(id); }
   /* a trail another system feeds itself (game/debris.js: burning pieces): drawn with the others until it is done */
   addTrail(tr) { this.ghost.push(tr); return tr; }
@@ -256,16 +262,20 @@ class FxSystem {
           const by = this.tracker(ev.by), bv = by ? by.vel : [0, 0, 0];
           const mom = [vel[0] * .5 + bv[0] * .3, vel[1] * .5 + bv[1] * .3, vel[2] * .5 + bv[2] * .3];
           this.add(new Burst({ t0: t, pos, mom, sc: 1.25, nF: 220, ns: 90, fire: 1.6, smoke: 55, life: 9, gy, seed, kind: 'kill' }), 3);
+          this.belt(ev, t, seed, bv);
         }
         return;
       }
-      case 'hit': return this.onHit(ev, t, seed);
+      case 'hit': if (ev.belt) this.belt(ev, t, seed, null); return this.onHit(ev, t, seed);
       case 'splash': {
         const pos = ev.pos, k = fk(ev.kind), gy = this.groundAt(pos[0], pos[2]);
         const tr = this.tracker(ev.proj); if (tr) tr.killed = true;
         if (ev.air) {
           const v = tr ? tr.vel : [0, 0, 0];
-          this.add(new Burst({ t0: t, pos, mom: [v[0] * .35, v[1] * .35, v[2] * .35], sc: .8, nF: 150, ns: 70, fire: 1.1, smoke: 40, life: 7, gy, seed, kind: 'destruct' }), 3);
+          // a warhead's burst (it went off by the target, 'burst' / 'wide'): smaller than a kill, its fragment belt
+          const wh = !!ev.belt;
+          this.add(new Burst({ t0: t, pos, mom: [v[0] * .35, v[1] * .35, v[2] * .35], sc: wh ? .45 + .02 * ev.belt.R : .8, nF: wh ? 110 : 150, ns: wh ? 90 : 70, fire: wh ? .7 + .045 * ev.belt.R : 1.1, smoke: wh ? 18 + ev.belt.R : 40, life: 7, gy, seed, kind: 'destruct' }), 3);
+          if (wh) this.belt(ev, t, seed, v);
           return;
         }
         const wet = ev.water !== undefined ? ev.water : this.wet(pos[0], pos[2]);
