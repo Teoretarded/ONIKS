@@ -146,27 +146,34 @@ function autoReturn(sim, u) {
 /* where an aircraft lands: drones at a catapult; others on a deck that takes their type (carrier; helos also a DDG) */
 function homeOf(sim, u) {
   let best = null, bd = 1e18, occ = null;
-  const own = u.type !== 'drone' ? sim.units.get(u.aboardOf || 0) : null, al = hostsOf(sim, u.side);
+  const own = u.type !== 'drone' ? sim.units.get(u.aboardOf || 0) : null, al = hostsOf(sim, u.side, u.type);
   for (let i = 0; i < al.length; i++) {
     const v = al[i];
-    if (u.type === 'drone') { if (v.type !== 'catapult') continue; }
-    else if (!v.def.air || !v.def.air.types.includes(u.type) || v.off.air) continue;
-    else if (v.type !== 'carrier' && v !== own && (occ || (occ = deckCounts(sim, u.side)))[v.id] >= v.def.air.cap) continue;
+    if (u.type !== 'drone') {
+      if (v.off.air) continue;
+      if (v.type !== 'carrier' && v !== own && (occ || (occ = deckCounts(sim, u.side)))[v.id] >= v.def.air.cap) continue;
+    }
     const dd = dxz(u.pos[0], u.pos[2], v.pos[0], v.pos[2]);
     if (dd < bd) { bd = dd; best = v; }
   }
   return best;
 }
 
-/* the side's units with a deck or a catapult, in sim.alive() order (rebuilt whenever sim.alive() gives a new array) */
-const HOSTS = { coast: { al: null, list: [] }, fleet: { al: null, list: [] } };
-function hostsOf(sim, side) {
+/* the side's units an aircraft of this type can land on (a drone: catapults; else decks that take the type), in
+   sim.alive() order: rebuilt whenever sim.alive() gives a new array */
+const HOSTS = { coast: { al: null, by: {} }, fleet: { al: null, by: {} } };
+function hostsOf(sim, side, type) {
   const al = sim.alive(side), H = HOSTS[side];
-  if (H.al !== al) {
-    H.al = al; H.list.length = 0;
-    for (let i = 0; i < al.length; i++) { const v = al[i]; if (v.def.air || v.type === 'catapult') H.list.push(v); }
+  if (H.al !== al) { H.al = al; H.by = {}; }
+  let L = H.by[type];
+  if (!L) {
+    L = H.by[type] = [];
+    for (let i = 0; i < al.length; i++) {
+      const v = al[i];
+      if (type === 'drone' ? v.type === 'catapult' : v.def.air && v.def.air.types.includes(type)) L.push(v);
+    }
   }
-  return H.list;
+  return L;
 }
 
 /* aircraft on or landing on each deck of a side, by host id (deckFull for every deck in one pass) */

@@ -7,6 +7,7 @@
                                 [--workers k] [--set a.b:v;...] [--rows] [--json out.json]
          the AI-vs-AI batches and table of game/balance.html (same match code: src/balance.js)
      node tools/sim.mjs bench [--units 200] [--secs 60] [--warm 90] [--reps 3] [--map stub|<id>] [--seed 77] [--perftest]
+                              [--noprof] [--fn 25]
          a 200-unit battle with 300+ projectiles in flight: ms per sim-second, per-stage and per-file breakdown
          (--perftest: the field of the tests.js perf test instead, units on hold)
      node tools/sim.mjs hash [--maps stub,fjord] [--seeds 1,2,3] [--ticks 6000] [--bench]
@@ -324,16 +325,25 @@ async function fileProfile(BO, warm, secs) {
   ss.disconnect();
   const dt = new Map();
   for (let i = 0; i < P.samples.length; i++) dt.set(P.samples[i], (dt.get(P.samples[i]) || 0) + (P.timeDeltas[i] || 0));
-  const F = new Map(); let tot = 0;
+  const F = new Map(), FN = new Map(), LN = new Map(); let tot = 0;
   for (const n of P.nodes) {
     const t = dt.get(n.id) || 0; if (!t) continue;
     const u = n.callFrame.url, i = u.indexOf('/game/src/');
     const k = i >= 0 ? u.slice(i + 10) : n.callFrame.functionName === '(garbage collector)' ? '(gc)' : '(other)';
     if (n.callFrame.functionName === '(idle)' || n.callFrame.functionName === '(program)') continue;
+    if (i < 0 && /inspector|sim\.mjs/.test(u)) continue;                  // the profiler session and this harness
     F.set(k, (F.get(k) || 0) + t); tot += t;
+    if (opt('lines') && n.callFrame.functionName === opt('lines')) for (const pt of n.positionTicks || []) LN.set(pt.line, (LN.get(pt.line) || 0) + pt.ticks);
+    const f = `${n.callFrame.functionName || '(anon)'} ${k}${i >= 0 ? ':' + (n.callFrame.lineNumber + 1) : ''}`;
+    FN.set(f, (FN.get(f) || 0) + t);
   }
   console.log(`\nper file (CPU profile self time, ${fmt(secs, 0)} s, ${fmt(ms / secs, 2)} ms/s while sampled):`);
   for (const [k, t] of [...F].sort((a, b) => b[1] - a[1])) if (t / tot >= .003) console.log(`  ${k.padEnd(20)} ${fmt(ms / secs * t / tot, 3).padStart(8)} ms/s  ${fmt(100 * t / tot, 1).padStart(5)} %`);
+  if (opt('lines')) { const T = [...LN.values()].reduce((a, b) => a + b, 0); console.log(`\nticks by line in ${opt('lines')}():`); for (const [l, c] of [...LN].sort((a, b) => b[1] - a[1]).slice(0, 12)) console.log(`  line ${l}: ${fmt(100 * c / T, 1)} %`); }
+  if (opt('fn')) {
+    console.log(`\nper function (self time; callees the optimiser inlined count in their caller):`);
+    for (const [k, t] of [...FN].sort((a, b) => b[1] - a[1]).slice(0, +opt('fn') || 25)) console.log(`  ${k.padEnd(40)} ${fmt(ms / secs * t / tot, 3).padStart(8)} ms/s  ${fmt(100 * t / tot, 1).padStart(5)} %`);
+  }
 }
 
 /* ---------------------------------------------------------------- hash (determinism proof) */
