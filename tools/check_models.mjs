@@ -34,9 +34,11 @@ const { X } = window.M3, GEO = window.GEO;
 const REAL = {
   cg: { size: [172.8, 16.8, null], tol: .02, note: 'CG-47: 172.8 m overall, 16.8 m beam' },
   lcs: { size: [127.4, 31.6, null], tol: .02, note: 'LCS-2: 127.4 m overall, 31.6 m beam' },
-  s400: { size: [null, 3.2, 4.0], tol: .06, note: '5P85SM2-01 + BAZ-64022: 3.2 m wide, ~4 m high travelling' },
-  s400r: { size: [null, 3.2, null], tol: .06, note: '92N6E on MZKT-7930: 3.2 m wide' },
-  bereg: { size: [null, 3.1, null], tol: .06, note: 'A-222 on MAZ-543M: 3.1 m wide' },
+  s400: { size: [null, 3.2, null], tol: .06, note: '5P85SM2-01 semi-trailer: 3.2 m wide travelling' },
+  s400r: { size: [13.8, null, null], tol: .03, note: '92N6E on the MZKT-7930: 13.8 m long like the K340P' },
+  bereg: { size: [11.7, 3.1, null], tol: .04, note: 'A-222 on the MAZ-543M: 11.7 m long, 3.1 m wide' },
+  s400_msl: { size: [7.5, 1.13, 1.13], tol: .04, note: '48N6E3: 7.5 m, Ø 0.519 m, fin span 1.13 m' },
+  rim116: { size: [2.79, .43, .43], tol: .06, note: 'RIM-116: 2.79 m, Ø 127 mm, span 0.43 m' },
 };
 const SIZE_TOL = .06;          // MODEL_INFO.size vs the sampled box (fraction of the size, or 0.15 m on small sizes)
 const BUDGET_SLACK = 1.0;      // a model may use up to this factor of the heaviest reference at the same level
