@@ -886,7 +886,7 @@ export const LHD_ANATOMY = {
     // what the X-ray finds: three LCACs in the well, MH-60Rs in the hangar, ACVs on the vehicle decks
     xray: [
       { id: 'LC', label: 'LCAC ×3 · in the well deck', model: 'lcac', st: { cushion: 0 }, parent: 'well', inst: () => LHD.SLOTS.map(p => T3(p)) },
-      { id: 'HH', label: 'MH-60R ×4 · in the hangar', model: 'helo', st: { droop: 1 }, parent: 'hangar', inst: () => LHD.HELO_IN.map(([x, z]) => T3([x, H.HGR, z])) },
+      { id: 'HH', label: 'MH-60R ×4 · in the hangar', model: 'helo', st: { droop: 1, fold: 1 }, parent: 'hangar', inst: () => LHD.HELO_IN.map(([x, z]) => T3([x, H.HGR, z])) },
       { id: 'AV', label: 'ACV ×14 · on the vehicle decks', model: 'acv', st: {}, parent: 'vehicle', inst: () => LHD.ACV_IN.map(p => T3(p)) },
     ],
   },

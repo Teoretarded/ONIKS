@@ -74,7 +74,7 @@ export function createRender(game, DM) {
     const A = cv.def.well && DM && DM.LHD;
     if (A && A.SPOTS && A.SPOTS.length) { const q = A.SPOTS[s % A.SPOTS.length]; lx = q[0]; lz = q[1]; yaw = q[2] || 0; dy = A.DECK_Y + .1; }
     const c = Math.cos(cp.hdg), sn = Math.sin(cp.hdg);
-    out.pos[0] = cp.pos[0] + c * lx + sn * lz; out.pos[2] = cp.pos[2] - sn * lx + c * lz; out.pos[1] = cp.pos[1] + dy + (u.type === 'aew' ? 1.9 : 0);   // the E-2D stands on its gear
+    out.pos[0] = cp.pos[0] + c * lx + sn * lz; out.pos[2] = cp.pos[2] - sn * lx + c * lz; out.pos[1] = cp.pos[1] + dy + (u.type === 'aew' ? 2.0 : u.type === 'fighter' ? 1.41 : 0);   // the E-2D stands on its gear
     out.hdg = cp.hdg + yaw; out.pitch = cp.pitch; out.roll = cp.roll;
     return out;
   }
