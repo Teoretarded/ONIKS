@@ -65,8 +65,8 @@ const norm = a => { const l = len(a) || 1; return [a[0] / l, a[1] / l, a[2] / l]
 const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 const isPos = p => p && p.length >= 3 && isFinite(p[0]) && isFinite(p[1]) && isFinite(p[2]);
 
-export function createAudio(game) {
-  const core = new Core();
+export function createAudio(game, opts) {
+  const core = new Core({ offline: !!(opts && opts.ac) });     // opts.ac: an OfflineAudioContext to render into
   const L = { eye: [0, 0, 0], f: [0, 0, 1], r: [1, 0, 0], vel: [0, 0, 0], prev: null, h: 0, ok: false };
   const pend = [];                                // sound fronts in flight
   const lastFire = new Map();                     // name -> real time (gap merge)
@@ -700,6 +700,7 @@ export function createAudio(game) {
 
   /* ---------------- the system ---------------- */
   core.onUnlock.push(() => { pools = makePools(); amb = makeAmb(); });
+  if (opts && opts.ac) core.unlock(opts.ac);
 
   const sys = {
     name: 'audio', priority: 0, core,

@@ -114,12 +114,36 @@ export class Voice extends Node_ {
     const k = this.k, t = this.t + (o.at || 0) / k, dur = o.dur / k, f = (o.f || 1000) * k;
     const s = this.src(o.buf || 'white', (o.rate || 1) * k), fl = this.filter(o.ft || 'lowpass', f, o.q);
     if (o.f1) { fl.frequency.setValueAtTime(clamp(f, 10, 20000), t); fl.frequency.exponentialRampToValueAtTime(clamp(o.f1 * k, 10, 20000), t + dur); }
+    if (o.rate1) { s.playbackRate.setValueAtTime((o.rate || 1) * k, t); s.playbackRate.exponentialRampToValueAtTime(o.rate1 * k, t + dur); }   // Doppler: pulling away
     s.connect(fl); let last = fl;
     if (o.ft2) { const f2 = this.filter(o.ft2, o.f2 * k, o.q2); fl.connect(f2); last = f2; }
     const env = this.gain(0);
     envelope(env.gain, t, o.g === undefined ? .05 : o.g, (o.a === undefined ? .01 : o.a) / k, (o.hold || 0) / k, dur);
     last.connect(env); env.connect(o.to || this.out);
     s.start(t, this.core.rand() * (s.buffer.duration - .01)); s.stop(t + dur + .03); this.until(t + dur + .03);
+    return env;
+  }
+
+  /* a baked buffer played once from its start (a blast wave, an N-wave crack), or a looped one gated for `dur`
+     (a gun's round train): { buf, at, rate, rate1, rdur (s, the rate ramp), g, ft, f, f1, q, dur, a, rel, loop, off, to }.
+     rate < 1 is a bigger, lower, longer blast. */
+  shot(o) {
+    const k = this.k, t = this.t + (o.at || 0) / k, r0 = (o.rate || 1) * k;
+    const s = this.src(o.buf, r0, !!o.loop), bl = s.buffer.duration;
+    const len = o.dur !== undefined ? o.dur / k : bl / r0, rel = (o.rel === undefined ? .04 : o.rel) / k;
+    if (o.rate1) { s.playbackRate.setValueAtTime(r0, t); s.playbackRate.exponentialRampToValueAtTime(o.rate1 * k, t + (o.rdur || len) / k); }
+    let last = s;
+    if (o.ft) {
+      const f = clamp((o.f || 1000) * k, 10, 20000), fl = this.filter(o.ft, f, o.q);
+      if (o.f1) { fl.frequency.setValueAtTime(f, t); fl.frequency.exponentialRampToValueAtTime(clamp(o.f1 * k, 10, 20000), t + len); }
+      s.connect(fl); last = fl;
+    }
+    const env = this.gain(0), g = o.g === undefined ? .5 : o.g;
+    env.gain.setValueAtTime(0, t); env.gain.linearRampToValueAtTime(g, t + (o.a || .0005) / k);
+    if (o.dur !== undefined) { env.gain.setValueAtTime(g, t + len); env.gain.exponentialRampToValueAtTime(1e-4, t + len + rel); }
+    last.connect(env); env.connect(o.to || this.out);
+    const end = t + len + (o.dur !== undefined ? rel : 0) + .03;
+    s.start(t, o.loop ? (o.off || 0) % bl : 0); s.stop(end); this.until(end);
     return env;
   }
 
@@ -210,8 +234,9 @@ export class Slot extends Node_ {
 /* ------------------------------------------------------------------------------------------------------------ */
 
 export class Core {
-  constructor() {
+  constructor(opts) {
     this.ac = null; this.bus = null; this.rev = null; this.bufs = null;
+    this.offline = !!(opts && opts.offline);          // an OfflineAudioContext render (audio.html's WAV renders): no listeners
     this.live = 0; this.made = 0;
     this.voices = [];
     this.cap = { world: 26, sig: 8, ui: 8, fx: 4 };
@@ -223,6 +248,7 @@ export class Core {
     this.now = { out: 0, pre: 0, gr: 0 };             // last frame
     this.onUnlock = [];
     this._waves = new Map();
+    if (this.offline) return;
     const un = () => this.unlock();
     for (const ev of ['pointerdown', 'keydown', 'touchstart']) addEventListener(ev, un, { capture: true });
     onSettings(s => { this.settings = s; this.apply(); });
@@ -233,13 +259,16 @@ export class Core {
     this._timer = setInterval(() => this.sweep(), 250);
   }
 
-  get ready() { return !!this.ac && this.ac.state === 'running'; }
+  get ready() { return !!this.ac && (this.offline || this.ac.state === 'running'); }
 
-  unlock() {
-    if (this.ac) { if (this.ac.state === 'suspended' && !document.hidden) this.ac.resume().catch(() => {}); return; }
-    let ac;
-    try { ac = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' }); }
-    catch (e) { console.warn('audio: no AudioContext', e); return; }
+  /* acIn: an OfflineAudioContext to render into (offline cores only) */
+  unlock(acIn) {
+    if (this.ac) { if (!this.offline && this.ac.state === 'suspended' && !document.hidden) this.ac.resume().catch(() => {}); return; }
+    let ac = acIn;
+    if (!ac) {
+      try { ac = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' }); }
+      catch (e) { console.warn('audio: no AudioContext', e); return; }
+    }
     this.ac = ac;
     this.bufs = makeBuffers(ac, this.rand);
     const G = v => { const g = ac.createGain(); g.gain.value = v; this.live++; return g; };
@@ -258,7 +287,13 @@ export class Core {
     this._buf = new Float32Array(4096);
     this.mix.connect(hp); hp.connect(comp); comp.connect(lim); lim.connect(clip); clip.connect(this.trimG); this.trimG.connect(this.vol);
     // meters: before the chain, and after the limiter / clip but before trim and volume (volume <= 1 only lowers it)
-    this.vol.connect(ac.destination); clip.connect(this.meterOut); this.mix.connect(this.meterPre);
+    if (this.offline) {
+      // rendered: channels 0-1 the output (volume 1), channel 2 the mix before the chain (how hard the limiter works)
+      const m = ac.createChannelMerger(Math.max(3, ac.destination.channelCount)), sp = ac.createChannelSplitter(2);
+      this.vol.connect(sp); sp.connect(m, 0, 0); sp.connect(m, 1, 1); this.mix.connect(m, 0, 2); m.connect(ac.destination);
+      this.live += 2;
+    } else this.vol.connect(ac.destination);
+    clip.connect(this.meterOut); this.mix.connect(this.meterPre);
     this.comp = comp; this.lim = lim; this.live += 6;
     // buses; the world, its reverb and the ambience pass the slow-motion lowpass (wide open unless a replay runs)
     this.bus = { world: G(1.6), amb: G(1), sig: G(1), ui: G(.8), fx: G(1) };
@@ -278,6 +313,7 @@ export class Core {
   apply() {
     if (!this.ac) return;
     const s = this.settings, t = this.ac.currentTime;
+    if (this.offline) { this.vol.gain.value = 1; return; }
     this.vol.gain.setTargetAtTime(this.muted ? 0 : s.volume * s.volume * .95 + 1e-4, t, .03);
     this.bus.ui.gain.setTargetAtTime(s.uiSound ? .8 : 0, t, .02);
   }
@@ -312,7 +348,7 @@ export class Core {
   /* a one-shot voice, or null when the cap is full of more important sounds. cls: 'world' | 'sig' | 'ui'.
      sp: spatial { gain, cut, pan, send } or null (straight to the bus) */
   voice(cls, prio, sp, name) {
-    if (!this.ac || this.ac.state !== 'running') return null;
+    if (!this.ready) return null;
     const now = this.ac.currentTime;
     let n = 0, victim = null, vr = 1e9;
     for (const v of this.voices) {
@@ -413,7 +449,128 @@ function makeBuffers(ac, r) {
       d[i] = amp * ring * Math.cos(ph) + (r() * 2 - 1) * .002;
     }
   }, .12);
-  return { white, pink, brown, crackle };
+  return { white, pink, brown, crackle, ...makeBlastBuffers(ac, r) };
+}
+
+/* The violent layers (launches, guns, blasts), baked once at load (~2 MB):
+   roar     rocket exhaust noise: broadband (pink + a strong low end), turbulent (random amplitude flutter 3-30 Hz),
+            no tone anywhere; loops
+   rcrackle the plume's crackle: steepened shocklets (a sharp positive jump, a fast decay, the undershoot), sparse and
+            bursty, heavy-tailed sizes, so the waveform is skewed like a real rocket's; loops
+   blast    a Friedlander blast wave (instant rise, positive phase 12 ms, the suction phase) and a short turbulent
+            coda; played once, rate < 1 for bigger / lower / longer
+   nwave    an N-wave (a supersonic crack): the jump, the linear fall, the jump back; 4 ms at rate 1
+   ciws     Phalanx round train: 75 rounds/s, each a sharp muzzle crack, the gas, a click of the mechanism;
+            2 s loop, jittered, seamless
+   gun30    2A38M: two barrels, 83 rounds/s together, bigger rounds (a thump under each crack), uneven pairs */
+function makeBlastBuffers(ac, r) {
+  const sr = ac.sampleRate;
+  const norm = (d, peak) => { let m = 0; for (let i = 0; i < d.length; i++) m = Math.max(m, Math.abs(d[i])); const k = peak / (m || 1); for (let i = 0; i < d.length; i++) d[i] *= k; };
+  const loopRms = (sec, fill, rms) => {                 // seamless looping noise, RMS-normalized (the crossfade of makeBuffers)
+    const n = Math.floor(sr * sec), x = Math.floor(sr * .03), tmp = new Float32Array(n + x);
+    fill(tmp);
+    const b = ac.createBuffer(1, n, sr), d = b.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = i < x ? tmp[i] * (i / x) + tmp[n + i] * (1 - i / x) : tmp[i];
+    let s = 0; for (let i = 0; i < n; i++) s += d[i] * d[i];
+    const k = rms / Math.sqrt(s / n);
+    for (let i = 0; i < n; i++) d[i] = clamp(d[i] * k, -1, 1);
+    return b;
+  };
+  const lp1 = hz => 1 - Math.exp(-2 * Math.PI * hz / sr);   // one-pole coefficient
+
+  // roar: pink + low-passed brown (the rumble under a rocket), with turbulent flutter
+  const roar = loopRms(4, d => {
+    let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0, br = 0, dc = 0, m1 = 0, m2 = 0, m3 = 0;
+    const k1 = lp1(3), k2 = lp1(11), k3 = lp1(34), kd = lp1(20);
+    for (let i = 0; i < d.length; i++) {
+      const w = r() * 2 - 1;
+      b0 = .99886 * b0 + w * .0555179; b1 = .99332 * b1 + w * .0750759; b2 = .969 * b2 + w * .153852;
+      b3 = .8665 * b3 + w * .3104856; b4 = .55 * b4 + w * .5329522; b5 = -.7616 * b5 - w * .016898;
+      const pk = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * .5362) * .11; b6 = w * .115926;
+      br += (r() * 2 - 1) * .06; br *= .9985; dc += kd * (br - dc);
+      m1 += k1 * ((r() * 2 - 1) - m1); m2 += k2 * ((r() * 2 - 1) - m2); m3 += k3 * ((r() * 2 - 1) - m3);
+      const am = Math.max(.15, 1 + 14 * m1 + 7 * m2 + 4 * m3);
+      d[i] = (pk + (br - dc) * .9) * am;
+    }
+  }, .3);
+
+  // rcrackle: shocklets, bursty (density follows a slow random envelope), skewed positive
+  const rcrackle = loopRms(3, d => {
+    let s = 0, hp = 0, m = 0, lp = 0;
+    const dec = Math.exp(-1 / (sr * .00045)), km = lp1(4), kh = lp1(250), kl = lp1(9000);
+    for (let i = 0; i < d.length; i++) {
+      m += km * ((r() * 2 - 1) - m);
+      const dens = 1400 * Math.pow(clamp(.25 + 9 * m, 0, 1.6), 2);
+      if (r() < dens / sr) s += .12 + Math.pow(r(), 3.2) * 1.6;
+      s *= dec;
+      lp += kl * (s - lp);                            // the jump is steep but not a single-sample click
+      hp += kh * (lp - hp);
+      d[i] = lp - hp + (r() * 2 - 1) * .004;
+    }
+  }, .22);
+
+  // blast: Friedlander positive phase (T+ = 12 ms, b = 1.6), the negative phase, then a turbulent coda
+  const blast = (() => {
+    const n = Math.floor(sr * 1.4), b = ac.createBuffer(1, n, sr), d = b.getChannelData(0), T = .012;
+    let br = 0, lp = 0;
+    const kl = lp1(900);
+    for (let i = 0; i < n; i++) {
+      const t = i / sr, x = t / T;
+      const rise = t < .00025 ? t / .00025 : 1;
+      let p = rise * (1 - x) * Math.exp(-1.6 * x);
+      if (x > 1) p *= 1 + .3 * (x - 1) * Math.exp(-(x - 1) * .6);   // a longer, shallower suction phase
+      br += (r() * 2 - 1) * .08; br *= .999; lp += kl * ((r() * 2 - 1) - lp);
+      const coda = (br * .7 + lp * 1.3) * .3 * Math.exp(-t / .22) * (t < .01 ? t / .01 : 1);
+      d[i] = p + coda + (t < .004 ? (r() * 2 - 1) * .25 * (1 - t / .004) : 0);
+    }
+    norm(d, .95);
+    return b;
+  })();
+
+  // nwave: a 4 ms N-wave (the edges take 0.1 ms), a little turbulence riding on it
+  const nwave = (() => {
+    const n = Math.floor(sr * .03), b = ac.createBuffer(1, n, sr), d = b.getChannelData(0), T = .004, e = .0001;
+    for (let i = 0; i < n; i++) {
+      const t = i / sr;
+      let p = 0;
+      if (t < e) p = t / e;
+      else if (t < T) p = 1 - 2 * (t - e) / (T - e);
+      else if (t < T + e) p = -1 + (t - T) / e;
+      if (t < T + .006) p += (r() * 2 - 1) * .08 * Math.exp(-t / .002);
+      d[i] = p;
+    }
+    norm(d, .95);
+    return b;
+  })();
+
+  // guns: a round train looped seamlessly (shots wrap round the end), each round a crack, the gas, the body, a click
+  const train = (sec, rps, round) => {
+    const n = Math.floor(sr * sec), b = ac.createBuffer(1, n, sr), d = b.getChannelData(0), N = Math.round(sec * rps), P = n / N;
+    for (let j = 0; j < N; j++) {
+      const t0 = Math.floor(j * P + (r() - .5) * P * .16);
+      round(j, (i, v) => { d[((t0 + i) % n + n) % n] += v; });
+    }
+    let hp = 0; const kh = lp1(30);
+    for (let pass = 0; pass < 2; pass++) for (let i = 0; i < n; i++) { hp += kh * (d[i] - hp); if (pass) d[i] -= hp; }   // no DC
+    norm(d, .9);
+    return b;
+  };
+  const round = (T, gain, noise, thump, click) => (j, add) => {
+    const g = gain(j), L = Math.floor(sr * .03);
+    let br = 0;
+    for (let i = 0; i < L; i++) {
+      const t = i / sr, x = t / T;
+      let p = (t < .00008 ? t / .00008 : 1) * (1 - x) * Math.exp(-1.8 * x);        // the muzzle blast
+      p += (r() * 2 - 1) * noise * Math.exp(-t / .0035);                             // the gas
+      br += (r() * 2 - 1) * .2; br *= .97;
+      p += thump * br * Math.exp(-t / .006);                                          // the report's body
+      if (click && t > .0025 && t < .004) p += click * (r() * 2 - 1);                 // the mechanism
+      add(i, p * g);
+    }
+  };
+  const ciws = train(2, 75, round(.0011, () => .8 + r() * .35, .45, .35, .05));
+  const gun30 = train(2, 83, round(.0019, j => (j & 1 ? .72 : 1) * (.85 + r() * .3), .4, .8, .03));
+  return { roar, rcrackle, blast, nwave, ciws, gun30 };
 }
 
 /* outdoor impulse response: a few sparse early reflections (ground, water) then a diffuse tail that darkens */

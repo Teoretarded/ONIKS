@@ -38,28 +38,28 @@ export const SPEC = {
   scan_strike: spec(W, { lvl: 0.6, prio: 9, delay: false, ref: 800, roll: .5, floor: .45, max: 1e9, rev: .3, gap: .1, minCut: 6000 }),
   scan_far: spec(W, { lvl: 0.6, prio: 6, ref: 100, roll: .7, floor: .04, max: 20000, rev: .3, gap: .1 }),
   // launches
-  cold_launch: spec(W, { prio: 8, ref: 40, roll: .72, floor: .06, max: 25000 }),
-  ignition: spec(W, { prio: 8, ref: 50, roll: .68, floor: .09, max: 40000, rev: .3 }),
-  vls_launch: spec(W, { prio: 8, ref: 50, roll: .68, floor: .08, max: 40000, rev: .3 }),
-  tube_launch: spec(W, { prio: 7, ref: 40, roll: .72, floor: .06, max: 25000 }),
-  rail_launch: spec(W, { lvl: 0.87, prio: 5, ref: 30, roll: .8, floor: .02, max: 8000 }),
-  sep: spec(W, { prio: 5, ref: 40, roll: .78, floor: .03, max: 15000 }),
+  cold_launch: spec(W, { lvl: 0.9, prio: 8, ref: 40, roll: .72, floor: .06, max: 25000 }),
+  ignition: spec(W, { lvl: 0.7, prio: 8, ref: 50, roll: .68, floor: .09, max: 40000, rev: .3 }),
+  vls_launch: spec(W, { lvl: 0.7, prio: 8, ref: 50, roll: .68, floor: .08, max: 40000, rev: .3 }),
+  tube_launch: spec(W, { lvl: 0.7, prio: 7, ref: 40, roll: .72, floor: .06, max: 25000 }),
+  rail_launch: spec(W, { lvl: 0.72, prio: 5, ref: 30, roll: .8, floor: .02, max: 8000 }),
+  sep: spec(W, { lvl: 0.6, prio: 5, ref: 40, roll: .78, floor: .03, max: 15000 }),
   sonic_boom: spec(W, { lvl: 1.5, prio: 8, ref: 40, roll: .7, floor: 0, max: 5000, rev: .3, gap: .08 }),
   // guns
-  gun5: spec(W, { prio: 6, ref: 50, roll: .68, floor: .08, max: 35000, rev: .35 }),
-  gun30: spec(W, { lvl: 1.9, prio: 6, ref: 40, roll: .74, floor: .04, max: 15000, gap: .1 }),
-  ciws: spec(W, { lvl: 2.6, prio: 6, ref: 40, roll: .74, floor: .04, max: 15000, gap: .1 }),
+  gun5: spec(W, { lvl: 0.85, prio: 6, ref: 50, roll: .68, floor: .08, max: 35000, rev: .35 }),
+  gun30: spec(W, { lvl: 1.0, prio: 6, ref: 40, roll: .74, floor: .04, max: 15000, gap: .1 }),
+  ciws: spec(W, { lvl: 2.2, prio: 6, ref: 40, roll: .74, floor: .04, max: 15000, gap: .1 }),
   // intercepts, hits, splashes, kills
-  intercept: spec(W, { prio: 8, ref: 60, roll: .68, floor: .1, max: 50000, rev: .35, gap: .05 }),
-  intercept_small: spec(W, { lvl: 1.6, prio: 6, ref: 40, roll: .74, floor: .05, max: 20000, rev: .3, gap: .05 }),
+  intercept: spec(W, { lvl: 0.8, prio: 8, ref: 60, roll: .68, floor: .1, max: 50000, rev: .35, gap: .05 }),
+  intercept_small: spec(W, { lvl: 0.9, prio: 6, ref: 40, roll: .74, floor: .05, max: 20000, rev: .3, gap: .05 }),
   explosion: spec(W, { lvl: 1.1, prio: 9, ref: 60, roll: .68, floor: .12, max: 60000, rev: .35, gap: .04 }),
-  secondary: spec(W, { lvl: 1.25, prio: 9, ref: 60, roll: .68, floor: .12, max: 60000, rev: .35, gap: .2 }),
+  secondary: spec(W, { lvl: 1.15, prio: 9, ref: 60, roll: .68, floor: .12, max: 60000, rev: .35, gap: .2 }),
   cookoff: spec(W, { lvl: 0.9, prio: 7, ref: 50, roll: .72, floor: .06, max: 25000, rev: .3, gap: .2 }),
-  airburst: spec(W, { prio: 7, ref: 60, roll: .7, floor: .08, max: 40000, rev: .35, gap: .05 }),
+  airburst: spec(W, { lvl: 0.85, prio: 7, ref: 60, roll: .7, floor: .08, max: 40000, rev: .35, gap: .05 }),
   hit_small: spec(W, { prio: 4, ref: 30, roll: .8, floor: .03, max: 8000, gap: .08 }),
   splash: spec(W, { prio: 4, ref: 40, roll: .78, floor: .04, max: 15000, gap: .06 }),
   crash: spec(W, { prio: 6, ref: 50, roll: .74, floor: .06, max: 25000, gap: .1 }),
-  box_launch: spec(W, { prio: 7, ref: 40, roll: .72, floor: .06, max: 25000, gap: .05 }),
+  box_launch: spec(W, { lvl: 0.75, prio: 7, ref: 40, roll: .72, floor: .06, max: 25000, gap: .05 }),
   broach: spec(W, { prio: 7, ref: 40, roll: .74, floor: .04, max: 20000, rev: .3, gap: .08 }),
   // sonar, torpedoes, boats (under water: heard near the camera only)
   sonar_ping: spec(W, { lvl: 0.45, prio: 4, delay: false, ref: 300, roll: .6, max: 15000, rev: .5, gap: .4, minCut: 3500 }),
@@ -160,65 +160,61 @@ export const SHOTS = {
     v.noise({ buf: 'white', at: .16, dur: 1.4, ft: 'bandpass', f: 1300, f1: 4400, q: 1.3, g: .05, a: 1.0 });
   },
 
-  /* ---------- launches ---------- */
-  cold_launch(v, P) {                   // TLC gas-generator ejection: cap pop, gas slam, thump, venting hiss
+  /* ---------- launches ----------
+     A rocket is not a tone: broadband roar (the baked 'roar' buffer, turbulent), the plume's crackle ('rcrackle',
+     skewed shocklets), a blast wave ('blast', Friedlander) and an N-wave crack ('nwave') at the moment of ignition.
+     The tracked missile voice (LOOPS.missile) carries the roar as it climbs away; these one-shots are the blast at
+     the launcher and the first seconds of roar washing back off the ground / deck. */
+  cold_launch(v, P) {                   // TLC gas-generator ejection: cap pop, a dull gas slam (no flame yet), the vent hiss
     const n = P.near;
     if (n > .02) v.noise({ buf: 'white', dur: .05, ft: 'bandpass', f: 2400, q: .8, g: .16 * n, a: .001 });
-    v.tone({ f0: 130, f1: 46, dur: .55, g: .22, a: .004 });
-    v.noise({ buf: 'white', dur: .75, ft: 'lowpass', f: 1000, f1: 380, q: .8, g: .3, a: .005 });
-    v.noise({ buf: 'brown', dur: .9, ft: 'lowpass', f: 260, q: .8, g: .3, a: .006 });
-    v.noise({ buf: 'white', at: .05, dur: 1.8, ft: 'highpass', f: 2800, q: .5, g: .06 * (.3 + .7 * n), a: .03 });
+    boom(v, { rate: .9, ft: 'lowpass', f: 900, g: .75 });
+    v.noise({ buf: 'white', dur: .55, ft: 'lowpass', f: 1600, f1: 400, q: .7, g: .22, a: .003 });
+    v.noise({ buf: 'brown', dur: .8, ft: 'lowpass', f: 220, q: .8, g: .35, a: .005 });
+    v.noise({ buf: 'white', at: .05, dur: 1.6, ft: 'highpass', f: 2800, q: .5, g: .06 * (.3 + .7 * n), a: .03 });
   },
-  ignition(v, P) {                      // the booster lights: a hard bang (the roar itself is the tracked missile voice)
+  ignition(v, P) {                      // the booster lights: the crack, the blast, then the roar tearing loose
+    rocketBlast(v, P, { at: 0, blast: .42, roar: 2.6, hold: .45, g: 1 });
+  },
+  vls_launch(v, P) {                    // Mk 41 hot launch: the hatch, then the motor lights in the cell and the blast
+    const n = P.near;                   // slams up the uptake beside it: a roar that bursts out of the deck
+    boom(v, { rate: 2.4, ft: 'lowpass', f: 1500, g: .16 * (.3 + .7 * n) });
+    v.noise({ buf: 'white', dur: .12, ft: 'lowpass', f: 900, q: .6, g: .05 * (.3 + .7 * n), a: .003 });
+    rocketBlast(v, P, { at: .18, blast: .36, roar: 2.9, hold: .6, g: 1.05 });
+    v.noise({ buf: 'roar', at: .18, dur: .55, ft: 'bandpass', f: 260, q: .9, g: .5, a: .004 });   // the uptake's whoomph
+  },
+  tube_launch(v, P) {                   // 57E6 off the Pantsir: a sharp bang, a short tearing roar leaving fast
+    rocketBlast(v, P, { at: 0, blast: .62, crack: .95, roar: 1.2, hold: .12, g: .8, rate1: .78 });
+    v.noise({ buf: 'white', at: .03, dur: 1, ft: 'bandpass', f: 2200, f1: 700, q: .6, g: .08, a: .015 });
+  },
+  rail_launch(v, P) {                   // off an aircraft rail: the motor lights with a snap, a short roar pulling away (Doppler)
     const n = P.near;
-    if (n > .02) v.noise({ buf: 'white', dur: .16, ft: 'bandpass', f: 2800, q: .5, g: .2 * n, a: .002 });
-    v.tone({ f0: 88, f1: 36, dur: 1, g: .2, a: .006 });
-    v.noise({ buf: 'brown', dur: 1.4, ft: 'lowpass', f: 320, q: .8, g: .45, a: .01 });
-    if (P.far > .05) v.noise({ buf: 'brown', at: .4, dur: 2.6, ft: 'lowpass', f: 150, g: .25 * P.far, a: .3 });
+    if (n > .02) crack(v, { rate: 1.4, g: .3 * n });
+    boom(v, { rate: 1.15, ft: 'lowpass', f: 2500, g: .3 });
+    v.noise({ buf: 'roar', at: .01, dur: 1.7, ft: 'lowpass', f: 9000, f1: 1300, q: .5, g: .5, a: .012, hold: .12, rate: 1.15, rate1: .7 });
+    v.noise({ buf: 'rcrackle', at: .01, dur: 1.2, ft: 'highpass', f: 900, q: .5, g: .35 * (.3 + .7 * n), a: .01, rate: 1.15, rate1: .75 });
+    v.noise({ buf: 'white', dur: 1.1, ft: 'bandpass', f: 2600, f1: 600, q: .7, g: .1, a: .03 });
   },
-  vls_launch(v, P) {                    // Mk 41: hatch, then the blast up the uptake
+  sep(v, P) {                           // booster separation: a crack and a short thud (the voice drops to its sustainer)
     const n = P.near;
-    v.tone({ type: sq, f0: 170, f1: 95, dur: .14, g: .03 * (.3 + .7 * n) });
-    v.noise({ buf: 'white', dur: .25, ft: 'lowpass', f: 700, q: .6, g: .05 * (.3 + .7 * n), a: .005 });
-    if (n > .02) v.noise({ buf: 'white', at: .2, dur: .14, ft: 'bandpass', f: 3000, q: .5, g: .16 * n, a: .002 });
-    v.noise({ buf: 'brown', at: .2, dur: 2.6, ft: 'lowpass', f: 280, q: .8, g: .45, a: .03 });
-    v.noise({ buf: 'white', at: .2, dur: 1.8, ft: 'bandpass', f: 1300, q: .5, g: .09, a: .04 });
-    v.tone({ f0: 56, f1: 34, dur: 2.6, g: .14, a: .02, at: .2 });
+    crack(v, { rate: 1, g: .35 * (.3 + .7 * n) });
+    boom(v, { rate: .9, ft: 'lowpass', f: 1800, g: .35 });
+    v.noise({ buf: 'brown', dur: .8, ft: 'lowpass', f: 200, q: .9, g: .2, a: .006 });
   },
-  tube_launch(v, P) {                   // 57E6 off the Pantsir: a sharp bang and a short tearing whoosh
-    const n = P.near;
-    if (n > .02) v.noise({ buf: 'white', dur: .08, ft: 'bandpass', f: 3500, q: .5, g: .22 * n, a: .001 });
-    v.noise({ buf: 'brown', dur: 1, ft: 'lowpass', f: 360, q: .8, g: .4, a: .004 });
-    v.tone({ f0: 95, f1: 40, dur: .6, g: .16, a: .003 });
-    v.noise({ buf: 'white', at: .03, dur: 1.1, ft: 'bandpass', f: 1900, f1: 800, q: .6, g: .08, a: .02 });
-  },
-  rail_launch(v, P) {                   // off an aircraft rail: a whoosh away
-    v.noise({ buf: 'white', dur: 1.2, ft: 'bandpass', f: 1600, f1: 650, q: .6, g: .09, a: .03 });
-    v.tone({ f0: 90, f1: 48, dur: .35, g: .06 });
-    if (P.near > .05) v.noise({ buf: 'crackle', dur: .8, ft: 'highpass', f: 2000, g: .12 * P.near, a: .01 });
-  },
-  sep(v, P) {                           // booster separation: a crack and a short thud
-    if (P.near > .02) v.noise({ buf: 'white', dur: .25, ft: 'bandpass', f: 4200, q: .45, g: .1 * P.near, a: .002 });
-    v.noise({ buf: 'brown', dur: 1.2, ft: 'lowpass', f: 230, q: .9, g: .22, a: .01 });
-    v.tone({ f0: 110, f1: 55, dur: .4, g: .05 });
-  },
-  sonic_boom(v) {                       // a supersonic round passing: the N-wave, a sharp double crack
-    v.noise({ buf: 'white', dur: .07, ft: 'bandpass', f: 1800, q: .4, g: .34, a: .0008 });
-    v.noise({ buf: 'white', at: .022, dur: .09, ft: 'bandpass', f: 1500, q: .4, g: .3, a: .0008 });
-    v.tone({ f0: 66, f1: 34, dur: .35, g: .2, a: .002 });
+  sonic_boom(v) {                       // a supersonic round passing: the N-wave, both edges heard (a sharp double crack)
+    crack(v, { rate: .36, g: .9 });
+    boom(v, { rate: .7, ft: 'lowpass', f: 1200, g: .25 });
     v.noise({ buf: 'brown', dur: .9, ft: 'lowpass', f: 260, g: .2, a: .004 });
   },
 
-  box_launch(v, P) {                    // Kh-35U out of the Bal's container: the cover blows, the booster's blast, a short roar
+  box_launch(v, P) {                    // Kh-35U out of the Bal's container: the cover blows, the booster's blast and roar
     const n = P.near;
     if (n > .02) v.noise({ buf: 'white', dur: .07, ft: 'bandpass', f: 3200, q: .5, g: .2 * n, a: .001 });
-    v.noise({ buf: 'brown', dur: 1.3, ft: 'lowpass', f: 380, q: .8, g: .42, a: .004 });
-    v.tone({ f0: 92, f1: 38, dur: .7, g: .17, a: .003 });
-    v.noise({ buf: 'white', at: .02, dur: 1.6, ft: 'bandpass', f: 1500, f1: 700, q: .6, g: .09, a: .02 });
+    rocketBlast(v, P, { at: .02, blast: .46, roar: 2.2, hold: .35, g: .9, rate1: .86 });
   },
   broach(v, P) {                        // a round out of a boat breaks the surface: a hollow pop, the water tearing, spray falling back
     const n = P.near;
-    v.tone({ f0: 160, f1: 70, dur: .2, g: .12, a: .002 });
+    boom(v, { rate: 1.3, ft: 'lowpass', f: 700, g: .5 });
     if (n > .02) v.noise({ buf: 'white', dur: .06, ft: 'bandpass', f: 1800, q: 1, g: .12 * n, a: .001 });
     v.noise({ buf: 'white', at: .02, dur: 1.1, ft: 'bandpass', f: 1300, f1: 600, q: .5, g: .16, a: .03 });
     v.noise({ buf: 'brown', dur: .9, ft: 'lowpass', f: 300, g: .28, a: .01 });
@@ -299,91 +295,107 @@ export const SHOTS = {
   },
 
   /* ---------- guns ---------- */
-  gun5(v, P) {                          // Mk 45 5"/62: crack, blast, thump, and the report rolling off the water
+  gun5(v, P) {                          // Mk 45 5"/62: the muzzle crack, the blast, the gas, the report rolling off the water
     const n = P.near, f = P.far;
-    if (n > .02) v.noise({ buf: 'white', dur: .09, ft: 'bandpass', f: 3200, q: .45, g: .3 * n, a: .001 });
-    v.noise({ buf: 'brown', dur: 1.2, ft: 'lowpass', f: 440, f1: 110, q: .8, g: .55, a: .003 });
-    v.tone({ f0: 74, f1: 30, dur: .85, g: .24, a: .003 });
+    crack(v, { rate: .55, g: .5 * (.25 + .75 * n) });
+    boom(v, { rate: .3, ft: 'lowpass', f: 3500, g: .95 });
+    v.noise({ buf: 'roar', dur: .7, ft: 'lowpass', f: 2500, f1: 300, q: .5, g: .22, a: .002 });
+    v.noise({ buf: 'brown', dur: 1.4, ft: 'lowpass', f: 160, q: .8, g: .35, a: .004 });
     v.roll({ at: .08, buf: 'pink', f: 300, q: .7, g: .07 + .1 * f, bumps: [[0, 1, 1.4], [.45 + .5 * f, .6, 1.6], [1.1 + f, .35, 1.8]], tail: 1.2 });
   },
-  gun30(v, P) {                         // 2A38M pair: ~83 rounds a second, a tearing burst
-    const d = clamp(P.o.dur || 1, .12, 3), n = P.near;
-    v.burst({ rate: 83, dur: d, f: 1700, q: .75, g: .3, duty: .22, body: .06 * (.3 + .7 * n), bodyF: 83, bodyLp: 520 });
-    if (n > .05) v.burst({ rate: 83, dur: d, f: 5200, q: .6, g: .12 * n, duty: .12 });
+  gun30(v, P) {                         // 2A38M pair: ~83 rounds a second, each a crack with a thump under it: a chattering tear
+    const d = clamp(P.o.dur || 1, .12, 3), n = P.near, r = P.r;
+    v.shot({ buf: 'gun30', loop: true, off: r() * 2, dur: d, rel: .03, g: .62, ft: 'lowpass', f: 6000 + 8000 * n, q: .5 });
+    boom(v, { rate: .8, ft: 'lowpass', f: 1500, g: .3 });                   // the first rounds' push
+    v.noise({ buf: 'roar', dur: d, ft: 'lowpass', f: 700, q: .5, g: .12, a: .02, hold: d * .8 });   // the gas and the din between rounds
     v.noise({ buf: 'brown', at: d, dur: 1.5, ft: 'lowpass', f: 280, q: .7, g: .16, a: .03 });
+    v.roll({ at: .1, buf: 'pink', f: 500, q: .7, g: .05 + .06 * P.far, bumps: [[0, 1, d + .8], [.5, .5, d + 1]], tail: .8 });
   },
-  ciws(v, P) {                          // Phalanx M61A1: 4,500 rounds a minute, the buzz
-    const d = clamp(P.o.dur || 1, .12, 3), n = P.near;
-    v.burst({ rate: 75, dur: d, f: 2300, q: .7, g: .26, duty: .35, body: .07, bodyF: 75, bodyLp: 600 });
-    v.tone({ type: sq, f0: 150, f1: 146, dur: d, g: .014, a: .01, hold: d * .8 });
-    if (n > .1) v.tone({ f0: 1500, f1: 1450, dur: d + .4, g: .006 * n, a: .05, hold: d });
+  ciws(v, P) {                          // Phalanx M61A1: 4,500 rounds a minute, the barrels spinning up: BRRRRT
+    const d = clamp(P.o.dur || 1, .12, 3), n = P.near, r = P.r;
+    v.shot({ buf: 'ciws', loop: true, off: r() * 2, dur: d, rel: .04, rate: .8, rate1: 1, rdur: .12, g: .6, ft: 'lowpass', f: 5000 + 6000 * n, q: .5 });
+    boom(v, { rate: 1.2, ft: 'lowpass', f: 2500, g: .22 });
+    v.noise({ buf: 'roar', dur: d, ft: 'bandpass', f: 900, q: .5, g: .1, a: .02, hold: d * .8 });
+    if (n > .1) v.tone({ f0: 1500, f1: 1450, dur: d + .4, g: .003 * n, a: .05, hold: d });   // the drive's whine, close in only
     v.noise({ buf: 'brown', at: d, dur: 1.3, ft: 'lowpass', f: 300, q: .7, g: .12, a: .03 });
+    v.roll({ at: .1, buf: 'pink', f: 600, q: .7, g: .04 + .06 * P.far, bumps: [[0, 1, d + .8], [.5, .5, d + 1]], tail: .8 });
   },
 
   /* ---------- intercepts, hits, kills ---------- */
-  intercept(v, P) {                     // an interceptor meets its round high up: crack, pop, fragments, roll
-    const n = P.near, f = P.far;
-    if (n > .02) v.noise({ buf: 'white', dur: .22, ft: 'bandpass', f: 4600, q: .5, g: .22 * n, a: .002 });
-    v.noise({ buf: 'white', dur: 1.2, ft: 'lowpass', f: 450, q: .7, g: .3, a: .008 });
-    v.noise({ buf: 'brown', dur: 1.6, ft: 'lowpass', f: 220, q: .8, g: .3, a: .01 });
-    v.tone({ f0: 96, f1: 44, dur: 1, g: .14, a: .004 });
-    if (n > .05) v.noise({ buf: 'crackle', at: .12, dur: 1.6, ft: 'highpass', f: 2200, q: .5, g: .25 * n, a: .15 });
+  intercept(v, P) {                     // an interceptor meets its round high up: crack, blast, the fireball's rush, fragments, roll
+    const n = P.near, f = P.far, r = P.r;
+    crack(v, { rate: .6, g: .55 * (.25 + .75 * n) });
+    boom(v, { rate: .32, ft: 'lowpass', f: 3000, g: .9 });
+    v.noise({ buf: 'roar', dur: 1.4, ft: 'lowpass', f: 1500, f1: 250, q: .5, g: .32, a: .005 });
+    v.noise({ buf: 'brown', dur: 2, ft: 'lowpass', f: 160, q: .8, g: .35, a: .01 });
+    if (n > .05) {
+      v.noise({ buf: 'crackle', at: .12, dur: 1.6, ft: 'highpass', f: 2200, q: .5, g: .25 * n, a: .15 });
+      debris(v, r, 5, .15, 1.2, .07 * n);
+    }
     if (f > .05) v.roll({ at: .3, f: 150, g: .22 * f, bumps: [[0, 1, 1.6], [.7, .5, 2]], tail: 1.4 });
   },
-  intercept_small(v, P) {               // a gun kill: a smaller, sharper pop
+  intercept_small(v, P) {               // a gun kill: a smaller, sharper bang
     const n = P.near;
-    if (n > .02) v.noise({ buf: 'white', dur: .12, ft: 'bandpass', f: 4000, q: .5, g: .14 * n, a: .001 });
-    v.noise({ buf: 'white', dur: .8, ft: 'lowpass', f: 520, q: .7, g: .18, a: .005 });
-    v.tone({ f0: 120, f1: 60, dur: .5, g: .08 });
+    crack(v, { rate: 1, g: .4 * (.25 + .75 * n) });
+    boom(v, { rate: .7, ft: 'lowpass', f: 3000, g: .55 });
+    v.noise({ buf: 'roar', dur: .7, ft: 'lowpass', f: 1800, f1: 300, q: .5, g: .15, a: .004 });
     if (n > .05) v.noise({ buf: 'crackle', at: .08, dur: 1, ft: 'highpass', f: 2500, g: .16 * n, a: .1 });
   },
-  explosion(v, P) {                     // a hit: near = crack + blast + debris; far = the low boom, rolling
+  explosion(v, P) {                     // a hit: near = crack + blast + fireball + debris; far = the low boom, rolling
     const s = clamp(P.o.size === undefined ? .7 : P.o.size, .1, 1.2), n = P.near, f = P.far, L = .55 + .45 * s, uw = !!P.o.under;
-    if (n > .02) v.noise({ buf: 'white', dur: .3 * L, ft: 'bandpass', f: 4200, q: .5, g: .26 * s * n * (uw ? .25 : 1), a: .002 });
+    crack(v, { rate: .45 + .35 * (1 - s), g: .6 * s * (.2 + .8 * n) * (uw ? .2 : 1) });
     if (uw) {                           // under the keel: a deep muffled thud, then the column of water rising and falling back
-      v.tone({ f0: 38, f1: 20, dur: 3, g: .22 * s, a: .02 });
+      boom(v, { rate: .13, ft: 'lowpass', f: 220, g: .9 * s });
       v.noise({ buf: 'white', at: .35, dur: 3.5, ft: 'bandpass', f: 900, f1: 380, q: .5, g: .2 * s, a: .5 });
       v.noise({ buf: 'crackle', at: 1.8, dur: 3.5, ft: 'highpass', f: 1800, g: .3 * s * (.3 + .7 * n), a: .6 });
+    } else {
+      boom(v, { rate: .2 + .22 * (1 - s), ft: 'lowpass', f: 2200 + 2500 * n, g: .95 * (.5 + .5 * s) });
+      v.noise({ buf: 'roar', at: .01, dur: 2.4 * L, ft: 'lowpass', f: 1600, f1: 200, q: .5, g: .32 * s, a: .01 });   // the fireball's rush
     }
-    v.noise({ buf: 'brown', dur: 5 * L, ft: 'lowpass', f: 170 + 260 * n, f1: 70, q: .9, g: .7 * (.45 + .55 * s), a: .012 });
-    v.tone({ f0: 62, f1: 22, dur: 4.2 * L, g: .2 * (.4 + .6 * s), a: .01 });
-    v.noise({ buf: 'pink', at: .15, dur: 4 * L, ft: 'lowpass', f: 700, q: .6, g: .12 * s, a: .5 });
-    if (n > .05) v.noise({ buf: 'crackle', at: .25, dur: 2.8 * L, ft: 'bandpass', f: 2600, q: .6, g: .4 * s * n, a: .3 });
-    if (P.o.metal && n > .1) {           // a hull: the steel rings
+    v.noise({ buf: 'brown', dur: 5 * L, ft: 'lowpass', f: 150 + 200 * n, f1: 60, q: .9, g: .55 * (.45 + .55 * s), a: .012 });
+    v.noise({ buf: 'pink', at: .15, dur: 4 * L, ft: 'lowpass', f: 700, q: .6, g: .1 * s, a: .5 });
+    if (n > .05) {
+      v.noise({ buf: 'crackle', at: .25, dur: 2.8 * L, ft: 'bandpass', f: 2600, q: .6, g: .4 * s * n, a: .3 });
+      debris(v, P.r, 7, .3, 2.6 * L, .06 * s * n);
+    }
+    if (P.o.metal && n > .1) {           // a hull: the steel rings (inharmonic, short) under the blast
       v.tone({ f0: 312, f1: 296, dur: 1.1, g: .025 * n, a: .002 });
       v.tone({ f0: 471, f1: 452, dur: .8, g: .016 * n, a: .002, at: .01 });
       v.tone({ f0: 1133, f1: 1100, dur: .4, g: .008 * n, a: .001, at: .01 });
+      boom(v, { rate: 2.6, at: .02, ft: 'bandpass', f: 1400, q: 2.5, g: .3 * n });   // the plating's clang
     }
     if (f > .05) v.roll({ at: .45, f: 140, g: .3 * f * s, bumps: [[0, 1, 2], [.6 + .8 * f, .55, 2.4], [1.7 + 1.5 * f, .3, 2.8]], tail: 1.8 });
   },
   secondary(v, P) {                     // a ship's magazine or fuel going: a bigger, longer blast with a second one
     SHOTS.explosion(v, { ...P, o: { size: 1.1, metal: true } });
-    v.noise({ buf: 'brown', at: 1.3, dur: 4, ft: 'lowpass', f: 200, q: .8, g: .4, a: .05 });
-    v.tone({ f0: 50, f1: 24, dur: 3.5, g: .14, at: 1.3 });
+    boom(v, { at: 1.3, rate: .24, ft: 'lowpass', f: 1500, g: .6 });
+    v.noise({ buf: 'roar', at: 1.3, dur: 3, ft: 'lowpass', f: 1200, f1: 180, q: .5, g: .3, a: .02 });
+    v.noise({ buf: 'brown', at: 1.3, dur: 4, ft: 'lowpass', f: 200, q: .8, g: .35, a: .05 });
     if (P.near > .05) v.noise({ buf: 'crackle', at: 1.4, dur: 3, ft: 'bandpass', f: 1800, q: .6, g: .3 * P.near, a: .4 });
   },
   cookoff(v, P) {                       // a vehicle's own load going up: a blast and popping rounds
     SHOTS.explosion(v, { ...P, o: { size: .55 } });
     const r = P.r;
-    if (P.near > .05) for (let i = 0; i < 5; i++) v.noise({ buf: 'white', at: .8 + r() * 2.8, dur: .12, ft: 'bandpass', f: 1400 + r() * 1400, q: .7, g: .1 * P.near, a: .001 });
+    if (P.near > .05) for (let i = 0; i < 6; i++) boom(v, { at: .8 + r() * 2.8, rate: 1.6 + r() * 1.5, ft: 'lowpass', f: 3500, g: .2 * P.near });
   },
   airburst(v, P) {                      // an aircraft or drone hit in the air
-    const s = clamp(P.o.size === undefined ? .6 : P.o.size, .1, 1);
-    if (P.near > .02) v.noise({ buf: 'white', dur: .2, ft: 'bandpass', f: 4000, q: .5, g: .2 * s * P.near, a: .002 });
-    v.noise({ buf: 'brown', dur: 2.6 * (.5 + .5 * s), ft: 'lowpass', f: 260, q: .8, g: .5 * s, a: .008 });
-    v.tone({ f0: 80, f1: 34, dur: 1.6 * (.5 + .5 * s), g: .14 * s });
-    if (P.near > .05) v.noise({ buf: 'crackle', at: .2, dur: 2, ft: 'highpass', f: 1800, g: .25 * s * P.near, a: .2 });
+    const s = clamp(P.o.size === undefined ? .6 : P.o.size, .1, 1), n = P.near;
+    crack(v, { rate: .6 + .4 * (1 - s), g: .5 * s * (.25 + .75 * n) });
+    boom(v, { rate: .3 + .35 * (1 - s), ft: 'lowpass', f: 2800, g: .85 * (.4 + .6 * s) });
+    v.noise({ buf: 'roar', dur: 1.8 * (.5 + .5 * s), ft: 'lowpass', f: 1500, f1: 220, q: .5, g: .3 * s, a: .006 });
+    v.noise({ buf: 'brown', dur: 2.6 * (.5 + .5 * s), ft: 'lowpass', f: 200, q: .8, g: .35 * s, a: .008 });
+    if (n > .05) { v.noise({ buf: 'crackle', at: .2, dur: 2, ft: 'highpass', f: 1800, g: .25 * s * n, a: .2 }); debris(v, P.r, 4, .2, 1.8, .05 * s * n); }
     if (P.far > .05) v.roll({ at: .4, f: 140, g: .2 * P.far * s, bumps: [[0, 1, 1.8], [.9, .5, 2.2]], tail: 1.4 });
   },
-  hit_small(v, P) {                     // cannon rounds striking: a few pops and ricochets
+  hit_small(v, P) {                     // cannon rounds striking: a few sharp pops and ricochets
     const r = P.r;
-    for (let i = 0; i < 4; i++) v.noise({ buf: 'white', at: r() * .3, dur: .06, ft: 'bandpass', f: 1500 + r() * 1500, q: .8, g: .14, a: .001 });
-    v.tone({ f0: 140, f1: 70, dur: .15, g: .05 });
+    for (let i = 0; i < 4; i++) boom(v, { at: r() * .3, rate: 2.5 + r() * 2, ft: 'highpass', f: 400, g: .3 });
+    for (let i = 0; i < 3; i++) v.noise({ buf: 'white', at: r() * .3, dur: .06, ft: 'bandpass', f: 1500 + r() * 1500, q: .8, g: .1, a: .001 });
     if (P.near > .05) v.noise({ buf: 'crackle', at: .1, dur: .7, ft: 'highpass', f: 2500, g: .15 * P.near, a: .05 });
   },
   splash(v, P) {                        // into the sea: a whump, the column of spray, the spray falling back
     const s = clamp(P.o.size === undefined ? .6 : P.o.size, .1, 1.2);
-    v.tone({ f0: 76, f1: 38, dur: .5, g: .14 * s, a: .004 });
+    boom(v, { rate: .7, ft: 'lowpass', f: 400, g: .45 * s });
     v.noise({ buf: 'white', dur: 1.5 * (.6 + .4 * s), ft: 'bandpass', f: 950, f1: 420, q: .6, g: .2 * s, a: .015 });
     v.noise({ buf: 'brown', dur: 1, ft: 'lowpass', f: 300, g: .2 * s, a: .01 });
     if (P.near > .05) v.noise({ buf: 'crackle', at: .3, dur: 1.8, ft: 'highpass', f: 2600, g: .2 * s * P.near, a: .25 });
@@ -468,6 +480,30 @@ export const SHOTS = {
 };
 SHOTS.scan_far = SHOTS.scan_strike;
 
+/* the two baked transients, trimmed together (they drive the master limiter): the N-wave crack and the blast wave */
+const crack = (v, o) => v.shot({ ...o, buf: 'nwave', g: (o.g === undefined ? .5 : o.g) * CRACK });
+const boom = (v, o) => v.shot({ ...o, buf: 'blast', g: (o.g === undefined ? .5 : o.g) * BOOM });
+const CRACK = .55, BOOM = .72;
+
+/* a rocket motor lighting (ignition, a hot launch, a box or tube): the N-wave crack (sharp only near), the blast
+   wave, then broadband roar tearing loose with the plume's crackle, the ground rumble under it, easing down as it
+   climbs away (rate1: Doppler as it leaves), and far off a low roll. o: { at, blast (rate), crack (rate), roar (s),
+   hold (s), g, rate1 } */
+function rocketBlast(v, P, o) {
+  const n = P.near, f = P.far, at = o.at || 0, g = o.g || 1, R = o.roar || 2.4, r1 = o.rate1 || .88;
+  crack(v, { at, rate: o.crack || .7, g: .55 * g * (.2 + .8 * n) });
+  boom(v, { at, rate: o.blast || .42, ft: 'lowpass', f: 3500, g: .85 * g });
+  v.noise({ buf: 'roar', at: at + .004, dur: R, ft: 'lowpass', f: 9000, f1: 1800, q: .5, g: .5 * g, a: .02, hold: o.hold || .4, rate: 1, rate1: r1 });
+  v.noise({ buf: 'rcrackle', at: at + .01, dur: R * .8, ft: 'highpass', f: 800, q: .5, g: .42 * g * (.35 + .65 * n), a: .015, hold: (o.hold || .4) * .8, rate: 1, rate1: r1 });
+  v.noise({ buf: 'brown', at, dur: R + .6, ft: 'lowpass', f: 110, q: .7, g: .5 * g, a: .03, hold: (o.hold || .4) * .5 });
+  if (f > .05) v.roll({ at: at + .35, buf: 'brown', f: 150, g: .3 * f * g, bumps: [[0, 1, 2.2], [.8 + f, .5, 2.6]], tail: 1.6 });
+}
+
+/* fragments and debris coming down: small sharp knocks at random times (a, b), gain g */
+function debris(v, r, k, a, b, g) {
+  for (let i = 0; i < k; i++) boom(v, { at: a + r() * (b - a), rate: 2.2 + r() * 3, ft: 'highpass', f: 300 + r() * 900, g: g * (.4 + r() * .6) });
+}
+
 /* ------------------------------------------------------------------------------------------------------------ */
 /* loops: patch(slot, t0) builds into slot.out and returns { set(params, now) } */
 
@@ -475,26 +511,33 @@ const run = (s, t0, off) => { s.start(t0, off || 0); return s; };
 const chain = (...n) => { for (let i = 0; i < n.length - 1; i++) n[i].connect(n[i + 1]); return n[n.length - 1]; };
 
 export const LOOPS = {
-  /* a missile or rocket: booster roar + crackle, sustainer hiss; k = doppler factor; fan = turbofan whine pitch
-     (Kh-35U, Kalibr: smaller, higher engines than the Tomahawk's) */
+  /* a missile or rocket in flight. Booster: broadband roar (the turbulent 'roar' buffer) + the plume's crackle + the
+     low rumble + the air tearing past; after separation the sustainer is thinner (the roar high-passed: a hiss);
+     a ramjet (3M55) keeps a rough roar and more crackle; a turbofan (Tomahawk, Kh-35U, Kalibr) is a jet whine over
+     a soft rush. k = Doppler factor (the noise buffers are played faster / slower, so the whole spectrum shifts);
+     fan = turbofan whine pitch (smaller engines whine higher) */
   missile(S, t0) {
     const r = S.core.rand;
-    const rs = run(S.src('brown'), t0, r() * 3), rl = S.filter('lowpass', 480, .6), rg = S.gain(0);
-    const hs = run(S.src('white'), t0, r() * 2), hb = S.filter('bandpass', 1500, .55), hg = S.gain(0);
-    const cs = run(S.src('crackle'), t0, r() * 2), ch = S.filter('highpass', 1800, .5), cg = S.gain(0);
-    const js = run(S.src('white'), t0, r() * 2), jb = S.filter('bandpass', 2600, 1.2), jg = S.gain(0);
-    const so = S.osc('sine', 44), sg = S.gain(0); so.start(t0);
-    const wo = S.osc('triangle', 2900), wg = S.gain(0); wo.start(t0);                 // turbofan whine (Tomahawk, SLAM-ER)
-    chain(rs, rl, rg, S.out); chain(hs, hb, hg, S.out); chain(cs, ch, cg, S.out); chain(js, jb, jg, S.out); chain(so, sg, S.out); chain(wo, wg, S.out);
+    const rs = run(S.src('roar'), t0, r() * 4), rl = S.filter('lowpass', 8000, .5), rg = S.gain(0);
+    const ts = run(S.src('roar'), t0, r() * 4), th = S.filter('highpass', 900, .6), tg = S.gain(0);
+    const cs = run(S.src('rcrackle'), t0, r() * 3), ch = S.filter('highpass', 700, .5), cg = S.gain(0);
+    const us = run(S.src('brown'), t0, r() * 3), ul = S.filter('lowpass', 110, .7), ug = S.gain(0);
+    const js = run(S.src('white'), t0, r() * 2), jb = S.filter('bandpass', 2600, .9), jg = S.gain(0);
+    const wo = S.osc('triangle', 2900), wg = S.gain(0); wo.start(t0);                 // turbofan whine
+    const w2 = S.osc('sine', 2900 * 1.51), w2g = S.gain(0); w2.start(t0);
+    chain(rs, rl, rg, S.out); chain(ts, th, tg, S.out); chain(cs, ch, cg, S.out); chain(us, ul, ug, S.out); chain(js, jb, jg, S.out);
+    chain(wo, wg, S.out); chain(w2, w2g, S.out);
     return {
       set(p, now) {
-        const k = clamp(p.k || 1, .3, 2.5), b = p.boost || 0, s = p.sus || 0, ram = p.ram ? 1 : 0, fan = p.fan || 1;
-        follow(rg.gain, .5 * b + (.14 + .08 * ram) * s, now, .04); follow(rl.frequency, 480 * k, now, .04);
-        follow(hg.gain, .16 * b + .06 * s, now, .04); follow(hb.frequency, 1500 * k, now, .04);
-        follow(cg.gain, .5 * b, now, .04); follow(cs.playbackRate, k, now, .04);
-        follow(jg.gain, (.22 + .14 * ram) * s + .02 * b, now, .04); follow(jb.frequency, (ram ? 2600 : 3400 * Math.sqrt(fan)) * k, now, .04);
-        follow(sg.gain, .08 * b, now, .04); follow(so.frequency, 44 * k, now, .04);
-        follow(wg.gain, .014 * s * (1 - ram), now, .04); follow(wo.frequency, 2900 * k * fan, now, .04);
+        const k = clamp(p.k || 1, .3, 2.5), b = p.boost || 0, s = p.sus || 0, ram = p.ram ? 1 : 0, fan = p.fan || 1, jet = s * (1 - ram);
+        follow(rs.playbackRate, k, now, .04); follow(ts.playbackRate, k, now, .04); follow(cs.playbackRate, k, now, .04);
+        follow(rg.gain, .5 * b + .22 * ram * s, now, .04); follow(rl.frequency, clamp(8000 * k, 800, 18000), now, .04);
+        follow(tg.gain, .1 * b + (.24 + .1 * ram) * s * (1 - .6 * (1 - ram)), now, .04); follow(th.frequency, 900 * k, now, .04);
+        follow(cg.gain, .55 * b + .22 * ram * s, now, .04);
+        follow(ug.gain, .5 * b + .08 * s, now, .04); follow(ul.frequency, 110 * k, now, .04);
+        follow(jg.gain, .04 * b + (.08 + .06 * ram) * s, now, .04); follow(jb.frequency, (ram ? 2200 : 3000 * Math.sqrt(fan)) * k, now, .04);
+        follow(wg.gain, .012 * jet, now, .04); follow(wo.frequency, 2900 * k * fan, now, .04);
+        follow(w2g.gain, .004 * jet, now, .04); follow(w2.frequency, 2900 * 1.51 * k * fan, now, .04);
       },
     };
   },

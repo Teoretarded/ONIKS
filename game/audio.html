@@ -65,6 +65,8 @@
 
 <script type="module">
 import { createAudio, db, SPEC } from './src/audio/index.js';
+import * as RENDER from './src/audio/render.js';
+window.RENDER = RENDER;      // offline WAV renders + numbers: await RENDER.analyze(await RENDER.renderScene('launch_sm6', 50))
 
 const $ = id => document.getElementById(id);
 const DEG = Math.PI / 180, TAU = Math.PI * 2;

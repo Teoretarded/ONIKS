@@ -106,13 +106,32 @@ Settings (`data/settings.js`, live via `onSettings`): `volume` (master, squared 
   missile was in `d / 343` s ago.
 - **Noise** buffers (white, pink, brown, crackle) are made once, RMS-normalized, loop-seamless, and reused
   with random offsets. Nothing uses `Math.random`.
+- **Violent layers** (baked at load, `core.js makeBlastBuffers`, ~2 MB): `roar` (rocket exhaust: pink + a strong low
+  end, turbulent 3-30 Hz flutter, no tone), `rcrackle` (the plume's crackle: skewed shocklets in bursts), `blast`
+  (a Friedlander blast wave, 12 ms positive phase + suction + turbulent coda; `rate` < 1 = bigger and lower), `nwave`
+  (a 4 ms N-wave crack), `ciws` / `gun30` (seamless 2 s round trains: 75 rounds/s single crack + gas + mechanism;
+  83 rounds/s uneven pairs with a thump under each). `Voice.shot()` plays them once or gates a looped train;
+  `noise({ rate, rate1 })` sweeps playback rate (Doppler as a launch pulls away). No sine sweeps in combat sounds:
+  launches are crack + blast + broadband roar + crackle + ground rumble (`rocketBlast` in patches.js); a hot VLS adds
+  the uptake's whoomph, a cold launch is a dull gas slam and the ignition 0.35 s later, a rail launch a snap and a roar
+  pulling away; separation is a crack and the tracked voice drops to its sustainer (the roar high-passed to a hiss),
+  a ramjet stays rough, a turbofan whines over a soft rush.
+- **Offline renders** (`render.js`, `window.RENDER` in audio.html): `renderScene(name, d)` runs the real system in an
+  OfflineAudioContext against a small fake world (tracked voices, sound travel and all; channel 3 is the mix before
+  the master chain), `analyze()` gives peak / pre-chain peak / RMS envelope / octave bands / spectral flatness / tonal
+  peak / skew, `wav()` a WAV. Measured 2026-09-25 (camera 40 m up, source 50 m out; pre-chain peak, loudest 100 ms
+  RMS): SM-6 VLS -3.9 / -12.7 dB, 3M55 -4 / -12.8, AIM-120 rail -10 / -17.8, 57E6 -6.9 / -15, sep -18 / -29, 5" -6.6 /
+  -16.9, 30 mm -10.6 / -21, Phalanx ~-4 / -19, SM-6 intercept -6.9 / -17.6, 3M55 on a DDG -3.5 / -14.4; octave bands of a
+  launch fall ~2 dB/octave from 63 Hz to 8 kHz (flatness 0.2, no tonal peak over 11 dB); at 10 km only the < 500 Hz
+  rumble is left. Salvo scene (12 launches, intercepts, hits, cannon, a ship kill in 10 s): pre-chain peak -6.4 dBFS,
+  12 voices, 515 nodes max.
 
 ## Event -> sound
 
 | Sim event | Sound (world sounds are positional and delayed by distance) |
 |---|---|
-| `launch` kind `oniks` | `cold_launch` (cap pop, gas slam, thump, venting hiss); `ignition` 0.35 s later, 8 m up; tracked booster roar + crackle, then the ramjet |
-| `launch` `sm6` `tlam` `pdms` | `vls_launch` (hatch, blast up the uptake); tracked booster, then sustainer / turbofan |
+| `launch` kind `oniks` | `cold_launch` (cap pop, dull gas slam, venting hiss); `ignition` 0.35 s later, 8 m up (crack, blast, roar tearing loose); tracked booster roar + crackle, then the ramjet |
+| `launch` `sm6` `tlam` `pdms` | `vls_launch` (hatch, then the motor lights in the cell: crack, blast, the uptake's whoomph, roar); tracked booster, then sustainer hiss / turbofan whine |
 | `launch` `sam` (57E6) | `tube_launch` (bang, tearing whoosh); tracked booster (coasting dart after) |
 | `launch` `aam` `slam` `hellfire` | `rail_launch` (whoosh away); tracked motor |
 | `launch` `uran` (Bal) | `box_launch` (cover, booster blast); tracked booster 2 s, then a small turbofan (a higher whine than the Tomahawk's, no ramjet) |
@@ -121,7 +140,7 @@ Settings (`data/settings.js`, live via `onSettings`): `volume` (master, squared 
 | `launch` `mk54` from a DDG / a helicopter | `torpedo_tube` (Mk 32: pneumatic crack, hiss, the splash 0.7 s on) / the release, then a small `splash` when it reaches the sea |
 | `launch` `shell` | `gun5` (Mk 45: crack, blast, thump, the report rolling off the water) |
 | `booster_sep` | `sep` (crack, thud); the tracked voice switches to its sustainer |
-| `gunfire` `gun30` / `ciws` | `gun30` (2A38M: 83 rounds/s tearing burst) / `ciws` (Phalanx: 75 rounds/s buzz, drive whine); burst length = `dur / rate` |
+| `gunfire` `gun30` / `ciws` | `gun30` (2A38M: 83 rounds/s tearing burst) / `ciws` (Phalanx: 75 rounds/s BRRRT, the barrels spinning up, drive whine close in); burst length = `dur / rate` |
 | `intercept` | `intercept` (crack, pop, fragments, far roll); gun kills: `intercept_small` 0.5 s later |
 | `hit` | missile / shell: `explosion` sized by kind (3M55 1, Tomahawk .85, SLAM-ER .75, Hellfire .45, 5" .45), steel ringing on ships; on aircraft `airburst`; cannon rounds `hit_small`; a torpedo (`under`): the explosion muffled under the keel, then the column of water rising and falling back. On the hull the hit replay is watching: `replay_boom` at once |
 | `splash` | into the sea `splash`; in the air (self-destruct) small `airburst`; into land `explosion`; aircraft `crash` / `splash` |
