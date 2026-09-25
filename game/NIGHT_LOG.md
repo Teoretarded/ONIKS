@@ -359,3 +359,12 @@ restore replays the recorded match to the saved tick in 1-2 s ("RESTORING · T+�
 state hash; every test restore landed exactly. A save from an older version of the code is refused cleanly.
 The end screen now shows the match's three best hit-replay moments as film stills beside Victory / Defeat
 ("Fig. 3 · COAST COMMAND POST · 02 COMMAND SHELTER · OUT · T+26:40"); click to open full size.
+
+## 13:05 · More stuff and more detail (your request)
+Started: four new units (Ticonderoga cruiser, Independence-class LCS trimaran, S-400 battery with its 92N6E radar,
+A-222 Bereg 130 mm coastal gun), a detail pass on the older models (F/A-18E wing fold, gear, canopy; MH-60R rotor
+head and cabin; E-2D gear; truck cabs and engines; DDG deck fittings; fuller X-ray interiors), and world detail
+(LiDAR forests and scrub per climate, roads drawn, rocks, power lines, fences, denser towns).
+Hit physics is half-way: collision-based hits are in (24-round gun bursts with dispersion, gravity and drag; missiles
+hit only if their path enters a part box; interceptors only if they pass within their burst radius; damage on the
+part struck; spin-outs); the agent is finishing tests, tuning and balance.
