@@ -18,6 +18,7 @@ export const STAGE = {
   damaged: { id: 7, cap: 16, dens: .6, B: .45, tau: 10, life: 22, spr: .9, ds: 3, v0: 0, kd: 1, rise: .4, hot: .3, col: 1 },  // a hit aircraft trailing smoke
   kh:      { id: 8, cap: 32, dens: .85, B: .72, tau: 15, life: 48, spr: 1.25, ds: .6, v0: 30, kd: 2.6, rise: .4, hot: 1.2, col: 1 },  // Kh-35U booster: a short solid motor, 2 s
   fan:     { id: 9, cap: 2, dens: .3, B: .14, tau: 1.5, life: 4, spr: .28, ds: 7, v0: 0, kd: 1, rise: 0, hot: 0, col: 0 },       // turbofans (Kh-35U, Kalibr cruise): a faint thread
+  thin:    { id: 11, cap: 8, dens: .45, B: .32, tau: 3.5, life: 8, spr: .32, ds: 1.4, v0: 18, kd: 3, rise: .15, hot: .5, col: 1 },     // reduced-smoke motors (AIM-120, Hellfire): a thread that thins fast
   brand:   { id: 10, cap: 7, dens: .5, B: .5, tau: 4, life: 11, spr: .4, ds: 2.2, v0: 0, kd: 1, rise: .35, hot: .5, col: 1 },     // a burning fragment (game/debris.js): a thin thread
 };
 const BY_ID = Object.values(STAGE).sort((a, b) => a.id - b.id);

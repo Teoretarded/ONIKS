@@ -285,14 +285,20 @@ export async function createDebris(game) {
     const tint = tintOf(src.side);
     const out = [];
     const sp0 = Math.hypot(v0[0], v0[1], v0[2]);
-    const kick = (warhead ? 30 : 14) * (.7 + .6 * r.r());
     const fwd = [M0[2], M0[5], M0[8]];
     // the blow's direction (the stream's, the burst's): everything gets a share of its push
     const imp = src.imp || [0, 0, 0];
+    // how this one comes apart, from the hit (roundBreaks: mode): 'snap' (struck near the nose: the nose snaps off and
+    // cartwheels away, the long rear flies on almost straight and noses over, its motor burning), 'tail' (struck at the
+    // tail: the motor section tumbles off burning, the front noses down), 'mid' (a burst close by: blown in two, apart);
+    // a blow across the flight throws the pieces sideways, one head-on strings them out along the path; faster, farther
+    const mode = src.mode || 'mid', cosI = imp[0] * fwd[0] + imp[1] * fwd[1] + imp[2] * fwd[2], cross = 1 - Math.abs(cosI);
+    const vk = clamp(sp0 / 500, .6, 1.4);
+    const kick = (warhead ? 30 : 14) * (.7 + .6 * r.r()) * vk * (mode === 'mid' && warhead ? 1.35 : 1);
     // the break: at the hit, on the nearest joint within half a metre
     let zc = null;
     if (src.cutZ === undefined || src.cutZ === null) {
-      zc = clamp(src.hitZ, zlo + .2 * L, zhi - .2 * L);
+      zc = mode === 'snap' ? zlo + L * (.7 + .1 * r.r()) : mode === 'tail' ? zlo + L * (.2 + .1 * r.r()) : clamp(src.hitZ, zlo + .2 * L, zhi - .2 * L);
       let bj = 1e9; for (const j of plan.joints || []) { const d = Math.abs(j - zc); if (d < .5 && d < bj && j > zlo + .12 * L && j < zhi - .12 * L) { bj = d; zc = j; } }
     }
     const fixed = (plan.fixed || []).filter(on);
@@ -306,7 +312,11 @@ export async function createDebris(game) {
     for (const s of sections) {
       const front = s.gz < 0;
       // the front took the hit (a gun's stream walks onto the nose): it loses more of its way; both keep most of it
-      const k = gun ? (front ? .9 + .06 * r.r() : .96 + .03 * r.r()) : .88 + .1 * r.r();
+      let k = gun ? (front ? .9 + .06 * r.r() : .96 + .03 * r.r()) : .88 + .1 * r.r();
+      // the long piece that was not struck keeps its way; the struck stub loses more
+      const big = (mode === 'snap' && !front) || (mode === 'tail' && front), stub = (mode === 'snap' && front) || (mode === 'tail' && !front);
+      if (big) k = Math.max(k, .96 + .03 * r.r());
+      if (stub) k *= .92;
       const box = boxOf(ent, s.names, st, plan.body, s.z0, s.z1);
       if (!box) continue;
       comOffset(M0, box.c, V3);
@@ -315,10 +325,11 @@ export async function createDebris(game) {
       // kicked apart along the axis and a little across it, and up
       const across = [Math.cos(ang), Math.sin(ang), 0], ac = [M0[0] * across[0] + M0[1] * across[1], M0[3] * across[0] + M0[4] * across[1], M0[6] * across[0] + M0[7] * across[1]];
       const v = [0, 0, 0];
-      for (let i = 0; i < 3; i++) v[i] = v0[i] * k + W3[i] + fwd[i] * side * kick * (.25 + .3 * r.r()) + ac[i] * kick * (.25 + .45 * r.r()) + imp[i] * kick * (.3 + .4 * r.r());
+      const kS = stub ? 1.5 : big ? .5 : 1, kAl = (cosI < -.5 ? 1.6 : 1) * kS, kAc = (cosI < -.5 ? .6 : 1) * kS, kIm = (.5 + 1.3 * cross) * kS;
+      for (let i = 0; i < 3; i++) v[i] = v0[i] * k + W3[i] + fwd[i] * side * kick * (.25 + .3 * r.r()) * kAl + ac[i] * kick * (.25 + .45 * r.r()) * kAc + imp[i] * kick * (.3 + .4 * r.r()) * kIm;
       v[1] += kick * .2 * r.r();
       // the tumble: end over end about an axis across it, some roll
-      const tumble = (gun ? 2.5 : 4) * (.6 + .9 * r.r()) * Math.sqrt(8 / Math.max(2, box.ext[2] * 2)) * r.sign();
+      const tumble = (gun ? 2.5 : 4) * (.6 + .9 * r.r()) * Math.sqrt(8 / Math.max(2, box.ext[2] * 2)) * r.sign() * (stub ? 2 : big ? .35 : mode === 'mid' && warhead ? 1.2 : 1);
       const ta = r.r() * TAU, tx = Math.cos(ta), ty = Math.sin(ta);
       const w = [0, 0, 0];
       for (let i = 0; i < 3; i++) w[i] = w0[i] + (M0[i * 3] * tx + M0[i * 3 + 1] * ty) * tumble + M0[i * 3 + 2] * r.n() * 4;
@@ -328,7 +339,8 @@ export async function createDebris(game) {
       b.o.hot = src.t0 + 1.6;
       // the section with the motor burns
       const motor = plan.motor === (front ? 'front' : 'rear');
-      if (motor || (warhead && r.r() < .5)) b.o.burn = { stage: motor ? STAGE.wreck : STAGE.damaged, until: src.t0 + (motor ? 3.5 + 4 * r.r() : 1.5 + 2 * r.r()), tr: null, z: s.gz < 0 ? s.z0 : s.z1, glow: motor ? 1 : .5 };
+      const hotMotor = motor && mode === 'tail';
+      if (motor || (warhead && r.r() < .5)) b.o.burn = { stage: motor ? STAGE.wreck : STAGE.damaged, until: src.t0 + (motor ? (big ? 5 : 3.5) + 4 * r.r() : 1.5 + 2 * r.r()) * (hotMotor ? 1.3 : 1), tr: null, z: s.gz < 0 ? s.z0 : s.z1, glow: motor ? (hotMotor ? 1.4 : 1) : .5 };
       out.push(b);
     }
     // the loose groups: fins, wings, a strapped-on booster
@@ -353,7 +365,7 @@ export async function createDebris(game) {
     // shards: the part that took the hit, torn up
     // fewer at the high time rates (nobody follows a chip at x32)
     const far = distEye(T0);
-    const nS = Math.round((gun ? 26 : warhead ? 40 : 18) * q * clamp(L / 7, .45, 1.2) * (game.timeRate >= 16 ? .3 : game.timeRate >= 8 ? .6 : 1) * (far > 8000 ? .4 : 1));
+    const nS = Math.round((gun ? 26 : warhead ? 40 : 18) * (mode === 'mid' && warhead ? 1.4 : mode === 'snap' ? .8 : 1) * q * clamp(L / 7, .45, 1.2) * (game.timeRate >= 16 ? .3 : game.timeRate >= 8 ? .6 : 1) * (far > 8000 ? .4 : 1));
     if (far < 25000 && nS > 0 && !lean) {
       const zh = zc !== null ? zc : clamp(src.hitZ, zlo, zhi);
       P3[0] = T0[0] + M0[2] * zh; P3[1] = T0[1] + M0[5] * zh; P3[2] = T0[2] + M0[8] * zh;
@@ -573,8 +585,48 @@ export async function createDebris(game) {
     else if (hp && R.models.has(src.key) && hasPart(R.models.get(src.key), hp)) hitZ = zMid(R.models.get(src.key), hp, src.st);
     else if (cause === 'gun') hitZ = zhi - L * (.22 + .25 * r.r());
     else hitZ = zlo + L * (.3 + .4 * r.r());
-    const out = breakRound({ key: src.key, kind: src.kind, side: src.side, T0: src.T0, M0, v0: src.v0, w0, t0: src.t0, st: src.st, hitZ, cause, seed, cutZ, attached, imp: src.imp });
+    // how it comes apart: from where it was struck and what struck it (seeded per event, so the same hit always
+    // breaks the same way; no two hits alike)
+    const u = (hitZ - zlo) / Math.max(.1, L), finHit = !!(hp && /fin|wing|tail|rudder/i.test(hp));
+    const mode = u > .7 ? 'snap' : u < .25 || finHit ? 'tail' : 'mid';
+    // a fin or the tail shot away from a round still flying: it rolls and corkscrews off its line first, shedding,
+    // then comes apart (0.6-1.4 s later)
+    const sp = Math.hypot(src.v0[0], src.v0[1], src.v0[2]);
+    if (!S && mode === 'tail' && cause !== 'destruct' && sp > 120 && game.timeRate < 8 && r.r() < (finHit ? .85 : .45) && spiral(id, src, M0, seed, cause)) return;
+    const out = breakRound({ key: src.key, kind: src.kind, side: src.side, T0: src.T0, M0, v0: src.v0, w0, t0: src.t0, st: src.st, hitZ, cause, seed, cutZ, attached, imp: src.imp, mode: cutZ !== null && cutZ !== undefined ? 'mid' : mode });
     if (out && out.length) announce({ t: src.t0, pos: src.T0, id, kind: src.kind, key: plan.draw, L, heavy: !!HEAVY[src.kind], side: src.side, w: 9 });
+  }
+  /* a round that lost a fin: a stand-in (ghost) rolls fast about its axis while its flight path corkscrews out in a
+     widening cone, smoke spiralling off the tail, fins shedding; after T it breaks up (roundBreaks from the ghost's
+     own place, frame and spin). false: not possible (no plan / body) */
+  function spiral(id, src, M0, seed, cause) {
+    const r = rng(seed + 71), v = src.v0.slice(), sp = Math.hypot(v[0], v[1], v[2]) || 1;
+    const a = [v[0] / sp, v[1] / sp, v[2] / sp], e1 = [M0[0], M0[3], M0[6]], e2 = [a[1] * e1[2] - a[2] * e1[1], a[2] * e1[0] - a[0] * e1[2], a[0] * e1[1] - a[1] * e1[0]];
+    const gid = 900000 + (++serial), t = src.t0;
+    const g = { id: gid, kind: src.kind, P: game.PROJ[src.kind] || {}, pos: src.T0.slice(), prev: src.T0.slice(), vel: v.slice(), alive: true, st: Object.assign({}, src.st), side: src.side, ctrl: false, t0: t, age: 0,
+      fall: .6, tl: t, fw: a.slice(), up: [M0[1], M0[4], M0[7]], w: [0, 0, 0],
+      sp: { a, e1, e2, v0: sp, cone: .12 + .2 * r.r(), wc: (5 + 5 * r.r()) * r.sign(), roll: (10 + 10 * r.r()) * r.sign(), th: r.r() * TAU, T: .6 + .8 * r.r(), cause, seed } };
+    g.breakAt = t + g.sp.T;
+    ghosts.push(g);
+    seenP.set(gid, { id: gid, kind: src.kind, key: src.key, side: src.side, pos: g.pos.slice(), vel: v.slice(), t, st: g.st, lastSeen: t, from: 0 });
+    const S = startSpin(g, { t, seed, ghost: true });
+    if (!S) { ghosts.pop(); seenP.delete(gid); return false; }
+    S.b.o.burn = { stage: STAGE.wreck, until: g.breakAt + .2, tr: null, glow: 1 };
+    return true;
+  }
+  /* the ghost of a corkscrewing round at t: its velocity round a widening cone about its old line, rolling */
+  function spiralStep(g, t, dt) {
+    const S = g.sp, tau = t - g.t0, c = S.cone * ss(0, S.T * .8, tau), th = S.th + S.wc * tau;
+    const sp = S.v0 * (1 - .25 * tau / S.T), ct = Math.cos(th), st = Math.sin(th), cc = Math.cos(c), sc = Math.sin(c);
+    for (let i = 0; i < 3; i++) g.fw[i] = S.a[i] * cc + (S.e1[i] * ct + S.e2[i] * st) * sc;
+    g.vel[0] = g.fw[0] * sp; g.vel[1] = g.fw[1] * sp - 9.81 * g.fall * tau; g.vel[2] = g.fw[2] * sp;
+    // its own roll about the axis; the up vector turned by it (the frame the debris draws the core in)
+    const ra = S.roll * dt, ux = g.up[0], uy = g.up[1], uz = g.up[2], f = g.fw, d = f[0] * ux + f[1] * uy + f[2] * uz;
+    let px = ux - f[0] * d, py = uy - f[1] * d, pz = uz - f[2] * d; const pl = Math.hypot(px, py, pz) || 1; px /= pl; py /= pl; pz /= pl;
+    const qx = f[1] * pz - f[2] * py, qy = f[2] * px - f[0] * pz, qz = f[0] * py - f[1] * px, cr = Math.cos(ra), sr = Math.sin(ra);
+    g.up[0] = px * cr + qx * sr; g.up[1] = py * cr + qy * sr; g.up[2] = pz * cr + qz * sr;
+    g.w[0] = f[0] * S.roll; g.w[1] = f[1] * S.roll; g.w[2] = f[2] * S.roll;
+    g.age = tau;
   }
   /* the bus and bullet time: a break-up that reads on screen */
   function announce(b) {
@@ -1194,7 +1246,8 @@ export async function createDebris(game) {
       const g = ghosts[i];
       const dt = Math.max(0, t - (g.tl === undefined ? g.t0 : g.tl)); g.tl = t;
       g.prev[0] = g.pos[0]; g.prev[1] = g.pos[1]; g.prev[2] = g.pos[2];
-      g.vel[1] -= 9.81 * g.fall * dt; g.vel[0] *= Math.exp(-.15 * dt); g.vel[2] *= Math.exp(-.15 * dt);
+      if (g.sp) spiralStep(g, t, dt);
+      else { g.vel[1] -= 9.81 * g.fall * dt; g.vel[0] *= Math.exp(-.15 * dt); g.vel[2] *= Math.exp(-.15 * dt); }
       g.pos[0] += g.vel[0] * dt; g.pos[1] += g.vel[1] * dt; g.pos[2] += g.vel[2] * dt;
       const S = spins.get(g.id);
       if (!S || !S.b.on || S.b.gen !== S.gen) { if (S) spins.delete(g.id); ghosts.splice(i, 1); continue; }
@@ -1204,6 +1257,14 @@ export async function createDebris(game) {
         const sh = S.sheds.shift(), w = omegaAt(S, t, S.vel, [0, 0, 0]);
         if (sh.tail) shedTail(S, t, g.pos, S.vel, w); else shedFrom(S, sh.names, t, g.pos, S.vel, w, true);
         frameAt(S, t, S.vel, S.M);
+      }
+      const c = seenP.get(g.id);
+      if (c) { c.pos[0] = g.pos[0]; c.pos[1] = g.pos[1]; c.pos[2] = g.pos[2]; c.vel[0] = g.vel[0]; c.vel[1] = g.vel[1]; c.vel[2] = g.vel[2]; c.t = t; c.lastSeen = t; }
+      if (g.breakAt !== undefined && t >= g.breakAt) {
+        // the corkscrew ends: it comes apart from where and how it turns now
+        ghosts.splice(i, 1);
+        roundBreaks(g.id, { t, proj: g.id, kind: g.kind, vel: g.vel.slice(), at: g.pos.slice(), pos: g.pos.slice(), seed: g.sp.seed + 5, breakup: true }, g.sp.cause);
+        continue;
       }
       const gy = game.ground(g.pos[0], g.pos[2]);
       if (g.pos[1] <= gy) {

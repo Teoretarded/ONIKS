@@ -132,3 +132,131 @@ export class Muzzle {
     }
   }
 }
+
+/* A burst drawn from the sim's own rounds (sim.bursts, sim/weapons.js stepBursts): each representative round where
+   the sim flies it, carried back from its last tick to the drawn time along its velocity, and the real rounds between
+   two of them strung along the stream (B.wt real rounds each: 75 a second from a Phalanx read as a rope of light,
+   ~15 m apart), so the stream bends and walks onto the target exactly as the sim's does, and the rounds that strike
+   are the drawn ones that reach it (they end there, at the struck point). A round that missed flies on after the sim
+   lets it go (gravity and drag): into the sea with a small splash, or, for self-destructing rounds (sd: the 30 mm;
+   C-RAM's HEIT-SD), a small sparkle where its tracer burns out. Short bursts: the sim's (w.burst, w.cd).
+   o: { t0, B (the sim's burst), sim, weapon, seed } */
+const GS = {
+  ciws: { burn: 3, sd: 0, kd: .3 },            // Mk 15 Phalanx, 20 mm: rounds that miss fly on into the sea
+  gun30: { burn: 3.2, sd: 1, kd: .35 },        // 2A38M, 30 mm: fused to burst at the end of the tracer
+};
+const STREAK = .0228;                          // s of flight behind a head (a frame and a half at 60 Hz)
+export class GunStream {
+  constructor(o) {
+    const B = o.B;
+    this.B = B; this.sim = o.sim; this.t0 = o.t0; this.seed = o.seed || 41;
+    this.g = GS[o.weapon] || GS.ciws; this.gun = GUN[o.weapon] || GUN.ciws;
+    this.dur = B.dur + Math.max(B.tmax, this.g.burn) + 1.5;
+    this.L = new Float32Array(B.n).fill(-1);     // a missed round's sea-entry time after its end (-1 not yet found)
+    this.P = new Float64Array(3); this.Q = new Float64Array(3);
+  }
+  get durAll() { return this.dur; }
+  firing(age) { return age >= 0 && age <= this.B.dur; }
+  /* round i at time t -> this.P (world), its velocity -> this.Q; 0 not out / gone, 1 flying, 2 a sparkle (sd) at
+     age this.sa, 3 a splash at age this.sa */
+  at(i, t) {
+    const B = this.B, j = i * 3, st = B.st[i], P = this.P, Q = this.Q, simT = this.sim.t;
+    if (st === 0) return 0;
+    let te = simT, ex = B.x[j], ey = B.x[j + 1], ez = B.x[j + 2], age0 = B.age[i];
+    if (st === 2) {
+      te = B.te[i];
+      const f = B.ef[i];
+      ex = B.p[j] + (B.x[j] - B.p[j]) * f; ey = B.p[j + 1] + (B.x[j + 1] - B.p[j + 1]) * f; ez = B.p[j + 2] + (B.x[j + 2] - B.p[j + 2]) * f;
+      age0 = B.age[i] - (1 - f) * .05;
+    }
+    const vx = B.v[j], vy = B.v[j + 1], vz = B.v[j + 2];
+    Q[0] = vx; Q[1] = vy; Q[2] = vz;
+    const back = te - t;
+    if (back >= 0) {
+      // before its last known point: back along its path (not before it left the muzzle)
+      if (back > age0) return 0;
+      P[0] = ex - vx * back; P[1] = ey - vy * back + 4.9 * back * back; P[2] = ez - vz * back;
+      return 1;
+    }
+    if (st !== 2 || B.hk[i]) return 0;         // struck: it ended there
+    // a miss, carried on: linear drag, gravity
+    const g = this.g, tau = -back, fl = age0 + tau;
+    if (g.sd && fl > g.burn) { const a = fl - g.burn; if (a > .35) return 0; this.sa = a; this.endAt(i, g.burn - age0); return 2; }
+    const k = g.kd, e = (1 - Math.exp(-k * tau)) / k;
+    P[0] = ex + vx * e; P[1] = ey + vy * e - 4.9 * tau * tau; P[2] = ez + vz * e;
+    Q[1] = vy * Math.exp(-k * tau) - 9.81 * tau;
+    if (P[1] <= 0) {
+      if (this.L[i] < 0) { let lo = 0, hi = tau; for (let it = 0; it < 20; it++) { const m = (lo + hi) / 2; if (ey + vy * (1 - Math.exp(-k * m)) / k - 4.9 * m * m > 0) lo = m; else hi = m; } this.L[i] = lo; }
+      const a = tau - this.L[i]; if (a > .9) return 0;
+      this.sa = a; this.endAt(i, this.L[i]); P[1] = 0; return 3;
+    }
+    if (fl > g.burn + 1) return 0;
+    return 1;
+  }
+  /* where round i was tau after its end -> this.P */
+  endAt(i, tau) {
+    const B = this.B, j = i * 3, f = B.ef[i], k = this.g.kd, e = (1 - Math.exp(-k * tau)) / k, P = this.P;
+    P[0] = B.p[j] + (B.x[j] - B.p[j]) * f + B.v[j] * e; P[1] = Math.max(0, B.p[j + 1] + (B.x[j + 1] - B.p[j + 1]) * f + B.v[j + 1] * e - 4.9 * tau * tau); P[2] = B.p[j + 2] + (B.x[j + 2] - B.p[j + 2]) * f + B.v[j + 2] * e;
+  }
+  draw(C, age) {
+    if (age > this.dur || C.n >= C.cap) return;
+    const B = this.B, V = C.V, dot = C.dot, t = this.t0 + age, n = Math.min(B.fired, B.n), q = C.q;
+    const fill = Math.max(0, Math.round(B.wt * Math.min(1, q + .2)) - 1);
+    let px = 0, py = 0, pz = 0, pv = false, pvx = 0, pvy = 0, pvz = 0;
+    for (let i = 0; i < n; i++) {
+      if (C.n >= C.cap) return;
+      const s = this.at(i, t);
+      if (s === 2 || s === 3) { this.pop(C, i, s); pv = false; continue; }
+      if (s !== 1) { pv = false; continue; }
+      const x = this.P[0], y = this.P[1], z = this.P[2], vx = this.Q[0], vy = this.Q[1], vz = this.Q[2];
+      if (y < 0) { pv = false; continue; }
+      const zc = V.depth(x, y, z);
+      if (zc > V.near && V.vis(x, y, z, 30)) {
+        this.head(C, x, y, z, vx, vy, vz, zc, .85 + .15 * hsh(i, 5), 1);
+        // the real rounds between this one and the one before it (the rope), where both are in the air and close
+        if (pv && fill > 0) {
+          const dx = px - x, dy = py - y, dz = pz - z;
+          if (dx * dx + dy * dy + dz * dz < 150 * 150) for (let m = 1; m <= fill; m++) {
+            const f = m / (fill + 1), jj = (i * 7 + m * 3 + this.seed) & GM, sp = .6 + .3 * Math.sqrt(dx * dx + dy * dy + dz * dz) * .01;
+            const hx = x + dx * f + GT[jj] * sp, hy = y + dy * f + GT[(jj + 1) & GM] * sp, hz = z + dz * f + GT[(jj + 2) & GM] * sp;
+            if (hy < 0) continue;
+            const zf = V.depth(hx, hy, hz); if (zf < V.near) continue;
+            this.head(C, hx, hy, hz, vx + (pvx - vx) * f, vy + (pvy - vy) * f, vz + (pvz - vz) * f, zf, .7 + .2 * hsh(i * 5 + m, 9), .6);
+          }
+        }
+      }
+      px = x; py = y; pz = z; pvx = vx; pvy = vy; pvz = vz; pv = true;
+    }
+  }
+  /* one tracer: a white-hot point and a lime streak a frame and a half of flight long behind it */
+  head(C, x, y, z, vx, vy, vz, zc, al, k) {
+    const dot = C.dot, V = C.V;
+    dot(x, y, z, zc < 1500 ? 2 : 1, 250, 255, 226, al);
+    if (zc < 1200) C.glow(x, y, z, 4, LIME[0], LIME[1], LIME[2], .07 * al);
+    const nt = Math.max(2, Math.min(40, Math.round(Math.hypot(vx, vy, vz) * STREAK * V.fl / zc / 1.6 * k)));
+    for (let m = 1; m <= nt; m++) { const d = STREAK * k * m / nt; dot(x - vx * d, y - vy * d, z - vz * d, zc < 1500 ? 2 : 1, LIME[0], LIME[1], LIME[2], al * (1 - .85 * m / (nt + 1))); }
+  }
+  /* a missed round's end: a self-destruct sparkle, or a little splash in the sea */
+  pop(C, i, s) {
+    const P = this.P, a = this.sa, V = C.V, x = P[0], y = P[1], z = P[2];
+    if (!V.vis(x, y, z, 20)) return;
+    const zc = V.depth(x, y, z); if (zc < V.near) return;
+    const sz = zc < 1500 ? 2 : 1;
+    if (s === 2) {
+      // HEIT-SD: a pop of white going lime, a few sparks flung out, gone in a third of a second
+      const f = 1 - a / .35;
+      dot1(C, x, y, z, zc < 800 ? 3 : 2, 255, 252, 236, f * (a < .05 ? 1 : .7));
+      C.glow(x, y, z, Math.min(18, 3 + 2500 / zc), LIME[0], LIME[1], LIME[2], .3 * f);
+      for (let m = 0; m < 7; m++) {
+        const jj = (i * 11 + m * 5 + this.seed) & GM, r = (4 + 10 * hsh(i, m)) * Math.sqrt(a / .35);
+        C.dot(x + GT[jj] * r, y + GT[(jj + 1) & GM] * r - 2 * a * a, z + GT[(jj + 2) & GM] * r, sz, LIME[0], LIME[1], LIME[2], .8 * f);
+      }
+      if (a < .06) C.light(x, y, z, 240, 255, 200, .12, 25);
+      return;
+    }
+    // into the sea: a small white splash
+    const al = .7 * (1 - a / .9), rn = hsh(i, 5);
+    for (let m = 0; m < 3; m++) { const vs = 2.5 + m * 2 + rn * 2, yy = vs * a - 4.9 * a * a; if (yy > 0) C.dot(x + (m - 1) * .3, yy, z, 1, WH[0], WH[1], WH[2], al); }
+  }
+}
+function dot1(C, x, y, z, s, r, g, b, a) { C.dot(x, y, z, s, r, g, b, a); }

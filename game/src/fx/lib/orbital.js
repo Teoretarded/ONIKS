@@ -19,7 +19,7 @@ import { Trail } from './smoke.js';
 import { ColdLaunch, VlsLaunch, HotLaunch, GunBlast, BalLaunch, SubLaunch, TorpLaunch } from './launch.js';
 import { Burst, BoosterSep } from './burst.js';
 import { Splash, Dirt, Blast, Fire, Sinking, TorpedoHit } from './impact.js';
-import { TracerStream, Muzzle } from './guns.js';
+import { TracerStream, GunStream, Muzzle } from './guns.js';
 import { SubWater } from './water.js';
 import { Lightning, flashLead, flashLevel } from './weather.js';
 
@@ -776,6 +776,18 @@ function tracers(e, age) {
     }
   }
 }
+/* the sim-driven stream (GunStream): each round a short hairline along its flight, the missed ones' ends as jets */
+function gunStream(e, age) {
+  if (age > e.dur) return;
+  const t = e.t0 + age, B = e.B, n = Math.min(B.fired, B.n);
+  for (let i = 0; i < n; i++) {
+    const s = e.at(i, t), P = e.P, Q = e.Q;
+    if (s === 3) { if ((i & 3) === 0) jets(P[0], 0, P[2], e.sa, .9, 2.5, .6, i, 2); continue; }
+    if (s !== 1 || P[1] < 0) continue;
+    const d = i % 3 === 0 ? .026 : .013;
+    seg(P[0] - Q[0] * d, P[1] - Q[1] * d, P[2] - Q[2] * d, P[0], P[1], P[2], i % 3 === 0 ? .9 : .55);
+  }
+}
 function muzzle(e, age) {
   if (age < 0 || age > e.dur) return;
   const M = e.mz, D = e.D, g = e.g;
@@ -1042,7 +1054,7 @@ export function orbRain(k, flash, base) {
 const BY = new Map([
   [ColdLaunch, coldLaunch], [VlsLaunch, vlsLaunch], [HotLaunch, hotLaunch], [GunBlast, gunBlast], [BalLaunch, balLaunch],
   [SubLaunch, subLaunch], [TorpLaunch, torpLaunch], [Burst, burst], [BoosterSep, boosterSep], [Splash, splash], [Dirt, dirt],
-  [Blast, blast], [Fire, fire], [Sinking, sinking], [TorpedoHit, torpedoHit], [TracerStream, tracers], [Muzzle, muzzle],
+  [Blast, blast], [Fire, fire], [Sinking, sinking], [TorpedoHit, torpedoHit], [TracerStream, tracers], [GunStream, gunStream], [Muzzle, muzzle],
   [Lightning, lightning],
 ]);
 /* one effect instance at its age (unknown kinds: nothing, never dots) */

@@ -11,6 +11,12 @@ export const PLUME = {
   ramjet:     { L: 5.5, r0: .26, cells: 7, off: 4.5, burn: .7, lr: 35, li: .15, dia: 1 },
   mk72:       { L: 22, r0: .3, cells: 5, off: 3.4, burn: 1, lr: 80, li: .35 },
   sustain:    { L: 9, r0: .17, cells: 4, off: 3.3, burn: .55, lr: 30, li: .12 },
+  // SM-6 after the Mk 72 drops: the Mk 104's own, smaller, cleaner flame at the sustainer nozzle (HD.sm6.SUSTAINER z -1.69)
+  mk104:      { L: 7, r0: .12, cells: 4, off: 1.72, burn: .6, lr: 30, li: .13 },
+  // ESSM (Mk 134): brighter and tighter than a Standard's, less smoke; 48N6 (after its cold launch); AIM-120 (reduced smoke)
+  essm:       { L: 6.5, r0: .13, cells: 4, off: 1.86, burn: .9, lr: 35, li: .18 },
+  s400:       { L: 15, r0: .26, cells: 5, off: 3.8, burn: 1, lr: 70, li: .3 },
+  thin:       { L: 3.2, r0: .08, cells: 3, off: 1.86, burn: .6, lr: 20, li: .1 },
   glide:      { L: 2.5, r0: .1, cells: 2, off: 3.3, burn: .15, lr: 0, li: 0 },
   tlamBoost:  { L: 12, r0: .26, cells: 4, off: 3.2, burn: .9, lr: 60, li: .25 },
   small:      { L: 5, r0: .14, cells: 3, off: 1.7, burn: .7, lr: 30, li: .15 },
@@ -110,7 +116,9 @@ export function drawPlume(C, x, y, z, ax, ay, az, P, ign, seed, fr) {
 export function drawHead(C, x, y, z, burn, k) {
   const V = C.V, zc = V.depth(x, y, z); if (zc < V.near) return;
   if (!V.vis(x, y, z, 4)) return;
-  C.halo(x, y, z, Math.min(56, 4 + 6000 * (.35 + burn) / zc), LIME[0], LIME[1], LIME[2], .26 * k * (.45 + burn));
-  C.halo(x, y, z, Math.min(16, 2 + 1300 / zc), 255, 250, 232, .6 * k);
+  // a marker to find it by, not its size: a few px at play range (a 6.6 m round is a pixel at 10 km), never a disc
+  // several times the round's own length close in
+  C.halo(x, y, z, Math.min(26, 3 + 3000 * (.35 + burn) / zc), LIME[0], LIME[1], LIME[2], .26 * k * (.45 + burn));
+  C.halo(x, y, z, Math.min(10, 1.5 + 900 / zc), 255, 250, 232, .6 * k);
   C.dot(x, y, z, zc < 3500 ? 3 : 2, 255, 253, 242, k);
 }

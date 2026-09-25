@@ -832,6 +832,11 @@ export const UNITS = {
 /* Projectiles and gun rounds (kind -> stats). mode: 'cruise' holds an altitude profile and flies to the
    aim point; 'direct' flies at a moving point; 'ballistic' is a shell arc. reach = how far the target may be from the
    aim point and still be reached (a stale track misses).
+   Flight (sim/weapons.js speedAt; research/info/<round>): v0 m/s out of the launcher, ign s before a cold-launched
+   round's motor lights, boost s of the first motor (to vb m/s, else speed), sepAt s the booster drops (model state
+   booster false), sus [lights, full, out] s of a second stage / air-breather (to speed), cd drag per metre for the
+   coast after burnout (down to vMin), vert s of vertical rise, then the pitch-over eased in over po s at poRate rad/s;
+   drop s an air-launched round falls before its engine lights; wingAt / wingT when its wings unfold.
    Physics (sim/bodies.js, sim/weapons.js; nothing is rolled): body = [length m, diameter m, mass kg] (public sizes),
    the capsule gun rounds and bursts strike and the tumbling flight's area and mass; turn / pitchRate = turn-rate
    limits (rad/s), gMax = lateral-acceleration limit (m/s²); sig0 + sigR x range = the track error the round steers
@@ -840,36 +845,36 @@ export const UNITS = {
    break the round up (fewer: it tumbles); blast = a shell's fragment reach (m) where it bursts on the ground. */
 export const PROJ = {
   oniks: { name: '3M55 Oniks', cls: 'ASCM', model: 'oniks', boosterModel: 'oniks_booster', mode: 'cruise', threat: true, speed: 750, dmg: 80, reach: 4000,
-           rcs: .3, vert: 1.4, v0: 30, boost: 6, sepAt: 7, alt: 40, seaAlt: 15, pitchMax: .55, pitchRate: .35, turn: .25,
+           rcs: .3, vert: 1.4, v0: 30, ign: .38, boost: 6, vb: 640, sepAt: 7, sus: [7.35, 14, 1e9], alt: 40, seaAlt: 15, pitchMax: .55, pitchRate: .35, turn: .25,
            finalDist: 25000, finalAlt: 10, body: [8.9, .7, 3000], sig0: 3, sigR: .0005, tough: 5 },
   tlam: { name: 'RGM-109 Tomahawk', cls: 'LACM', model: 'tomahawk', boosterModel: null, mode: 'cruise', threat: true, speed: 245, dmg: 45, reach: 1500,
-          rcs: .15, vert: 2.0, v0: 25, boost: 12, sepAt: 12, alt: 60, pitchMax: .5, pitchRate: .3, turn: .12,
+          rcs: .15, vert: 3.0, po: 1.0, poRate: .8, v0: 25, boost: 10, sepAt: 10, wingAt: 9.2, wingT: 1, alt: 60, pitchMax: .5, pitchRate: .3, turn: .12,
           finalDist: 4000, finalAlt: 25, body: [5.56, .52, 1300], sig0: 1.5, sigR: .0003, tough: 3 },
   slam: { name: 'AGM-84H SLAM-ER', cls: 'ASM', model: 'slam', mode: 'cruise', threat: true, speed: 240, dmg: 40, reach: 1500,
-          rcs: .15, vert: 0, v0: 0, boost: 3, alt: 90, pitchMax: .35, pitchRate: .25, turn: .12, finalDist: 4000, finalAlt: 25,
+          rcs: .15, vert: 0, v0: 0, drop: 1.0, wingAt: .15, wingT: .5, boost: 3, alt: 90, pitchMax: .35, pitchRate: .25, turn: .12, finalDist: 4000, finalAlt: 25,
           body: [4.37, .34, 675], sig0: 1.5, sigR: .0003, tough: 3 },
   hellfire: { name: 'AGM-114 Hellfire', cls: 'ATGM', model: 'hellfire', mode: 'direct', threat: true, speed: 400, dmg: 25, reach: 400,
               rcs: .03, vert: 0, v0: 0, boost: 2.5, turn: .6, pitchRate: .6, body: [1.63, .178, 45], sig0: .6, sigR: .0002, tough: 1 },
-  sm6: { name: 'RIM-174 SM-6', cls: 'SAM', model: 'sm6', boosterModel: 'mk72', mode: 'direct', speed: 1100, dmg: 15,
-         vert: 2.0, v0: 20, boost: 6, sepAt: 6, turn: .35, pitchRate: .28, gMax: 300, body: [6.55, .34, 1500], burst: 8, sig0: 14, sigR: .0008 },   // balance: sig0 16 -> 14
-  pdms: { name: 'RIM-162 ESSM', cls: 'SAM', model: 'essm', mode: 'direct', speed: 1000, dmg: 12,
-          vert: 1.0, v0: 20, boost: 3, turn: .5, pitchRate: .45, gMax: 400, body: [3.66, .254, 280], burst: 7, sig0: 34, sigR: .0008 },   // balance: sig0 16 -> 34
-  sam: { name: '57E6', cls: 'SAM', model: 'sam57e6', mode: 'direct', speed: 900, dmg: 12,
-         vert: 0, v0: 60, boost: 2.4, sepAt: 2.4, turn: .6, pitchRate: .6, gMax: 350, body: [3.2, .17, 90], burst: 5, sig0: 7, sigR: .0006 },   // balance: sig0 10 -> 7
-  aam: { name: 'AIM-120D', cls: 'AAM', model: 'aim120', mode: 'direct', speed: 1200, dmg: 15,
-         vert: 0, v0: 0, boost: 3, turn: .5, pitchRate: .5, gMax: 400, body: [3.66, .178, 152], burst: 7, sig0: 6, sigR: .0003 },
+  sm6: { name: 'RIM-174 SM-6', cls: 'SAM', model: 'sm6', boosterModel: 'mk72', mode: 'direct', speed: 1190, dmg: 15,
+         vert: 2.3, po: 3, poRate: .22, v0: 40, boost: 6, vb: 960, sepAt: 6, sus: [6.4, 9.5, 18], cd: 8e-6, vMin: 400, turn: .35, pitchRate: .28, gMax: 300, body: [6.55, .34, 1500], burst: 8, sig0: 14, sigR: .0008 },   // balance: sig0 16 -> 14
+  pdms: { name: 'RIM-162 ESSM', cls: 'SAM', model: 'essm', mode: 'direct', speed: 1300, dmg: 12,
+          vert: .6, po: 1, poRate: 1.2, v0: 30, boost: 3.5, cd: 2.5e-5, vMin: 350, turn: .5, pitchRate: .45, gMax: 400, body: [3.66, .254, 280], burst: 7, sig0: 34, sigR: .0008 },   // balance: sig0 16 -> 34
+  sam: { name: '57E6', cls: 'SAM', model: 'sam57e6', mode: 'direct', speed: 1300, dmg: 12,
+         vert: 0, v0: 60, boost: 2.4, sepAt: 2.4, cd: 2.84e-5, vMin: 300, turn: .6, pitchRate: .6, gMax: 350, body: [3.2, .17, 90], burst: 5, sig0: 7, sigR: .0006 },   // balance: sig0 10 -> 7
+  aam: { name: 'AIM-120D', cls: 'AAM', model: 'aim120', mode: 'direct', speed: 1300, dmg: 15,
+         vert: 0, v0: 0, boost: 4, cd: 8e-6, vMin: 400, turn: .5, pitchRate: .5, gMax: 400, body: [3.66, .178, 152], burst: 7, sig0: 6, sigR: .0003 },
   shell: { name: '5"/62 round', cls: 'SHELL', model: 'shell', mode: 'ballistic', speed: 810, dmg: 6, sigma: 40, body: [.66, .127, 32], blast: 10 },
   uran: { name: 'Kh-35U', cls: 'ASCM', model: 'kh35', boosterModel: null, mode: 'cruise', threat: true, speed: 270, dmg: 35, reach: 3000,
           rcs: .1, vert: 0, v0: 35, boost: 2, sepAt: 2, alt: 25, seaAlt: 10, pitchMax: .45, pitchRate: .35, turn: .3,
           finalDist: 12000, finalAlt: 5, body: [4.4, .42, 610], sig0: 2.5, sigR: .0005, tough: 3 },
   kalibr: { name: '3M-54 Kalibr', cls: 'ASCM', model: 'kalibr', boosterModel: null, mode: 'cruise', threat: true, speed: 280, dmg: 55, reach: 4000,
-            rcs: .15, vert: 1.6, v0: 25, boost: 5, sepAt: 5, alt: 30, seaAlt: 15, pitchMax: .5, pitchRate: .35, turn: .2,
+            rcs: .15, vert: 1.6, v0: 25, ign: .15, boost: 5, sepAt: 5, alt: 30, seaAlt: 15, pitchMax: .5, pitchRate: .35, turn: .2,
             finalDist: 20000, finalAlt: 8, body: [8.22, .533, 1780], sig0: 3, sigR: .0005, tough: 4 },
   /* the third wave's rounds (closed shells; data/models_units3.js) */
-  sam48: { name: '48N6E3', cls: 'SAM', model: 's400_msl', mode: 'direct', speed: 1400, dmg: 16,
-           vert: 1.2, v0: 30, boost: 8, turn: .3, pitchRate: .3, gMax: 300, body: [7.5, .52, 1835], burst: 10, sig0: 14, sigR: .0008 },
-  ram: { name: 'RIM-116 RAM', cls: 'SAM', model: 'rim116', mode: 'direct', speed: 700, dmg: 8,
-         vert: 0, v0: 40, boost: 2.5, turn: .7, pitchRate: .7, gMax: 400, body: [2.79, .127, 74], burst: 5, sig0: 8, sigR: .0006 },
+  sam48: { name: '48N6E3', cls: 'SAM', model: 's400_msl', mode: 'direct', speed: 1700, dmg: 16,
+           vert: 1.2, po: .8, poRate: 1.0, v0: 30, ign: .5, boost: 8, cd: 6e-6, vMin: 450, turn: .3, pitchRate: .3, gMax: 300, body: [7.5, .52, 1835], burst: 10, sig0: 14, sigR: .0008 },
+  ram: { name: 'RIM-116 RAM', cls: 'SAM', model: 'rim116', mode: 'direct', speed: 750, dmg: 8,
+         vert: 0, v0: 40, boost: 2, cd: 3e-5, vMin: 250, turn: .7, pitchRate: .7, gMax: 400, body: [2.79, .127, 74], burst: 5, sig0: 8, sigR: .0006 },
   shell130: { name: '130 mm round', cls: 'SHELL', model: 'shell130', mode: 'ballistic', speed: 850, dmg: 8, sigma: 35, body: [.68, .13, 33.4], blast: 11 },
   shell57: { name: '57 mm round', cls: 'SHELL', model: 'shell57', mode: 'ballistic', speed: 1000, dmg: 2.5, sigma: 18, body: [.3, .057, 2.7], blast: 5 },
   /* torpedoes run under water (not drawn; heard by sonar): mode 'run' holds a depth and closes on the target once it

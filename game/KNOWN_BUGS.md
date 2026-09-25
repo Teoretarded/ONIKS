@@ -22,23 +22,44 @@ Screenshots of several of these were shared in the chat. Start the next session 
    under 8 px are clicks, a lost release drops the box; with no unit in the box it selects the rounds in flight
    (C cinematic / B bullet time on them). `game/src/game/select.js`, `game/src/engine/camera.js`.
 
-3. **Scale feels wrong.** On a ~120-180 km map, the ships and missiles don't feel real in size or speed:
-   missiles feel too slow or too big. Audit true dimensions and speeds against the camera FOV, the time rate shown,
-   and any minimum on-screen size or enlargement applied to far units (engine `models.js` LOD / dotSpacing,
-   `game/src/game/render.js`, the Orbital glyphs). Real: DDG 155 m, carrier 333 m, 3M55 8.9 m at ~Mach 2.5,
-   SM-6 6.6 m at ~Mach 3.5.
+3. ~~**Scale feels wrong.**~~ *Audited 2026-09-25.* Models are drawn at true size: no minimum on-screen size or
+   enlargement anywhere in the engine (`models.js` draws every part at its real transform; a model under 0.7 px
+   radius is one 1-px dot, `speck`; dot size is 1-3 px from the sample spacing, never scaled with distance), nor in
+   `render.js`. Checked in stills: a DDG is ~38 px long at 6 km and ~10 px at 20 km (155 m at 40° FOV). What read
+   as "too big" was the FX: the head marker of a round far off (`fx/lib/plume.js drawHead`) was a lime disc up to
+   56 px, several times the round; it is now a 3-26 px marker (a few px at play range). Far units stay findable by
+   that marker, the HUD tags and the Orbital glyphs (2D, not the model). Speeds follow `research/info` (below), and
+   the time rate now shows on screen even with the UI hidden (top right, `render.js`). Still open: the HUD's tags and
+   brackets (not audited here) may add to the feel.
 
-4. **Missile motion is not realistic, SM-6 launches especially.** Use reference footage: the SM-6 leaves the
-   Mk 41 cell vertically, the Mk 72 booster burns ~6 s, the missile pitches over smoothly (long eased rise, gentle
-   arc: see `reference/films/_brief/realism.txt`), the Mk 72 separates and falls away, then the Mk 104 sustainer
-   burns as a separate phase with its own smaller plume. Files: `game/src/sim/weapons.js` (flight phases),
-   `game/src/data/units.js` PROJ `sm6`, `game/src/game/render.js` (projectile model state), `game/src/fx/lib/plume.js`,
-   `game/src/fx/index.js`.
+4. ~~**Missile motion is not realistic, SM-6 launches especially.**~~ *Fixed 2026-09-25.* Every round's speed is
+   now a closed-form thrust curve in its age (`sim/weapons.js speedAt`, PROJ `ign boost vb sepAt sus cd vMin`):
+   hot launch at full thrust (SM-6 out of the cell at 40 m/s, ~12 g rising to ~20 g), the Mk 72 to 960 m/s at 6 s,
+   separation, the Mk 104 lit at 6.4 s to Mach 3.5 (1190 m/s) by 9.5 s, held to 18 s, then a drag coast (v =
+   v1 / (1 + cd v1 t)): 57E6 1300 -> 780 m/s over 18 km as sourced, ESSM Mach 3.8, 48N6 1700, AIM-120 pulls ahead
+   of the jet in 1-2 s. Vertical rounds rise straight for P.vert, then the pitch-over eases in over P.po at P.poRate
+   (SM-6: 2.3 s, a gentle arc over ~6 s to a ~5 km loft; ESSM snaps over after 0.6 s; Tomahawk rises 3 s, tips
+   hard to a dive, booster off and wings out at 10 s, then the near-invisible turbofan; SLAM-ER falls 1 s off the
+   pylon, wings snapping out, before its turbojet lights; RAM leaves its trained Mk 49 box near level; 48N6 and
+   Kalibr are thrown out cold and light 0.5 / 0.15 s up). Flight time to max range is within a few seconds of the
+   old model (balance).
 
-5. **SM-6 modules and flame are wrong after the booster phase.** Once the booster is gone there seems to be no
-   second (sustainer) phase: the model still shows the old configuration and the booster flame stays visible.
-   The model state (`booster: false`) and the plume must switch at booster separation; the dropped Mk 72 should
-   tumble away (the debris / FX systems can do it). Same files as 4, plus `game/src/game/debris.js`.
+5. ~~**SM-6 modules and flame are wrong after the booster phase.**~~ *Fixed 2026-09-25.* The FX phases follow the
+   sim's motor timings (`fx/index.js profile`, `motorOf`): Mk 72 flame and thick column to 6 s, the casing drops
+   (`booster_sep`, tumbling `mk72` model), a beat of nothing, then the Mk 104's own smaller flame at the sustainer
+   nozzle (`PLUME.mk104`, 1.7 m behind the origin: the old sustain plume sat where the booster had been, which is
+   what read as "the booster flame stays") and a thinner trail, then the coast with only the head marker. Checked
+   in stills at 5.5 / 6.25 / 6.7 s.
+
+   Also 2026-09-25 (same pass): **gun tracers** are drawn from the sim's own rounds (`fx/lib/guns.js GunStream`
+   over `sim.bursts`; the sim records per round whether and where it struck, `B.hk / ef / te`), with the real rounds
+   between two representative ones strung in as a rope, so the rounds seen to reach the target are the ones that
+   kill it; the mount walks its fire in from slightly low over the first 0.2 s (`w.walk`); misses fly on into the
+   sea, the 30 mm's burst at tracer burnout (sparkle). **Break-ups vary with the hit** (`game/debris.js`): struck
+   near the nose it snaps (the nose cartwheels off, the long rear flies on and noses over, burning); at the tail the
+   motor section tumbles away burning; a fin / tail hit often first sends the round rolling and corkscrewing off its
+   line for 0.6-1.4 s, shedding, before it comes apart; a burst close by blows it apart; a crossing blow throws the
+   pieces sideways, a head-on one strings them along the path. Seeded per event (deterministic).
 
 6. ~~**Dark circle under selected aircraft.**~~ *Fixed 2026-09-25.* The renderer's subject list (the world-dimming
    pool, `engine/renderer.js` `_subjects`) skips anything whose centre is more than ~1.2 radii above the ground or sea

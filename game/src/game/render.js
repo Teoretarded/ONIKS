@@ -344,5 +344,15 @@ export function createRender(game, DM) {
       if (!ownFxTrails && ptrails.size) drawTrails();
       if (this.ownSweep && !game.getSystem('sensors')) sweep();
     },
+    /* time compression is always on screen: with the UI hidden (F10, a clean take) the rate still shows, small, in the
+       top right corner (the HUD and the time system show it otherwise) */
+    always2d: true,
+    draw2d(ov) {
+      if (!game.ui.hidden || game.paused) return;
+      const r = game.timeRate;
+      if (!(r > 1.001 || r < .999)) return;
+      const K = ov.ui || 1, lbl = r >= 1 ? '×' + Math.round(r) : '×' + (Math.round(r * 100) / 100);
+      ov.text(ov.W - 22 * K, 24 * K, lbl, { size: 11, col: '#C6F432', a: .9, align: 'right' });
+    },
   };
 }

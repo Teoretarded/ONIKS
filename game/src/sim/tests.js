@@ -744,7 +744,8 @@ async function main() {
       return { B, ev };
     };
     let a, b;
-    try { W.disp = 0; W.burst = DT; a = once(0); b = once(30); } finally { W.disp = keep[0]; W.burst = keep[1]; }
+    const kw = W.walk;
+    try { W.disp = 0; W.burst = DT; W.walk = 0; a = once(0); b = once(30); } finally { W.disp = keep[0]; W.burst = keep[1]; W.walk = kw; }   // no walk-in either: one straight line
     const ha = a.ev.filter(e => e.type === 'gunhit');
     ok(a.B.hits >= 1 && ha.length >= 1, `no round struck the missile on the rounds' line (${a.B.hits})`);
     ok(ha.every(e => e.onSkin), 'a struck point is off the missile\'s skin');
@@ -792,9 +793,10 @@ async function main() {
       P.turn = .05; P.pitchRate = .05; P.gMax = 40;              // a sluggish interceptor
       b = once();
     } finally { [P.sig0, P.sigR, P.turn, P.pitchRate, P.gMax] = keep; }
-    // threshold from what the model produces: on this crossing shot (a Mach 2.2 target 7 km abeam, 2 s vertical rise)
-    // the agile SM-6 passes ~540 m from it (sampled per tick), the sluggish one ~8.8 km
-    ok(a.end === 'intercept' || a.end === 'spinout' || a.minD <= 700, `the agile SM-6 neither struck nor closed on its crossing target (${a.end}, closest ${fmt(a.minD)} m)`);
+    // threshold from what the model produces: on this crossing shot (a Mach 2.2 target 7 km abeam) the agile SM-6,
+    // with its real launch (hot out of the cell at full thrust, 2.3 s vertical, the gentle eased pitch-over, Mach 3.5),
+    // passes ~1 km from it (sampled per tick), the sluggish one ~8.8 km
+    ok(a.end === 'intercept' || a.end === 'spinout' || a.minD <= 1400, `the agile SM-6 neither struck nor closed on its crossing target (${a.end}, closest ${fmt(a.minD)} m)`);
     ok(!(b.end === 'intercept' || b.end === 'spinout') && b.minD > P.burst && b.minD > 5 * a.minD, `the sluggish SM-6 struck or came as close (${b.end}, closest ${fmt(b.minD)} m)`);
     return `agile: ${a.end} (closest centre-to-centre ${fmt(a.minD)} m) · turn .05 rad/s, 4 g: ${b.end}, closest ${fmt(b.minD)} m`;
   });

@@ -248,6 +248,9 @@ function burst(sim, u, w, tgt, isProj) {
     id: sim.nextBurst = (sim.nextBurst || 0) + 1, unit: u.id, side: u.side, weapon: wn, w, target: tgt.id, tk: isProj ? 'proj' : 'unit',
     t0: sim.t, dur, n, fired: 0, live: 0, wt: real / n, mount, hits: 0, tmax: (w.range || 2000) * 1.8 / (w.v0 || 1000) + 1,
     x: new Float64Array(n * 3), p: new Float64Array(n * 3), v: new Float64Array(n * 3), st: new Uint8Array(n), age: new Float32Array(n),
+    // how each round ended (renderers draw the stream from these): hk 1 = it struck the target, at ef along its last
+    // path (0..1, p -> x), at sim time te
+    hk: new Uint8Array(n), ef: new Float32Array(n).fill(1), te: new Float32Array(n),
     aim: [0, 0, 0], tof: 0,
   };
   leadOf(u, w, tgt, mz, B.aim);
@@ -318,6 +321,9 @@ function stepBursts(sim) {
         const ux = (u.pos[0] - u.prev[0]) / DT, uy = (u.pos[1] - u.prev[1]) / DT, uz = (u.pos[2] - u.prev[2]) / DT;
         const rvx = VT[0] - ux, rvy = VT[1] - uy, rvz = VT[2] - uz;              // the target's velocity relative to the gun
         const v0 = w.v0 || 1000, sg = w.disp === undefined ? .003 : w.disp, r = sim.rng.fire, k0 = B.fired, cnt = due - k0;
+        // the mount walks its fire onto the target: the first rounds of a burst go a little low, the radar closing the
+        // gap between the stream and the target over the first fifth of a second (w.walk rad; the tracer rope bends in)
+        const wk = (w.walk === undefined ? .0025 : w.walk) * Math.exp(-(sim.t - B.t0) / .2);
         for (let i = k0; i < due; i++) {
           // rounds of one tick are strung along the stream: one that left `lead` of a tick earlier is that much further
           // out and arrives that much sooner, so it is aimed where the target is that much sooner
@@ -327,7 +333,7 @@ function stepBursts(sim) {
           // two axes across the line of fire for the dispersion cone
           let ex = dz, ez = -dx; const el = Math.sqrt(ex * ex + ez * ez) || 1; ex /= el; ez /= el;
           const fx = dy * ez, fy = dz * ex - dx * ez, fz = -dy * ex;
-          const a = gauss(r) * sg, b = gauss(r) * sg;
+          const a = gauss(r) * sg, b = gauss(r) * sg - wk;
           let cx = dx + ex * a + fx * b, cy = dy + fy * b, cz = dz + ez * a + fz * b;
           const cl = Math.sqrt(cx * cx + cy * cy + cz * cz); cx /= cl; cy /= cl; cz /= cl;
           const j = i * 3;
@@ -368,6 +374,7 @@ function stepBursts(sim) {
             // the round met the missile: where on its skin (relative to the missile at that instant), which part
             const s = HIT.s, t = HIT.t;
             nh++; done = true;
+            B.hk[i] = 1; B.ef[i] = s;
             if (hj < 0) {
               hj = i;
               hx = B.p[j] + (x - B.p[j]) * s; hy = B.p[j + 1] + (y - B.p[j + 1]) * s; hz = B.p[j + 2] + (z - B.p[j + 2]) * s;
@@ -375,13 +382,13 @@ function stepBursts(sim) {
             }
           }
         } else if (segUnit(T, ax, ay, az, bx, by, bz, .01, .3) >= 0) {
-          nh++; done = true;
+          nh++; done = true; B.hk[i] = 1; B.ef[i] = HIT.s === undefined ? 1 : HIT.s;
           if (hj < 0) { hj = i; hpart = HIT.part; const P3 = toWorld(T, HIT.x, HIT.y, HIT.z, [0, 0, 0]); hx = P3[0]; hy = P3[1]; hz = P3[2]; B.lx = HIT.x; B.ly = HIT.y; B.lz = HIT.z; }
         }
         // past the target and opening: it will not come back
         if (!done) { const rx = bx, ry = by, rz = bz; if (rx * (B.v[j] - tvx) + ry * (B.v[j + 1] - tvy) + rz * (B.v[j + 2] - tvz) > 0 && rx * rx + ry * ry + rz * rz > 900) done = true; }
       }
-      if (done) { B.st[i] = 2; B.live--; }
+      if (done) { B.st[i] = 2; B.live--; B.te[i] = sim.t; }
     }
     if (nh) {
       B.hits += nh;
@@ -479,13 +486,14 @@ export function launch(sim, u, w, target, tk, aimAt) {
     pitch = P.vert > 0 ? Math.PI / 2 : .35;
     aimTurret(u, aimAt);
     if (u.type === 'pantsir') { hdg = u.aimB; pitch = Math.max(.2, u.aimP + .15); }
+    else if (w.proj === 'ram') { hdg = u.aimB; pitch = clamp(u.aimP + .08, .05, .9); }   // RAM: off the trained Mk 49 box, near level
     else if (w.needs === 'lift') { hdg = u.aimB; pitch = Math.max(.02, u.aimP + .03); }   // the Kornet: out along the sight line
   }
   const p = {
     id: sim.nextId++, kind: w.proj, side: u.side, P,
     pos, prev: pos.slice(), vel: [0, 0, 0], from: u.id, fromPos: pos.slice(), target, tk,
     aim: [aimAt[0], aimAt[1], aimAt[2]], phase: 'launch', t0: t, age: 0, alive: true, st: { booster: true, wing: 0, fin: 0 },
-    spd, spd0: spd, hdg, pitch, eng: 0, shots: 0, minD: 1e9, seen: { coast: -1e9, fleet: -1e9 }, locked: false, sep: false,
+    spd, spd0: spd, pitch0: pitch, hdg, pitch, eng: 0, shots: 0, minD: 1e9, seen: { coast: -1e9, fleet: -1e9 }, locked: false, sep: false,
     maxT: (w.range / P.speed) * 1.8 + (P.vert || 0) + (P.boost || 0) + 20, ball: null,
     gA: undefined, gL: null, gLx: 0, gLz: 0, gLmax: 0, gFl: -9, depth: 0,    // terrain look-ahead; torpedo depth
     // physics: under control (false: tumbling, see spinout), gun hits taken (real rounds), roll, the tumbling frame
@@ -508,6 +516,36 @@ export function launch(sim, u, w, target, tk, aimAt) {
   if (P.threat || P.mode === 'ballistic' || P.reveal) launchSeen(sim, u);
   if (P.torpedo) { p.depth = isSub(u) ? Math.max(20, -pos[1]) : 0; torpedoHeard(sim, u); }
   return p;
+}
+
+/* ---------- a round's speed over its flight (m/s), closed form in its age: the same at any time rate ----------
+   A cold-launched round (P.ign) is thrown out of its tube at v0 and slows under gravity until its motor lights. The
+   first motor burns for P.boost s, from the launch speed to P.vb (else P.speed), its thrust climbing as the propellant
+   burns off (.75 of the mean acceleration at the start, 1.25 at the end: a hot launch leaves at full thrust). A
+   second stage or an air-breather (P.sus = [lights, at full speed, burns out], ages) takes it to P.speed and holds it.
+   A motor out, a rocket coasts under drag: dv/dt = -cd v^2 (P.cd, per metre: v = v1 / (1 + cd v1 t), the 57E6's
+   1300 -> 780 m/s over 18 km), never below P.vMin. Air-breathers (no cd) hold their speed. */
+export function speedAt(P, age, v0) {
+  const ig = P.ign || 0, top = P.speed, vb = P.vb || top, k = P.cd || 0, S = P.sus;
+  if (age < ig) return Math.max(5, v0 - G * Math.max(0, age));
+  const a = age - ig, B = P.boost || 0, vi = ig ? Math.max(5, v0 - G * ig) : v0;
+  if (a < B) { const x = a / B; return vi + (vb - vi) * x * (.75 + .25 * x); }
+  const vB = B > 0 ? vb : Math.max(vi, top);
+  if (!S || age < S[0]) return k ? coast(P, vB, age - ig - B, k) : vB;
+  const v1 = k ? coast(P, vB, S[0] - ig - B, k) : vB;
+  if (age < S[1]) { const x = (age - S[0]) / (S[1] - S[0]); return v1 + (top - v1) * x * (.75 + .25 * x); }
+  if (age < S[2]) return top;
+  return k ? coast(P, top, age - S[2], k) : top;
+}
+function coast(P, v, t, k) { return Math.max(Math.min(v, P.vMin || 0), v / (1 + k * v * Math.max(0, t))); }
+/* which motor burns at this age (model state and effects): 0 none (before ignition, coasting), 1 the booster / first
+   motor, 2 the sustainer (or the air-breather) */
+export function motorOf(P, age) {
+  const ig = P.ign || 0, B = P.boost || 0, S = P.sus;
+  if (age < ig) return 0;
+  if (age < ig + B) return 1;
+  if (S) return age >= S[0] && age < S[2] ? 2 : 0;
+  return P.cd ? 0 : 2;
 }
 
 function setVel(p) {
@@ -643,14 +681,21 @@ function stepOne(sim, p) {
     }
     else if (p.locked && !tgt) p.locked = false;
   }
-  // speed
-  if (p.age < boost) p.spd = p.spd0 + (P.speed - p.spd0) * ease(p.age / P.boost);
-  else p.spd = P.speed;
+  // speed: the motors' thrust curves and the coast after burnout (speedAt), from the end of a drop
+  const drop = P.drop || 0;
+  p.spd = speedAt(P, p.age - drop, p.spd0);
   // steering
   const dx = p.aim[0] - p.pos[0], dz = p.aim[2] - p.pos[2], dist = Math.sqrt(dx * dx + dz * dz);
-  if (p.age >= vert) {
+  if (drop && p.age < drop) {
+    // an air-launched round dropped off its pylon: it falls clear, unpowered, wings unfolding, before its engine lights
+    const vh = p.spd0 * Math.cos(p.pitch0), vy = p.spd0 * Math.sin(p.pitch0) - G * p.age;
+    p.pitch = Math.atan2(vy, vh); p.spd = Math.sqrt(vh * vh + vy * vy);
+    p.phase = 'launch';
+  } else if (p.age >= vert) {
     let hT = Math.atan2(dx, dz);
-    const bend = ease((p.age - vert) / 2.5);           // gentle, round pitch-over after the vertical rise
+    // the pitch-over after the vertical rise: the turn eases in over P.po seconds (a long, round arc, never a hook);
+    // P.poRate is the pitch rate through it (an SM-6 leans over gently, an ESSM snaps round on its thrust vanes)
+    const po = P.po || 2.5, bend = ease((p.age - vert) / po);
     // terrain ahead (2 s and 4 s, and the next 2 km of the track; refreshed 5x a second): everything keeps clear of
     // the ground until the last stretch
     const g0 = ground(map, p.pos[0], p.pos[2]);
@@ -698,7 +743,8 @@ function stepOne(sim, p) {
     if (p.missed) { hT = p.hdg; pT = Math.min(pT, -.3); }
     // turn-rate limit, and the lateral-acceleration limit (gMax, m/s²) as a turn rate at this speed
     const gl = P.gMax ? P.gMax / Math.max(60, p.spd) : 99;
-    const tr = Math.min(P.turn, gl) * DT * (P.vert ? Math.max(.15, bend) : 1), pr = Math.min(P.pitchRate, gl) * DT * (P.vert ? Math.max(.1, bend) : 1);
+    const pRate = P.poRate && P.vert ? P.poRate + (P.pitchRate - P.poRate) * ease((p.age - vert - po) / po) : P.pitchRate;
+    const tr = Math.min(P.turn, gl) * DT * (P.vert ? Math.max(.15, bend) : 1), pr = Math.min(pRate, gl) * DT * (P.vert ? Math.max(.1, bend) : 1);
     p.hdg += clamp(angTo(p.hdg, hT), -tr, tr);
     p.pitch += clamp(pT - p.pitch, -pr, pr);
   } else p.phase = 'launch';
@@ -709,7 +755,11 @@ function stepOne(sim, p) {
     p.sep = true; p.st.booster = false;
     sim.emit('booster_sep', { proj: p.id, kind: p.kind, side: p.side, pos: p.pos.slice(), vel: p.vel.slice() });
   }
-  p.st.wing = ease((p.age - vert - .5) / 1.5); p.st.fin = ease((p.age - vert) / .8); p.st.cover = p.age < .3; p.st.inlet = p.st.wing;
+  // wings and fins unfold (P.wingAt: when the wings start, over P.wingT s; a Tomahawk's at its booster's burnout, a
+  // SLAM-ER's as it falls clear)
+  const wa = P.wingAt !== undefined ? P.wingAt : vert + .5;
+  p.st.wing = ease((p.age - wa) / (P.wingT || 1.5)); p.st.fin = ease((p.age - Math.min(vert, wa)) / .8); p.st.cover = p.age < .3; p.st.inlet = p.st.wing;
+  p.st.motor = motorOf(P, p.age - drop);
   // resolution: by geometry only. Interceptors (proximity fuze, PROJ.burst) go off when their path this tick passes
   // within the burst radius of the target's body; strike rounds hit when their path enters the target's part boxes.
   // A round that passes its target flies on (no circling back): an interceptor ends in the air, a strike round goes

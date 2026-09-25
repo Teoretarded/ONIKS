@@ -18,7 +18,7 @@ import { drawPlume, drawHead, PLUME } from './lib/plume.js';
 import { ColdLaunch, VlsLaunch, HotLaunch, GunBlast, BalLaunch, SubLaunch, TorpLaunch } from './lib/launch.js';
 import { Burst, BoosterSep } from './lib/burst.js';
 import { Splash, Dirt, Blast, Fire, Sinking, TorpedoHit } from './lib/impact.js';
-import { TracerStream, Muzzle } from './lib/guns.js';
+import { TracerStream, GunStream, Muzzle } from './lib/guns.js';
 import { Wake, Downwash, Bubbles, SubWater } from './lib/water.js';
 import { drawJet, drawProps } from './lib/air.js';
 import { Lightning, drawRain } from './lib/weather.js';
@@ -27,29 +27,49 @@ import { orbBegin, orbEnd, orbDraw, orbTrail, orbPlume, orbHead, orbWake, orbDow
 export { engineSink };
 
 /* ---------------- flight profiles: which smoke and which flame, by kind and age ---------------- */
-/* returns [trail stage | null, plume spec | null, head glow 0..1]; p: the projectile (the Kalibr's dash: p.dash) */
+/* returns [trail stage | null, plume spec | null, head glow 0..1]; p: the projectile (the Kalibr's dash: p.dash).
+   The phases follow the sim's own motor timings (PROJ: ign, boost, sepAt, sus, drop; sim/weapons.js motorOf), so the
+   flame and the smoke change exactly when the model state does (booster off at sepAt) */
 const NONE = [null, null, 0];
+const R_SM6B = [null, null, 0], R_GLIDE = [null, null, .15], R_DART = [null, null, .2];
 function profile(kind, age, P, p) {
   switch (kind) {
     case 'oniks': {
-      const ig = .38, sep = (P && P.sepAt) || 7;
+      const ig = (P && P.ign) || .38, sep = (P && P.sepAt) || 7;
       if (age < ig) return [null, null, 0];
       if (age < sep) return [STAGE.boost, PLUME.oniksBoost, 0];
       if (age < sep + .35) return [null, null, 0];
       return [STAGE.air, PLUME.ramjet, 0];
     }
     case 'sm6': {
-      const sep = (P && P.sepAt) || 6;
-      if (age < sep) return [STAGE.boost, PLUME.mk72, 1];
-      if (age < sep + 5) return [STAGE.sustain, PLUME.sustain, .55];
-      return [STAGE.glide, PLUME.glide, .15];
+      // Mk 72 (thick column, long flame) -> it drops, a beat of nothing -> the Mk 104 (its own smaller flame at the
+      // sustainer's nozzle, a thinner trail) -> burnout: the coast, a white point in a lime halo
+      const B = (P && P.boost) || 6, S = (P && P.sus) || [6.4, 9.5, 18];
+      if (age < B) return [STAGE.boost, PLUME.mk72, 1];
+      if (age < S[0]) return R_SM6B;
+      if (age < S[2]) return [STAGE.sustain, PLUME.mk104, .55];
+      return R_GLIDE;
+    }
+    case 'sam48': {
+      // 48N6: thrown up cold (the ColdLaunch pop, no flame), lit half a second up, one long burn, then the coast
+      const ig = (P && P.ign) || .5, B = (P && P.boost) || 8;
+      if (age < ig) return NONE;
+      if (age < ig + B) return [STAGE.boost, PLUME.s400, 1];
+      return R_GLIDE;
     }
     case 'tlam': {
-      const b = (P && P.boost) || 12;
+      // the booster's column through the tip-over, it drops at burnout (wings out), then the turbofan: all but invisible
+      const b = (P && P.sepAt) || (P && P.boost) || 10;
       if (age < b) return [STAGE.boost, PLUME.tlamBoost, 0];
+      if (age < b + .4) return NONE;
       return [STAGE.heat, PLUME.turbojet, 0];
     }
-    case 'slam': return [STAGE.heat, PLUME.turbojet, 0];
+    case 'slam': {
+      // dropped off the pylon unpowered, the wings snapping out as it falls; the turbojet spools up after
+      const d = (P && P.drop) || 0;
+      if (age < d + .35) return NONE;
+      return [STAGE.heat, PLUME.turbojet, 0];
+    }
     case 'uran': {
       // Kh-35U: a 2 s solid booster out of the pack, dropped; then the turbofan, no flame at all
       const sep = (P && P.sepAt) || 2;
@@ -66,24 +86,31 @@ function profile(kind, age, P, p) {
       if (p && (p.dash || p.phase === 'dash')) return [STAGE.sustain, PLUME.dash, 0];
       return [STAGE.fan, PLUME.fanKal, 0];
     }
-    case 'pdms': return age < 3 ? [STAGE.sustain, PLUME.small, 1] : age < 7 ? [STAGE.glide, PLUME.glide, .3] : [null, null, .15];
-    case 'sam': return age < 2.4 ? [STAGE.small, PLUME.small, 1] : [STAGE.glide, null, .2];
-    case 'aam': return age < 3 ? [STAGE.sustain, PLUME.small, .8] : [STAGE.glide, null, .15];
-    case 'hellfire': return age < 2.5 ? [STAGE.small, PLUME.tiny, .6] : [null, null, .1];
+    // ESSM: one bright, tight burn (the Mk 134), then the coast
+    case 'pdms': return age < ((P && P.boost) || 3.5) ? [STAGE.sustain, PLUME.essm, 1] : age < ((P && P.boost) || 3.5) + 3 ? [STAGE.glide, null, .3] : R_GLIDE;
+    // RAM: a short hot burn off the box launcher
+    case 'ram': return age < ((P && P.boost) || 2) ? [STAGE.small, PLUME.small, .9] : R_GLIDE;
+    // 57E6: the booster's 2.4 s, then the unpowered dart
+    case 'sam': return age < ((P && P.boost) || 2.4) ? [STAGE.small, PLUME.small, 1] : age < ((P && P.boost) || 2.4) + 2 ? [STAGE.glide, null, .2] : R_DART;
+    // AIM-120: reduced-smoke propellant: a compact flame and a thin thread, then nothing but the point
+    case 'aam': return age < ((P && P.boost) || 4) ? [STAGE.thin, PLUME.thin, .8] : [null, null, .15];
+    case 'hellfire': return age < 2.5 ? [STAGE.thin, PLUME.tiny, .6] : [null, null, .1];
     case 'kornet': return age < 1.2 ? [STAGE.small, PLUME.tiny, .5] : [null, null, .08];      // 9M133: a short sustainer burn
-    default: return [null, null, 0];
+    default: return NONE;
   }
 }
-/* the third wave's rounds look like their nearest kin: gun rounds like the 5-inch, the 48N6 like the SM-6 (after its
-   cold launch: the ColdLaunch pop, no flame for the first half second), RAM like the ESSM */
-const FXK = { shell57: 'shell', shell130: 'shell', sam48: 'sm6', ram: 'pdms' };
+/* the third wave's rounds look like their nearest kin: gun rounds like the 5-inch; the 48N6 and RAM have their own
+   phases above but launch like their kin (the 48N6 with the ColdLaunch pop) */
+const FXK = { shell57: 'shell', shell130: 'shell' };
 const fk = k => FXK[k] || k;
 const BOOSTER = { oniks: 'oniks', sm6: 'mk72', tlam: 'tlam', sam: 'small', pdms: 'small', uran: 'kh35', kalibr: 'kalibr' };
-const SPLASH_H = { kornet: 9, shell: 26, oniks: 46, tlam: 36, slam: 34, hellfire: 12, sm6: 16, pdms: 14, sam: 12, aam: 12, crash: 30, uran: 30, kalibr: 40 };
-const HIT_SC = { kornet: .22, oniks: 1, tlam: .7, slam: .65, hellfire: .3, shell: .2, sm6: .35, pdms: .3, sam: .3, aam: .3, ciws: .05, gun30: .06, uran: .55, kalibr: .75 };
+/* kinds that launch like a kin (their flights have their own phases in profile) */
+const LAUNCH_AS = { sam48: 'sm6', ram: 'pdms' };
+const SPLASH_H = { sam48: 16, ram: 12, kornet: 9, shell: 26, oniks: 46, tlam: 36, slam: 34, hellfire: 12, sm6: 16, pdms: 14, sam: 12, aam: 12, crash: 30, uran: 30, kalibr: 40 };
+const HIT_SC = { sam48: .35, ram: .3, kornet: .22, oniks: 1, tlam: .7, slam: .65, hellfire: .3, shell: .2, sm6: .35, pdms: .3, sam: .3, aam: .3, ciws: .05, gun30: .06, uran: .55, kalibr: .75 };
 const THREAT = { kornet: 1, oniks: 1, tlam: 1, slam: 1, hellfire: 1, shell: 1, crash: 1, uran: 1, kalibr: 1 };
 const GUNS = { ciws: 1, gun30: 1 };
-const NOZ = { kornet: .6, oniks: 4.5, sm6: 3.3, tlam: 3.1, slam: 2.2, pdms: 1.8, sam: 1.7, aam: 1.8, hellfire: .85, uran: 2.25, kalibr: 4.15 };
+const NOZ = { sam48: 3.8, ram: 1.4, kornet: .6, oniks: 4.5, sm6: 3.3, tlam: 3.1, slam: 2.2, pdms: 1.8, sam: 1.7, aam: 1.8, hellfire: .85, uran: 2.25, kalibr: 4.15 };
 /* torpedoes: the round's length (m) and the height of the column its charge throws up under a keel */
 const TORP = { mk48: { len: 5.8, H: 115 }, t53: { len: 7.2, H: 105 }, mk54: { len: 2.72, H: 45 } };
 /* the boats (data/models.js SUBS: VA, KL): the sail [z0, z1, half width, top], the casing's top over the waterline,
@@ -190,7 +217,7 @@ class FxSystem {
       case 'launch': {
         const u = sim && sim.units.get(ev.from);
         if (u && !this.seeUnit(u)) return;
-        const axis = dirOf(ev.hdg, ev.pitch), pos = ev.pos, k0 = ev.kind, k = fk(k0);
+        const axis = dirOf(ev.hdg, ev.pitch), pos = ev.pos, k0 = ev.kind, k = LAUNCH_AS[k0] || fk(k0);
         if (TORP[k]) return this.onTorpLaunch(ev, u, t, seed);
         const boat = !!(u && u.def.sub);
         if (k0 === 'sam48') { this.lnch.set(ev.proj, .5); this.add(new ColdLaunch({ t0: t, pos, axis, ground: this.C.ground, seed }), 1); }
@@ -286,6 +313,16 @@ class FxSystem {
         const u = sim && sim.units.get(ev.unit);
         if (u && !this.seeUnit(u)) return;
         const w = ev.weapon === 'gun30' ? 'gun30' : 'ciws';
+        // the sim flies every round of the burst (sim.bursts): the stream is drawn from them, so the rounds that strike
+        // are the ones seen to reach the target; the analytic stream only without them (the bench, older saves)
+        let B = null;
+        if (sim && sim.bursts && ev.burst !== undefined) for (let i = sim.bursts.length - 1; i >= 0; i--) if (sim.bursts[i].id === ev.burst) { B = sim.bursts[i]; break; }
+        if (B) {
+          this.add(new GunStream({ t0: t, B, sim, weapon: w, seed }), 2);
+          const d = [ev.aim[0] - ev.pos[0], ev.aim[1] - ev.pos[1], ev.aim[2] - ev.pos[2]], l = Math.hypot(d[0], d[1], d[2]) || 1;
+          this.add(new Muzzle({ t0: t, mz: ev.pos, dir: [d[0] / l, d[1] / l, d[2] / l], dur: B.dur, seed, weapon: w }), 2);
+          return;
+        }
         const s = new TracerStream({ t0: t, mz: ev.pos, to: ev.to, weapon: w, dur: ev.dur || 1, hit: ev.hit, seed, gy: 0 });
         this.add(s, 2);
         this.add(new Muzzle({ t0: t, mz: ev.pos, dir: s.D, dur: s.a1, seed, weapon: w }), 2);
@@ -435,7 +472,7 @@ class FxSystem {
       if (!tr) {
         if (!p.alive) { this.lnch.delete(p.id); continue; }   // killed after this tick's collection (sim/weapons.js): its tracker is already gone
         const torp = !!TORP[p.kind] || !!(p.P && p.P.torpedo);
-        tr = { id: p.id, kind: p.kind, t0: p.t0 !== undefined ? p.t0 : t, trail: new Trail(torp ? 4 : fk(p.kind) === 'sm6' ? 14000 : p.kind === 'oniks' ? 8000 : 6000, p.id, this.C.ground), vel: [0, 0, 0], pos: p.pos.slice(), seen: false, killed: false, P: p.P,
+        tr = { id: p.id, kind: p.kind, t0: p.t0 !== undefined ? p.t0 : t, trail: new Trail(torp ? 4 : (p.kind === 'sm6' || p.kind === 'sam48') ? 14000 : p.kind === 'oniks' ? 8000 : 6000, p.id, this.C.ground), vel: [0, 0, 0], pos: p.pos.slice(), seen: false, killed: false, P: p.P,
           ig: this.lnch.get(p.id) || 0, bub: torp ? new Bubbles(p.id) : null };
         this.lnch.delete(p.id);
         this.trk.set(p.id, tr);
@@ -593,14 +630,14 @@ class FxSystem {
         const x = p.prev[0] + (p.pos[0] - p.prev[0]) * alpha, y = p.prev[1] + (p.pos[1] - p.prev[1]) * alpha, z = p.prev[2] + (p.pos[2] - p.prev[2]) * alpha;
         const v = p.vel, l = Math.hypot(v[0], v[1], v[2]) || 1;
         if (orb) {
-          if (pr[1]) orbPlume(x, y, z, v[0] / l, v[1] / l, v[2] / l, pr[1], ignOf(fk(p.kind), age, tr.ig), p.id, fr);
+          if (pr[1]) orbPlume(x, y, z, v[0] / l, v[1] / l, v[2] / l, pr[1], ignOf(fk(p.kind), age, tr.ig, p.P), p.id, fr);
           if (pr[2] && V.pxm(x, y, z) < 3) orbHead(x, y, z, pr[2], 1);
           continue;
         }
         // a round out of control: the plume swings round with its tumbling axis (and chokes if its ramjet does)
         const hd = this.headOf(p, t);
-        if (hd) { if (pr[1] && hd.k > .01) drawPlume(C, hd.x, hd.y, hd.z, hd.ax, hd.ay, hd.az, pr[1], ignOf(fk(p.kind), age, tr.ig) * hd.k, p.id, fr); continue; }
-        if (pr[1]) drawPlume(C, x, y, z, v[0] / l, v[1] / l, v[2] / l, pr[1], ignOf(fk(p.kind), age, tr.ig), p.id, fr);
+        if (hd) { if (pr[1] && hd.k > .01) drawPlume(C, hd.x, hd.y, hd.z, hd.ax, hd.ay, hd.az, pr[1], ignOf(fk(p.kind), age, tr.ig, p.P) * hd.k, p.id, fr); continue; }
+        if (pr[1]) drawPlume(C, x, y, z, v[0] / l, v[1] / l, v[2] / l, pr[1], ignOf(fk(p.kind), age, tr.ig, p.P), p.id, fr);
         if (pr[2] && V.pxm(x, y, z) < 3) drawHead(C, x, y, z, pr[2], 1);
       }
       // jets and rotors
@@ -679,8 +716,11 @@ class FxSystem {
   }
 }
 /* ignition envelope of the flame (the booster lighting, the ramjet catching) */
-function ignOf(kind, age, ig) {
+function ignOf(kind, age, ig, P) {
   if (kind === 'oniks') return age < 7 ? sat((age - .38) / .12) : sat((age - 7.35) / .4);
+  // a second stage lights on its own (the SM-6's Mk 104 catching after the Mk 72 has dropped)
+  if (P && P.sus && age >= P.sus[0]) return sat((age - P.sus[0]) / .18);
+  if (P && P.ign && age >= P.ign) return sat((age - P.ign) / .12);
   return sat((age - (ig || 0)) / .12);
 }
 
