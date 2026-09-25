@@ -391,7 +391,7 @@ export function createContacts(S) {
     vis, pings, update, draw3d, draw2d, ping,
     onEvent(e) {
       if (e.side !== game.side) return;
-      if (e.type === 'detect' && e.unit !== undefined && e.pos && S.V.vis(e.pos[0], e.pos[1], e.pos[2], 200)) ping(e.pos[0], e.pos[1], e.pos[2], 40, e.how === 'lightning' ? 2 : 0);
+      if (e.type === 'detect' && e.unit !== undefined && e.pos && S.V.vis(e.pos[0], e.pos[1], e.pos[2], 200)) ping(e.pos[0], e.pos[1], e.pos[2], 40, 0);
     },
   };
 }

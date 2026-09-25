@@ -71,24 +71,35 @@ export function sampleOf(R, key, want) {
 }
 function safe(f) { try { return f(); } catch (e) { return null; } }
 
-/* voxel graph over the rest points: nodes { p (centroid), m (point indices), nb (neighbour ids) } */
+/* voxel graph over the rest points: nodes { p (centroid), m (point indices), nb (neighbour ids) }. A dense grid
+   of cell -> node ids (the model's box is ~34 cells a side), so building it is a few ms at most. */
 export function graphOf(s) {
   if (s.graph) return s.graph;
-  const H = s.L / 34, map = new Map(), nodes = [];
+  const H = s.L / 34, mn = s.mn;
+  const NX = Math.max(1, Math.floor((s.mx[0] - mn[0]) / H) + 1), NY = Math.max(1, Math.floor((s.mx[1] - mn[1]) / H) + 1), NZ = Math.max(1, Math.floor((s.mx[2] - mn[2]) / H) + 1);
+  const grid = new Int32Array(NX * NY * NZ).fill(-1), nodes = [];
   for (let i = 0; i < s.n; i++) {
     const x = s.rest[i * 3], y = s.rest[i * 3 + 1], z = s.rest[i * 3 + 2];
-    const ix = Math.floor(x / H), iy = Math.floor(y / H), iz = Math.floor(z / H), key = ix + ',' + iy + ',' + iz;
-    let nd = map.get(key);
-    if (!nd) { nd = { id: nodes.length, ix, iy, iz, p: [0, 0, 0], m: [], nb: null }; map.set(key, nd); nodes.push(nd); }
+    const ix = Math.min(NX - 1, Math.floor((x - mn[0]) / H)), iy = Math.min(NY - 1, Math.floor((y - mn[1]) / H)), iz = Math.min(NZ - 1, Math.floor((z - mn[2]) / H));
+    const c = (ix * NY + iy) * NZ + iz;
+    let id = grid[c], nd;
+    if (id < 0) { id = grid[c] = nodes.length; nd = { id, ix, iy, iz, p: [0, 0, 0], m: [], nb: null }; nodes.push(nd); }
+    else nd = nodes[id];
     nd.m.push(i); nd.p[0] += x; nd.p[1] += y; nd.p[2] += z;
   }
   for (const nd of nodes) { const k = nd.m.length; nd.p[0] /= k; nd.p[1] /= k; nd.p[2] /= k; }
   for (const nd of nodes) {
     nd.nb = [];
-    for (let dx = -2; dx <= 2; dx++) for (let dy = -2; dy <= 2; dy++) for (let dz = -2; dz <= 2; dz++) {
-      if (!dx && !dy && !dz) continue;
-      const q = map.get((nd.ix + dx) + ',' + (nd.iy + dy) + ',' + (nd.iz + dz));
-      if (q) nd.nb.push(q.id);
+    for (let dx = -2; dx <= 2; dx++) {
+      const x = nd.ix + dx; if (x < 0 || x >= NX) continue;
+      for (let dy = -2; dy <= 2; dy++) {
+        const y = nd.iy + dy; if (y < 0 || y >= NY) continue;
+        for (let dz = -2; dz <= 2; dz++) {
+          const z = nd.iz + dz; if (z < 0 || z >= NZ || (!dx && !dy && !dz)) continue;
+          const q = grid[(x * NY + y) * NZ + z];
+          if (q >= 0) nd.nb.push(q);
+        }
+      }
     }
   }
   s.graph = { nodes, H };
