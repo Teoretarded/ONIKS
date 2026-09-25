@@ -44,6 +44,7 @@ const OPTIONAL = [
   [['./audio/index.js'], 'createAudio', 'audio'],
   [['./ui/hud/index.js', './ui/hud.js'], 'createHud', 'hud'],
   [['./game/landmarks.js'], 'createLandmarks', 'landmarks'],
+  [['./game/ground.js'], 'createGround', 'ground'],             // forests, roads, lines, fences, denser towns (game/ground/)
   [['./game/orbital.js'], 'createOrbital', 'orbital'],
   [['./ui/help/index.js'], 'createHelp', 'help'],
   [['./game/filmmaker.js'], 'createFilmmaker', 'filmmaker'],
