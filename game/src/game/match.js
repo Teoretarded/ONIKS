@@ -115,6 +115,8 @@ export function createMatchFlow(game) {
     document.body.appendChild(v);
     requestAnimationFrame(() => v.classList.add('on'));
     setTimeout(() => { if (url) location.href = url; else location.reload(); }, 380);
+    // back here through the browser's page cache: the picture and the sound return
+    addEventListener('pageshow', e => { if (!e.persisted) return; v.remove(); leaving = false; if (au && au.mute) try { au.mute(false); } catch (err) { /* */ } }, { once: true });
   }
 
   /* arrows move the lime square, Enter takes the row */
@@ -127,11 +129,13 @@ export function createMatchFlow(game) {
       bs.forEach((b, k) => b.classList.toggle('on', k === i));
     } else if ((e.code === 'Enter' || e.code === 'NumpadEnter') && bs[i]) act(bs[i].dataset.a);
   }
+  let camKeys = true;
   function openMenu(on) {
     if (on === menuOpen) return;
     menuOpen = on;
-    if (on) { wasPaused = game.paused; game.pause(true); renderMenu(); menuEl.style.display = ''; }
-    else { if (menuEl) menuEl.style.display = 'none'; if (!wasPaused) game.pause(false); }
+    // the menu has the keys and the pointer: the camera neither pans (W A S D, the screen edges) nor turns under it
+    if (on) { wasPaused = game.paused; game.pause(true); renderMenu(); menuEl.style.display = ''; camKeys = game.camera.keys; game.camera.keys = false; }
+    else { if (menuEl) menuEl.style.display = 'none'; if (!wasPaused) game.pause(false); game.camera.keys = camKeys; }
   }
   function renderMenu() {
     if (!menuEl) {

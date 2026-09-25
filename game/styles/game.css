@@ -119,8 +119,8 @@
 #boot.oniks-load .ld-line { display: flex; align-items: center; gap: calc(12px * var(--ls)); height: calc(14px * var(--ls)); font: 500 calc(12.5px * var(--ls))/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
 #boot.oniks-load .ld-line > i { width: calc(8px * var(--ls)); height: calc(8px * var(--ls)); background: var(--lime); animation: blink .5s steps(2) infinite; flex: none; }
 #boot.oniks-load .ld-t:empty { display: none; }
-#boot.oniks-load .ld-bar { display: flex; gap: calc(3px * var(--ls)); height: calc(3px * var(--ls)); }
-#boot.oniks-load .ld-bar i { width: calc(3px * var(--ls)); height: calc(3px * var(--ls)); background: rgba(255,255,255,.16); }
+#boot.oniks-load .ld-bar { display: flex; gap: var(--ld, 3px); height: var(--ld, 3px); }
+#boot.oniks-load .ld-bar i { width: var(--ld, 3px); height: var(--ld, 3px); background: rgba(255,255,255,.16); }
 #boot.oniks-load .ld-bar i.f { background: rgba(255,255,255,.86); }
 #boot.oniks-load .ld-bar i.h { background: var(--lime); }
 #boot.oniks-load.ld-done .ld-line > i { animation: none; }
@@ -190,8 +190,8 @@
 /* the F1 HELP chip: bottom left, under the selection panel, at the HUD's scale */
 .oniks-f1 { position: absolute; left: 0; bottom: 0; zoom: var(--hs, 1); padding: 0 0 14px 56px; }
 .oniks-f1 .keys { gap: 0; }
-.oniks-f1 .keys span { padding: 4px 8px 3px 4px; gap: 7px; font-size: 10px; color: rgba(255,255,255,.42); border-color: rgba(255,255,255,.1); cursor: pointer; }
-.oniks-f1 .keys b { padding: 2px 4px 1px; background: rgba(255,255,255,.62); }
+.oniks-f1 .keys span { padding: 4px 8px 3px 4px; gap: 7px; font-size: 10px; color: rgba(255,255,255,.55); border-color: rgba(255,255,255,.14); cursor: pointer; text-shadow: 0 0 2px #0B0C0A; }
+.oniks-f1 .keys b { padding: 2px 4px 1px; background: rgba(255,255,255,.72); }
 .oniks-f1 .keys span:hover { color: #fff; border-color: rgba(255,255,255,.34); }
 .oniks-f1 .keys span:hover b { background: var(--lime); }
 .oniks-f1.off { display: none; }
@@ -202,3 +202,6 @@ body.oniks-helping .oniks-sbx, body.oniks-helping .oniks-buy { opacity: 0; point
 /* ---------------------------------------------------------------- leaving a match (match.js): through black */
 .oniks-fade { position: fixed; inset: 0; z-index: 100; background: var(--bg); opacity: 0; transition: opacity .34s ease-in; pointer-events: auto; }
 .oniks-fade.on { opacity: 1; }
+
+/* the pause menu and the end block (match.js) at the HUD's scale, like the help and the in-game settings */
+.oniks-menu .blk, .oniks-end .blk { zoom: var(--hs, 1); }

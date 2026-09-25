@@ -67,8 +67,10 @@ export function campaignScreen(app) {
     const meta = MS.byId(m.map), f = FILMS[m.film.id];
     fl.innerHTML = `<span>${pad2(m.n)} · ${esc(meta.name)}</span><span class="sp"></span><i>${esc(cap(m.weather))} · ${esc(cap(m.time))}</i>`;
     const g = prog.grades[m.n];
-    const req = m.objectives.filter(o => !o.optional).map(o => esc(o.text)).join('<br>');
-    const opt = m.objectives.filter(o => o.optional).map(o => esc(o.text)).join('<br>');
+    // the objectives known before the battle; the hidden ones are revealed by the mission script in play
+    const shown = m.objectives.filter(o => !o.hidden);
+    const req = shown.filter(o => !o.optional).map(o => esc(o.text)).join('<br>');
+    const opt = shown.filter(o => o.optional).map(o => esc(o.text)).join('<br>');
     grid.innerHTML = [
       ['Film', `<b>${esc(f ? f.name : m.film.id)}</b>`],
       ['Objectives', `<b>${req}</b>`],

@@ -382,3 +382,9 @@ body.th-orb .keys span[data-key]:hover { color: var(--ink); }
 /* ---------- the veil covers the whole window (a window that is not 16:9 shows the film in strips beside the stage) */
 body::before { content: ''; position: fixed; inset: 0; z-index: 1; background: var(--bg); opacity: 0; transition: opacity .6s; pointer-events: none; }
 body:has(#veil:not(.off))::before { opacity: 1; }
+
+/* ---------- SETTINGS: the keybind reference in three columns (Camera · View and time | Select · Inspect | Orders · Sandbox) */
+.binds.c3 { left: 820px; width: 1012px; grid-template-columns: 1fr 1fr 1fr; column-gap: 40px; align-items: start; }
+.binds.c3 .b { height: 23px; }
+.binds.c3 .g { margin-bottom: 22px; }
+.binds .b em { font-style: normal; color: var(--faint); margin-left: 6px; }

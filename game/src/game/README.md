@@ -11,6 +11,7 @@ systems. Other agents plug in by exporting a factory from their module; `main.js
 | `src/ui/inspect.js` or `src/ui/inspect/index.js` | `createInspect(game, ctx)` | `inspect` |
 | `src/audio/index.js` | `createAudio(game, ctx)` | `audio` |
 | `src/ui/hud/index.js` or `src/ui/hud.js` | `createHud(game, ctx)` | `hud` |
+| `src/ui/help/index.js` | `createHelp(game)` | `help` (F1 controls, the pause menu's in-game settings, settings applied live) |
 
 A factory may return one system, an array of systems, a Promise of either, or null. `ctx = { DM /* data/models.js */,
 params, mission, match }`. `?nosys=fx,audio` skips optional systems (debugging).
@@ -77,7 +78,7 @@ frame = { game, R, cam, fx /* R.fx */, sink, t, alpha, dt, dtSim, realT, seaT }
 ```
 
 Priorities (`PRI` in game.js; input goes high to low, drawing low to high):
-menu 120 · inspect 100 · targeting 80 · hud 70 · sandbox 60 · orders 50 · selection 40 · time 30 · director 20 ·
+help 130 · menu 120 · inspect 100 · targeting 80 · hud 70 · sandbox 60 · orders 50 · selection 40 · time 30 · director 20 ·
 sensors 15 · render 10 · fx 5 · audio 1. The camera takes its own keys (WASD / arrows pan, Q E rotate, PageUp /
 PageDown pitch, wheel zoom, right-drag rotate, middle-drag pan) below everything; a system that needs the keys
 for itself sets `game.camera.keys = false` while it is active.
@@ -139,7 +140,11 @@ point beyond every reach is refused, nothing drives), Y radar on / off, L launch
 strike package off the deck, then click a track to strike or a point to patrol), U launch an MH-60R (fleet),
 B reinforcements, Esc cancel / pause menu.
 Time: Space pause, + / - rate. View: C cinematic camera, F10 hide the UI, I inspect (Inspect system), V radar view
-(Sensors system).
+(Sensors system), F1 every control (help; the list is `KEYBINDS` in data/settings.js: keep it true when a key changes).
+
+Loading (`src/ui/loading`): play.html shows the loading screen from its first paint; main.js reports the real steps
+(map, terrain, forces, systems, models), pre-samples every level of the models in play (`warmLists`), renders two
+frames under it, then fades it over the opening shot; the Inspect cutaways are sampled later in idle time.
 
 ## Files
 

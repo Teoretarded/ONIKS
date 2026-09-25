@@ -17,7 +17,13 @@ export function settingsScreen(app) {
   el.append(kick, formEl, blurb, binds, keys);
   let form = null;
 
-  binds.innerHTML = KEYBINDS.map(g => `<div class="g"><div class="lbl">${esc(g.group)}</div>${g.binds.map(([k, t]) => `<div class="b"><span>${esc(t)}</span><b>${esc(k)}</b></div>`).join('')}</div>`).join('');
+  // three columns (the in-game help's order): Camera, View and time | Select, Inspect | Orders, Sandbox; a row that
+  // belongs to one side or to the sandbox says so
+  const COLS = [['Camera', 'View and time'], ['Select', 'Inspect'], ['Orders', 'Sandbox']];
+  const grp = g => `<div class="g"><div class="lbl">${esc(g.group)}</div>${g.binds.map(([k, t, o]) => `<div class="b"><span>${esc(t)}${o && o.side ? ` <em>${esc(o.side)}</em>` : ''}</span><b>${esc(k)}</b></div>`).join('')}</div>`;
+  binds.classList.add('c3');
+  binds.innerHTML = COLS.map(c => `<div class="col">${c.map(n => KEYBINDS.find(g => g.group === n)).filter(Boolean).map(grp).join('')}</div>`).join('')
+    + KEYBINDS.filter(g => !COLS.flat().includes(g.group)).map(grp).join('');
 
   function build() {
     const s = getSettings();

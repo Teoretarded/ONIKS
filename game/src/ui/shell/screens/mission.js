@@ -101,7 +101,8 @@ export function briefingScreen(app) {
       kick.lastChild.textContent = `Mission ${pad2(m.n)} / ${pad2(MISSIONS.length)} · ${meta.name}`;
       title.textContent = m.title;
       lines.innerHTML = m.brief.map(s => `<p>${esc(s)}</p>`).join('');
-      objs.innerHTML = m.objectives.map(o => `<div class="obj${o.optional ? ' opt' : ''}"><i></i><span>${esc(o.text)}</span>${o.optional ? '<span class="o">Optional</span>' : ''}</div>`).join('');
+      // only what the player is told at the start: the mission script reveals the hidden ones in play (data/campaign.js)
+      objs.innerHTML = m.objectives.filter(o => !o.hidden).map(o => `<div class="obj${o.optional ? ' opt' : ''}"><i></i><span>${esc(o.text)}</span>${o.optional ? '<span class="o">Optional</span>' : ''}</div>`).join('');
       const prog = getProgress();
       const carry = m.carry && prog.carry && prog.carry.after === m.n - 1 ? '<div class="ro" style="margin-top:12px">Rounds carried over from the last battle</div>' : '';
       forces.innerHTML = `<div class="sec" style="margin-top:0"><div class="lbl">Own forces</div><div class="forces">${forceTags(m.forces.coast, 'lime')}</div>${carry}</div>`

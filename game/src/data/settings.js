@@ -144,6 +144,7 @@ export function setSetting(k, v) {
 
 export function resetSettings() {
   mem = {}; write(mem);
+  try { localStorage.removeItem('oniks.autoSlow'); } catch (e) { /* */ }
   const s = getSettings();
   for (const fn of listeners) { try { fn(s, null); } catch (e) { console.error(e); } }
   return s;

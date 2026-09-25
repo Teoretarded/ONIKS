@@ -15,7 +15,7 @@
   #ui { position: absolute; inset: 0; pointer-events: none; }
   #ui .hit { pointer-events: auto; }
   body.ui-off #ui > :not(.always) { display: none; }
-  #perf { position: absolute; left: 50%; bottom: 118px; transform: translateX(-50%); font: 400 11px/1.6 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); text-align: center; font-variant-numeric: tabular-nums; white-space: pre; }
+  #perf { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); font: 400 11px/1.6 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); text-align: center; font-variant-numeric: tabular-nums; white-space: pre; }
   #perf b { font-weight: 400; color: #fff; }
   /* #boot: the loading screen (styles/game.css "loading", src/ui/loading) */
 </style></head>
@@ -29,7 +29,7 @@
 </div>
 <script>/* the loading screen from the first paint: its scale and its dotted bar (src/ui/loading takes it over) */
 (function () { var b = document.getElementById('boot'), s = Math.max(.8, Math.min(1.6, Math.min(innerWidth / 1920, innerHeight / 1080)));
-  b.style.setProperty('--ls', s); b.querySelector('.ld-bar').innerHTML = new Array(57).join('<i></i>'); })();</script>
+  b.style.setProperty('--ls', s); b.style.setProperty('--ld', Math.max(2, Math.round(3 * s)) + 'px'); b.querySelector('.ld-bar').innerHTML = new Array(57).join('<i></i>'); })();</script>
 <script type="module">import { createLoading } from './src/ui/loading/index.js'; createLoading(document.getElementById('boot'));</script>
 <script src="../reference/menus/common/m3.js"></script>
 <script src="../reference/menus/common/geo.js"></script>
