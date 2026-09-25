@@ -67,6 +67,14 @@ launch or a new hostile contact happens, like a naval sim, so the spectacle is w
   edge, range rings, tracks.
 - **Cinematic camera** (C): an auto-director that picks the most interesting thing happening (a launch, an
   intercept, a hit) and flies the camera like the films. **H** hides the UI.
+- **Scan sources (planned, from the user 2026-09-26)**: the lightning scan comes from a platform, each with its own
+  film (`reference/films/pc_scan_*`).
+  - Destroyer (Arleigh Burke): the normal lightning scan, with the **railgun** film (`pc_scan_railgun`).
+  - **Aircraft carrier (Nimitz now, and any carrier added later): the satellite scan** (`pc_scan_satellite`). Only
+    carriers get it. **No range limit** (anywhere on the map), **longer cooldown** than the destroyer scan,
+    **5 × the destroyer scan's area**, and a bigger, more powerful look: the carrier's radar spins up and sends
+    three visible pulses to the satellite, the camera rides the third, the satellite wakes and unfolds, then the
+    blast lands on the point the player picked. Film can run up to 1:20.
 - **Dynamic light**: flashes, plumes, muzzle fire and lightning light up nearby dots (terrain, hulls, smoke).
 - **Weather**: calm, haze, rain squalls (radar clutter), storms with lightning that flash the whole cloud.
 
