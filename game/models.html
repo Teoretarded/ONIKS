@@ -1,0 +1,61 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>ONIKS · Models</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=block">
+<link rel="stylesheet" href="../reference/menus/common/pc.css">
+<style>
+  html, body { background: #0B0C0A; }
+  #stage { cursor: grab; }
+  #stage.drag { cursor: grabbing; }
+  .kick { position: absolute; left: 56px; top: 44px; }
+  .list { position: absolute; left: 56px; top: 92px; width: 280px; font: 500 12px/1 var(--mono); letter-spacing: .05em; text-transform: uppercase; }
+  .list h4 { font: 400 10.5px var(--mono); letter-spacing: .08em; color: var(--faint); margin: 16px 0 7px; font-weight: 400; }
+  .list .it { display: flex; align-items: center; gap: 9px; padding: 4px 0; color: rgba(255,255,255,.4); cursor: pointer; pointer-events: auto; white-space: nowrap; }
+  .list .it .sq { width: 7px; height: 7px; background: var(--lime); transform: scale(0); transition: transform .15s; flex: none; }
+  .list .it .nm { color: inherit; }
+  .list .it .ds { font: 400 10.5px var(--mono); color: rgba(255,255,255,.26); text-transform: none; letter-spacing: .02em; overflow: hidden; text-overflow: ellipsis; }
+  .list .it .ok { width: 4px; height: 4px; flex: none; background: rgba(255,255,255,.18); }
+  .list .it .ok.bad { background: var(--coral); }
+  .list .it:hover { color: rgba(255,255,255,.75); }
+  .list .it.on { color: #fff; }
+  .list .it.on .sq { transform: scale(1); }
+  .side { position: absolute; right: 56px; top: 44px; width: 300px; font: 400 11.5px/1.6 var(--mono); letter-spacing: .04em; color: var(--dim); pointer-events: auto; }
+  .side .tt { font: 500 19px/1.2 var(--sans); letter-spacing: -.01em; color: #fff; text-transform: none; margin-bottom: 6px; }
+  .side .sz { color: var(--lime); text-transform: uppercase; }
+  .side .nt { font: 400 12.5px/1.45 var(--sans); color: rgba(255,255,255,.5); margin: 10px 0 14px; letter-spacing: 0; }
+  .side .ro { text-transform: uppercase; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .side .ro b { color: rgba(255,255,255,.8); font-weight: 400; }
+  .side h4 { font: 400 10.5px var(--mono); letter-spacing: .08em; color: var(--faint); margin: 18px 0 8px; font-weight: 400; text-transform: uppercase; }
+  .row { display: grid; grid-template-columns: 78px 1fr 46px; align-items: center; gap: 10px; height: 22px; text-transform: uppercase; font-size: 10.5px; }
+  .row .v { text-align: right; color: rgba(255,255,255,.75); font-variant-numeric: tabular-nums; }
+  input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 14px; background: transparent; cursor: pointer; }
+  input[type=range]::-webkit-slider-runnable-track { height: 1px; background: rgba(255,255,255,.28); }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 8px; height: 8px; margin-top: -4px; background: var(--lime); border: 0; }
+  .chip { display: inline-flex; align-items: center; gap: 7px; margin: 0 6px 6px 0; padding: 5px 8px 4px 5px; border: 1px solid var(--hair); font: 500 10.5px/1 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); cursor: pointer; user-select: none; }
+  .chip b { color: #0B0C0A; background: rgba(255,255,255,.62); padding: 3px 5px 2px; font-weight: 500; }
+  .chip.on { color: #fff; border-color: rgba(198,244,50,.55); }
+  .chip.on b { background: var(--lime); }
+  .foot { position: absolute; left: 50%; bottom: 36px; transform: translateX(-50%); display: flex; gap: 8px; font: 500 11px/1 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); }
+  .foot span { display: flex; align-items: center; gap: 8px; padding: 6px 10px 5px 6px; border: 1px solid var(--hair); }
+  .foot b { color: #0B0C0A; background: rgba(255,255,255,.78); padding: 3px 5px 2px; font-weight: 500; }
+  .status { position: absolute; left: 56px; bottom: 36px; font: 400 11px/1.8 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .status b { color: #fff; font-weight: 400; } .status i { font-style: normal; color: var(--lime); }
+  .noui .list, .noui .side, .noui .foot, .noui .kick, .noui .status { display: none; }
+</style></head>
+<body><div id="stage">
+  <canvas id="c" class="px" width="1920" height="1080"></canvas>
+  <canvas id="o" width="1920" height="1080"></canvas>
+  <div class="ui" id="ui">
+    <div class="kick"><i></i><span id="kick">Models</span></div>
+    <div class="list" id="list"></div>
+    <div class="side" id="side"></div>
+    <div class="status" id="status"></div>
+    <div class="foot"><span><b>E</b>Explode</span><span><b>X</b>X-ray</span><span><b>W</b>Wreck</span><span><b>Space</b>Orbit</span><span><b>↑↓</b>Model</span><span><b>S</b>Still</span></div>
+  </div>
+</div>
+<script src="../reference/menus/common/m3.js"></script>
+<script src="../reference/menus/common/geo.js"></script>
+<script src="../reference/menus/common/dots.js"></script>
+<script src="../reference/films/common/hd_land.js"></script>
+<script src="../reference/films/common/hd_sea_air.js"></script>
+<script type="module" src="src/models_view.js"></script>
+</body></html>
