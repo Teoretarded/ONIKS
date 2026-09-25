@@ -339,3 +339,10 @@ Per your note (no dice rolls; rigid bodies; the gun stream that makes a missile 
 - **Rigid-body break-ups**: when something is hit, its modules (nose, body sections, wings, fins, booster, rotor
   blades, masts, radar arrays) separate as rigid bodies with mass, spin, drag and splashes, burning pieces trailing
   smoke; a spun-out round tumbles and sheds fins, then wings, then the booster, until it hits the sea.
+
+## 12:30 · The finale earns its grade
+Mission 6: the task group waits out of every reach under a heavy storm cell; around 6:15 the cell drifts in and
+"The cell is over their approach · scan into it"; lightning near the carrier shows where it is. A minute after each
+launch the fleet answers on the launch point (SLAM-ERs from the jets on station, Tomahawk waves of 4, 4, 8), so TELs
+must move. S needs the storm, moving after every launch, and the carrier down by 22:00. Scripted tests: passive D,
+the plain loop B/C (A at best), storm + fire-and-move S on two seeds.
