@@ -395,3 +395,13 @@ Every agent was cut off at the 5-hour limit around 13:40; after the reset they w
 physics, rigid-body break-ups, the hit-model balance pass, the 60 fps guard, the two new maps, fleet sensing, the
 model detail pass and world detail. The two cloud routines (four new units; sim performance + Node harness) were
 re-fired now that the Claude GitHub app has write access, so they can push `cloud/units3` and `cloud/simperf`.
+
+## 14:05 · 60 fps guard
+Normal play (any map height, zooms, camera jumps, Inspect, storms, the Orbital style, scans, the radar view) stays
+well under 16.7 ms (typical 2.5-6 ms). Fixed the real spikes: the salvo board's canvas resize (0.6-0.9 s hitches),
+the radar-scope layers, smoke and tracer costs, the scan's part boxes (hit frame 8-17 ms → 0.6 ms), off-screen rings;
+the hit replay went from 23.6 ms avg (p99 58) to 8.4 (p99 15.5). "Auto quality" (Settings, on by default) watches
+frame time and steps effects, dot density and render scale down under load and back up with hysteresis; at full
+quality it changes nothing. Still over budget: a 200-unit battle at x32 (30-70 ms, CPU-bound in the sim and the
+smoke/debris systems; being addressed by the physics, debris and sim-performance agents), and the Arctic sea ice.
+`ONIKS.perf()` / `game/perf.html` run the stress suite. The game and film servers were restarted after the limit.
