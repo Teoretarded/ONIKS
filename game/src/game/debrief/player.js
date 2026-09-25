@@ -479,7 +479,7 @@ export async function createPlayer(game, ctx, role) {
       // the skip: as fast as the frame allows, never past the goal
       mute(true);
       const left = sh.ff * DT - sim.t;
-      const want = Math.min(left, Math.max(64 * dt, left * dt / Math.max(dt, 2.2 - (sh.t - sh.dur))));
+      const want = Math.min(left, Math.max(64 * dt, left * dt / Math.max(dt, 2.2 - (sh.t - sh.dur), 1e-6)));   // paused late in a skip: 0, not 0 / 0
       F.simT = sim.t + want;
       advance(F.simT, 11);
       F.simT = Math.min(F.simT, sim.t);
