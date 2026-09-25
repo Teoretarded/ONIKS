@@ -23,6 +23,9 @@ launch-flash duration by eye.
 | `static_turret_guns_tubes_radar.jpg` | Turret side close-up: search-radar panel on mast, twin guns, level tube pack, armoured side flaps | https://commons.wikimedia.org/wiki/File:96K6_Pantsir-S1_-_Engineering_technologies_2012_(5).jpg | CC BY-SA 4.0, Vitaly V. Kuzmin |
 | `static_vehicle_72v6e4_front_quarter.jpg` | Full vehicle (72V6-E4 combat vehicle), left-front, tubes level, radar raised | https://commons.wikimedia.org/wiki/File:Pantsir-S1_72V6-E4_-_100th_Anniversary_VVS-R_-01.jpg | CC BY-SA 4.0, Vitaly V. Kuzmin |
 | `static_vehicle_travel_stowed.jpg` | Full vehicle in travel configuration: radar folded flat, tubes horizontal to rear | https://commons.wikimedia.org/wiki/File:Bronnitsy_-_01_-_Pantsir-S1_SAM.jpg | CC BY-SA 4.0, Vitaly V. Kuzmin |
+| `profile_pantsir_s1_57e6_rounds_maks2013.jpg` | Vehicle side profile with the 57E6 tube cluster raised, rounds visible in their tubes, MAKS 2013 | https://commons.wikimedia.org/wiki/File:MAKS_Airshow_2013_(Ramenskoye_Airport,_Russia)_(521-05).jpg | CC BY-SA 4.0 |
 
 Gap: no free-licensed launch or in-flight photos of the 57E6 found on Commons (category and search checked);
-use the videos above for `launch_*`/`flight_*` look. No close static photo of the bare missile round either.
+use the videos above for `launch_*`/`flight_*` look. Still no close photo of a fully bare (uncanistered) 57E6
+round — `profile_pantsir_s1_57e6_rounds_maks2013.jpg` shows the rounds in their launch tubes, which is the
+closest free-licensed image found, not a bare-round shot.

@@ -34,6 +34,9 @@ Fires GMLRS-family rockets or a single ATACMS/PrSM long-range missile from the s
 | `profile_himars.jpg` | HIMARS launcher, static profile | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:M142_High_Mobility_Artillery_Rocket_System_(HIMARS)_668579_EMILY_ROSE_(14992404654).jpg) | CC BY-SA 2.0 |
 | `detail_saberstrike18_7.jpg` | HIMARS pod/turntable detail, Saber Strike 18 | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:180614-A-IY962-108_-_M142_High_Mobility_Artillery_Rocket_System_(HIMARS)_firing_during_Saber_Strike_18_(Image_7_of_7).jpg) (US Army) | Public domain |
 | `detail_grafenwohr.jpg` | HIMARS on display, Grafenwöhr, Germany | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:High_Mobility_Artillery_Rocket_System_(HIMARS)_Summit_held_on_Grafenw%C3%B6hr,_Germany_(7948252).jpg) (US Army) | Public domain |
+| `static_himars_front_radom2023.jpg` | HIMARS launcher, front three-quarter static, Radom 2023 | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:M142_HIMARS_front_Radom-2023.jpg) | CC BY-SA 3.0 |
+| `static_himars_launcher_pod_radom2023.jpg` | HIMARS launcher pod, raised, rear three-quarter, Radom 2023 | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:M142_HIMARS_left_back_Radom-2023.jpg) | CC BY-SA 3.0 |
+| `launch_himars_missile_launched.jpg` | HIMARS mid-launch, pod raised, rocket clear of the tube | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:HIMARS_-_missile_launched.jpg) | Public domain |
 
 ## Videos
 

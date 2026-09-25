@@ -33,6 +33,9 @@ the coastal side's truck-mounted Bastion/Bal launchers.
 | `action_c17_load_travis.jpg` | NMESIS launcher secured onto a C-17 Globemaster III, Travis AFB | [DVIDS](https://www.dvidshub.net/image/8188805/60th-aps-assists-new-equipment-training-team) (US Air Force) | Public domain |
 | `action_notional_fire_okinawa.jpg` | Marines guide a NMESIS launcher during a notional fire mission, Okinawa | [DVIDS](https://www.dvidshub.net/image/9294649/12th-and-3d-lct-marines-execute-notional-fire-missions-with-nmesis) (USMC) | Public domain |
 | `detail_nsm_pod_pointmugu.jpg` | Marines fit safety braces to an NSM pod on the launcher, NAS Point Mugu | [DVIDS](https://www.dvidshub.net/image/7918237/2nd-bn-11th-marines-becomes-first-marine-unit-fire-nmesis-missiles) (USMC) | Public domain |
+| `static_nmesis_launcher.jpg` | NMESIS launcher, static, no crew cab visible | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:NMESIS_launcher.jpg) | Public domain |
+| `static_nmesis_reload_drill.jpg` | Marines execute a reloading drill with the NMESIS launcher | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:12th_and_3d_LCT_Marines_Execute_Reloading_Drills_with_the_NMESIS_(9294514).jpg) (USMC) | Public domain |
+| `static_nmesis_fire_mission_rd25.jpg` | Marines rehearse a notional NMESIS fire mission, Resolute Dragon 25 | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:RD25_-_12th_and_3rd_MLR_Marines_Rehearse_Notional_NMESIS_Fire_Missions_(9320305).jpg) (USMC) | Public domain |
 
 ## Videos
 

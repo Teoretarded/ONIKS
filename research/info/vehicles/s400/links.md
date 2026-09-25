@@ -27,6 +27,7 @@
 | detail_launcher_droni4ch.jpg | Launcher, wide profile | [Commons](https://commons.wikimedia.org/wiki/File:S-400_Triumf_launch_vehicle.JPG) | CC BY 3.0, Droni4ch |
 | detail_radar_92n6a.jpg | 92N6-family radar, antenna detail | [Commons](https://commons.wikimedia.org/wiki/File:92N6A_radar_for_S-400.jpg) | CC BY-SA 4.0, Vitaly V. Kuzmin |
 | detail_radar_96l6.jpg | 96L6 acquisition radar alongside launcher | [Commons](https://commons.wikimedia.org/wiki/File:S-400_Triumf_with_96L6.jpg) | CC BY-SA 4.0, Vitaly V. Kuzmin |
+| profile_s400_triumf_launcher.jpg | Launcher, clean side profile, canisters lowered | [Commons](https://commons.wikimedia.org/wiki/File:S-400_Triumf_(27102989027).jpg) | CC BY 2.0 |
 
 Note: `detail_radar_92n6a.jpg` is labelled "92N6A" on Commons (an upgraded sub-variant of the 92N6E family) —
 close enough for silhouette reference but confirm antenna-face proportions if exact 92N6E fidelity matters.

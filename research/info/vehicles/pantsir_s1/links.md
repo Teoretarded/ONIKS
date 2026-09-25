@@ -26,3 +26,4 @@
 | detail_et2012_b.jpg | Turret/missile bank detail, alt angle | [Commons](https://commons.wikimedia.org/wiki/File:96K6_Pantsir-S1_-_Engineering_technologies_2012_(3).jpg) | CC BY-SA 4.0, Vitaly V. Kuzmin |
 | action_arctic_kamaz.jpg | Arctic-camouflage variant, KAMAZ-6560 | [Commons](https://commons.wikimedia.org/wiki/File:Kamaz-6560_Pantsir-S1_arctic.jpg) | CC BY-SA 4.0, Boevaya mashina |
 | action_northern_clover.jpg | Deployed during Northern Clover exercise | [Commons](https://commons.wikimedia.org/wiki/File:Pantsir-S1_Northern_Clover.jpg) | CC BY 4.0, Russian MoD |
+| profile_pantsir_s1_maks2013.jpg | Full vehicle, side profile, missile tubes raised, MAKS 2013 airshow | [Commons](https://commons.wikimedia.org/wiki/File:MAKS_Airshow_2013_(Ramenskoye_Airport,_Russia)_(521-05).jpg) | CC BY-SA 4.0 |
