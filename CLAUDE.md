@@ -27,6 +27,9 @@ PATH; call it from PowerShell by full path).
 
 | Path | What |
 |---|---|
+| `game/` | **the game** (browser, plain JS ES modules + WebGL2, no build step). Start with `game/README.md`, `game/DESIGN.md`, `game/ARCHITECTURE.md`, `game/src/game/README.md` (systems); overnight history in `game/NIGHT_LOG.md`, scored reviews in `game/reviews/` |
+| `game/src/` | `engine/` (WebGL point renderer, clipmap terrain/sea, models, camera, overlay, Orbital hairlines), `sim/` (deterministic headless sim + AI), `world/` (six maps, landmarks), `game/` (the match: systems), `ui/` (HUD, sensors + scan, inspect, shell menus, help), `fx/`, `audio/`, `data/` (units, models, anatomy, campaign, settings) |
+| `tools/serve_game.py` | server for the repo root (game + reference), port 8771, PNG sink; `run_game.bat` starts it and opens the game |
 | `reference/films/` | the films (`<id>.html` + `<id>_*.js`), gallery `index.html`, briefs `_brief/`, stills `_shoot.html` |
 | `reference/films/common/` | `film.js` (film runtime), `hd_land.js`, `hd_sea_air.js` (detailed models) |
 | `reference/menus/` | the ten earlier animated menus + the shared kit in `common/` |
@@ -37,6 +40,9 @@ PATH; call it from PowerShell by full path).
 
 | Task | Command |
 |---|---|
+| Play the game | `run_game.bat`, or `python tools/serve_game.py` and open http://localhost:8771/game/index.html |
+| Game tests / balance | http://localhost:8771/game/tests.html · `game/balance.html` (AI-vs-AI batches per map) |
+| Game stills | in the page console: `ONIKS.still(name)` (WebGL only), `ONIKS.hudShot(name)` (with the HUD) → `game/shots/` (gitignored); `ONIKS.benchSync(n)` GPU-synced ms; `ONIKS.ff(sec)` runs the sim ahead |
 | Serve and watch | `python tools/serve.py`, open http://localhost:8770/films/index.html |
 | Stills | open `/films/_shoot.html?s=<film>@t1,t2` → `reference/films/shots/<film>_t<sec>.png` (gitignored) |
 | Gallery thumbs | list moments in `reference/films/_thumbs.py`, run it |
@@ -81,8 +87,15 @@ PATH; call it from PowerShell by full path).
 - **Browser tab cap (~9)** with many parallel agents: one tab per agent, reused, closed at the end.
 - **Noisy benchmarks** while many agents run: compare against a reference film at the same moment under the same
   load, and re-bench on a quiet machine.
-- **Port clash** with another session's server: give each project its own port (8770 here).
+- **Port clash** with another session's server: give each project its own port (8770 here, 8771 for the game).
 - **Garbled × ° · ±** in one save: keep files UTF-8.
+- **Slow page loads on Windows** (`localhost` tries IPv6 first): `serve_game.py` also listens on `::1`; use
+  http://127.0.0.1:8771/ if a server predates that.
+- **Balance/AI briefs tripped the safety filter** when they described tactics ("screens the carrier",
+  "saturates the air defence"). A numbers-only brief that treats `sim/ai.js` as a black box (win rates, match
+  lengths, stat and spawn changes via `game/balance.html`) worked.
+- **Parallel game agents**: give each one explicit file ownership (and a do-not-edit list), let them add systems
+  through `main.js`'s optional-import list, and commit only their paths (never `git commit -a` mid-wave).
 
 ## Open items
 
