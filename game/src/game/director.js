@@ -244,6 +244,7 @@ function makeDirector(game) {
     if (u && u.side === game.side) s += 3;           // something is coming at us
     if (u && (u.def.domain === 'sea' || u.def.hq)) s += 1;
     if (shot && shot.id === p.id) s += 5;            // stay with the round we are on
+    if (p.ctrl === false) s += 6;                    // a round out of control, coming apart (game/debris.js)
     return s;
   }
 
@@ -577,6 +578,14 @@ function makeDirector(game) {
       return false;
     },
     init() {
+      // a break-up (game/debris.js): the moment the intercept already put on the list weighs more; a spin-out or an
+      // aircraft coming apart is a moment of its own
+      game.bus.on('breakup', b => {
+        if (!b || !b.pos) return;
+        const r = recent.find(x => x.kind === 'intercept' && Math.abs(x.t - b.t) < .2);
+        if (r) r.w = Math.max(r.w, b.w || 7);
+        else { recent.push({ kind: 'intercept', pos: b.pos.slice(), t: b.t, w: b.w || 7, unit: b.unit }); if (recent.length > 24) recent.shift(); }
+      });
       game.bus.on('result', () => {
         // the end: the last kill, held (the most important of the last few, the command post first); else the command
         // post or carrier the match was lost with, where it went down

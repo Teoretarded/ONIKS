@@ -22,6 +22,8 @@ game.addSystem(createFx(game, { budget: 150000, wakes: true, fog: true }));   //
 | `update(dtReal, dtSim)` | keeps the persistent ones fed from `game.sim`: projectile trails (puffs laid along `p.pos` since the last frame), wakes of moving ships, fires on damaged and dying units, sinking slicks, aircraft trailing smoke, wreck fires on the ground |
 | `draw3d(frame)` | draws everything into `frame.sink` at `frame.t` (the interpolated sim time), in three layers: flashes, heads and flames first (never cut), then debris, splashes and tracers, then smoke, wakes and weather |
 | `stats` | `{ dots, q, effects, trails, ms }` of the last frame (`q` is the thinning factor, 1 = full) |
+| `addTrail(tr)` | a `Trail` another system feeds itself (game/debris.js: burning pieces, `STAGE.wreck` / `damaged` / `brand`), drawn with the others until it is done |
+| `headOf(p, t)` | a round the debris system draws tumbling (`game.debris.head`): its origin, forward axis and flame left; the trail is laid at its swinging nozzle and the plume points along its axis (the smoke corkscrews), a destroyed aircraft's jets and rotor wash stop |
 | `wakes` | true: the render system leaves ship wakes to FX (it reads `game.getSystem('fx').wakes`) |
 | `ownTrails` | true: FX draws the Kh-35U / Kalibr plumes and smoke (the render system's stop-gap trail for those kinds can go) |
 | `budget` | dots per frame (default 150 000), also the hard cap. Over 85% of it, `q` drops for the next frame (every effect scales its dot counts by `q`); a spike frame that still reaches the cap loses its last-drawn smoke, never a flash or a head (drawn first). `q` recovers slowly when under. |

@@ -177,12 +177,14 @@ export async function createReplay(game, ctx) {
     // one still fading out hands over what it will restore (the world, the rate, the view the player had)
     const prev = S;
     if (prev) { R.worldBright = prev.wb0; S = null; }
+    // a break-up's bullet time (game/debris.js) running now hands over the rate the player had
+    const bt = !prev && game.bulletTime && game.bulletTime.active ? game.bulletTime.take() : null;
     const V = {
       mode: o.mode, id: u ? u.id : rec.id, u, rec, def, subj, sea: def.domain === 'sea', fin: !!o.fin,
       side: u ? u.side : rec.side, kind: o.p ? o.p.kind : rec ? rec.kind : o.e ? o.e.kind : '',
       proj: o.p ? o.p.id : 0, t: 0, phase: 'in', uiA: 0,
       tI: 0, tHit: -1, tDead: -1, tGone: -1, tPull: 1e9, tEnd: 1e9,
-      rate0: prev ? prev.rateTo : RATES.includes(game.timeRate) ? game.timeRate : game.timeRate > 1 ? 4 : 1, rateTouched: false,
+      rate0: prev ? prev.rateTo : bt ? bt.rate0 : RATES.includes(game.timeRate) ? game.timeRate : game.timeRate > 1 ? 4 : 1, rateTouched: false,
       ui0: prev ? prev.ui0 : game.ui.hidden, wb0: prev ? prev.wb0 : R.worldBright,
       cam0: prev ? prev.cam0 : { target: cam.target.slice(), dist: cam.dist, yaw: cam.yaw, pitch: cam.pitch, followFn: cam.followFn, followOff: cam.followOff ? cam.followOff.slice() : [0, 0, 0] },
       T0: [0, 0, 0], R0: [1, 0, 0, 0, 1, 0, 0, 0, 1], st: {}, hdg: 0,
@@ -622,10 +624,13 @@ export async function createReplay(game, ctx) {
     const dm = damageNow(V);
     d.damage = dm;
     const under = V.sea ? 1.8 : 1.3, xOpen = F.started && !F.closed;
+    // parts that broke loose and fly on their own (game/debris.js) are not on the hull any more
+    const gone = game.debris && game.debris.gone ? game.debris.gone(V.id) : null;
     for (const p of subj.parts) {
       const nm = p.name;
       if (p.k > 0) d.partX[nm] = p.rx; else if (d.partX[nm]) delete d.partX[nm];
       let al = p.cls === 'hidden' ? (xOpen ? under : 0) : p.cls === 'part' ? 1.12 : 1;
+      if (gone && gone(nm)) al = 0;
       const fl = V.flash.get(nm);
       if (fl) al *= 1 + 1.5 * fl.amp * (1 - ss(0, 1.1, t - fl.t0));
       if (dm && dm[nm] >= .99) al *= .3;

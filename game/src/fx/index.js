@@ -70,15 +70,16 @@ function profile(kind, age, P, p) {
     case 'sam': return age < 2.4 ? [STAGE.small, PLUME.small, 1] : [STAGE.glide, null, .2];
     case 'aam': return age < 3 ? [STAGE.sustain, PLUME.small, .8] : [STAGE.glide, null, .15];
     case 'hellfire': return age < 2.5 ? [STAGE.small, PLUME.tiny, .6] : [null, null, .1];
+    case 'kornet': return age < 1.2 ? [STAGE.small, PLUME.tiny, .5] : [null, null, .08];      // 9M133: a short sustainer burn
     default: return [null, null, 0];
   }
 }
 const BOOSTER = { oniks: 'oniks', sm6: 'mk72', tlam: 'tlam', sam: 'small', pdms: 'small', uran: 'kh35', kalibr: 'kalibr' };
-const SPLASH_H = { shell: 26, oniks: 46, tlam: 36, slam: 34, hellfire: 12, sm6: 16, pdms: 14, sam: 12, aam: 12, crash: 30, uran: 30, kalibr: 40 };
-const HIT_SC = { oniks: 1, tlam: .7, slam: .65, hellfire: .3, shell: .2, sm6: .35, pdms: .3, sam: .3, aam: .3, ciws: .05, gun30: .06, uran: .55, kalibr: .75 };
-const THREAT = { oniks: 1, tlam: 1, slam: 1, hellfire: 1, shell: 1, crash: 1, uran: 1, kalibr: 1 };
+const SPLASH_H = { kornet: 9, shell: 26, oniks: 46, tlam: 36, slam: 34, hellfire: 12, sm6: 16, pdms: 14, sam: 12, aam: 12, crash: 30, uran: 30, kalibr: 40 };
+const HIT_SC = { kornet: .22, oniks: 1, tlam: .7, slam: .65, hellfire: .3, shell: .2, sm6: .35, pdms: .3, sam: .3, aam: .3, ciws: .05, gun30: .06, uran: .55, kalibr: .75 };
+const THREAT = { kornet: 1, oniks: 1, tlam: 1, slam: 1, hellfire: 1, shell: 1, crash: 1, uran: 1, kalibr: 1 };
 const GUNS = { ciws: 1, gun30: 1 };
-const NOZ = { oniks: 4.5, sm6: 3.3, tlam: 3.1, slam: 2.2, pdms: 1.8, sam: 1.7, aam: 1.8, hellfire: .85, uran: 2.25, kalibr: 4.15 };
+const NOZ = { kornet: .6, oniks: 4.5, sm6: 3.3, tlam: 3.1, slam: 2.2, pdms: 1.8, sam: 1.7, aam: 1.8, hellfire: .85, uran: 2.25, kalibr: 4.15 };
 /* torpedoes: the round's length (m) and the height of the column its charge throws up under a keel */
 const TORP = { mk48: { len: 5.8, H: 115 }, t53: { len: 7.2, H: 105 }, mk54: { len: 2.72, H: 45 } };
 /* the boats (data/models.js SUBS: VA, KL): the sail [z0, z1, half width, top], the casing's top over the waterline,
@@ -124,6 +125,7 @@ class FxSystem {
     this.wclk = 0; this.lastBig = -9; this.lastBigIc = -9; this.lastCg = -9;
     this.groundFires = [];
     this.down = new Downwash({});
+    this.skirt = new Downwash({ D: 15 });      // an LCAC on cushion: the spray (dust over land) from under its skirt
     this.V = new View();
     this.lastT = 0;
     const self = this;
@@ -169,6 +171,13 @@ class FxSystem {
   }
   add(e, layer) { e.layer = layer || 0; this.fx.push(e); return e; }
   tracker(id) { return this.trk.get(id) || this.gone.get(id); }
+  /* a trail another system feeds itself (game/debris.js: burning pieces): drawn with the others until it is done */
+  addTrail(tr) { this.ghost.push(tr); return tr; }
+  /* a round the debris system draws tumbling: its origin and forward axis at t, k the flame left (null: not one) */
+  headOf(p, t) {
+    const D = this.game && this.game.debris;
+    return D && D.head && D.spins && D.spins.size ? D.head(p, t, this._hd || (this._hd = { x: 0, y: 0, z: 0, ax: 0, ay: 0, az: 1, k: 1 })) : null;
+  }
 
   /* ---------- sim events ---------- */
   onEvent(ev) {
@@ -191,7 +200,7 @@ class FxSystem {
         else if (k === 'shell') this.add(new GunBlast({ t0: t, pos, axis, seed, sea: this.wet(pos[0], pos[2]) }), 1);
         else if (k === 'sam') this.add(new HotLaunch({ t0: t, pos, axis, seed, scale: 1, ground: this.C.ground }), 1);
         else if (k === 'pdms') this.add(new HotLaunch({ t0: t, pos, axis, seed, scale: .8 }), 1);
-        else if (k === 'hellfire') this.add(new HotLaunch({ t0: t, pos, axis, seed, scale: .35 }), 1);
+        else if (k === 'hellfire' || k === 'kornet') this.add(new HotLaunch({ t0: t, pos, axis, seed, scale: k === 'kornet' ? .3 : .35 }), 1);
         else this.add(new HotLaunch({ t0: t, pos, axis, seed, scale: .45 }), 1);
         return;
       }
@@ -432,10 +441,13 @@ class FxSystem {
       tr.seen = tr.seen || vis;
       if (tr.bub) { if (vis && p.pos[1] < -1) tr.bub.feed(t, p.pos[0], p.pos[2], -p.pos[1]); continue; }
       const pr = age < tr.ig ? NONE : profile(p.kind, age, p.P, p);
-      if (pr[0] && vis) {
+      // a round out of control (game/debris.js): the nozzle swings round with its tumble, so the smoke corkscrews
+      const hd = this.headOf(p, t);
+      if (pr[0] && vis && (!hd || hd.k > .05)) {
         // puffs leave the nozzle, not the round's middle
-        const v = p.vel, l = Math.hypot(v[0], v[1], v[2]) || 1, ax = v[0] / l, ay = v[1] / l, az = v[2] / l, nz = pr[1] ? pr[1].off : (NOZ[p.kind] || 2);
-        tr.trail.feed(t, p.pos[0] - ax * nz, p.pos[1] - ay * nz, p.pos[2] - az * nz, pr[0], ax, ay, az);
+        const v = p.vel, l = Math.hypot(v[0], v[1], v[2]) || 1, nz = pr[1] ? pr[1].off : (NOZ[p.kind] || 2);
+        const ax = hd ? hd.ax : v[0] / l, ay = hd ? hd.ay : v[1] / l, az = hd ? hd.az : v[2] / l, hx = hd ? hd.x : p.pos[0], hy = hd ? hd.y : p.pos[1], hz = hd ? hd.z : p.pos[2];
+        tr.trail.feed(t, hx - ax * nz, hy - ay * nz, hz - az * nz, pr[0], ax, ay, az);
       } else tr.trail.lx = NaN;
     }
     // rounds gone this frame: their smoke hangs on; the tracker is kept a moment for the events that follow
@@ -456,7 +468,7 @@ class FxSystem {
           w.vis = this.seeUnit(u);
         }
         if (u.def.sub) this.boatWater(u, w, t);
-        else if (w) w.update(u.pos, u.hdg, u.speed || 0, t);
+        else if (w) w.update(u.pos, u.hdg, u.def.hover && (u.aboard || this.groundAt(u.pos[0], u.pos[2]) > 0) ? 0 : u.speed || 0, t);   // no wake over the beach
       }
       const f = this.fires.get(u.id);
       if (f) {
@@ -579,6 +591,9 @@ class FxSystem {
           if (pr[2] && V.pxm(x, y, z) < 3) orbHead(x, y, z, pr[2], 1);
           continue;
         }
+        // a round out of control: the plume swings round with its tumbling axis (and chokes if its ramjet does)
+        const hd = this.headOf(p, t);
+        if (hd) { if (pr[1] && hd.k > .01) drawPlume(C, hd.x, hd.y, hd.z, hd.ax, hd.ay, hd.az, pr[1], ignOf(p.kind, age, tr.ig) * hd.k, p.id, fr); continue; }
         if (pr[1]) drawPlume(C, x, y, z, v[0] / l, v[1] / l, v[2] / l, pr[1], ignOf(p.kind, age, tr.ig), p.id, fr);
         if (pr[2] && V.pxm(x, y, z) < 3) drawHead(C, x, y, z, pr[2], 1);
       }
@@ -587,6 +602,8 @@ class FxSystem {
         if (u.def.domain !== 'air' || u.aboard || !this.seeUnit(u)) continue;
         const ps = g && g.unitPose ? g.unitPose(u, alpha) : u, pos = ps.pos;
         if (u.type === 'aew') { if (u.alive) { if (orb) orbProps(pos, ps.hdg, ps.pitch, ps.roll, 1, u.id); else drawProps(C, pos, ps.hdg, ps.pitch, ps.roll, 1, u.id); } }
+        // a destroyed aircraft's engines and rotor are gone with it (game/debris.js draws the airframe coming apart)
+        else if (!u.alive) continue;
         else if (u.type === 'fighter') {
           const ab = Math.max(u.ab || 0, (this.abUntil.get(u.id) || 0) > t ? 1 : 0);
           if (orb) orbJet(pos, u.hdg, u.pitch, u.roll, ab, PLUME.ab, u.id);
@@ -596,6 +613,14 @@ class FxSystem {
           this.down.seed = u.id;
           if (orb) orbDownwash(this.down, pos, gy, this.wet(pos[0], pos[2]), 1); else this.down.draw(C, pos, gy, this.wet(pos[0], pos[2]), 1);
         }
+      }
+      // LCACs on cushion: spray thrown out from under the skirt (dust over the beach), stronger with speed
+      for (const u of sim.units.values()) {
+        if (!u.def.hover || u.aboard || !u.alive || (u.cushion || 0) < .3 || !this.seeUnit(u)) continue;
+        const ps = g && g.unitPose ? g.unitPose(u, alpha) : u, pos = ps.pos, gy = this.groundAt(pos[0], pos[2]);
+        const k = (u.cushion || 0) * (.45 + .55 * Math.min(1, (u.speed || 0) / 12));
+        this.skirt.seed = u.id;
+        if (orb) orbDownwash(this.skirt, pos, gy, this.wet(pos[0], pos[2]), k); else this.skirt.draw(C, pos, gy, this.wet(pos[0], pos[2]), k);
       }
     }
     mark('heads');

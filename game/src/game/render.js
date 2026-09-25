@@ -69,9 +69,12 @@ export function createRender(game, DM) {
     // two rows aft of the island (starboard) and along the port bow, 22 m apart
     const row = s % 2, i = s >> 1;
     // the starboard row skips the island (z -50 .. -4): its 4th slot on park forward of it
-    const lx = row ? -26 : 24, lz = -110 + i * 24 + (row ? 70 : !row && i >= 3 ? 48 : 0), yaw = row ? Math.PI / 2 : -Math.PI / 2;
+    let lx = row ? -26 : 24, lz = -110 + i * 24 + (row ? 70 : !row && i >= 3 ? 48 : 0), yaw = row ? Math.PI / 2 : -Math.PI / 2, dy = 19.6;
+    // an LHD: its helicopter spots down the flight deck (data/models.js LHD.SPOTS)
+    const A = cv.def.well && DM && DM.LHD;
+    if (A && A.SPOTS && A.SPOTS.length) { const q = A.SPOTS[s % A.SPOTS.length]; lx = q[0]; lz = q[1]; yaw = q[2] || 0; dy = A.DECK_Y + .1; }
     const c = Math.cos(cp.hdg), sn = Math.sin(cp.hdg);
-    out.pos[0] = cp.pos[0] + c * lx + sn * lz; out.pos[2] = cp.pos[2] - sn * lx + c * lz; out.pos[1] = cp.pos[1] + 19.6 + (u.type === 'aew' ? 1.9 : 0);   // the E-2D stands on its gear
+    out.pos[0] = cp.pos[0] + c * lx + sn * lz; out.pos[2] = cp.pos[2] - sn * lx + c * lz; out.pos[1] = cp.pos[1] + dy + (u.type === 'aew' ? 1.9 : 0);   // the E-2D stands on its gear
     out.hdg = cp.hdg + yaw; out.pitch = cp.pitch; out.roll = cp.roll;
     return out;
   }
@@ -133,7 +136,31 @@ export function createRender(game, DM) {
     }
   }
 
-  const parked = { pos: [0, 0, 0], hdg: 0, pitch: 0, roll: 0 };
+  const parked = { pos: [0, 0, 0], hdg: 0, pitch: 0, roll: 0 }, hostP = { pos: [0, 0, 0], hdg: 0, pitch: 0, roll: 0 };
+
+  /* a carried unit (sim/amphib.js): an LCAC in its berth in the LHD's well, seen only with the stern gate down (it
+     floats in the flooded well); a vehicle on an LCAC's cargo deck (not while that craft is shut in the well). On the
+     LHD's vehicle decks nothing shows. false = not drawn */
+  function carriedPose(u, h, out) {
+    if (h.def.well && u.def.hover) {
+      if ((h.well || 0) < .05) return false;
+      const W = h.def.well, cp = game.unitPose(h), z = W.slots[u.slot >= 0 ? u.slot : 0], c = Math.cos(cp.hdg), s = Math.sin(cp.hdg);
+      out.pos[0] = cp.pos[0] + s * z; out.pos[2] = cp.pos[2] + c * z; out.pos[1] = Math.max(0, cp.pos[1] + W.y);
+      out.hdg = cp.hdg; out.pitch = cp.pitch; out.roll = cp.roll;
+      return true;
+    }
+    if (h.def.hover) {
+      let hp;
+      if (h.aboard) { const hh = sim.units.get(h.aboard); if (!hh || !carriedPose(h, hh, hostP)) return false; hp = hostP; }
+      else hp = game.unitPose(h);
+      const A = DM && DM.LCAC, q = (A && A.SLOTS && A.SLOTS[u.slot > 0 ? 1 : 0]) || [0, u.slot > 0 ? -4.9 : 4.9];
+      const y = A && A.deckY ? A.deckY(h.def.modelState(h, game.t)) : 2.3, c = Math.cos(hp.hdg), s = Math.sin(hp.hdg);
+      out.pos[0] = hp.pos[0] + c * q[0] + s * q[1]; out.pos[2] = hp.pos[2] - s * q[0] + c * q[1]; out.pos[1] = hp.pos[1] + y;
+      out.hdg = hp.hdg; out.pitch = hp.pitch; out.roll = hp.roll;
+      return true;
+    }
+    return false;
+  }
 
   function drawUnit(u) {
     const d0 = u.def;
@@ -149,7 +176,9 @@ export function createRender(game, DM) {
     if (v !== 'own' && v !== 'track') return;
     let d = inst.get(u.id);
     if (!d) { d = { key: d0.model, T: [0, 0, 0], hdg: 0, pitch: 0, roll: 0, st: null, tint: 'own', id: u.id, alpha: 1, dissolve: 0, damage: null }; inst.set(u.id, d); }
-    const p = u.aboard ? parkPose(u, sim.units.get(u.aboard), parked) : game.unitPose(u);
+    let p;
+    if (u.aboard && d0.domain !== 'air') { if (!carriedPose(u, sim.units.get(u.aboard), parked)) { game.drawn.delete(u.id); return; } p = parked; }
+    else p = u.aboard ? parkPose(u, sim.units.get(u.aboard), parked) : game.unitPose(u);
     d.T[0] = p.pos[0]; d.T[1] = p.pos[1]; d.T[2] = p.pos[2];
     d.hdg = p.hdg; d.pitch = p.pitch; d.roll = p.roll;
     d.tint = tintOf(v);
@@ -175,10 +204,12 @@ export function createRender(game, DM) {
       else d.dissolve = ss(.85, 1, k);
       d.damage = u.parts;
     } else d.tintK = undefined;
+    // the debris system (game/debris.js): an aircraft coming apart is drawn there; parts that broke loose are masked
+    if (game.debris && game.debris.unit(u, d) === false) return;
     R.draw(d);
     game.drawn.set(u.id, d);
-    // wake behind a moving ship (unless the FX system lays its own)
-    if (d0.domain === 'sea' && !fxWakes) {
+    // wake behind a moving ship (unless the FX system lays its own); none for a hovercraft over the beach
+    if (d0.domain === 'sea' && !fxWakes && !(d0.hover && game.map.h(p.pos[0], p.pos[2]) > 0)) {
       let w = wakes.get(u.id);
       if (!w) { w = new Wake({ L: d0.size[0], B: d0.size[1], seed: u.id, len: d0.size[0] > 300 ? 1500 : 1100 }); wakes.set(u.id, w); }
       w.update(p.pos, p.hdg, u.alive ? u.speed : u.speed * (1 - u.dying), game.t);
@@ -245,6 +276,8 @@ export function createRender(game, DM) {
     d.hdg = p.hdg; d.pitch = p.pitch; d.roll = 0;
     d.st = pr.st || {};
     d.tint = pr.side === game.side ? 'own' : 'hostile';
+    // a round out of control or broken up is drawn by the debris system (game/debris.js)
+    if (game.debris && !game.debris.proj(pr, d)) return;
     R.draw(d);
   }
 
@@ -276,7 +309,7 @@ export function createRender(game, DM) {
       if (e.type === 'removed') {
         // a burnt-out vehicle stays on the ground a while as a wreck, then the returns thin out
         const d = inst.get(e.unit);
-        if (d && /_wreck$/.test(d.key)) ghosts.push({ d: { key: d.key, T: d.T.slice(), hdg: d.hdg, pitch: d.pitch, roll: d.roll, st: Object.assign({}, d.st, { wreck: 1 }), tint: 'neutral', dissolve: .55, damage: d.damage ? Object.assign({}, d.damage) : null }, t0: sim.t });
+        if (d && /_wreck$/.test(d.key)) ghosts.push({ d: { key: d.key, T: d.T.slice(), hdg: d.hdg, pitch: d.pitch, roll: d.roll, st: Object.assign({}, d.st, { wreck: 1 }), tint: 'neutral', dissolve: .55, damage: d.damage ? Object.assign({}, d.damage) : null, partAlpha: d.partAlpha }, t0: sim.t });
         inst.delete(e.unit); wakes.delete(e.unit); mastInst.delete(e.unit); for (const m of deckSlots.values()) m.delete(e.unit);
       }
       else if (e.type === 'takeoff') { for (const m of deckSlots.values()) m.delete(e.unit); }
