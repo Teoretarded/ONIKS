@@ -109,3 +109,10 @@ Fix wave launched: gameplay fixes (player fires first, weapons free/hold fire, c
 reach refused, HUD collisions, clickable alerts, look up at launches), scan payoff (chain lightning that forks to
 every contact, part boxes and decoding labels on the hulls in the normal view, a magnified EO inset like the films),
 campaign pacing and threat. The world-look agent also got the "units must pop over the ground" note.
+
+## 06:10 · World look done
+The sea now lies in world-fixed bands like the Engagement film (measured against it: same dot spacing and brightness
+at the same framing), land reads as LiDAR with crisp cliffs, coastlines and contour lines from high up, fields and
+marsh on the flat maps, a horizon band with sparse stars. The ground dims around units so ships and trucks stand out.
+Before/after: `game/shots/look_before_after.png`, `look_film_vs_game.png`. Director + hit replay agent started
+(the cinematic camera frames the action; a decisive hit plays as a slow-motion Anatomy moment with the X-ray sweep).
