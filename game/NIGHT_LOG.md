@@ -229,3 +229,11 @@ When two or more rounds of a salvo are in the air, a strip opens above the comma
 lane per round on a shared time-to-impact axis (`R1 3M55 … T–0:11 M 2.2 7.8 KM`), interceptor ticks rising under each
 round, lanes ending HIT / DOWN (`SM-6 · 25 KM`) / MISS / SPENT; incoming raids in coral with their targets
 (`RAID 01 · 4 × TLAM · → SAM 06`). Click a lane to ride behind that round. Stills: `game/shots/salvo_board/`.
+
+## 10:00 · Combat depth done
+Attack orders now keep firing volley after volley (each volley watched until its rounds are down), hold when the
+track is lost ("TRK 22 · LOST · HOLDING 5:00") and resume when it comes back; salvo size 1 / 2 / ALL (`~` key or the
+Salvo row); "IN REACH" alerts when a classified track comes within reach of your weapons (click to fly there, drops
+to x1). The coast AI now presses in skirmish (an idle fleet on the strait: 34 rounds, two destroyers and the carrier
+sunk by T+60, where it used to fire 8 rounds and stall). 20/20 tests. Balance swung (two maps now favour the coast),
+so a numbers-only balance pass is running.
