@@ -269,7 +269,7 @@ export function createSelect(game) {
   function reloadNote() {
     const us = game.selected().filter(u => !u.aboard);
     if (!us.length) return;
-    const r = us.filter(u => u.type === 'tel' || u.type === 'bal' || u.type === 'transloader' || u.def.domain === 'sea' || u.type === 'pantsir');
+    const r = us.filter(u => u.type === 'tel' || u.type === 'bal' || u.type === 'transloader' || u.def.domain === 'sea' || u.type === 'pantsir' || u.def.depotRefill);
     if (!r.length) { game.bus.emit('toast', { text: 'NOTHING TO RELOAD', bad: true }); return; }
     const full = u => u.type === 'transloader' ? u.cargo >= u.def.cargo
       : ammoFull(u) && (!u.mag || Object.keys(u.mag).every(k => u.mag[k] >= u.def.magazine[k]));

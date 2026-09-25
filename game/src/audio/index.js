@@ -440,7 +440,7 @@ export function createAudio(game) {
       // missiles in flight
       if (sim.projectiles && sim.projectiles.values) {
         for (const p of sim.projectiles.values()) {
-          if (!p || !p.alive || !isPos(p.pos) || p.kind === 'shell') continue;
+          if (!p || !p.alive || !isPos(p.pos) || p.kind === 'shell' || (p.P && p.P.mode === 'ballistic')) continue;
           const d = dist(p.pos);
           if ((MK[p.kind] && MK[p.kind].how === 'torp') || (p.P && p.P.torpedo)) {
             // a torpedo in the water: its whine, near the camera only

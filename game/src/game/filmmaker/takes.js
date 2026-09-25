@@ -111,7 +111,7 @@ export function saveDraft(take, mapId) {
 }
 
 /* ---------------------------------------------------------------- built-in takes (any map, either side) */
-const RANK = { tel: 10, ddg: 10, carrier: 8, radar: 6, pantsir: 5, hq: 4, transloader: 3, catapult: 2 };
+const RANK = { tel: 10, ddg: 10, cg: 10, s400: 9, carrier: 8, lcs: 7, radar: 6, s400r: 6, bereg: 6, pantsir: 5, hq: 4, transloader: 3, catapult: 2 };
 
 /* the unit that stands for the player's force: the launchers first */
 function leadOf(game) {

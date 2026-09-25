@@ -73,6 +73,10 @@ function profile(kind, age, P, p) {
     default: return [null, null, 0];
   }
 }
+/* the third wave's rounds look like their nearest kin: gun rounds like the 5-inch, the 48N6 like the SM-6 (after its
+   cold launch: the ColdLaunch pop, no flame for the first half second), RAM like the ESSM */
+const FXK = { shell57: 'shell', shell130: 'shell', sam48: 'sm6', ram: 'pdms' };
+const fk = k => FXK[k] || k;
 const BOOSTER = { oniks: 'oniks', sm6: 'mk72', tlam: 'tlam', sam: 'small', pdms: 'small', uran: 'kh35', kalibr: 'kalibr' };
 const SPLASH_H = { shell: 26, oniks: 46, tlam: 36, slam: 34, hellfire: 12, sm6: 16, pdms: 14, sam: 12, aam: 12, crash: 30, uran: 30, kalibr: 40 };
 const HIT_SC = { oniks: 1, tlam: .7, slam: .65, hellfire: .3, shell: .2, sm6: .35, pdms: .3, sam: .3, aam: .3, ciws: .05, gun30: .06, uran: .55, kalibr: .75 };
@@ -177,10 +181,11 @@ class FxSystem {
       case 'launch': {
         const u = sim && sim.units.get(ev.from);
         if (u && !this.seeUnit(u)) return;
-        const axis = dirOf(ev.hdg, ev.pitch), pos = ev.pos, k = ev.kind;
+        const axis = dirOf(ev.hdg, ev.pitch), pos = ev.pos, k0 = ev.kind, k = fk(k0);
         if (TORP[k]) return this.onTorpLaunch(ev, u, t, seed);
         const boat = !!(u && u.def.sub);
-        if (k === 'oniks') this.add(new ColdLaunch({ t0: t, pos, axis, ground: this.C.ground, seed }), 1);
+        if (k0 === 'sam48') { this.lnch.set(ev.proj, .5); this.add(new ColdLaunch({ t0: t, pos, axis, ground: this.C.ground, seed }), 1); }
+        else if (k === 'oniks') this.add(new ColdLaunch({ t0: t, pos, axis, ground: this.C.ground, seed }), 1);
         else if (k === 'kalibr' || (boat && subUnder(u))) {
           // out of a boat: the round breaches, its booster lights a few metres over the sea
           this.lnch.set(ev.proj, .15);
@@ -220,7 +225,7 @@ class FxSystem {
       }
       case 'hit': return this.onHit(ev, t, seed);
       case 'splash': {
-        const pos = ev.pos, k = ev.kind, gy = this.groundAt(pos[0], pos[2]);
+        const pos = ev.pos, k = fk(ev.kind), gy = this.groundAt(pos[0], pos[2]);
         const tr = this.tracker(ev.proj); if (tr) tr.killed = true;
         if (ev.air) {
           const v = tr ? tr.vel : [0, 0, 0];
@@ -344,7 +349,7 @@ class FxSystem {
     }
   }
   onHit(ev, t, seed) {
-    const sim = this.sim, u = sim && sim.units.get(ev.target), pos = ev.pos, k = ev.kind, sc = HIT_SC[k] || .3;
+    const sim = this.sim, u = sim && sim.units.get(ev.target), pos = ev.pos, k = fk(ev.kind), sc = HIT_SC[k] || .3;
     if (ev.under || TORP[k]) return this.onTorpHit(ev, u, t, seed);
     const dom = u ? u.def.domain : (this.wet(pos[0], pos[2]) ? 'sea' : 'land');
     if (u) {
@@ -420,7 +425,7 @@ class FxSystem {
       let tr = this.trk.get(p.id);
       if (!tr) {
         const torp = !!TORP[p.kind] || !!(p.P && p.P.torpedo);
-        tr = { id: p.id, kind: p.kind, t0: p.t0 !== undefined ? p.t0 : t, trail: new Trail(torp ? 4 : p.kind === 'sm6' ? 14000 : p.kind === 'oniks' ? 8000 : 6000, p.id, this.C.ground), vel: [0, 0, 0], pos: p.pos.slice(), seen: false, killed: false, P: p.P,
+        tr = { id: p.id, kind: p.kind, t0: p.t0 !== undefined ? p.t0 : t, trail: new Trail(torp ? 4 : fk(p.kind) === 'sm6' ? 14000 : p.kind === 'oniks' ? 8000 : 6000, p.id, this.C.ground), vel: [0, 0, 0], pos: p.pos.slice(), seen: false, killed: false, P: p.P,
           ig: this.lnch.get(p.id) || 0, bub: torp ? new Bubbles(p.id) : null };
         this.lnch.delete(p.id);
         this.trk.set(p.id, tr);
@@ -431,10 +436,10 @@ class FxSystem {
       const age = t - tr.t0, vis = this.seeProj(p);
       tr.seen = tr.seen || vis;
       if (tr.bub) { if (vis && p.pos[1] < -1) tr.bub.feed(t, p.pos[0], p.pos[2], -p.pos[1]); continue; }
-      const pr = age < tr.ig ? NONE : profile(p.kind, age, p.P, p);
+      const pr = age < tr.ig ? NONE : profile(fk(p.kind), age, p.P, p);
       if (pr[0] && vis) {
         // puffs leave the nozzle, not the round's middle
-        const v = p.vel, l = Math.hypot(v[0], v[1], v[2]) || 1, ax = v[0] / l, ay = v[1] / l, az = v[2] / l, nz = pr[1] ? pr[1].off : (NOZ[p.kind] || 2);
+        const v = p.vel, l = Math.hypot(v[0], v[1], v[2]) || 1, ax = v[0] / l, ay = v[1] / l, az = v[2] / l, nz = pr[1] ? pr[1].off : (NOZ[fk(p.kind)] || 2);
         tr.trail.feed(t, p.pos[0] - ax * nz, p.pos[1] - ay * nz, p.pos[2] - az * nz, pr[0], ax, ay, az);
       } else tr.trail.lx = NaN;
     }
@@ -571,15 +576,15 @@ class FxSystem {
       for (const tr of this.trk.values()) {
         const p = tr.p; if (!p || !p.alive || !this.seeProj(p)) continue;
         const age = t - tr.t0; if (tr.bub || age < tr.ig) continue;
-        const pr = profile(p.kind, age, p.P, p); if (!pr[1] && !pr[2]) continue;
+        const pr = profile(fk(p.kind), age, p.P, p); if (!pr[1] && !pr[2]) continue;
         const x = p.prev[0] + (p.pos[0] - p.prev[0]) * alpha, y = p.prev[1] + (p.pos[1] - p.prev[1]) * alpha, z = p.prev[2] + (p.pos[2] - p.prev[2]) * alpha;
         const v = p.vel, l = Math.hypot(v[0], v[1], v[2]) || 1;
         if (orb) {
-          if (pr[1]) orbPlume(x, y, z, v[0] / l, v[1] / l, v[2] / l, pr[1], ignOf(p.kind, age, tr.ig), p.id, fr);
+          if (pr[1]) orbPlume(x, y, z, v[0] / l, v[1] / l, v[2] / l, pr[1], ignOf(fk(p.kind), age, tr.ig), p.id, fr);
           if (pr[2] && V.pxm(x, y, z) < 3) orbHead(x, y, z, pr[2], 1);
           continue;
         }
-        if (pr[1]) drawPlume(C, x, y, z, v[0] / l, v[1] / l, v[2] / l, pr[1], ignOf(p.kind, age, tr.ig), p.id, fr);
+        if (pr[1]) drawPlume(C, x, y, z, v[0] / l, v[1] / l, v[2] / l, pr[1], ignOf(fk(p.kind), age, tr.ig), p.id, fr);
         if (pr[2] && V.pxm(x, y, z) < 3) drawHead(C, x, y, z, pr[2], 1);
       }
       // jets and rotors

@@ -168,7 +168,7 @@ async function match(job, yieldFn) {
       for (const e of sim.drainEvents()) {
         if (e.type === 'destroyed') { const k = e.side === 'coast' ? 'fleet' : 'coast', ty = typeOf(sim, e.unit); kills[k][ty] = (kills[k][ty] || 0) + 1; }
         if (e.type === 'hit') { if (firstHit === null) firstHit = e.t; inc(tally.hit, e.kind); inc(tally.on, e.kind + '>' + typeOf(sim, e.target)); }
-        else if (e.type === 'launch') { inc(tally.launch, e.kind); if (e.tk === 'unit' && e.kind !== 'shell') inc(tally.aim, e.kind + '>' + typeOf(sim, e.target)); }
+        else if (e.type === 'launch') { inc(tally.launch, e.kind); if (e.tk === 'unit' && e.kind !== 'shell' && e.kind !== 'shell57' && e.kind !== 'shell130') inc(tally.aim, e.kind + '>' + typeOf(sim, e.target)); }
         else if (e.type === 'intercept') inc(tally.icpt, e.kind);
         else if (e.type === 'classify' && (e.cls === 'HQ' || e.cls === 'CVN') && seenHq[e.side] === null) seenHq[e.side] = +(e.t / 60).toFixed(1);
       }

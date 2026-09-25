@@ -27,9 +27,9 @@ addEventListener('resize', fit); fit();
 if (Q.get('ui') === '0') stage.classList.add('noui');
 
 const GROUPS = [
-  ['Coast', ['tel', 'transloader', 'radar', 'pantsir', 'drone', 'catapult', 'hq', 'bal', 'ssk', 'kornet']],
-  ['Fleet', ['destroyer', 'carrier', 'helo', 'fighter', 'aew', 'ssn', 'lhd', 'lcac', 'acv']],
-  ['Munitions', ['oniks', 'tlc', 'oniks_booster', 'pantsir_missile', 'sm6', 'mk72', 'mk41_can', 'strike_missile', 'essm', 'slam', 'hellfire', 'aam', 'shell', 'kh35', 'kalibr', 'torpedo533', 'vpt_can', 'kornet_msl']],
+  ['Coast', ['tel', 'transloader', 'radar', 'pantsir', 'drone', 'catapult', 'hq', 'bal', 'ssk', 'kornet', 's400', 's400r', 'bereg']],
+  ['Fleet', ['destroyer', 'carrier', 'helo', 'fighter', 'aew', 'ssn', 'lhd', 'lcac', 'acv', 'cg', 'lcs']],
+  ['Munitions', ['oniks', 'tlc', 'oniks_booster', 'pantsir_missile', 'sm6', 'mk72', 'mk41_can', 'strike_missile', 'essm', 'slam', 'hellfire', 'aam', 'shell', 'kh35', 'kalibr', 'torpedo533', 'vpt_can', 'kornet_msl', 's400_msl', 'rim116', 'shell130', 'shell57']],
   ['Structures', ['depot', 'port', 'lighthouse', 'radar_hill', 'airfield']],
 ];
 const KEYS = GROUPS.flatMap(g => g[1]);

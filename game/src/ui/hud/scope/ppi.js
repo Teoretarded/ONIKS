@@ -26,8 +26,8 @@ import { radarWorks } from '../../../sim/sensors.js';
 const TAU = Math.PI * 2, DEG = Math.PI / 180;
 const RANGES = [10, 20, 30, 40, 60, 80, 100, 120, 160, 200];      // km: the wheel's steps
 const RING = [2.5, 5, 10, 10, 20, 20, 25, 30, 40, 50];             // km between the rings at each
-const NAME = { radar: 'MONOLITH-B', carrier: 'CVN', ddg: 'DDG', aew: 'E-2D', helo: 'MH-60R', pantsir: 'PANTSIR' };
-const RANK = { radar: 0, carrier: 1, ddg: 2, aew: 3, helo: 4, pantsir: 5 };
+const NAME = { radar: 'MONOLITH-B', carrier: 'CVN', ddg: 'DDG', aew: 'E-2D', helo: 'MH-60R', pantsir: 'PANTSIR', cg: 'CG', lcs: 'LCS', s400r: '92N6E', bereg: 'BEREG' };
+const RANK = { radar: 0, carrier: 1, ddg: 2, aew: 3, helo: 4, pantsir: 5, cg: 1.5, lcs: 2.5, s400r: 4.5, bereg: 6 };
 const PC = { orb: false, bg: '#0B0C0A', wh: '#EEEEE4', own: '#C6F432', sweep: '#C6F432', hot: '#FF6A3D', hotL: '#FF6A3D', rnd: '#C6F432', sel: '#FFFFFF',
   rgb: '198,244,50', font: "'Geist Mono', monospace", fw: 500, wedge: .1, ring: .3, rim: .5 };
 // (the Orbital style: coral only for the marks of hostility; its lines and labels are white, the label a coral square)

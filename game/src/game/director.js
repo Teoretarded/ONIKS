@@ -37,7 +37,7 @@ const CAM_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown'
 /* how much a round is worth watching */
 const HERO = { oniks: 10, tlam: 8, slam: 7, sm6: 5, hellfire: 4, pdms: 3, sam: 3, aam: 3, shell: 0 };
 /* how much a unit is worth watching */
-const RANK = { carrier: 10, hq: 9, ddg: 8, tel: 6, radar: 5, pantsir: 4, transloader: 3, helo: 2, fighter: 2, catapult: 1, drone: 1 };
+const RANK = { carrier: 10, hq: 9, cg: 8, ddg: 8, lcs: 6, tel: 6, s400: 5, radar: 5, s400r: 5, pantsir: 4, bereg: 4, transloader: 3, helo: 2, fighter: 2, catapult: 1, drone: 1 };
 const APPROACH_REAL = 4.6;         // s of real time before the impact the approach shot takes over at the latest
 const MID_REAL = 12, MID_SEP = 12000;   // it takes over earlier, inside 12 s and 12 km: the round and its target framed
                                         // together from the side, closing in as the round closes (no empty mid-course)

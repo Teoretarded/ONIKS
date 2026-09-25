@@ -17,9 +17,9 @@ import { PROJ, UNITS } from '../../data/units.js';
 import { DT } from '../../sim/consts.js';
 
 const XRAY = { oniks: 1, tlam: 1, slam: 1, uran: 1, kalibr: 1 };
-const W8 = { carrier: 30, hq: 30, ddg: 22, ssn: 18, ssk: 18, tel: 12, radar: 10, pantsir: 8, transloader: 6, bal: 10, catapult: 3 };
+const W8 = { carrier: 30, hq: 30, cg: 24, ddg: 22, ssn: 18, ssk: 18, lcs: 14, tel: 12, radar: 10, s400r: 10, s400: 9, pantsir: 8, bereg: 7, transloader: 6, bal: 10, catapult: 3 };
 const heavy = k => !!(PROJ[k] && PROJ[k].threat);
-export const major = t => { const d = UNITS[t]; return !!d && (d.domain === 'sea' || !!d.hq || t === 'tel' || t === 'radar' || t === 'pantsir' || t === 'transloader'); };
+export const major = t => { const d = UNITS[t]; return !!d && (d.domain === 'sea' || !!d.hq || t === 'tel' || t === 'radar' || t === 'pantsir' || t === 'transloader' || t === 's400' || t === 's400r' || t === 'bereg'); };
 const sec = s => Math.round(s / DT);
 
 export function makePlan(rec, side) {

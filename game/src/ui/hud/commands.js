@@ -81,14 +81,14 @@ export function createCommands(game, hud, parent) {
           : v === 'ALL' ? 'Every round in hand in one volley · the heaviest blow, then reload'
           : `${v} rounds a volley · the next when they are down · ~ cycles 1 / 2 / all` };
     } else S.salvo = { ok: false, x: '', hint: 'Rounds per volley of an attack · select launchers first' };
-    const dep = us.filter(u => u.type === 'tel' || u.type === 'bal' || u.type === 'radar');
+    const dep = us.filter(u => u.type === 'tel' || u.type === 'bal' || u.type === 'radar' || u.type === 's400' || u.type === 's400r');
     if (dep.length) {
-      const up = dep.every(u => u.type !== 'radar' ? (u.dep > 0 || u.depT > 0 || u.elevT > 0) : (u.mast > 0 || u.mastT > 0));
+      const up = dep.every(u => u.def.deploy ? (u.dep > 0 || u.depT > 0 || u.elevT > 0) : (u.mast > 0 || u.mastT > 0));
       const blocked = dep.every(u => u.off.deploy);
       S.deploy = { ok: !blocked, lab: up ? 'Stow' : 'Deploy', x: blocked ? 'out' : '',
-        hint: up ? 'Bring it down to drive' : dep[0].type === 'tel' ? 'Jacks 10 s · erect 15 s · cannot move while up' : dep[0].type === 'bal' ? 'Jacks 6 s · pack up 8 s · cannot move while up' : 'Mast up 15 s · needed to radiate' };
-    } else S.deploy = { ok: false, lab: 'Deploy', hint: 'TEL, Bal and Monolith-B only' };
-    const rl = us.filter(u => u.type === 'tel' || u.type === 'transloader' || u.def.domain === 'sea' || u.type === 'pantsir' || u.type === 'bal' || u.type === 'kornet');
+        hint: up ? 'Bring it down to drive' : dep[0].type === 'tel' ? 'Jacks 10 s · erect 15 s · cannot move while up' : dep[0].type === 'bal' ? 'Jacks 6 s · pack up 8 s · cannot move while up' : dep[0].type === 's400' ? 'Jacks 12 s · containers vertical 18 s · fires only on a 92N6E cue' : dep[0].type === 's400r' ? 'Array up 20 s · needed to radiate' : 'Mast up 15 s · needed to radiate' };
+    } else S.deploy = { ok: false, lab: 'Deploy', hint: 'TEL, Bal, S-400 and radars only' };
+    const rl = us.filter(u => u.type === 'tel' || u.type === 'transloader' || u.def.domain === 'sea' || u.type === 'pantsir' || u.type === 'bal' || u.type === 'kornet' || u.def.depotRefill);
     if (rl.length) {
       const need = rl.some(u => u.type === 'transloader' ? u.cargo < u.def.cargo : Object.keys(u.def.weapons).some(w => u.ammo[w] < u.def.weapons[w].ammo));
       const off = rl.every(u => u.off.reload);

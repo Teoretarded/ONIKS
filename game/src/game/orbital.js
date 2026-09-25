@@ -189,7 +189,7 @@ export function createOrbital(game) {
   }
 
   /* ---------- the frame's items: units, tracks, contacts ---------- */
-  const RANK = { hq: 9, carrier: 9, ddg: 7, radar: 6, tel: 6, pantsir: 5, transloader: 3, catapult: 2, fighter: 4, helo: 3, drone: 2 };
+  const RANK = { hq: 9, carrier: 9, cg: 7, ddg: 7, lcs: 6, radar: 6, s400r: 6, tel: 6, s400: 5, pantsir: 5, bereg: 5, transloader: 3, catapult: 2, fighter: 4, helo: 3, drone: 2 };
   function gather() {
     items.length = 0;
     const me = game.side;

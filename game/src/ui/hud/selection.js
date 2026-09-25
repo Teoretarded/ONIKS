@@ -8,9 +8,10 @@ import { TEL_ELEV, CLASSIFY } from '../../data/units.js';
 import { WNAME, pad2, esc, dots, speedOf, km, brg, sat, dur } from './fmt.js';
 import { TRACK, offensive } from '../../game/labels.js';
 
-const TYPE_ORDER = ['hq', 'carrier', 'ddg', 'tel', 'radar', 'pantsir', 'transloader', 'catapult', 'drone', 'fighter', 'helo'];
+const TYPE_ORDER = ['hq', 'carrier', 'cg', 'ddg', 'lcs', 'tel', 'radar', 's400r', 's400', 'pantsir', 'bereg', 'transloader', 'catapult', 'drone', 'fighter', 'helo'];
 const SHORTN = { hq: 'K380R CP', tel: 'K340P TEL', radar: 'Monolith-B', pantsir: 'Pantsir-S1', catapult: 'Orlan-10 rail', drone: 'Orlan-10',
-  transloader: 'K342P TLV', carrier: 'CVN-68 Nimitz', ddg: 'DDG-51 Burke', helo: 'MH-60R', fighter: 'F/A-18E' };
+  transloader: 'K342P TLV', carrier: 'CVN-68 Nimitz', ddg: 'DDG-51 Burke', helo: 'MH-60R', fighter: 'F/A-18E',
+  s400: '5P85SM2-01', s400r: '92N6E', bereg: 'A-222 Bereg', cg: 'CG-47 Ticonderoga', lcs: 'LCS-2 Independence' };
 
 export function createSelection(game, hud) {
   const { sim } = game;

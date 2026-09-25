@@ -5,7 +5,7 @@ import { clock, esc, unitRef, trackRef, PNAME, WNAME, km, brg } from './fmt.js';
 
 const ROWS = 6;
 const HEAD = { coast: 'K300P Bastion-P', fleet: 'CSG · CVN-68' };
-const DEF_KINDS = new Set(['sam', 'sm6', 'pdms', 'aam']);
+const DEF_KINDS = new Set(['sam', 'sm6', 'pdms', 'aam', 'sam48', 'ram']);
 
 export function createLog(game, hud, parent) {
   const { sim } = game;

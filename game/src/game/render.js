@@ -66,6 +66,14 @@ export function createRender(game, DM) {
     if (!m) deckSlots.set(cv.id, m = new Map());
     if (!m.has(u.id)) { let s = 0; const used = new Set(m.values()); while (used.has(s)) s++; m.set(u.id, s); }
     const s = m.get(u.id), cp = game.unitPose(cv);
+    // a ship's helicopter deck (data/units.js def.air.park: the spot, then the hangar)
+    const PK = cv.def.air && cv.def.air.park;
+    if (PK) {
+      const q = PK[Math.min(s, PK.length - 1)], c0 = Math.cos(cp.hdg), s0 = Math.sin(cp.hdg);
+      out.pos[0] = cp.pos[0] + c0 * q[0] + s0 * q[2]; out.pos[2] = cp.pos[2] - s0 * q[0] + c0 * q[2]; out.pos[1] = cp.pos[1] + q[1];
+      out.hdg = cp.hdg; out.pitch = cp.pitch; out.roll = cp.roll;
+      return out;
+    }
     // two rows aft of the island (starboard) and along the port bow, 22 m apart
     const row = s % 2, i = s >> 1;
     // the starboard row skips the island (z -50 .. -4): its 4th slot on park forward of it

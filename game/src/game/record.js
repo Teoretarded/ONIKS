@@ -129,7 +129,7 @@ export function createRecorder(game) {
   /* ------------------------------------------------------------------ tracks of the rounds in flight */
   function sample() {
     for (const p of sim.projectiles.values()) {
-      if (!p.alive || p.kind === 'shell') continue;
+      if (!p.alive || p.kind === 'shell' || (p.P && p.P.mode === 'ballistic')) continue;
       let T = rec.tracks[p.id];
       if (!T) {
         const f = p.fromPos || p.pos;

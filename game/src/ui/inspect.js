@@ -42,7 +42,8 @@ const MUSEUM_Y = 9000;                 // the museum floats in dark space above 
 /* public-reference masses (approximate, where commonly published) */
 const MASS = { destroyer: '≈9 200 t full load', carrier: '≈100 000 t full load', helo: '10.4 t max', fighter: '29.9 t max',
   oniks: '≈3 000 kg', sm6: '≈1 500 kg', pantsir_missile: '≈75 kg', sam57e6: '≈75 kg', drone: '18 kg max', aam: '≈152 kg', aim120: '≈152 kg',
-  hellfire: '≈49 kg', essm: '≈280 kg', slam: '≈675 kg', shell: '≈31.8 kg' };
+  hellfire: '≈49 kg', essm: '≈280 kg', slam: '≈675 kg', shell: '≈31.8 kg',
+  cg: '≈9 800 t full load', lcs: '≈3 100 t full load', bereg: '≈43.7 t', s400_msl: '≈1 835 kg', rim116: '≈74 kg', shell130: '≈33 kg', shell57: '≈2.4 kg' };
 /* where each container's contents sit (x-ray group ids without an "in ..." in their label) */
 const WHERE = { VF: 'VLS fwd', VA: 'VLS aft', MAG: 'magazines', B: 'chamber' };
 /* model state fields that only spin (they never move the x-ray contents) */

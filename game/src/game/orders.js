@@ -33,7 +33,7 @@ const sat = v => v < 0 ? 0 : v > 1 ? 1 : v;
 const km = m => (m < 10000 ? (m / 1000).toFixed(1) : String(Math.round(m / 1000)));
 const pad2 = n => String(n).padStart(2, '0');
 const CAP_R = { fighter: 8000, helo: 3000 };      // patrol radius of a launch to a point (m)
-const CLS = { tel: 'TEL', bal: 'BAL', ddg: 'DDG', ssn: 'SSN', ssk: 'SSK', fighter: 'F/A-18E', helo: 'MH-60R' };
+const CLS = { tel: 'TEL', bal: 'BAL', ddg: 'DDG', ssn: 'SSN', ssk: 'SSK', fighter: 'F/A-18E', helo: 'MH-60R', cg: 'CG', lcs: 'LCS', bereg: 'BEREG' };
 
 export function createOrders(game) {
   const { sim, R } = game, cam = R.camera, T = R.terrain;
@@ -280,7 +280,7 @@ export function createOrders(game) {
         }
         return true;
       }
-      case 'reload': { const r = us.filter(u => u.type === 'tel' || u.type === 'bal' || u.type === 'transloader' || u.def.domain === 'sea' || u.type === 'pantsir'); game.order(r.map(u => u.id), { kind: 'reload' }); return true; }
+      case 'reload': { const r = us.filter(u => u.type === 'tel' || u.type === 'bal' || u.type === 'transloader' || u.def.domain === 'sea' || u.type === 'pantsir' || u.def.depotRefill); game.order(r.map(u => u.id), { kind: 'reload' }); return true; }
       case 'radar': {
         const rs = us.filter(u => u.def.sensors && u.def.sensors.radar);
         if (!rs.length) return true;
