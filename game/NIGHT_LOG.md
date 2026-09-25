@@ -187,3 +187,13 @@ selected unit or the next round, rate ramps (x1 -> x0.25 -> x8) blend like the f
 the sea"). Shift+F9 plays the take clean over the live match with the films' readout and timeline bar; F8 saves a
 full-res still, Shift+F8 a 30 fps PNG sequence. Built-in takes on any map: a dusk orbit of the battery, a chase of
 the next round off the rail, a climb from the sea to 60 km (it dissolves into the Orbital map on the way up).
+
+## 08:15 · Units expansion done
+Four new units with film-quality models and X-ray interiors:
+- **E-2D Hawkeye** (fleet): the 7.3 m rotodome turns once every 10 s; a flying radar launched from the carrier.
+- **Virginia SSN** (fleet) and **Kilo 636.3 SSK** (coast): run submerged, drawn as a ghost of the hull under the
+  water; invisible to radar, scans and lightning; found only by **sonar** (lime pulses over the water from ships,
+  boats and the MH-60R's dipping sonar, white rings where a boat is heard); come up to periscope depth to fire
+  (O dive / come up, Shift+O surface). X-ray shows launch cells, torpedo rooms, reactor / battery and diesels.
+- **Bal** (coast): 8 Kh-35U in a pack that tilts up, faster to deploy than the TEL, shorter range.
+Rounds now terrain-follow with look-ahead (no more flying into the fjord cliffs). 17/17 sim tests pass.
