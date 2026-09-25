@@ -262,3 +262,11 @@ rumbles, rain and wind that follow the storm cells, and a slow-motion treatment 
 and longer, a double sub pulse, a boom at impact). Rate-change blips no longer spam during replays and film takes.
 Selecting units and giving orders now click (the sounds existed but nothing triggered them). Measured peaks stay
 under -1 dBFS in every stress test.
+
+## 10:35 · Effects 2 done
+Bal launches (a hot flash at the pack's rear, efflux rolling over the cab, the booster dropping off, then a faint
+turbofan shimmer), submarine missile launches (the sea domes up, a water column, the booster lighting just above the
+waves, spray falling back in rings), torpedo launches from ships (arcing out of the tube) and helicopters (under a
+small parachute), bubble lines on the surface, torpedo hits as a slow 110 m white water column along the hull instead
+of a fireball, wakes that follow a boat's depth (none deep, a feather at periscope depth), water pouring off the sail
+when a boat surfaces, E-2D prop discs.
