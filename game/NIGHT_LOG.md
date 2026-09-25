@@ -381,3 +381,11 @@ cloud on their own branches: `cloud/units3` (the four new units' models, anatomy
 headlessly in Node) and `cloud/simperf` (a Node harness for tests / balance / bench, and a sim performance pass that
 must keep the state hashes identical). Their branches get merged back here and checked visually.
 The three local agents paused for the limit (new units, detail pass, world detail) resume after 13:50.
+
+## 13:35 · Amphibious landings
+The fleet gains an LHD (Wasp class, 257 m) whose stern gate lowers into the sea; LCAC hovercraft (skirt inflating,
+shrouded props turning, bow ramp) back out of the well deck, run to the nearest beach, drop off cushion and roll
+ACV-1.1s ashore, then return for more. Landed vehicles capture objectives, and holding the ground around the coast's
+command post for 120 s overruns it: a second way for the fleet to win. The coast gets Kornet-EM teams on Tigr-M
+trucks whose launchers rise through the roof. Keys: T Land / Unload / Dock / Board (fleet). 3 new tests pass.
+Balance is off right now (the new collision hits stop ~87% of Oniks); the balance pass is on it.
