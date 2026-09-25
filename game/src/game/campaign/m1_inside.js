@@ -119,7 +119,7 @@ export function run(S) {
           const trk = S.contact(ddg);
           if (trk) cam.flyTo([trk.pos[0], 0, trk.pos[2]], { dist: 9000, pitch: 24 * DEG, yaw: seaB });
         },
-        prompt: () => game.timeRate >= 8 ? 'Wait for it to classify' : 'Faster', key: () => game.timeRate >= 8 ? null : '+', done: () => S.classified(ddg) },
+        prompt: () => game.timeRate >= 8 ? 'Wait for it to classify' : 'Faster', key: () => game.timeRate >= 8 ? null : ']', done: () => S.classified(ddg) },
       { skip: () => false, then: () => ['Classified · DDG · Arleigh Burke'], after: 1.2 },
       { prompt: 'Scan · then click the track', key: 'X', done: () => { const c = S.contact(ddg); return !!(c && c.identified); },
         then: 'Identified · 0.97 · every part tagged', after: 2.2 },

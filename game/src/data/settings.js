@@ -89,17 +89,19 @@ export const DEFAULTS = Object.fromEntries(SETTINGS.map(s => [s.key, s.def]));
    [key, what, { side: 'coast' | 'fleet', mode: 'sandbox', ctx }?]: the help shows a row only for that side / mode.
    ctx: where the key does this (a key is bound once per context; tools/validate.mjs checks it): 'play' (the default:
    the battle view), 'selection' (while units are selected; it comes before 'play'), 'inspect' (in the Inspect view),
-   'film' (the film panel open, F9), 'palette' (the sandbox spawn palette open, P). */
+   'film' (the film panel open, F9), 'palette' (the sandbox spawn palette open, P), 'rounds' (rounds in flight
+   selected: a click on one, or a box round some). */
 export const KEYBINDS = [
   { group: 'Camera', binds: [
     ['W A S D', 'Pan · Shift faster'], ['Edges', 'Pan'], ['Middle drag', 'Pan'], ['Right drag', 'Rotate 360° · pitch'],
-    ['Q E', 'Rotate'], ['PgUp PgDn', 'Pitch'], ['Wheel', 'Zoom to the pointer'], ['F', 'Follow · again: stop'] ] },
+    ['Q E', 'Rotate'], ['PgUp PgDn', 'Pitch'], ['Wheel', 'Zoom to the pointer'], ['= −', 'Zoom · numpad + − too'], ['F', 'Follow · again: stop'],
+    ['Double click', 'Spectate · Esc leaves'] ] },
   { group: 'Select', binds: [
-    ['Click', 'Select'], ['Shift click', 'Add / remove'], ['Drag', 'Box select'], ['Double click', 'All of that type'],
+    ['Click', 'Select a unit or round'], ['Shift click', 'Add / remove'], ['Drag', 'Box select · or rounds'], ['Ctrl Double click', 'All of that type'],
     ['Ctrl 1-9', 'Set group · Alt 1-9 too'], ['1-9', 'Recall group · twice: fly'], ['Tab', 'Next unit'], ['Esc', 'Clear selection', { ctx: 'selection' }] ] },
   { group: 'Orders', binds: [
     ['Right click', 'Move · attack a track'], ['Shift', 'Queue the order'], ['Z', 'Stop'], ['H', 'Weapons free / hold'],
-    ['~', 'Salvo 1 / 2 / all · Shift: back'],
+    ['~', 'Salvo fire · again: size'],
     ['T', 'Deploy / undeploy', { side: 'coast' }], ['R', 'Reload'], ['X', 'Scan, then click'], ['Y', 'Radar on / off'],
     ['L', 'Launch Orlan-10', { side: 'coast' }], ['L', 'Launch strike package', { side: 'fleet' }], ['U', 'Launch MH-60R', { side: 'fleet' }],
     ['O', 'Boats: dive / come up · Shift: surface'], ['B', 'Reinforcements'] ] },
@@ -108,8 +110,9 @@ export const KEYBINDS = [
     ['X', 'X-ray on / off', { ctx: 'inspect' }], ['H', 'Hide the tags', { ctx: 'inspect' }], ['Esc', 'Leave', { ctx: 'inspect' }],
     ['Shift I', 'Anatomy browser', { mode: 'sandbox' }] ] },
   { group: 'View and time', binds: [
-    ['C', 'Cinematic camera'], ['J', 'Replay the last hit'], ['Shift J', 'Hit replay on / off'], ['V', 'Radar view'],
-    ['F10', 'Hide the interface'], ['F1', 'Help'], ['Space', 'Pause'], ['+ −', 'Time rate'], ['Esc', 'Menu'] ] },
+    ['C', 'Cinematic camera'], ['C', 'Cinematic on rounds', { ctx: 'rounds' }],
+    ['B', 'Bullet time on rounds', { ctx: 'rounds' }], ['Esc', 'Drop the rounds', { ctx: 'rounds' }], ['J', 'Replay the last hit'], ['Shift J', 'Hit replay on / off'], ['V', 'Radar view'],
+    ['F10', 'Hide the interface'], ['F1', 'Help'], ['Space', 'Pause'], ['[ ]', 'Time rate slower / faster'], ['Esc', 'Menu'] ] },
   { group: 'Film maker', binds: [
     ['F9', 'Film panel'], ['K', 'Key at this view', { ctx: 'film' }], ['Shift K', 'Key that follows', { ctx: 'film' }], ['Shift F9', 'Play the take'],
     ['F8', 'Still · Shift: sequence'] ] },

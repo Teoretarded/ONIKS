@@ -211,7 +211,8 @@ export class Renderer {
     gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, this.ubo);
   }
 
-  /* the units on screen the world dims round (terrain.subjectDim): the biggest queued instances, up to 12 */
+  /* the units on screen the world dims round (terrain.subjectDim): the biggest queued instances, up to 12; only those
+     on the ground or the sea (a centre within ~1.2 radii of the surface; d.noDim opts out) */
   _subjects() {
     const cam = this.camera, e = cam.eye, f = cam.f, r = cam.r, u = cam.u, fl = 540 / Math.tan(cam.fov / 2);
     const list = this._subjList || (this._subjList = []), pool = this._subjPool || (this._subjPool = []);
@@ -224,6 +225,9 @@ export class Renderer {
       const cx = d.T[0] - e[0] + (R ? R[0] * c0[0] + R[1] * c0[1] + R[2] * c0[2] : c0[0]);
       const cy = d.T[1] - e[1] + (R ? R[3] * c0[0] + R[4] * c0[1] + R[5] * c0[2] : c0[1]);
       const cz = d.T[2] - e[2] + (R ? R[6] * c0[0] + R[7] * c0[1] + R[8] * c0[2] : c0[2]);
+      // nothing in the air dims the world (an aircraft, a helo, a round, a jet on a deck): the pool would lie on the
+      // ground under it, and the screen backdrop would slide over the sea with it
+      if (d.noDim || cy + e[1] - Math.max(0, this.terrain.heightAt(d.T[0], d.T[2])) > m.radius * 1.2 + 4) continue;
       const cyd = cy - (cx * cx + cz * cz) / (2 * R_EARTH);
       const zc = cx * f[0] + cyd * f[1] + cz * f[2];
       if (zc < cam.near) continue;

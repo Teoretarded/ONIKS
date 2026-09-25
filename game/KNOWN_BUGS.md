@@ -15,10 +15,12 @@ Screenshots of several of these were shared in the chat. Start the next session 
    (`data/settings.js`); the controls agent owns those files. At x16/x32 fast antennas also strobe (a few frames per
    turn), which reads as erratic speed; the scope already switches to its "fast" rendering there.
 
-2. **Selecting units feels buggy; double-click should focus.** Expected: double-clicking a unit (e.g. an F/A-18E)
-   flies the camera close and orbits / follows it. Today double-click selects all units of that type.
-   Proposal: double-click = fly to + orbit/follow; Ctrl+click (or Ctrl+double-click) = select all of that type.
-   Files: `game/src/game/select.js`, `game/src/engine/camera.js` (follow/orbit), KEYBINDS in `game/src/data/settings.js`.
+2. ~~**Selecting units feels buggy; double-click should focus.**~~ *Fixed 2026-09-25.* Double-click spectates a unit
+   or round (camera.spectate: flies in, follows tightly; left / right drag orbits, wheel zooms, Esc or a click on empty
+   ground leaves; the unit stays selected for orders); Ctrl+double-click selects all of the type; Inspect no longer
+   opens on a double-click (Alt+click / I). Box select counts units by centre or a third of their drawn box, drags
+   under 8 px are clicks, a lost release drops the box; with no unit in the box it selects the rounds in flight
+   (C cinematic / B bullet time on them). `game/src/game/select.js`, `game/src/engine/camera.js`.
 
 3. **Scale feels wrong.** On a ~120-180 km map, the ships and missiles don't feel real in size or speed:
    missiles feel too slow or too big. Audit true dimensions and speeds against the camera FOV, the time rate shown,
@@ -38,11 +40,9 @@ Screenshots of several of these were shared in the chat. Start the next session 
    The model state (`booster: false`) and the plume must switch at booster separation; the dropped Mk 72 should
    tumble away (the debris / FX systems can do it). Same files as 4, plus `game/src/game/debris.js`.
 
-6. **Dark circle under selected aircraft.** Selecting an F/A-18E shows a dark disc on the sea under it, which then
-   stops and a smaller circle comes out of it and follows the jet. It is the ground-dimming pool the engine puts
-   around units so they stand out (`game/src/engine/terrain.js` "subjectDim", fed by the renderer with units on
-   screen) plus possibly the selection's ground ring. Air units should not dim the ground, and nothing should
-   detach or slide. Files: `game/src/engine/renderer.js` / `terrain.js` (subject list), `game/src/game/select.js`.
+6. ~~**Dark circle under selected aircraft.**~~ *Fixed 2026-09-25.* The renderer's subject list (the world-dimming
+   pool, `engine/renderer.js` `_subjects`) skips anything whose centre is more than ~1.2 radii above the ground or sea
+   (aircraft, helos, rounds, jets on a deck; `d.noDim` opts out), so no pool or screen backdrop follows a jet.
 
 7. ~~**TEL reloading is "telepathic".**~~ *Fixed 2026-09-25.* The transloader now drives (rounding the TEL if it
    comes from ahead) to a point 80 m, then 40 m, behind its spot, creeps the last stretch on its own turning circle

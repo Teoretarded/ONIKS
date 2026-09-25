@@ -1,5 +1,11 @@
-/* Selection: click, Shift-click add / remove, drag a box, double-click (every unit of that type on screen),
+/* Selection: click, Shift-click add / remove, drag a box (own units whose centre or drawn box is in it; with no unit
+   in it, the rounds in flight in it; drags under 8 px are clicks), double-click spectates (the camera flies in to a
+   close orbit and follows the unit or round; left- or right-drag orbits, wheel zooms, Esc or a click on empty ground
+   leaves; the unit stays selected for orders), Ctrl double-click (every unit of that type on screen),
    Ctrl 1-9 set a group, 1-9 recall (twice quickly: fly to it), Tab / Shift-Tab cycle own units, F follow.
+   Rounds: a click on one (or a box round some) selects rounds (game.selProj, projectile ids; never mixed with units).
+   With rounds selected C hands them to the cinematic camera and B runs bullet time (x0.1) on them, the camera on
+   them; again: the next round of the group (one round: off). Esc leaves the spectate / bullet time / round selection.
    Draws lime brackets that fit the object (R.screenBox) with a short tag, hover highlight, the drag box. Tags stay on
    screen and out of the HUD panels (ov.fitBox), with a leader back to the object when they had to move.
    Aircraft parked on a deck are picked by a click on them (close enough to tell them apart) or a double-click (that
@@ -11,17 +17,24 @@
    the strategic layer has the screen (game.orbital.k > .5) the marks give way to its glyphs. */
 import { PRI } from './game.js';
 import { unitTag, SHORT } from './labels.js';
-import { ammoFull } from '../sim/mech.js';
 import { orbOn, orbOverlay, OHI } from '../ui/sensors/orb.js';
+import { PNAME } from '../ui/hud/fmt.js';
 
 const LIME = '#C6F432', CORAL = '#FF6A3D';
 const TS = 10.5;                 // tag size (px at 1080p)
+const BOX_MIN = 8;               // px: a shorter drag is a click
+const BT_RATE = .1;              // bullet time on selected rounds
+const DEG = Math.PI / 180;
 
 export function createSelect(game) {
   const { sim, R } = game, cam = R.camera;
   let box = null;              // { x0, y0, x1, y1, add }
   let lastRecall = { n: 0, t: 0 };
   let followId = 0;
+  let spec = null;             // spectating: { kind: 'unit' | 'proj', id, fn, name }
+  let orbitDrag = null;        // a left-drag orbiting the spectated subject: { x, y }
+  let bt = null;               // bullet time on selected rounds: { rate0, ids, end }
+  const selProj = game.selProj = new Set();
   const q = [0, 0, 0], placed = [];
 
   /* where a unit is drawn: aircraft on a deck sit at their parking spot, not at the carrier's centre */
@@ -94,6 +107,91 @@ export function createSelect(game) {
   }
   game.pickContact = pickContact;
 
+  /* ---------- rounds in flight ---------- */
+  const projSeen = p => p && p.alive && sim.projVisible(game.side, p);
+  const projName = p => PNAME[p.kind] || (game.PROJ[p.kind] && game.PROJ[p.kind].name) || p.kind.toUpperCase();
+  function projUnder(x, y, r) {
+    let best = null, bd = (r || 18) ** 2;
+    for (const p of sim.projectiles.values()) {
+      if (!projSeen(p) || !cam.project(game.projPose(p).pos, q)) continue;
+      const d = (q[0] - x) ** 2 + (q[1] - y) ** 2;
+      if (d < bd) { bd = d; best = p; }
+    }
+    return best;
+  }
+  game.pickProj = projUnder;
+  function selectProj(ids, add) {
+    if (!add) selProj.clear();
+    for (const id of ids) selProj.add(id);
+    if (selProj.size && game.selection.size) game.clearSelection();
+    game.bus.emit('selectProj', selProj);
+  }
+  function clearProj() { if (!selProj.size) return; selProj.clear(); game.bus.emit('selectProj', selProj); }
+  game.selectProj = selectProj;
+  // a unit selection drops the rounds (and the other way round, above)
+  game.bus.on('select', () => { if (game.selection.size && selProj.size) clearProj(); });
+
+  /* ---------- spectate: fly in to a close orbit, then follow ---------- */
+  function spectate(kind, id) {
+    let L, name;
+    const fn = kind === 'unit'
+      ? () => { const v = sim.units.get(id); return v && (v.alive || v.dying < 1) ? posOf(v) : null; }
+      : () => { const p = sim.projectiles.get(id); return p && p.alive ? game.projPose(p).pos : null; };
+    if (kind === 'unit') { const u = sim.units.get(id); if (!u) return false; L = Math.max(u.def.size[0], 8); name = unitTag(game, u).label; }
+    else { const p = sim.projectiles.get(id); if (!p) return false; L = 10; name = projName(p); }
+    if (!fn()) return false;
+    const d = game.getSystem('director'); if (d && d.on) d.set(false);
+    follow(null);
+    cam.spectate(fn, { dist: Math.min(2500, Math.max(kind === 'proj' ? 70 : 60, L * 3.2 + 30)), pitch: (kind === 'proj' ? 8 : 16) * DEG });
+    spec = { kind, id, fn, name };
+    return true;
+  }
+  function unspectate() { if (!spec) return; if (cam.followFn === spec.fn) cam.follow(null); if (cam.fly && cam.fly.track === spec.fn) cam.fly = null; spec = null; }
+  game.spectate = spectate;
+  Object.defineProperty(game, 'spectating', { get: () => spec, configurable: true });
+
+  /* what a click at (x, y) selects: a unit, else a round, else nothing (while spectating: leaves the spectate first) */
+  function clickAt(x, y, shift) {
+    const u = pickUnit(x, y);
+    if (!u) {
+      const p = projUnder(x, y);
+      if (p) { selectProj([p.id], shift); return; }
+      if (spec) { unspectate(); return; }
+      if (!shift) { game.clearSelection(); clearProj(); }
+      return;
+    }
+    if (u.side !== game.side) { game.select([u.id]); return; }
+    if (shift) game.select([u.id], { toggle: true }); else game.select([u.id]);
+  }
+  /* own units in a screen box: the centre inside, or (drawn large enough to have one) a third of the drawn box in it */
+  function inBox(x0, y0, x1, y1) {
+    const ids = [];
+    for (const u of sim.alive(game.side)) {
+      if (u.aboard) continue;
+      const P = game.unitPose(u).pos;
+      if (!cam.project(P, q)) continue;
+      let hit = q[0] >= x0 && q[0] <= x1 && q[1] >= y0 && q[1] <= y1;
+      if (!hit) {
+        const d = game.drawn.get(u.id);
+        const e = d && R.models.has(d.key) ? R.models.get(d.key) : null;
+        if (e && cam.fl * e.radius / q[2] > 16) {
+          const b = R.screenBox(d);
+          if (b) { const ix = Math.min(b[2], x1) - Math.max(b[0], x0), iy = Math.min(b[3], y1) - Math.max(b[1], y0); hit = ix > 0 && iy > 0 && ix * iy >= (b[2] - b[0]) * (b[3] - b[1]) / 3; }
+        }
+      }
+      if (hit) ids.push(u.id);
+    }
+    return ids;
+  }
+  function projInBox(x0, y0, x1, y1) {
+    const ids = [];
+    for (const p of sim.projectiles.values()) {
+      if (!projSeen(p) || !cam.project(game.projPose(p).pos, q)) continue;
+      if (q[0] >= x0 && q[0] <= x1 && q[1] >= y0 && q[1] <= y1) ids.push(p.id);
+    }
+    return ids;
+  }
+
   function onScreen(u) {
     if (!cam.project(game.unitPose(u).pos, q)) return false;
     return q[0] >= 0 && q[1] >= 0 && q[0] <= cam.W && q[1] <= cam.H;
@@ -156,39 +254,55 @@ export function createSelect(game) {
     },
     onPointer(ev) {
       if (ev.type === 'move') {
-        if (box) { box.x1 = ev.x; box.y1 = ev.y; return true; }
+        // a lost release (another system took it): the box goes
+        if ((box || orbitDrag) && game.mouse.down !== 0) { box = null; orbitDrag = null; }
+        if (orbitDrag) {
+          const dx = ev.x - orbitDrag.x, dy = ev.y - orbitDrag.y; orbitDrag.x = ev.x; orbitDrag.y = ev.y;
+          if (ev.drag >= 4) { cam.goal.yaw += dx * .0055 * (cam.invert ? -1 : 1); cam.goal.pitch = Math.max(cam.pitchMin(cam.goal.dist), Math.min(cam.maxPitch, cam.goal.pitch + dy * .0045)); }
+          return true;
+        }
+        if (box) { box.x1 = ev.x; box.y1 = ev.y; box.live = ev.drag >= BOX_MIN; return true; }
         if (game.mouse.down < 0) { const u = pickUnit(ev.x, ev.y); game.hover = u ? u.id : null; }
         return false;
       }
-      if (ev.type === 'down' && ev.button === 0) { box = { x0: ev.x, y0: ev.y, x1: ev.x, y1: ev.y, add: ev.shift, live: false }; return false; }
+      if (ev.type === 'down' && ev.button === 0) {
+        // spectating: a left-drag orbits the subject (a click still selects)
+        if (spec) { orbitDrag = { x: ev.x, y: ev.y }; box = null; return false; }
+        box = { x0: ev.x, y0: ev.y, x1: ev.x, y1: ev.y, add: ev.shift, live: false }; orbitDrag = null; return false;
+      }
+      if (ev.type === 'up' && ev.button === 0 && orbitDrag) { orbitDrag = null; return ev.drag >= 5; }
       if (ev.type === 'up' && ev.button === 0 && box) {
         const b = box; box = null;
         if (ev.drag < 5) return false;               // a click: handled below
-        const x0 = Math.min(b.x0, b.x1), x1 = Math.max(b.x0, b.x1), y0 = Math.min(b.y0, b.y1), y1 = Math.max(b.y0, b.y1);
-        const ids = [];
-        for (const u of sim.alive(game.side)) {
-          if (u.aboard) continue;
-          if (!cam.project(game.unitPose(u).pos, q)) continue;
-          if (q[0] >= x0 && q[0] <= x1 && q[1] >= y0 && q[1] <= y1) ids.push(u.id);
-        }
-        if (ids.length || !b.add) game.select(ids, { add: b.add });
+        if (ev.drag < BOX_MIN) { clickAt(ev.x, ev.y, ev.shift); return true; }   // a shaky click
+        const x0 = Math.min(b.x0, ev.x), x1 = Math.max(b.x0, ev.x), y0 = Math.min(b.y0, ev.y), y1 = Math.max(b.y0, ev.y);
+        const ids = inBox(x0, y0, x1, y1);
+        if (ids.length) { game.select(ids, { add: b.add && !selProj.size }); return true; }
+        // no unit: the rounds in flight in the box
+        const ps = projInBox(x0, y0, x1, y1);
+        if (ps.length) { selectProj(ps, b.add); return true; }
+        if (!b.add) { game.clearSelection(); clearProj(); }
         return true;
       }
-      if (ev.type === 'click' && ev.button === 0) {
-        const u = pickUnit(ev.x, ev.y);
-        if (!u) { if (!ev.shift) game.clearSelection(); return true; }
-        if (u.side !== game.side) { game.select([u.id]); return true; }
-        if (ev.shift) game.select([u.id], { toggle: true }); else game.select([u.id]);
-        return true;
-      }
+      if (ev.type === 'click' && ev.button === 0) { clickAt(ev.x, ev.y, ev.shift); return true; }
       if (ev.type === 'dblclick' && ev.button === 0) {
         const u = pickUnit(ev.x, ev.y);
-        if (!u || u.side !== game.side) return false;
-        // on a deck: that deck's aircraft of the type; else every one of the type on screen (not the parked ones)
-        const ids = u.aboard ? sim.alive(game.side).filter(v => v.type === u.type && v.aboard === u.aboard).map(v => v.id)
-          : sim.alive(game.side).filter(v => v.type === u.type && !v.aboard && onScreen(v)).map(v => v.id);
-        game.select(ids, { add: ev.shift });
-        return true;
+        if (ev.ctrl) {
+          // Ctrl double-click: on a deck, that deck's aircraft of the type; else every one of the type on screen
+          if (!u || u.side !== game.side) return false;
+          const ids = u.aboard ? sim.alive(game.side).filter(v => v.type === u.type && v.aboard === u.aboard).map(v => v.id)
+            : sim.alive(game.side).filter(v => v.type === u.type && !v.aboard && onScreen(v)).map(v => v.id);
+          game.select(ids, { add: ev.shift });
+          return true;
+        }
+        if (u && (u.side === game.side || game.vis(u) === 'track')) {
+          if (!game.selection.has(u.id)) game.select([u.id], { add: ev.shift && u.side === game.side });
+          spectate('unit', u.id);
+          return true;
+        }
+        const p = projUnder(ev.x, ev.y, 22);
+        if (p) { if (!selProj.has(p.id)) selectProj([p.id], ev.shift); spectate('proj', p.id); return true; }
+        return false;
       }
       return false;
     },
@@ -198,7 +312,12 @@ export function createSelect(game) {
       for (const id of game.selection) { const u = sim.units.get(id); if (!u || !u.alive || (u.side !== game.side && game.vis(u) !== 'track')) { game.selection.delete(id); ch = true; } }
       if (ch) game.bus.emit('select', game.selection);
       if (followId && !sim.units.has(followId)) follow(null);
-      if (box && box.x0 !== undefined) box.live = Math.abs(box.x1 - box.x0) + Math.abs(box.y1 - box.y0) > 5;
+      // rounds that are down leave the selection
+      let chP = false;
+      for (const id of selProj) if (!projSeen(sim.projectiles.get(id))) { selProj.delete(id); chP = true; }
+      if (chP) game.bus.emit('selectProj', selProj);
+      // the spectate ends when the camera is taken (pan, a fly elsewhere, Inspect, the cinematic) or the subject is gone
+      if (spec && cam.followFn !== spec.fn && !(cam.fly && cam.fly.track === spec.fn)) spec = null;
     },
     draw2d(ov0) {
       // the Orbital style: the Orbital overlay, the yellow for your own selection while it has it
@@ -217,6 +336,25 @@ export function createSelect(game) {
         const u = sim.units.get(id);
         if (!u) continue;
         mark(ov, u, true, 1, n++ < 24, many);
+      }
+      // selected rounds: a mark and the round's name (the first few; C or B on the one the camera is on)
+      if (!muted && selProj.size) {
+        let np = 0;
+        const k = ov.ui || 1, w = watchedId();
+        for (const id of selProj) {
+          const p = sim.projectiles.get(id); if (!p || !cam.project(game.projPose(p).pos, q)) continue;
+          if (q[0] < -40 || q[1] < -40 || q[0] > cam.W + 40 || q[1] > cam.H + 40) continue;
+          const own = p.side === game.side, col = own ? (hiSel ? OHI : LIME) : CORAL;
+          const sx = Math.max(5, Math.min(cam.W - 5, q[0])), sy = Math.max(5, Math.min(cam.H - 5, q[1]));
+          ov.mark(sx, sy, 8, col, 1);
+          if (np++ < 8) tagFree(ov, { id: w === id ? (bt ? 'B' : 'C') : '', label: projName(p), value: '' }, own ? (hiSel ? 'hi' : 'lime') : 'coral',
+            { x: sx + 14 * k, y: sy - 30 * k, ax: sx + 4 * k, ay: sy - 4 * k, lead: [sx + 4 * k, sy - 4 * k, sx + 14 * k, sy - 14 * k] }, null);
+        }
+      }
+      // spectating: one line at the top centre
+      if (spec) {
+        const k = ov.ui || 1;
+        ov.tag(cam.W / 2, 74 * k, 'SPECTATE', spec.name, 'DRAG ORBIT · WHEEL ZOOM · ESC', { kind: orb ? 'white' : 'lime', size: 10.5, align: 'center' });
       }
       // the drag box: dotted lime (the Orbital style: a white hairline box and corners)
       if (box && box.live) {
@@ -266,29 +404,8 @@ export function createSelect(game) {
       : near ? [`OUT OF REACH · ${kmTxt(near.d)} / ${kmTxt(near.u.def.scan.reach)} KM`, CORAL] : ['NO SCANNER', CORAL];
     say([['NOT TRACKED · SCAN IT (X)', CORAL], line2], sx, sy);
   }
-  /* R: what the reload order will find (the sim's reload rule), said only when it comes to nothing or to less */
-  function reloadNote() {
-    const us = game.selected().filter(u => !u.aboard);
-    if (!us.length) return;
-    const r = us.filter(u => u.type === 'tel' || u.type === 'bal' || u.type === 'transloader' || u.def.domain === 'sea' || u.type === 'pantsir' || u.def.depotRefill);
-    if (!r.length) { game.bus.emit('toast', { text: 'NOTHING TO RELOAD', bad: true }); return; }
-    const full = u => u.type === 'transloader' ? u.cargo >= u.def.cargo
-      : ammoFull(u) && (!u.mag || Object.keys(u.mag).every(k => u.mag[k] >= u.def.magazine[k]));
-    const need = r.filter(u => !full(u));
-    if (!need.length) { game.bus.emit('toast', { text: 'FULL · NOTHING TO RELOAD', bad: true }); return; }
-    const tels = need.filter(u => u.type === 'tel' && !u.reloader);
-    if (!tels.length) return;
-    const loaders = sim.alive(game.side).filter(v => v.type === 'transloader' && !v.off.reload);
-    if (loaders.some(v => v.cargo > 0 && !v.busy)) return;            // a transloader comes to the TEL
-    const text = !loaders.length ? 'NO TRANSLOADER · TEL TO DEPOT' : loaders.every(v => v.cargo <= 0) ? 'TLV EMPTY · REFILL AT DEPOT' : 'TLV BUSY · TEL TO DEPOT';
-    game.bus.emit('toast', { text, bad: true });
-  }
   const orderNotes = {
     name: 'order-notes', priority: PRI.orders + 5,
-    onKey(e) {
-      if (e.type === 'keydown' && e.code === 'KeyR' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat) reloadNote();
-      return false;          // the orders system still gives the order
-    },
     onPointer(ev) {
       if (ev.type !== 'click' || ev.button !== 2 || !game.selected().length) return false;
       if (pickUnit(ev.x, ev.y)) return false;                            // a unit or a track: the orders system's
@@ -314,7 +431,82 @@ export function createSelect(game) {
       }
     },
   };
-  return [selection, orderNotes];
+
+  /* ---------- the selected rounds: C cinematic on them, B bullet time on them; Esc steps back ---------- */
+  const director = () => game.getSystem('director');
+  function watchedId() { const d = director(); const w = d && d.on && d.watching; return w ? w.id : 0; }
+  const liveProj = () => [...selProj].filter(id => projSeen(sim.projectiles.get(id)));
+  const sameSet = (a, b) => a.length === b.length && a.every(id => b.includes(id));
+  /* hand the rounds to the director: the first time the first one; again (same rounds): the next; one round: off */
+  function watchRounds(ids, kind) {
+    const d = director(); if (!d || !d.watch) return false;
+    const w = d.on && d.watching;
+    if (w && sameSet(w.ids, ids)) {
+      if (ids.length < 2) return false;                     // the caller turns it off
+      d.watch(w.ids, (w.i + 1) % w.ids.length);
+    } else { unspectate(); d.watch(ids, 0); }
+    const v = d.watching; if (!v) return false;
+    const p = sim.projectiles.get(v.id);
+    game.bus.emit('toast', { text: `${kind} · ${p ? projName(p) : 'ROUND'}${v.ids.length > 1 ? ` · ${v.i + 1} / ${v.ids.length}` : ''}` });
+    return true;
+  }
+  function btStart(ids) {
+    if (!bt) {
+      const r0 = game.paused ? 1 : game.timeRate < 1 ? 1 : game.timeRate;
+      bt = { rate0: r0, ids, end: 0 };
+      if (game.bulletTime && game.bulletTime.active) game.bulletTime.take();
+      game.paused = false; game.timeRate = BT_RATE;
+      game.bus.emit('rate', { rate: BT_RATE, paused: false, why: 'bullet' });
+      game.bus.emit('bullet', { on: true, rounds: ids });
+    }
+    bt.ids = ids;
+  }
+  function btStop(restore) {
+    if (!bt) return;
+    if (restore && Math.abs(game.timeRate - BT_RATE) < 1e-6) { game.timeRate = bt.rate0; game.bus.emit('rate', { rate: game.timeRate, paused: game.paused, why: 'bullet' }); }
+    bt = null;
+    game.bus.emit('bullet', { on: false });
+  }
+  // the player's own rate ([ / ], Space) ends it where it is
+  game.bus.on('rate', d => { if (bt && d && d.why === 'user') btStop(false); });
+  const watch = {
+    name: 'rounds', priority: PRI.hud + 5,
+    onKey(e) {
+      if (e.type !== 'keydown' || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return false;
+      if (e.code === 'Escape') {
+        if (spec) { unspectate(); return true; }
+        if (bt) { btStop(true); const d = director(); if (d && d.on) d.set(false); return true; }
+        if (selProj.size) { clearProj(); return true; }
+        return false;
+      }
+      if (e.code !== 'KeyC' && e.code !== 'KeyB') return false;
+      const ids = liveProj();
+      if (!ids.length) {
+        // C with nothing selected: the director's own (below); B: reinforcements (the HUD's)
+        return false;
+      }
+      if (e.code === 'KeyC') {
+        if (bt) btStop(true);
+        if (!watchRounds(ids, 'CINEMATIC')) { const d = director(); if (d) d.set(false); game.bus.emit('toast', { text: 'CINEMATIC OFF' }); }
+        return true;
+      }
+      // B
+      if (bt && ids.length < 2) { btStop(true); const d = director(); if (d && d.on) d.set(false); game.bus.emit('toast', { text: 'BULLET TIME OFF' }); return true; }
+      if (!watchRounds(ids, 'BULLET TIME')) return true;
+      btStart(ids);
+      return true;
+    },
+    update(dtReal) {
+      if (!bt) return;
+      if (game.replay && game.replay.active) return;
+      // the rounds are down: hold a moment on the hit, then time comes back
+      const live = bt.ids.some(id => projSeen(sim.projectiles.get(id)));
+      if (live) { bt.end = 0; if (Math.abs(game.timeRate - BT_RATE) > 1e-6 && !game.paused) btStop(false); return; }
+      bt.end += dtReal;
+      if (bt.end > 1.6) btStop(true);
+    },
+  };
+  return [selection, orderNotes, watch];
 
   /* a tag goes up only where it does not cover another (a crowded selection keeps its marks). It stays on screen and
      out of the HUD panels; when it had to move away from its place, a leader runs back to the object (anchor). */

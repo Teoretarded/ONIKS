@@ -8,7 +8,7 @@ and calls `game.addSystem(await createX(game, ctx))`:
 | Module | Export | Name (priority): what it is |
 |---|---|---|
 | `render.js` | `createRender(game, DM)` | `render` (10): units, projectiles, wakes, sites (registered first, directly) |
-| `select.js` | `createSelect` | `selection` (40): click / box / groups / follow, brackets and tags; `order-notes` (55): a right-click on an unclassified contact's cloud answers "NOT TRACKED · SCAN IT (X)" and which scanner reaches it (no move order), R says why nothing reloads |
+| `select.js` | `createSelect` | `selection` (40): click / box / groups / follow / double-click spectate (Ctrl: all of the type), selected rounds (`game.selProj`), brackets and tags; `order-notes` (55): a right-click on an unclassified contact's cloud answers "NOT TRACKED · SCAN IT (X)" and which scanner reaches it (no move order); `rounds` (75): with rounds selected C cinematic / B bullet time on them (director.watch), Esc leaves spectate / bullet time / the rounds |
 | `orders.js` | `createOrders` | `orders` (50) + `targeting` (80): right-click and hotkey orders, the scan / launch aim modes |
 | `amphib.js` | (via `createOrders`) | `amphib` (55): the landing force: T Land (LHD / LCAC: click a beach or inland), Unload / Dock / Board by the selection; right-click board / dock / land; landing events to the HUD log and alerts |
 | `time.js` | `createTime` | `time` (30): Space, + / -, F10; rate readout and toasts without a HUD |
@@ -78,6 +78,8 @@ game = {
   pickContact(sx, sy) -> { u, c, at } | null   // an unclassified contact's cloud there, picked at its estimate (selection)
   unitScreenPos(u) -> [x, y, z]       // where the unit is drawn (aircraft on a deck: their parking spot) (selection)
   follow(unit | null), frameUnits(units)   // camera helpers (selection)
+  spectate('unit' | 'proj', id), spectating // fly in to a close orbit and follow (selection; camera.spectate)
+  selProj: Set<projId>, selectProj(ids, add), pickProj(sx, sy)   // selected rounds in flight (selection)
   endMatch({ win, reason })           // end now (objectives use it; match.js does the rest)
   fmtTime(s) -> 'mm:ss'               // (time)
 }
@@ -101,7 +103,7 @@ frame = { game, R, cam, fx /* R.fx */, sink, t, alpha, dt, dtSim, realT, seaT }
 ```
 
 Priorities (`PRI` in game.js; input goes high to low, drawing low to high):
-help 130 · filmmaker 125 · menu 120 · replay 110 · inspect 100 · targeting 80 · hud 70 · sandbox 60 · order-notes 55 · orders 50 · selection 40 ·
+help 130 · filmmaker 125 · menu 120 · replay 110 · inspect 100 · targeting 80 · rounds 75 · hud 70 · sandbox 60 · order-notes 55 · orders 50 · selection 40 ·
 time 30 · director 20 · orbital 16 · sensors 15 · sonar / orbital-pre 14 · landmarks 12 · render 10 · fx 5 · objectives 3 ·
 escape 2 · audio 1 · perfguard 0. The camera takes its own keys (WASD / arrows pan, Q E rotate, PageUp / PageDown pitch, wheel zoom,
 right-drag rotate, middle-drag pan) below everything; a system that needs the keys for itself sets

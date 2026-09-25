@@ -6,8 +6,11 @@
    The coast card has T Deploy and L Drone; the fleet's has U Helo and L Launch (the strike package off the deck).
    O Depth (the sonar system's key, game/sonar.js) shows while the side has a submarine: deep boats come up to
    periscope depth, others go deep; Shift+O surfaces. T Land (the fleet's; game/amphib.js): LCACs to a beach with their
-   ACVs, Unload / Dock / Board by what is selected. ~ Salvo (the key left of 1): rounds per volley of the
-   selection's attacks, 1 / 2 / ALL (the row reads the value; Shift+~ steps back). */
+   ACVs, Unload / Dock / Board by what is selected. ~ Salvo (the key left of 1): Salvo fire, a targeting mode (click a
+   track; ~ again steps the rounds per volley 1 / 2 / ALL, which the row reads; Esc cancels).
+   A row that cannot run now says why when pressed (a toast with its help line; Reload asks the orders system, which
+   names the reason). While a targeting mode is armed (salvo, scan, drone, launch, helo) the help line under the card
+   says what to click and how to cancel. */
 import { scanBlocked } from '../../sim/sensors.js';
 import { isSub, depthName } from '../../sim/subs.js';
 import { offensive } from '../../game/labels.js';
@@ -16,7 +19,7 @@ import { esc, dur } from './fmt.js';
 const ROWS = [
   { k: 'Z', id: 'stop', lab: 'Stop' },
   { k: 'H', id: 'weapons', lab: 'Weapons' },
-  { k: '~', id: 'salvo', lab: 'Salvo' },
+  { k: '~', id: 'salvo', lab: 'Salvo fire' },
   { k: 'T', id: 'deploy', lab: 'Deploy', side: 'coast' },
   { k: 'T', id: 'land', lab: 'Land', side: 'fleet' },
   { k: 'U', id: 'helo', lab: 'Helo', side: 'fleet' },
@@ -36,6 +39,7 @@ export function createCommands(game, hud, parent) {
   const hintEl = el.querySelector('.hint');
   let hover = null, hintKey = '', animKey = '', state = {}, last = -1, mode = null;
   game.bus.on('mode', m => { mode = m && m.mode; last = -1; });
+  game.bus.on('editor', d => { el.style.display = d && d.on ? 'none' : ''; });   // the F2 map builder has the bottom centre
 
   el.addEventListener('mouseover', e => { const it = e.target.closest('[data-c]'); hover = it ? it.dataset.c : null; last = -1; });
   el.addEventListener('mouseleave', () => { hover = null; last = -1; });
@@ -48,7 +52,14 @@ export function createCommands(game, hud, parent) {
 
   function run(id) {
     const s = state[id];
-    if (!s || !s.ok) { hud.click(true); return; }
+    if (!s || !s.ok) {
+      // say why, briefly (Reload: the orders system names the reason)
+      const o = game.getSystem('orders');
+      if (id === 'reload' && o && o.hotkey && game.selected().length) { o.hotkey('reload'); last = -1; return; }
+      hud.click(true);
+      if (s && s.hint) game.bus.emit('toast', { text: `${(s.lab || ROWS.find(r => r.id === id).lab).toUpperCase()} · ${s.hint.toUpperCase()}`, bad: true });
+      return;
+    }
     if (id === 'buy') { hud.toggleBuy(); hud.click(); return; }
     if (id === 'dive') { const so = game.getSystem('sonar'); if (so && so.dive) so.dive(false); hud.click(); last = -1; return; }
     if (id === 'land') { const am = game.getSystem('amphib'); if (am && am.hotkey) am.hotkey(false); hud.click(); last = -1; return; }
@@ -76,11 +87,9 @@ export function createCommands(game, hud, parent) {
     const ord0 = game.getSystem('orders');
     if (arm.length && ord0 && ord0.salvoText) {
       const v = ord0.salvoText(arm);
-      S.salvo = { ok: true, x: v === 'MIXED' ? 'mixed' : v,
-        hint: v === '1' ? 'One round a volley · the next when it is down · shoot, look, shoot'
-          : v === 'ALL' ? 'Every round in hand in one volley · the heaviest blow, then reload'
-          : `${v} rounds a volley · the next when they are down · ~ cycles 1 / 2 / all` };
-    } else S.salvo = { ok: false, x: '', hint: 'Rounds per volley of an attack · select launchers first' };
+      S.salvo = { ok: true, on: mode === 'salvo', x: v === 'MIXED' ? 'mixed' : v,
+        hint: `Pick a track to fire on · ${v === '1' ? 'one round a volley, shoot, look, shoot' : v === 'ALL' ? 'every round in hand in one volley' : v + ' rounds a volley'} · ~ again: 1 / 2 / all` };
+    } else S.salvo = { ok: false, x: '', hint: any ? 'No offensive weapons in the selection' : 'Select launchers first, then pick a track' };
     const dep = us.filter(u => u.type === 'tel' || u.type === 'bal' || u.type === 'radar' || u.type === 's400' || u.type === 's400r');
     if (dep.length) {
       const up = dep.every(u => u.def.deploy ? (u.dep > 0 || u.depT > 0 || u.elevT > 0) : (u.mast > 0 || u.mastT > 0));
@@ -92,7 +101,7 @@ export function createCommands(game, hud, parent) {
     if (rl.length) {
       const need = rl.some(u => u.type === 'transloader' ? u.cargo < u.def.cargo : Object.keys(u.def.weapons).some(w => u.ammo[w] < u.def.weapons[w].ammo));
       const off = rl.every(u => u.off.reload);
-      S.reload = { ok: need && !off, x: off ? 'out' : need ? '' : 'full',
+      S.reload = { ok: need && !off, x: off ? 'out' : need ? '' : 'full', why: off ? 'Knocked out' : need ? '' : 'Full · nothing to reload',
         hint: rl[0].type === 'tel' ? 'A transloader alongside (45 s a round) or a depot (90 s)' : rl[0].type === 'transloader' ? 'Refill the TLCs at a depot' : rl[0].def.domain === 'sea' ? (rl[0].side === 'coast' && rl[0].def.sub ? 'Back to base off the coast to restock' : 'Sail to the replenishment point') : rl[0].type === 'bal' ? 'Refill the containers at a depot (40 s a round)' : 'Refill at a depot' };
     } else S.reload = { ok: false, hint: 'TEL, Bal, transloader, Pantsir or ship' };
     // scan: the selection's scanners, else any on the side (the orders system does the same)
@@ -166,7 +175,11 @@ export function createCommands(game, hud, parent) {
         if (x !== it.xT) { it.xT = x; it.x.textContent = x; }
       }
       let h = '';
-      if (hover && state[hover]) h = `<b>${ROWS.find(r => r.id === hover).k}</b>${esc(state[hover].hint)}`;
+      const MODE_HINT = { salvo: ['~', 'Salvo · click a track to fire · ~ size · Esc cancels'], scan: ['X', 'Scan · click the area · Esc cancels'],
+        drone: ['L', 'Drone · click the patrol point · Esc cancels'], launch: ['L', 'Launch · click a track or a patrol point · Esc cancels'],
+        helo: ['U', 'Helo · click a search point or a track · Esc cancels'], land: ['T', 'Land · click a beach · Esc cancels'] };
+      if (mode && MODE_HINT[mode]) h = `<b>${MODE_HINT[mode][0]}</b>${esc(MODE_HINT[mode][1])}`;
+      else if (hover && state[hover]) h = `<b>${ROWS.find(r => r.id === hover).k}</b>${esc(state[hover].ok || !state[hover].why ? state[hover].hint : state[hover].why + ' · ' + state[hover].hint)}`;
       else {
         // what a right-click does for this selection (the orders system's rules), and I when it can be inspected
         const us = game.selected();

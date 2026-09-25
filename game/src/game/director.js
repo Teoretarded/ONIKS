@@ -1,4 +1,6 @@
-/* Cinematic camera (C): an auto-director that frames the action the way the films do.
+/* Cinematic camera (C): an auto-director that frames the action the way the films do. With rounds selected
+   (game/select.js: click or box them) C and B hand it those rounds: director.watch(ids, i) pins the shot to them (the
+   i-th, then the next still flying; its hit plays out, then the director chooses again). bus 'watch' { ids, id }.
 
    Shots (one continuous take: every change of subject is an eased glide from wherever the camera is, pulling back
    on long moves; never a cut):
@@ -176,6 +178,7 @@ function makeDirector(game) {
   let on = false, shot = null, lastPick = -99, edgeWas = true, waiting = false, fitK = 1, dirInit = false;
   const recent = [];           // interesting events: { kind, pos, t, w, unit, seen }
   let lastKill = null, lastHq = null, final = null;
+  let pin = null;              // the player's own subject: { ids: [projectile ids], i } (C / B on selected rounds)
   const eye = [0, 0, 0], look = [0, 0, 0], q3 = [0, 0, 0], c3 = [0, 0, 0], w3 = [0, 0, 0];
   const dirS = [0, 0, 1];
   const want = newPose(), cur = newPose();
@@ -190,6 +193,7 @@ function makeDirector(game) {
     if (v === on) return;
     on = v; game.cinematic = on;
     shot = null; lastPick = -99;
+    if (!on && pin) { pin = null; game.bus.emit('watch', { ids: [] }); }
     // the screen edges do not pan while the director flies (a resting mouse would fight it)
     if (on) { edgeWas = game.replay && game.replay.state && game.replay.state.edge0 !== undefined ? game.replay.state.edge0 : cam.edge; cam.edge = false; }
     else { cam.edge = edgeWas; if (!(game.replay && game.replay.active)) { cam.follow(null); cam.fly = null; } }
@@ -253,6 +257,16 @@ function makeDirector(game) {
     lastPick = game.realT;
     const t = game.realT;
     if (final) { if (!shot || shot.kind !== 'death' || !shot.final) startDeath(final, true); return; }
+    // the player's rounds (C / B on a selection of rounds): the pinned one, else the next of the group still flying;
+    // the hit of the last one plays out (approach -> after) before the director chooses again
+    if (pin) {
+      const n = pin.ids.length;
+      let p = null;
+      for (let k = 0; k < n && !p; k++) { const q = sim.projectiles.get(pin.ids[(pin.i + k) % n]); if (q && q.alive) { p = q; pin.i = (pin.i + k) % n; } }
+      if (p) { if (!shot || shot.id !== p.id || shot.kind === 'after') startProj(p, phaseOf(p)); return; }
+      pin = null; game.bus.emit('watch', { ids: [] });
+      if (shot && shot.kind === 'after' && t < shot.until) return;
+    }
     // the rounds
     let best = null, bs = 0, bph = null;
     for (const p of sim.projectiles.values()) {
@@ -393,7 +407,7 @@ function makeDirector(game) {
         // the next round of the salvo still on the pad keeps the shot; else chase this one
         let nx = null;
         for (const q of sim.projectiles.values()) if (q.alive && q !== p && q.side === p.side && heroOf(q) >= 5 && (q.age || 0) < 3 && upFrom(q) < 900 && sim.projVisible(game.side, q) && Math.hypot(q.fromPos[0] - p.fromPos[0], q.fromPos[2] - p.fromPos[2]) < 3500) { nx = q; break; }
-        if (nx) shot.id = nx.id;
+        if (nx && !pin) shot.id = nx.id;
         else { toKind('chase', {}, 2.2); return desired(); }
         return desired();
       }
@@ -562,12 +576,22 @@ function makeDirector(game) {
   return {
     name: 'director', priority: PRI.director,
     set, get on() { return on; }, get shot() { return shot; },
+    /* the player's rounds: the cinematic takes them (the i-th first, then the next still flying); [] lets go */
+    watch(ids, i) {
+      ids = (ids || []).filter(id => { const p = sim.projectiles.get(id); return p && p.alive; });
+      pin = ids.length ? { ids, i: i || 0 } : null;
+      if (pin && !on) set(true);
+      shot = null; lastPick = -99;
+      game.bus.emit('watch', { ids: pin ? pin.ids.slice() : [], id: pin ? pin.ids[pin.i] : 0 });
+      return !!pin;
+    },
+    get watching() { return pin ? { ids: pin.ids.slice(), i: pin.i, id: pin.ids[pin.i] } : null; },
     get edgeWas() { return edgeWas; }, set edgeWas(v) { edgeWas = v; },
     /* for the replay: glide on from where the camera is now */
     resync() { shot = null; lastPick = -99; },
     onKey(e) {
       if (e.type !== 'keydown') return false;
-      if (e.code === 'KeyC' && !e.ctrlKey && !e.metaKey && !e.altKey) { set(!on); game.bus.emit('toast', { text: on ? 'CINEMATIC' : 'CINEMATIC OFF' }); return true; }
+      if (e.code === 'KeyC' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) { set(!on); game.bus.emit('toast', { text: on ? 'CINEMATIC' : 'CINEMATIC OFF' }); return true; }
       if (on && e.code === 'Escape' && !(game.replay && game.replay.active)) { set(false); return true; }
       if (on && CAM_KEYS.has(e.code)) set(false);   // the camera takes it from here
       return false;

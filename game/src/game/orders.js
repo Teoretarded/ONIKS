@@ -4,8 +4,10 @@
    Z stop · H weapons free / hold fire · T deploy / undeploy · R reload · X scan (click a point) · Y radar on / off ·
    L launch: the Orlan-10 off its rail (coast), or the strike package off the deck (fleet: the selected deck aircraft,
    else every F/A-18E on the selected / any deck; click a track to strike it, a point to fly a patrol there) ·
-   U launch one MH-60R (click a search point or a track) · ~ (the key left of 1) salvo size 1 / 2 / ALL (Shift: back) ·
-   B reinforcements.
+   U launch one MH-60R (click a search point or a track) · ~ (the key left of 1) Salvo fire: a targeting mode ("SALVO 2 ·
+   PICK A TARGET" at the cursor; a left or right click on a track fires the salvo; ~ again steps the size 1 / 2 / ALL,
+   Shift+~ back; Esc or a right-click off a track cancels) · R reload (always says what happens: where the units go,
+   or why nothing can: full, no transloader, no replenishment point) · B reinforcements.
    Attacks persist (sim/orders.js): volleys of the salvo size, each watched until its rounds are down, until the target
    is destroyed, the weapon is empty with no reload coming, or the track has been lost for 5 min (held meanwhile:
    "TRK 25 · LOST · HOLDING"). A hostile track that is classified and within reach of the side's weapons raises an
@@ -20,13 +22,15 @@
    side's weapons that no scanner reaches, and so cannot be classified, raises one alert ("IN WEAPON REACH · NOT SCANNED
    · TRK 21 · 88 / 85 KM"; bus 'unscanned').
    Feedback in the world: a dotted lime path and marker for moves, a coral dotted line for attacks, fading; the
-   remaining route of selected units; weapon range of the selection. Targeting modes (scan, drone, launch, helo) run
+   remaining route of selected units with a waypoint ring at its end (aircraft: a line and ring to their goal); weapon
+   range of the selection; with a selection that can attack, a hostile track under the cursor reads "RMB ATTACK TRK nn". Targeting modes (scan, drone, launch, helo) run
    as a second system above the selection. */
 import { PRI } from './game.js';
 import { SHORT, offensive } from './labels.js';
 import { buyable } from '../data/units.js';
 import { scanBlocked } from '../sim/sensors.js';
 import { createAmphib } from './amphib.js';
+import { ammoFull, replenishPoint } from '../sim/mech.js';
 
 const LIME = [198, 244, 50], CORAL = [255, 106, 61], WH = [238, 238, 228];
 const WH1 = [246 / 255, 245 / 255, 242 / 255], CO1 = [1, 106 / 255, 61 / 255];        // hairline colours (0..1)
@@ -133,7 +137,7 @@ export function createOrders(game) {
     if (deck.length) game.bus.emit('toast', { text: `STRIKE · ${pkgName(deck)} · ${c.track}` });
     else game.bus.emit('toast', { text: `ATTACK · ${c.track} · ${countBy(us)} · SALVO ${salvoText(us)}` });
     marks.push({ kind: 'attack', target: t.id, ids: us.map(u => u.id), t0: game.realT, dur: 2.6 });
-    return true;
+    return 'fired';
   }
   /* "3 DDG" / "2 TEL · 1 BAL" */
   function countBy(us) {
@@ -251,6 +255,47 @@ export function createOrders(game) {
     marks.push({ kind: 'move', at: game.unitPose(tel).pos.slice(), ids: tl.map(u => u.id), t0: game.realT, dur: 2.2 });
     return true;
   }
+  /* R (and the card's Reload): give the reload order to what can take it and say, in one line, what happens */
+  const canReload = u => u.type === 'tel' || u.type === 'bal' || u.type === 'transloader' || u.def.domain === 'sea' || u.type === 'pantsir' || u.type === 'kornet' || !!u.def.depotRefill;
+  const isFull = u => u.type === 'transloader' ? u.cargo >= u.def.cargo
+    : ammoFull(u) && (!u.mag || Object.keys(u.mag).every(k => u.mag[k] >= u.def.magazine[k]));
+  function reload(us) {
+    const mx = game.mouse.x, my = game.mouse.y;
+    const toast = (text, no) => { game.bus.emit('toast', { text, bad: !!no }); if (no) bad(); };
+    const r = us.filter(u => !u.aboard && canReload(u));
+    if (!r.length) { toast(us.some(u => u.def.domain === 'air') ? 'AIRCRAFT REARM ON THE DECK · RIGHT-CLICK THE CARRIER' : 'NOTHING TO RELOAD', true); return true; }
+    const out = r.filter(u => u.off.reload);
+    const need = r.filter(u => !u.off.reload && !isFull(u));
+    if (!need.length) { toast(out.length === r.length ? 'RELOAD KNOCKED OUT' : 'FULL · NOTHING TO RELOAD', true); return true; }
+    game.order(need.map(u => u.id), { kind: 'reload' });
+    const lines = [];
+    // ships: to the replenishment point (the coast's boats: their base)
+    const sea = need.filter(u => u.def.domain === 'sea');
+    if (sea.length) {
+      const R = replenishPoint(sim, sea[0]);
+      if (!R) lines.push(['NO REPLENISHMENT POINT ON THIS MAP', true]);
+      else {
+        const d = Math.hypot(sea[0].pos[0] - R.x, sea[0].pos[2] - R.z);
+        if (d < R.r * .8) lines.push([`REARMING · ${countBy(sea)} · AT THE REPLENISHMENT POINT`]);
+        else {
+          lines.push([`RELOAD · ${countBy(sea)} · TO THE REPLENISHMENT POINT · ${km(d)} KM`]);
+          marks.push({ kind: 'move', at: [R.x, 0, R.z], ids: sea.map(u => u.id), t0: game.realT, dur: 3.2 });
+        }
+      }
+    }
+    // TELs: a transloader comes, else the TEL goes to a depot
+    const tels = need.filter(u => u.type === 'tel' && !u.reloader);
+    if (tels.length) {
+      const loaders = sim.alive(game.side).filter(v => v.type === 'transloader' && !v.off.reload);
+      if (loaders.some(v => v.cargo > 0 && !v.busy)) lines.push([`RELOAD · TLV TO ${tels.length > 1 ? tels.length + ' TEL' : ref(tels[0])}`]);
+      else lines.push([!loaders.length ? 'NO TRANSLOADER · TEL TO DEPOT' : loaders.every(v => v.cargo <= 0) ? 'TLV EMPTY · TEL TO DEPOT' : 'TLV BUSY · TEL TO DEPOT', true]);
+    }
+    const dep = need.filter(u => u.def.domain !== 'sea' && u.type !== 'tel');
+    if (dep.length) lines.push([`RELOAD · ${countBy(dep)} · TO THE DEPOT`]);
+    for (const [t, no] of lines.slice(0, 2)) toast(t, no);
+    if (!lines.length) say('RELOAD', mx, my);
+    return true;
+  }
   function hotkey(kind, back) {
     const us = own();
     const mx = game.mouse.x, my = game.mouse.y;
@@ -269,9 +314,15 @@ export function createOrders(game) {
         return true;
       }
       case 'salvo': {
-        const r = cycleSalvo(back);
-        if (!r) { say('NO OFFENSIVE WEAPONS · DEFENCE IS AUTOMATIC', mx, my); bad(); return true; }
-        game.bus.emit('toast', { text: `SALVO ${r.next === 0 ? 'ALL' : r.next} · ${countBy(r.arm)}` });
+        // Salvo fire: a targeting mode; ~ again (in the mode) steps the size
+        const arm = us.filter(offensive);
+        if (!arm.length) { say('NO OFFENSIVE WEAPONS · DEFENCE IS AUTOMATIC', mx, my); bad(); return true; }
+        if (mode && mode.kind === 'salvo') {
+          const r = cycleSalvo(back);
+          if (r) { mode.flash = game.realT; game.bus.emit('toast', { text: `SALVO ${r.next === 0 ? 'ALL' : r.next} · ${countBy(r.arm)}` }); }
+          return true;
+        }
+        setMode({ kind: 'salvo', units: arm });
         return true;
       }
       case 'deploy': {
@@ -283,7 +334,7 @@ export function createOrders(game) {
         }
         return true;
       }
-      case 'reload': { const r = us.filter(u => u.type === 'tel' || u.type === 'bal' || u.type === 'transloader' || u.def.domain === 'sea' || u.type === 'pantsir' || u.type === 'kornet' || u.def.depotRefill); game.order(r.map(u => u.id), { kind: 'reload' }); return true; }
+      case 'reload': return reload(us);
       case 'radar': {
         const rs = us.filter(u => u.def.sensors && u.def.sensors.radar);
         if (!rs.length) return true;
@@ -504,6 +555,19 @@ export function createOrders(game) {
     },
     onPointer(ev) {
       if (!mode) return false;
+      if (mode.kind === 'salvo') {
+        if (ev.type !== 'click' || (ev.button !== 0 && ev.button !== 2)) return ev.type === 'down' && ev.button === 0 || ev.type === 'up' && ev.button === 0;
+        const t = game.pickUnit ? game.pickUnit(ev.x, ev.y) : null;
+        if (t && t.alive && t.side !== game.side && game.vis(t) === 'track') {
+          if (attack(t, ev.shift, ev.x, ev.y) === 'fired' && !ev.shift) setMode(null);
+          else if (mode) mode.flash = game.realT;
+          return true;
+        }
+        if (ev.button === 2) { setMode(null); return true; }
+        const hit = game.pickContact ? game.pickContact(ev.x, ev.y) : null;
+        say(hit ? 'NOT TRACKED · SCAN IT (X)' : 'PICK A TRACK · ESC CANCELS', ev.x, ev.y); bad(); mode.flash = game.realT;
+        return true;
+      }
       if (ev.type === 'click' && ev.button === 2) { setMode(null); return true; }
       if (ev.type === 'click' && ev.button === 0) {
         const w = cam.pickGround(ev.x, ev.y);
@@ -537,6 +601,7 @@ export function createOrders(game) {
         if (u) { if (mode.units.length !== 1 || mode.units[0] !== u) mode.units = [u]; }
         else if (mode.units !== mode.pref) mode.units = mode.pref;
       }
+      if (mode && mode.kind === 'salvo' && !mode.units.some(u => u.alive)) setMode(null);
       // a launch mode whose aircraft all went (or died) closes
       if (mode && (mode.kind === 'launch' || mode.kind === 'helo') && game.frameN % 15 === 0) {
         if (!mode.units.some(u => u.alive && u.aboard && !queued(u))) { const pk = pkg(mode.kind); if (pk.units.length) mode.units = pk.units; else setMode(null); }
@@ -564,6 +629,17 @@ export function createOrders(game) {
           R.fx.ring(w, s.u.def.scan.r, { rgb: LIME, a: .8, step: 4, drape: true, lift: 2, mode: 'over' });
           R.fx.line([p[0], p[1] + 10, p[2]], [w[0], w[1] + 30, w[2]], { rgb: LIME, a: .5, step: 7, mode: 'over' });
         } else if (out && w) R.fx.ring(w, s.near.u.def.scan.r, { rgb: CORAL, a: .7, step: 4, drape: true, lift: 2, mode: 'over' });
+      } else if (mode.kind === 'salvo') {
+        const t = game.hover ? sim.units.get(game.hover) : null;
+        if (t && t.alive && t.side !== game.side && game.vis(t) === 'track') {
+          const tp = game.unitPose(t).pos, de = Math.hypot(tp[0] - cam.eye[0], tp[1] - cam.eye[1], tp[2] - cam.eye[2]);
+          R.fx.ring(tp, Math.max(t.def.size[0] * .7, 26 * de / cam.fl), { rgb: CORAL, a: .9, step: 4, size: 1.5, lift: 2, mode: 'over' });
+          for (const u of mode.units) {
+            if (!u.alive || u.aboard) continue;
+            const p = game.unitPose(u).pos;
+            R.fx.line([p[0], p[1] + 4, p[2]], [tp[0], tp[1] + 6, tp[2]], { rgb: CORAL, a: .45, step: 8, mode: 'over' });
+          }
+        }
       } else if (mode.kind === 'drone' && w) {
         R.fx.ring(w, 1500, { rgb: LIME, a: .7, step: 5, drape: true, lift: 2, mode: 'over' });
       } else if (mode.kind === 'launch' || mode.kind === 'helo') {
@@ -604,6 +680,16 @@ export function createOrders(game) {
           if (cd > 0 && !sub) { sub = `SIDE COOLDOWN ${Math.ceil(cd)} S`; subCol = CO; }
         }
       } else if (mode.kind === 'drone') { key = 'L'; txt = 'ORLAN-10 · CLICK THE PATROL POINT'; }
+      else if (mode.kind === 'salvo') {
+        key = '~';
+        const t = game.hover ? sim.units.get(game.hover) : null;
+        const onTrack = t && t.alive && t.side !== game.side && game.vis(t) === 'track';
+        const c = onTrack ? sim.contact(game.side, t.id) : null;
+        const n = salvoText(mode.units.filter(u => u.alive));
+        txt = `SALVO ${n || '-'} · ${onTrack ? 'FIRE ON ' + (c ? c.track : 'TRK') : 'PICK A TARGET'}`;
+        if (onTrack) col = CO;
+        sub = '~ SIZE 1 / 2 / ALL · ESC CANCELS'; subCol = 'rgba(255,255,255,.7)';
+      }
       else {
         key = mode.kind === 'helo' ? 'U' : 'L';
         const t = game.hover ? sim.units.get(game.hover) : null;
@@ -623,6 +709,14 @@ export function createOrders(game) {
       if (sub && b) ov.text(b[0], b[3] + 15 * k, sub, { size: 10, col: subCol });
     },
   };
+
+  /* the end of a selected unit's route: a small ring about 10 px across whatever the zoom, on the ground */
+  const WP = [0, 0, 0];
+  function waypoint(at, air) {
+    WP[0] = at[0]; WP[2] = at[2]; WP[1] = air ? at[1] : Math.max(0, T.heightAt(at[0], at[2]));
+    const de = Math.hypot(WP[0] - cam.eye[0], WP[1] - cam.eye[1], WP[2] - cam.eye[2]);
+    R.fx.ring(WP, 9 * de / cam.fl, { rgb: LIME, a: .75, step: 3, size: 1.5, drape: !air, lift: 1, mode: 'over' });
+  }
 
   /* ---------- the orders system ---------- */
   const orders = {
@@ -672,8 +766,10 @@ export function createOrders(game) {
           const pts = [[p[0], p[1], p[2]]];
           for (let i = u.wi; i < u.path.length; i++) pts.push([u.path[i][0], 0, u.path[i][1]]);
           R.fx.path(pts, { rgb: LIME, a: .6, step: 6, size: 1.5, drape: u.def.domain !== 'air', lift: 1.5, mode: 'over' });
+          waypoint(pts[pts.length - 1], u.def.domain === 'air');
         } else if (u.def.domain === 'air' && u.goal) {
           R.fx.line(p, [u.goal[0], p[1], u.goal[1]], { rgb: LIME, a: .35, step: 8, mode: 'over' });
+          waypoint([u.goal[0], 0, u.goal[1]], false);
         }
         // a standing attack: a faint coral line to the track (sparser while the track is lost and the order holds)
         const o = u.orders[0];
@@ -720,6 +816,18 @@ export function createOrders(game) {
       }
     },
     draw2d(ov) {
+      // a hostile track under the cursor with a selection that can attack it: say what a right-click does
+      if (!mode && game.hover && game.mouse.in && game.mouse.down < 0 && game.selection.size) {
+        const t = sim.units.get(game.hover);
+        if (t && t.alive && t.side !== game.side && game.vis(t) === 'track') {
+          const dom = domOf(t), c = sim.contact(game.side, t.id);
+          const can = own().some(u => Object.values(u.def.weapons).some(w => !w.gun && w.vs.includes(dom) && !(w.auto && !w.salvo))) || own().some(u => u.type === 'carrier');
+          if (can && c) {
+            const k = ov.ui || 1, ok = c.conf >= game.CLASSIFY;
+            ov.tag(game.mouse.x + 16 * k, game.mouse.y + 14 * k, 'RMB', ok ? `ATTACK ${c.track}` : `${c.track} · SCAN FIRST (X)`, '', { kind: 'coral', size: 10, fit: [] });
+          }
+        }
+      }
       for (const m of marks) if (m.kind === 'say') {
         const a = sat(1 - (game.realT - m.t0) / m.dur);
         const k = ov.ui || 1;

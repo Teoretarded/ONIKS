@@ -1,5 +1,5 @@
-/* Time controls: Space pause, + / - rate (x1 .. x32; the camera's = / - zoom keys are taken for this, the wheel
-   zooms), F10 hide the UI. The sim is stepped by game.frame(); this system only changes game.timeRate / paused.
+/* Time controls: Space pause, ] / [ rate (x1 .. x32; = / - and the numpad + / - are the camera's zoom keys, never
+   the rate: zooming with the keys used to speed time up), F10 hide the UI. The sim is stepped by game.frame(); this system only changes game.timeRate / paused.
    Until a HUD system is registered it also draws the rate readout and the toasts itself (the rate is always on
    screen), with a lime blip when the game drops to x1 on its own. */
 import { PRI } from './game.js';
@@ -7,7 +7,6 @@ import { PRI } from './game.js';
 const sat = v => v < 0 ? 0 : v > 1 ? 1 : v;
 
 export function createTime(game) {
-  const cam = game.camera;
   const toasts = [];
   let blip = -99, blipWhy = '';
   game.bus.on('toast', d => { toasts.push({ text: d.text, bad: !!d.bad, t0: game.realT }); if (toasts.length > 4) toasts.shift(); });
@@ -20,9 +19,8 @@ export function createTime(game) {
     name: 'time', priority: PRI.time, always2d: true,
     onKey(e) {
       const k = e.code;
-      if (k === 'Equal' || k === 'NumpadAdd' || k === 'Minus' || k === 'NumpadSubtract') {
-        cam.down.delete(k);                      // not the camera's zoom
-        if (e.type === 'keydown' && !e.repeat) game.stepRate(k === 'Equal' || k === 'NumpadAdd' ? 1 : -1);
+      if (k === 'BracketRight' || k === 'BracketLeft') {
+        if (e.type === 'keydown' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) game.stepRate(k === 'BracketRight' ? 1 : -1);
         return true;
       }
       if (e.type !== 'keydown') return false;

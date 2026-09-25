@@ -1,7 +1,7 @@
 /* ONIKS · Inspect / Anatomy: the in-game Anatomy films (reference/films/pc_anatomy*_film.js).
 
-   Open:  I on the selected unit (or the round in flight under the cursor), Alt + double-click / Alt + click a
-          unit or a round, double-click an enemy track or a round. Own units always; enemy units once a scan has
+   Open:  I on the selected unit (or the round in flight under the cursor), Alt + click a unit or a round (a plain
+          double-click spectates: game/select.js). Own units always; enemy units once a scan has
           identified them (a short coral "not identified" tag otherwise; sandbox with fog off: everything).
           Shift + I (sandbox): the Anatomy browser, every model in dark space, ← → / [ ] to walk.
    In it: E exploded view (assemblies leave in their w0 order and come home in reverse) · X X-ray on / off ·
@@ -879,8 +879,8 @@ export async function createInspect(game, ctx) {
   }
   function onPointer(ev) {
     if (!S || S.phase === 'out') {
-      // Alt + click or double-click: a round in flight, or a unit (double-click on own units stays "select all")
-      if ((ev.type === 'dblclick' || (ev.type === 'click' && ev.alt)) && ev.button === 0) {
+      // Alt + click: a round in flight, or a unit (double-click is the selection's spectate, game/select.js)
+      if (ev.type === 'click' && ev.alt && ev.button === 0) {
         const pr = projUnder(ev.x, ev.y, 22);
         const u = game.pickUnit ? game.pickUnit(ev.x, ev.y) : (R.pick(ev.x, ev.y) && sim.units.get(R.pick(ev.x, ev.y).id));
         if (ev.alt) { if (pr && !u) return openProj(pr) || true; if (u) { openUnit(u); return true; } if (pr) return openProj(pr) || true; return false; }

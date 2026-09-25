@@ -1,6 +1,7 @@
 /* RTS camera: orbits a ground target. Full 360 degree yaw, pitch 3..89 degrees, distance 20 m .. 150 km
    (exponential zoom toward the cursor), pan with WASD / arrows / screen edges / middle-drag, rotate with
-   right-drag and Q/E, smooth damping, follow, fly-to, frame a set of points. Picking: screen -> ground (with
+   right-drag and Q/E, smooth damping, follow, fly-to, spectate (fly in to a moving object, then follow it), frame a
+   set of points. Picking: screen -> ground (with
    the Earth's curvature, as drawn), project() for overlays.
    Looking up: close to the ground (dist < lookUpFar) the pitch may go below minPitch by up to lookUp (16 deg: -13,
    the line of sight ~13 deg above the horizon, at dist <= lookUpNear, fading to none at lookUpFar). The lens then
@@ -96,6 +97,7 @@ export class RTSCamera {
 
   /* zoom by factor k (< 1 in) about the ground point under (sx, sy) */
   zoomAt(sx, sy, k) {
+    if (this.fly && this.fly.track) { this.fly.to.dist = clamp(this.fly.to.dist * k, this.minDist, this.maxDist); return; }   // spectating: the glide in keeps going
     const g = this.goal, d0 = g.dist, d1 = clamp(d0 * k, this.minDist, this.maxDist);
     const q = d1 / d0;
     if (sx !== undefined && !this.followFn) {
@@ -130,9 +132,20 @@ export class RTSCamera {
   /* ---------- commands ---------- */
   /* follow a moving object: fn() -> [x, y, z] (null stops); the target keeps the offset it has now if keepOffset */
   follow(fn, keepOffset) {
-    this.followFn = fn; this.fly = null;
+    this.followFn = fn; this.fly = null; this.tight = false;
     if (fn && keepOffset) { const p = fn(); if (p) this.followOff = [this.goal.target[0] - p[0], 0, this.goal.target[2] - p[2]]; }
     else this.followOff = [0, 0, 0];
+  }
+  /* spectate a moving object: fly in (the glide aims at where it is each frame, not where it was), then follow it;
+     fn() -> [x, y, z] (null stops); o: { dist, pitch, time }. Wheel zooms and right-drag orbits as ever. */
+  spectate(fn, o) {
+    o = o || {};
+    const p = fn && fn();
+    if (!p) { this.follow(null); return; }
+    this.flyTo(p, { dist: o.dist, pitch: o.pitch, time: o.time });
+    this.fly.track = fn;
+    this.fly.to.target = [p[0], p[1], p[2]];
+    this.followOff = [0, 0, 0];
   }
   /* fly to a target (and optionally dist / yaw / pitch), with a pull-back arc on long moves */
   flyTo(target, o) {
@@ -218,6 +231,7 @@ export class RTSCamera {
     if (this.bounds) { const b = this.bounds; g.target[0] = clamp(g.target[0], b[0], b[2]); g.target[2] = clamp(g.target[2], b[1], b[3]); }
     if (this.fly) {
       const F = this.fly; F.t += dt;
+      if (F.track) { const p = F.track(); if (p) { F.to.target[0] = p[0]; F.to.target[1] = p[1]; F.to.target[2] = p[2]; } else F.track = null; }
       const u = clamp(F.t / F.dur, 0, 1), s = u * u * (3 - 2 * u), s2 = u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
       for (let k = 0; k < 3; k++) this.target[k] = F.from.target[k] + (F.to.target[k] - F.from.target[k]) * s2;
       this.dist = Math.exp(Math.log(F.from.dist) + (Math.log(F.to.dist) - Math.log(F.from.dist)) * s + F.bump * Math.sin(Math.PI * s));
@@ -225,17 +239,19 @@ export class RTSCamera {
       this.yaw = F.from.yaw + (F.to.yaw - F.from.yaw) * s;
       this.pitch = F.from.pitch + (F.to.pitch - F.from.pitch) * s;
       g.target = this.target.slice(); g.dist = F.to.dist; g.yaw = this.yaw; g.pitch = this.pitch;
-      if (u >= 1) { this.fly = null; g.dist = this.dist = F.to.dist; }
+      if (u >= 1) { this.fly = null; g.dist = this.dist = F.to.dist; if (F.track) { this.followFn = F.track; this.followOff = [0, 0, 0]; this.tight = true; } }
     } else if (dt > 0) {
-      for (const k of [0, 2]) this.target[k] += (g.target[k] - this.target[k]) * E;
+      // spectating: the target sits on the subject (a fast one would trail the damped target by tens of metres)
+      if (this.tight && this.followFn) { this.target[0] = g.target[0]; this.target[2] = g.target[2]; }
+      else for (const k of [0, 2]) this.target[k] += (g.target[k] - this.target[k]) * E;
       this.yaw += (g.yaw - this.yaw) * Er;
       this.pitch += (g.pitch - this.pitch) * Er;
       this.dist = Math.exp(Math.log(this.dist) + (Math.log(g.dist) - Math.log(this.dist)) * Ez);
     } else { this.target = g.target.slice(); this.yaw = g.yaw; this.pitch = g.pitch; this.dist = g.dist; }
     // the target rides the ground (or the followed object's height)
-    const gy = g.followY && this.followFn ? g.target[1] : this.ground(this.target[0], this.target[2]);
+    const gy = g.followY && this.followFn ? g.target[1] : this.fly && this.fly.track ? this.target[1] : this.ground(this.target[0], this.target[2]);
     g.followY = false;
-    this.target[1] = dt > 0 ? this.target[1] + (gy - this.target[1]) * (1 - Math.exp(-8 * dt)) : gy;
+    this.target[1] = dt > 0 && !(this.tight && this.followFn) ? this.target[1] + (gy - this.target[1]) * (1 - Math.exp(-8 * dt)) : gy;
     this._pose();
     return this;
   }

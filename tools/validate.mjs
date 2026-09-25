@@ -395,7 +395,7 @@ if (want('maps')) {
 /* ---------------------------------------------------------------- keybinds */
 if (want('keybinds')) {
   const end = begin('keybinds');
-  const CTX = ['play', 'selection', 'inspect', 'film', 'palette'], MODES = ['sandbox', 'combat', 'campaign'];
+  const CTX = ['play', 'selection', 'inspect', 'film', 'palette', 'rounds'], MODES = ['sandbox', 'combat', 'campaign'];
   const MODS = { Shift: 'Shift', '⇧': 'Shift', Ctrl: 'Ctrl', Alt: 'Alt' };
   const MOUSE = { Right: 1, Middle: 1, Double: 1 };
   /* 'Q E' -> ['Q', 'E']; 'Ctrl 1-9' -> ['Ctrl+1', ...]; '1-9 ⇧1-9' -> ['1', ..., 'Shift+1', ...]; 'Shift click' ->

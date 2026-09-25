@@ -124,7 +124,7 @@ export function run(S) {
       F.sentAny = true;
       S.prompt(null);
       S.say('Orlan-10 · 30 m/s · camera 5 km in this haze');
-      S.real(3.5, () => { if (game.timeRate < 16 && !found()) S.prompt('Faster while it flies', { key: '+' }); });
+      S.real(3.5, () => { if (game.timeRate < 16 && !found()) S.prompt('Faster while it flies', { key: ']' }); });
       S.when(() => game.timeRate >= 16 || found() > 0, () => S.prompt(null));
     }
   });
