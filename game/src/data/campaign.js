@@ -19,6 +19,7 @@
      carry: bool, resupply: n,          // rounds left from the last battle carry over, plus `resupply` new ones
      par: { kills },                    // ships (DDG, CVN) to sink for a good grade: none sunk grades C at best,
                                         // fewer than `kills` B at best (campaign/grade.js)
+     grade: { anyLoss: false },         // losses graded by the mission's own 'lose' objective, not a step for any loss
    }
    Objective = { id, kind, text, hint?, optional?, hidden?, ... } with kind one of
      'deploy'  { type }                 deploy a unit of this type
@@ -150,19 +151,22 @@ export const MISSIONS = [
     film: { id: 'oa_strike', from: 33, to: 132 },
     map: 'caldera', side: 'coast', time: 'night', weather: 'storm', ai: 'hard', enemyAi: false, supply: 600,
     brief: [
-      'The whole task group has run into the caldera, out of the storm.',
-      'Inside a storm cell their radar is nearly blind. So is yours. Lightning shows both.',
-      'Sink the carrier. When the storm is off them, they sail.',
+      'The task group is out past the reach of your scans, under a heavy storm cell. It will come in under it.',
+      'Inside the cell their radar is nearly blind, and so is yours. Scan into it. Lightning shows both.',
+      'Every launch is seen and answered. Fire, then move. When the cell has passed, they are gone.',
     ],
     objectives: [
       { id: 'find', kind: 'script', text: 'Find the carrier' },
       { id: 'sink', kind: 'destroy', type: 'carrier', count: 1, text: 'Sink the carrier', hidden: true },
       { id: 'cp', kind: 'protect', type: 'hq', text: 'Keep the command post' },
-      { id: 'escort', kind: 'destroy', type: 'ddg', count: 1, optional: true, text: 'Sink an escort' },
-      { id: 'tels', kind: 'lose', type: 'tel', max: 1, optional: true, text: 'Lose one TEL at most' },
+      { id: 'par', kind: 'script', optional: true, text: 'Carrier down by 22:00' },
+      { id: 'move', kind: 'script', optional: true, text: 'Move after every launch' },
+      { id: 'loss', kind: 'lose', type: ['hq', 'tel', 'radar', 'pantsir', 'transloader', 'catapult'], max: 1, optional: true, text: 'Lose one unit at most' },
     ],
     forces: { coast: [['hq', 1], ['tel', 4], ['radar', 2], ['pantsir', 2], ['catapult', 1], ['transloader', 2]], fleet: [['carrier', 1], ['ddg', 3], ['helo', 2], ['fighter', 6]] },
     carry: true, resupply: 8, par: { kills: 1 },
+    // losses are graded by the 'loss' objective alone (one unit lost is still S), not a step for any loss
+    grade: { anyLoss: false },
   },
 ];
 

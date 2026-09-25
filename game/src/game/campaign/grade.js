@@ -21,9 +21,11 @@ export function gradeOf(game, win) {
   // drones are spent, not lost: an Orlan-10 shot down over the fleet does not cost a step
   const o = game.getSystem && game.getSystem('objectives'), byType = o && o.counts ? o.counts.losses : null;
   const lost = Math.max(0, S.lost - (byType && byType.drone || 0));
-  // one step per optional missed, one for any loss, one more for heavy losses (a third of the force)
+  // one step per optional missed, one for any loss, one more for heavy losses (a third of the force). A mission with
+  // `grade: { anyLoss: false }` (06 Strike) grades losses by its own 'lose' objective instead of the step for any loss
+  const G = (game.mission && game.mission.grade) || {};
   let k = missed;
-  if (lost > 0) k++;
+  if (lost > 0 && G.anyLoss !== false) k++;
   if (lost > start / 3) k++;
   // a battle that was sat out is not done well: with a par, no ship sunk is C at best, short of the par B at best
   const par = game.mission && game.mission.par;
