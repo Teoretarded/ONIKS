@@ -68,7 +68,8 @@ export function createRender(game, DM) {
     const s = m.get(u.id), cp = game.unitPose(cv);
     // two rows aft of the island (starboard) and along the port bow, 22 m apart
     const row = s % 2, i = s >> 1;
-    const lx = row ? -26 : 24, lz = -110 + i * 24 + (row ? 70 : 0), yaw = row ? Math.PI / 2 : -Math.PI / 2;
+    // the starboard row skips the island (z -50 .. -4): its 4th slot on park forward of it
+    const lx = row ? -26 : 24, lz = -110 + i * 24 + (row ? 70 : !row && i >= 3 ? 48 : 0), yaw = row ? Math.PI / 2 : -Math.PI / 2;
     const c = Math.cos(cp.hdg), sn = Math.sin(cp.hdg);
     out.pos[0] = cp.pos[0] + c * lx + sn * lz; out.pos[2] = cp.pos[2] - sn * lx + c * lz; out.pos[1] = cp.pos[1] + 19.6 + (u.type === 'aew' ? 1.9 : 0);   // the E-2D stands on its gear
     out.hdg = cp.hdg + yaw; out.pitch = cp.pitch; out.roll = cp.roll;
