@@ -3039,4 +3039,27 @@ Object.assign(MODEL_INFO, LHDM.LHD_INFO, AMPH.AMPHIB_INFO);
 for (const [a, k] of Object.entries(MODEL_ALIASES)) { MODEL_INFO[a] = MODEL_INFO[k]; }
 for (const k of Object.keys(CUT_MODELS)) { const b = k.replace(/_cut$/, ''); MODEL_INFO[k] = O(MODEL_INFO[b], { name: MODEL_INFO[b].name + ' · cutaway', kind: 'cut', base: b }); }
 
+/* ================================================================ DETAIL · close-up upgrades (data/models_detail.js)
+   The films' HD units (fighter, helo, drone, catapult, destroyer, tel, radar, pantsir) and the game's E-2D, K342P
+   and Bal raised to the Nimitz's standard: overrides under the same keys (EXTRA_MODELS / ALL_MODELS, CUT_MODELS),
+   every part name and state field kept, parts added. models_detail.js builds them from the helpers handed over here
+   and returns what this section registers. New states: fighter gear / fold / hook / probe / slam / aam, helo fold /
+   hellfire / mk54, aew gear (MODEL_STATES); anchors DETAIL.FIGHTER, DETAIL.HELO and E2D.GEAR_H. */
+import { installDetail } from './models_detail.js';
+export const DETAIL = installDetail({
+  bboxOf, splitPart, cloneModel, partOf, cutBySides, sideSplit, indexSplit, slab2, skQuad, skAt, skN, slimShell, aam, slam, hellfire,
+  cvVolume, cvWall, cvStripe, aew, aewCut, E2, e2Y, e2LE, e2TE, e2Dome, telCut, radarCut, pantsirCut, balCut, bal, transloader, TZM,
+  yamz846, mzktRadiator, mzktGearbox, mzktTransfer, mzktShafts, mzktHubs, kamaz740, PZ, AXZ, BL, wheelSide,
+  ddClassify, underwater, mrg, MRGS, lm2500, GTS, gtXf, ddTrunks, ddShafts, vlsBlock, hD, DDA,
+});
+Object.assign(EXTRA_MODELS, DETAIL.models); Object.assign(CUT_MODELS, DETAIL.cuts); Object.assign(ALL_MODELS, DETAIL.models, DETAIL.cuts);
+for (const k of Object.keys(DETAIL.models)) if (k in UNIT_MODELS) UNIT_MODELS[k] = DETAIL.models[k];
+for (const [k, v] of Object.entries(DETAIL.states)) MODEL_STATES[k] = O(MODEL_STATES[k] || {}, v);
+for (const k of Object.keys(DETAIL.cuts)) {
+  const b = k.replace(/_cut$/, '');
+  MODEL_STATES[k] = O(MODEL_STATES[b] || {}, { xray: false });
+  if (!MODEL_INFO[k]) MODEL_INFO[k] = O(MODEL_INFO[b], { name: MODEL_INFO[b].name + ' · cutaway', kind: 'cut', base: b });
+}
+Object.assign(E2D, DETAIL.E2D);
+
 export default EXTRA_MODELS;
