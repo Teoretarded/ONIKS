@@ -79,7 +79,7 @@ export function setupScreen(app, mode) {
         { id: 'weather', label: 'Weather', choices: WEATHERS, value: MS.byId(mapId).weather || 'calm', blurb: v => WEATHER_BLURB[v] },
       );
     }
-    rows.push({ gap: true }, { id: 'start', label: 'Start', action: true, blurb: combat ? 'Fog of war is on. The enemy is awake.' : 'Both rosters in the spawn palette (P). The enemy AI sleeps until you wake it (K).' });
+    rows.push({ gap: true }, { id: 'start', label: 'Start', action: true, blurb: combat ? 'Fog of war is on. The enemy is awake.' : 'Both rosters in the spawn palette (P); F2 opens the map builder. The enemy AI sleeps until you wake it (K).' });
     const sv = savedGame(mode);
     slotSeen = slotKey();
     if (sv) rows.push(continueRow(sv));

@@ -115,7 +115,8 @@ export const KEYBINDS = [
     ['F8', 'Still · Shift: sequence'] ] },
   { group: 'Sandbox', mode: 'sandbox', binds: [
     ['P', 'Spawn palette'], ['1-9 ⇧1-9', 'Pick a unit to place', { ctx: 'palette' }], ['Del', 'Delete selected'], ['G', 'Fog'], ['K', 'Enemy AI'],
-    ['M', 'Switch side'], ['N', 'Weather'] ] },
+    ['M', 'Switch side'], ['N', 'Weather'], ['F2', 'Map builder · time stops'],
+    ['Wheel R', 'Builder: turn · drag moves · Del removes', { ctx: 'palette' }] ] },
 ];
 
 const spec = k => SETTINGS.find(s => s.key === k);

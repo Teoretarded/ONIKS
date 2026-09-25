@@ -17,6 +17,7 @@ and calls `game.addSystem(await createX(game, ctx))`:
 | `objectives.js` | `createObjectives` | `objectives` (3; + the campaign script, `campaign/`): objectives, waves |
 | `match.js` | `createMatchFlow` | `menu` (120) + `escape` (2): result, grade, end overlay, pause menu |
 | `sandbox.js` | `createSandbox` | `sandbox` (60): spawn palette and tools (sandbox only) |
+| `editor.js` | `createEditor` | `editor` (90): the map builder (sandbox only, F2): time stops; place both rosters, drag to move, wheel / R turn, Del remove, spots checked (`sandbox.js canPlace`), a layout per map saved in localStorage; bus `editor` `{ on }` |
 | `sonar.js` | `createSonar` | `sonar` (14): sonar rings, heard contacts, torpedo tracks; O dive (boats) |
 | `src/fx/index.js` | `createFx(game, ctx)` | `fx` (5): launches, plumes, trails, hits, fires, wakes, weather; detail = the Effects setting |
 | `src/ui/sensors.js` or `src/ui/sensors/index.js` | `createSensors(game, ctx)` | `sensors` (15): radar picture, contacts, the SCAN, radar view (V), storms |

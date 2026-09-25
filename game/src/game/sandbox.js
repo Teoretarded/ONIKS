@@ -3,7 +3,8 @@
    other side's AI, command either side, weather presets.
    Keys: P palette · 1-9 coast rows, Shift 1-9 fleet rows (palette open) · Del delete · G fog · K enemy AI ·
    M switch side (J is the hit replay's, O the boats' dive) · N weather. Click places, Shift-click keeps placing,
-   right-click / Esc stops. */
+   right-click / Esc stops. F2 (or the Map builder row) opens the map builder (editor.js), which hides this palette.
+   canPlace / whyNot / removeUnits are shared with the builder. */
 import { PRI } from './game.js';
 import { setAi, weatherOf } from './setup.js';
 import { SHORT } from './labels.js';
@@ -12,23 +13,56 @@ import { Weather } from '../sim/weather.js';
 
 const WEATHERS = ['calm', 'haze', 'rain', 'storm'];
 
+/* can a unit of this type stand at (x, z)? Aircraft anywhere inside the map (they fly at their cruise height); land
+   units on open, not too steep ground; boats in deep water; an LCAC on water or a beach; ships in open water deep
+   enough for their draught. The sandbox palette and the map builder (editor.js) both place through it. */
+export function canPlace(game, type, x, z) {
+  const d = UNITS[type], sim = game.sim, h = game.map.h(x, z);
+  if (Math.abs(x) > game.map.W / 2 - 300 || Math.abs(z) > game.map.H / 2 - 300) return false;
+  if (d.domain === 'air') return true;
+  if (d.domain === 'land') return h > .5 && game.map.slope(x, z) < (d.slopeMax || .4) && sim.nav.open('land', x, z);
+  if (d.sub) return h < -d.sub.water && sim.nav.open('sub', x, z);          // boats: deep water only
+  if (d.hover) return (h < -1 || h > .5) && sim.nav.open('hover', x, z);   // an LCAC: water, or a beach
+  return h < -(d.draught || 5) - 3 && sim.nav.open('sea', x, z);
+}
+/* why a spot is refused (the toast and the builder's tag) */
+export function whyNot(type) {
+  const d = UNITS[type];
+  return d.domain === 'air' ? 'INSIDE THE MAP' : d.sub ? 'NEEDS DEEP WATER' : d.hover ? 'WATER OR A BEACH' : d.domain === 'sea' ? 'NEEDS OPEN WATER' : 'NEEDS OPEN GROUND';
+}
+/* sim.spawn for a player's placement, kept true in the match record: a host that comes loaded (an LHD's craft,
+   vehicles and helicopters, spawned inside its own spawn) is one command, so its passengers' inner spawns are not
+   recorded as commands of their own (played back they would be spawned twice, before their host) */
+export function spawnUnit(game, type, side, x, z, o) {
+  const D = game.debrief, rec = D && D.recorder && D.recorder.on && D.rec ? D.rec : null, n0 = rec ? rec.ops.length : 0;
+  const u = game.sim.spawn(type, side, x, z, o);
+  if (rec && rec.ops.length - n0 > 1) { const last = rec.ops[rec.ops.length - 1]; rec.ops.length = n0; rec.ops.push(last); }
+  return u;
+}
+/* take units off the map (recorded: the recorder watches units.delete); aircraft parked aboard go with their ship */
+export function removeUnits(game, ids) {
+  const sim = game.sim, all = new Set(ids);
+  // whatever rides aboard (jets on a deck, craft in a well, vehicles in a craft) goes with its host
+  for (let grew = true; grew;) { grew = false; for (const v of sim.units.values()) if (v.aboard && all.has(v.aboard) && !all.has(v.id)) { all.add(v.id); grew = true; } }
+  for (const id of all) {
+    const u = sim.units.get(id); if (!u) continue;
+    sim.units.delete(id);
+    for (const s in sim.sides) sim.sides[s].contacts.delete(id);
+    sim.emit('removed', { unit: id, type: u.type, side: u.side });
+  }
+  sim._dirty = true;
+  game.dispatchEvents();
+}
+
 export function createSandbox(game, ctx) {
   if (game.mode !== 'sandbox') return null;
   const { sim, R } = game, cam = R.camera;
   const rosters = { coast: typesOf('coast'), fleet: typesOf('fleet') };
-  let open = true, place = null, el = null, aiLevel = 'normal';
+  let open = true, place = null, el = null, aiLevel = 'normal', building = false;
   const ghost = { key: '', T: [0, 0, 0], hdg: 0, st: {}, tint: 'own', alpha: .5 };
   addStyle();
 
-  function valid(type, x, z) {
-    const d = UNITS[type], h = game.map.h(x, z);
-    if (Math.abs(x) > game.map.W / 2 - 300 || Math.abs(z) > game.map.H / 2 - 300) return false;
-    if (d.domain === 'air') return true;
-    if (d.domain === 'land') return h > .5 && game.map.slope(x, z) < (d.slopeMax || .4) && sim.nav.open('land', x, z);
-    if (d.sub) return h < -d.sub.water && sim.nav.open('sub', x, z);          // boats: deep water only
-    if (d.hover) return (h < -1 || h > .5) && sim.nav.open('hover', x, z);   // an LCAC: water, or a beach
-    return h < -(d.draught || 5) - 3 && sim.nav.open('sea', x, z);
-  }
+  const valid = (type, x, z) => canPlace(game, type, x, z);
   function hdgFor(side, x, z) { const e = game.map.spawns[ENEMY[side]]; return Math.atan2(e.x - x, e.z - z); }
   function pick(side, type) {
     place = { side, type };
@@ -39,25 +73,13 @@ export function createSandbox(game, ctx) {
   function stop() { if (!place) return; place = null; game.bus.emit('mode', { mode: null }); render(); }
   function doPlace(x, z) {
     const { side, type } = place, d = UNITS[type];
-    if (!valid(type, x, z)) { game.bus.emit('toast', { text: d.sub ? 'NEEDS DEEP WATER' : d.domain === 'sea' ? 'NEEDS OPEN WATER' : 'NEEDS OPEN GROUND', bad: true }); return false; }
-    const u = sim.spawn(type, side, x, z, { hdg: hdgFor(side, x, z) });
+    if (!valid(type, x, z)) { game.bus.emit('toast', { text: whyNot(type), bad: true }); return false; }
+    const u = spawnUnit(game, type, side, x, z, { hdg: hdgFor(side, x, z) });
     if (u && side === game.side) game.select([u.id], { add: true });
     game.bus.emit('spawned', { unit: u.id, type, side });
     return true;
   }
-  function remove(ids) {
-    for (const id of ids) {
-      const u = sim.units.get(id); if (!u) continue;
-      sim.units.delete(id);
-      for (const s in sim.sides) sim.sides[s].contacts.delete(id);
-      // aircraft parked on a deleted carrier go with it
-      for (const v of sim.units.values()) if (v.aboard === id) { sim.units.delete(v.id); sim.emit('removed', { unit: v.id, type: v.type, side: v.side }); }
-      sim.emit('removed', { unit: id, type: u.type, side: u.side });
-    }
-    sim._dirty = true;
-    game.dispatchEvents();
-    game.clearSelection();
-  }
+  function remove(ids) { removeUnits(game, ids); game.clearSelection(); }
   function setWeather(kind) {
     const w = weatherOf(game.map, kind);
     sim.weather = new Weather(sim, w);
@@ -79,6 +101,7 @@ export function createSandbox(game, ctx) {
     } else if (k === 'weather') { const w = (game.weather && game.weather.kind) || 'calm'; setWeather(WEATHERS[(WEATHERS.indexOf(w) + 1) % WEATHERS.length]); }
     else if (k === 'delete') { const ids = [...game.selection]; if (ids.length) remove(ids); }
     else if (k === 'palette') { open = !open; if (!open) stop(); }
+    else if (k === 'builder') { const ed = game.getSystem('editor'); if (ed) ed.toggle(); }
     render();
   }
 
@@ -110,16 +133,22 @@ export function createSandbox(game, ctx) {
         <div class="t" data-k="fog"><b>G</b><span>Fog</span><em>${sim.fog ? 'on' : 'off'}</em></div>
         <div class="t" data-k="weather"><b>N</b><span>Weather</span><em>${w}</em></div>
         <div class="t" data-k="delete"><b>Del</b><span>Delete selected</span></div>
+        <div class="t" data-k="builder"><b>F2</b><span>Map builder</span></div>
         <div class="t" data-k="palette"><b>P</b><span>Hide</span></div>
       </div>` : `<div class="t" data-k="palette"><b>P</b><span>Sandbox</span></div>`;
   }
 
   return {
     name: 'sandbox', priority: PRI.sandbox,
-    init() { render(); game.bus.on('side', render); },
+    init() {
+      render(); game.bus.on('side', render);
+      // the map builder (editor.js) has the stage: this palette steps aside and stops placing
+      game.bus.on('editor', e => { building = !!(e && e.on); if (building) stop(); if (el) el.style.display = building ? 'none' : ''; });
+    },
     onKey(e) {
       if (e.type !== 'keydown' || e.ctrlKey || e.metaKey || e.altKey) return false;
       const k = e.code;
+      if (building && (k === 'KeyP' || k === 'Delete' || /^Digit/.test(k))) return false;   // the builder's
       if (open && /^Digit[0-9]$/.test(k)) {
         const n = +k.slice(5), list = e.shiftKey ? rosters.fleet : rosters.coast, side = e.shiftKey ? 'fleet' : 'coast';
         if (n >= 1 && list[n - 1]) { pick(side, list[n - 1]); return true; }
@@ -131,7 +160,7 @@ export function createSandbox(game, ctx) {
       return false;
     },
     onPointer(ev) {
-      if (!place) return false;
+      if (!place || building) return false;
       if (ev.type === 'click' && ev.button === 2) { stop(); return true; }
       if (ev.type === 'click' && ev.button === 0) {
         const w = cam.pickGround(ev.x, ev.y);
@@ -141,7 +170,7 @@ export function createSandbox(game, ctx) {
       return ev.type === 'down' && ev.button === 0 || ev.type === 'up' && ev.button === 0;
     },
     draw3d() {
-      if (!place || !game.mouse.in) return;
+      if (!place || building || !game.mouse.in) return;
       const w = cam.pickGround(game.mouse.x, game.mouse.y);
       if (!w) return;
       const d = UNITS[place.type], ok = valid(place.type, w[0], w[2]);

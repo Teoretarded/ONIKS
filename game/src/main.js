@@ -48,6 +48,7 @@ const OPTIONAL = [
   [['./game/orbital.js'], 'createOrbital', 'orbital'],
   [['./ui/help/index.js'], 'createHelp', 'help'],
   [['./game/filmmaker.js'], 'createFilmmaker', 'filmmaker'],
+  [['./game/editor.js'], 'createEditor', 'editor'],                 // the sandbox's map builder (F2)
   [['./game/debrief.js'], 'createDebrief', 'debrief'],
   [['./game/debris.js'], 'createDebris', 'debris'],
   [['./game/perfguard.js'], 'createPerfGuard', 'perfguard'],   // last: it wraps game.frame after the debrief's host
