@@ -42,6 +42,7 @@ PATH; call it from PowerShell by full path).
 |---|---|
 | Play the game | `run_game.bat`, or `python tools/serve_game.py` and open http://localhost:8771/game/index.html |
 | Game tests / balance | http://localhost:8771/game/tests.html · `game/balance.html` (AI-vs-AI batches per map) |
+| Data checks (Node) | `node tools/validate.mjs` (units, anatomy, campaign, maps, keybinds; `--only`, `--maps`, `--quiet`); exit 1 on a failure |
 | Game stills | in the page console: `ONIKS.still(name)` (WebGL only), `ONIKS.hudShot(name)` (with the HUD) → `game/shots/` (gitignored); `ONIKS.benchSync(n)` GPU-synced ms; `ONIKS.ff(sec)` runs the sim ahead |
 | Serve and watch | `python tools/serve.py`, open http://localhost:8770/films/index.html |
 | Stills | open `/films/_shoot.html?s=<film>@t1,t2` → `reference/films/shots/<film>_t<sec>.png` (gitignored) |
