@@ -146,3 +146,9 @@ rounds in a TEL's containers), fitted 3D part boxes pop in order with labels dec
 counts up to 0.97 and settles coral. When the target is a speck, a magnified inset opens beside the log with the
 cutaway turning under a lime slice. Storm lightning forks in white to everything near the strike, both sides.
 Stills: `game/shots/final_1_forks.png` ... `final_7_close.png`.
+
+## 06:55 · Campaign pacing fixed
+Every mission's first beat now comes within minutes; a passive player loses every mission except the tutorial;
+each was won on the first try by a scripted player (grades S/A). M2 has a hide-and-seek structure (their helicopter
+takes off at 6:00 and its radar gives you a bearing), M5 is fire-and-move with a depot ring to refill Pantsirs,
+M6's storm cell is how you get rounds through to the carrier. Results only count in unlock order.
