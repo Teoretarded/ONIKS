@@ -237,3 +237,11 @@ Salvo row); "IN REACH" alerts when a classified track comes within reach of your
 to x1). The coast AI now presses in skirmish (an idle fleet on the strait: 34 rounds, two destroyers and the carrier
 sunk by T+60, where it used to fire 8 rounds and stall). 20/20 tests. Balance swung (two maps now favour the coast),
 so a numbers-only balance pass is running.
+
+## 10:05 · Look pass 2 done; review 3 started
+Model dots are now capped by spacing on screen (1.8 px at 1080p), so big hulls keep their dot texture up close (the
+carrier deck at 420 m is no longer a solid slab) with a camera fill light like the Anatomy · Ship film; the sea reads
+as rows from 5-20 km and no longer looks like stars; haze fades with distance instead of blacking out the near sea;
+the Orbital hairlines start fading in at 22 km so the zoom never passes through an empty band.
+Started: review 3, and a film-quality Nimitz (island with turning radars, angled deck, catapults, elevators,
+sponsons, below-waterline shafts and propellers; an X-ray/exploded anatomy).
