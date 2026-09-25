@@ -22,7 +22,8 @@
    Merged: a hit landing on an old scar enlarges it; up to 8 scars a unit (the shader's arrays).
 
    Hooks: game.scars = { surface(ev) (the snapped world point of the hit just handled: the fx blast sits there),
-   burning(id), heavy(id) (> 1: the warhead was far too big for the target: a catastrophic break-up), of(id), stats }.
+   burning(id), heavy(id) (> 1: the warhead was far too big for the target: a catastrophic break-up), of(id), clear(id)
+   (the marks, fires and ejecta off at once: the Inspect impact test's reset), stats }. WH (warhead kg) is exported.
    The render instance gets d.scars (drawn this frame, game.drawn) for engine/models.js. Console: ONIKS.game.scars.
 
    createScars(game) -> system 'scars' (priority 12: its events before debris (11) and fx (5); draws after render). */
@@ -30,8 +31,8 @@ import { Fire } from '../fx/lib/impact.js';
 import { attitudeM } from './debris/math.js';
 
 /* warhead (kg): public figures, rounded */
-const WH = { oniks: 250, kalibr: 200, tlam: 450, slam: 360, uran: 145, hellfire: 9, kornet: 7, shell: 3.6, shell130: 3.6,
-  shell57: .4, sm6: 64, pdms: 39, sam: 20, sam48: 180, ram: 11, aam: 18, mk48: 290, mk54: 44, t53: 300, ciws: .05, gun30: .1 };
+export const WH = { oniks: 250, kalibr: 200, tlam: 450, slam: 360, uran: 145, hellfire: 9, kornet: 7, shell: 3.6, shell130: 3.6,
+  shell57: .4, sm6: 64, pdms: 39, sam: 20, sam48: 180, ram: 11, aam: 18, mk48: 290, mk54: 44, t53: 300, ciws: .05, gun30: .1, rws: .05 };
 const MAXS = 8, MAXE = 700, GROUPS = 16, EJ_LIFE = 7;
 const sat = v => v < 0 ? 0 : v > 1 ? 1 : v;
 const ss = (a, b, v) => { const t = sat((v - a) / (b - a)); return t * t * (3 - 2 * t); };
@@ -274,7 +275,7 @@ export function createScars(game) {
     if (!n) return;
     const g = groups.length >= GROUPS ? groups.shift() : null;
     const G = g && g.P.length >= n * 3 ? g : { P: new Float32Array(Math.max(n, 64) * 3), V: new Float32Array(Math.max(n, 64) * 3), K: new Float32Array(Math.max(n, 64) * 2) };
-    G.t0 = sim.t; G.n = n; G.seed = S.seed;
+    G.t0 = sim.t; G.n = n; G.seed = S.seed; G.unit = u.id;
     const sp = u.def.domain === 'sea' ? (u.speed || 0) : 0, vbx = Math.sin(pose.hdg) * sp, vbz = Math.cos(pose.hdg) * sp;
     const Nw = [M[0] * S.nx + M[1] * S.ny + M[2] * S.nz, M[3] * S.nx + M[4] * S.ny + M[5] * S.nz, M[6] * S.nx + M[7] * S.ny + M[8] * S.nz];
     const kick = Math.sqrt(S.W / 100);
@@ -399,6 +400,16 @@ export function createScars(game) {
     /* the latest scar of a unit, model frame: { x, y, z, nx, ny, nz, r, W } */
     last(id) { const r = recs.get(id); return r && r.list.length ? r.list.reduce((a, b) => ((b.t0h || b.t0) >= (a.t0h || a.t0) ? b : a)) : null; },
     of(id) { return recs.get(id) || null; },
+    /* take a unit's marks off now (the Inspect impact test's reset): its scars, their fires and smoke (out of the fx
+       list at once), its ejecta */
+    clear(id) {
+      const rec = recs.get(id), f = fxSys();
+      if (rec) for (const S of rec.list) if (S.fire) { S.fire.stop(sim.t); const i = f && f.fx ? f.fx.indexOf(S.fire) : -1; if (i >= 0) f.fx.splice(i, 1); }
+      recs.delete(id);
+      for (let i = groups.length - 1; i >= 0; i--) if (groups[i].unit === id) groups.splice(i, 1);
+      const d = game.drawn && game.drawn.get(id); if (d) d.scars = null;
+      if (lastEv && lastEv.target === id) lastEv = null;
+    },
     init() { game.scars = sys; },
     onEvent(e) {
       switch (e.type) {

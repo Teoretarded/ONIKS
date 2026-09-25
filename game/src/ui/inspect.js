@@ -7,6 +7,7 @@
    In it: E exploded view (assemblies leave in their w0 order and come home in reverse) · X X-ray on / off ·
           left or right drag orbit · wheel zoom · click a tag (or a part) to frame it, click empty space to
           frame the whole · H hide the tags · Esc or I leave (the camera flies back, time and the world return).
+          B (sandbox, a unit): the impact test (ui/inspect/impact.js): strike it with any round in the game.
    Time:  combat / campaign pause while inspecting; sandbox keeps running (settings.inspectPause overrides);
           a round in flight drops the game to bullet time x0.05, shown on screen.
 
@@ -23,6 +24,7 @@ import { makeSubject, toWorld } from './inspect/subject.js';
 import * as O from './inspect/overlay.js';
 import { SHORT, TRACK, status } from '../game/labels.js';
 import { MUSEUM_KEYS, groupOf, attachPaletteRow } from './inspect/museum.js';
+import { createImpact } from './inspect/impact.js';
 
 const TAU = Math.PI * 2;
 const sat = v => v < 0 ? 0 : v > 1 ? 1 : v;
@@ -66,6 +68,9 @@ export async function createInspect(game, ctx) {
   let K = 1;
   const pcam = { project(p, o) { const r = cam.project(p, o); if (r) { r[0] /= K; r[1] /= K; } return r; } };
   let paletteStop = null;
+  /* the impact test (sandbox, a unit open: B): ui/inspect/impact.js */
+  const IMP = createImpact({ game, sim, R, cam, O, pcam, state: () => S });
+  const impOk = V => V && V.kind === 'unit' && game.mode === 'sandbox';
 
   function subjectOf(key) {
     if (!subjects.has(key)) {
@@ -118,6 +123,7 @@ export async function createInspect(game, ctx) {
     const subj = subjectOf(tg.key);
     if (!subj) return false;
     let saved = null, prev = null;
+    IMP.leave();
     if (S && S.phase !== 'out') { prev = S; saved = S.saved; bus.emit('inspect', { id: prev.id, kind: prev.kind, on: false }); }
     else if (S) finish(true);
     if (!saved) saved = saveState();
@@ -187,6 +193,7 @@ export async function createInspect(game, ctx) {
   function close() {
     if (!S || S.phase === 'out') return;
     const V = S;
+    IMP.leave();
     V.phase = 'out'; V.tOut = V.t; V.xr.on = false; V.ex.on = false;
     const sv = V.saved;
     cam.minDist = sv.minDist; cam.minPitch = sv.minPitch; cam.keys = sv.keys;
@@ -232,7 +239,8 @@ export async function createInspect(game, ctx) {
     let pos, hdg = 0, pitch = 0, roll = 0, src = null;
     if (V.kind === 'unit') {
       const u = sim.units.get(V.id);
-      if (!u || !u.alive || u.aboard) { if (!V.lostT) { V.lostT = V.t || 1e-3; V.lostWhy = u && !u.alive ? (u.def.domain === 'sea' ? 'Sinking' : 'Destroyed') : 'Gone'; } return V.t > 0; }
+      // (the impact test keeps a lost unit in view while she sinks or burns: its reset puts a fresh one in her place)
+      if (!u || u.aboard || (!u.alive && !IMP.on)) { if (!V.lostT) { V.lostT = V.t || 1e-3; V.lostWhy = u && !u.alive ? (u.def.domain === 'sea' ? 'Sinking' : 'Destroyed') : 'Gone'; } return V.t > 0; }
       const p = game.unitPose(u); pos = p.pos; hdg = p.hdg; pitch = p.pitch; roll = p.roll; src = u.st;
       V.u = u;
     } else if (V.kind === 'proj') {
@@ -338,6 +346,7 @@ export async function createInspect(game, ctx) {
   /* ------------------------------------------------------------ per frame */
   function update(dt) {
     if (note && game.realT - note.t0 > 2.2) note = null;
+    IMP.update(dt);
     if (!S) return;
     const V = S;
     V.t += dt;
@@ -472,6 +481,10 @@ export async function createInspect(game, ctx) {
     // parts: explode offsets (partX), hidden parts shown by the slice or lifted out, damage coral / dropped out
     const dmg = damageOf(V);
     d.damage = dmg;
+    // the unit's hit marks (game/scars.js) on the cutaway too; the modules the debris took off it left out
+    const sc = V.kind === 'unit' && game.scars ? game.scars.of(V.id) : null;
+    d.scars = sc && sc.n ? sc : null;
+    const gone = V.kind === 'unit' && game.debris && game.debris.gone ? game.debris.gone(V.id) : null;
     const under = V.kind === 'unit' && V.u && V.u.def.domain === 'sea' ? 2.4 : 1.35;
     for (const p of subj.parts) {
       const nm = p.name;
@@ -485,6 +498,7 @@ export async function createInspect(game, ctx) {
       } else if (p.cls === 'part') a = 1.15;
       const dm = dmg ? dmg[nm] || 0 : 0;
       if (dm >= .99) a *= .16;
+      if (gone && gone(nm)) a = 0;
       d.partAlpha[nm] = a;
     }
     R.draw(d);
@@ -492,6 +506,7 @@ export async function createInspect(game, ctx) {
     if (V.prevInst) { V.prevInst.dissolve = ss(0, .45, V.prevT); R.draw(V.prevInst); }
     // what the x-ray finds inside
     drawContents(V, xk > 0);
+    IMP.draw3d();
   }
   function drawContents(V, on) {
     const groups = contentGroups(V);
@@ -521,7 +536,8 @@ export async function createInspect(game, ctx) {
   function dimFx(k, V) {
     if (k >= .999) return;
     // effects on the subject (its plume and trail, its fires) keep their light: only the rest of the world steps back
-    const fx = R.fx, e = cam.eye, keep = V.kind === 'proj' ? Math.max(40, V.subj.axis.L * 4) : 0;
+    // (the impact test keeps the blasts, fires and smoke round the unit at full strength)
+    const fx = R.fx, e = cam.eye, keep = V.kind === 'proj' ? Math.max(40, V.subj.axis.L * 4) : IMP.on ? Math.max(700, V.subj.axis.L * 5) : 0;
     const cx = V.T0[0] - e[0], cy = V.T0[1] - e[1], cz = V.T0[2] - e[2], k2 = keep * keep;
     // the trail of a round runs back along its path: keep a capsule behind it
     const tr = V.kind === 'proj' ? 900 : 0, bx = -V.R0[2], by = -V.R0[5], bz = -V.R0[8];
@@ -584,6 +600,7 @@ export async function createInspect(game, ctx) {
     drawTimeChip(ctx, W, A);
     drawKeys(ctx, W, H, A);
     drawScale(ctx, W, H, A);
+    if (impOk(V)) IMP.draw2d(ctx, W, H, A);
   }
 
   /* the placards: lime chip tags condensing as the slice reaches their part, in columns either side of the model,
@@ -646,7 +663,7 @@ export async function createInspect(game, ctx) {
       r.side = o.side;
     }
     const wL = Math.max(0, ...rows.filter(r => r.side === 'L').map(r => r.w)), wR = Math.max(0, ...rows.filter(r => r.side === 'R').map(r => r.w));
-    const xL = Math.max(34 + wL, Math.min(mb[0] - 40, W * .5 - 60)), xR = Math.min(W - 34 - wR, Math.max(mb[2] + 40, W * .5 + 60));
+    const xL = Math.max(34 + wL, Math.min(mb[0] - 40, W * .5 - 60)), xR = Math.min(W - IMP.reserve - 34 - wR, Math.max(mb[2] + 40, W * .5 + 60));
     const top = { L: Math.max(96, readBottom + 22), R: 74 }, bottom = H - 104;
     const k = 1 - Math.exp(-12 * Math.max(1e-3, game.dtReal || .016));
     for (const side of ['L', 'R']) {
@@ -794,6 +811,7 @@ export async function createInspect(game, ctx) {
       const rate = game.paused ? ['Paused', Wt] : game.timeRate === BULLET ? [`x${BULLET}`, LIME] : [`x${game.timeRate}`, Wt];
       L.push([rate, [game.timeRate === BULLET && !game.paused ? ' · bullet time · ' : ' · ', F], [`T+${game.fmtTime ? game.fmtTime(sim.t) : sim.t.toFixed(0)}`, F]]);
     }
+    for (const segs of IMP.readout(F, Wt)) L.push(segs);
     if (V.lostT) L.push([[V.lostWhy, CORAL]]);
     for (const segs of L) { O.runs(ctx, x, y, segs, { size: 11.5, a: A }); y += 21; }
     return y;
@@ -807,8 +825,9 @@ export async function createInspect(game, ctx) {
   }
   function drawKeys(ctx, W, H, A) {
     const V = S;
-    const list = [['E', V.ex.on ? 'Assemble' : 'Explode'], ['X', 'X-ray'], ['Drag', 'Orbit'], ['Wheel', 'Zoom'], ['Click', 'Frame part'], ['H', 'Tags']];
+    const list = IMP.on ? IMP.keys() : [['E', V.ex.on ? 'Assemble' : 'Explode'], ['X', 'X-ray'], ['Drag', 'Orbit'], ['Wheel', 'Zoom'], ['Click', 'Frame part'], ['H', 'Tags']];
     if (V.kind === 'museum') list.unshift(['← →', 'Walk']);
+    if (impOk(V) && !IMP.on) list.push(['B', 'Impact test']);
     list.push(['Esc', 'Leave']);
     O.keys(ctx, W / 2, H - 50, list, A * .95);
   }
@@ -845,6 +864,7 @@ export async function createInspect(game, ctx) {
     if (PASS_KEYS.has(e.code)) return false;
     if (!down) return /^Key|^Digit|^Arrow|Tab|Bracket/.test(e.code);
     if (e.repeat && e.code !== 'ArrowLeft' && e.code !== 'ArrowRight') return true;
+    if (impOk(V) && IMP.onKey(e)) return true;
     switch (e.code) {
       case 'Escape': case 'KeyI': close(); return true;
       case 'KeyE': toggleExplode(V); return true;
@@ -890,6 +910,7 @@ export async function createInspect(game, ctx) {
       return false;
     }
     const V = S;
+    if (impOk(V) && (ev.type === 'click' || (ev.type === 'move' && !(V.drag && game.mouse.down === 0))) && IMP.onPointer(ev, ev.x / K, ev.y / K)) return true;
     if (ev.type === 'wheel') { V.manual = true; V.ex.idle = 0; return false; }
     if (ev.type === 'down') { if (ev.button === 0) V.drag = { x: ev.x, y: ev.y }; V.ex.idle = 0; return true; }
     if (ev.type === 'move') {
@@ -940,7 +961,7 @@ export async function createInspect(game, ctx) {
         setTimeout(() => { if (!S) subjectOf(key); }, 120);
       });
       if (game.mode === 'sandbox' && game.uiRoot) paletteStop = attachPaletteRow(game.uiRoot, () => openMuseum());
-      game.inspect = { open: id => openUnit(sim.units.get(id)), openProj: id => openProj(sim.projectiles.get(id)), museum: key => openMuseum(key), close, can,
+      game.inspect = { open: id => openUnit(sim.units.get(id)), openProj: id => openProj(sim.projectiles.get(id)), museum: key => openMuseum(key), close, can, impact: IMP,
         get active() { return !!S && S.phase !== 'out'; }, get state() { return S; } };
     },
     update, draw3d, draw2d, onKey, onPointer,

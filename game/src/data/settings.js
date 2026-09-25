@@ -115,7 +115,13 @@ export const KEYBINDS = [
   { group: 'Inspect', binds: [
     ['I', 'Inspect the selection'], ['Alt click', 'Inspect a unit or round'], ['E', 'Exploded view', { ctx: 'inspect' }],
     ['X', 'X-ray on / off', { ctx: 'inspect' }], ['H', 'Hide the tags', { ctx: 'inspect' }], ['Esc', 'Leave', { ctx: 'inspect' }],
-    ['Shift I', 'Anatomy browser', { mode: 'sandbox' }] ] },
+    ['Shift I', 'Anatomy browser', { mode: 'sandbox' }],
+    ['B', 'Impact test on / off', { ctx: 'inspect', mode: 'sandbox' }], ['Click', 'Impact: strike there', { ctx: 'inspect', mode: 'sandbox' }],
+    ['F', 'Impact: strike at the aim', { ctx: 'inspect', mode: 'sandbox' }], ['R', 'Impact: repeat the last strike', { ctx: 'inspect', mode: 'sandbox' }],
+    ['↑ ↓', 'Impact: the round', { ctx: 'inspect', mode: 'sandbox' }], ['A', 'Impact: aim · click, random, waterline, deck', { ctx: 'inspect', mode: 'sandbox' }],
+    ['V', 'Impact: from the camera / the dial', { ctx: 'inspect', mode: 'sandbox' }], ['← → PgUp PgDn', 'Impact: dial bearing · elevation', { ctx: 'inspect', mode: 'sandbox' }],
+    ['Z', 'Impact: time ×1 ×0.25 ×0.1', { ctx: 'inspect', mode: 'sandbox' }], ['D', 'Impact: sim damage on / off', { ctx: 'inspect', mode: 'sandbox' }],
+    ['C', 'Impact: reset the damage', { ctx: 'inspect', mode: 'sandbox' }] ] },
   { group: 'View and time', binds: [
     ['C', 'Cinematic camera'], ['C', 'Cinematic on rounds', { ctx: 'rounds' }],
     ['B', 'Bullet time on rounds', { ctx: 'rounds' }], ['Esc', 'Drop the rounds', { ctx: 'rounds' }], ['J', 'Replay the last hit'], ['Shift J', 'Hit replay on / off'], ['V', 'Radar view'], ['Shift V', 'Radar sweeps on / off'],
