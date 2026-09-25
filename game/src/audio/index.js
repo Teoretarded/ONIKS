@@ -388,8 +388,8 @@ export function createAudio(game) {
     }
   }
   /* 'destroyed' / 'takeoff' / 'land' carry the unit type in a data field named `type`, which Sim.emit overwrites
-     with the event name; recover it from the unit (still in sim.units while it dies), or ev.unitType */
-  function kindOf(ev) { const u = unitOf(ev.unit); return (u && u.type) || ev.unitType || ''; }
+     with the event name (it moves to ev.utype); recover it from the unit (still in sim.units while it dies), or ev.utype */
+  function kindOf(ev) { const u = unitOf(ev.unit); return (u && u.type) || ev.utype || ''; }
 
   /* ---------------- loops ---------------- */
   function makePools() {
