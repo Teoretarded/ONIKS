@@ -107,7 +107,9 @@ export function createMinimap(game, hud) {
     e.preventDefault(); e.stopPropagation();
     if (!M) return;
     const w = toWorld(e);
-    if (e.button === 0 && mapAim(game, w[0], w[1], e.shiftKey)) { ping(w[0], w[1], LIME, 1.4); hud.click(); return; }
+    // a few px of the map in metres there (a track near a salvo click is picked)
+    const w2 = toWorld({ clientX: e.clientX + 14, clientY: e.clientY }), pr = Math.hypot(w2[0] - w[0], w2[1] - w[1]);
+    if (e.button === 0 && mapAim(game, w[0], w[1], e.shiftKey, pr)) { ping(w[0], w[1], LIME, 1.4); hud.click(); return; }
     if (e.button === 0) { drag = true; lookAt(w, false); }
     else if (e.button === 2) moveOrder(w, e.shiftKey);
   });

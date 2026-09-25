@@ -5,7 +5,7 @@
    createHud(game) -> the 'hud' system (priority 70; the time, objectives and director systems stop drawing their
    own fallbacks when it is there). Pieces: top.js (mark, mode · map, objectives | rate, clock, supply, side),
    log.js (engagement log), alerts.js (incoming, contacts, losses, under the log; toasts), selection.js,
-   commands.js (command card), minimap.js, reinforce.js (B), tooltip.js, mask.js. Scales with the window
+   commands.js (command card), strike.js (the G Launch picker), minimap.js, reinforce.js (B), tooltip.js, mask.js. Scales with the window
    (1080p = 1, never below .8). F10 hides it (the game's ui-off); the pause menu and the end screen veil it.
 
    For other systems:
@@ -29,7 +29,8 @@ import { createReinforce } from './reinforce.js';
 import { createMinimap } from './minimap.js';
 import { createTooltip } from './tooltip.js';
 import { createMask } from './mask.js';
-import { createSalvo } from './salvo.js';   // the salvo board (its own system; top of the command card)
+import { createSalvo } from './salvo.js';
+import { createStrike } from './strike.js';   // G: the Launch picker (over the command card)   // the salvo board (its own system; top of the command card)
 import { orbOverlay } from '../sensors/orb.js';
 
 export function createHud(game) {
@@ -59,6 +60,7 @@ export function createHud(game) {
   const bc = hud.div('h-bc');
   const buy = createReinforce(game, hud, bc);
   const alerts = createAlerts(game, hud, tr, bc);
+  const strike = createStrike(game, hud, bc);
   const cmd = createCommands(game, hud, bc);
   createSalvo(game, hud, bc);
   const sel = createSelection(game, hud);
@@ -109,7 +111,7 @@ export function createHud(game) {
       const v = (menus.length && menus[0].style.display !== 'none') || (ends.length && !ends[0].classList.contains('min'));
       if (v !== veiled) { veiled = v; root.classList.toggle('veil', v); }
       theme();
-      top.update(); log.update(); alerts.update(); sel.update(); cmd.update(); buy.update(); map.update();
+      top.update(); log.update(); alerts.update(); sel.update(); strike.update(); cmd.update(); buy.update(); map.update();
       hud.stats.ms = hud.stats.ms * .95 + (performance.now() - t0) * .05;
     },
     draw2d(ov) { const t0 = performance.now(); mask.apply(ov); tip.draw2d(orbK ? orbOverlay(ov) : ov, orbK); hud.stats.d2 = (hud.stats.d2 || 0) * .95 + (performance.now() - t0) * .05; },

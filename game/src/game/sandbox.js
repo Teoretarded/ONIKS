@@ -130,7 +130,7 @@ export function createSandbox(game, ctx) {
       <div class="tools">
         <div class="t" data-k="side"><b>M</b><span>Command</span><em>${game.side}</em></div>
         <div class="t" data-k="ai"><b>K</b><span>Enemy AI</span><em>${sim.ai[game.enemy] ? 'awake' : 'asleep'}</em></div>
-        <div class="t" data-k="fog"><b>G</b><span>Fog</span><em>${sim.fog ? 'on' : 'off'}</em></div>
+        <div class="t" data-k="fog"><b>⇧G</b><span>Fog</span><em>${sim.fog ? 'on' : 'off'}</em></div>
         <div class="t" data-k="weather"><b>N</b><span>Weather</span><em>${w}</em></div>
         <div class="t" data-k="delete"><b>Del</b><span>Delete selected</span></div>
         <div class="t" data-k="builder"><b>F2</b><span>Map builder</span></div>
@@ -155,7 +155,8 @@ export function createSandbox(game, ctx) {
         return false;
       }
       if (place && k === 'Escape') { stop(); return true; }
-      const T = { KeyP: 'palette', Delete: 'delete', KeyG: 'fog', KeyK: 'ai', KeyM: 'side', KeyN: 'weather' }[k];
+      // Shift+G fog (G alone is the orders' Launch at a point)
+      const T = k === 'KeyG' && !e.shiftKey ? null : { KeyP: 'palette', Delete: 'delete', KeyG: 'fog', KeyK: 'ai', KeyM: 'side', KeyN: 'weather' }[k];
       if (T) { tool(T); return true; }
       return false;
     },

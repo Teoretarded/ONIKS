@@ -1,6 +1,8 @@
 /* Orders: issue (with formations for groups) and per-tick processing of each unit's order queue.
    order = { kind: 'move'|'attack'|'stop'|'hold'|'weapons'|'salvo'|'deploy'|'undeploy'|'reload'|'scan'|'radar'
-             |'launch_drone'|'patrol'|'return'|'dive', x?, z?, target?, on?, free?, n?, salvo?, r?, queue?, stay?, depth? }
+             |'launch_drone'|'patrol'|'return'|'dive'|'strike', x?, z?, target?, on?, free?, n?, salvo?, r?, queue?, stay?,
+             depth?, w? }
+   'strike' { x, z, w: weapon key, n }: n rounds of that weapon at a map point, no track needed (H.strike).
    'attack' with `n`: one volley of n rounds (the AI, the campaign scripts). Without `n` (the player's): persistent,
    volleys of the salvo size until the target is destroyed, the weapon is empty with no reload coming, the track has
    been lost for GRACE s (the order holds meanwhile and resumes when the track is back), or it is cancelled.
@@ -15,9 +17,10 @@
 import { CLASSIFY, TEL_ELEV, UNITS } from '../data/units.js';
 import { canMove, stow, navDom } from './movement.js';
 import { onDeck } from './dynamics.js';
-import { startScan, scanBlocked } from './sensors.js';
+import { startScan, scanBlocked, radarWorks } from './sensors.js';
+import { launch } from './weapons.js';
 import { ammoFull, atDepot, elevOf, replenishPoint } from './mech.js';
-import { atPD } from './subs.js';
+import { atPD, isSub } from './subs.js';
 import { ORDERS as AMPH, requestWell } from './amphib.js';
 import { dxz, clamp, angTo, wrapPi } from './util.js';
 import { DT } from './consts.js';
@@ -449,6 +452,43 @@ const H = {
     return true;
   },
 
+  /* strike: n rounds of the weapon o.w at the point (o.x, o.z), no track needed (the player's Launch at a point).
+     It closes like an attack (engageFrom: to 85 % of range; aircraft fly their strike profile), erects / comes up to
+     periscope depth, an aircraft turns its nose onto the point, then one round leaves per ready tube until n are
+     away. A point strike has no target: the rounds fly to the point and burst there. o.fired, o.st = 'close' |
+     'ready' | 'fire'; the sim emits 'strike' { unit, side, weapon, n, why: 'done' | 'empty' | 'reach' | 'out' | 'radar' }. */
+  strike(sim, u, o) {
+    const w = u.def.weapons[o.w], air = u.def.domain === 'air';
+    if (o.fired === undefined) { o.fired = 0; o.st = 'close'; }
+    if (!w || w.gun || (w.mounts && w.mounts.every(m => u.off[m]))) return strikeEnd(sim, u, o, 'out');
+    if (u.off[o.w]) return strikeEnd(sim, u, o, 'out');
+    if (o.fired >= (o.n || 1)) return strikeEnd(sim, u, o, 'done');
+    if (u.ammo[o.w] <= 0) return strikeEnd(sim, u, o, 'empty');
+    if (u.aboard) { if (air) requestLaunch(sim, u); return false; }
+    if (air && autoReturn(sim, u)) return false;
+    const P = o._p || (o._p = { pos: [o.x, Math.max(0, sim.map.h(o.x, o.z)), o.z] });
+    const r = engageFrom(sim, u, o, w, P);
+    if (r === 'end') return strikeEnd(sim, u, o, 'reach');
+    if (r !== 'fire') { o.st = 'close'; return false; }
+    o.st = 'ready';
+    if (w.needs === 'erect' && (u.elev < elevOf(u.def) - 1e-6 || u.dep < 1 || u.reloader)) return false;
+    if (w.needs === 'lift' && u.lift < 1) return false;
+    if (w.sub && isSub(u) && !atPD(u)) return false;
+    if (w.needsRadar && !radarWorks(u)) return strikeEnd(sim, u, o, 'radar');
+    if (air) {
+      // nose on the point, wings near level, past the first seconds after take-off
+      const e = angTo(u.hdg, Math.atan2(o.x - u.pos[0], o.z - u.pos[2]));
+      const lined = Math.abs(e) <= (u.type === 'helo' ? .45 : .2) && Math.abs(u.roll || 0) <= .4 && sim.t - (u.born || 0) >= 10;
+      if (!lined || u.type !== 'helo') { u.goal = [o.x, o.z]; u.orbitR = 0; }
+      if (!lined) return false;
+    }
+    if ((u.cooldowns[o.w] || 0) > 0) return false;
+    o.st = 'fire';
+    launch(sim, u, w, 0, 'point', P.pos);
+    o.fired++;
+    return o.fired >= (o.n || 1) ? strikeEnd(sim, u, o, 'done') : false;
+  },
+
   launch_drone(sim, u, o) {
     if (u.type !== 'catapult' || u.off.launch || u.drones <= 0) return true;
     if (u.speed > .3) { u.path = null; return false; }
@@ -663,6 +703,20 @@ function persistAttack(sim, u, o) {
   if (r === 'end') return endAttack(sim, u, o, 'reach');
   o.st = r;
   return false;
+}
+
+/* a point strike is over: a boat back to its depth; an aircraft that fired turns away from the point (20 km out, the
+   way it came) and loiters there; say it */
+function strikeEnd(sim, u, o, why) {
+  if (o._dive !== undefined && u.def.sub) { u.dive = o._dive; o._dive = undefined; }
+  if (u.def.domain === 'air' && !u.aboard) {
+    const d = dxz(u.pos[0], u.pos[2], o.x, o.z) || 1;
+    if (o.fired > 0 && u.type !== 'helo') { u.goal = [u.pos[0] + (u.pos[0] - o.x) / d * 20000, u.pos[2] + (u.pos[2] - o.z) / d * 20000]; u.orbitR = 0; }
+    else { u.goal = [u.pos[0], u.pos[2]]; u.orbitR = u.type === 'helo' ? 0 : 1500; }
+  }
+  o.st = 'done';
+  sim.emit('strike', { unit: u.id, side: u.side, weapon: o.w, n: o.fired || 0, why, x: o.x, z: o.z, pos: u.pos.slice() });
+  return true;
 }
 
 function nearestDepot(sim, u) {

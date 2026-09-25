@@ -64,7 +64,7 @@ export function mechanics(sim, u) {
   // (lift s), and comes down to drive (stow() holds it down for 2 s)
   if (d.lift) {
     const o = u.orders[0], was = u.lift;
-    const want = (u.hold || (o && o.kind === 'attack')) && !u.path && u.speed < .3 && t - (u.stowT || -1e9) > 2 && !u.off.move;
+    const want = (u.hold || (o && (o.kind === 'attack' || o.kind === 'strike'))) && !u.path && u.speed < .3 && t - (u.stowT || -1e9) > 2 && !u.off.move;
     u.lift = clamp(u.lift + (want ? DT : -DT) / d.lift, 0, 1);
     if (u.lift >= 1 && was < 1) sim.emit('deploy', { unit: u.id, side: u.side, what: 'lift_up', pos: u.pos.slice() });
     if (u.lift <= 0 && was > 0) sim.emit('deploy', { unit: u.id, side: u.side, what: 'lift_down', pos: u.pos.slice() });

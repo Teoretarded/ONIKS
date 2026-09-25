@@ -7,7 +7,9 @@
    U launch one MH-60R (click a search point or a track) · ~ (the key left of 1) Salvo fire: a targeting mode ("SALVO 2 ·
    PICK A TARGET" at the cursor; a left or right click on a track fires the salvo; ~ again steps the size 1 / 2 / ALL,
    Shift+~ back; Esc or a right-click off a track cancels) · R reload (always says what happens: where the units go,
-   or why nothing can: full, no transloader, no replenishment point) · B reinforcements.
+   or why nothing can: full, no transloader, no replenishment point) · B reinforcements · G launch at a point (the
+   selection's rounds, which and how many: 1-9 / the HUD's picker, ui/hud/strike.js; a click on the map or the minimap
+   fires them; each round greyed where it cannot hit, with the reason; the sim's 'strike' order).
    Attacks persist (sim/orders.js): volleys of the salvo size, each watched until its rounds are down, until the target
    is destroyed, the weapon is empty with no reload coming, or the track has been lost for 5 min (held meanwhile:
    "TRK 25 · LOST · HOLDING"). A hostile track that is classified and within reach of the side's weapons raises an
@@ -23,8 +25,9 @@
    · TRK 21 · 88 / 85 KM"; bus 'unscanned').
    Feedback in the world: a dotted lime path and marker for moves, a coral dotted line for attacks, fading; the
    remaining route of selected units with a waypoint ring at its end (aircraft: a line and ring to their goal); weapon
-   range of the selection; with a selection that can attack, a hostile track under the cursor reads "RMB ATTACK TRK nn". Targeting modes (scan, drone, launch, helo) run
-   as a second system above the selection. */
+   range of the selection; with a selection that can attack, a hostile track under the cursor reads "RMB ATTACK TRK nn". Targeting modes (scan, drone, launch, helo,
+   salvo, strike) run as a second system above the selection; aimAt(x, z, shift, r) takes a minimap / scope click for
+   scan, salvo (the nearest hostile track) and strike (ui/hud/mapaim.js). */
 import { PRI } from './game.js';
 import { SHORT, offensive } from './labels.js';
 import { buyable } from '../data/units.js';
@@ -38,6 +41,7 @@ const sat = v => v < 0 ? 0 : v > 1 ? 1 : v;
 const km = m => (m < 10000 ? (m / 1000).toFixed(1) : String(Math.round(m / 1000)));
 const pad2 = n => String(n).padStart(2, '0');
 const CAP_R = { fighter: 8000, helo: 3000 };      // patrol radius of a launch to a point (m)
+const PSHORT = { oniks: 'ONIKS', tlam: 'TLAM', slam: 'SLAM-ER', hellfire: 'HELLFIRE', uran: 'KH-35U', kalibr: 'KALIBR', kornet: 'KORNET', shell: '5" RD', shell130: '130 MM RD', shell57: '57 MM RD' };
 const CLS = { tel: 'TEL', bal: 'BAL', ddg: 'DDG', ssn: 'SSN', ssk: 'SSK', fighter: 'F/A-18E', helo: 'MH-60R', cg: 'CG', lcs: 'LCS', bereg: 'BEREG' };
 
 export function createOrders(game) {
@@ -325,7 +329,7 @@ export function createOrders(game) {
     const mx = game.mouse.x, my = game.mouse.y;
     if (kind === 'hold') kind = 'weapons';
     if (kind === 'launch' && droneContext()) kind = 'drone';
-    if (!us.length && kind !== 'scan' && kind !== 'drone' && kind !== 'launch' && kind !== 'helo' && kind !== 'buy') return false;
+    if (!us.length && kind !== 'scan' && kind !== 'drone' && kind !== 'launch' && kind !== 'helo' && kind !== 'buy' && kind !== 'strike') return false;
     switch (kind) {
       case 'stop': game.order(us.map(u => u.id), { kind: 'stop' }); return true;
       case 'weapons': {
@@ -347,6 +351,13 @@ export function createOrders(game) {
           return true;
         }
         setMode({ kind: 'salvo', units: arm });
+        return true;
+      }
+      case 'strike': {
+        // G: the selection's rounds at a map point (the picker; G again or Esc closes it)
+        if (mode && mode.kind === 'strike') { setMode(null); return true; }
+        if (!us.length) { say('SELECT LAUNCHERS · SHIPS, TEL, AIRCRAFT', mx, my); bad(); return true; }
+        if (!openStrike(us)) { say('NO ROUNDS IN THE SELECTION', mx, my); bad(); }
         return true;
       }
       case 'deploy': {
@@ -396,6 +407,169 @@ export function createOrders(game) {
     return false;
   }
   function setMode(m) { mode = m; game.bus.emit('mode', m ? { mode: m.kind } : { mode: null }); }
+
+  /* ---------- G: rounds at a map point (no track needed) ----------
+     The selection's rounds by type (a row per round: name, rounds in hand, how many to fire), each row judged at the
+     point under the cursor: a round that cannot hit what is there is greyed with the reason (a SAM at a ground point:
+     AIR TARGETS ONLY; an anti-ship round over land: SEA TARGETS ONLY; a torpedo: NEEDS A TRACK; a battery that cannot
+     move and is out of range: OUT OF RANGE · 130 / 110 KM). A click fires the picked rounds at the point: the sim's
+     'strike' order per launcher (sim/orders.js: units close to range, aircraft fly their strike profile), the rounds
+     shared over the launchers that reach (nearest first), each up to what it has. Deterministic: the orders go
+     through game.order like any other (recorded, replayed). */
+  const pname = k => (game.PROJ[k] && game.PROJ[k].name) || k.toUpperCase();
+  function strikeRows(us) {
+    const rows = new Map();
+    for (const u of us) {
+      if (!u.alive) continue;
+      const W = u.def.weapons;
+      for (const k in W) {
+        const w = W[k];
+        if (w.gun) continue;
+        let r = rows.get(w.proj);
+        if (!r) { r = { key: w.proj, name: pname(w.proj), P: game.PROJ[w.proj] || {}, w, list: [], units: new Set() }; rows.set(w.proj, r); }
+        r.list.push({ u, k }); r.units.add(u);
+      }
+    }
+    // the offensive rounds first, the longest reach first; the defensive ones (greyed at any surface point) after
+    return [...rows.values()].sort((a, b) => ((a.w.auto ? 1 : 0) - (b.w.auto ? 1 : 0)) || b.w.range - a.w.range);
+  }
+  const stockOf = r => { let n = 0; for (const { u, k } of r.list) if (u.alive && !u.off[k]) n += Math.max(0, u.ammo[k]); return n; };
+  /* a row at a point: { ok, why, note, sh: [{ u, k, d, inR, n }] } */
+  function rowAt(r, x, z) {
+    const w = r.w, dom = game.map.h(x, z) > 0 ? 'land' : 'sea', vs = w.vs;
+    if (r.P.torpedo) return { ok: false, why: 'NEEDS A TRACK' };
+    if (!vs.includes(dom)) {
+      const why = !vs.includes('land') && !vs.includes('sea') ? (vs.includes('sub') ? 'SUBMARINES ONLY' : 'AIR TARGETS ONLY')
+        : vs.includes('sea') ? 'SEA TARGETS ONLY' : 'LAND TARGETS ONLY';
+      return { ok: false, why };
+    }
+    const sh = [];
+    let near = null, any = false;
+    for (const { u, k } of r.list) {
+      const ww = u.def.weapons[k];
+      if (!u.alive || u.off[k] || u.ammo[k] <= 0) continue;
+      any = true;
+      const d = Math.hypot(u.pos[0] - x, u.pos[2] - z), air = u.def.domain === 'air';
+      const mob = air || (u.def.speed > 0 && !u.def.static && !u.off.move);
+      const inR = d <= ww.range * .97 && d >= (ww.min || 0);
+      if (!near || d / ww.range < near.d / near.w.range) near = { d, w: ww };
+      // a launcher out of range closes along the line to 85 % of its range: only where it can go (a vehicle on land,
+      // a ship at sea; an aircraft anywhere)
+      let can = inR;
+      if (!can && mob && (air || d > ww.range * .97)) {
+        const f = air ? 0 : (d - ww.range * .85) / d;
+        can = air || canGo(u, u.pos[0] + (x - u.pos[0]) * f, u.pos[2] + (z - u.pos[2]) * f);
+      }
+      if (can) sh.push({ u, k, d, inR, n: u.ammo[k], air });
+    }
+    if (!sh.length) {
+      if (!any) return { ok: false, why: stockOf(r) ? 'KNOCKED OUT' : 'EMPTY' };
+      return { ok: false, why: near.d < (near.w.min || 0) ? `INSIDE MIN RANGE · ${km(near.d)} / ${km(near.w.min)} KM` : `OUT OF RANGE · ${kmPast(near.d, near.w.range)} / ${km(near.w.range)} KM` };
+    }
+    sh.sort((a, b) => (b.inR - a.inR) || a.d - b.d);
+    const s0 = sh[0], ww = s0.u.def.weapons[s0.k];
+    const note = s0.inR ? `${km(s0.d)} KM` : s0.air ? `FLIES IN · ${km(s0.d)} KM` : `CLOSES ${km(Math.max(0, s0.d - ww.range * .85))} KM`;
+    return { ok: true, sh, note };
+  }
+  /* the default count of a row: the launchers' salvo (the ~ setting), else the weapon's own, never more than in hand */
+  function strikeDefault(r) {
+    const st = stockOf(r), u = r.list[0].u, s = u.salvo !== undefined ? u.salvo : (r.w.salvo || 1);
+    return Math.min(st, s === 0 ? st : Math.max(1, s));
+  }
+  function openStrike(us) {
+    const rows = strikeRows(us);
+    if (!rows.length) return false;
+    const pick = new Map(), first = rows.find(r => !r.w.auto && !r.P.torpedo && stockOf(r) > 0);
+    if (first) pick.set(first.key, strikeDefault(first));
+    setMode({ kind: 'strike', units: us, rows, pick });
+    return true;
+  }
+  /* the picker's controls (keys 1-9, the HUD's rows): i = row index; d = +1 / -1 rounds, 0 toggles */
+  function strikePick(i, d) {
+    if (!mode || mode.kind !== 'strike') return false;
+    const r = mode.rows[i];
+    if (!r) return false;
+    const st = stockOf(r), n = mode.pick.get(r.key) || 0;
+    if (!st) { bad(); return true; }
+    let v = d === 0 ? (n ? 0 : strikeDefault(r)) : Math.max(0, Math.min(st, n + d));
+    if (d > 0 && !n) v = Math.max(1, Math.min(st, v));
+    if (v) mode.pick.set(r.key, v); else mode.pick.delete(r.key);
+    mode.flash = undefined;
+    return true;
+  }
+  /* what a click at (x, z) would fire: { total, text, why, plan: Map(unit -> [{ w, n }]) } */
+  function strikePlan(x, z) {
+    const plan = new Map(), parts = [], whys = [];
+    let total = 0, note = '';
+    for (const r of mode.rows) {
+      const n = mode.pick.get(r.key) || 0;
+      if (!n) continue;
+      const a = rowAt(r, x, z);
+      if (!a.ok) { whys.push(`${r.name.toUpperCase()} · ${a.why}`); continue; }
+      // shared round-robin over the launchers that reach (in range and nearest first), each up to what it has
+      let left = n;
+      const got = new Map();
+      while (left > 0) {
+        let moved = false;
+        for (const s of a.sh) { if (left <= 0) break; const g = got.get(s) || 0; if (g < s.n) { got.set(s, g + 1); left--; moved = true; } }
+        if (!moved) break;
+      }
+      for (const [s, k] of got) { let L = plan.get(s.u); if (!L) plan.set(s.u, L = []); L.push({ w: s.k, n: k }); }
+      total += n - left; parts.push(`${n - left} ${PSHORT[r.key] || r.name.toUpperCase()}`);
+      if (!note) note = a.note;
+    }
+    return { total, plan, text: parts.join(' · '), note, why: whys[0] || '' };
+  }
+  function fireStrike(x, z, shift, sx, sy) {
+    if (!mode.pick.size) { say('PICK THE ROUNDS · 1-9', sx, sy); bad(); mode.flash = game.realT; return false; }
+    const p = strikePlan(x, z);
+    if (!p.total) { say(p.why || 'NOTHING CAN FIRE THERE', sx, sy); bad(); mode.flash = game.realT; marks.push({ kind: 'no', at: [x, Math.max(0, T.heightAt(x, z)), z], t0: game.realT, dur: 1.2 }); return false; }
+    const ids = [];
+    for (const [u, L] of p.plan) { ids.push(u.id); L.forEach((q, i) => game.order([u.id], { kind: 'strike', x, z, w: q.w, n: q.n, queue: shift || i > 0 })); }
+    const us = [...p.plan.keys()];
+    game.bus.emit('toast', { text: `LAUNCH · ${p.text} · ${countBy(us)} · ${p.note}` });
+    marks.push({ kind: 'strike', at: [x, Math.max(0, T.heightAt(x, z)), z], ids, t0: game.realT, dur: 2.6 });
+    return true;
+  }
+  /* the HUD's picker reads this: the rows judged at a point (or not) */
+  function strikeInfo(w) {
+    if (!mode || mode.kind !== 'strike') return null;
+    return { rows: mode.rows.map((r, i) => {
+      // no point (the cursor off the map): what holds anywhere (a torpedo, a round only for aircraft)
+      const vs = r.w.vs, a = w ? rowAt(r, w[0], w[2]) : r.P.torpedo ? { ok: false, why: 'NEEDS A TRACK' }
+        : !vs.includes('land') && !vs.includes('sea') ? { ok: false, why: vs.includes('sub') ? 'SUBMARINES ONLY' : 'AIR TARGETS ONLY' } : null, st = stockOf(r);
+      return { i, key: r.key, name: r.name, stock: st, full: r.list.reduce((s, q) => s + q.u.def.weapons[q.k].ammo, 0), n: mode.pick.get(r.key) || 0,
+        units: r.units.size, cls: countBy([...r.units]), ok: a ? a.ok : st > 0, why: a && !a.ok ? a.why : !st ? 'EMPTY' : '', note: a && a.ok ? a.note : '' };
+    }) };
+  }
+  /* a point from the minimap / scope (x, z; r: metres a few px cover there): the armed mode's click there. Salvo picks
+     the nearest hostile track to the point; scan and launch-at-a-point take the point */
+  function aimAt(x, z, shift, r) {
+    if (!mode) return false;
+    const mx = game.mouse.x, my = game.mouse.y, y = Math.max(0, T.heightAt(x, z));
+    if (mode.kind === 'strike') { if (fireStrike(x, z, shift, mx, my) && !shift) setMode(null); return true; }
+    if (mode.kind === 'scan') {
+      // a contact's cloud near the point: its estimate
+      let at = [x, y, z], bd = Math.max(600, r || 1500);
+      const S = sim.sides[game.side];
+      if (S) for (const c of S.contacts.values()) { if (c.dead || c.dom === 'air') continue; const d = Math.hypot(c.pos[0] - x, c.pos[2] - z); if (d < bd) { bd = d; at = [c.pos[0], Math.max(0, T.heightAt(c.pos[0], c.pos[2])), c.pos[2]]; } }
+      if (scanClick({ x: mx, y: my }, at) && !shift) setMode(null);
+      return true;
+    }
+    if (mode.kind === 'salvo') {
+      const S = sim.sides[game.side];
+      let best = null, bd = Math.max(800, r || 2000);
+      if (S) for (const c of S.contacts.values()) {
+        if (c.dead) continue;
+        const t = sim.units.get(c.unitId); if (!t || !t.alive || t.side === game.side || game.vis(t) !== 'track') continue;
+        const d = Math.hypot(c.pos[0] - x, c.pos[2] - z); if (d < bd) { bd = d; best = t; }
+      }
+      if (!best) { say('PICK A TRACK · ESC CANCELS', mx, my); bad(); mode.flash = game.realT; return true; }
+      if (attack(best, shift, mx, my) === 'fired' && !shift) setMode(null); else if (mode) mode.flash = game.realT;
+      return true;
+    }
+    return false;
+  }
 
   /* ---------- scan: who reaches the point ---------- */
   /* the best scanner in `list` that reaches (x, z) (ready ones and radars already radiating first, then the nearest),
@@ -575,6 +749,12 @@ export function createOrders(game) {
         if (n && L[n - 1]) { buy(L[n - 1].type); return true; }
       }
       if (mode && e.code === 'Escape') { setMode(null); return true; }
+      // the Launch picker: 1-9 pick a round (again: one more), Shift: one fewer
+      if (mode && mode.kind === 'strike' && /^Digit[1-9]$/.test(e.code) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const i = +e.code.slice(5) - 1, r = mode.rows[i];
+        if (r) strikePick(i, e.shiftKey ? -1 : mode.pick.get(r.key) ? 1 : 0);
+        return true;
+      }
       return false;
     },
     onPointer(ev) {
@@ -593,6 +773,13 @@ export function createOrders(game) {
         return true;
       }
       if (ev.type === 'click' && ev.button === 2) { setMode(null); return true; }
+      if (mode.kind === 'strike') {
+        if (ev.type !== 'click' || ev.button !== 0) return ev.type === 'down' || ev.type === 'up';
+        const w = cam.pickGround(ev.x, ev.y);
+        if (!w) { say('CLICK THE MAP · ESC CANCELS', ev.x, ev.y); bad(); return true; }
+        if (fireStrike(w[0], w[2], ev.shift, ev.x, ev.y) && !ev.shift) setMode(null);
+        return true;
+      }
       if (ev.type === 'click' && ev.button === 0) {
         const w = cam.pickGround(ev.x, ev.y);
         let done = true;
@@ -637,6 +824,12 @@ export function createOrders(game) {
         else if (mode.units !== mode.pref) mode.units = mode.pref;
       }
       if (mode && mode.kind === 'salvo' && !mode.units.some(u => u.alive)) setMode(null);
+      if (mode && mode.kind === 'strike' && !mode.units.some(u => u.alive)) setMode(null);
+      // launch at a point: what a click here would fire, once a frame (draw3d / draw2d / the HUD's picker)
+      if (mode && mode.kind === 'strike') {
+        const w = game.mouse.in ? cam.pickGround(game.mouse.x, game.mouse.y) : null;
+        mode.aim = { w, p: w ? strikePlan(w[0], w[2]) : null, f: game.frameN };
+      }
       // a launch mode whose aircraft all went (or died) closes
       if (mode && (mode.kind === 'launch' || mode.kind === 'helo') && game.frameN % 15 === 0) {
         if (!mode.units.some(u => u.alive && u.aboard && !queued(u))) { const pk = pkg(mode.kind); if (pk.units.length) mode.units = pk.units; else setMode(null); }
@@ -673,6 +866,19 @@ export function createOrders(game) {
             if (!u.alive || u.aboard) continue;
             const p = game.unitPose(u).pos;
             R.fx.line([p[0], p[1] + 4, p[2]], [tp[0], tp[1] + 6, tp[2]], { rgb: CORAL, a: .45, step: 8, mode: 'over' });
+          }
+        }
+      } else if (mode.kind === 'strike') {
+        const A = mode.aim && mode.aim.f === game.frameN ? mode.aim : null, p = A && A.p;
+        if (w && p) {
+          // the impact point: a coral ring ~48 px across whatever the zoom (white while nothing picked can fire there),
+          // dotted coral lines from the launchers that would fire
+          const de = Math.hypot(w[0] - cam.eye[0], w[1] - cam.eye[1], w[2] - cam.eye[2]), r = 24 * de / cam.fl, on = p.total > 0;
+          R.fx.ring(w, r, { rgb: on ? CORAL : WH, a: on ? .9 : .5, step: 4, size: 1.5, drape: true, lift: 2, mode: 'over' });
+          R.fx.ring(w, r * .3, { rgb: on ? CORAL : WH, a: on ? .8 : .4, step: 3, size: 1.5, drape: true, lift: 2, mode: 'over' });
+          for (const u of p.plan.keys()) {
+            const q0 = posOf(u);
+            R.fx.line([q0[0], q0[1] + 4, q0[2]], [w[0], w[1] + 6, w[2]], { rgb: CORAL, a: .45, step: 8, mode: 'over' });
           }
         }
       } else if (mode.kind === 'drone' && w) {
@@ -715,6 +921,14 @@ export function createOrders(game) {
           if (cd > 0 && !sub) { sub = `SIDE COOLDOWN ${Math.ceil(cd)} S`; subCol = CO; }
         }
       } else if (mode.kind === 'drone') { key = 'L'; txt = 'ORLAN-10 · CLICK THE PATROL POINT'; }
+      else if (mode.kind === 'strike') {
+        key = 'G';
+        const A = mode.aim && mode.aim.f === game.frameN ? mode.aim : null, p = A && A.p;
+        if (!mode.pick.size) { txt = 'LAUNCH · PICK THE ROUNDS · 1-9'; col = 'W'; }
+        else if (p && p.total) { txt = `LAUNCH · ${p.text} · ${p.note}`; col = CO; }
+        else { txt = p && p.why ? p.why : 'LAUNCH · CLICK A POINT'; col = 'W'; }
+        sub = '1-9 ROUNDS · SHIFT KEEPS · ESC CANCELS'; subCol = 'rgba(255,255,255,.7)';
+      }
       else if (mode.kind === 'salvo') {
         key = '~';
         const t = game.hover ? sim.units.get(game.hover) : null;
@@ -735,12 +949,13 @@ export function createOrders(game) {
         const wait = mode.units.filter(u => !ready(u));
         if (wait.length) { sub = `${wait.length} REARMING · OFF THE DECK WHEN READY`; subCol = 'rgba(255,255,255,.7)'; }
       }
-      const k = ov.ui || 1, r0 = 8 * k, r1 = 18 * k;
+      const k = ov.ui || 1, r0 = 8 * k, r1 = 18 * k, kind = col === CO ? 'coral' : col === 'W' ? 'white' : 'lime';
+      if (col === 'W') col = '#F6F5F2';
       ov.mark(x, y, 11, col, 1);
       ov.dline(x - r1, y, x - r0, y, 3, 1, col, 1); ov.dline(x + r0, y, x + r1, y, 3, 1, col, 1);
       ov.dline(x, y - r1, x, y - r0, 3, 1, col, 1); ov.dline(x, y + r0, x, y + r1, 3, 1, col, 1);
       const fl = mode.flash !== undefined && game.realT - mode.flash < .6 ? (Math.floor((game.realT - mode.flash) * 10) % 2 ? .25 : 1) : 1;
-      const b = ov.tag(x + 16 * k, y + 14 * k, key, txt, '', { kind: col === CO ? 'coral' : 'lime', size: 10, fit: [], a: fl });
+      const b = ov.tag(x + 16 * k, y + 14 * k, key, txt, '', { kind, size: 10, fit: [], a: fl });
       if (sub && b) ov.text(b[0], b[3] + 15 * k, sub, { size: 10, col: subCol });
     },
   };
@@ -757,10 +972,10 @@ export function createOrders(game) {
   const orders = {
     name: 'orders', priority: PRI.orders,
     get mode() { return mode; },
-    marks, setMode, hotkey, toggleBuy, pkg, droneContext, salvoOf, salvoText, reachOf,
+    marks, setMode, hotkey, toggleBuy, pkg, droneContext, salvoOf, salvoText, reachOf, strikeInfo, strikePick, aimAt,
     onKey(e) {
       if (e.type !== 'keydown' || e.ctrlKey || e.metaKey || e.altKey) return false;
-      const K = { KeyZ: 'stop', KeyH: 'weapons', KeyT: 'deploy', KeyR: 'reload', KeyX: 'scan', KeyY: 'radar', KeyL: 'launch', KeyU: 'helo', Backquote: 'salvo' }[e.code]
+      const K = { KeyZ: 'stop', KeyH: 'weapons', KeyT: 'deploy', KeyR: 'reload', KeyX: 'scan', KeyY: 'radar', KeyL: 'launch', KeyU: 'helo', Backquote: 'salvo', KeyG: 'strike' }[e.code]
         || (e.key === '`' || e.key === '~' ? 'salvo' : null);          // the key left of 1 (by its character when no code comes)
       if (K) return hotkey(K, e.shiftKey);
       if (e.code === 'KeyB') { toggleBuy(); return true; }
@@ -832,6 +1047,16 @@ export function createOrders(game) {
             const u = sim.units.get(id); if (!u) continue;
             const p = posOf(u);
             R.fx.line(p, m.at, { rgb: LIME, a: a * .85, step: 5, size: 1.5, drape: u.def.domain !== 'air', lift: 1.5, mode: 'over' });
+          }
+        } else if (m.kind === 'strike') {
+          // a launch at a point: the impact ring and the lines from the launchers, fading
+          const de = Math.hypot(m.at[0] - cam.eye[0], m.at[1] - cam.eye[1], m.at[2] - cam.eye[2]), r = 24 * de / cam.fl * (1 + k * .5);
+          R.fx.ring(m.at, r, { rgb: CORAL, a, step: 4, size: 1.5, drape: true, lift: 2, mode: 'over' });
+          R.fx.ring(m.at, r * .3, { rgb: CORAL, a: a * .8, step: 3, size: 1.5, drape: true, lift: 2, mode: 'over' });
+          for (const id of m.ids) {
+            const u = sim.units.get(id); if (!u) continue;
+            const p = posOf(u);
+            R.fx.line([p[0], p[1] + 4, p[2]], [m.at[0], m.at[1] + 6, m.at[2]], { rgb: CORAL, a: a * .85, step: 5, size: 1.5, mode: 'over' });
           }
         } else if (m.kind === 'attack') {
           const t = sim.units.get(m.target); if (!t) continue;

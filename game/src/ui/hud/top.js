@@ -1,6 +1,6 @@
 /* Top corners. Left: the ONIKS mark, one kick line (mode · map), the objectives with a lime tick when done, the map's
-   sites as a row of squares by owner. Right: the time rate (click: faster, right-click: slower, wraps; PAUSED,
-   bullet time), the sim clock, supply and income, the player's side, the auto x1 blip. */
+   sites as a row of squares by owner. Right: the time rate (click: faster, right-click: slower; x0.1 to x32,
+   PAUSED, bullet time), the sim clock, supply and income, the player's side, the auto x1 blip. */
 import { clockL, esc } from './fmt.js';
 import { RATES } from '../../game/game.js';
 
@@ -8,7 +8,7 @@ const MARK = '<svg viewBox="0 0 24 24"><path d="M12 2 20.5 22h-4.1L12 11.4 7.6 2
 const TICK = '<svg viewBox="0 0 10 10"><path d="M1.2 5.4 4 8.1 8.9 1.9" fill="none" stroke="#C6F432" stroke-width="1.6"/></svg>';
 const SIDE = { coast: 'Coast · Bastion-P', fleet: 'Fleet · CSG' };
 /* the named time rates; a rate in between (a replay easing back to x1) reads as the nearest (in ratio) of them */
-const NAMED = [.1, .25, .5, 1, 2, 4, 8, 16, 32];
+const NAMED = [.05, .1, .2, .25, .5, 1, 2, 4, 8, 16, 32];
 function snapRate(r) {
   if (!(r > 0)) return 1;
   let best = 1, bd = 1e9;
@@ -32,8 +32,7 @@ export function createTop(game, hud) {
   rateEl.addEventListener('mousedown', e => {
     e.stopPropagation(); e.preventDefault();
     if (game.paused) { game.pause(false); return; }
-    const i = RATES.indexOf(game.timeRate), n = RATES.length;
-    game.setRate(RATES[e.button === 2 ? (i - 1 + n) % n : (i + 1) % n]);
+    game.stepRate(e.button === 2 ? -1 : 1);
     hud.click();
   });
   rateEl.addEventListener('contextmenu', e => e.preventDefault());
@@ -79,12 +78,13 @@ export function createTop(game, hud) {
     update() {
       objectives(); sites();
       // rate (the hit replay eases it back out through fractions: the readout snaps to the nearest named rate)
-      const r = snapRate(game.timeRate), bt = r < 1;
-      const rk = game.paused ? 'P' : r + '';
+      // slow time the player chose (x0.5, x0.2, x0.1: one of RATES) reads as the rate; any other rate under x1 is bullet time
+      const r = snapRate(game.timeRate), bt = r < 1 && !RATES.includes(game.timeRate);
+      const rk = game.paused ? 'P' : r + (bt ? 'b' : '');
       if (rk !== rateKey) {
         rateKey = rk;
         rateEl.textContent = game.paused ? 'Paused' : bt ? `×${r} · bullet time` : '×' + r;
-        rateEl.className = 'rate hit' + (game.paused ? ' paused' : r > 1 || bt ? ' l' : '');
+        rateEl.className = 'rate hit' + (game.paused ? ' paused' : r !== 1 ? ' l' : '');
         sq.className = 'sq' + (game.paused ? ' paused' : '');
       }
       const ck = 'T+' + clockL(game.t);

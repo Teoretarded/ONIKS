@@ -1,4 +1,4 @@
-/* Time controls: Space pause, ] / [ rate (x1 .. x32; = / - and the numpad + / - are the camera's zoom keys, never
+/* Time controls: Space pause, ] / [ rate (x0.1 x0.2 x0.5 x1 .. x32, game.js RATES; = / - and the numpad + / - are the camera's zoom keys, never
    the rate: zooming with the keys used to speed time up), F10 hide the UI. The sim is stepped by game.frame(); this system only changes game.timeRate / paused.
    Until a HUD system is registered it also draws the rate readout and the toasts itself (the rate is always on
    screen), with a lime blip when the game drops to x1 on its own. */

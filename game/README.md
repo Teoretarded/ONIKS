@@ -15,7 +15,7 @@ then open http://localhost:8771/game/index.html (Chrome or Edge; WebGL2).
 
 ## Modes
 
-- **Sandbox**: any map, both sides, place anything (P), wake the enemy (K), fog (G), weather (N), switch the side
+- **Sandbox**: any map, both sides, place anything (P), wake the enemy (K), fog (Shift+G), weather (N), switch the side
   you command (M), the anatomy museum (Shift+I).
 - **Combat**: a skirmish against the AI as the Coast or the Fleet. Destroy the enemy HQ (command post / carrier) or
   hold the objectives.
@@ -27,9 +27,9 @@ then open http://localhost:8771/game/index.html (Chrome or Edge; WebGL2).
 |---|---|
 | Camera | WASD / edges / middle-drag pan · right-drag or Q E rotate 360° · wheel zoom (20 m to 150 km) · PgUp PgDn pitch · F follow |
 | Select | click · Shift-click · drag a box · double-click all of a type · Ctrl/Alt 1-9 groups · Tab |
-| Orders | right-click move / attack · H weapons free / hold fire · T deploy · R reload · X scan · Y radar on/off · L drone (coast) or strike package (fleet) · U helo · O dive / come up · B reinforcements · Z stop |
+| Orders | right-click move / attack · H weapons free / hold fire · T deploy · R reload · X scan · Y radar on/off · L drone (coast) or strike package (fleet) · U helo · G launch at a point · O dive / come up · B reinforcements · Z stop |
 | Views | I inspect (E exploded, X x-ray) · V radar view · C cinematic camera · J replay the last hit · F10 hide the UI |
-| Time | Space pause · + − rate (x1 ... x32, always on screen) |
+| Time | Space pause · [ ] rate (x0.1 x0.2 x0.5 slow time, x1 ... x32, always on screen) |
 | Film maker | F9 panel · K key · Shift+K follow key · Shift+F9 play · F8 still |
 
 ## The signature things

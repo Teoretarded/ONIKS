@@ -12,7 +12,10 @@ import { ENEMY, CLASSIFY, UNITS, PROJ } from '../data/units.js';
 import { landPose, seaPose, deckPose } from './pose.js';
 import { getSetting, setSetting } from '../data/settings.js';
 
-export const RATES = [1, 2, 4, 8, 16, 32];
+/* the time rates [ and ] step through: below x1 slow time (x0.5, x0.2, x0.1: the sim steps as ever, fixed DT, just fewer
+   per second; drawn between ticks); a rate not in the list (bullet time x0.25, Inspect x0.05, a replay easing out) is
+   the systems' own and reads as bullet time */
+export const RATES = [.1, .2, .5, 1, 2, 4, 8, 16, 32];
 /* suggested priorities (input goes high -> low; draw goes low -> high, so high draws on top) */
 export const PRI = { menu: 120, inspect: 100, targeting: 80, hud: 70, sandbox: 60, orders: 50, selection: 40, time: 30,
   director: 20, sensors: 15, render: 10, fx: 5, audio: 1 };
@@ -43,6 +46,8 @@ export function createGame(o) {
   const drawOrder = [];        // sorted by priority, low first
   const poses = new Map();     // unit id -> pose (reused)
   const pposes = new Map();    // projectile id -> pose (reused)
+  const posesA = new Map(), pposesA = new Map();   // the same at a caller's own alpha (never the frame's cached pose)
+  let poseN = 0;               // the frame's pose epoch: bumped once the frame's alpha is known (after the sim steps)
 
   const game = {
     sim, map: o.map, renderer: R, R, camera: cam, overlay: R.overlay,
@@ -118,13 +123,16 @@ export function createGame(o) {
     return true;
   };
 
-  /* interpolated render pose of a unit (cached per frame; the same pose every system draws against).
+  /* interpolated render pose of a unit (cached per frame; the same pose every system draws against). The cache is
+     keyed on the frame's pose epoch, set after the sim has stepped: a pose asked for while the sim steps (an event
+     handler) is not kept for the frame, and a pose at a caller's own alpha is computed apart, so what the render draws,
+     the brackets and the camera follow always agree.
      -> { pos: [x, y, z], hdg, pitch, roll, speed, vis } ; land units on the drawn ground, ships on the swell */
   game.unitPose = (u, alpha) => {
-    const cache = alpha === undefined;
-    let p = poses.get(u.id);
-    if (!p) { p = { pos: [0, 0, 0], hdg: 0, pitch: 0, roll: 0, f: -1, speed: 0 }; poses.set(u.id, p); }
-    if (cache && p.f === game.frameN) return p;
+    const cache = alpha === undefined, M = cache ? poses : posesA;
+    let p = M.get(u.id);
+    if (!p) { p = { pos: [0, 0, 0], hdg: 0, pitch: 0, roll: 0, f: -1, speed: 0 }; M.set(u.id, p); }
+    if (cache && p.f === poseN) return p;
     const a = cache ? game.alpha : alpha;
     const d = u.def, P = u.pos, Q = u.prev;
     const x = Q[0] + (P[0] - Q[0]) * a, z = Q[2] + (P[2] - Q[2]) * a;
@@ -137,14 +145,15 @@ export function createGame(o) {
     else if (u.deck && sim.units.get(u.deck.cv)) deckPose(u.deck, game.unitPose(sim.units.get(u.deck.cv), alpha), a, p);
     else { p.pos[0] = x; p.pos[1] = y; p.pos[2] = z; p.hdg = hdg; p.pitch = u.pitch; p.roll = u.roll; }
     p.speed = u.speed;
-    if (cache) p.f = game.frameN;
+    if (cache) p.f = poseN;
     return p;
   };
   /* interpolated pose of a projectile, oriented along its motion: { pos, hdg, pitch } */
   game.projPose = (pr, alpha) => {
-    let p = pposes.get(pr.id);
-    if (!p) { p = { pos: [0, 0, 0], hdg: 0, pitch: 0, roll: 0, f: -1 }; pposes.set(pr.id, p); }
-    if (alpha === undefined && p.f === game.frameN) return p;
+    const M = alpha === undefined ? pposes : pposesA;
+    let p = M.get(pr.id);
+    if (!p) { p = { pos: [0, 0, 0], hdg: 0, pitch: 0, roll: 0, f: -1 }; M.set(pr.id, p); }
+    if (alpha === undefined && p.f === poseN) return p;
     const a = alpha === undefined ? game.alpha : alpha, P = pr.pos, Q = pr.prev;
     p.pos[0] = Q[0] + (P[0] - Q[0]) * a; p.pos[1] = Q[1] + (P[1] - Q[1]) * a; p.pos[2] = Q[2] + (P[2] - Q[2]) * a;
     const v = pr.vel;
@@ -152,7 +161,7 @@ export function createGame(o) {
     const h = Math.hypot(vx, vz);
     if (h + Math.abs(vy) > 1e-6) { p.hdg = Math.atan2(vx, vz); p.pitch = Math.atan2(vy, h); }
     else { p.hdg = pr.hdg || 0; p.pitch = pr.pitch || 0; }
-    if (alpha === undefined) p.f = game.frameN;
+    if (alpha === undefined) p.f = poseN;
     return p;
   };
 
@@ -166,8 +175,10 @@ export function createGame(o) {
     bus.emit('rate', { rate: r, paused: false, why: why || 'user' });
   };
   game.stepRate = dir => {
-    const i = RATES.indexOf(game.timeRate);
-    game.setRate(RATES[clamp((i < 0 ? 2 : i) + dir, 0, RATES.length - 1)]);
+    // from a rate between the named ones (bullet time, a replay easing out): the next named one that way
+    let i = RATES.indexOf(game.timeRate);
+    if (i < 0) { const r = game.timeRate; i = dir > 0 ? RATES.findIndex(v => v > r) - 1 : RATES.findIndex(v => v >= r); if (i < -1) i = RATES.length - 1; if (dir < 0 && i < 0) i = RATES.length; }
+    game.setRate(RATES[clamp(i + dir, 0, RATES.length - 1)]);
   };
   game.pause = on => {
     on = on === undefined ? !game.paused : !!on;
@@ -274,6 +285,7 @@ export function createGame(o) {
     if (game.profile) prof('sim', now() - t0);
     game.alpha = game.paused ? game.alpha : clamp(acc / DT, 0, 1);
     game.t = sim.t - DT * (1 - game.alpha);
+    poseN++;                                            // poses from here on are this frame's
     if (!game.paused) game.seaT += dtReal * Math.min(game.timeRate, 2);
     for (let k = 0; k < systems.length; k++) { const s = systems[k]; if (s.update) call(s, s.update, 'update', dtReal, dtSim); }
     R.frame(dtReal, game.seaT);
@@ -294,8 +306,8 @@ export function createGame(o) {
     bus.emit('frame', frame);
     // drop the cached poses of units and rounds that are gone (every round fired would otherwise keep one)
     if ((game.frameN & 255) === 0) {
-      for (const id of poses.keys()) if (!sim.units.has(id)) poses.delete(id);
-      for (const id of pposes.keys()) if (!sim.projectiles.has(id)) pposes.delete(id);
+      for (const M of [poses, posesA]) for (const id of M.keys()) if (!sim.units.has(id)) M.delete(id);
+      for (const M of [pposes, pposesA]) for (const id of M.keys()) if (!sim.projectiles.has(id)) M.delete(id);
     }
   };
   const reported = new Set();

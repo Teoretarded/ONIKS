@@ -20,6 +20,7 @@ const ROWS = [
   { k: 'Z', id: 'stop', lab: 'Stop' },
   { k: 'H', id: 'weapons', lab: 'Weapons' },
   { k: '~', id: 'salvo', lab: 'Salvo fire' },
+  { k: 'G', id: 'strike', lab: 'Missiles' },
   { k: 'T', id: 'deploy', lab: 'Deploy', side: 'coast' },
   { k: 'T', id: 'land', lab: 'Land', side: 'fleet' },
   { k: 'U', id: 'helo', lab: 'Helo', side: 'fleet' },
@@ -90,6 +91,11 @@ export function createCommands(game, hud, parent) {
       S.salvo = { ok: true, on: mode === 'salvo', x: v === 'MIXED' ? 'mixed' : v,
         hint: `Pick a track to fire on · ${v === '1' ? 'one round a volley, shoot, look, shoot' : v === 'ALL' ? 'every round in hand in one volley' : v + ' rounds a volley'} · ~ again: 1 / 2 / all` };
     } else S.salvo = { ok: false, x: '', hint: any ? 'No offensive weapons in the selection' : 'Select launchers first, then pick a track' };
+    // G: the selection's rounds at a map point (the picker: what, how many; greyed where they cannot hit)
+    let rds = 0, anyR = false;
+    for (const u of us) for (const k in u.def.weapons) { const w = u.def.weapons[k]; if (w.gun || w.auto || (game.PROJ[w.proj] || {}).torpedo) continue; anyR = true; if (!u.off[k]) rds += Math.max(0, u.ammo[k]); }
+    S.strike = anyR ? { ok: rds > 0, on: mode === 'strike', x: String(rds), why: rds ? '' : 'No rounds in hand', hint: 'Launch at a point · pick the rounds and how many · click the map or the minimap · no track needed' }
+      : { ok: false, x: '', hint: any ? 'No rounds to launch in the selection' : 'Select launchers first: ships, TEL, Bal, aircraft, boats' };
     const dep = us.filter(u => u.type === 'tel' || u.type === 'bal' || u.type === 'radar' || u.type === 's400' || u.type === 's400r');
     if (dep.length) {
       const up = dep.every(u => u.def.deploy ? (u.dep > 0 || u.depT > 0 || u.elevT > 0) : (u.mast > 0 || u.mastT > 0));
@@ -177,7 +183,7 @@ export function createCommands(game, hud, parent) {
       let h = '';
       const MODE_HINT = { salvo: ['~', 'Salvo · click a track to fire · ~ size · Esc cancels'], scan: ['X', 'Scan · click the area · Esc cancels'],
         drone: ['L', 'Drone · click the patrol point · Esc cancels'], launch: ['L', 'Launch · click a track or a patrol point · Esc cancels'],
-        helo: ['U', 'Helo · click a search point or a track · Esc cancels'], land: ['T', 'Land · click a beach · Esc cancels'] };
+        helo: ['U', 'Helo · click a search point or a track · Esc cancels'], strike: ['G', 'Launch · pick the rounds (1-9) · click the point · Shift keeps aiming · Esc cancels'], land: ['T', 'Land · click a beach · Esc cancels'] };
       if (mode && MODE_HINT[mode]) h = `<b>${MODE_HINT[mode][0]}</b>${esc(MODE_HINT[mode][1])}`;
       else if (hover && state[hover]) h = `<b>${ROWS.find(r => r.id === hover).k}</b>${esc(state[hover].ok || !state[hover].why ? state[hover].hint : state[hover].why + ' · ' + state[hover].hint)}`;
       else {

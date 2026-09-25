@@ -101,7 +101,7 @@ export const KEYBINDS = [
     ['Ctrl 1-9', 'Set group · Alt 1-9 too'], ['1-9', 'Recall group · twice: fly'], ['Tab', 'Next unit'], ['Esc', 'Clear selection', { ctx: 'selection' }] ] },
   { group: 'Orders', binds: [
     ['Right click', 'Move · attack a track'], ['Shift', 'Queue the order'], ['Z', 'Stop'], ['H', 'Weapons free / hold'],
-    ['~', 'Salvo fire · again: size'],
+    ['~', 'Salvo fire · again: size'], ['G', 'Launch at a point · 1-9 rounds, click the map'],
     ['T', 'Deploy / undeploy', { side: 'coast' }], ['R', 'Reload'], ['X', 'Scan, then click'], ['Y', 'Radar on / off'],
     ['L', 'Launch Orlan-10', { side: 'coast' }], ['L', 'Launch strike package', { side: 'fleet' }], ['U', 'Launch MH-60R', { side: 'fleet' }],
     ['O', 'Boats: dive / come up · Shift: surface'], ['B', 'Reinforcements'] ] },
@@ -112,12 +112,12 @@ export const KEYBINDS = [
   { group: 'View and time', binds: [
     ['C', 'Cinematic camera'], ['C', 'Cinematic on rounds', { ctx: 'rounds' }],
     ['B', 'Bullet time on rounds', { ctx: 'rounds' }], ['Esc', 'Drop the rounds', { ctx: 'rounds' }], ['J', 'Replay the last hit'], ['Shift J', 'Hit replay on / off'], ['V', 'Radar view'],
-    ['F10', 'Hide the interface'], ['F1', 'Help'], ['Space', 'Pause'], ['[ ]', 'Time rate slower / faster'], ['Esc', 'Menu'] ] },
+    ['F10', 'Hide the interface'], ['F1', 'Help'], ['Space', 'Pause'], ['[ ]', 'Time rate ×0.1 … ×32'], ['Esc', 'Menu'] ] },
   { group: 'Film maker', binds: [
     ['F9', 'Film panel'], ['K', 'Key at this view', { ctx: 'film' }], ['Shift K', 'Key that follows', { ctx: 'film' }], ['Shift F9', 'Play the take'],
     ['F8', 'Still · Shift: sequence'] ] },
   { group: 'Sandbox', mode: 'sandbox', binds: [
-    ['P', 'Spawn palette'], ['1-9 ⇧1-9', 'Pick a unit to place', { ctx: 'palette' }], ['Del', 'Delete selected'], ['G', 'Fog'], ['K', 'Enemy AI'],
+    ['P', 'Spawn palette'], ['1-9 ⇧1-9', 'Pick a unit to place', { ctx: 'palette' }], ['Del', 'Delete selected'], ['Shift G', 'Fog'], ['K', 'Enemy AI'],
     ['M', 'Switch side'], ['N', 'Weather'], ['F2', 'Map builder · time stops'],
     ['Wheel R', 'Builder: turn · drag moves · Del removes', { ctx: 'palette' }] ] },
 ];
