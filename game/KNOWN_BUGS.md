@@ -5,7 +5,7 @@ Screenshots of several of these were shared in the chat. Start the next session 
 
 ## From the user's play-test
 
-1. **Zooming speeds up the radars.** *Cause found (2026-09-25), fix pending in the controls:* every antenna, rotor,
+1. **Zooming speeds up the radars.** *Fixed (2026-09-25, ce48778): `=`/`-` now zoom, `]`/`[` set the time rate.* Cause: every antenna, rotor,
    dome and scope sweep is already a pure function of sim time (`antA + antW (t - antT)` in `data/units.js`,
    `ui/sensors/radar.js`, `ui/hud/scope/ppi.js`, `hud/minimap.js`; measured: `game.t` advances exactly with real
    time while wheel-zooming). What speeds them up is the time rate: **`=` / `-` (and numpad `+` / `-`) are the time
