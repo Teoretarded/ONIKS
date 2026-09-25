@@ -125,3 +125,16 @@ in the delta; the caldera cone's steam plume leaning with the storm wind. Towns 
 beams sweeping the sea, buoys blinking in real patterns, cargo ships and trawlers at real speeds. Stills: `lm_*.png`.
 Orbital agent started: past ~50 km altitude the picture dissolves into the Orbital films' hairline language
 (black, white contours, yellow for your salvo, catalog labels) and re-condenses into dots as you zoom back in.
+
+## 06:35 · Gameplay fixes and balance done
+- The player now fires first: your launchers start with weapons held (H toggles weapons free / hold fire);
+  defensive fire (Pantsir, SM-6, Phalanx) stays automatic. As the fleet you can now launch the carrier's air wing
+  (L strike package, U helo, or right-click a track with the carrier selected). Out-of-reach scans are handed to
+  another scanner in reach or refused ("OUT OF REACH · 106 / 85 KM") instead of driving the radar away. HUD
+  collisions fixed, alerts clickable, and near the ground you can tilt the camera up to watch a round climb.
+- Balance: spawns moved to 89-114 km apart; every map now 40-58% coast wins over 48 AI-vs-AI matches (was 0-73%);
+  `game/balance.html` runs the batches.
+- Started: first-run polish (F1 help overlay, loading screen, model warm-up, in-game settings) and a units expansion:
+  E-2D Hawkeye (turning rotodome, flying radar), Virginia and Kilo submarines (hidden under the sea, found by sonar
+  rings on the water), Bal coastal launcher.
+- `run_game.bat` in the repo root starts the server and opens the game.
