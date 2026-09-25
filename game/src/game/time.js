@@ -4,6 +4,7 @@
    screen), with a lime blip when the game drops to x1 on its own. */
 import { PRI } from './game.js';
 
+const KEY_CODE = { '[': 'BracketLeft', ']': 'BracketRight', ' ': 'Space' };
 const sat = v => v < 0 ? 0 : v > 1 ? 1 : v;
 
 export function createTime(game) {
@@ -18,7 +19,7 @@ export function createTime(game) {
   return {
     name: 'time', priority: PRI.time, always2d: true,
     onKey(e) {
-      const k = e.code;
+      const k = e.code || KEY_CODE[e.key] || '';   // some input paths (IMEs, remote tools) send the key without its code
       if (k === 'BracketRight' || k === 'BracketLeft') {
         if (e.type === 'keydown' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) game.stepRate(k === 'BracketRight' ? 1 : -1);
         return true;

@@ -265,10 +265,34 @@ export function createOrders(game) {
     const r = us.filter(u => !u.aboard && canReload(u));
     if (!r.length) { toast(us.some(u => u.def.domain === 'air') ? 'AIRCRAFT REARM ON THE DECK · RIGHT-CLICK THE CARRIER' : 'NOTHING TO RELOAD', true); return true; }
     const out = r.filter(u => u.off.reload);
-    const need = r.filter(u => !u.off.reload && !isFull(u));
+    let need = r.filter(u => !u.off.reload && !isFull(u));
     if (!need.length) { toast(out.length === r.length ? 'RELOAD KNOCKED OUT' : 'FULL · NOTHING TO RELOAD', true); return true; }
-    game.order(need.map(u => u.id), { kind: 'reload' });
     const lines = [];
+    // TELs while every transloader with rounds is on its way to (or reloading) another launcher: the sim would send
+    // them off to a depot; queue them on that transloader instead (as a Shift right-click of it on the TEL would)
+    const loaders0 = sim.alive(game.side).filter(v => v.type === 'transloader' && !v.off.reload && v.cargo > 0);
+    const errand = v => { const q = v.orders[0]; return q && q.kind === 'reload' && q.target ? q.target : 0; };
+    const free = loaders0.filter(v => !v.busy && !errand(v));
+    if (!free.length && loaders0.length) {
+      const short = u => u.def.weapons.oniks.ammo - u.ammo.oniks;
+      // rounds a transloader has left after the launchers already on its list
+      const spare = v => v.cargo - v.orders.reduce((n, q) => { const T = q.kind === 'reload' && q.target && sim.units.get(q.target); return n + (T && T.alive ? short(T) : 0); }, 0);
+      const queued = [];
+      for (const t of need) {
+        if (t.type !== 'tel' || t.reloader || t.depotLoad || loaders0.some(v => v.orders.some(q => q.kind === 'reload' && q.target === t.id))) continue;
+        let L = null, bd = 1e18;
+        for (const v of loaders0) { if (spare(v) <= 0) continue; const d = Math.hypot(v.pos[0] - t.pos[0], v.pos[2] - t.pos[2]); if (d < bd) { bd = d; L = v; } }
+        if (!L) continue;                                         // no rounds to spare: it goes to a depot (below)
+        queued.push(t);
+        game.order([L.id], { kind: 'reload', target: t.id, queue: true });
+        const cur = sim.units.get(errand(L) || (sim.alive(game.side).find(v => v.reloader === L.id) || {}).id);
+        lines.push([`RELOAD · TLV ${cur ? (L.busy ? 'AT ' : 'TO ') + ref(cur) + ' · THEN ' : 'TO '}${ref(t)}`]);
+      }
+      need = need.filter(u => !queued.includes(u));
+      for (const t of need.filter(u => u.type === 'tel' && loaders0.some(v => v.orders.some(q => q.kind === 'reload' && q.target === u.id)))) lines.push([`RELOAD · TLV COMING TO ${ref(t)}`]);
+      need = need.filter(u => !(u.type === 'tel' && loaders0.some(v => v.orders.some(q => q.kind === 'reload' && q.target === u.id))));
+    }
+    if (need.length) game.order(need.map(u => u.id), { kind: 'reload' });
     // ships: to the replenishment point (the coast's boats: their base)
     const sea = need.filter(u => u.def.domain === 'sea');
     if (sea.length) {
@@ -287,7 +311,7 @@ export function createOrders(game) {
     const tels = need.filter(u => u.type === 'tel' && !u.reloader);
     if (tels.length) {
       const loaders = sim.alive(game.side).filter(v => v.type === 'transloader' && !v.off.reload);
-      if (loaders.some(v => v.cargo > 0 && !v.busy)) lines.push([`RELOAD · TLV TO ${tels.length > 1 ? tels.length + ' TEL' : ref(tels[0])}`]);
+      if (loaders.some(v => v.cargo > 0 && !v.busy && !errand(v))) lines.push([`RELOAD · TLV TO ${tels.length > 1 ? tels.length + ' TEL' : ref(tels[0])}`]);
       else lines.push([!loaders.length ? 'NO TRANSLOADER · TEL TO DEPOT' : loaders.every(v => v.cargo <= 0) ? 'TLV EMPTY · TEL TO DEPOT' : 'TLV BUSY · TEL TO DEPOT', true]);
     }
     const dep = need.filter(u => u.def.domain !== 'sea' && u.type !== 'tel');

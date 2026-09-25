@@ -259,6 +259,7 @@ async function boot() {
       shots.push({ name, done }); step(performance.now(), dt === undefined ? 0 : dt);
     }),
   };
+  if (Q.has('playbot')) import('./dev/playbot.js').then(m => m.attach(window.ONIKS)).catch(e => console.warn('main: playbot', e));   // play-test helper
 }
 
 /* the opening shot (game/campaign/camera.js `opening`): 60-120 m from the command post (the fleet: the carrier), low,

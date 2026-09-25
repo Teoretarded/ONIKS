@@ -354,7 +354,7 @@ export function createSelect(game) {
       // spectating: one line at the top centre
       if (spec) {
         const k = ov.ui || 1;
-        ov.tag(cam.W / 2, 74 * k, 'SPECTATE', spec.name, 'DRAG ORBIT · WHEEL ZOOM · ESC', { kind: orb ? 'white' : 'lime', size: 10.5, align: 'center' });
+        ov.tag(cam.W / 2, 34 * k, 'SPECTATE', spec.name, 'DRAG ORBIT · WHEEL ZOOM · ESC', { kind: orb ? 'white' : 'lime', size: 10.5, align: 'center', fit: false });   // in the top safe band (world tags are kept off it)
       }
       // the drag box: dotted lime (the Orbital style: a white hairline box and corners)
       if (box && box.live) {
