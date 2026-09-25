@@ -318,7 +318,7 @@ export function createRender(game, DM) {
         // a burnt-out vehicle stays on the ground a while as a wreck, then the returns thin out
         const d = inst.get(e.unit);
         if (d && /_wreck$/.test(d.key)) ghosts.push({ d: { key: d.key, T: d.T.slice(), hdg: d.hdg, pitch: d.pitch, roll: d.roll, st: Object.assign({}, d.st, { wreck: 1 }), tint: 'neutral', dissolve: .55, damage: d.damage ? Object.assign({}, d.damage) : null, partAlpha: d.partAlpha }, t0: sim.t });
-        inst.delete(e.unit); wakes.delete(e.unit); mastInst.delete(e.unit); for (const m of deckSlots.values()) m.delete(e.unit);
+        inst.delete(e.unit); wakes.delete(e.unit); mastInst.delete(e.unit); deckSlots.delete(e.unit); for (const m of deckSlots.values()) m.delete(e.unit);
       }
       else if (e.type === 'takeoff') { for (const m of deckSlots.values()) m.delete(e.unit); }
     },
