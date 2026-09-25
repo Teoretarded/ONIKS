@@ -26,6 +26,7 @@
    infinity: a band of returns riding the dipped horizon (glowing toward dusk) and sparse stars. */
 import { HEAD, FRAME, COMMON, FS_POINT, CULL } from './shaders.js';
 import { program, floatTex } from './gl.js';
+import { getSettings, onSettings } from '../data/settings.js';
 
 const MAXL = 20;
 const B = 32;                 // block side (dots)
@@ -232,6 +233,12 @@ uniform vec4 uSubA[${NSUB}];      // subjects (the units on screen): xyz centre 
 uniform vec4 uSubB[${NSUB}];      // x, y: screen centre (1080-px units from the centre), z: screen radius (1080 px), w: depth
 uniform vec4 uSubC[${NSUB}];      // a ship on the sea: x, y heading sin, cos; z half length, w half beam (m); z 0: not a ship
 uniform vec4 uSubP;         // x: count, y: dimming at a subject, z: aspect (W / H), w: backdrop dimming (behind a subject on screen)
+/* the environment's tone (Settings, Graphics, Environment tone; ENV_TONES below): the world's returns tinted and held
+   under a shoulder, so white stays the units' */
+uniform vec4 uEnvL;         // land: rgb tint, w: shoulder (brightness the land's returns tend to; 0 none)
+uniform vec4 uEnvS;         // sea (and seabed): rgb tint, w: shoulder
+uniform vec4 uEnvF;         // foam (the waterline, surf, whitecaps, glints): rgb tint, w: its brightness scale
+float envShoulder(float b, float cap) { return cap > 0.0 ? cap * tanh(b / cap) : b; }
 /* the world dims round the units on screen (the films keep the ground dim round their models): a pool round each
    subject in the world, and a soft backdrop behind it on screen */
 float subjDim(vec3 p, vec4 c) {
@@ -296,7 +303,7 @@ void main() {
   float pxs = s * uCam.x / length(p0);
   float fg = abs(p0.y) * inversesqrt(dot(p0, p0));      // flat ground's facing: sine of the view's elevation
   vec3 col = WH;
-  float b, y, big = 0.0, kd = 0.0, land = 0.0, sea = 0.0, glint = 0.0, glowH = 0.0;
+  float b, y, big = 0.0, kd = 0.0, land = 0.0, sea = 0.0, glint = 0.0, glowH = 0.0, foam = 0.0;
   vec3 n = vec3(0.0, 1.0, 0.0);
   float wl = max(0.75 * s, 2.0);
   if (dsh < wl && dout <= 0.0) {
@@ -309,6 +316,7 @@ void main() {
     y = 0.35;
     b = uSurf.y * (0.72 + 0.28 * u01(hash1(hs ^ 0x51ed27u)));
     big = 1.0;
+    foam = 1.0;
   } else if (h > 0.0) {
     land = 1.0;
     // a dot budget per screen area of the (map) surface, with a grazing floor: walls turned to the lens keep
@@ -391,6 +399,7 @@ void main() {
     }
     b = min(1.0, b * uLand.x);
     b *= mix(1.0, uLand.w, smoothstep(0.0, 3000.0, dout));
+    b = envShoulder(b, uEnvL.w);
   } else {
     sea = 1.0;
     // the sea: returns at a constant horizontal spacing on screen, denser in the surf zone
@@ -459,6 +468,8 @@ void main() {
     }
     // seen steeply the returns are denser, so each is dimmer: a fine surface, not a scatter of bright points
     b *= mix(1.0, uSea4.z, kSteep);
+    b = envShoulder(b, uEnvS.w);
+    float bBody = b;
     // glints: now and then a facet flashes at the lens
     uint hg = hash1(hs ^ 0x7f4a7c15u);
     if (u01(hg) < uSea2.z * (0.02 + 0.05 * face) * (1.0 - kR)) {
@@ -483,6 +494,8 @@ void main() {
       float wv = 0.5 + 0.5 * sin(dsh * 0.45 - uSurf.z * 1.3 + u01(hs) * 1.5);
       b = max(b, (0.2 + 0.6 * wv * wv) * sf * uSurf.y * uCoast.y);
     }
+    // what the foam, the glints and the whitecaps added over the sea's own return: foam-tinted, scaled
+    if (b > bBody) { foam = 1.0 - bBody / b; b = bBody + (b - bBody) * uEnvF.w; }
   }
   vec3 p = vec3(xz.x, y - uEyeW.y, xz.y);
   p.y -= curveDrop(p);
@@ -499,6 +512,7 @@ void main() {
   // going out toward a floor)
   if (uSea3.y > 0.0) b *= mix(uSea3.z, 1.0, exp(-c.w / uSea3.y));
   b *= subjDim(p, c);
+  col = mix(land > 0.5 ? uEnvL.rgb : uEnvS.rgb, uEnvF.rgb, foam);
   vec2 sc = scanAt(p);
   vec2 sw2 = sweepAt(p);
   col = mix(col, uScanC[0].rgb, 0.35 * sc.y);
@@ -545,7 +559,7 @@ void main() {
   gl_Position = c;
   float b = 0.28 * exp(h / 9.0) * (0.45 + 0.55 * max(0.0, dot(n, uSun.xyz)));
   b *= depthFade(c.w) * vis * uFade.z;
-  vCol = WH * b;
+  vCol = uEnvS.rgb * b;
   gl_PointSize = max(1.0, floor(uCam.y + 0.5));
 }
 `;
@@ -658,6 +672,21 @@ const TIME_LOOK = {
   day: { stars: 0, band: 1, glowAz: 110, glow: .3 },
 };
 
+/* The environment's tone (Settings, Graphics, Environment tone: getSettings().envTone). The world's returns are graded
+   so the units, which keep the films' white, stand out: the sea a dim cool blue-grey, the land a dim warm grey, foam
+   and surf kept but under the units, beaches no longer the brightest thing; lime and coral stay the sides' and the
+   effects'. A grade, not a new style: the same dots, rows and flicker. 'classic' is the films' all-white world.
+   land / sea / foam: rgb tint (applied to the return's brightness; the units' white is 0.933, 0.933, 0.894)
+   landK, seaK: brightness; cap: a soft shoulder (tanh) the land's and the sea's returns tend to (0 = none)
+   foamK: what the waterline, surf, whitecaps and glints add; beach: the sand's brightening; coast: the waterline's
+   dots; bed: the seabed; band: the horizon's band of returns (sky and sea) */
+export const ENV_TONES = {
+  classic: { land: [.933, .933, .894], sea: [.933, .933, .894], foam: [.933, .933, .894], landK: 1, seaK: 1, capL: 0, capS: 0, foamK: 1, beach: 1, coast: 1, bed: 1, band: 1 },
+  muted: { land: [.86, .83, .76], sea: [.74, .86, .92], foam: [.78, .86, .90], landK: .78, seaK: .9, capL: .48, capS: .42, foamK: .7, beach: .5, coast: .7, bed: .7, band: .8 },
+};
+let TONE_SETTING = 'muted';
+try { TONE_SETTING = getSettings().envTone || TONE_SETTING; onSettings(s => { TONE_SETTING = s.envTone || 'muted'; }); } catch (e) { /* no settings: the default */ }
+
 export class Terrain {
   constructor(G, map, opts) {
     opts = opts || {};
@@ -699,7 +728,8 @@ export class Terrain {
     this.fields = opts.fields !== undefined ? opts.fields : 1;               // field patchwork on flat low ground
     this.marsh = opts.marsh !== undefined ? opts.marsh : 1;
     this.beach = opts.beach !== undefined ? opts.beach : .6;
-    this.landBright = opts.landBright || .8;     // at play altitudes the ground stays under the units (the films)
+    this.landBright0 = opts.landBright || .8;    // at play altitudes the ground stays under the units (the films)
+    this.toneName = opts.tone || null;           // the environment's tone (ENV_TONES); null: the setting
     this.dotPx = opts.dotPx || [4.2, 15, 22];  // 2 px / 3 px thresholds, dimming above (on-screen spacing, 1080-px)
     this.seaDot2 = opts.seaDot2 || 3.4;        // sea dots are 2 px above this on-screen spacing
     this.contours = opts.contours !== undefined ? opts.contours : 1;        // contour emphasis from high up
@@ -714,6 +744,14 @@ export class Terrain {
     this._prepData();
     this._prepGL();
   }
+
+  /* the environment's tone: an ENV_TONES key (or null: follow the setting) */
+  setTone(name) { this.toneName = name && ENV_TONES[name] ? name : null; }
+  get tone() { return ENV_TONES[this.toneName || TONE_SETTING] || ENV_TONES.muted; }
+  get toneKey() { return ENV_TONES[this.toneName || TONE_SETTING] ? this.toneName || TONE_SETTING : 'muted'; }
+  /* the land's brightness with the tone (the ground layers read it too: game/ground.js) */
+  get landBright() { return this.landBright0 * this.tone.landK; }
+  set landBright(v) { this.landBright0 = v; }
 
   /* ---------- data ---------- */
   _prepData() {
@@ -1084,11 +1122,15 @@ export class Terrain {
     if (u.uDot2) gl.uniform4f(u.uDot2, this.landNear, this.reliefK, this.seaFade, this.seaBands);
     if (u.uWl2) gl.uniform1f(u.uWl2, this.wl2);
     if (u.uSeaGrp) gl.uniform1f(u.uSeaGrp, .3 + .5 * (this.altK || 0));
-    if (u.uHz) gl.uniform2f(u.uHz, this.dip || 0, .6 * this.sky.band);
+    if (u.uHz) gl.uniform2f(u.uHz, this.dip || 0, .6 * this.sky.band * this.tone.band);
     // (the screen-area rule takes over from a few hundred metres up: close to the water the films' spacing rule holds)
     if (u.uSea3) gl.uniform4f(u.uSea3, this.seaArea * Math.pow(16, 1 - (this.seaMidK || 0)) * Math.pow(1 + this.seaHigh[0] * (this.seaAltK || 0), 2), this.hazeEff || 0, this.hazeFloor, this.seaRows * (this.seaMidK || 0));
     if (u.uSeaRow) gl.uniform4f(u.uSeaRow, this.seaSwellRows, this.seaRowKeep, this.seaRowDark, this.seaRowCrest);
     if (u.uSea4) gl.uniform4f(u.uSea4, Math.log2(Math.max(50, this.lookD || 1000)), this.seaRecede, this.seaSteepB, this.seaJitter);
+    const E = this.tone;
+    if (u.uEnvL) gl.uniform4f(u.uEnvL, E.land[0], E.land[1], E.land[2], E.capL);
+    if (u.uEnvS) gl.uniform4f(u.uEnvS, E.sea[0], E.sea[1], E.sea[2], E.capS);
+    if (u.uEnvF) gl.uniform4f(u.uEnvF, E.foam[0], E.foam[1], E.foam[2], E.foamK);
     gl.bindVertexArray(this.vao);
   }
   /* depth-only occluder: pass 0 land envelope (with the seabed), pass 1 clamped up to the sea surface */
@@ -1102,6 +1144,8 @@ export class Terrain {
   drawSeabed() {
     const gl = this.gl, P = this.pBed;
     this._bindCommon(P);
+    const E = this.tone;
+    if (P.u.uEnvS) gl.uniform4f(P.u.uEnvS, E.sea[0] * E.bed, E.sea[1] * E.bed, E.sea[2] * E.bed, 0);
     gl.uniform1ui(P.u.uSalt, 0xa511e9b3);
     gl.drawArraysInstanced(gl.POINTS, 0, B * B, this.nInst);
   }
@@ -1110,15 +1154,16 @@ export class Terrain {
     o = o || {};
     const k = this.altK || 0;
     // the sea brightens from the lens out to a few km up (the films'), then gives way to the coast map
-    this._seaB = (o.seaBright || 1) * this.seaLook.bright * 1.1 * (1 + this.seaMidBright * (this.seaMidK || 0)) * (1 - this.seaHigh[1] * (this.seaAltK || 0));
+    const E = this.tone;
+    this._seaB = (o.seaBright || 1) * E.seaK * this.seaLook.bright * 1.1 * (1 + this.seaMidBright * (this.seaMidK || 0)) * (1 - this.seaHigh[1] * (this.seaAltK || 0));
     this._bindCommon(P);
     gl.uniform1ui(u.uSalt, 0);
     gl.uniform4f(u.uSea2, this.rough, this.whitecaps, this.glints, this.seaDot2);
-    gl.uniform4f(u.uSurf, 70, 1.0, this.t, this.contour);
+    gl.uniform4f(u.uSurf, 70, E.coast, this.t, this.contour);
     gl.uniform4f(u.uLand, (o.landBright || this.landBright) * (1 + this.landHigh * k), 0, 1, .45);
     gl.uniform4f(u.uCont, this.contI[0], this.contI[1], this.contI[2], Math.min(1, this.contourK));
     gl.uniform4f(u.uLit, this.litCam[0], this.litCam[1], this.litCam[2], this.lightFollow);
-    gl.uniform4f(u.uTex, this.fields, this.marsh, this.beach, this.grazing);
+    gl.uniform4f(u.uTex, this.fields, this.marsh, this.beach * E.beach, this.grazing);
     gl.uniform4f(u.uTex2, this.prominence * (.4 + .6 * k), 0, 0, 0);
     gl.uniform4fv(u.uSubA, this.subA); gl.uniform4fv(u.uSubB, this.subB); if (u.uSubC) gl.uniform4fv(u.uSubC, this.subC);
     gl.uniform4f(u.uSubP, this.nSub, this.subjectDim, this.G.W / Math.max(1, this.G.H), this.subjectBack);
@@ -1128,7 +1173,7 @@ export class Terrain {
     const gl = this.gl, P = this.pSky, S = this.sky;
     k = k === undefined ? 1 : k;
     gl.useProgram(P.p);
-    gl.uniform4f(P.u.uSkyP, S.stars * k, S.band * k, this.dip || 0, S.glowAz);
+    gl.uniform4f(P.u.uSkyP, S.stars * k, S.band * k * this.tone.band, this.dip || 0, S.glowAz);
     gl.uniform1f(P.u.uSkyG, S.glow);
     gl.bindVertexArray(this.skyVao);
     gl.drawArrays(gl.POINTS, 0, this.nSky);

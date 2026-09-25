@@ -19,6 +19,8 @@
      autoQuality * bool                          hold 60 fps: effects, dot density, then render scale step down under load
                                                  and back up with headroom (game/perfguard.js; the FPS readout shows it)
      showFps     * bool
+     envTone     * 'muted' | 'classic'           the world's returns: muted (sea blue-grey, land warm grey, both dimmer, so the
+                                                 units' white stands out) or classic (the films' all-white world); engine/terrain.js ENV_TONES
      radarSweep  * bool                          own radars paint their sweep on the world (Shift V; ui/sensors/radar.js)
      volume      * 0..1 (steps of 0.1)          master volume (films, UI, game)
      uiSound       bool                          menu / HUD clicks
@@ -55,6 +57,7 @@ export const SETTINGS = [
   { key: 'effects', group: 'Graphics', label: 'Effects', def: 'high', choices: [['low', 'Low'], ['medium', 'Medium'], ['high', 'High']] },
   { key: 'autoQuality', group: 'Graphics', label: 'Auto quality', def: true, choices: [[false, 'Off'], [true, 'On']] },
   { key: 'showFps', group: 'Graphics', label: 'Show FPS', def: false, choices: [[false, 'Off'], [true, 'On']] },
+  { key: 'envTone', group: 'Graphics', label: 'Environment tone', def: 'muted', choices: [['muted', 'Muted'], ['classic', 'Classic']] },
   { key: 'radarSweep', group: 'Graphics', label: 'Radar sweeps', def: true, choices: [[false, 'Off'], [true, 'On']] },
   { key: 'volume', group: 'Sound', label: 'Master volume', def: .8, meter: true, choices: [0, .1, .2, .3, .4, .5, .6, .7, .8, .9, 1].map(v => [v, Math.round(v * 100) + '']) },
   { key: 'uiSound', group: 'Sound', label: 'UI sound', def: true, choices: [[false, 'Off'], [true, 'On']] },
@@ -74,6 +77,7 @@ export const NOTES = {
   effects: v => ({ low: 'Sparse smoke and debris; only the strongest flashes light the world. Fastest.', medium: 'Lighter smoke and debris, fewer dynamic lights.', high: 'Smoke, debris, sparks and dynamic light, as in the films.' }[v]),
   autoQuality: v => v ? 'Holds 60 fps: under load effects, then dots, then render scale step down, and come back.' : 'Quality stays as set, whatever the frame rate.',
   showFps: v => v ? 'Frame rate and frame time on screen.' : 'No frame counter.',
+  envTone: v => v === 'classic' ? 'Sea and land in the films\' white, as bright as the units.' : 'Sea a dim blue-grey, land a dim warm grey: white is left to the units and the rounds.',
   radarSweep: v => v ? 'Own radars paint their sweep on the sea and the land. Shift V hides it.' : 'No sweep painted on the world; the radars still work. Shift V shows it.',
   volume: v => `Master volume ${Math.round(v * 100)}%. Films, interface and battle.`,
   uiSound: v => v ? 'Clicks and blips on the menus and the HUD.' : 'Silent menus and HUD.',
