@@ -16,6 +16,7 @@
 import { CORAL, sat, clamp, outCubic, outExpo, pad2 } from './core.js';
 import { decode, flicker, seedOf } from './decode.js';
 import { TRACK } from '../../game/labels.js';
+import { orbOn } from './orb.js';
 
 const R_EARTH = 6371000, DEG = Math.PI / 180;
 const IW = 480, IH = 270;                 // CSS px at 1080p
@@ -45,6 +46,7 @@ uniform vec4 uTint;                     // rgb, strength
 uniform vec4 uGate;                     // model-space slice normal, w: the front (n.p)
 uniform vec4 uG2;                       // x mode (0 plain, 1 shell, 2 hidden, 3 part, 4 x-ray item), y band (m), z afterglow (m), w interior lime
 uniform vec4 uG3;                       // x: band amplitude
+uniform vec4 uAcc;                      // the accent: lime (Point Cloud), white (Orbital)
 uniform vec3 uSun;
 out vec3 vCol;
 void main() {
@@ -86,7 +88,8 @@ void main() {
     if (hr < xr * 0.55) { ${CULL} }
     b = mix(b, 0.05 + 0.2 * lit, xr);
   }
-  const vec3 WH = vec3(0.933, 0.933, 0.894), LIME = vec3(0.776, 0.957, 0.196);
+  const vec3 WH = vec3(0.933, 0.933, 0.894);
+  vec3 LIME = uAcc.rgb;
   vec3 col = mix(WH, uTint.rgb, uTint.a * mix(0.08, 1.0, rim));
   if (mode > 1.5 && mode < 2.5) { col = mix(col, LIME, uG2.w); b = max(b, 0.35); }
   if (mode > 3.5) { col = mix(WH, LIME, uG2.w); b = max(b, 0.42 + 0.3 * lit); }
@@ -345,9 +348,13 @@ export function createInset(S, AN) {
     for (const it of slot.sc.idents || []) { const p = game.unitPose(it.u).pos; if (cam.project(p, q)) keep.push(q[0], q[1], it.u === slot.u ? 14 : 5); }
     if (cam.project(slot.sc.pos, q)) keep.push(q[0], q[1], 3);
     const cands = [];
-    // right column under the log; left column under the palette; above the minimap; top middle
+    // right column under the log and its alerts (the HUD keeps their room in its rect, chips up or not); left column
+    // under the palette; above the minimap; top middle. The right column's picture shrinks a little (to 80 %) rather
+    // than run into the minimap's label on a short window: [x, y, size factor]
     let yR = 60 * k; for (const r of rects) if (r[2] > W - 200 && r[1] < H * .4) yR = Math.max(yR, r[3] + 34 * k);
-    cands.push([W - 88 * k - w, yR]);
+    let lim = H - 4; for (const r of rects) if (r[1] > yR && r[0] < W - 88 * k && r[2] > W - 88 * k - w) lim = Math.min(lim, r[1]);
+    const fR = clamp((lim - 7 - 22 * k - yR) / h, .8, 1);
+    cands.push([W - 88 * k - Math.round(w * fR), yR, fR]);
     let yL = 60 * k; for (const r of rects) if (r[0] < 200 && r[1] < H * .5) yL = Math.max(yL, r[3] + 34 * k);
     cands.push([88 * k, yL]);
     cands.push([W - 88 * k - w, H * .5 - h / 2]);
@@ -356,13 +363,14 @@ export function createInset(S, AN) {
     cands.push([W - 88 * k - w, H - 170 * k - h]);
     cands.push([W * .5 - w / 2, H - 190 * k - h]);
     let best = null, bs = 1e9;
-    for (const [x, y] of cands) {
-      const b = [x, y - 22 * k, x + w, y + h + 22 * k];
+    for (const [x, y, f] of cands) {
+      const cw = f ? Math.round(w * f) : w, chh = f ? Math.round(h * f) : h;
+      const b = [x, y - 22 * k, x + cw, y + chh + 22 * k];
       let sc = 0;
       if (b[1] < 4 || b[3] > H - 4 || b[0] < 4 || b[2] > W - 4) sc += 50;
       for (const r of rects) if (over(b, r, 6)) sc += 10;
       for (let i = 0; i < keep.length; i += 3) if (keep[i] > b[0] - 50 && keep[i] < b[2] + 50 && keep[i + 1] > b[1] - 50 && keep[i + 1] < b[3] + 50) sc += keep[i + 2];
-      if (sc < bs) { bs = sc; best = [Math.round(x), Math.round(y), Math.round(x + w), Math.round(y + h), w, h, k]; }
+      if (sc < bs) { bs = sc; best = [Math.round(x), Math.round(y), Math.round(x + cw), Math.round(y + chh), cw, chh, k]; }
       if (sc === 0) break;
     }
     return best;
@@ -419,7 +427,9 @@ export function createInset(S, AN) {
     gl.enable(gl.SCISSOR_TEST);
     gl.scissor(vx, vy + Math.round(vh * (1 - wipe)), vw, Math.round(vh * wipe));
     gl.viewport(vx, vy, vw, vh);
-    gl.clearColor(11 / 255, 12 / 255, 10 / 255, 1); gl.clearDepth(1);
+    const orb = orbOn(R);
+    if (orb) gl.clearColor(0, 0, 0, 1); else gl.clearColor(11 / 255, 12 / 255, 10 / 255, 1);
+    gl.clearDepth(1);
     gl.depthMask(true);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     if (!slew && wipe > 0) {
@@ -436,6 +446,8 @@ export function createInset(S, AN) {
       gl.uniform4f(u.uCam, flD, hwD, hhD, C.near);
       gl.uniform4f(u.uDep, C.near, C.far, pxK, s.seed & 1023);
       gl.uniform4f(u.uG3, sweep.band, 0, 0, 0);
+      // the accent: lime, or white in the Orbital style (a sensor's picture in the Orbital frame)
+      if (orb) gl.uniform4f(u.uAcc, .96, .96, .94, 0); else gl.uniform4f(u.uAcc, .776, .957, .196, 0);
       gl.uniform3f(u.uSun, -.45, .8, -.4);
       // model -> eye-relative
       M9[0] = M[0]; M9[1] = M[3]; M9[2] = M[6]; M9[3] = M[1]; M9[4] = M[4]; M9[5] = M[7]; M9[6] = M[2]; M9[7] = M[5]; M9[8] = M[8];
@@ -460,7 +472,7 @@ export function createInset(S, AN) {
         const al = mode === 2 ? xk : 1;
         if (al < .01) continue;
         gl.uniform4f(u.uP, al, mode === 1 ? .85 * xk : 0, cl.sp, 1.0);
-        gl.uniform4f(u.uTint, tint[0] / 255, tint[1] / 255, tint[2] / 255, .55 * idk * (1 - xk * .6));
+        gl.uniform4f(u.uTint, tint[0] / 255, tint[1] / 255, tint[2] / 255, (orb ? 0 : .55) * idk * (1 - xk * .6));
         gl.uniform4f(u.uG2, xk > .01 ? mode : 3, Math.max(.6, subj.L * .02), subj.L * .12, .55);
         gl.bindVertexArray(cl.vao);
         gl.drawArrays(gl.POINTS, 0, cl.n);
@@ -547,12 +559,16 @@ export function createInset(S, AN) {
     const g = outExpo(open), cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
     const fx0 = cx - w / 2 * g, fx1 = cx + w / 2 * g, fy0 = cy - h / 2 * g, fy1 = cy + h / 2 * g;
     ctx.save();
-    // dotted frame
-    ctx.globalAlpha = .55 * open; ctx.fillStyle = 'rgba(255,255,255,.9)';
-    for (let x = fx0; x <= fx1; x += 3) { ctx.fillRect(Math.round(x), Math.round(fy0), 1, 1); ctx.fillRect(Math.round(x), Math.round(fy1), 1, 1); }
-    for (let y = fy0; y <= fy1; y += 3) { ctx.fillRect(Math.round(fx0), Math.round(y), 1, 1); ctx.fillRect(Math.round(fx1), Math.round(y), 1, 1); }
+    const orb = S.orb, ACC = orb ? '#F6F5F2' : '#C6F432';
+    // dotted frame (the Orbital style: a hairline)
+    if (orb) { ctx.globalAlpha = .4 * open; ctx.strokeStyle = '#F6F5F2'; ctx.lineWidth = 1; ctx.strokeRect(Math.round(fx0) + .5, Math.round(fy0) + .5, Math.round(fx1 - fx0), Math.round(fy1 - fy0)); }
+    else {
+      ctx.globalAlpha = .55 * open; ctx.fillStyle = 'rgba(255,255,255,.9)';
+      for (let x = fx0; x <= fx1; x += 3) { ctx.fillRect(Math.round(x), Math.round(fy0), 1, 1); ctx.fillRect(Math.round(x), Math.round(fy1), 1, 1); }
+      for (let y = fy0; y <= fy1; y += 3) { ctx.fillRect(Math.round(fx0), Math.round(y), 1, 1); ctx.fillRect(Math.round(fx1), Math.round(y), 1, 1); }
+    }
     // corner brackets
-    ctx.globalAlpha = open; ctx.strokeStyle = '#FFFFFF'; ctx.lineWidth = 1.5; ctx.beginPath();
+    ctx.globalAlpha = open; ctx.strokeStyle = orb ? '#F6F5F2' : '#FFFFFF'; ctx.lineWidth = orb ? 1.2 : 1.5; ctx.beginPath();
     const cl = 16 * k;
     for (const [px, py, sx, sy] of [[fx0 - 3, fy0 - 3, 1, 1], [fx1 + 3, fy0 - 3, -1, 1], [fx1 + 3, fy1 + 3, -1, -1], [fx0 - 3, fy1 + 3, 1, -1]]) { ctx.moveTo(px + sx * cl, py); ctx.lineTo(px, py); ctx.lineTo(px, py + sy * cl); }
     ctx.stroke();
@@ -591,10 +607,12 @@ export function createInset(S, AN) {
       const kind = a < 1.25 ? 'white' : a < 1.6 && Math.sin(a * 30) > -.2 ? 'lime' : 'coral';
       ov.tag(x0 + 8 * k, y0 + 8 * k, track, text, conf.toFixed(2), { kind, a: ta, size: 10 * k, raw: true });
     }
-    // the slice's readout, top right, while it runs
+    // the slice's readout, top right, while it runs (the Orbital style: under the frame, left, clear of the placards)
+    let xrTxt = '';
     if (sw.k > 0 && sw.k < 1) {
       const zf = sw.front, st2 = stationAt(subj, zf);
-      ov.text(x1 - 8 * k, y0 + 22 * k, `X-RAY · Z ${zf >= 0 ? '+' : '−'}${Math.abs(zf).toFixed(1)} M${st2 ? ' · ' + st2 : ''}`, { size: 9.5 * k, col: '#C6F432', a: .95, align: 'right', raw: true });
+      xrTxt = `X-RAY · Z ${zf >= 0 ? '+' : '−'}${Math.abs(zf).toFixed(1)} M${st2 ? ' · ' + st2 : ''}`;
+      if (!orb) ov.text(x1 - 8 * k, y0 + 22 * k, xrTxt, { size: 9.5 * k, col: '#C6F432', a: .95, align: 'right', raw: true });
     }
     // part boxes: each pops as the slice passes it, grows in, holds, goes; its placard in a row above or below
     const d = unitXf(u);
@@ -619,12 +637,12 @@ export function createInset(S, AN) {
         if (q[1] > by) by = q[1];
       }
       if (!okb) continue;
-      ctx.globalAlpha = al * .9; ctx.strokeStyle = '#C6F432'; ctx.lineWidth = 1.4; ctx.setLineDash([2, 2]);
+      ctx.globalAlpha = al * (orb ? .62 : .9); ctx.strokeStyle = ACC; ctx.lineWidth = orb ? 1 : 1.4; if (!orb) ctx.setLineDash([2, 2]);
       ctx.beginPath();
       for (let e = 0; e < 24; e += 2) { const i0 = EDGES[e], i1 = EDGES[e + 1]; ctx.moveTo(CP[i0 * 2], CP[i0 * 2 + 1]); ctx.lineTo(CP[i1 * 2], CP[i1 * 2 + 1]); }
       ctx.stroke(); ctx.setLineDash([]);
-      ctx.fillStyle = '#C6F432'; ctx.globalAlpha = al;
-      for (let ci = 0; ci < 8; ci++) ctx.fillRect(Math.round(CP[ci * 2]) - 1, Math.round(CP[ci * 2 + 1]) - 1, 2, 2);
+      ctx.fillStyle = ACC; ctx.globalAlpha = al;
+      if (!orb) for (let ci = 0; ci < 8; ci++) ctx.fillRect(Math.round(CP[ci * 2]) - 1, Math.round(CP[ci * 2 + 1]) - 1, 2, 2);
       const text = decode(en.label.toUpperCase(), sat((ak - .06) / .5), S.clock, en.seed);
       const val = ak > .5 ? en.size : '';
       const tw = tagWidth(ov, en.id, en.label, en.size, fs);
@@ -642,21 +660,24 @@ export function createInset(S, AN) {
       ROWS[row].push(lx, lx + tw);
       const ly = row < 3 ? y0 + (31 + row * 22) * k : y1 - (27 + (row - 3) * 22) * k;
       // dotted stem from the placard to the box
-      ctx.globalAlpha = .75 * al; ctx.fillStyle = '#C6F432';
+      ctx.globalAlpha = (orb ? .55 : .75) * al; ctx.fillStyle = ACC;
       const sx = Math.round(Math.max(lx + 3, Math.min(lx + tw - 3, tx)));
-      if (row < 3) for (let yy = ly + hB + 2; yy < ty - 2; yy += 3) ctx.fillRect(sx, Math.round(yy), 1, 1);
+      if (orb) { if (row < 3) ctx.fillRect(sx, Math.round(ly + hB + 2), 1, Math.max(0, Math.round(ty - 2 - ly - hB - 2))); else ctx.fillRect(sx, Math.round(by + 3), 1, Math.max(0, Math.round(ly - 2 - by - 3))); }
+      else if (row < 3) for (let yy = ly + hB + 2; yy < ty - 2; yy += 3) ctx.fillRect(sx, Math.round(yy), 1, 1);
       else for (let yy = by + 3; yy < ly - 2; yy += 3) ctx.fillRect(sx, Math.round(yy), 1, 1);
       ctx.globalAlpha = 1;
       ov.tag(lx, ly, en.id, text, val, { kind: 'lime', a: al, size: fs, raw: true });
     }
     ctx.restore();
+    if (orb && xrTxt) ov.text(x0, y1 + 18 * k, xrTxt, { size: 9.5 * k, col: '#F6F5F2', a: .8, raw: true });
     // scale bar, under the frame on the right (at the hull's range in the picture)
     const sb = subj.L > 60 ? 50 : subj.L > 12 ? 10 : 2;
     const mpp = C.dist * Math.tan(C.fov / 2) / (w / 2), len = sb / mpp;
     if (len > 12 && len < w * .45) {
       ctx.globalAlpha = .7 * open; ctx.fillStyle = '#FFFFFF';
       const bx = x1 - len, by2 = y1 + 14 * k;
-      for (let i = 0; i <= len; i += 3) ctx.fillRect(Math.round(bx + i), Math.round(by2), 1, 1);
+      if (orb) ctx.fillRect(Math.round(bx), Math.round(by2), Math.round(len), 1);
+      else for (let i = 0; i <= len; i += 3) ctx.fillRect(Math.round(bx + i), Math.round(by2), 1, 1);
       ctx.fillRect(Math.round(bx), Math.round(by2 - 3), 1, 7); ctx.fillRect(Math.round(bx + len), Math.round(by2 - 3), 1, 7);
       ctx.globalAlpha = 1;
       ov.text(bx - 8 * k, by2 + 4 * k, sb + ' M', { size: 9.5 * k, col: 'rgba(255,255,255,.55)', align: 'right', raw: true });

@@ -78,6 +78,7 @@ export class Fork {
      age: seconds since the fork started (flicker of the leader) */
   draw(fx, V, e, reach, I, pal, leading, age) {
     if (I < .004 && !leading) return 0;
+    if (pal.orb) return this.drawW(fx, V, e, reach, I, pal, leading, age);
     const n = this.n, nVis = reach * n, A = this._a, B = this._b, P = this._P, core = pal.core, gl = pal.glow;
     let dots = 0, k3 = 0;
     const iEnd = Math.min(n, Math.ceil(nVis));
@@ -128,6 +129,38 @@ export class Fork {
       fx.glow(A, 14, gl, .4);
     }
     return dots;
+  }
+  /* the Orbital style (pal.orb: the renderer's Wire): the channel and its tendrils as hairlines (pal.line 0..1), the
+     leader's head a restrained bloom */
+  drawW(fx, V, e, reach, I, pal, leading, age) {
+    const W = pal.orb, c = pal.line, n = this.n, nVis = reach * n, A = this._a, B = this._b;
+    const iEnd = Math.min(n, Math.ceil(nVis));
+    this.pt(0, e, A);
+    for (let i = 0; i < iEnd; i++) {
+      this.pt(i + 1, e, B);
+      const frac = Math.min(1, nVis - i);
+      const behind = leading ? (nVis - i) / Math.max(1, n * .35) : 0;
+      const al = leading ? Math.min(1, .95 * Math.exp(-behind * 1.2) + .28) * (.8 + .2 * Math.sin(age * 90 + i)) : Math.min(1, I);
+      W.seg(A[0], A[1], A[2], A[0] + (B[0] - A[0]) * frac, A[1] + (B[1] - A[1]) * frac, A[2] + (B[2] - A[2]) * frac, c[0], c[1], c[2], al);
+      A[0] = B[0]; A[1] = B[1]; A[2] = B[2];
+    }
+    for (const b of this.br) {
+      if (nVis <= b.i) continue;
+      const g = sat((nVis - b.i) / (n * .18)), al = (leading ? .5 : Math.min(1, I * .65)) * b.w / .5;
+      if (al < .01) continue;
+      this.pt(b.i, e, A);
+      const dx = e[0] - this.from[0], dz = e[2] - this.from[2], L = Math.hypot(dx, dz) || 1, fx0 = dx / L, fz0 = dz / L;
+      const mm = Math.ceil(b.m * g);
+      let px = A[0], py = A[1], pz = A[2];
+      for (let j = 1; j <= mm; j++) {
+        const q = b.pts, o = j * 3;
+        const x = A[0] + fx0 * q[o] - fz0 * q[o + 1], y = A[1] + q[o + 2], z = A[2] + fz0 * q[o] + fx0 * q[o + 1];
+        W.seg(px, py, pz, x, y, z, c[0], c[1], c[2], al * (1 - .5 * j / b.m));
+        px = x; py = y; pz = z;
+      }
+    }
+    if (leading && nVis < n) { this.pt(Math.floor(nVis), e, A); fx.glow(A, 10, pal.glow, .3); }
+    return iEnd;
   }
   /* the return stroke of a fork (s after it connects): the main bolt's two flickers, a little faster */
   static stroke(tr) { return Bolt.stroke(tr * 1.15); }

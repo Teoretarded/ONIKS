@@ -30,6 +30,7 @@ import { CLASSIFY } from '../../data/units.js';
 import { flashLevel, flashLead } from '../../fx/lib/weather.js';
 import { HEAD, FRAME, COMMON, CULL } from '../../engine/shaders.js';
 import { program } from '../../engine/gl.js';
+import { W1, crossW, billowW } from './orb.js';
 
 /* ======================================================================================================== */
 /* GPU                                                                                                       */
@@ -494,6 +495,8 @@ export function createWeather(S) {
   /* ---------- events ---------- */
   const reveals = [];               // { u, own, tF, t0, fork, from, seed, s }
   const PAL_W = { core: [250, 252, 255], glow: [205, 222, 255], spark: [235, 240, 255], light: [225, 235, 255] };
+  // the Orbital style: the same white, as hairlines (bolt.js / chain.js draw through pal.orb, the renderer's Wire)
+  const PAL_WO = Object.assign({}, PAL_W, { line: W1, orb: null }), PAL_O = Object.assign({}, PAL, { line: W1, orb: null });
   const E3 = [0, 0, 0], q = [0, 0, 0], BX = [0, 0, 0, 0], MR = [1, 0, 0, 0, 1, 0, 0, 0, 1];
   function cellById(id) { if (id === undefined) return null; for (const c of cellsNow()) if (c.id === id) return c; return null; }
   function onEvent(e) {
@@ -560,7 +563,8 @@ export function createWeather(S) {
   }
   const owns = new Set();           // unit ids whose tag the flash owns right now (the contacts system stands aside)
   function reveals3d() {
-    const fx = R.fx, V = S.V;
+    const fx = R.fx, V = S.V, orb = S.orb, PW = orb ? PAL_WO : PAL_W;
+    if (orb) PAL_WO.orb = S.W;
     owns.clear();
     for (let i = reveals.length - 1; i >= 0; i--) {
       const rv = reveals[i], a = S.clock - rv.t0;
@@ -574,8 +578,8 @@ export function createWeather(S) {
       if (a > .04 && a < rv.tF + .7 && near) {
         const land = u.def.domain === 'land';
         if (!rv.fork) rv.fork = new Fork({ from: rv.from, to: E3, seed: rv.seed, ground: land ? (x, z) => R.terrain.heightAt(x, z) : null, climb: E3[1] - (land ? Math.max(0, R.terrain.heightAt(E3[0], E3[2])) : 0) });
-        if (a < rv.tF) rv.fork.draw(fx, V, E3, reachOf(a - .04, Math.max(.05, rv.tF - .04)), .55, PAL_W, true, a);
-        else rv.fork.draw(fx, V, E3, 1, Fork.stroke(a - rv.tF), PAL_W, false, a);
+        if (a < rv.tF) rv.fork.draw(fx, V, E3, reachOf(a - .04, Math.max(.05, rv.tF - .04)), .55, PW, true, a);
+        else rv.fork.draw(fx, V, E3, 1, Fork.stroke(a - rv.tF), PW, false, a);
       }
       // the unit flashes white: its returns lit for a moment
       const b = a - rv.tF;
@@ -587,6 +591,8 @@ export function createWeather(S) {
       else { const c = Math.cos(pose.hdg), sn = Math.sin(pose.hdg); M = MR; MR[0] = c; MR[2] = sn; MR[4] = 1; MR[6] = -sn; MR[8] = c; T = p; }
       const zc = Math.max(V.near, V.depth(p[0], p[1], p[2])), px = s.L * V.fl / zc;
       const al = (b < .06 ? 1 : Math.exp(-(b - .06) * 4)) * (Math.sin(b * 70) > -.6 ? 1 : .5);
+      // (the Orbital style: the light shows its hairlines; a speck gets a small cross)
+      if (orb) { if (px < 4) crossW(S.W, V, p[0], p[1] + 2, p[2], 4, W1, al); continue; }
       if (px < 4) { fx.dotXYZ(p[0], p[1] + 2, p[2], 3, 255, 255, 255, al, 'over'); continue; }
       const stride = Math.max(1, Math.floor(s.n / clamp(px * 6, 60, s.n))), rest = s.rest;
       for (let j = 0; j < s.n; j += stride) {
@@ -628,17 +634,19 @@ export function createWeather(S) {
   function draw3d() {
     reveals3d();
     skyStars();
+    if (S.orb) orbitalClouds();
     // the bolts, when the FX system does not draw them
     if (game.getSystem('fx')) return;
-    const fx = R.fx, V = S.V;
+    const fx = R.fx, V = S.V, P0 = S.orb ? PAL_O : PAL;
+    if (S.orb) PAL_O.orb = S.W;
     for (const f of flashes) {
       if (f.kind !== 'cg') continue;
       const a = S.clock - f.t0;
       if (!f.bolt) f.bolt = stormBolt([f.gx, Math.max(0, f.gy), f.gz], f.top, f.seed);
       const lead = flashLead(f.seed), I = level(f, a);
-      if (a < lead) { f.bolt.draw(fx, V, a / lead, .5, PAL, -1, true); continue; }
+      if (a < lead) { f.bolt.draw(fx, V, a / lead, .5, P0, -1, true); continue; }
       if (I < .005) continue;
-      f.bolt.draw(fx, V, 1, Math.min(1, I), PAL, -1, false);
+      f.bolt.draw(fx, V, 1, Math.min(1, I), P0, -1, false);
       const d = V.dist(f.gx, 800, f.gz);
       if (f.big) fx.lift(Math.min(.18, .18 * I * clamp(2400 / d, .05, 1)), PAL.lift);
       R.light([f.gx, 900, f.gz], 7000, PAL.light, 1.3 * I);
@@ -661,6 +669,55 @@ export function createWeather(S) {
     let k = 0;
     for (const c of cellsNow()) { const d = Math.hypot(e[0] - c.x, e[2] - c.z); k = Math.max(k, ss(c.r * 2.4, c.r * .9, d) * sat((c.q === undefined ? 1 : c.q) * 1.5)); }
     starsSet = T.sky.stars = base * (1 - k);
+  }
+
+  /* ---------- the Orbital style: the cells as the Orbital storm draws them ----------
+     the same cloud (buildCell: the deck, the towers and their domes, the anvil, the shelf, the flanking towers) as
+     hairline billows, squashed like the puffs they stand for, faint, lit from inside by the flashes; the rain curtains as
+     slanted hairlines from the base to the sea. Through R.wire (the GPU passes are the Point Cloud's). */
+  function orbitalClouds() {
+    const list = cellsNow(); if (!list.length) return;
+    const WR = S.W, V = S.V; if (!R.wire) return;
+    frameN++;
+    const w = W(), wv = w.wind || [0, 0], wl = Math.hypot(wv[0], wv[1]) || 1, wdx = wv[0] / wl, wdz = wv[1] / wl;
+    const slant = clamp(wl / 9 * .45, .12, .5), fade = 1 - .6 * S.scopeK;
+    for (let ci = 0; ci < list.length; ci++) {
+      const c = list[ci], storm = !!c.ltg, key = c.seed * 2 + (storm ? 1 : 0);
+      let C = cellCache.get(key);
+      if (!C) { C = buildCell(c.seed, storm, c.r0 || c.r, c.base, c.top); cellCache.set(key, C); }
+      C.used = frameN;
+      const base = c.base, top = c.top;
+      if (!V.vis(c.x, (base + top) / 2, c.z, c.r * 2.4 + (top - base))) continue;
+      const q = c.q === undefined ? 1 : c.q, sc = c.r / C.rRef, Hq = base + (top - base) * Math.pow(ss(0, .85, q), .8);
+      const vl = Math.hypot(c.vx || 0, c.vz || 0), dx = vl > .1 ? c.vx / vl : wdx, dz = vl > .1 ? c.vz / vl : wdz, px = dz, pz = -dx;
+      // the flashes in this cell light it from inside
+      let lit = 0;
+      for (const f of flashes) { if (Math.hypot(f.x - c.x, f.z - c.z) > c.r * 1.6) continue; lit = Math.max(lit, level(f, S.clock - f.t0)); }
+      const aC = (.09 + .5 * Math.min(1, lit)) * fade * (storm ? 1 : .8), lean = storm ? .1 : 0, P = C.P;
+      for (let i = 0; i < C.n; i++) {
+        const o = i * NP, kind = P[o + 8];
+        let y = P[o + 2] === 0 ? base + P[o + 3] : P[o + 2] === 1 ? base + (top - base) * P[o + 3] : base * P[o + 3];
+        const R0 = P[o + 4] * (kind === 0 || kind === 3 ? Math.min(1, .5 + .5 * sc) : (.55 + .45 * sc));
+        let al = kind === 0 ? ss(0, .3, q) : kind === 3 ? ss(.35, .75, q) : kind === 2 ? ss(.72, .95, q) : kind === 4 ? ss(.88, 1, q) : ss(Hq + 200, Hq - 700, y);
+        if (al < .02) continue;
+        if (kind === 1 || kind === 5) y = Math.min(y, Hq - R0 * .3);
+        const lx = P[o] * sc + (kind === 1 || kind === 4 ? lean * (y - base) : 0), lz = P[o + 1] * sc;
+        billowW(WR, V, c.x + dx * lx + px * lz, y, c.z + dz * lx + pz * lz, R0 * Math.max(P[o + 5], P[o + 7]), R0 * P[o + 6], aC * al, (c.seed + i * 131) % 997 + .37, S.clock * .05, kind === 1 || kind === 4 ? 1 : 0);
+      }
+      // rain curtains
+      const rq = ss(.25, .7, q) * (storm ? 1 : .8) * fade;
+      if (rq < .02) continue;
+      const Cc = C.C;
+      for (let i = 0; i < C.nC; i++) {
+        const o = i * 4, lx = Cc[o] * sc, lz = Cc[o + 1] * sc;
+        const tx = c.x + dx * lx + px * lz, tz = c.z + dz * lx + pz * lz, ty = base - 40 - 160 * Cc[o + 2];
+        const bx = tx + wdx * slant * ty, bz = tz + wdz * slant * ty;
+        for (let k = 0; k < 2; k++) {
+          const off = (k - .5) * 160 * (.6 + .4 * Cc[o + 2]);
+          WR.seg(tx + px * off, ty, tz + pz * off, bx + px * off, 2, bz + pz * off, W1[0], W1[1], W1[2], rq * (.045 + .045 * Cc[o + 2]) * (1 + 2 * Math.min(1, lit)));
+        }
+      }
+    }
   }
 
   /* ---------- the storm on the GPU (after the engine's frame) ---------- */

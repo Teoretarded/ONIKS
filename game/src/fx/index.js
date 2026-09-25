@@ -9,7 +9,9 @@
    hand) sets the dot budget, the ceiling of the thinning factor q and which dynamic lights are cast:
    high = the films (every light), medium = lighter smoke and debris and fewer, stronger lights, low = sparse smoke
    and debris and only the strongest flashes lighting the world. Every particle is an analytic function of its age plus a seeded index;
-   the only records kept are emission data (where a puff, a wake row or a smoke parcel was laid, and when). */
+   the only records kept are emission data (where a puff, a wake row or a smoke parcel was laid, and when).
+   The Orbital render style (R.style === 'orbital'): every effect is drawn from the same state in the Orbital films'
+   hairlines instead (lib/orbital.js: billows, great circles, streaks, jets, restrained bloom); no dots. */
 import { View, TAU, dirOf, norm3, hsh, sat, ss, clamp, LIME } from './lib/core.js';
 import { Trail, STAGE } from './lib/smoke.js';
 import { drawPlume, drawHead, PLUME } from './lib/plume.js';
@@ -20,6 +22,7 @@ import { TracerStream, Muzzle } from './lib/guns.js';
 import { Wake, Downwash, Bubbles, SubWater } from './lib/water.js';
 import { drawJet, drawProps } from './lib/air.js';
 import { Lightning, drawRain } from './lib/weather.js';
+import { orbBegin, orbEnd, orbDraw, orbTrail, orbPlume, orbHead, orbWake, orbDownwash, orbBubbles, orbSubWater, orbJet, orbProps, orbRain, orbStats } from './lib/orbital.js';
 
 export { engineSink };
 
@@ -548,6 +551,10 @@ class FxSystem {
     // models (a tumbling booster casing): the sink's own, or the engine's R.draw when it knows the key
     const RR = (frame && frame.R) || (g && g.renderer);
     if (sink !== this._sink || RR !== this._RR) this.bind(sink, RR);
+    // the Orbital style: the same effects as hairlines (lib/orbital.js), flushed by the orbital system
+    const orb = !!(RR && RR.style === 'orbital' && RR.wire);
+    if (orb) orbBegin(RR.wire, C, 1 - ss(.3, .9, (g && g.orbital && g.orbital.k) || 0));
+    const D = orb ? orbDraw : null;
     // lightning in the air freezes the rain
     let flash = 0;
     for (const b of this.bolts) flash = Math.max(flash, b.level(this.wclk - b.t0));
@@ -556,8 +563,8 @@ class FxSystem {
     let tp = P ? performance.now() : 0;
     const mark = k => { if (!P) return; const n = performance.now(); P[k] = (P[k] || 0) * .9 + (n - tp) * .1; tp = n; };
     // 1. flashes, heads and flames first: the budget never cuts them
-    for (const e of this.fx) if (e.layer >= 3 || e.layer === 1) { const a = t - e.t0; if (a >= -.001) e.draw(C, a); }
-    for (const b of this.bolts) b.draw(C, this.wclk - b.t0);
+    for (const e of this.fx) if (e.layer >= 3 || e.layer === 1) { const a = t - e.t0; if (a >= -.001) { if (D) D(e, a); else e.draw(C, a); } }
+    for (const b of this.bolts) { if (D) D(b, this.wclk - b.t0); else b.draw(C, this.wclk - b.t0); }
     mark('flash');
     if (sim) {
       const fr = Math.floor(C.tr * 60);
@@ -567,6 +574,11 @@ class FxSystem {
         const pr = profile(p.kind, age, p.P, p); if (!pr[1] && !pr[2]) continue;
         const x = p.prev[0] + (p.pos[0] - p.prev[0]) * alpha, y = p.prev[1] + (p.pos[1] - p.prev[1]) * alpha, z = p.prev[2] + (p.pos[2] - p.prev[2]) * alpha;
         const v = p.vel, l = Math.hypot(v[0], v[1], v[2]) || 1;
+        if (orb) {
+          if (pr[1]) orbPlume(x, y, z, v[0] / l, v[1] / l, v[2] / l, pr[1], ignOf(p.kind, age, tr.ig), p.id, fr);
+          if (pr[2] && V.pxm(x, y, z) < 3) orbHead(x, y, z, pr[2], 1);
+          continue;
+        }
         if (pr[1]) drawPlume(C, x, y, z, v[0] / l, v[1] / l, v[2] / l, pr[1], ignOf(p.kind, age, tr.ig), p.id, fr);
         if (pr[2] && V.pxm(x, y, z) < 3) drawHead(C, x, y, z, pr[2], 1);
       }
@@ -574,34 +586,44 @@ class FxSystem {
       for (const u of sim.units.values()) {
         if (u.def.domain !== 'air' || u.aboard || !this.seeUnit(u)) continue;
         const ps = g && g.unitPose ? g.unitPose(u, alpha) : u, pos = ps.pos;
-        if (u.type === 'aew') { if (u.alive) drawProps(C, pos, ps.hdg, ps.pitch, ps.roll, 1, u.id); }
+        if (u.type === 'aew') { if (u.alive) { if (orb) orbProps(pos, ps.hdg, ps.pitch, ps.roll, 1, u.id); else drawProps(C, pos, ps.hdg, ps.pitch, ps.roll, 1, u.id); } }
         else if (u.type === 'fighter') {
           const ab = Math.max(u.ab || 0, (this.abUntil.get(u.id) || 0) > t ? 1 : 0);
-          drawJet(C, pos, u.hdg, u.pitch, u.roll, ab, .6, u.id);
+          if (orb) orbJet(pos, u.hdg, u.pitch, u.roll, ab, PLUME.ab, u.id);
+          else drawJet(C, pos, u.hdg, u.pitch, u.roll, ab, .6, u.id);
         } else if (u.type === 'helo') {
           const gy = this.groundAt(pos[0], pos[2]);
-          this.down.seed = u.id; this.down.draw(C, pos, gy, this.wet(pos[0], pos[2]), 1);
+          this.down.seed = u.id;
+          if (orb) orbDownwash(this.down, pos, gy, this.wet(pos[0], pos[2]), 1); else this.down.draw(C, pos, gy, this.wet(pos[0], pos[2]), 1);
         }
       }
     }
     mark('heads');
     // 2. bursts' debris, splashes, casings, tracers
-    for (const e of this.fx) if (e.layer === 2) { const a = t - e.t0; if (a >= -.001) e.draw(C, a); }
+    for (const e of this.fx) if (e.layer === 2) { const a = t - e.t0; if (a >= -.001) { if (D) D(e, a); else e.draw(C, a); } }
     mark('debris');
     // 3. smoke: trails, columns, wakes, weather
-    for (const tr of this.trk.values()) tr.trail.draw(C, 1);
-    for (const tr of this.ghost) tr.draw(C, 1);
-    for (const fl of this.falls.values()) fl.draw(C, 1);
-    for (const tr of this.trk.values()) if (tr.bub) tr.bub.draw(C, 1);
-    for (const b of this.bubGhost) b.draw(C, 1);
+    if (orb) {
+      for (const tr of this.trk.values()) orbTrail(tr.trail, 1);
+      for (const tr of this.ghost) orbTrail(tr, 1);
+      for (const fl of this.falls.values()) orbTrail(fl, 1);
+      for (const tr of this.trk.values()) if (tr.bub) orbBubbles(tr.bub, 1);
+      for (const b of this.bubGhost) orbBubbles(b, 1);
+    } else {
+      for (const tr of this.trk.values()) tr.trail.draw(C, 1);
+      for (const tr of this.ghost) tr.draw(C, 1);
+      for (const fl of this.falls.values()) fl.draw(C, 1);
+      for (const tr of this.trk.values()) if (tr.bub) tr.bub.draw(C, 1);
+      for (const b of this.bubGhost) b.draw(C, 1);
+    }
     mark('trails');
-    for (const e of this.fx) if (e.layer === 0) { const a = t - e.t0; if (a >= -.001) e.draw(C, a); }
+    for (const e of this.fx) if (e.layer === 0) { const a = t - e.t0; if (a >= -.001) { if (D) D(e, a); else e.draw(C, a); } }
     mark('fires');
     if (this.wakes) {
-      for (const w of this.wk.values()) if (w.vis !== false) w.draw(C, 1);
-      for (const w of this.wkM.values()) if (w.vis !== false) w.draw(C, 1);
+      for (const w of this.wk.values()) if (w.vis !== false) { if (orb) orbWake(w, 1); else w.draw(C, 1); }
+      for (const w of this.wkM.values()) if (w.vis !== false) { if (orb) orbWake(w, 1); else w.draw(C, 1); }
     }
-    for (const sw of this.subw.values()) if (sw.vis !== false) sw.draw(C);
+    for (const sw of this.subw.values()) if (sw.vis !== false) { if (orb) orbSubWater(sw); else sw.draw(C); }
     mark('wakes');
     // the rain round the lens, only inside a cell (the shafts and the cloud are SENSORS', on the GPU)
     if (sim && sim.weather) {
@@ -613,8 +635,9 @@ class FxSystem {
       } else if (W.kind === 'storm' || W.kind === 'rain') {
         for (const s of W.squalls || []) { const d = Math.hypot(ex[0] - s.x, ex[2] - s.z); inRain = Math.max(inRain, sat((s.r - d) / 800 + 1) * (d < s.r + 800 ? 1 : 0)); }
       }
-      if (inRain > .01) drawRain(C, (W.kind === 'rain' ? .75 : 1) * inRain, flash, base);
+      if (inRain > .01) { if (orb) orbRain((W.kind === 'rain' ? .75 : 1) * inRain, flash, base); else drawRain(C, (W.kind === 'rain' ? .75 : 1) * inRain, flash, base); }
     }
+    if (orb) { orbEnd(); this.stats.segs = orbStats.segs; }
     // the budget: thin everything next frame if this one ran over, recover slowly
     // (the budget is also the hard cap: a spike frame loses its last-drawn smoke, never a flash or a head)
     const n = C.n, aim = this.budget * .85;

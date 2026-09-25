@@ -4,10 +4,15 @@
    screen and out of the HUD panels (ov.fitBox), with a leader back to the object when they had to move.
    Aircraft parked on a deck are picked by a click on them (close enough to tell them apart) or a double-click (that
    deck's aircraft of the type), and from the selection panel's Air row; box select and Tab leave them on the deck.
-   Enemy tracks can be selected alone (for their readout); they are never ordered. */
+   Enemy tracks can be selected alone (for their readout); they are never ordered.
+   The Orbital render style (R.style 'orbital'): the same marks through the Orbital overlay (ui/sensors/orb.js): hairline
+   corners and catalog labels; your own selection in the one yellow while it has it (game.orbital.yellow ===
+   'selection': the orbital system paints its models yellow too), a selected track white with its coral square; while
+   the strategic layer has the screen (game.orbital.k > .5) the marks give way to its glyphs. */
 import { PRI } from './game.js';
 import { unitTag, SHORT } from './labels.js';
 import { ammoFull } from '../sim/mech.js';
+import { orbOn, orbOverlay, OHI } from '../ui/sensors/orb.js';
 
 const LIME = '#C6F432', CORAL = '#FF6A3D';
 const TS = 10.5;                 // tag size (px at 1080p)
@@ -194,26 +199,29 @@ export function createSelect(game) {
       if (followId && !sim.units.has(followId)) follow(null);
       if (box && box.x0 !== undefined) box.live = Math.abs(box.x1 - box.x0) + Math.abs(box.y1 - box.y0) > 5;
     },
-    draw2d(ov) {
-      const ctx = ov.ctx;
+    draw2d(ov0) {
+      // the Orbital style: the Orbital overlay, the yellow for your own selection while it has it
+      const orb = orbOn(R), O = game.orbital, ov = orb ? orbOverlay(ov0) : ov0, ctx = ov.ctx;
+      hiSel = orb && !!O && O.yellow === 'selection';
+      const muted = orb && !!O && O.k > .5;
       // hover
-      if (game.hover && !game.selection.has(game.hover)) {
+      if (!muted && game.hover && !game.selection.has(game.hover)) {
         const u = sim.units.get(game.hover);
         if (u && (u.alive || u.dying < 1)) mark(ov, u, false, .55);
       }
       let n = 0;
       placed.length = 0;
       const many = game.selection.size > 12;
-      for (const id of game.selection) {
+      if (!muted) for (const id of game.selection) {
         const u = sim.units.get(id);
         if (!u) continue;
         mark(ov, u, true, 1, n++ < 24, many);
       }
-      // the drag box: dotted lime
+      // the drag box: dotted lime (the Orbital style: a white hairline box and corners)
       if (box && box.live) {
         const x0 = Math.min(box.x0, box.x1), x1 = Math.max(box.x0, box.x1), y0 = Math.min(box.y0, box.y1), y1 = Math.max(box.y0, box.y1);
-        ov.box([x0, y0, x1, y1], LIME, .9, [2, 3]);
-        ctx.globalAlpha = .9; ctx.strokeStyle = LIME; ctx.lineWidth = 1.5; ctx.beginPath();
+        ov.box([x0, y0, x1, y1], LIME, orb ? .5 : .9, [2, 3]);
+        ctx.globalAlpha = .9; ctx.strokeStyle = orb ? '#F6F5F2' : LIME; ctx.lineWidth = orb ? 1.2 : 1.5; ctx.beginPath();
         const k = Math.min(10, (x1 - x0) / 3, (y1 - y0) / 3);
         for (const [px, py, sx, sy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x1, y1, -1, -1], [x0, y1, 1, -1]]) { ctx.moveTo(px + sx * k, py + .5); ctx.lineTo(px + .5, py + .5); ctx.lineTo(px + .5, py + sy * k); }
         ctx.stroke(); ctx.globalAlpha = 1;
@@ -227,6 +235,7 @@ export function createSelect(game) {
        the sea under it;
      - R with nothing that can happen (all full, the transloaders empty or none): a short line, not silence. */
   const notes = [];            // { lines: [[text, col]], sx, sy, t0, dur }
+  let hiSel = false;           // the Orbital style: your selection has the yellow this frame
   const say = (lines, sx, sy) => { notes.length = 0; notes.push({ lines, sx, sy, t0: game.realT, dur: 1.9 }); };
   const bad = () => { const a = game.getSystem('audio'); if (a && a.ui) try { a.ui('invalid'); } catch (e) { /* */ } };
   const pad2 = n => String(n).padStart(2, '0');
@@ -288,14 +297,17 @@ export function createSelect(game) {
       return true;
     },
     update() { for (let i = notes.length - 1; i >= 0; i--) if (game.realT - notes[i].t0 > notes[i].dur) notes.splice(i, 1); },
-    draw2d(ov) {
+    draw2d(ov0) {
       // below and right of the click (the cloud's own tag and class bars sit above it), each line on its dark strip
+      // (the Orbital style: catalog lines, a coral square where it says no, a white one where it says yes)
+      const orb = orbOn(R), ov = orb ? orbOverlay(ov0) : ov0;
       const k = ov.ui || 1;
       for (const n of notes) {
         const a = Math.max(0, Math.min(1, (n.dur - (game.realT - n.t0)) / .5));
         let y = n.sy + 16 * k;
         for (const [text, col] of n.lines) {
-          const b = ov.tag(n.sx + 14 * k, y, '', '', text, { kind: 'coral', valCol: col, a, size: 10.5, fit: true });
+          const b = orb ? ov.tag(n.sx + 14 * k, y, text, '', '', { kind: col === LIME ? 'lime' : 'coral', a, size: 10.5, fit: true })
+            : ov.tag(n.sx + 14 * k, y, '', '', text, { kind: 'coral', valCol: col, a, size: 10.5, fit: true });
           y = (b ? b[3] : y + 20 * k) + 2 * k;
         }
       }
@@ -326,7 +338,7 @@ export function createSelect(game) {
     const P = posOf(u), own = u.side === game.side;
     if (!cam.project(P, q)) return;
     if (q[0] < -60 || q[1] < -60 || q[0] > cam.W + 60 || q[1] > cam.H + 60) return;
-    const col = own ? LIME : CORAL, kind = own ? 'lime' : 'coral';
+    const hi = own && hiSel, col = hi ? OHI : own ? LIME : CORAL, kind = hi ? 'hi' : own ? 'lime' : 'coral';
     const d = game.drawn.get(u.id);
     const e = R.models.has(u.def.model) ? R.models.get(u.def.model) : null;
     const rpx = e ? cam.fl * e.radius / q[2] : 0;

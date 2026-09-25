@@ -15,6 +15,7 @@ import { LIME, CORAL, WH, TAU, sat, clamp, ss, hsh, gH, outCubic, pad2, wrapPi }
 import { sampleOf } from './samples.js';
 import { TRACK } from '../../game/labels.js';
 import { barsW } from './tags.js';
+import { crossW, W1 } from './orb.js';
 
 const CLS_SHOW = { HQ: 'CP' };
 const CANDS = { sea: ['DDG', 'CVN'], land: ['TEL', 'RADAR', 'SAM', 'TLV', 'CP', 'UAV-L'], air: ['FTR', 'HELO', 'UAV'] };
@@ -166,11 +167,12 @@ export function createContacts(S) {
       if (!V.vis(cx, cy, cz, ext)) continue;
       const zc = Math.max(V.near, V.depth(cx, cy, cz)), px = ext * V.fl / zc;
       cv.px = px; cv.seenF = frameN;
-      if (px < 5) { fx.dotXYZ(cx, cy + 2, cz, 2, WH[0], WH[1], WH[2], .9 * (1 - .75 * scope), 'max'); continue; }
+      if (px < 5) { if (S.orb) crossW(S.W, V, cx, cy + 2, cz, 2.5, W1, .8 * (1 - .75 * scope)); else fx.dotXYZ(cx, cy + 2, cz, 2, WH[0], WH[1], WH[2], .9 * (1 - .75 * scope), 'max'); continue; }
       drawList.push(cv); want += Math.min(5000, px * 4 + 60);
     }
     // (in the radar view the scope's returns and gates stand for the clouds)
-    const kB = Math.min(1, BUDGET * (1 - .6 * scope) / Math.max(1, want));
+    // (the Orbital style: each return a short hairline along the line of sight, fewer of them)
+    const kB = Math.min(1, BUDGET * (S.orb ? .4 : 1) * (1 - .6 * scope) / Math.max(1, want));
     if (scope < .6) for (let i = 0; i < drawList.length; i++) { const cv = drawList[i]; cloud(fx, V, cv, Math.max(50, Math.min(5000, cv.px * 4 + 60) * kB), scope); }
     // the 2-sigma ellipsoids of the biggest few (p5)
     if (scope < .5) {
@@ -225,6 +227,8 @@ export function createContacts(S) {
     const mult = stride > 1 ? 1 : Math.min(3, Math.floor(dots / n)), jit = cv.sig * .07 + cv.L * .01;
     const sgn = Math.min(1, cv.sig / (cv.L * .25 + 2));
     const e = V.e, big = cv.px > 220, clock = S.clock, OP = cv.OP, ON = cv.ON, TU = cv.TU, FL = cv.FL;
+    // the Orbital style: returns as short hairlines along the line of sight (the radar's range smear), ~3 px long
+    const W = S.orb ? S.W : null, lx = cv.los[0], lz = cv.los[1], tick = W ? 1.6 * Math.max(V.near, V.depth(cx, cy, cz)) / V.fl : 0;
     const spread = lost ? 1 + 1.6 * sat((clock - cv.tLost) / 1.6) : 1;
     for (let i = (cv.id * 7) % stride; i < n; i += stride) {
       const j = i * 3;
@@ -248,6 +252,7 @@ export function createContacts(S) {
       const fk = Math.min(clock - FL[i], clock - cv.flashT);
       if (fk < .5) { const w = Math.exp(-fk * 7); r += (LIME[0] - r) * w; g += (LIME[1] - g) * w; bl += (LIME[2] - bl) * w; b = Math.max(b, .9 * w); }
       const A = Math.min(1, b) * al * snapOut;
+      if (W) { const fa = fk < .5 ? Math.exp(-fk * 7) : 0, aa = Math.min(1, A * .85 + .35 * fa); W.seg(x - lx * tick, y, z - lz * tick, x + lx * tick, y, z + lz * tick, W1[0], W1[1], W1[2], aa); continue; }
       fx.dotXYZ(x, y, z, big && (sgn < .5 || (i & 3) === 0) ? 2 : 1, r, g, bl, A, 'max');
       for (let m = 1; m < mult; m++) fx.dotXYZ(x + (hsh(i, m * 7) - .5) * 2 * jit, y + (hsh(i, m * 7 + 2) - .5) * jit, z + (hsh(i, m * 7 + 4) - .5) * 2 * jit, 1, r, g, bl, A * .85, 'max');
     }
@@ -271,6 +276,17 @@ export function createContacts(S) {
   function ering(fx, c, cy, i1, i2, off, sc, pxm, ea) {
     const A = AX[i1], B = AX[i2], r1 = RADS[i1] * sc, r2 = RADS[i2] * sc;
     const n = Math.round(clamp(TAU * Math.max(r1, r2) * pxm / 7, 36, 180));
+    if (S.orb) {
+      // the Orbital style: a dashed hairline ellipse
+      const W = S.W; let px = 0, py = 0, pz = 0;
+      for (let k = 0; k <= n; k++) {
+        const th = k / n * TAU, ca = Math.cos(th), sa = Math.sin(th);
+        const x = c[0] + A[0] * ca * r1 + B[0] * sa * r2, y = cy + off + A[1] * ca * r1 + B[1] * sa * r2, z = c[2] + A[2] * ca * r1 + B[2] * sa * r2;
+        if (k && (k & 3) < 3) W.seg(px, py, pz, x, y, z, W1[0], W1[1], W1[2], ea * (y < 0 ? .22 : .55));
+        px = x; py = y; pz = z;
+      }
+      return;
+    }
     for (let k = 0; k < n; k++) {
       const th = k / n * TAU, ca = Math.cos(th), sa = Math.sin(th);
       const x = c[0] + A[0] * ca * r1 + B[0] * sa * r2, y = cy + off + A[1] * ca * r1 + B[1] * sa * r2, z = c[2] + A[2] * ca * r1 + B[2] * sa * r2;
@@ -290,7 +306,8 @@ export function createContacts(S) {
     const p = game.unitPose(best).pos, dist = Math.sqrt(bd); if (dist < 50) return;
     const brg = Math.atan2(c.pos[0] - p[0], c.pos[2] - p[2]), half = clamp(Math.atan2(c.err, dist), .6 * Math.PI / 180, .35);
     const len = dist + c.err, al = .55 * k * (.75 + .25 * Math.sin(S.clock * 5));
-    const o = S.dotOpt(CORAL, al, 6, 1, 'over');
+    // (the Orbital style: white hairlines; the emitter's tag carries the coral square)
+    const o = S.dotOpt(S.orb ? WH : CORAL, al * (S.orb ? .8 : 1), 6, 1, 'over');
     o.max = 600;
     for (let s = -1; s <= 1; s += 2) {
       const b = brg + s * half;

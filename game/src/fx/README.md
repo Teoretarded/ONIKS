@@ -95,6 +95,17 @@ flashes use .4 - 1.4, fires .3, plumes .1 - .35.
 | (units, every frame) | **Wake** behind every ship from speed and heading (Kelvin arms at 19.47 deg with feathered crests, churned centre, prop wash boiling astern, bow wave rolling off the stem, spray at speed); **Fire** on damaged units (flame tongues rising and dying at their own heights, white-hot to lime, a light, a smoke column rising fast, spreading under its ceiling and leaning downwind with height; a destroyer's column tops out at 400-900 m); **Downwash** under a helicopter below ~40 m (a ring of spray on water, dust on land); jet heat shimmer |
 | weather `rain` / `storm` | near rain: a world lattice of drops round the lens, streaked by their fall (short while lightning freezes them); rain shafts under the squalls far off |
 
+## Orbital style
+
+When the renderer's style is Orbital (`R.style === 'orbital'`, Settings, Graphics, Render style) `draw3d` draws every
+effect from the same state through `lib/orbital.js` instead of the dots, in the Orbital films' language (oa_strike,
+oe_ring): smoke as camera-facing scalloped billows (a trail is the laid smoke's two wispy edges with billows riding on
+it, thinned by their power-of-two stride so it never stacks up), fireballs as great circles opening and thinning, flashes
+as one restrained bloom (`R.fx.glow`) with a glint of radial lines and the dynamic light, motors as a flickering stroke
+(a spindle of meridians close up), sparks and fragments as short streaks, splashes as jets of spray and a ring on the
+water, wakes as the Kelvin arms, crests, the churned band's edges and foam streaks, lightning and rain as hairlines. All
+white through `R.wire` (the orbital system flushes it); no lime, no coral. `stats.segs` counts the hairlines (cap 70 000).
+
 ## Files
 
 | | |
@@ -110,6 +121,7 @@ flashes use .4 - 1.4, fires .3, plumes .1 - .35.
 | `lib/water.js` | `Wake` (with row strength and the mast `feather`), `Downwash`, `Bubbles`, `SubWater` |
 | `lib/air.js` | `drawJet`, `drawProps` (E-2D) |
 | `lib/weather.js` | `Lightning`, `drawRain`, `drawShafts` |
+| `lib/orbital.js` | the Orbital style's drawers: `orbDraw(effect, age)` (by class), `orbTrail`, `orbPlume`, `orbHead`, `orbWake`, `orbDownwash`, `orbBubbles`, `orbSubWater`, `orbJet`, `orbProps`, `orbRain`, between `orbBegin(wire, C)` and `orbEnd()` |
 | `bench/*` | the bench: the films' CPU renderer as a sink (`cpu.js`), a coast with HD models (`scene.js`), a stand-in sim (`sim.js`), the page logic (`main.js`) |
 
 Each effect is `new X(opts)` with `t0` and `dur`, and `draw(C, age)`; `C` is the frame context (`C.dot/glow/halo/

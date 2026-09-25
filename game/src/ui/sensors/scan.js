@@ -21,10 +21,16 @@ import { Fork, reachOf } from './chain.js';
 import { sampleOf, revealFrom } from './samples.js';
 import { decode, flicker, seedOf } from './decode.js';
 import { TRACK, SHORT } from '../../game/labels.js';
+import { W1, CO1, crossW } from './orb.js';
 
 const TF = 2.3;                              // s for the front to reach the edge of the radius
 const PAL_OWN = { core: HOT, glow: LIME, spark: [230, 255, 170], light: [225, 255, 170], lift: [226, 250, 200] };
 const PAL_EN = { core: [255, 244, 236], glow: CORAL, spark: [255, 200, 170], light: [255, 214, 190], lift: [255, 224, 212] };
+/* the Orbital style: white hairlines (the enemy's strike in coral: hostility), restrained white bloom and light; orb is
+   set to the renderer's Wire when used (bolt.js / chain.js draw hairlines then) */
+const WARM = [255, 250, 236];
+const PAL_OWN_O = { core: [255, 255, 255], glow: WARM, spark: [255, 255, 255], light: [240, 240, 232], lift: [236, 236, 230], line: W1, orb: null };
+const PAL_EN_O = { core: [255, 244, 236], glow: [255, 170, 140], spark: [255, 220, 200], light: [255, 222, 206], lift: [240, 228, 222], line: CO1, orb: null };
 const ID_END = 4.4;                          // s after its fork lands a hull's payoff is over
 const BIG = 140;                             // px: a hull this long on screen gets its part boxes in the world (else the inset)
 const MAX_FORKS = 12;
@@ -145,6 +151,8 @@ export function createScan(S, AN, inset) {
       const d0 = game.drawn.get(it.u.id), st = d0 && d0.st ? d0.st : it.u.st;
       const items = AN.xrayOf(it.key, st).filter(x => R.models.has(x.model));
       if (items.length) it.xray = items.map(x => ({ x, d: { key: x.model, R: null, T: [0, 0, 0], st: x.st || {}, tint: [LIME[0] / 255, LIME[1] / 255, LIME[2] / 255], tintK: .95, tintFace: .55, alpha: 1, bright: 1.2 } }));
+      // (the Orbital style draws the tint as the hairlines' colour: white there)
+      if (it.xray) for (const o of it.xray) o.d._orbRgb = W1;
     } catch (err) { it.xray = false; }
     return it.xray || null;
   }
@@ -242,8 +250,10 @@ export function createScan(S, AN, inset) {
 
   function draw3d() {
     const fx = R.fx, V = S.V, T = R.terrain;
+    const orb = S.orb;
+    if (orb) PAL_OWN_O.orb = PAL_EN_O.orb = S.W;
     for (const sc of scans) {
-      const pal = sc.own ? PAL_OWN : PAL_EN, P = sc.pos, B = sc.bolt;
+      const pal = orb ? (sc.own ? PAL_OWN_O : PAL_EN_O) : sc.own ? PAL_OWN : PAL_EN, P = sc.pos, B = sc.bolt;
       if (sc.Ehit === null) {
         // ---- the charge: rings drawn in to the point, the uplink from the scanner, then the leader
         const k = sat((S.clock - sc.E0) / Math.max(.05, sc.Eexp - sc.E0));
@@ -331,6 +341,13 @@ export function createScan(S, AN, inset) {
       if (SP && sa < 1) for (let i = 0; i < 70; i++) {
         const o = i * 4, life = SP[o + 3]; if (sa > life) continue;
         const w = 1 - sa / life;
+        if (pal.orb) {
+          // (Orbital: a short hairline stroke along each spark's flight)
+          if (i & 1) continue;
+          const s0 = Math.max(0, sa - .05), c = pal.line;
+          pal.orb.seg(E3[0] + SP[o] * s0, E3[1] + SP[o + 1] * s0 - 9 * s0 * s0, E3[2] + SP[o + 2] * s0, E3[0] + SP[o] * sa, E3[1] + SP[o + 1] * sa - 9 * sa * sa, E3[2] + SP[o + 2] * sa, c[0], c[1], c[2], w * .9);
+          continue;
+        }
         fx.dotXYZ(E3[0] + SP[o] * sa, E3[1] + SP[o + 1] * sa - 9 * sa * sa, E3[2] + SP[o + 2] * sa, 2, pal.spark[0], pal.spark[1], pal.spark[2], w, 'add');
       }
       if (sa < .25) { R.light([E3[0], E3[1] + 4, E3[2]], Math.max(80, (it.s ? it.s.L : 20) * 2.2), pal.light, 1.5 * I); fx.glow(E3, 16, pal.glow, .5 * I); }
@@ -353,7 +370,17 @@ export function createScan(S, AN, inset) {
     const u = sim.units.get(sc.by), a = u && u.alive ? game.unitPose(u).pos : sc.from, b = sc.bolt.top;
     const L = Math.hypot(b[0] - a[0], b[2] - a[2]), apex = Math.max(b[1], a[1]) + L * .12;
     const n = 90, al = .55 * (1 - .4 * k);
-    for (let i = 0; i <= n; i++) {
+    if (pal.orb) {
+      // (Orbital: the arc as hairline dashes marching up it)
+      const W = pal.orb, c = pal.line;
+      let px = a[0], py = a[1], pz = a[2];
+      for (let i = 1; i <= n; i++) {
+        const t = i / n, x = a[0] + (b[0] - a[0]) * t, z = a[2] + (b[2] - a[2]) * t;
+        const y = (1 - t) * (1 - t) * a[1] + 2 * (1 - t) * t * apex + t * t * b[1];
+        if ((((t * 40 - k * 6) % 1 + 1) % 1) <= .55) W.seg(px, py, pz, x, y, z, c[0], c[1], c[2], al * .9);
+        px = x; py = y; pz = z;
+      }
+    } else for (let i = 0; i <= n; i++) {
       const t = i / n; if (((t * 40 - k * 6) % 1 + 1) % 1 > .55) continue;
       const x = a[0] + (b[0] - a[0]) * t, z = a[2] + (b[2] - a[2]) * t;
       const y = (1 - t) * (1 - t) * a[1] + 2 * (1 - t) * t * apex + t * t * b[1];
@@ -384,9 +411,11 @@ export function createScan(S, AN, inset) {
     const zc = Math.max(V.near, V.depth(Tt[0], Tt[1], Tt[2])), px = it.px = s.L * V.fl / zc;
     if (!V.vis(Tt[0], Tt[1], Tt[2], s.L)) { xrayOff(it); return; }
     // the hull flares where the fork struck
-    if (a < .45) R.light([Tt[0], Tt[1] + s.L * .3, Tt[2]], Math.max(s.L * 2.5, 60), LIME, 1.6 * (1 - a / .45));
+    if (a < .45) R.light([Tt[0], Tt[1] + s.L * .3, Tt[2]], Math.max(s.L * 2.5, 60), S.orb ? WARM : LIME, 1.6 * (1 - a / .45));
     // tendrils racing over its points from the strike, then a lime glow that settles
-    if (a < 1.8 && px > 3) {
+    // (the Orbital style: the tendrils are hairlines over the hull, drawn on the overlay, identify2d)
+    if (S.orb) { if (a < 1.8 && px <= 3) crossW(S.W, V, Tt[0], Tt[1] + 2, Tt[2], 4, W1, 1 - a / 1.8); }
+    else if (a < 1.8 && px > 3) {
       const rev = it.rev, stride = Math.max(1, Math.floor(n / clamp(px * 8, 60, n))), big = px > 90;
       for (let i = 0; i < n; i += stride) {
         const lt = rev ? rev.pt[i] : 0; if (a < lt) continue;
@@ -476,6 +505,14 @@ export function createScan(S, AN, inset) {
       CP[ci * 2] = q[0]; CP[ci * 2 + 1] = q[1];
       if (q[1] < ty) { ty = q[1]; top = ci; }
     }
+    if (S.orb) {
+      // the Orbital style: the box as white hairlines, no corner dots
+      ctx.globalAlpha = a * .62; ctx.strokeStyle = '#F6F5F2'; ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let e = 0; e < 24; e += 2) { const i0 = EDGES[e], i1 = EDGES[e + 1]; ctx.moveTo(CP[i0 * 2], CP[i0 * 2 + 1]); ctx.lineTo(CP[i1 * 2], CP[i1 * 2 + 1]); }
+      ctx.stroke(); ctx.globalAlpha = 1;
+      return top;
+    }
     ctx.globalAlpha = a * .85; ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.setLineDash([2, 2.5]);
     ctx.beginPath();
     for (let e = 0; e < 24; e += 2) { const i0 = EDGES[e], i1 = EDGES[e + 1]; ctx.moveTo(CP[i0 * 2], CP[i0 * 2 + 1]); ctx.lineTo(CP[i1 * 2], CP[i1 * 2 + 1]); }
@@ -516,7 +553,8 @@ export function createScan(S, AN, inset) {
     const out = 1 - sat((a - (ID_END - .6)) / .6);
     const inInset = inset && inset.showing === u.id;
     // tendril links: parent -> child segments whose child just lit (p1's live branches)
-    if (it.rev && a < .9 && px > 25) {
+    if (S.orb && it.rev && a < 1.9 && px > 12) tendrilsW(ctx, it, M, Tt, a, px);
+    else if (it.rev && a < .9 && px > 25) {
       const g = s.graph, nodes = g.nodes, nt = it.rev.nodeT, par = it.rev.par;
       ctx.globalCompositeOperation = 'lighter'; ctx.lineWidth = 1.2; ctx.strokeStyle = 'rgba(210,255,120,.85)'; ctx.beginPath();
       const qa = [0, 0, 0], qb = [0, 0, 0], wa = [0, 0, 0];
@@ -605,6 +643,29 @@ export function createScan(S, AN, inset) {
       TL.add({ x: ax + 14 * K, y: ay - 26 * K, ax, ay, id, label: text, value: conf.toFixed(2), kind, a: ta, size: 10.5, pri: 8, valCol: kind === 'white' ? 'rgba(255,255,255,.72)' : undefined });
     }
   }
+  /* the Orbital style: the tendrils as a white hairline network racing over the hull from the strike (every branch
+     whose child has lit, bright as it lands, then fading as the model settles), in three alpha buckets */
+  const TQA = [0, 0, 0], TQB = [0, 0, 0], TWA = [0, 0, 0];
+  function tendrilsW(ctx, it, M, Tt, a, px) {
+    const cam = R.camera, g = it.s.graph, nodes = g.nodes, nt = it.rev.nodeT, par = it.rev.par;
+    const settle = 1 - ss(1.1, 1.9, a), step = px < 60 ? 3 : px < 140 ? 2 : 1;
+    ctx.lineWidth = 1; ctx.strokeStyle = '#F6F5F2';
+    for (let pass = 0; pass < 3; pass++) {
+      const al = pass === 0 ? .95 : pass === 1 ? .5 * Math.max(.35, settle) : .2 * settle;
+      if (al < .02) continue;
+      ctx.globalAlpha = al; ctx.beginPath();
+      for (let i = 0; i < nodes.length; i += pass === 0 ? 1 : step) {
+        const tn = nt[i]; if (a < tn || par[i] < 0) continue;
+        const age = a - tn, b = age < .16 ? 0 : age < .5 ? 1 : 2;
+        if (b !== pass) continue;
+        if (!cam.project(xf(M, Tt, nodes[i].p, TWA), TQA)) continue;
+        if (!cam.project(xf(M, Tt, nodes[par[i]].p, TWA), TQB)) continue;
+        ctx.moveTo(TQB[0], TQB[1]); ctx.lineTo(TQA[0], TQA[1]);
+      }
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
   const ROWS = [], ROWP = [];
   const byTy = (a, b) => a.ty - b.ty;
   /* would a column there sit on a HUD panel or the inset? */
@@ -653,7 +714,7 @@ export function createScan(S, AN, inset) {
     const H = clamp(sc.r * .55, 1400, 2600);
     S.line(w[0], w[1], w[2], w[0], w[1] + H, w[2], S.dotOpt(col, .5, 5, 1, 'over'));
     P3[0] = w[0]; P3[1] = w[1] + H; P3[2] = w[2];
-    fx.glow(P3, 10, col, .5);
+    fx.glow(P3, 10, S.orb ? (aim.inReach ? WARM : [255, 170, 140]) : col, .5);
     aim.n = 0; aim.ids.length = 0;
     const side = sim.sides[game.side];
     if (side) for (const c of side.contacts.values()) {

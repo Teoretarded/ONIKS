@@ -4,6 +4,7 @@
    light above it (p2), the others a short dotted afterglow, and a faint ring at its reach. */
 import { LIME, WH, TAU, sat, clamp, ss, hsh, wrap2 } from './core.js';
 import { radarWorks } from '../../sim/sensors.js';
+import { lineW } from './orb.js';
 
 export function createRadar(S) {
   const { game } = S, sim = game.sim, R = game.R, map = game.map;
@@ -72,8 +73,11 @@ export function createRadar(S) {
       const dAng = Math.abs(o.w) * (game.paused ? 0 : game.timeRate) * Math.max(1 / 60, game.dtReal);
       const blur = clamp(.35 / Math.max(1e-3, dAng), .22, 1);
       const a = (o.main ? .7 : o.surf ? .85 : .5) * blur * (1 - .2 * scope);
-      beam(fx, V, T, o, o.brg, a, full);
-      if (!o.main && full) for (let k = 1; k <= 3; k++) beam(fx, V, T, o, o.brg - k * .045, a * .32 * Math.exp(-k * .6), false);
+      if (S.orb) beamW(o, a, o.main, full);
+      else {
+        beam(fx, V, T, o, o.brg, a, full);
+        if (!o.main && full) for (let k = 1; k <= 3; k++) beam(fx, V, T, o, o.brg - k * .045, a * .32 * Math.exp(-k * .6), false);
+      }
       // reach ring (only once the view is wide enough to show it as a ring, or for the selected radar)
       const sel = game.selection.has(o.u.id);
       const ra = (sel ? 1 : o.surf ? ss(o.range * .06, o.range * .25, game.camera.dist) : 0) * ss(.1, .35, game.camera.pitch) * (1 - scope);
@@ -82,6 +86,25 @@ export function createRadar(S) {
   }
   const byD = (a, b) => a.d - b.d;
   const P = [0, 0, 0];
+  /* the Orbital style: the beam as the films' hairlines, the leading edge draped on the ground and fading out along
+     its reach, a fan of fainter lines behind it (the afterglow; the main radar's longer), no curtain */
+  const EO = { rgb: WH, a: 1, step: 3, size: 2, drape: null, lift: 1.5 }, LO = { rgb: WH, a: 1, step: 3, size: 1, drape: null, lift: 0 };
+  function beamW(o, a, main, full) {
+    const W = S.W, V = S.V, range = o.range;
+    if (!R.wire) return;
+    const sb = Math.sin(o.brg), cb = Math.cos(o.brg);
+    if (!V.vis(o.x + sb * range / 2, 0, o.z + cb * range / 2, range / 2 + 2000)) return;
+    const a1 = Math.min(1, a * 1.15);
+    EO.drape = R.terrain; EO.a = t => a1 * (1 - .55 * t);
+    lineW(W, V, o.x, 0, o.z, o.x + sb * range, 0, o.z + cb * range, EO);
+    const n = main ? 14 : full ? 4 : 0, ag = main ? .9 : .16;
+    for (let i = 1; i <= n; i++) {
+      const db = i * ag / n, b = o.brg - db, al = a * (main ? .2 : .3) * Math.exp(-3.2 * db / ag);
+      if (al < .01) continue;
+      LO.a = al;
+      lineW(W, V, o.x, 1.5, o.z, o.x + Math.sin(b) * range, 1.5, o.z + Math.cos(b) * range, LO);
+    }
+  }
   /* the leading edge (and its curtain) along bearing b */
   function beam(fx, V, T, o, b, a, curtain) {
     const sb = Math.sin(b), cb = Math.cos(b), range = o.range;

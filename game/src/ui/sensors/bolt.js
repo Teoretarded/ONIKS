@@ -72,6 +72,7 @@ export class Bolt {
      pour: 0..1 age of the pour (the stream of dots coming down with the leader), leading: bool */
   draw(fx, V, reach, I, pal, pour, leading) {
     if (I < .004 && !leading) return;
+    if (pal.orb) return this.drawW(fx, V, reach, I, pal, pour, leading);
     const core = pal.core, gl = pal.glow;
     const m = this.main, nVis = reach * (m.length - 1);
     this._path(fx, V, m, 0, nVis, Math.min(1, I * 1.1), leading ? 2 : 3, core, gl, true);
@@ -94,6 +95,31 @@ export class Bolt {
         this.at(s, p);
         const f = (1 - s) * .8;
         fx.dotXYZ(p[0] + R[o5 + 2] * f, p[1] + R[o5 + 3] * f, p[2] + R[o5 + 4] * f, 2, core[0] * .92, core[1], core[2] * .8, .85, 'add');
+      }
+    }
+  }
+  /* the Orbital style (pal.orb: the renderer's Wire): the channel and its branches as hairlines (pal.line 0..1), the
+     pour as short strokes running down it, one restrained bloom at the leader's head */
+  drawW(fx, V, reach, I, pal, pour, leading) {
+    const W = pal.orb, c = pal.line, m = this.main, nVis = reach * (m.length - 1);
+    pathW(W, V, m, nVis, Math.min(1, I * 1.1), c);
+    for (const b of this.br) {
+      const s = b.at * (m.length - 1); if (nVis <= s) continue;
+      const k = (nVis - s) / ((m.length - 1) * .25) * (b.pts.length - 1);
+      pathW(W, V, b.pts, k, Math.min(1, I * .7 * b.w / .5), c);
+    }
+    if (leading) {
+      const tip = m[Math.min(m.length - 1, Math.floor(nVis))];
+      const P = this._p; P[0] = tip[0]; P[1] = tip[1]; P[2] = tip[2];
+      fx.glow(P, 10, pal.glow, .3);
+    }
+    if (pour >= 0 && pour < 1.2) {
+      const R = this.rain, p = this._p, q = this._q || (this._q = [0, 0, 0]);
+      for (let k = 0; k < 360; k += 3) {
+        const o5 = k * 5, s = R[o5] + pour * R[o5 + 1]; if (s < .02 || s > 1) continue;
+        this.at(s, p); this.at(s - .015, q);
+        const f = (1 - s) * .8, ox = R[o5 + 2] * f, oy = R[o5 + 3] * f, oz = R[o5 + 4] * f;
+        W.seg(q[0] + ox, q[1] + oy, q[2] + oz, p[0] + ox, p[1] + oy, p[2] + oz, c[0], c[1], c[2], .7);
       }
     }
   }
@@ -121,6 +147,17 @@ export class Bolt {
   sparks(fx, a, pal) {
     if (a < 0 || a > 1.4) return;
     const S = this.SP, h = this.hit, c = pal.spark || pal.core;
+    if (pal.orb) {
+      // the Orbital style: each spark a short hairline stroke along its flight
+      const W = pal.orb, lc = pal.line, a0 = Math.max(0, a - .05);
+      for (let i = 0; i < 160; i += 2) {
+        const o = i * 4, life = S[o + 3]; if (a > life) continue;
+        const w = 1 - a / life, y1 = h[1] + S[o + 1] * a - 11 * a * a, y0 = h[1] + S[o + 1] * a0 - 11 * a0 * a0;
+        if (y1 < h[1]) continue;
+        W.seg(h[0] + S[o] * a0, y0, h[2] + S[o + 2] * a0, h[0] + S[o] * a, y1, h[2] + S[o + 2] * a, lc[0], lc[1], lc[2], w * .9);
+      }
+      return;
+    }
     for (let i = 0; i < 160; i++) {
       const o = i * 4, life = S[o + 3]; if (a > life) continue;
       const w = 1 - a / life;
@@ -130,6 +167,15 @@ export class Bolt {
   }
 }
 
+/* a jagged channel as hairlines up to point index `to` (fractional) */
+function pathW(W, V, pts, to, a, c) {
+  if (a < .004) return;
+  const n1 = Math.min(pts.length - 1, to);
+  for (let i = 0; i < n1; i++) {
+    const A = pts[i], B = pts[i + 1], f = Math.min(1, n1 - i);
+    W.seg(A[0], A[1], A[2], A[0] + (B[0] - A[0]) * f, A[1] + (B[1] - A[1]) * f, A[2] + (B[2] - A[2]) * f, c[0], c[1], c[2], a);
+  }
+}
 /* cloud-to-ground lightning for weather (fallback when the FX system does not draw it) */
 export function stormBolt(pos, top, seed) {
   const H = Math.max(800, (top ? top[1] : 3200) - pos[1]);

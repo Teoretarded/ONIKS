@@ -5,6 +5,7 @@
    units as lime marks. V again flies back. The change is a smooth fade both ways. */
 import { LIME, CORAL, WH, TAU, DEG, sat, clamp, ss, hsh, gH, pad2, mix } from './core.js';
 import { TRACK, SHORT } from '../../game/labels.js';
+import { crossW, W1 } from './orb.js';
 
 const RCS_DB = { carrier: 51, ddg: 40, helo: 12, fighter: 8, drone: -2, tel: 22, radar: 22, pantsir: 22, transloader: 22, catapult: 12, hq: 26 };
 
@@ -103,7 +104,8 @@ export function createScope(S) {
     }
     // the radar site: a stalk and a lime head
     S.line(r.x, r.y, r.z, r.x, r.y + RM * .012, r.z, S.dotOpt(WH, .8 * k, 3, 1, 'max'));
-    fx.dotXYZ(r.x, r.y + RM * .012, r.z, 4, LIME[0], LIME[1], LIME[2], k, 'over');
+    if (S.orb) crossW(S.W, V, r.x, r.y + RM * .012, r.z, 4, W1, k);
+    else fx.dotXYZ(r.x, r.y + RM * .012, r.z, 4, LIME[0], LIME[1], LIME[2], k, 'over');
     // returns of the contacts / tracks, and their gates, histories, leaders
     const side = game.side, S0 = sim.sides[side], HK = RM / 64000 * 45;
     RL.length = 0;
@@ -119,7 +121,8 @@ export function createScope(S) {
       const h = hist.get(c.unitId);
       if (h) for (let j = 0; j < h.n; j++) {
         const i = (h.i - 1 - j + 24) % 12, al = k * (.7 - .5 * j / 12);
-        fx.dotXYZ(h.pts[i * 3], 3, h.pts[i * 3 + 2], 2, col[0], col[1], col[2], al, 'max');
+        if (S.orb) crossW(S.W, V, h.pts[i * 3], 3, h.pts[i * 3 + 2], 2, W1, al * .8);
+        else fx.dotXYZ(h.pts[i * 3], 3, h.pts[i * 3 + 2], 2, col[0], col[1], col[2], al, 'max');
       }
       if (trk && Math.hypot(c.vel[0], c.vel[2]) > .5) S.line(c.pos[0], 3, c.pos[2], c.pos[0] + c.vel[0] * 120, 3, c.pos[2] + c.vel[2] * 120, S.dotOpt(col, .55 * k, 4, 1, 'max'));
       let e = RP[RL.length]; if (!e) e = RP[RL.length] = { c: null, d: 0 };
@@ -129,8 +132,8 @@ export function createScope(S) {
     // the returns of the nearest few (the height-field pillars)
     if (RL.length > 30) { RL.sort((a, b) => a.d - b.d); RL.length = 30; }
     for (const e of RL) { const c = e.c, u = sim.units.get(c.unitId), dx = c.pos[0] - r.x, dz = c.pos[2] - r.z; returns(fx, V, c, u, r, Math.hypot(dx, dz), dx, dz, HK, k); }
-    // own units: lime marks
-    for (const u of sim.alive(side)) {
+    // own units: lime marks (the Orbital style: the overlay's marks only)
+    if (!S.orb) for (const u of sim.alive(side)) {
       if (u.aboard) continue;
       const p = game.unitPose(u).pos;
       fx.dotXYZ(p[0], p[1] + 3, p[2], 3, LIME[0], LIME[1], LIME[2], k, 'over');
@@ -158,6 +161,8 @@ export function createScope(S) {
       let b = clamp((db + 14) / 40, .16, 1) * (.36 + .64 * glow);
       if (on) b = Math.max(b, .55 + .45 * glow);
       const cr0 = WH[0] + (LIME[0] - WH[0]) * lk, cg = WH[1] + (LIME[1] - WH[1]) * lk, cb = WH[2] + (LIME[2] - WH[2]) * lk;
+      // the Orbital style: every return a pillar of hairline (the height field in lines), brighter at the edge
+      if (S.orb) { const W = S.W; W.seg(x, 1, z, x, Math.max(2, y), z, W1[0], W1[1], W1[2], Math.min(1, b * (on ? 1 : .6) + .3 * lk) * k); continue; }
       if (on) { RGB[0] = cr0; RGB[1] = cg; RGB[2] = cb; S.line(x, 1, z, x, y, z, S.dotOpt(RGB, b * .55 * k, 3, 1, 'max')); }
       fx.dotXYZ(x, y, z, 2, cr0, cg, cb, Math.min(1, b) * k, 'max');
     }

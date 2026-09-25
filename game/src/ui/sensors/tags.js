@@ -6,6 +6,7 @@
    side of what it names) and out of the HUD panels (a tag with no room off them is left out, the thing keeps its mark).
    Nothing while the pause menu or the end block is up (ov.worldA). Callers give their offsets at 1080p times ov.ui. */
 import { sat } from './core.js';
+import { OrbOverlay, MONO as OMONO } from './orb.js';
 
 const LIME = '#C6F432', CORAL = '#FF6A3D';
 const byPri = (a, b) => (b.pri - a.pri) || (a.y - b.y);
@@ -66,7 +67,7 @@ export class TagLayer {
       }
       t.skip = true;
     }
-    const ctx = ov.ctx;
+    const ctx = ov.ctx, orb = ov instanceof OrbOverlay;
     for (let i = n - 1; i >= 0; i--) {
       const t = L[i];
       if (t.skip || t.y < -40 || t.y > H + 40) continue;
@@ -79,7 +80,7 @@ export class TagLayer {
         if (Math.hypot(lx - t.ax, ly - t.ay) > 6) ov.leader(t.ax, t.ay, lx, ly, t.leadCol || (t.kind === 'coral' ? 'rgba(255,150,120,.9)' : t.kind === 'lime' ? LIME : 'rgba(238,238,228,.85)'), .75 * t.a);
       }
       ov.tag(tx, t.y, t.id, t.label, t.value, { kind: t.kind, a: t.a, size: t.size, valCol: t.valCol });
-      if (t.bars) drawBars(ctx, right ? t.x + t.fw - t.bw : t.x, t.y + t.h + 4 * k, t.bars, t.a * wa, k);
+      if (t.bars) (orb ? drawBarsOrb : drawBars)(ctx, right ? t.x + t.fw - t.bw : t.x, t.y + t.h + 4 * k, t.bars, t.a * wa, k);
     }
   }
 }
@@ -148,6 +149,26 @@ export function drawBars(ctx, x, y, bars, a, k) {
     ctx.fillStyle = top ? LIME : 'rgba(255,255,255,.75)'; ctx.fillRect(bx, yy - (bh >> 1), Math.round(wB * sat(p)), bh);
     ctx.fillStyle = top ? LIME : 'rgba(255,255,255,.75)';
     ctx.textAlign = 'right'; txt(ctx, p.toFixed(2), bx + wB + p8 + wV, yy, .45 * k); ctx.textAlign = 'left';
+  }
+  ctx.textBaseline = 'alphabetic';
+  ctx.globalAlpha = 1;
+}
+/* the class bars in the Orbital language: no backdrop, hairline tracks, the leading class white, the rest dim */
+export function drawBarsOrb(ctx, x, y, bars, a, k) {
+  k = k || 1;
+  const rows = bars.rows, n = rows.length, rh = 12 * k, px = 9.5 * k;
+  const wL = (bars.wL || 62) * k, wB = 58 * k, wV = 30 * k, p9 = 9 * k, p8 = 8 * k;
+  x = Math.round(x); y = Math.round(y);
+  ctx.font = `400 ${px}px ${OMONO}`;
+  ctx.textBaseline = 'middle';
+  for (let i = 0; i < n; i++) {
+    const [lab, p] = rows[i], top = i === bars.top, yy = Math.round(y + 6 * k + i * rh + rh / 2);
+    ctx.globalAlpha = a * (top ? 1 : .5); ctx.fillStyle = '#F6F5F2';
+    ctx.fillText(lab, x + p9, yy);
+    const bx = Math.round(x + p9 + wL + p8);
+    ctx.globalAlpha = a * .22; ctx.fillRect(bx, yy, Math.round(wB), 1);
+    ctx.globalAlpha = a * (top ? 1 : .6); ctx.fillRect(bx, yy - (top ? 1 : 0), Math.max(1, Math.round(wB * sat(p))), top ? 3 : 1);
+    ctx.textAlign = 'right'; ctx.fillText(p.toFixed(2), bx + wB + p8 + wV, yy); ctx.textAlign = 'left';
   }
   ctx.textBaseline = 'alphabetic';
   ctx.globalAlpha = 1;
