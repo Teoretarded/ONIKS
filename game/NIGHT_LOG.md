@@ -419,3 +419,10 @@ smoke/debris systems; being addressed by the physics, debris and sim-performance
   naval base) and Bukhta Svetlaya (a harbour city of ~12,000 lit buildings, a container terminal, two cable-stayed
   bridges). Eight maps now.
 - Balance is currently skewed toward the fleet by the new collision hits; the balance pass is on it.
+
+## 14:40 · Ground detail
+Every map now has LiDAR vegetation by climate (steppe scrub and field tree rows on Krasnaya Kosa, taiga to a tree line
+in the fjord, tundra shrub in the Arctic, willows and reeds in the delta, pine on the caldera's outer slopes...), rocks
+and boulder fields, the whole road network drawn (two dotted edges close up, one line far off, faint on the Orbital
+map), power lines on towers, fences round objective sites, farms and more houses with lit windows at night. Trees
+fade in front of the camera so a close look at a unit is never through leaves. Cost 0.2-1.2 ms per frame.
