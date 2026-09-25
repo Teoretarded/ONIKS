@@ -189,7 +189,7 @@ function makeDirector(game) {
     on = v; game.cinematic = on;
     shot = null; lastPick = -99;
     // the screen edges do not pan while the director flies (a resting mouse would fight it)
-    if (on) { edgeWas = cam.edge; cam.edge = false; }
+    if (on) { edgeWas = game.replay && game.replay.state && game.replay.state.edge0 !== undefined ? game.replay.state.edge0 : cam.edge; cam.edge = false; }
     else { cam.edge = edgeWas; if (!(game.replay && game.replay.active)) { cam.follow(null); cam.fly = null; } }
     game.bus.emit('cinematic', { on });
   }
@@ -409,7 +409,7 @@ function makeDirector(game) {
       const pull = shot.kind === 'after' ? ss(1.5, 11, age) : 0;
       const pitch = ((sea ? 5.5 : 10) + shot.raise + 7 * pull) * DEG;
       const appr = shot.appr + (shot.kind === 'after' ? shot.side * .05 * age : 0);
-      acrossView(cam, T, HC, n, appr, shot.side, pitch, { min: sea ? 170 : 60, k: fitK * (1 + 1.3 * pull), shift: endShift() }, eye, look);
+      acrossView(cam, T, HC, n, appr, shot.side, pitch, { min: sea ? 170 : Math.max(30, u.def.size[0] * 2.2), k: fitK * (1 + 1.3 * pull), shift: endShift() }, eye, look);
       addKey(T);
       if (p) { const pp = game.projPose(p).pos; if (Math.hypot(pp[0] - T[0], pp[2] - T[2]) < Math.hypot(eye[0] - T[0], eye[2] - T[2]) * 1.3) addKey(pp); }
       if (!sea) clearance(T);
@@ -438,7 +438,7 @@ function makeDirector(game) {
       if (!n) return false;
       c3[0] /= n; c3[1] /= n; c3[2] /= n;
       const pitch = ((shot.sea ? 6 : 12) + shot.raise) * DEG, yaw = shot.yaw0 + age * .03 * (shot.unit % 2 ? 1 : -1);
-      let d = Math.max(shot.sea ? 420 : 140, shot.L * (shot.sea ? 4.5 : 7));
+      let d = Math.max(shot.sea ? 380 : 120, shot.L * (shot.sea ? 3 : 6));
       if (nKeys > 1) d = Math.max(d, fitDist(cam, c3, KP, nKeys, yaw, pitch, .7, .6));
       orbit(c3, yaw, pitch, d * fitK);
       if (!shot.sea) clearance(c3);
@@ -485,7 +485,7 @@ function makeDirector(game) {
     let l = Math.hypot(ax, ay, az) || 1; ax /= l; ay /= l; az /= l;
     let bx = P[0] - eye[0], by = P[1] - eye[1], bz = P[2] - eye[2];
     l = Math.hypot(bx, by, bz) || 1; bx /= l; by /= l; bz /= l;
-    const w = .32;
+    const w = .4;
     look[0] = eye[0] + (ax * (1 - w) + bx * w) * 600; look[1] = eye[1] + (ay * (1 - w) + by * w) * 600; look[2] = eye[2] + (az * (1 - w) + bz * w) * 600;
     addKey(P);
     return true;
@@ -551,6 +551,7 @@ function makeDirector(game) {
   return {
     name: 'director', priority: PRI.director,
     set, get on() { return on; }, get shot() { return shot; },
+    get edgeWas() { return edgeWas; }, set edgeWas(v) { edgeWas = v; },
     /* for the replay: glide on from where the camera is now */
     resync() { shot = null; lastPick = -99; },
     onKey(e) {
