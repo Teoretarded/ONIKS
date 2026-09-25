@@ -245,3 +245,12 @@ as rows from 5-20 km and no longer looks like stars; haze fades with distance in
 the Orbital hairlines start fading in at 22 km so the zoom never passes through an empty band.
 Started: review 3, and a film-quality Nimitz (island with turning radars, angled deck, catapults, elevators,
 sponsons, below-waterline shafts and propellers; an X-ray/exploded anatomy).
+
+## 10:10 · Debrief film done
+Every Combat or Sandbox match is recorded (setup + your commands with their ticks; the sim is deterministic, checked
+by state hashes every 30 s). On the end screen, **Debrief** (D) re-simulates the match and films it as one continuous
+take (~60 s): Fig. 1 first salvo side-on, Fig. 2 the chase, Fig. 3 the hit's X-ray replay, a time jump up through the
+Orbital map with the true rate on screen, the decisive round, the wreck, and Fig. 7: a climb to 130 km where every
+round's track draws on in launch order with the tally ("3M55 Oniks · 8 fired · 2 hit · 4 down"). V opens a replay
+viewer with a scrub bar. Stills: `game/shots/debrief/final/`.
+Note: `game/shots/` (gitignored) holds ~2.3 GB of the agents' test stills; safe to clear.
