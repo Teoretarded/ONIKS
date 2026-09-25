@@ -225,6 +225,38 @@ units a planner put on one spot (game/setup.js runs it on the starting forces).
 map. `sim.ai[side].log` holds its recent decisions. `AI.emplace()` (used by `setupBattle`) puts the battery on the
 sites it would choose.
 
+## Headless (Node): `tools/sim.mjs`
+
+No browser needed: the harness shims `window` (and `window.M3` from `reference/menus/common/m3.js`, evaluated with `vm`),
+generates maps directly (`loadMap(id, { worker: false, cache: false })`) and runs the page code itself.
+
+| Command | What |
+|---|---|
+| `node tools/sim.mjs test [--only s] [--map id] [--long]` | every test in `tests.js` (as `tests.html`), PASS / FAIL lines, exit code 1 on a failure |
+| `node tools/sim.mjs balance --maps all --seeds 24 [--seed 1] [--level normal] [--limit 7200] [--set …] [--workers k] [--rows] [--json f]` | the AI-vs-AI batches of `balance.html`: `src/balance.js` runs the matches in `worker_threads` (its own worker protocol), same table |
+| `node tools/sim.mjs bench [--perftest] [--map id] [--secs 60] [--warm 90] [--reps 3] [--fn 25] [--lines fn]` | cost of a 200-unit battle with 250-470 rounds in flight (`--perftest`: the field of the tests.js perf test): ms per sim-second warm (best of fresh runs) and cold (the first run in the process, as the first match of a page), per stage (a copy of `step()` with a clock round each stage; checked to give the same state hash as `step()`), per file (CPU profile self time) |
+| `node tools/sim.mjs hash [--maps stub,fjord] [--seeds 1,2,3] [--ticks 36000] [--bench] [--json f]` | `sim.hash()` and a deep hash (every field of units, rounds, bursts, contacts, sides, AI, weather, objectives at full float precision, every event, the next draw of each seeded stream) after N ticks: run before and after a change that must not change behaviour |
+
+## Performance notes (keep these when changing the sim)
+
+- A step is ~9 ms per sim-second for 200 units and ~350 rounds in flight once the JIT has settled (x32 costs ~30 % of a
+  core), ~11 cold. Rounds (`stepOne`: two atan2 and four sin/cos per round per tick) and movement are the largest parts.
+- Keep objects in one layout: every field a unit can ever get is declared in `sim.spawn` (unset fields as `undefined`),
+  likewise the projectile literal in `launch`, the contact in `getContact` and the Sim's own fields. A unit that grows
+  a field later forks its hidden class, and every property read on units anywhere in the sim becomes a slow generic
+  lookup (this alone cost ~25 %). Per-type caches go on the unit tables at load (mech.js, weapons.js), never mid-match.
+- `primeLayouts()` (sim.js) runs once per page / Worker: it spawns one unit of every type on a tiny private sim and
+  gives every field that takes fractions in play one, so the first match does not keep throwing away optimised code
+  when a field first gets a fraction. The lists (`FRAC`) were sampled over full AI battles on every map; add a field
+  there when a new one takes fractions (a missing one only costs speed).
+- Sensors scan flat per-tick tables (foes, own sensors) and cache per-foe terms (weather, height, rcs^.25); a cheap
+  pre-test rejects pairs well outside the radar's sweep sector before the exact test. Only pure tests are cached or
+  reordered: the seeded draws happen for the same pairs in the same order.
+- Contacts change only through sensors.js (`PICTURE.v` counts the changes); weapons.js lists the air tracks and the
+  classified tracks once per weapons tick and again when the picture changes.
+- Check every optimisation with `node tools/sim.mjs hash` before / after (the deep hash must not change) and the
+  balance table (the rows must be identical).
+
 ## Files
 
 `sim.js` (state, step, visible, hash) · `nav.js` (grids, A*) · `movement.js` · `orders.js` · `mech.js` (deploy,

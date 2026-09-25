@@ -285,8 +285,13 @@ function seeProjectiles(sim, side, own) {
     if (t - p.seen[side] < .3) continue;
     const rcs = p.P.rcs || .1, k = Math.pow(rcs, .25);
     const px = p.pos[0], py = p.pos[1], pz = p.pos[2], sp = Math.sqrt(py > 0 ? py : 0);
-    let wr = NaN;
-    for (let i = 0; i < n; i++) {
+    // whether any sensor covers the round does not depend on the order they are asked in (nothing is drawn): ask
+    // first the one that covered it last time (its index in this side's table), then the rest
+    const last = side === 'coast' ? p._seeC : p._seeF;
+    let wr = NaN, hit = -1;
+    for (let q = -1; q < n; q++) {
+      const i = q < 0 ? last : q;
+      if (i < 0 || i >= n || (q >= 0 && i === last)) continue;
       let rng = 0, ha = 0;
       if (SRAD[i]) {
         if (wr !== wr) wr = wx.radar(px, pz);
@@ -301,10 +306,13 @@ function seeProjectiles(sim, side, own) {
       const d = Math.sqrt(dx * dx + dz * dz);
       if (d > rng || d > SQ4120 * (Math.sqrt(ha > 0 ? ha : 0) + sp)) continue;     // horizon(ha, p.pos[1])
       if (!los(map, SX[i], ha, SZ[i], px, py, pz)) continue;
-      if (p.seen[side] < 0) sim.emit('detect', { side, proj: p.id, kind: p.kind, pos: p.pos.slice(), how: 'radar', dom: 'missile' });
-      p.seen[side] = t;
+      hit = i;
       break;
     }
+    if (hit < 0) continue;
+    if (side === 'coast') p._seeC = hit; else p._seeF = hit;
+    if (p.seen[side] < 0) sim.emit('detect', { side, proj: p.id, kind: p.kind, pos: p.pos.slice(), how: 'radar', dom: 'missile' });
+    p.seen[side] = t;
   }
 }
 

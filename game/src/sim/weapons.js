@@ -480,6 +480,7 @@ export function launch(sim, u, w, target, tk, aimAt) {
     // physics: under control (false: tumbling, see spinout), gun hits taken (real rounds), roll, the tumbling frame
     // (fw forward, up) and angular velocity w (rad/s, world axes), the track-error seeds (dispersion), a missed pass
     ctrl: true, gh: 0, roll: 0, fw: null, up: null, w: null, dsp: null, missed: null,
+    _seeC: -1, _seeF: -1,                  // sensors.js: the sensor (table index) that saw it last, per side
   };
   if (P.sig0 || P.sigR) {
     const r = sim.rng.fire;

@@ -32,6 +32,8 @@ class Heap {
   }
 }
 
+const DI = [1, -1, 0, 0, 1, 1, -1, -1], DJ = [0, 0, 1, -1, 1, -1, 1, -1], OFF = [-.3, .3];
+
 export class Nav {
   constructor(map, cell) {
     this.map = map;
@@ -160,13 +162,20 @@ export class Nav {
 
   astar(G, s, g, dom) {
     this.searches++;
-    const { cols, gs, par, stamp, closed, heap } = this, cost = G.cost;
+    if (!this.search(G.cost, s, g, dom === 'land' ? ROAD_COST : 1)) return null;
+    const par = this.par, cells = []; for (let k = g; k >= 0; k = par[k]) cells.push(k);
+    cells.reverse();
+    return dom === 'land' ? this.collinear(cells) : this.pull(G, cells);
+  }
+  /* the A* loop on its own (numbers only): the engine optimises it mid-loop, and code around it that has not run yet
+     would throw that away on the way out (the rare, long searches kept doing that) */
+  search(cost, s, g, hmin) {
+    const { cols, rows, gs, par, stamp, closed, heap } = this;
     const sid = ++this.sid; heap.n = 0;
-    const gi = g % cols, gj = (g - gi) / cols, hmin = dom === 'land' ? ROAD_COST : 1;
+    const gi = g % cols, gj = (g - gi) / cols;
     const H = k => { const i = k % cols, j = (k - i) / cols, dx = Math.abs(i - gi), dz = Math.abs(j - gj); return hmin * (Math.max(dx, dz) + .41421 * Math.min(dx, dz)); };
     gs[s] = 0; par[s] = -1; stamp[s] = sid; heap.push(s, H(s));
     let found = false, it = 0;
-    const DI = [1, -1, 0, 0, 1, 1, -1, -1], DJ = [0, 0, 1, -1, 1, -1, 1, -1];
     while (heap.n && it < 200000) {
       const k = heap.pop(); it++;
       if (closed[k] === sid) continue;
@@ -175,7 +184,7 @@ export class Nav {
       const i = k % cols, j = (k - i) / cols, ck = cost[k];
       for (let d = 0; d < 8; d++) {
         const ni = i + DI[d], nj = j + DJ[d];
-        if (ni < 0 || nj < 0 || ni >= cols || nj >= this.rows) continue;
+        if (ni < 0 || nj < 0 || ni >= cols || nj >= rows) continue;
         const nk = nj * cols + ni, cn = cost[nk];
         if (!cn || closed[nk] === sid) continue;
         if (d >= 4 && (!cost[j * cols + ni] || !cost[nj * cols + i])) continue;   // no corner cutting
@@ -183,10 +192,7 @@ export class Nav {
         if (stamp[nk] !== sid || ng < gs[nk]) { stamp[nk] = sid; gs[nk] = ng; par[nk] = k; heap.push(nk, ng + H(nk)); }
       }
     }
-    if (!found) return null;
-    const cells = []; for (let k = g; k >= 0; k = par[k]) cells.push(k);
-    cells.reverse();
-    return dom === 'land' ? this.collinear(cells) : this.pull(G, cells);
+    return found;
   }
   collinear(cells) {
     if (cells.length < 3) return cells;
@@ -217,8 +223,8 @@ export class Nav {
     for (let e = 1; e < n; e++) {
       const fi = ai + (bi - ai) * e / n, fj = aj + (bj - aj) * e / n;
       // test the 4 cells around the sample so the line never grazes a blocked corner
-      for (const oi of [-.3, .3]) for (const oj of [-.3, .3]) {
-        const i = Math.round(fi + oi), j = Math.round(fj + oj);
+      for (let a = 0; a < 2; a++) for (let b = 0; b < 2; b++) {
+        const i = Math.round(fi + OFF[a]), j = Math.round(fj + OFF[b]);
         if (!G.cost[j * cols + i]) return false;
       }
     }
