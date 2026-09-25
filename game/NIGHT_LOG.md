@@ -291,3 +291,8 @@ RAM and Phalanx as closed shapes, the underwater hull with four shafts and 6.4 m
 radars go first, the island rises level by level, the flight deck lifts off, the hangar rises out of the hull with
 eight F/A-18Es and two E-2Ds inside, the reactor spaces and magazines as closed volumes, the hull splits in three.
 Stills: `game/shots/cvn_inspect_*.png`, `mus_cv_*.png`.
+
+## 11:40 · Balance 3 done
+Over 192 AI-vs-AI seeds per map every map is now 48-58% coast wins with median matches of 30-53 min, and only
+3 of 1,152 matches ended in under 10 minutes. The coast AI holds fire on the carrier for the opening (5 min on normal,
+3 on hard); three fleet spawns, four depots and three replenishment points moved.
