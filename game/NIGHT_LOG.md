@@ -405,3 +405,17 @@ frame time and steps effects, dot density and render scale down under load and b
 quality it changes nothing. Still over budget: a 200-unit battle at x32 (30-70 ms, CPU-bound in the sim and the
 smoke/debris systems; being addressed by the physics, debris and sim-performance agents), and the Arctic sea ice.
 `ONIKS.perf()` / `game/perf.html` run the stress suite. The game and film servers were restarted after the limit.
+
+## 14:30 · Physics, break-ups, detail, two new maps
+- **Physics**: vehicles by power/weight and slope with real turning circles; ships take minutes to reach speed, turn
+  on real circles, heel and squat, and ride the waves you see; jets bank and bleed speed, launch by catapult and
+  trap on the wires; helicopters flare; units never overlap; sinking ships list toward the hit side and can capsize.
+- **Rigid-body break-ups** (your request): a missile hit by gun rounds snaps at the struck point, sections tumble,
+  fins and wings flutter off, shards glow; spin-outs corkscrew and shed parts one by one; aircraft, masts, turrets and
+  radar arrays break loose; pieces land on real decks; close break-ups drop to x0.25 bullet time.
+- **Detail**: F/A-18E wing fold, gear, stores; MH-60R rotor head and folds; E-2D gear; truck cabs and drivetrains;
+  DDG bridge and deck fittings.
+- **New maps**: Guba Ledyanaya (Arctic: fast ice vehicles can cross, pack ice with leads, an icebreaker channel to a
+  naval base) and Bukhta Svetlaya (a harbour city of ~12,000 lit buildings, a container terminal, two cable-stayed
+  bridges). Eight maps now.
+- Balance is currently skewed toward the fleet by the new collision hits; the balance pass is on it.
