@@ -26,7 +26,7 @@ export function createRender(game, DM) {
   const sites = [];
   const ghosts = [];              // wrecks left after the sim removed the unit: { d, t0 }
   const GHOST_LIFE = 180;         // sim seconds a wreck stays on the ground
-  let lastSweep = null, fxWakes = false;
+  let lastSweep = null, fxWakes = false, ownFxTrails = false;
 
   function wreckKey(key) {
     const k = key + '_wreck';
@@ -281,7 +281,9 @@ export function createRender(game, DM) {
       else if (e.type === 'takeoff') { for (const m of deckSlots.values()) m.delete(e.unit); }
     },
     update() {
-      layTrails();
+      // the FX system draws the Kh-35U / Kalibr plumes and trails itself; this stop-gap only runs without it
+      const fxs = game.getSystem('fx'); ownFxTrails = !!(fxs && fxs.ownTrails);
+      if (!ownFxTrails) layTrails();
       // forget projectile instances that are gone
       if (pinst.size > sim.projectiles.size + 32) for (const id of pinst.keys()) if (!sim.projectiles.has(id)) pinst.delete(id);
     },
@@ -297,7 +299,7 @@ export function createRender(game, DM) {
       const list = sim.list();
       for (let i = 0; i < list.length; i++) drawUnit(list[i]);
       for (const pr of sim.projectiles.values()) drawProj(pr);
-      if (ptrails.size) drawTrails();
+      if (!ownFxTrails && ptrails.size) drawTrails();
       if (this.ownSweep && !game.getSystem('sensors')) sweep();
     },
   };
