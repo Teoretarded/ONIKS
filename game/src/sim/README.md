@@ -162,7 +162,7 @@ Orders queue with `queue: true`. The AI uses the same orders.
   listening, the command post after 4-10 min. The confidence holds while the unit is still heard; a silent (EMCON)
   unit gives nothing, and a fix fades within about a minute once it goes quiet. Constants in consts.js (`ESM_*`).
 - Fleet sensors over land: the DDG's radar sees land units within 3 km of the water (`radar.shore`, `SHORE_D`) at
-  .6 of its surface range (inland .3); the E-2D looks down (`land` .45, moving vehicles `gmti` .7) but slowly
+  .45 of its surface range (inland .3); the E-2D looks down (`land` .45, moving vehicles `gmti` .7) but slowly
   (`landGain`: ~5 min to classify a parked launcher 25 km off; `hold`: a paint holds the contact 40 s); the F/A-18E's
   targeting pod (`sensors.pod`) classifies the land and sea units it passes within 5 km of and identifies them.
 - `sim.projVisible(side, proj)` → the side's sensors cover that missile now.

@@ -1,9 +1,19 @@
 /* Sensors and the picture (fog of war).
    - Radars sweep with a period; each paint of a target inside range, above the radar horizon and in line of sight
      raises that contact's confidence. Horizon: d_km = 4.12 (sqrt(h1_m) + sqrt(h2_m)).
-   - Cameras (drone, helo) give fast confidence at short range.
+   - Cameras (drone, helo) give fast confidence at short range. The F/A-18E's targeting pod (sensors.pod) reveals
+     the land and sea units it passes within a few km of (classified at once, identified when held).
+   - Land targets: a radar sees them at `land` x its surface range, at `landGain` x its gain. `shore`: land units
+     within SHORE_D of the water are seen at that factor instead (the DDG looks at the coastline). `gmti`: moving
+     land vehicles are seen at that factor (the E-2D looks down). `hold` (s): a paint holds the contact that long
+     against decay (a slow rotodome).
    - Radiating units (radars on, the command post's comms) can be heard by the other side: a rough contact with a
-     large error that never classifies on its own.
+     large error that never classifies on its own. ESM CROSS-FIX: ESM listeners (sensors.esm: E-2D, DDG) in line
+     of sight take bearings; bearings from two directions ESM_CROSS apart (two listeners, or one that has
+     moved) within ESM_WINDOW s fix the emitter: the error shrinks with the crossing angle and the confidence climbs
+     at the listener's esm.gain per second (x the emitter's emits.fix) up to ESM_CAP, so a unit that keeps radiating
+     is classified after a few minutes of listening. The E-2D's ESM hears 1.3x farther (esm.reach). A contact holds
+     its confidence while it is still heard and fades once the unit goes quiet; a silent unit gives nothing.
    - Unseen contacts decay and their error grows; confidence >= CLASSIFY classifies the track and allows engagement.
    - SCAN: after a short delay every enemy unit in the radius is identified (conf .97); the scanner is revealed.
    - Submarines: a submerged boat is invisible to radar and cameras (at periscope depth its masts show to a radar at
@@ -12,7 +22,7 @@
      also hear ships far off); the contacts it makes are like any other (confidence, classification). Torpedoes are
      heard by sonar, never seen by radar. A boat that launches is heard / seen for a moment (launchSeen). */
 import { UNITS, PROJ, ENEMY, CLASSIFY } from '../data/units.js';
-import { SIDE_SCAN_CD, SCAN_DELAY } from './consts.js';
+import { SIDE_SCAN_CD, SCAN_DELAY, ESM_CROSS, ESM_WINDOW, ESM_BEARING, ESM_CAP, SHORE_D } from './consts.js';
 import { gauss } from './rand.js';
 import { dxz, ground, wrapPi } from './util.js';
 import { isSub, submerged, deep, domOf, mastTop, noiseOf } from './subs.js';
@@ -70,11 +80,29 @@ export function sonarWorks(u) {
 /* what a submerged boat still shows to radar / cameras: masts at periscope depth, nothing deeper */
 const subVis = (e, cam) => !isSub(e) || !submerged(e) ? 1 : deep(e) ? 0 : cam ? .5 : .14;
 
-function rangeVs(R, e) {
+function rangeVs(R, e, map) {
   const dom = e.def.domain;
   if (dom === 'air') return R.air;
-  if (dom === 'land') return R.surf * (R.land || 0);
+  if (dom === 'land') {
+    let k = R.land || 0;
+    if (R.gmti && e.speed > 2 && R.gmti > k) k = R.gmti;
+    if (R.shore && R.shore > k && nearShore(map, e)) k = R.shore;
+    return R.surf * k;
+  }
   return R.surf;
+}
+
+/* a land unit within SHORE_D of the water (cached on the unit until it moves 250 m) */
+function nearShore(map, e) {
+  if (e.shoreX !== undefined && Math.abs(e.pos[0] - e.shoreX) < 250 && Math.abs(e.pos[2] - e.shoreZ) < 250) return e.shore;
+  const x = e.pos[0], z = e.pos[2];
+  let near = false;
+  for (let k = 0; k < 16 && !near; k++) {
+    const a = k / 16 * TAU, s = Math.sin(a), c = Math.cos(a);
+    for (let r = SHORE_D / 3; r <= SHORE_D + 1; r += SHORE_D / 3) if (map.h(x + s * r, z + c * r) < 0) { near = true; break; }
+  }
+  e.shoreX = x; e.shoreZ = z; e.shore = near;
+  return near;
 }
 
 /* ---------- contacts ---------- */
@@ -86,14 +114,15 @@ export function getContact(sim, side, e) {
       track: 'TRK ' + (S.trkNext++), unitId: e.id, conf: 0, cls: null, type: null, name: null,
       pos: [e.pos[0], e.pos[1], e.pos[2]], vel: [0, 0, 0], err: 5000, lastSeen: sim.t, firstSeen: sim.t,
       identified: false, emitting: false, lastEmit: -1e9, dom: domOf(e), hits: 0, dead: false, fresh: true, pingT: -1e9, deadT: 0,
+      until: 0, xfix: 0, fx: null,          // no decay before `until`; ESM cross-fix quality (0..1) and its bearing samples
     };
     S.contacts.set(e.id, c);
   }
   return c;
 }
 
-/* a detection with measurement noise sigma (m) and confidence gain */
-export function detect(sim, side, e, sigma, gain, how) {
+/* a detection with measurement noise sigma (m) and confidence gain; hold: s the contact is held against decay */
+export function detect(sim, side, e, sigma, gain, how, hold) {
   if (!e.alive || e.aboard) return null;
   const S = sim.sides[side], isNew = !S.contacts.has(e.id);
   const c = getContact(sim, side, e), r = sim.rng.sense, t = sim.t;
@@ -115,25 +144,28 @@ export function detect(sim, side, e, sigma, gain, how) {
   c.conf += (1 - c.conf) * gain;
   if (c.conf > .995) c.conf = .995;
   c.lastSeen = t; c.hits++;
+  if (hold && t + hold > c.until) c.until = t + hold;
   if (isNew) sim.emit('detect', { side, unit: e.id, track: c.track, pos: c.pos.slice(), how, dom: c.dom });
-  classify(sim, side, c, e);
+  classify(sim, side, c, e, how);
   return c;
 }
-function classify(sim, side, c, e) {
+function classify(sim, side, c, e, how) {
   if (!c.cls && c.conf >= CLASSIFY) {
     c.cls = e.def.cls; c.type = e.type; c.name = e.def.name;
-    sim.emit('classify', { side, unit: e.id, track: c.track, cls: c.cls, name: c.name, pos: c.pos.slice() });
+    sim.emit('classify', { side, unit: e.id, track: c.track, cls: c.cls, name: c.name, pos: c.pos.slice(), how });
   }
 }
 
-/* a rough contact from hearing a radiating unit or seeing a launch: never classifies by itself */
-export function roughContact(sim, side, e, err, gain, cap) {
+/* a rough contact from hearing a radiating unit or seeing a launch: never classifies by itself (keep: leave the
+   position alone, a cross-fix holds it) */
+export function roughContact(sim, side, e, err, gain, cap, keep) {
   if (!e.alive || e.aboard) return null;
   const S = sim.sides[side], isNew = !S.contacts.has(e.id), c = getContact(sim, side, e), r = sim.rng.sense;
   c.dom = domOf(e);
   // fuse the fix by accuracy (a precise track barely moves; repeated rough fixes average down, not below err / 3)
   const mx = e.pos[0] + gauss(r) * err * .6, mz = e.pos[2] + gauss(r) * err * .6;
   if (isNew || sim.t - c.lastSeen > 60) { c.pos[0] = mx; c.pos[2] = mz; c.pos[1] = e.pos[1]; c.err = err; c.vel[0] = c.vel[1] = c.vel[2] = 0; c.lastSeen = sim.t; }
+  else if (keep) c.lastSeen = sim.t;
   else if (c.err > err * .34) {
     const a = c.err * c.err, b = err * err, w = a / (a + b);
     c.pos[0] += (mx - c.pos[0]) * w; c.pos[2] += (mz - c.pos[2]) * w;
@@ -143,7 +175,7 @@ export function roughContact(sim, side, e, err, gain, cap) {
   }
   if (c.conf < cap) c.conf = Math.min(cap, c.conf + gain);
   if (isNew) sim.emit('detect', { side, unit: e.id, track: c.track, pos: c.pos.slice(), how: 'esm', dom: c.dom });
-  classify(sim, side, c, e);
+  classify(sim, side, c, e, 'esm');
   return c;
 }
 
@@ -163,7 +195,7 @@ export function senseTick(sim, dt) {
     const all = sim.alive(side), foes = sim.alive(ENEMY[side]);
     // only units that carry a radar or a camera look
     const own = SENSORS; own.length = 0;
-    for (let i = 0; i < all.length; i++) { const u = all[i]; if (!u.aboard && (u.def.sensors.radar || u.def.sensors.camera)) own.push(u); }
+    for (let i = 0; i < all.length; i++) { const u = all[i], Sd = u.def.sensors; if (!u.aboard && (Sd.radar || Sd.camera || Sd.pod)) own.push(u); }
     for (let i = 0; i < own.length; i++) {
       const u = own[i];
       if (u.aboard) continue;
@@ -180,7 +212,7 @@ export function senseTick(sim, dt) {
           const dx = e.pos[0] - u.pos[0], dz = e.pos[2] - u.pos[2];
           if (Math.abs(dx) > rmax || Math.abs(dz) > rmax) continue;
           const d = Math.sqrt(dx * dx + dz * dz);
-          let rng = rangeVs(R, e) * subVis(e, false);
+          let rng = rangeVs(R, e, map) * subVis(e, false);
           if (!rng || d > rng) continue;
           if (!full) {
             const b = Math.atan2(dx, dz), off = wrapPi(b - a0);
@@ -193,7 +225,23 @@ export function senseTick(sim, dt) {
           if (!los(map, u.pos[0], ha, u.pos[2], e.pos[0], ht, e.pos[2])) continue;
           const f = d / rng, pd = .95 - .55 * f * f;
           if (sim.rng.sense() > pd) continue;
-          detect(sim, side, e, 30 + .004 * d, R.gain, 'radar');
+          detect(sim, side, e, 30 + .004 * d, e.def.domain === 'land' && R.landGain ? R.gain * R.landGain : R.gain, 'radar', R.hold || 0);
+        }
+      }
+      // targeting pod: land and sea units the aircraft passes within a few km of are seen, classified at once
+      if (Sd.pod && !u.off.pod) {
+        const P = Sd.pod, ha = u.pos[1];
+        for (let j = 0; j < foes.length; j++) {
+          const e = foes[j];
+          if (e.aboard || e.def.domain === 'air' || submerged(e)) continue;
+          const dx = e.pos[0] - u.pos[0], dz = e.pos[2] - u.pos[2];
+          if (Math.abs(dx) > P.range || Math.abs(dz) > P.range) continue;
+          const d = Math.sqrt(dx * dx + dz * dz);
+          if (d > P.range * wx.camera(e.pos[0], e.pos[2])) continue;
+          if (!los(map, u.pos[0], ha, u.pos[2], e.pos[0], topH(e), e.pos[2])) continue;
+          if (sim.rng.sense() > .9) continue;
+          const c = detect(sim, side, e, 6 + .001 * d, P.gain, 'camera');
+          if (c && c.conf >= .9) c.identified = true;               // held in the pod: known well enough to inspect
         }
       }
       // camera: every tick, all around, short range
@@ -255,14 +303,14 @@ function decay(sim, side, dt) {
     c.pos[0] += c.vel[0] * dt; c.pos[2] += c.vel[2] * dt;
     if (c.dom === 'air') c.pos[1] += c.vel[1] * dt;
     const since = t - c.lastSeen;
-    if (since > 4) {
+    if (since > 4 && t > c.until) {
       c.conf -= (c.cls ? (c.dom === 'air' ? .01 : .004) : .015) * dt;
       c.err = Math.min(30000, c.err + (c.dom === 'air' ? 120 : c.dom === 'sea' || c.dom === 'sub' ? 12 : c.type === 'hq' ? 0 : 6) * dt);
       if (since > (c.dom === 'air' ? 8 : 30)) { c.vel[0] *= .96; c.vel[1] *= .9; c.vel[2] *= .96; }
     }
     c.fresh = since < 6;
-    if (c.emitting && t - c.lastEmit > 10) c.emitting = false;
-    if (c.conf < .04 || since > 900 || (c.dead && t - c.deadT > 8)) {
+    if (c.emitting && t - c.lastEmit > 10) { c.emitting = false; c.xfix = 0; }
+    if ((c.conf < .04 && t > c.until) || since > 900 || (c.dead && t - c.deadT > 8)) {
       S.contacts.delete(id);
       if (!c.dead) sim.emit('lost', { side, unit: id, track: c.track, pos: c.pos.slice() });
     }
@@ -270,6 +318,7 @@ function decay(sim, side, dt) {
 }
 
 /* ---------- emitters (1 Hz): radiating units are heard by the other side ---------- */
+const EARS = [], ESM_EARS = 10;
 export function esmTick(sim) {
   for (const side of ['coast', 'fleet']) {
     const own = sim.alive(side), foes = sim.alive(ENEMY[side]);
@@ -278,19 +327,90 @@ export function esmTick(sim) {
       const er = e.def.emits ? e.def.emits.range : 0;
       if (!er) continue;
       const he = e.def.domain === 'air' ? e.pos[1] : e.pos[1] + (e.def.sensors.radar ? e.def.sensors.radar.h || 5 : 10);
-      let best = 1e18;
+      let best = 1e18, tries = 0;
+      EARS.length = 0;
       for (const u of own) {
         if (u.aboard || deep(u)) continue;                        // a deep boat has no mast up to listen with
         const d = dxz(u.pos[0], u.pos[2], e.pos[0], e.pos[2]);
-        if (d > er || d >= best) continue;
-        if (d > horizon(he, topH(u)) * 1.15) continue;
-        best = d;
+        const Es = u.def.sensors.esm, ear = !!Es && typeof Es === 'object' && !u.off.esm;
+        if (d > (ear && Es.reach ? er * Es.reach : er) || (d >= best && !ear)) continue;   // esm.reach: hears farther
+        const hu = topH(u);
+        if (d > horizon(he, hu) * 1.15) continue;
+        if (d < best) best = d;
+        // a bearing needs line of sight to the emitter (terrain masks it as it masks a radar); up to ESM_EARS tries
+        if (ear && tries < ESM_EARS) { tries++; if (los(sim.map, u.pos[0], hu, u.pos[2], e.pos[0], he, e.pos[2])) EARS.push(u); }
       }
       if (best === 1e18) continue;
-      const c = roughContact(sim, side, e, Math.max(2500, .1 * best), .05, .45);
-      if (c) { c.emitting = true; c.lastEmit = sim.t; }
+      const c0 = EARS.length ? sim.sides[side].contacts.get(e.id) : null;
+      const c = roughContact(sim, side, e, Math.max(2500, .1 * best), .05, .45, !!(c0 && c0.xfix));
+      if (!c) continue;
+      c.emitting = true; c.lastEmit = sim.t;
+      if (EARS.length) crossFix(sim, side, c, e, EARS);
+      // a contact ESM listeners have taken bearings on does not fade while it is still heard (it climbs only on a fix)
+      if (c.fx && c.until < sim.t + 1.5) c.until = sim.t + 1.5;
     }
   }
+}
+
+/* ESM cross-fix. The contact keeps up to FIX_N bearing samples (listener and emitter positions, time); a listener
+   whose bearing is within 3 deg of a fresh sample refreshes its time, else it takes a stale slot or the oldest one
+   that is not part of the widest pair (a listener that flies round keeps adding bearings). A sample is stale after
+   ESM_WINDOW s or once the emitter has moved 1.5 km from where it was. The widest crossing (sine of the angle between
+   two bearing lines, at the emitter) is the fix quality. */
+const FIX_N = 6, FIX_W = 5, SAME_B = 3 * Math.PI / 180;
+const FB = new Float64Array(FIX_N), FV = new Uint8Array(FIX_N);
+/* which samples count now (FV) and their bearings from the emitter (FB) */
+function fixValid(F, t, ex, ez) {
+  for (let i = 0; i < FIX_N; i++) {
+    const o = i * FIX_W, mx = F[o + 2] - ex, mz = F[o + 3] - ez;
+    FV[i] = t - F[o + 4] <= ESM_WINDOW && mx * mx + mz * mz < 2.25e6 ? 1 : 0;
+    if (FV[i]) FB[i] = Math.atan2(F[o] - ex, F[o + 1] - ez);
+  }
+}
+function crossFix(sim, side, c, e, ears) {
+  const t = sim.t, ex = e.pos[0], ez = e.pos[2];
+  let F = c.fx;
+  if (!F) { F = c.fx = new Float64Array(FIX_N * FIX_W); for (let i = 0; i < FIX_N; i++) F[i * FIX_W + 4] = -1e9; }
+  let gain = 0, dmin = 1e18;
+  fixValid(F, t, ex, ez);
+  for (let k = 0; k < ears.length; k++) {
+    const u = ears[k], lx = u.pos[0], lz = u.pos[2], b = Math.atan2(lx - ex, lz - ez);
+    const g = u.def.sensors.esm.gain || 0; if (g > gain) gain = g;
+    const d = dxz(lx, lz, ex, ez); if (d < dmin) dmin = d;
+    let slot = -1;
+    for (let i = 0; i < FIX_N && slot < 0; i++) if (FV[i] && Math.abs(wrapPi(b - FB[i])) < SAME_B) slot = i;
+    if (slot >= 0) { F[slot * FIX_W + 4] = t; continue; }       // the same bearing again: keep it fresh
+    for (let i = 0; i < FIX_N && slot < 0; i++) if (!FV[i]) slot = i;
+    if (slot < 0) {
+      // full: keep the widest pair, replace the oldest of the rest
+      let bi = 0, bj = 1, bq = -1;
+      for (let i = 0; i < FIX_N; i++) for (let j = i + 1; j < FIX_N; j++) { const q = Math.abs(Math.sin(FB[i] - FB[j])); if (q > bq) { bq = q; bi = i; bj = j; } }
+      let old = 1e18;
+      for (let i = 0; i < FIX_N; i++) if (i !== bi && i !== bj && F[i * FIX_W + 4] < old) { old = F[i * FIX_W + 4]; slot = i; }
+    }
+    const o = slot * FIX_W;
+    F[o] = lx; F[o + 1] = lz; F[o + 2] = ex; F[o + 3] = ez; F[o + 4] = t;
+    FV[slot] = 1; FB[slot] = b;
+  }
+  let q = 0;
+  for (let i = 0; i < FIX_N; i++) if (FV[i]) for (let j = i + 1; j < FIX_N; j++) if (FV[j]) { const s = Math.abs(Math.sin(FB[i] - FB[j])); if (s > q) q = s; }
+  c.xfix = q >= ESM_CROSS ? q : 0;
+  if (!c.xfix) return;
+  // the bearing lines cross: a fix, error ~ range x bearing error / sine of the crossing, fused like the rough fixes
+  const err = Math.max(300, dmin * ESM_BEARING / q), r = sim.rng.sense;
+  const mx = ex + gauss(r) * err * .6, mz = ez + gauss(r) * err * .6;
+  if (c.err > err * .34) {
+    const a = c.err * c.err, b = err * err, w = a / (a + b);
+    c.pos[0] += (mx - c.pos[0]) * w; c.pos[2] += (mz - c.pos[2]) * w;
+    c.err = Math.max(err / 3, Math.sqrt(a * b / (a + b)));
+    if (c.err > 1000) { c.vel[0] = c.vel[1] = c.vel[2] = 0; }
+  } else if ((mx - c.pos[0]) ** 2 + (mz - c.pos[2]) ** 2 > (err * 3.5) ** 2) {
+    c.pos[0] = mx; c.pos[2] = mz; c.err = err; c.vel[0] = c.vel[1] = c.vel[2] = 0;   // the track had moved off the fix
+  }
+  c.lastSeen = t;
+  const k = e.def.emits.fix !== undefined ? e.def.emits.fix : 1;
+  if (c.conf < ESM_CAP) c.conf = Math.min(ESM_CAP, c.conf + (1 - c.conf) * gain * k);
+  classify(sim, side, c, e, 'esm');
 }
 
 /* a launch shows the shooter to the other side (rough position) */
@@ -343,7 +463,7 @@ export function resolveScans(sim) {
       if (!c) continue;
       c.conf = Math.max(c.conf, .97); c.identified = true; c.err = 5;
       c.pos[0] = e.pos[0]; c.pos[1] = e.pos[1]; c.pos[2] = e.pos[2];
-      classify(sim, s.side, c, e);
+      classify(sim, s.side, c, e, 'scan');
       hits.push(e.id);
     }
     sim.emit('scan', { phase: 'hit', side: s.side, by: s.by, pos: [s.x, ground(sim.map, s.x, s.z), s.z], r: s.r, hits });
