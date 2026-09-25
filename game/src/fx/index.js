@@ -18,6 +18,7 @@ import { drawPlume, drawHead, PLUME } from './lib/plume.js';
 import { ColdLaunch, VlsLaunch, HotLaunch, GunBlast, BalLaunch, SubLaunch, TorpLaunch } from './lib/launch.js';
 import { Burst, BoosterSep, FragBelt } from './lib/burst.js';
 import { Splash, Dirt, Blast, Fire, Sinking, TorpedoHit } from './lib/impact.js';
+import { HullBlast } from './lib/hullblast.js';
 import { TracerStream, GunStream, Muzzle } from './lib/guns.js';
 import { Wake, Downwash, Bubbles, SubWater } from './lib/water.js';
 import { drawJet, drawProps } from './lib/air.js';
@@ -425,7 +426,14 @@ class FxSystem {
       return;
     }
     const sea = dom === 'sea', gy = sea ? 0 : this.groundAt(pos[0], pos[2]);
-    this.add(new Blast({ t0: t, pos, sc, sea, gy, seed }), 3);
+    const SC = this.game && this.game.scars, nrm = sp && SC.normal ? SC.normal(ev) : null, kg = sp && SC.charge ? SC.charge(ev) : 0;
+    if (u && nrm && kg >= 1) {
+      // a warhead on a hull / vehicle / site: the violent point-cloud blast at the surface, scaled by its charge
+      const wet = sea || this.wet(pos[0], pos[2]);
+      this.add(new HullBlast({ t0: t, pos, n: nrm, kg, seed, sea: wet, gy }), 3);
+      // near the waterline: the sea thrown up in a column
+      if (wet && pos[1] < 6 + Math.cbrt(kg)) this.add(new Splash({ t0: t + .03, pos: [pos[0] + nrm[0] * 3, 0, pos[2] + nrm[2] * 3], size: 14 * Math.cbrt(kg), seed: seed + 3, ring: 0 }), 2);
+    } else this.add(new Blast({ t0: t, pos, sc, sea, gy, seed }), 3);
     if (!sea && sc >= .15) this.add(new Dirt({ t0: t, pos: [pos[0], gy, pos[2]], size: 10 + 22 * sc, seed: seed + 1 }), 2);
     // a missile or a shell sets it burning (at the hole, by the scars system, when it runs)
     if (u && sc >= .15 && !this.scarred()) {

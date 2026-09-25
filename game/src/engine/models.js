@@ -47,7 +47,7 @@ void main() {
   float hr = u01(hid);
   // scars: the hole (dots gone, a few torn ones bent in), the petalled rim (bent in, torn in strips, glowing while
   // hot), the scorch round it (charred: dimmer, sparser, grey; the stain taller above than below)
-  float burn = 0.0, hot = 0.0, edge = 0.0;
+  float burn = 0.0, hot = 0.0, edge = 0.0, heatN = 0.0, inner = 0.0;
   for (int i = 0; i < 8; i++) {
     if (i >= uScN) break;
     vec4 A = uScA[i];
@@ -64,26 +64,42 @@ void main() {
     float rag = 1.0 + 0.2 * sin(3.0 * ang + sd) + 0.12 * sin(5.0 * ang + sd * 1.7) + 0.07 * sin(9.0 * ang + sd * 2.9);
     float rr = r * rag * (0.9 + 0.2 * h2);
     float q = sqrt(dot(lat, lat) + al * al * 0.55) / rr;
+    float lq = length(lat) / rr;
     if (q < 1.0) {
+      // the hole: gone, a few torn dots left bent in, black
       if (h3 > 0.05 + 0.12 * q) { ${CULL} return; }
       p -= nn * (1.0 - q) * r * 0.85;
       p.y -= (1.0 - q) * r * 0.3 * h2;
       burn = 1.0; hot = max(hot, (0.5 + 0.5 * q) * uScC[i].w);
-    } else if (q < 1.55) {
-      float e = (1.55 - q) / 0.55;
+    } else if (lq < 1.05 && al < 0.0 && al > -r * 3.5) {
+      // what is seen through the hole (decks, bulkheads, the far side): burnt out, black, the fire inside glowing
+      // on it (so the hole reads as a hole into a burning hull)
+      burn = 1.0; inner = max(inner, max(uScC[i].w, 0.3) * (1.0 - lq * 0.5));
+      if (h3 < 0.5) { ${CULL} return; }
+    } else if (q < 1.6) {
+      // the torn rim: petals of plating, strips curled out (the blast came out through it) and bent in between
+      float e = (1.6 - q) / 0.6;
       float strip = 0.5 + 0.5 * sin(ang * (5.0 + mod(floor(sd), 4.0)) + sd * 3.1);
-      bool rim = q < 1.28 + 0.14 * strip;
+      bool rim = q < 1.36 + 0.18 * strip;
       if (!rim && h3 < 0.3 * e * e) { ${CULL} return; }
-      p -= nn * e * e * r * uScC[i].z * (0.35 + 0.65 * strip);
+      float curl = strip > 0.55 ? 1.0 : -0.55;
+      vec3 radial = lat / max(1e-3, length(lat));
+      p += nn * curl * e * e * r * uScC[i].z * (0.5 + 0.9 * strip);
+      p += radial * curl * e * e * r * 0.18 * strip;
       p.y -= e * e * r * 0.12 * strip * h2;
-      burn = max(burn, 0.6 + 0.4 * e);
-      // the torn edge itself: bright ragged steel round the black hole (it reads on a hull side in shadow too)
-      if (rim) edge = max(edge, 0.8 + 0.2 * strip);
+      burn = max(burn, 0.65 + 0.35 * e);
+      if (rim) { edge = max(edge, 0.8 + 0.2 * strip); heatN = max(heatN, uScC[i].w); }
       hot = max(hot, e * e * uScC[i].w);
     } else {
+      // round it the plating is buckled (dished in, rippled) and charred; the stain taller above than below
       vec3 ds = d; if (ds.y > 0.0) ds.y *= 0.45;
-      float qs = (length(ds) - rr * 1.55) / max(1e-3, rr * (uScC[i].y - 1.55));
-      if (qs < 1.0) { float s = 1.0 - max(qs, 0.0); burn = max(burn, s * (0.45 + 0.45 * s) * (0.75 + 0.5 * h2)); }
+      float qs = (length(ds) - rr * 1.6) / max(1e-3, rr * (uScC[i].y - 1.6));
+      if (qs < 1.0) {
+        float s = 1.0 - max(qs, 0.0);
+        float qb = (lq - 1.6) / max(1e-3, uScC[i].y * 0.9);
+        if (qb < 1.0) { float kb = (1.0 - qb) * (1.0 - qb); p -= nn * kb * r * (0.16 + 0.1 * sin(2.0 * ang + sd * 0.7) + 0.06 * sin(lq * 5.0 + sd)); }
+        burn = max(burn, s * (0.45 + 0.45 * s) * (0.75 + 0.5 * h2));
+      }
     }
   }
   if (burn > 0.0 && edge <= 0.0 && u01(hash1(hid ^ 0x1b873593u)) < burn * 0.5) { ${CULL} return; }
@@ -150,12 +166,14 @@ void main() {
   if (uDen.w > 0.0 && b > 0.5) b = mix(b, 0.5 + 0.4 * (1.0 - exp((0.5 - b) / 0.4)), uDen.w);
   vec3 col = mix(WH, uTint.rgb, uTint.a * mix(uQ.y, 1.0, rim));
   if (dmg > 0.0) col = mix(col, CORAL, min(1.0, dmg * 1.1));
-  if (burn > 0.0) { col = mix(col, vec3(0.62, 0.6, 0.56), burn); b *= 1.0 - 0.88 * burn; }
-  if (edge > 0.0) { b = max(b, edge * (0.62 + 0.3 * hr)); col = mix(col, WH, edge); }
+  if (burn > 0.0) { col = mix(col, vec3(0.62, 0.6, 0.56), burn); b *= 1.0 - 0.94 * burn; }
+  // the torn edge: glowing while hot (warm white to amber), then a charred grey ring
+  if (edge > 0.0) { float hk = clamp((heatN - 0.06) / 0.6, 0.0, 1.0); b = max(b, edge * (0.36 + 0.64 * hk) * (0.75 + 0.3 * hr)); col = mix(col, mix(vec3(0.55, 0.53, 0.5), vec3(1.0, 0.72, 0.42), hk), edge); }
   vec2 sc = scanAt(p);
   vec3 rgb = col * b;
   // the rim still hot: warm white at the tear, flickering
-  if (hot > 0.01) rgb = max(rgb, vec3(1.0, 0.8, 0.56) * hot * (0.7 + 0.3 * sin(uEyeW.w * 11.0 + hr * 40.0)));
+  if (hot > 0.01) rgb = max(rgb, vec3(1.0, 0.72, 0.45) * hot * (0.75 + 0.25 * sin(uEyeW.w * 11.0 + hr * 40.0)));
+  if (inner > 0.0) rgb = max(rgb, vec3(1.0, 0.5, 0.2) * inner * (0.3 + 0.25 * sin(uEyeW.w * 7.0 + hr * 23.0)) * (0.5 + hr));
   if (sc.x > 0.01) rgb = max(mix(rgb, uScanC[0].rgb * max(b, 0.95), sc.x), rgb);
   if (sc.y > 0.0) rgb = mix(rgb, rgb * 0.6 + uScanC[0].rgb * b * 0.5, 0.3 * sc.y);
   if (gk > 0.01) rgb = max(mix(rgb, LIME * max(b, 0.95), gk), rgb);

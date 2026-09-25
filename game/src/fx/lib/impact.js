@@ -210,7 +210,7 @@ export class Fire {
     this.fl = o.flame === undefined ? 1 : o.flame; this.emb = o.embers === undefined ? 1 : o.embers;
     this.lR = o.lightR || 26 * Math.sqrt(sz) + 14; this.lI = o.lightI === undefined ? 1 : o.lightI;
     this.dense = o.dense || 3.4;
-    this.lc = o.lightRgb || [240, 255, 190];
+    this.lc = o.lightRgb || [255, 190, 120];
     // the flame points, in the unit frame round the fire's centre
     const nF = Math.round(120 + 160 * Math.min(1, sz));
     this.FP = new Float32Array(nF * 4);
@@ -256,24 +256,28 @@ export class Fire {
         const blink = hsh(j + Math.floor(tr * 14), sd + 7) < .8 ? 1 : .25, al = Math.pow(1 - a / Tj, 1.6) * blink * Math.min(1, kNow * 1.5);
         if (al < .04) continue;
         const hot = 1 - a / Tj;
-        dot(ex, ey, ez, 1, 255, 255 - 40 * (1 - hot), 190 + 50 * hot, al);
+        dot(ex, ey, ez, pxm > 3 ? 2 : 1, 255, 150 + 95 * hot, 70 + 120 * hot * hot, al);
       }
       if (pxm * this.spr[0] < 3) {
-        dot(fx, fy + 2, fz, 2, 242, 255, 190, kNow * flick);
-        C.glow(fx, fy + 2, fz, 3, LIME[0], LIME[1], LIME[2], .12 * kNow);
+        // far: a flickering amber point with a warm glow round it (it still reads as a fire from kilometres)
+        dot(fx, fy + 2, fz, 2, 255, 214, 150, Math.min(1, kNow * flick * 1.4));
+        C.glow(fx, fy + 2, fz, 4, 255, 150, 70, .3 * kNow * flick);
+        if (this.fl > .5) dotHalo(C, fx, fy + 2, fz, 16, 60, 255, 150, 70, .2 * kNow * flick, 2);
       } else {
         // tongues of flame: licks standing on their seats along the fire, wide and white-hot at the root, narrowing
-        // and cooling to lime at the tip, each flickering in height and swaying (the dots flow up inside it); leaning
+        // and cooling through amber to a dull coral at the tip, each flickering in height and swaying (the dots flow up inside it); leaning
         // downwind. Real time, so a time-lapse never strobes them; as many as the fire's size on screen needs
         const S0 = this.spr[0], S1 = this.spr[1], S2 = this.spr[2], sd = this.seed;
-        const nT = Math.max(5, Math.min(40, Math.round(4 + S0 * pxm / 7))), big = pxm > .5 ? 2 : 1;
+        const nT = Math.max(6, Math.min(60, Math.round(6 + S0 * pxm / 3))), big = pxm > .5 ? 2 : 1;
         const hpx = S1 * pxm, mT = Math.max(6, Math.round(Math.min(150, 8 + hpx * .9) * q));
         const lean = .04;                                  // the tips lean downwind: m per m/s of wind per m of height
+        // the fire's own glow round its seat (it reads as a fire from far off)
+        dotHalo(C, fx, fy + S1 * .35, fz, Math.max(24, Math.min(260, S1 * pxm * 1.3)), 260, 255, 150, 70, .16 * kNow * flick, 2);
         for (let i = 0; i < nT; i++) {
           const hs = hsh(i, sd + 1), lx = (hs - .5) * 2 * S0 * .9, lz = (hsh(i, sd + 2) - .5) * 2 * S2 * .8;
           const fl = .7 + .2 * Math.sin(tr * (5 + 3 * hsh(i, sd + 3)) + i * 1.7) + .15 * noise(tr * 2.2, i * .37, sd * .01);
           const Hi = S1 * (.35 + .65 * hsh(i, sd + 4)) * (1 - .45 * Math.abs(hs - .5) * 2) * (.45 + .55 * kNow) * fl;
-          const Wi = Math.max(.25, S0 / nT * 1.6) * (.7 + .5 * hsh(i, sd + 5));
+          const Wi = Math.max(.25, S0 / nT * 2.6) * (.7 + .5 * hsh(i, sd + 5));
           const sp = 1.4 + 1.2 * hsh(i, sd + 6), ph0 = tr * sp;
           const swx = Math.sin(tr * 2.1 + i * 2.3) * .12 * Hi, top = Hi, fy0 = fy + (hsh(i, sd + 11) - .5) * S1 * .22;
           for (let j = 0; j < mT; j++) {
@@ -281,11 +285,12 @@ export class Fire {
             const w = Wi * Math.pow(1 - v, .7), off = (hsh(j, sd + 8 + i * 7) - .5) * 2 * w;
             const bend = v * v, dx = lx + off + swx * bend, dz = lz + (hsh(j, sd + 9 + i * 5) - .5) * w * .6, lw = lean * top * bend;
             const wx = fx + s * dx + c * dz + W0 * lw, wz = fz + c * dx - s * dz + W2 * lw, wy = fy0 + v * top;
-            const hot = 1 - v * v, al = Math.min(1, 2 * kNow) * Math.pow(1 - v, .7) * (.65 + .35 * hsh(j + Math.floor(tr * 20), sd + 10));
+            const hot = 1 - v, al = Math.min(1, 2.4 * kNow) * Math.pow(1 - v, .55) * (.7 + .3 * hsh(j + Math.floor(tr * 20), sd + 10));
             if (al < .03) continue;
-            dot(wx, wy, wz, big, LIME[0] + (255 - LIME[0]) * hot, 255, LIME[2] + (230 - LIME[2]) * hot * hot, al > 1 ? 1 : al);
+            // white-hot at the root, amber, a dull coral at the tip
+            dot(wx, wy, wz, big, 255, 106 + 146 * Math.pow(hot, .8), 61 + 175 * hot * hot, al > 1 ? 1 : al);
           }
-          C.glow(fx + s * lx + c * lz, fy + top * .3, fz + c * lx - s * lz, Math.max(3, Wi * pxm * 1.5), 255, 244, 214, .06 * kNow * fl);
+          C.glow(fx + s * lx + c * lz, fy + top * .3, fz + c * lx - s * lz, Math.max(3, Wi * pxm * 1.8), 255, 176, 92, .09 * kNow * fl);
         }
       }
     }
@@ -312,7 +317,8 @@ export class Fire {
       const heat = Math.max(Math.exp(-a / 2.4), .55 * kk * Math.exp(-h / (140 * Math.sqrt(sz))));
       const al = kk * Math.min(1, a * 1.5) * Math.pow(1 - a / life, .7) * (.55 + .45 * heat) * Math.min(1, this.dense / Math.sqrt(nd / 3)) * (.55 + .9 * hsh(idx, this.seed + 3)) * (thin ? 1.4 : 1) * ss(rad * .3, rad * 1.8, zc);
       if (al < .01) continue;
-      const cr = 196 + (LIME[0] + 50 - 196) * heat, cg = 198 + (LIME[1] + 11 - 198) * heat, cb = 192 + (LIME[2] + 160 - 192) * heat;
+      // lit warm from the fire under it while low and hot, grey above
+      const cr = 196 + (255 - 196) * heat, cg = 198 + (176 - 198) * heat, cb = 192 + (112 - 192) * heat;
       const g0 = (idx * 37 + this.seed) | 0;
       for (let m = 0; m < nd; m++) {
         const j = (g0 + m * 1733) & GM, ox = GT[j] * rad * .7, oy = GT[(j + 1) & GM] * rad * .55, oz = GT[(j + 2) & GM] * rad * .7;

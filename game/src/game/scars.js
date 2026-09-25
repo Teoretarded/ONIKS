@@ -53,7 +53,7 @@ export function createScars(game) {
   const recs = new Map();                 // unit id -> { id, n, L (8 x [x y z r nx ny nz seed]), C (8 x [0 reach petal heat]), list, M, now, dead }
   const groups = [];                      // ejecta: { t0, n, P, V, K, gy, sea, near }
   const M9 = [1, 0, 0, 0, 1, 0, 0, 0, 1], W3 = [0, 0, 0];
-  let lastEv = null, lastPos = [0, 0, 0];
+  let lastEv = null, lastPos = [0, 0, 0], lastN = [0, 1, 0], lastW = 0;
   const stats = { scars: 0, fires: 0, ejecta: 0, snapMs: 0, drawMs: 0 };
   // scratch for the snap: the dots near the hit (model frame + normal), reused
   let TMP = new Float32Array(6 * 20000);
@@ -179,7 +179,7 @@ export function createScars(game) {
       din = [-h[0] / l, 0, -h[2] * .3 / l];
     }
     const cap = .35 * Math.max(def.size[1], def.size[2]);
-    const r0 = B.k * .5 * Math.cbrt(Wk) * (e.under ? 1.3 : 1), r = Math.min(r0, cap);
+    const r0 = B.k * .95 * Math.cbrt(Wk) * (e.under ? 1.25 : 1), r = Math.min(r0, cap);
     const o = new Array(12), ts = performance.now();
     if (!snap(ent, st, h, din, e.under ? .8 : Math.max(1.5, r * .55), o)) { o[0] = h[0]; o[1] = h[1]; o[2] = h[2]; o[3] = -din[0]; o[4] = -din[1]; o[5] = -din[2]; }
     const nl = Math.hypot(o[3], o[4], o[5]) || 1;
@@ -190,6 +190,8 @@ export function createScars(game) {
     lastPos[0] = pose.pos[0] + M[0] * S.x + M[1] * S.y + M[2] * S.z;
     lastPos[1] = pose.pos[1] + M[3] * S.x + M[4] * S.y + M[5] * S.z;
     lastPos[2] = pose.pos[2] + M[6] * S.x + M[7] * S.y + M[8] * S.z;
+    lastN[0] = M[0] * S.nx + M[1] * S.ny + M[2] * S.nz; lastN[1] = M[3] * S.nx + M[4] * S.ny + M[5] * S.nz; lastN[2] = M[6] * S.nx + M[7] * S.ny + M[8] * S.nz;
+    lastW = Wk;
     stats.surfMs = performance.now() - ts;
     addScar(u, S);
     const te = performance.now();
@@ -237,8 +239,8 @@ export function createScars(game) {
     const sea = S.sea, sz = Math.max(.12, Math.min(1.1, .18 + Math.sqrt(S.W) / 18));
     const r = S.r;
     const F = new Fire({ t0: sim.t, seed: S.seed * 7 + 3, size: sz, local: [0, 0, 0],
-      spread: [r * 1.1 + .4, r * 1.8 + (sea ? 2 : .8), r * .6 + .3], ceiling: (sea ? 750 : 200) * sz + 40,
-      life: sea ? (sz > .5 ? 200 : 120) : 90, flame: S.wl ? .12 : 1, embers: S.wl ? .2 : 1, lightR: 4 + r * 3, lightI: .5, lightRgb: [255, 236, 206], dense: S.wl ? 8 : 7 });
+      spread: [r * .9 + .4, r * 2.6 + (sea ? 3 : 1), r * .55 + .3], ceiling: (sea ? 900 : 240) * sz + 60,
+      life: sea ? (sz > .5 ? 220 : 130) : 90, flame: S.wl ? .15 : 1, embers: S.wl ? .25 : 1.6, lightR: 8 + r * 5, lightI: 1.1, lightRgb: [255, 170, 90], dense: S.wl ? 13 : 12 });
     F.k = 0;
     f.add(F, 0);
     S.fire = F;
@@ -366,7 +368,7 @@ export function createScars(game) {
         L[i * 8] = S.x; L[i * 8 + 1] = S.y; L[i * 8 + 2] = S.z; L[i * 8 + 3] = a < 0 ? 0 : S.r * grow;
         L[i * 8 + 4] = S.nx; L[i * 8 + 5] = S.ny; L[i * 8 + 6] = S.nz; L[i * 8 + 7] = S.seed;
         C[i * 4] = 0; C[i * 4 + 1] = S.reach; C[i * 4 + 2] = S.petal;
-        C[i * 4 + 3] = ah < 0 ? 0 : .25 + .75 * Math.exp(-ah / 18) * (S.W > 2 ? 1 : .5);
+        C[i * 4 + 3] = ah < 0 ? 0 : .05 + .95 * Math.exp(-ah / 28) * (S.W > 2 ? 1 : .5);
         if (S.fire) {
           // seated just outside the hole, at its upper edge on a side (the flames lick up the plating from the tear;
           // the hole itself stays dark), in the crater on a deck
@@ -389,6 +391,9 @@ export function createScars(game) {
     stats, groups,
     /* the snapped world point of the hit event just handled (fx lays its blast there) */
     surface(ev) { return ev && ev === lastEv ? lastPos : null; },
+    /* the world normal of the surface there and the warhead (kg) of the hit just handled */
+    normal(ev) { return ev && ev === lastEv ? lastN : null; },
+    charge(ev) { return ev && ev === lastEv ? lastW : 0; },
     burning(id) { const r = recs.get(id); return !!(r && r.list.some(S => S.fire)); },
     heavy(id) { const r = recs.get(id); return r ? r.heavy : 0; },
     /* the latest scar of a unit, model frame: { x, y, z, nx, ny, nz, r, W } */
