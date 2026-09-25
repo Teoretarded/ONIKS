@@ -13,6 +13,7 @@ import { Terrain } from './terrain.js';
 import { ModelLib, attitude } from './models.js';
 import { FX, LIME, CORAL, WH } from './fx.js';
 import { Overlay } from './overlay.js';
+import { Wire } from './wire.js';
 
 const R_EARTH = 6371000;
 export const TINT = { own: [198 / 255, 244 / 255, 50 / 255], hostile: [1, 106 / 255, 61 / 255], unknown: [1, 1, 1], neutral: [1, 1, 1] };
@@ -40,6 +41,9 @@ export class Renderer {
     this.camera = new RTSCamera(Object.assign({ ground: (x, z) => this.terrain.heightAt(x, z), bounds: [-o.map.W / 2 - 20000, -o.map.H / 2 - 20000, o.map.W / 2 + 20000, o.map.H / 2 + 20000] }, o.camera || {}));
     this.models = new ModelLib(this.G);
     this.fx = new FX(this.G, this);
+    // GPU hairlines (the Orbital language), flushed at the end of the frame; a failure here never takes the points down
+    try { this.wire = new Wire(this.G, this); } catch (e) { console.error('renderer: hairlines unavailable', e); this.wire = null; }
+    this.pcOff = false;                        // skip the point passes (a hairline picture covers the whole frame)
     this.overlay = o.overlay ? new Overlay(o.overlay) : null;
     this.pBg = program(gl, VS_BG, FS_BG, 'bg');
     this.bg = [11 / 255, 12 / 255, 10 / 255]; this.vignette = .62;
@@ -77,6 +81,7 @@ export class Renderer {
     const cam = this.camera, G = this.G;
     this.queue.length = 0; this.lights.length = 0;
     this.fx.begin(cam.eye);
+    if (this.wire) this.wire.begin(cam.eye);
     this.models.begin();
     this.terrain.prepare(cam, t);
     const fl1080 = 540 / Math.tan(cam.fov / 2);
@@ -132,6 +137,9 @@ export class Renderer {
   setScan(i, s) { this.scans[i] = s && s.mode !== 'off' ? s : { mode: 0 }; }
   /* the radar sweep painting the sea and the land: { origin [x, z], bearing (rad), amp, afterglow (rad), range (m), edge (rad) } or null */
   setSweep(s) { this.sweep = s; }
+  /* darken the finished frame toward black by a (0..1), leaving the CSS px rect `exclude` as it is (a cross-fade
+     into the hairline picture; call after end()). dissolve 0..1: the returns go out one by one instead of dimming */
+  veil(a, exclude, rgb, dissolve) { if (this.wire) this.wire.veil(a, rgb, exclude, dissolve); }
   /* screen box of a queued/drawn instance (tight, from its points); null off screen */
   screenBox(d) { if (d.hdg !== undefined || !d.R) d.R = attitude(d.hdg || 0, d.pitch || 0, d.roll || 0); return this.models.screenBox(d, this.camera); }
   /* the instance under a screen point (CSS px) among the instances drawn this frame (those with an id) */
@@ -232,13 +240,15 @@ export class Renderer {
     this._ubo();
     gl.viewport(0, 0, G.W, G.H);
     gl.disable(gl.CULL_FACE);
-    // background
+    // background (pure black under a hairline picture)
     gl.disable(gl.DEPTH_TEST); gl.depthMask(false); gl.disable(gl.BLEND);
     gl.useProgram(this.pBg.p);
-    gl.uniform4f(this.pBg.u.uBg, this.bg[0], this.bg[1], this.bg[2], this.vignette);
+    if (this.pcOff) gl.uniform4f(this.pBg.u.uBg, 0, 0, 0, 0);
+    else gl.uniform4f(this.pBg.u.uBg, this.bg[0], this.bg[1], this.bg[2], this.vignette);
     gl.bindVertexArray(null);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.depthMask(true); gl.clearDepth(1); gl.clear(gl.DEPTH_BUFFER_BIT);
+    if (this.pcOff) { this._endWire(t0); return; }
     gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL);
     // occluder: land envelope with the seabed
     gl.colorMask(false, false, false, false);
@@ -280,8 +290,15 @@ export class Renderer {
     this.fx.drawLift();
     gl.disable(gl.BLEND); gl.depthMask(true);
     gl.bindVertexArray(null);
-    this.stats.ms = performance.now() - t0;
     this.stats.draws = draws; this.stats.points = pts;
+    this._endWire(t0);
+  }
+  /* the hairlines queued this frame (unless their owner flushes them itself: wire.auto = false) */
+  _endWire(t0) {
+    if (this.pcOff) { this.stats.draws = 0; this.stats.points = 0; }
+    if (this.wire && this.wire.auto && !this.wire.flushed) this.wire.flush();
+    this.gl.bindVertexArray(null);
+    this.stats.ms = performance.now() - t0;
   }
 }
 

@@ -7,7 +7,9 @@ import { put, landSpot, siteWithView, snap, bearing, offset, dist, radarOn, xz, 
 import { AI } from '../../sim/ai.js';
 
 const DEG = Math.PI / 180;
-const ROUTE = [[1500, -52000], [2500, -38000], [3000, -26000], [4500, -14000], [5000, 4000], [3000, 30000]];
+/* the channel northbound; the column starts 19 km short of the narrows (about 29 min at 21 kn: a battery that does
+   nothing loses the strait inside half an hour of game time) */
+const ROUTE = [[2500, -38000], [3000, -26000], [4500, -14000], [5000, 4000], [3000, 30000]];
 const SHORE = [-7000, 6000];      // the battery on the western shore of the strait, facing the narrows
 const NARROWS_Z = -19000;
 const SPEED = 11;                 // m/s, 21 kn
@@ -65,7 +67,8 @@ export function run(S) {
     u.spdCap = SPEED;
   }
   ddgs.forEach(steer);
-  S.every(3, () => { for (const u of ddgs) if (u.alive && !u.orders.length) steer(u); });
+  // back on the route after an attack, and at 21 kn on it (a finished leg drops the speed cap)
+  S.every(3, () => { for (const u of ddgs) if (u.alive) { if (!u.orders.length) steer(u); else if (u.orders[0].kind === 'move') u.spdCap = SPEED; } });
 
   /* ---- intro: over the column at the south entrance, up the strait to the battery on the western shore ---- */
   const d0 = ddgs[0];
@@ -94,8 +97,9 @@ export function run(S) {
     if (!L || !o || o.state !== 'active') return;
     const togo = Math.max(0, NARROWS_Z - L.pos[2]);
     o.within = sim.t + togo / SPEED;
-    if (togo <= 0) { S.say('The lead ship is through the narrows', { tone: 'coral' }); S.failObj('sink'); }
+    if (togo <= 0) S.failObj('sink');
   });
+  S.when(() => { const o = S.objective('sink'); return o && o.state === 'failed'; }, () => S.say('The lead ship is through the narrows', { tone: 'coral' }));
 
   /* ---- one salvo of six ---- */
   const recent = [];

@@ -139,7 +139,7 @@ Orbital agent started: past ~50 km altitude the picture dissolves into the Orbit
   rings on the water), Bal coastal launcher.
 - `run_game.bat` in the repo root starts the server and opens the game.
 
-## 06:55 · Scan payoff done
+## 06:45 · Scan payoff done
 The scan is now the signature move: the bolt forks to every hull in the ring (chain lightning, nearest first), the
 area flashes lime, lime tendrils race over each struck hull, the X-ray flickers on (VLS canisters, turbines, the
 rounds in a TEL's containers), fitted 3D part boxes pop in order with labels decoding out of glyph noise, the tag

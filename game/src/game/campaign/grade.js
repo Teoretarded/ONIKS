@@ -2,8 +2,9 @@
 
    Grade (a won mission): the optional objectives are how a mission is done well (losses, time, rounds fired);
    S = every optional objective met and nothing lost; each optional missed costs a step, any loss a step, losing
-   over a third of the force another: A, B, C. A lost mission is D. The grade replaces the match's own in
-   game.result and oniks.lastResult.
+   over a third of the force another: A, B, C. A mission with a par (`par: { kills }`) caps it: no enemy ship sunk
+   is C at best, fewer than the par B at best, so a battle sat out never grades well. A lost mission is D. The
+   grade replaces the match's own in game.result and oniks.lastResult.
 
    Carry: progress.carry = { after: n, ammo: { tel, telCap, cargo, cargoCap } } (the match's stats.ammo, kept by
    data/campaign.js recordResult). The next mission starts with the rounds left (in TELs and transloaders) plus
@@ -17,11 +18,29 @@ export function gradeOf(game, win) {
   const missed = objs.filter(o => o.state !== 'done').length;
   const sim = game.sim, S = sim.sides[game.side];
   const start = game.startCount || Math.max(1, sim.alive(game.side).length + S.lost);
+  // drones are spent, not lost: an Orlan-10 shot down over the fleet does not cost a step
+  const o = game.getSystem && game.getSystem('objectives'), byType = o && o.counts ? o.counts.losses : null;
+  const lost = Math.max(0, S.lost - (byType && byType.drone || 0));
   // one step per optional missed, one for any loss, one more for heavy losses (a third of the force)
   let k = missed;
-  if (S.lost > 0) k++;
-  if (S.lost > start / 3) k++;
+  if (lost > 0) k++;
+  if (lost > start / 3) k++;
+  // a battle that was sat out is not done well: with a par, no ship sunk is C at best, short of the par B at best
+  const par = game.mission && game.mission.par;
+  if (par && par.kills) {
+    const n = shipKills(game);
+    if (n === 0) k = Math.max(k, 3);
+    else if (n < par.kills) k = Math.max(k, 2);
+  }
   return ['S', 'A', 'B', 'C'][Math.min(3, k)];
+}
+
+/* enemy ships sunk by the player (the objectives system counts kills by type) */
+export function shipKills(game) {
+  const o = game.getSystem && game.getSystem('objectives');
+  const k = o && o.counts ? o.counts.kills : null;
+  if (!k) return 0;
+  return (k.ddg || 0) + (k.carrier || 0);
 }
 
 /* rewrite the grade the match computed (bus 'result' comes right after oniks.lastResult is written) */

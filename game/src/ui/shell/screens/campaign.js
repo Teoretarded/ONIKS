@@ -8,13 +8,15 @@ import * as MS from '../mapsrc.js';
 import { pixelScale } from '../preview.js';
 
 const cap = s => s ? s[0].toUpperCase() + s.slice(1) : '';
-/* index.html?unlock#campaign opens every mission for this visit (for testing; nothing is saved) */
+/* index.html?unlock#campaign opens every mission on this screen for this visit, for testing. Nothing of it is saved:
+   the URL itself is never written anywhere, and a result that comes back for a mission the real progress still has
+   locked is not recorded (data/campaign.js recordResult), so the list below never shows a pass out of order. */
 const ALL = new URLSearchParams(location.search).has('unlock');
 const isUnlocked = (n, p) => ALL || unlocked(n, p);
 
 export function campaignScreen(app) {
   const el = h('section.scr#scr-campaign');
-  const kick = h('div.kick', h('i'), h('span', '03 · Campaign'));
+  const kick = h('div.kick', h('i'), h('span', ALL ? '03 · Campaign · Test · all open' : '03 · Campaign'));
   const deb = h('div.debrief');
   const list = h('div.form.mlist');
   const blurb = h('div.sblurb');
@@ -109,9 +111,15 @@ export function campaignScreen(app) {
       await MS.refresh();
       build();
       let k = p && p.focus != null ? p.focus - 1 : -1;
+      // a result that came back for a locked mission (a test run) does not steer the list onto it
+      if (k >= 0 && (!MISSIONS[k] || !isUnlocked(MISSIONS[k].n, prog))) k = -1;
       if (k < 0) { const nx = MISSIONS.findIndex(m => !isPassed(m.n, prog) && isUnlocked(m.n, prog)); k = nx >= 0 ? nx : MISSIONS.length - 1; }
       i = -1; set(k, true);
-      if (p && p.result) app.debrief(deb, p.result); else deb.classList.remove('on');
+      if (p && p.result) {
+        app.debrief(deb, p.result);
+        // a result for a mission that is still locked (a test run) is shown but not kept
+        if (p.result.ignored) deb.insertAdjacentHTML('beforeend', '<span class="ro">Not recorded · <b>mission locked</b></span>');
+      } else deb.classList.remove('on');
     },
     key(e) {
       if (busy) return true;

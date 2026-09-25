@@ -105,3 +105,100 @@
 
 @keyframes blink { 50% { opacity: 0; } }
 @keyframes typein { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+
+/* ---------------------------------------------------------------- loading (play.html #boot, src/ui/loading)
+   The ONIKS mark where the HUD puts it (56, 48 at 1080p, the HUD's scale --ls), one mono line with the real step,
+   a dotted progress line; the screen fades over the opening shot. */
+#boot.oniks-load { position: absolute; inset: 0; z-index: 50; background: var(--bg); color: #fff; --ls: 1; opacity: 1;
+  transition: opacity .9s cubic-bezier(.4,0,.2,1); }
+#boot.oniks-load.off { opacity: 0; pointer-events: none; }
+#boot.oniks-load .ld-mark { position: absolute; left: calc(56px * var(--ls)); top: calc(48px * var(--ls)); display: flex; align-items: center; gap: calc(11px * var(--ls));
+  font: 600 calc(22px * var(--ls))/1 var(--sans); letter-spacing: -.02em; }
+#boot.oniks-load .ld-mark svg { width: calc(24px * var(--ls)); height: calc(24px * var(--ls)); }
+#boot.oniks-load .ld-mid { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: calc(18px * var(--ls)); }
+#boot.oniks-load .ld-line { display: flex; align-items: center; gap: calc(12px * var(--ls)); height: calc(14px * var(--ls)); font: 500 calc(12.5px * var(--ls))/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+#boot.oniks-load .ld-line > i { width: calc(8px * var(--ls)); height: calc(8px * var(--ls)); background: var(--lime); animation: blink .5s steps(2) infinite; flex: none; }
+#boot.oniks-load .ld-t:empty { display: none; }
+#boot.oniks-load .ld-bar { display: flex; gap: calc(3px * var(--ls)); height: calc(3px * var(--ls)); }
+#boot.oniks-load .ld-bar i { width: calc(3px * var(--ls)); height: calc(3px * var(--ls)); background: rgba(255,255,255,.16); }
+#boot.oniks-load .ld-bar i.f { background: rgba(255,255,255,.86); }
+#boot.oniks-load .ld-bar i.h { background: var(--lime); }
+#boot.oniks-load.ld-done .ld-line > i { animation: none; }
+#boot.oniks-load.ld-fail .ld-line { color: var(--coral); }
+#boot.oniks-load.ld-fail .ld-line > i { background: var(--coral); animation: none; }
+
+/* ---------------------------------------------------------------- help (F1) and the in-game settings (src/ui/help)
+   Over the dimmed live game, laid out like the pause menu (the block at 9vw, the gradient fading to the battle on the
+   right); inside, 1080p px (the root .hp-in is zoomed to the window like the HUD). */
+.oniks-help, .oniks-set { position: absolute; inset: 0; z-index: 3; }
+.oniks-help { background: linear-gradient(90deg, rgba(11,12,10,.93) 0%, rgba(11,12,10,.86) 42%, rgba(11,12,10,.55) 70%, rgba(11,12,10,.3) 100%); }
+.oniks-help .hp-in, .oniks-set .hp-in { position: absolute; left: 0; top: 0; display: flex; align-items: center; }
+.oniks-help .blk, .oniks-set .blk { margin-left: 9vw; }
+.oniks-help .cols { display: flex; gap: 64px; margin: 40px 0 44px; }
+.oniks-help .col { width: 300px; display: flex; flex-direction: column; gap: 34px; }
+.oniks-help .gl { display: flex; gap: 12px; align-items: baseline; padding-bottom: 11px; margin-bottom: 10px; border-bottom: 1px solid var(--hair);
+  font: 400 11.5px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: rgba(255,255,255,.82); }
+.oniks-help .gl .n { color: var(--lime); }
+.oniks-help .rows { display: grid; grid-template-columns: max-content 1fr; column-gap: 14px; row-gap: 0; align-items: center;
+  font: 400 11.5px/1 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--dim); }
+.oniks-help .r { display: contents; }
+.oniks-help .r b { justify-self: start; margin: 4px 0; font: 500 10.5px/1 var(--mono); letter-spacing: .05em; color: #0B0C0A; background: rgba(255,255,255,.78); padding: 3px 5px 2px; white-space: nowrap; }
+.oniks-help .r span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.oniks-help .keys span[data-k] { cursor: pointer; }
+.oniks-help .keys span[data-k]:hover { border-color: rgba(255,255,255,.4); color: #fff; }
+
+/* the settings rows: the Settings screen's compact form, smaller */
+.oniks-set .blk { width: 760px; }
+.oniks-set .list { margin: 34px 0 18px; }
+.oniks-set .row { position: relative; display: flex; align-items: center; height: 44px; cursor: pointer; }
+.oniks-set .row .n { font: 400 12px var(--mono); letter-spacing: .05em; color: rgba(255,255,255,.3); width: 36px; flex: none; }
+.oniks-set .row .sq { width: 9px; height: 9px; background: var(--lime); transform: scale(0); transition: transform .18s cubic-bezier(.3,1.6,.5,1); flex: none; margin-right: 16px; }
+.oniks-set .row .k { font: 400 12.5px/1 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); width: 168px; flex: none; }
+.oniks-set .row .vals { display: flex; align-items: center; gap: 26px; font: 500 19px/1 var(--sans); letter-spacing: -.02em; white-space: nowrap; }
+.oniks-set .row .c { position: relative; color: rgba(255,255,255,.3); }
+.oniks-set .row .c:hover { color: rgba(255,255,255,.72); }
+.oniks-set .row .c .tx { position: relative; }
+.oniks-set .row .c .tx::after { content: ''; position: absolute; left: 0; right: 0; bottom: -9px; height: 3px;
+  background-image: radial-gradient(circle, rgba(255,255,255,.9) 1px, transparent 1.3px); background-size: 6px 3px; background-repeat: repeat-x;
+  clip-path: inset(0 100% 0 0); transition: clip-path .3s steps(12); opacity: .5; }
+.oniks-set .row .c.sel { color: rgba(255,255,255,.8); }
+.oniks-set .row .c.sel .tx::after { clip-path: inset(0 0 0 0); }
+.oniks-set .row.on .n { color: var(--lime); }
+.oniks-set .row.on .sq { transform: scale(1); }
+.oniks-set .row.on .k { color: #fff; }
+.oniks-set .row.on .c.sel { color: #fff; }
+.oniks-set .row.on .c.sel .tx::after { opacity: 1; }
+.oniks-set .meter { display: inline-flex; gap: 6px; align-items: center; }
+.oniks-set .meter i { width: 12px; height: 12px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.26); cursor: pointer; }
+.oniks-set .meter i.f { background: rgba(255,255,255,.62); box-shadow: none; }
+.oniks-set .row.on .meter i.f { background: #fff; }
+.oniks-set .row.on .meter i.f.top { background: var(--lime); }
+.oniks-set .mv { margin-left: -8px; font: 400 13px var(--mono); color: var(--dim); font-variant-numeric: tabular-nums; }
+.oniks-set .row.on .mv { color: #fff; }
+.oniks-set .gap { height: 14px; }
+.oniks-set .row.act { height: 52px; }
+.oniks-set .row.act .lab { position: relative; font: 400 26px/1 var(--sans); letter-spacing: -.02em; color: rgba(255,255,255,.34); }
+.oniks-set .row.act .lab::after { content: ''; position: absolute; left: 0; right: 0; bottom: -9px; height: 3px;
+  background-image: radial-gradient(circle, rgba(255,255,255,.9) 1px, transparent 1.3px); background-size: 6px 3px; background-repeat: repeat-x;
+  clip-path: inset(0 100% 0 0); transition: clip-path .3s steps(12); }
+.oniks-set .row.act.on .lab { color: #fff; }
+.oniks-set .row.act.on .lab::after { clip-path: inset(0 0 0 0); }
+.oniks-set .note { height: 22px; margin: 0 0 30px 61px; font: 400 15px/1.42 var(--sans); letter-spacing: -.005em; color: var(--dim); white-space: nowrap; }
+.oniks-set .note.in { animation: typein .45s steps(18); }
+.oniks-set .keys span[data-kk] { cursor: pointer; }
+
+/* the F1 HELP chip: bottom left, under the selection panel, at the HUD's scale */
+.oniks-f1 { position: absolute; left: 0; bottom: 0; zoom: var(--hs, 1); padding: 0 0 14px 56px; }
+.oniks-f1 .keys { gap: 0; }
+.oniks-f1 .keys span { padding: 4px 8px 3px 4px; gap: 7px; font-size: 10px; color: rgba(255,255,255,.42); border-color: rgba(255,255,255,.1); cursor: pointer; }
+.oniks-f1 .keys b { padding: 2px 4px 1px; background: rgba(255,255,255,.62); }
+.oniks-f1 .keys span:hover { color: #fff; border-color: rgba(255,255,255,.34); }
+.oniks-f1 .keys span:hover b { background: var(--lime); }
+.oniks-f1.off { display: none; }
+body.oniks-helping #hud { opacity: 0; }
+body.oniks-helping #hud .hit { pointer-events: none !important; }
+body.oniks-helping .oniks-sbx, body.oniks-helping .oniks-buy { opacity: 0; pointer-events: none; }
+
+/* ---------------------------------------------------------------- leaving a match (match.js): through black */
+.oniks-fade { position: fixed; inset: 0; z-index: 100; background: var(--bg); opacity: 0; transition: opacity .34s ease-in; pointer-events: auto; }
+.oniks-fade.on { opacity: 1; }

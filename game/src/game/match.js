@@ -84,13 +84,37 @@ export function createMatchFlow(game) {
     if (dir && dir.set) dir.set(true);
   }
   function act(a) {
-    if (a === 'continue') location.href = back();
-    else if (a === 'restart') location.reload();
+    if (a === 'continue') leave(back());
+    else if (a === 'restart') leave(null);
     else if (a === 'watch') { if (endEl) endEl.classList.toggle('min'); }
     else if (a === 'resume') openMenu(false);
-    else if (a === 'settings') window.open('index.html#settings', 'oniks-settings');   // another tab: the match stays, settings apply live
-    else if (a === 'quit') location.href = back();
+    else if (a === 'settings') settings();
+    else if (a === 'quit') leave(back());
     else if (a === 'auto') { game.setAutoSlow(!game.autoSlow); renderMenu(); }
+  }
+  /* the pause menu's Settings: the in-game panel (ui/help) over the paused battle, back to this menu after; without
+     it, the Settings screen in another tab (the settings apply live across tabs) */
+  function settings() {
+    const h = game.getSystem('help');
+    if (!h || !h.openSettings) { window.open('index.html#settings', 'oniks-settings'); return; }
+    const blk = menuEl && menuEl.querySelector('.blk');
+    if (blk) blk.style.visibility = 'hidden';
+    h.openSettings({ onClose() { if (menuOpen) { renderMenu(); focusRow('settings'); } } });
+  }
+  function focusRow(a) { if (!menuEl) return; menuEl.querySelectorAll('.btn').forEach(b => b.classList.toggle('on', b.dataset.a === a)); }
+  /* leave the match through black: the sound and the picture fade out together, then the menu (or the same match
+     again) fades in from black */
+  let leaving = false;
+  function leave(url) {
+    if (leaving) return;
+    leaving = true;
+    const au = game.getSystem('audio');
+    if (au && au.mute) try { au.mute(true); } catch (e) { /* */ }
+    const v = document.createElement('div');
+    v.className = 'oniks-fade';
+    document.body.appendChild(v);
+    requestAnimationFrame(() => v.classList.add('on'));
+    setTimeout(() => { if (url) location.href = url; else location.reload(); }, 380);
   }
 
   /* arrows move the lime square, Enter takes the row */

@@ -17,17 +17,20 @@
   body.ui-off #ui > :not(.always) { display: none; }
   #perf { position: absolute; left: 50%; bottom: 118px; transform: translateX(-50%); font: 400 11px/1.6 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); text-align: center; font-variant-numeric: tabular-nums; white-space: pre; }
   #perf b { font-weight: 400; color: #fff; }
-  #boot { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font: 500 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); gap: 12px; background: var(--bg); transition: opacity .4s; z-index: 50; }
-  #boot i { width: 8px; height: 8px; background: var(--lime); animation: blink .5s steps(2) infinite; }
-  #boot.off { opacity: 0; pointer-events: none; }
+  /* #boot: the loading screen (styles/game.css "loading", src/ui/loading) */
 </style></head>
 <body>
 <div id="view">
   <canvas id="gl"></canvas>
   <canvas id="ov"></canvas>
   <div id="ui"><div id="perf"></div></div>
-  <div id="boot"><i></i><span id="bootmsg">Loading</span></div>
+  <div id="boot" class="oniks-load"><div class="ld-mark"><svg viewBox="0 0 24 24"><path d="M12 2 20.5 22h-4.1L12 11.4 7.6 22H3.5z" fill="#fff"/><circle cx="12" cy="18.2" r="1.7" fill="#C6F432"/></svg><span>ONIKS</span></div>
+    <div class="ld-mid"><div class="ld-line"><i></i><span class="ld-t"></span></div><div class="ld-bar"></div></div></div>
 </div>
+<script>/* the loading screen from the first paint: its scale and its dotted bar (src/ui/loading takes it over) */
+(function () { var b = document.getElementById('boot'), s = Math.max(.8, Math.min(1.6, Math.min(innerWidth / 1920, innerHeight / 1080)));
+  b.style.setProperty('--ls', s); b.querySelector('.ld-bar').innerHTML = new Array(57).join('<i></i>'); })();</script>
+<script type="module">import { createLoading } from './src/ui/loading/index.js'; createLoading(document.getElementById('boot'));</script>
 <script src="../reference/menus/common/m3.js"></script>
 <script src="../reference/menus/common/geo.js"></script>
 <script src="../reference/films/common/hd_land.js"></script>

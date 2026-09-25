@@ -90,7 +90,7 @@ const app = {
   launch(url, label) {
     sfx.start();
     this.veil(true, label || '');
-    setTimeout(() => { location.href = url; }, 900);
+    setTimeout(() => { location.href = url; }, 700);     // the veil is black by then (.6 s); play.html opens on black
   },
 
   /* one line after a match: [02] Scale · Passed · Grade B, then the stats */

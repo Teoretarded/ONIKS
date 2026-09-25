@@ -1,7 +1,7 @@
 /* World helpers for the mission scripts: points on the map, placing units, the enemy's picture, the enemy AI on and
    off, air raids, radars, weather changes (a squall rolling in, a storm starting) and a lightning strike. All of it
    goes through the sim's own state and functions, so the sim stays deterministic for a given run of the script. */
-import { detect, flashReveal, los } from '../../sim/sensors.js';
+import { detect, flashReveal, los, horizon } from '../../sim/sensors.js';
 import { setAi } from '../setup.js';
 import { UNITS, TEL_ELEV, CLASSIFY } from '../../data/units.js';
 
@@ -84,6 +84,32 @@ export function siteWithView(sim, near, targets, r, h, step) {
   }
   return best || snap(sim, 'land', N[0], N[1]);
 }
+/* can a sensor at `from` (antenna `h` m above the ground there) see a target `th` m tall at `p`: line of sight over
+   the terrain and inside the radar horizon */
+export function sees(sim, from, h, p, th) {
+  const A = xz(from), P = xz(p), map = sim.map;
+  const ay = Math.max(0, map.h(A[0], A[1])) + h, ty = Math.max(0, map.h(P[0], P[1])) + (th || 20);
+  if (Math.hypot(P[0] - A[0], P[1] - A[1]) > horizon(ay, ty)) return false;
+  return los(map, A[0], ay, A[1], P[0], ty, P[1]);
+}
+/* sea points `dMin`..`dMax` m from `from`, on a grid of `step` m, deep (`depth` m) and open to ships:
+   [{ p: [x, z], d, b (bearing from `from`) }] */
+export function seaRing(sim, from, dMin, dMax, o) {
+  o = o || {};
+  const F = xz(from), map = sim.map, step = o.step || 1500, depth = o.depth || 15, out = [];
+  const W = map.W / 2 - 4000, H = map.H / 2 - 4000;
+  for (let z = F[1] - dMax; z <= F[1] + dMax; z += step) for (let x = F[0] - dMax; x <= F[0] + dMax; x += step) {
+    if (Math.abs(x) > W || Math.abs(z) > H) continue;
+    const d = Math.hypot(x - F[0], z - F[1]);
+    if (d < dMin || d > dMax) continue;
+    if (map.h(x, z) > -depth || !sim.nav.open('sea', x, z)) continue;
+    out.push({ p: [x, z], d, b: Math.atan2(x - F[0], z - F[1]) });
+  }
+  return out;
+}
+/* the smallest angle between two bearings */
+export const angle = (a, b) => { const d = Math.abs(((a - b) % (Math.PI * 2) + Math.PI * 3) % (Math.PI * 2) - Math.PI); return d; };
+
 /* a flat land spot near (x, z), clear of the given points by `clear` m */
 export function landSpot(sim, x, z, r, avoid, clear) {
   const map = sim.map, rnd = sim.rng.place;
@@ -173,6 +199,51 @@ export function fleetStrikeOnce(sim, ai, max) {
   }
   return null;
 }
+
+/* a Tomahawk salvo: `n` rounds on `target` from the destroyers in `ships` that reach it, spread over them (the ship
+   with the most left fires most) so they come in together; their side learns the target first. Ships already on an
+   attack order are left alone. Returns the rounds ordered (0 when none can fire). The ships' own course is theirs to
+   pick up again (their orders are replaced by the attack). */
+export function salvo(sim, ships, target, n, o) {
+  o = o || {};
+  if (!target || !target.alive || !(n > 0)) return 0;
+  // rounds a ship still has once the attack orders it holds are fired (o.queue: a second target after the first)
+  const free = s => s.ammo.strike - s.orders.reduce((a, x) => a + (x.kind === 'attack' && x.w !== 'gun5' ? Math.max(0, (x.n || 0) - (x.fired || 0)) : 0), 0);
+  const can = ships.filter(s => s.alive && s.def.weapons.strike && free(s) > 0 && !s.off.strike
+    && (o.queue || !(s.orders[0] && s.orders[0].kind === 'attack')) && dist(s, target) < s.def.weapons.strike.range * .95)
+    .sort((a, b) => free(b) - free(a));
+  if (!can.length) return 0;
+  const share = new Map();
+  let left = n;
+  while (left > 0) {
+    let any = false;
+    for (const s of can) { if (left <= 0) break; const k = share.get(s) || 0; if (k < free(s)) { share.set(s, k + 1); left--; any = true; } }
+    if (!any) break;
+  }
+  const c = knows(sim, can[0].side, target, o.err || 150);
+  if (c && target.speed < .5) c.vel[0] = c.vel[1] = c.vel[2] = 0;
+  let sent = 0;
+  for (const [s, k] of share) { sim.order([s.id], { kind: 'attack', target: target.id, n: k, queue: !!o.queue }); sent += k; }
+  return sent;
+}
+/* their rounds in the air keep their aim on a target that stands where they have it: the side's track of a unit that
+   has not moved off it is refreshed (a fixed site they have a fix on stays fixed; a rough radio bearing would
+   otherwise replace it after a minute and send the rounds kilometres wide). A TEL that drives off its launch point
+   is not refreshed, so moving after firing still works. Call every few seconds. */
+export function holdTracks(sim, side) {
+  const S = sim.sides[side];
+  for (const p of sim.projectiles.values()) {
+    if (!p.alive || p.side !== side || p.tk !== 'unit' || !p.P.threat) continue;
+    const u = sim.units.get(p.target);
+    if (!u || !u.alive || u.side === side || u.speed > .5) continue;
+    const c = S.contacts.get(u.id);
+    if (!c || c.dead || Math.hypot(c.pos[0] - u.pos[0], c.pos[2] - u.pos[2]) > 500 || sim.t - c.lastSeen < 20) continue;
+    const k = knows(sim, side, u, 80);
+    if (k) { k.vel[0] = k.vel[1] = k.vel[2] = 0; }
+  }
+}
+/* strike rounds left in the ships */
+export const strikeLeft = ships => ships.reduce((a, s) => a + (s.alive && !s.off.strike ? s.ammo.strike || 0 : 0), 0);
 
 /* aircraft already airborne at (x, z), heading toward (tx, tz); returns the units */
 export function airborne(sim, type, side, x, z, n, toward_, spread) {

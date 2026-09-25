@@ -3,7 +3,7 @@
    the lime lightning, inspect (I, X-ray, exploded view), fire, watch (C), reload from the transloader, fire again.
    Nothing can be lost here: the destroyer has no orders to fire (the stock AI is off) and the transloader parks at
    the depot of the battery, so it refills itself. */
-import { put, stow, highGround, landSpot, snap, bearing, offset, dist, radarOn, xz } from './world.js';
+import { put, stow, highGround, landSpot, snap, bearing, offset, dist, radarOn, xz, sees, seaRing, angle, toward } from './world.js';
 import { CLASSIFY, TEL_ELEV } from '../../data/units.js';
 
 const DEG = Math.PI / 180;
@@ -32,15 +32,37 @@ export function setup(S) {
   put(sim, radar, rp[0], rp[1], seaB);
   stow(tel); stow(radar); radarOn(sim, radar, false);
   for (const u of [tel, radar, tlv]) u.def.modelState(u, sim.t);
-  // the destroyer on patrol 46 km out, radar off (it lights up after ours does), short of interceptors
-  const c = offset(tel, seaB, 46000);
-  const a = snap(sim, 'sea', ...offset(c, seaB + Math.PI / 2, 9000)), b = snap(sim, 'sea', ...offset(c, seaB - Math.PI / 2, 9000));
-  put(sim, ddg, a[0], a[1], seaB - Math.PI / 2);
+  // the destroyer on patrol 40-48 km out, radar off (it lights up after ours does), short of interceptors. Its patrol
+  // line is where the Monolith-B will see it the moment it radiates (line of sight from the mast, inside the radar
+  // horizon): the first contact is the tutorial's first beat, so it must come at once on any version of the map
+  const [a, b] = patrolLine(S, radar, tel, seaB, ddg.def.top);
+  put(sim, ddg, a[0], a[1], bearing(a, b));
   radarOn(sim, ddg, false);
   ddg.ammo.sm6 = 2; ddg.hold = false;
   sim.order([ddg.id], { kind: 'patrol', x: b[0], z: b[1] });
   ddg.spdCap = 7;
-  Object.assign(S.flags, { hq, tel, radar, tlv, ddg });
+  Object.assign(S.flags, { hq, tel, radar, tlv, ddg, patrol: [a, b] });
+}
+
+/* two sea points 14 km apart, 40-48 km from the radar, both in its sight, as near the bearing of the open sea as the
+   map allows (the old fixed 46 km out along it could land behind a headland or 85 km away after a snap to water) */
+function patrolLine(S, radar, tel, seaB, top) {
+  const { sim } = S, MH = 14, th = top * .7;
+  const ok = p => sees(sim, radar, MH, p, th) && dist(p, tel) > 15000;
+  let best = null, bs = -1e18;
+  for (const c of seaRing(sim, radar, 40000, 48000, { step: 2000, depth: 30 })) {
+    if (!ok(c.p)) continue;
+    const s0 = -angle(c.b, seaB) * 20000 - Math.abs(c.d - 44000);
+    if (s0 < bs) continue;
+    // the two ends across the line of sight, 7 km each way, both seen
+    const ends = [c.b + Math.PI / 2, c.b - Math.PI / 2].map(b => snap(sim, 'sea', ...offset(c.p, b, 7000), 20));
+    if (!ends.every(ok) || dist(ends[0], ends[1]) < 9000) continue;
+    best = ends; bs = s0;
+  }
+  if (best) return best;
+  // nothing seen that far: the old line (the runtime fallback in run() brings it into view)
+  const c = offset(tel, seaB, 46000);
+  return [snap(sim, 'sea', ...offset(c, seaB + Math.PI / 2, 9000)), snap(sim, 'sea', ...offset(c, seaB - Math.PI / 2, 9000))];
 }
 
 export function run(S) {
@@ -126,6 +148,17 @@ export function run(S) {
   S.once('scan', e => e.phase === 'hit' && e.side === S.side && e.hits && e.hits.includes(ddg.id), () => S.reveal('look'));
   // the destroyer's radar comes on a little after ours
   S.when(radiating, () => S.after(12, () => { radarOn(sim, ddg, true); }));
+  // a minute of sweeps and no paint (the map hid its patrol line): it turns in toward the coast until the radar has it
+  S.when(radiating, () => S.after(60, () => {
+    if (!ddg.alive || S.tracked(ddg)) return;
+    const p = snap(sim, 'sea', ...toward(radar, ddg, 34000));
+    sim.order([ddg.id], { kind: 'move', x: p[0], z: p[1] }); ddg.spdCap = 14;
+    S.when(() => S.tracked(ddg) || !ddg.alive, () => {
+      if (!ddg.alive) return;
+      const q = snap(sim, 'sea', ...offset(ddg, bearing(radar, ddg) + Math.PI / 2, 8000), 20);
+      sim.order([ddg.id], { kind: 'patrol', x: q[0], z: q[1] }); ddg.spdCap = 7;
+    });
+  }));
 
   /* ---- the salvo, told as it happens ---- */
   let salvoN = 0, firstHit = true;

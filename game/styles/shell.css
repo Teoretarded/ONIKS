@@ -378,3 +378,7 @@ body.th-orb .cutbar { bottom: 32px; }
 .keys span[data-key] { cursor: pointer; transition: border-color .15s, color .15s; }
 .keys span[data-key]:hover { border-color: rgba(255,255,255,.4); color: #fff; }
 body.th-orb .keys span[data-key]:hover { color: var(--ink); }
+
+/* ---------- the veil covers the whole window (a window that is not 16:9 shows the film in strips beside the stage) */
+body::before { content: ''; position: fixed; inset: 0; z-index: 1; background: var(--bg); opacity: 0; transition: opacity .6s; pointer-events: none; }
+body:has(#veil:not(.off))::before { opacity: 1; }

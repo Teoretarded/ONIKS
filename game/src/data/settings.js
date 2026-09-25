@@ -9,15 +9,18 @@
    onSettings(fn)       -> fn(settings, key) on every change, also from other tabs; returns an unsubscribe
    DOT_DENSITY[s.dotDensity] -> dot-count multiplier for the renderer
 
-   Keys (the shell's Settings screen edits all of them):
-     renderScale   0.5 | 0.67 | 0.75 | 1        fraction of the device-pixel canvas size
-     dotDensity    'low' | 'medium' | 'high' | 'ultra'
+   Keys (the shell's Settings screen edits all of them; the in-game panel (ui/help, pause menu > Settings) the ones
+   marked *, applied live):
+     renderStyle   'pointcloud' | 'orbital'     the look: Point Cloud (graphite, white dots) or Orbital (black, hairlines)
+     renderScale * 0.5 | 0.67 | 0.75 | 1        fraction of the device-pixel canvas size
+     dotDensity  * 'low' | 'medium' | 'high' | 'ultra'
      effects       'low' | 'medium' | 'high'    particles, smoke, debris, dynamic lights
-     showFps       bool
-     volume        0..1 (steps of 0.1)          master volume (films, UI, game)
+     showFps     * bool
+     volume      * 0..1 (steps of 0.1)          master volume (films, UI, game)
      uiSound       bool                          menu / HUD clicks
-     edgePan       bool                          camera pans at the screen edges
+     edgePan     * bool                          camera pans at the screen edges
      invertRotate  bool                          right-drag / Q E rotate the other way
+     autoSlow    * bool                          drop to x1 on a launch or a new contact (game.autoSlow; was 'oniks.autoSlow')
      timeRate      1 | 2 | 4 | 8 | 16 | 32       time rate a match starts at
      menuFilm      'random' | film id           the film behind the main menu */
 
@@ -41,6 +44,7 @@ export const MENU_FILMS = [
 
 /* The settings table: order, grouping, labels and allowed values. */
 export const SETTINGS = [
+  { key: 'renderStyle', group: 'Graphics', label: 'Render style', def: 'pointcloud', choices: [['pointcloud', 'Point Cloud'], ['orbital', 'Orbital']] },
   { key: 'renderScale', group: 'Graphics', label: 'Render scale', def: 1, choices: [[.5, '50%'], [.67, '67%'], [.75, '75%'], [1, '100%']] },
   { key: 'dotDensity', group: 'Graphics', label: 'Dot density', def: 'high', choices: [['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['ultra', 'Ultra']] },
   { key: 'effects', group: 'Graphics', label: 'Effects', def: 'high', choices: [['low', 'Low'], ['medium', 'Medium'], ['high', 'High']] },
@@ -49,29 +53,52 @@ export const SETTINGS = [
   { key: 'uiSound', group: 'Sound', label: 'UI sound', def: true, choices: [[false, 'Off'], [true, 'On']] },
   { key: 'edgePan', group: 'Controls', label: 'Edge pan', def: true, choices: [[false, 'Off'], [true, 'On']] },
   { key: 'invertRotate', group: 'Controls', label: 'Invert rotate', def: false, choices: [[false, 'Off'], [true, 'On']] },
+  { key: 'autoSlow', group: 'Controls', label: 'Auto ×1', def: true, choices: [[false, 'Off'], [true, 'On']] },
   { key: 'timeRate', group: 'Controls', label: 'Start time rate', def: 4, choices: [1, 2, 4, 8, 16, 32].map(v => [v, 'x' + v]) },
   { key: 'menuFilm', group: 'Menu', label: 'Menu film', def: 'random', cycle: true, choices: MENU_FILMS },
 ];
 
+/* One true line per setting, for the value it has (the Settings screen and the in-game panel show it). */
+export const NOTES = {
+  renderStyle: v => v === 'orbital' ? 'Black, white hairline wireframe, one yellow. The Orbital films.' : 'Graphite, white LiDAR dots, lime and coral. The Point Cloud films.',
+  renderScale: v => v < 1 ? `Draws at ${Math.round(v * 100)}% of the screen's pixels and scales up. Faster.` : 'Draws at the full resolution of the screen.',
+  dotDensity: v => ({ low: 'Fewer dots per model and per square of ground. Fastest.', medium: 'A lighter cloud.', high: 'The films\' density.', ultra: 'Denser than the films. Needs a strong GPU.' }[v]),
+  effects: v => ({ low: 'Flashes and trails only.', medium: 'Smoke and sparks, fewer lights.', high: 'Smoke, debris, sparks and dynamic light, as in the films.' }[v]),
+  showFps: v => v ? 'Frame rate and frame time on screen.' : 'No frame counter.',
+  volume: v => `Master volume ${Math.round(v * 100)}%. Films, interface and battle.`,
+  uiSound: v => v ? 'Clicks and blips on the menus and the HUD.' : 'Silent menus and HUD.',
+  edgePan: v => v ? 'The camera pans when the pointer touches a screen edge.' : 'Pan with W A S D or the middle button only.',
+  invertRotate: v => v ? 'Right-drag and Q E turn the camera the other way.' : 'Right-drag and Q E turn the camera as the pointer moves.',
+  autoSlow: v => v ? 'A launch or a new contact drops time to x1, so it is watched at real speed.' : 'Time stays at the rate you set.',
+  timeRate: v => `Matches start at x${v}.`,
+  menuFilm: v => v === 'random' ? 'A different favourite film behind the menu each time.' : 'This film plays behind the menu.',
+};
+
 export const DEFAULTS = Object.fromEntries(SETTINGS.map(s => [s.key, s.def]));
 
-/* Keybinds reference (shown in Settings; the HUD can show the same list). */
+/* Keybinds reference: the real bindings of the game's systems (camera.js, select.js, orders.js, time.js, director.js,
+   sensors, inspect, sandbox.js, match.js). Shown by the Settings screen and the in-game help (F1).
+   [key, what, { side: 'coast' | 'fleet', mode: 'sandbox' }?]: the help shows a row only for that side / mode. */
 export const KEYBINDS = [
   { group: 'Camera', binds: [
-    ['W A S D', 'Pan'], ['Edges', 'Pan'], ['Middle drag', 'Pan'],
-    ['Right drag', 'Rotate 360°'], ['Q E', 'Rotate'], ['PgUp PgDn', 'Pitch'], ['Wheel', 'Zoom'], ['F', 'Follow'] ] },
+    ['W A S D', 'Pan · Shift faster'], ['Edges', 'Pan'], ['Middle drag', 'Pan'], ['Right drag', 'Rotate 360° · pitch'],
+    ['Q E', 'Rotate'], ['PgUp PgDn', 'Pitch'], ['Wheel', 'Zoom to the pointer'], ['F', 'Follow · again: stop'] ] },
   { group: 'Select', binds: [
-    ['Click', 'Select'], ['Shift click', 'Add / remove'], ['Drag', 'Box select'], ['Double click', 'All of a type'],
-    ['Ctrl / Alt 1-9', 'Set group'], ['1-9', 'Recall group'], ['Tab', 'Next unit'] ] },
+    ['Click', 'Select'], ['Shift click', 'Add / remove'], ['Drag', 'Box select'], ['Double click', 'All of that type'],
+    ['Ctrl 1-9', 'Set group · Alt 1-9 too'], ['1-9', 'Recall group · twice: fly'], ['Tab', 'Next unit'], ['Esc', 'Clear selection'] ] },
   { group: 'Orders', binds: [
-    ['Right click', 'Move / attack / reload'], ['Shift', 'Queue'], ['Z', 'Stop'], ['H', 'Hold'], ['T', 'Deploy'],
-    ['R', 'Reload'], ['X', 'Scan'], ['Y', 'Radar on / off'], ['L', 'Launch drone'], ['B', 'Reinforce'],
-    ['I', 'Inspect'], ['E', 'Exploded view'] ] },
-  { group: 'Time and view', binds: [
-    ['Space', 'Pause'], ['+ −', 'Time rate'], ['C', 'Cinematic camera'], ['V', 'Radar view'], ['F10', 'Hide UI'],
-    ['Esc', 'Menu'] ] },
-  { group: 'Sandbox', binds: [
-    ['P', 'Spawn palette'], ['1-7 ⇧1-4', 'Pick a unit'], ['Del', 'Delete'], ['G', 'Fog'], ['K', 'Enemy AI'],
+    ['Right click', 'Move · attack a track'], ['Shift', 'Queue the order'], ['Z', 'Stop'], ['H', 'Weapons free / hold'],
+    ['T', 'Deploy / undeploy', { side: 'coast' }], ['R', 'Reload'], ['X', 'Scan, then click'], ['Y', 'Radar on / off'],
+    ['L', 'Launch Orlan-10', { side: 'coast' }], ['L', 'Launch strike package', { side: 'fleet' }], ['U', 'Launch MH-60R', { side: 'fleet' }],
+    ['B', 'Reinforcements'] ] },
+  { group: 'Inspect', binds: [
+    ['I', 'Inspect the selection'], ['Alt click', 'Inspect a unit or round'], ['E', 'Exploded view'], ['X', 'X-ray on / off'],
+    ['H', 'Hide the tags'], ['Esc', 'Leave'], ['Shift I', 'Anatomy browser', { mode: 'sandbox' }] ] },
+  { group: 'View and time', binds: [
+    ['C', 'Cinematic camera'], ['V', 'Radar view'], ['F10', 'Hide the interface'], ['F1', 'Help'],
+    ['Space', 'Pause'], ['+ −', 'Time rate'], ['Esc', 'Menu'] ] },
+  { group: 'Sandbox', mode: 'sandbox', binds: [
+    ['P', 'Spawn palette'], ['1-7 ⇧1-4', 'Pick a unit to place'], ['Del', 'Delete selected'], ['G', 'Fog'], ['K', 'Enemy AI'],
     ['J', 'Switch side'], ['N', 'Weather'] ] },
 ];
 
@@ -84,8 +111,11 @@ function valid(k, v) {
 }
 
 function read() {
-  try { const o = JSON.parse(localStorage.getItem(KEY) || '{}'); return o && typeof o === 'object' ? o : {}; }
-  catch (e) { return {}; }
+  let o = {};
+  try { o = JSON.parse(localStorage.getItem(KEY) || '{}'); if (!o || typeof o !== 'object') o = {}; } catch (e) { o = {}; }
+  // auto x1 used to live on its own key (game.js still writes it): an old Off carries over
+  if (!('autoSlow' in o)) { try { if (localStorage.getItem('oniks.autoSlow') === '0') o.autoSlow = false; } catch (e) { /* */ } }
+  return o;
 }
 function write(o) {
   try { localStorage.setItem(KEY, JSON.stringify(o)); } catch (e) { /* private mode: settings live for this page only */ }

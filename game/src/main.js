@@ -15,6 +15,7 @@ import { parseParams, createMatch } from './game/setup.js';
 import { createRender } from './game/render.js';
 import { getSettings, onSettings, DOT_DENSITY } from './data/settings.js';
 import { getMission } from './data/campaign.js';
+import { createLoading, warmLists } from './ui/loading/index.js';
 
 const Q = new URLSearchParams(location.search);
 const $ = id => document.getElementById(id);
@@ -38,6 +39,8 @@ const OPTIONAL = [
   [['./audio/index.js'], 'createAudio', 'audio'],
   [['./ui/hud/index.js', './ui/hud.js'], 'createHud', 'hud'],
   [['./game/landmarks.js'], 'createLandmarks', 'landmarks'],
+  [['./game/orbital.js'], 'createOrbital', 'orbital'],
+  [['./ui/help/index.js'], 'createHelp', 'help'],
 ];
 
 async function getMap(id) {
@@ -86,18 +89,28 @@ async function optional(path, exp, game, ctx) {
   } catch (e) { console.error(`main: ${path} failed to load`, e); return null; }
 }
 
+let LOAD = null;
 async function boot() {
+  const load = LOAD = createLoading($('boot'));     // the loading screen (ui/loading): the real step, a dotted bar
   const P = parseParams(location.search);
   const mission = P.mode === 'campaign' ? getMission(P.mission) : null;
   const mapId = (mission && mission.map) || P.map || 'krasnaya_kosa';
   const settings = getSettings();
   const perf = $('perf');
-  $('bootmsg').textContent = 'Loading map';
+  const skip = new Set((Q.get('nosys') || '').split(',').filter(Boolean));
+  // fetch the systems' code while the map loads (module by module the waves of imports add up); registered in order below
+  const code = async paths => { for (const p of paths) if (await exists(p)) return import(new URL(p, import.meta.url).href).catch(() => null); };
+  for (const [p] of OWN) code([p]);
+  for (const [paths, , key] of OPTIONAL) if (!skip.has(key)) code(paths);
+  code(['./data/models.js']);
+  let mapName = mapId.replace(/_/g, ' ');
+  try { const W = await import('./world/maps.js'); const d = W.MAPS && W.MAPS.find(m => m.id === mapId); if (d) mapName = d.name; } catch (e) { /* stub */ }
+  load.step('Map', mapName);
   const t0 = performance.now();
   const map = await getMap(mapId);
   const tMap = performance.now() - t0;
-  $('bootmsg').textContent = 'Building the picture';
-  await new Promise(r => setTimeout(r, 0));
+  load.step('Terrain', `${Math.round(map.W / 1000)} × ${Math.round(map.H / 1000)} km`);
+  await load.paint();
   const dens = DOT_DENSITY[settings.dotDensity] || 1;
   const R = new Renderer({ canvas: $('gl'), overlay: $('ov'), map, renderScale: (+Q.get('scale') || 1) * (settings.renderScale || 1),
     terrain: { densNear: 140 * dens, densFar: 380 * dens } });
@@ -112,10 +125,11 @@ async function boot() {
     R.models.registerAll(DM.CUT_MODELS, DM.MODEL_INFO);
   } catch (e) { console.warn('main: data/models.js not registered (' + (e && e.message) + ')'); }
 
-  $('bootmsg').textContent = 'Deploying';
-  await new Promise(r => setTimeout(r, 0));
+  load.step('Forces');
+  await load.paint();
   const M = createMatch(map, P, mission);
   const sim = M.sim;
+  load.note(`${sim.list().length} units`);
   if (P.rate) settings.timeRate = P.rate;
   const game = createGame({ sim, map, renderer: R, side: M.side, settings, mode: P.mode, params: P, mission });
   game.uiRoot = $('ui');
@@ -124,21 +138,21 @@ async function boot() {
   game.weather = M.weather;                       // { kind, wind, sea } (sandbox can change it: bus 'weather')
   if (M.weather) R.terrain.setWeather({ wind: M.weather.wind, sea: M.weather.sea });
   game.addSystem(createRender(game, DM));
-  const skip = new Set((Q.get('nosys') || '').split(',').filter(Boolean));
   const ctx = { DM, params: P, mission, match: M };
   // own systems first (in order), then the optional ones
-  for (const [path, exp] of OWN) { const s = await optional(path, exp, game, ctx); if (s) game.addSystem(s); }
+  let nSys = 0; const allSys = OWN.length + OPTIONAL.length;
+  load.count('Systems', 0, allSys);
+  for (const [path, exp] of OWN) { const s = await optional(path, exp, game, ctx); if (s) game.addSystem(s); load.count('Systems', ++nSys, allSys); }
   const firstOf = async (paths, exp) => { for (const p of paths) if (await exists(p)) return optional(p, exp, game, ctx); return null; };
-  const opt = await Promise.all(OPTIONAL.map(([paths, exp, key]) => skip.has(key) ? null : firstOf(paths, exp)));
+  const opt = await Promise.all(OPTIONAL.map(([paths, exp, key]) => (skip.has(key) ? Promise.resolve(null) : firstOf(paths, exp)).then(s => { load.count('Systems', ++nSys, allSys); return s; })));
   opt.forEach((s, i) => { if (s) { game.addSystem(s); console.log(`ONIKS: system ${OPTIONAL[i][2]} on`); } });
   game.attachInput($('gl'));
   game.bus.emit('ready', game);
   onSettings(s => { game.settings = Object.assign(game.settings, s); cam.edge = s.edgePan !== false; cam.invert = !!s.invertRotate; perf.style.display = s.showFps || Q.get('fps') === '1' ? '' : 'none'; });
 
-  // warm the model caches the opening needs
-  for (const k of ['tel', 'radar', 'pantsir', 'catapult', 'drone', 'destroyer', 'carrier', 'helo', 'fighter', 'oniks', 'sm6']) if (R.models.has(k)) R.models.warm(k);
-  if (R.models.has('transloader')) R.models.warm('transloader');
-  if (R.models.has('hq')) R.models.warm('hq');
+  // warm the model caches: every level of what is in play now (no stall on the first close look), the rest in idle time
+  const warm = warmLists(game);
+  await load.warm(game, warm.load);
   console.log(`ONIKS: ${P.mode} on ${map.id} as ${game.side}; map ${Math.round(tMap)} ms, setup ${Math.round(performance.now() - t0 - tMap)} ms; ${sim.list().length} units`);
 
   // camera: on the player's own force, looking toward the enemy
@@ -148,7 +162,9 @@ async function boot() {
     cam.set({ target: [x, R.terrain.heightAt(x, z), z], dist: d || 500, yaw: (y || 0) * DEG, pitch: (p || 30) * DEG });
   }
   if (Q.get('ui') === '0') game.setUiHidden(true);
-  $('boot').classList.add('off');
+  // two frames under the loading screen (terrain, shaders, the first samples), so the first one seen is smooth
+  for (let i = 0; i < 2; i++) { game.frame(0); await load.paint(); }
+  await load.fill();
 
   /* ---------- loop ---------- */
   perf.style.display = settings.showFps || Q.get('fps') === '1' ? '' : 'none';
@@ -196,6 +212,9 @@ async function boot() {
     }
   }
   requestAnimationFrame(loop);
+  // the loading screen fades over the opening shot (a short push-in unless a flight, a still or a bench has the camera)
+  load.reveal(game, { glide: !Q.get('cam') && !bench && P.mode !== 'campaign' && Q.get('ui') !== '0' })
+    .then(() => { if (!bench) load.idle(game, warm.idle); });
 
   window.ONIKS = {
     R, map, sim, game, cam, params: P, mission,
@@ -246,4 +265,4 @@ function openingShot(game) {
   }
 }
 
-boot().catch(e => { console.error(e); const b = $('bootmsg'); if (b) b.textContent = 'Error: ' + e.message; });
+boot().catch(e => { console.error(e); if (LOAD) LOAD.fail(e && e.message); });
