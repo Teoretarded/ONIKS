@@ -6,8 +6,9 @@
      node tools/sim.mjs balance [--maps all|a,b] [--seeds 24] [--seed 1] [--level normal] [--limit 7200]
                                 [--workers k] [--set a.b:v;...] [--rows] [--json out.json]
          the AI-vs-AI batches and table of game/balance.html (same match code: src/balance.js)
-     node tools/sim.mjs bench [--units 200] [--secs 60] [--map stub|<id>] [--seed 77]
-         a 200-unit battle with 300+ projectiles in flight: ms per sim-second, per-module breakdown
+     node tools/sim.mjs bench [--units 200] [--secs 60] [--warm 90] [--reps 3] [--map stub|<id>] [--seed 77] [--perftest]
+         a 200-unit battle with 300+ projectiles in flight: ms per sim-second, per-stage and per-file breakdown
+         (--perftest: the field of the tests.js perf test instead, units on hold)
      node tools/sim.mjs hash [--maps stub,fjord] [--seeds 1,2,3] [--ticks 6000] [--bench]
          state hashes after N ticks (sim.hash() and a deep hash of the whole state, full float bits and the
          event stream): run before and after a change that must not change behaviour
@@ -150,9 +151,24 @@ async function benchSim(o = {}) {
   const { Sim } = await mod('sim/sim.js');
   const { setupBattle } = await mod('sim/setup.js');
   const m = await getMap(o.map || 'stub');
-  const sim = new Sim(m, { seed: o.seed || 77, fog: true, aiSides: ['coast', 'fleet'] });
+  const sim = new Sim(m, { seed: o.perftest ? 77 : o.seed || 77, fog: true, aiSides: ['coast', 'fleet'] });
   setupBattle(sim);
   const r = sim.rng.place;
+  if (o.perftest) {
+    // tests.js 'perf: 200 units': the same field, weapons free on hold, spread wider (fewer rounds in flight)
+    const mixT = { coast: ['tel', 'tel', 'pantsir', 'radar', 'transloader', 'catapult', 'drone'], fleet: ['ddg', 'ddg', 'helo', 'fighter'] };
+    let sx = null; for (let x = -m.W / 2; x < m.W / 2; x += 100) if (m.h(x, 0) > 0) { sx = x; break; }
+    let k = sim.units.size;
+    while (k < 200) {
+      const side = k % 2 ? 'coast' : 'fleet', type = mixT[side][Math.floor(r() * mixT[side].length)];
+      let x, z;
+      if (side === 'coast') { x = sx + 3000 + r() * 25000; z = (r() - .5) * 60000; if (m.h(x, z) < 2) continue; }
+      else { x = sx - 20000 - r() * 40000; z = (r() - .5) * 70000; if (m.h(x, z) > -40) continue; }
+      sim.spawn(type, side, x, z, { hold: true, deployed: true, alt: type === 'fighter' ? 6000 : undefined });
+      k++;
+    }
+    return sim;
+  }
   const mix = { coast: ['tel', 'tel', 'pantsir', 'pantsir', 'radar', 'transloader', 'catapult', 'drone'], fleet: ['ddg', 'ddg', 'ddg', 'helo', 'fighter'] };
   // the stub map: land east of shoreX; a real map: around the spawns
   let shoreX = null;
@@ -242,23 +258,26 @@ async function profiledStepper() {
 
 async function cmdBench() {
   const secs = +opt('secs', 60), warm = +opt('warm', 90), mapId = opt('map', 'stub'), reps = +opt('reps', 3);
-  const BO = { map: mapId, units: +opt('units', 200), seed: +opt('seed', 77), nofog: !!opt('nofog') };
+  const BO = { map: mapId, units: +opt('units', 200), seed: +opt('seed', 77), nofog: !!opt('nofog'), perftest: !!opt('perftest') };
   const { DT } = await mod('sim/consts.js');
   // the plain step over the same stretch of the same battle, best of `reps` fresh runs (a shared machine: the
   // minimum is the honest cost). Warm-up: the first 90 s, while the salvoes build up to 250-450 rounds in flight.
   const W = Math.round(secs / DT);
-  let best = 1e9, projN = 0, projMax = 0, projMin = 1e9, k = 0, sim;
+  let best = 1e9, cold = 0, projN = 0, projMax = 0, projMin = 1e9, k = 0, sim;
   const stats = () => { const n = sim.projectiles.size; projN += n; k++; projMax = Math.max(projMax, n); projMin = Math.min(projMin, n); };
   for (let w = 0; w < reps; w++) {
     sim = await benchSim(BO);
     for (let i = 0; i < warm / DT; i++) { sim.step(); sim.drainEvents(); }
     const t0 = performance.now();
     for (let i = 0; i < W; i++) { sim.step(); if (w === 0 && (i & 7) === 0) stats(); sim.drainEvents(); }
-    best = Math.min(best, (performance.now() - t0) / (W * DT));
+    const ms = (performance.now() - t0) / (W * DT);
+    if (w === 0) cold = ms;
+    best = Math.min(best, ms);
   }
   const alive = sim.list().filter(u => u.alive).length;
-  console.log(`bench · ${mapId} map · ${sim.units.size} units (${alive} alive at the end) · projectiles in flight mean ${fmt(projN / k, 0)} (min ${projMin}, max ${projMax})`);
-  console.log(`step: ${fmt(best, 2)} ms per sim-second (t = ${warm}..${warm + secs} s, best of ${reps}) → x32 costs ${fmt(best * 32 / 10, 1)} % of a core`);
+  console.log(`bench${BO.perftest ? ' (the tests.js perf field)' : ''} · ${mapId} map · ${sim.units.size} units (${alive} alive at the end) · projectiles in flight mean ${fmt(projN / k, 0)} (min ${projMin}, max ${projMax})`);
+  console.log(`step: ${fmt(best, 2)} ms per sim-second warm (t = ${warm}..${warm + secs} s, best of ${reps} fresh runs) → x32 costs ${fmt(best * 32 / 10, 1)} % of a core`);
+  console.log(`      ${fmt(cold, 2)} ms per sim-second cold (the first run: the first match of a page, while the JIT still learns the battle)`);
   // the per-module breakdown, on a twin of the same battle, stepped by the profiled copy of step()
   const twin = await benchSim(BO);
   const { step, T, K, N } = await profiledStepper();
