@@ -6,7 +6,8 @@ import { esc, dur, dots, sat } from './fmt.js';
 
 const SHORTN = { tel: 'K340P TEL', radar: 'Monolith-B radar', pantsir: 'Pantsir-S1', catapult: 'Orlan-10 catapult', drone: 'Orlan-10 UAV',
   transloader: 'K342P transloader', ddg: 'DDG-51 Arleigh Burke', helo: 'MH-60R Seahawk', fighter: 'F/A-18E Super Hornet',
-  bal: 'Bal · 3K60 launcher', ssk: 'Kilo 636.3 · SSK', aew: 'E-2D Advanced Hawkeye', ssn: 'Virginia · SSN' };
+  bal: 'Bal · 3K60 launcher', ssk: 'Kilo 636.3 · SSK', aew: 'E-2D Advanced Hawkeye', ssn: 'Virginia · SSN',
+  lhd: 'LHD Wasp · 3 LCAC · 8 ACV', lcac: 'LCAC · into an LHD', acv: 'ACV-1.1 · into an LHD', kornet: 'Kornet-EM · Tigr-M' };
 
 export function createReinforce(game, hud, parent) {
   const { sim } = game;
@@ -22,8 +23,10 @@ export function createReinforce(game, hud, parent) {
   const list = () => buyable(game.side);
 
   function buy(type) {
-    const ok = sim.buy(game.side, type);
-    game.bus.emit('toast', { text: ok ? `${SHORTN[type] || type} · on the way` : 'Not enough supply', bad: !ok });
+    const ok = sim.buy(game.side, type), d = game.UNITS[type];
+    // the landing force boards an LHD: refused when none has room (the supply is not the reason)
+    const why = !ok && d && d.embark && sim.sides[game.side].supply >= d.cost ? 'No room aboard an LHD' : 'Not enough supply';
+    game.bus.emit('toast', { text: ok ? `${SHORTN[type] || type} · on the way` : why, bad: !ok });
     game.bus.emit('buy', { type, ok });
     hud.click(!ok);
     last = -1;

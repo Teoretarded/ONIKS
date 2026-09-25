@@ -33,6 +33,10 @@
                     radars, weapons) */
 const M3 = window.M3, GEO = window.GEO, HD = window.HD;
 if (!M3 || !GEO || !HD || !HD.READY_LAND || !HD.READY_SEA_AIR) throw new Error('models.js needs m3.js, geo.js, hd_land.js and hd_sea_air.js loaded first');
+import * as LHDM from './models_lhd.js';
+import * as AMPH from './models_amphib.js';
+export { LHD } from './models_lhd.js';
+export { LCAC, ACV, KORNET } from './models_amphib.js';
 const { V, R, X } = M3;
 const { hex, box, lathe, cyl, panel, line, blades } = GEO;
 const PI = Math.PI, TAU = 2 * PI, DEG = PI / 180;
@@ -2942,6 +2946,8 @@ export const EXTRA_MODELS = {
   carrier,
   // the projectile names data/units.js uses
   tomahawk: strikeMissile, sam57e6: pantsirMissile, aim120: aam,
+  // the amphibious units (models_lhd.js, models_amphib.js) and the Kornet round
+  lhd: LHDM.lhd, lcac: AMPH.lcac, acv: AMPH.acv, kornet: AMPH.kornet, kornet_msl: AMPH.kornetMsl,
 };
 export const MODEL_ALIASES = { tomahawk: 'strike_missile', sam57e6: 'pantsir_missile', aim120: 'aam' };
 const cache = f => { let m = null; return () => cloneModel(m || (m = f())); };
@@ -2950,6 +2956,7 @@ export const CUT_MODELS = {
   helo_cut: cache(heloCut), fighter_cut: cache(fighterCut), drone_cut: cache(droneCut), oniks_cut: cache(oniksCut), sm6_cut: cache(sm6Cut),
   aew_cut: cache(aewCut), ssn_cut: cache(ssnCut), ssk_cut: cache(sskCut), bal_cut: cache(balCut),
   carrier_cut: cache(carrierCut),
+  lhd_cut: cache(LHDM.lhdCut), lcac_cut: cache(AMPH.lcacCut), acv_cut: cache(AMPH.acvCut), kornet_cut: cache(AMPH.kornetCut),
 };
 export const ALL_MODELS = O(UNIT_MODELS, EXTRA_MODELS, CUT_MODELS);
 export function makeModel(key) { const f = ALL_MODELS[key]; if (!f) throw new Error('unknown model ' + key); return f(); }
@@ -2983,7 +2990,8 @@ export const MODEL_STATES = {
   kh35: { wing: [0, 1, 1], fin: [0, 1, 1], booster: true },
   kalibr: { wing: [0, 1, 1], fin: [0, 1, 1], booster: true },
 };
-for (const k of ['tel', 'radar', 'pantsir', 'destroyer', 'helo', 'fighter', 'drone', 'oniks', 'sm6', 'aew', 'ssn', 'ssk', 'bal']) MODEL_STATES[k + '_cut'] = O(MODEL_STATES[k], { xray: false });
+Object.assign(MODEL_STATES, LHDM.LHD_STATES, AMPH.AMPHIB_STATES);
+for (const k of ['tel', 'radar', 'pantsir', 'destroyer', 'helo', 'fighter', 'drone', 'oniks', 'sm6', 'aew', 'ssn', 'ssk', 'bal', 'lhd', 'lcac', 'acv', 'kornet']) MODEL_STATES[k + '_cut'] = O(MODEL_STATES[k], { xray: false });
 MODEL_STATES.tomahawk = MODEL_STATES.strike_missile; MODEL_STATES.sam57e6 = MODEL_STATES.pantsir_missile;
 MODEL_STATES.carrier_cut = O(MODEL_STATES.carrier, { xray: false });
 MODEL_STATES.depot = { xray: false }; MODEL_STATES.radar_hill.xray = false;
@@ -3027,6 +3035,7 @@ export const MODEL_INFO = {
   torpedo533: { name: 'Torpedo · 533 mm', kind: 'munition', size: [6.2, .53, .53], s: [.012, .03, .09] },
   vpt_can: { name: 'VPT cell canister', kind: 'munition', size: [.6, .6, 6.35], s: [.012, .03, .09] },
 };
+Object.assign(MODEL_INFO, LHDM.LHD_INFO, AMPH.AMPHIB_INFO);
 for (const [a, k] of Object.entries(MODEL_ALIASES)) { MODEL_INFO[a] = MODEL_INFO[k]; }
 for (const k of Object.keys(CUT_MODELS)) { const b = k.replace(/_cut$/, ''); MODEL_INFO[k] = O(MODEL_INFO[b], { name: MODEL_INFO[b].name + ' · cutaway', kind: 'cut', base: b }); }
 

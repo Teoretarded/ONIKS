@@ -26,6 +26,7 @@ export function createSandbox(game, ctx) {
     if (d.domain === 'air') return true;
     if (d.domain === 'land') return h > .5 && game.map.slope(x, z) < (d.slopeMax || .4) && sim.nav.open('land', x, z);
     if (d.sub) return h < -d.sub.water && sim.nav.open('sub', x, z);          // boats: deep water only
+    if (d.hover) return (h < -1 || h > .5) && sim.nav.open('hover', x, z);   // an LCAC: water, or a beach
     return h < -(d.draught || 5) - 3 && sim.nav.open('sea', x, z);
   }
   function hdgFor(side, x, z) { const e = game.map.spawns[ENEMY[side]]; return Math.atan2(e.x - x, e.z - z); }

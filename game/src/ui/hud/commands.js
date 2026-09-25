@@ -5,7 +5,8 @@
    H reads "Weapons held" / "Weapons free" (lime) for the selection's offensive weapons; defence is always automatic.
    The coast card has T Deploy and L Drone; the fleet's has U Helo and L Launch (the strike package off the deck).
    O Depth (the sonar system's key, game/sonar.js) shows while the side has a submarine: deep boats come up to
-   periscope depth, others go deep; Shift+O surfaces. ~ Salvo (the key left of 1): rounds per volley of the
+   periscope depth, others go deep; Shift+O surfaces. T Land (the fleet's; game/amphib.js): LCACs to a beach with their
+   ACVs, Unload / Dock / Board by what is selected. ~ Salvo (the key left of 1): rounds per volley of the
    selection's attacks, 1 / 2 / ALL (the row reads the value; Shift+~ steps back). */
 import { scanBlocked } from '../../sim/sensors.js';
 import { isSub, depthName } from '../../sim/subs.js';
@@ -17,6 +18,7 @@ const ROWS = [
   { k: 'H', id: 'weapons', lab: 'Weapons' },
   { k: '~', id: 'salvo', lab: 'Salvo' },
   { k: 'T', id: 'deploy', lab: 'Deploy', side: 'coast' },
+  { k: 'T', id: 'land', lab: 'Land', side: 'fleet' },
   { k: 'U', id: 'helo', lab: 'Helo', side: 'fleet' },
   { k: 'R', id: 'reload', lab: 'Reload' },
   { k: 'X', id: 'scan', lab: 'Scan' },
@@ -49,6 +51,7 @@ export function createCommands(game, hud, parent) {
     if (!s || !s.ok) { hud.click(true); return; }
     if (id === 'buy') { hud.toggleBuy(); hud.click(); return; }
     if (id === 'dive') { const so = game.getSystem('sonar'); if (so && so.dive) so.dive(false); hud.click(); last = -1; return; }
+    if (id === 'land') { const am = game.getSystem('amphib'); if (am && am.hotkey) am.hotkey(false); hud.click(); last = -1; return; }
     const o = game.getSystem('orders');
     if (o && o.hotkey) o.hotkey(id);
     hud.click();
@@ -85,7 +88,7 @@ export function createCommands(game, hud, parent) {
       S.deploy = { ok: !blocked, lab: up ? 'Stow' : 'Deploy', x: blocked ? 'out' : '',
         hint: up ? 'Bring it down to drive' : dep[0].type === 'tel' ? 'Jacks 10 s · erect 15 s · cannot move while up' : dep[0].type === 'bal' ? 'Jacks 6 s · pack up 8 s · cannot move while up' : 'Mast up 15 s · needed to radiate' };
     } else S.deploy = { ok: false, lab: 'Deploy', hint: 'TEL, Bal and Monolith-B only' };
-    const rl = us.filter(u => u.type === 'tel' || u.type === 'transloader' || u.def.domain === 'sea' || u.type === 'pantsir' || u.type === 'bal');
+    const rl = us.filter(u => u.type === 'tel' || u.type === 'transloader' || u.def.domain === 'sea' || u.type === 'pantsir' || u.type === 'bal' || u.type === 'kornet');
     if (rl.length) {
       const need = rl.some(u => u.type === 'transloader' ? u.cargo < u.def.cargo : Object.keys(u.def.weapons).some(w => u.ammo[w] < u.def.weapons[w].ammo));
       const off = rl.every(u => u.off.reload);
@@ -135,6 +138,9 @@ export function createCommands(game, hud, parent) {
         hint: anyDeep ? 'Up to periscope depth · masts up, missiles can fire · a radar close by can see the masts · Shift+O surfaces'
           : 'Go deep · no radar or camera sees the boat, only sonar close by · missiles need periscope depth · Shift+O surfaces' };
     } else S.dive = { ok: false, lab: 'Dive', hint: 'Submarines only · deep, periscope depth or surfaced' };
+    // the landing force (game/amphib.js): T Land / Unload / Dock / Board for the selection
+    const am = game.getSystem('amphib');
+    S.land = am && am.card ? am.card(us) : { ok: false, hint: 'LHD, LCAC or ACV · the landing force' };
     const cheap = game.UNITS && Object.values(game.UNITS).filter(d => d.side === game.side && d.cost > 0).reduce((a, d) => Math.min(a, d.cost), 1e9);
     S.buy = { ok: cheap < 1e9, on: hud.buyOpen, x: side.queue.length ? String(side.queue.length) : '', hint: 'Buy units with supply · they arrive at your spawn' };
     return S;

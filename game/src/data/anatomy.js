@@ -29,6 +29,8 @@
    anchorOf(model, entry, st), boundsOf(key, model, st, e), fitView(key, model, st, e, fovY),
    validateAnatomy(key, model). */
 import { TRANSLOADER, DEPOT_SLOTS, DDG, PANTSIR, SUBS, BAL } from './models.js';
+import { LHD_ANATOMY } from './models_lhd.js';
+import { AMPHIB_ANATOMY } from './models_amphib.js';
 
 const { V, R, X } = window.M3;
 const T3 = p => X.make(R.I(), p);
@@ -679,6 +681,8 @@ export const ANATOMY = {
 
 /* the projectile names data/units.js uses read the same entries */
 ANATOMY.tomahawk = ANATOMY.strike_missile; ANATOMY.sam57e6 = ANATOMY.pantsir_missile; ANATOMY.aim120 = ANATOMY.aam;
+/* the amphibious units: their entries live beside their models (models_lhd.js, models_amphib.js) */
+Object.assign(ANATOMY, LHD_ANATOMY, AMPHIB_ANATOMY);
 
 /* the transloader's TLC frames (parts tlcR / tlcL / tlcHook), as its model defines them */
 function tlcXfOf(part, st) {

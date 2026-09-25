@@ -5,11 +5,13 @@ export const SHORT = {
   hq: 'K380R CP', tel: 'K340P TEL', radar: 'MONOLITH-B', pantsir: 'PANTSIR-S1', catapult: 'ORLAN-10 RAIL', drone: 'ORLAN-10',
   transloader: 'K342P TLV', carrier: 'CVN NIMITZ', ddg: 'DDG ARLEIGH BURKE', helo: 'MH-60R', fighter: 'F/A-18E',
   bal: 'BAL 3K60', ssk: 'KILO 636.3', aew: 'E-2D', ssn: 'VIRGINIA SSN',
+  lhd: 'LHD WASP', lcac: 'LCAC', acv: 'ACV-1.1', kornet: 'KORNET-EM',
 };
 /* the class line a track shows once classified (the sensors' `cls` + the type's short name) */
 export const TRACK = { hq: 'CP · K380R', tel: 'TEL · K340P', radar: 'RADAR · MONOLITH-B', pantsir: 'SAM · PANTSIR-S1', catapult: 'UAV-L · ORLAN-10',
   drone: 'UAV · ORLAN-10', transloader: 'TLV · K342P', carrier: 'CVN · NIMITZ', ddg: 'DDG · ARLEIGH BURKE', helo: 'HELO · MH-60R', fighter: 'FTR · F/A-18E',
-  bal: 'TEL · BAL', ssk: 'SSK · KILO', aew: 'AEW · E-2D', ssn: 'SSN · VIRGINIA' };
+  bal: 'TEL · BAL', ssk: 'SSK · KILO', aew: 'AEW · E-2D', ssn: 'SSN · VIRGINIA',
+  lhd: 'LHD · WASP', lcac: 'LCAC', acv: 'ACV · ACV-1.1', kornet: 'ATGM · KORNET-EM' };
 
 const pad2 = n => String(n).padStart(2, '0');
 
@@ -48,6 +50,14 @@ export function status(u) {
       return u.type === 'ssn' ? `${d} · TLAM ${u.ammo.strike}` : `${d} · ${u.ammo.klub} KALIBR`;
     }
     case 'hq': return k ? k.toUpperCase() : 'CP';
+    case 'lhd': return u.well > 0 ? (u.well >= 1 ? 'WELL OPEN' : u.wellT > 0 ? 'GATE LOWERING' : 'GATE RAISING') : 'WELL SHUT';
+    case 'lcac': {
+      const ph = o && o.kind === 'land' ? o.ph : null;
+      const s = u.aboard ? 'IN THE WELL' : u.dockT ? (u.dockT.mode === 'out' ? 'LEAVING THE WELL' : 'ENTERING THE WELL') : ph === 'unload' ? 'UNLOADING' : k === 'dock' ? 'RETURNING' : ph === 'go' ? 'TO THE BEACH' : u.cushion > .5 ? 'ON CUSHION' : 'OFF CUSHION';
+      return u.cargoN ? `${s} · ${u.cargoN} ACV` : s;
+    }
+    case 'kornet': return `${u.lift >= 1 ? 'UP' : u.lift > 0 ? 'RAISING' : 'STOWED'} · ${u.ammo.kornet} RD`;
+    case 'acv': return k === 'embark' ? 'BOARDING' : k ? k.toUpperCase() : 'ASHORE';
   }
   return k ? k.toUpperCase() : '';
 }
