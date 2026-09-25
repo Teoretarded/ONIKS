@@ -212,11 +212,12 @@ body.hud-on .oniks-sbx { zoom: var(--hs, 1); left: 56px; right: auto; top: 138px
 #hud .h-salvo { position: relative; margin: 0 -146px 22px; contain: inline-size; font: 400 11.5px/1 var(--mono); letter-spacing: .05em;
   text-transform: uppercase; color: var(--faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
 #hud .h-salvo.dim { opacity: .35; }
-/* the films' calm under the text (a soft ellipse, no edge): the lanes read over the sea's dots */
+/* a faint graphite calm under the text (a soft ellipse sized to the board by salvo.js, no edge): the lanes read over
+   the sea's dots */
 #hud .h-salvo::before { content: ''; position: absolute; left: -110px; right: -110px; top: -46px; bottom: -40px; pointer-events: none;
-  background: radial-gradient(ellipse 640px var(--sb-ry, 140px) at 50% 50%, rgba(11,12,10,.8), rgba(11,12,10,.55) 55%, rgba(11,12,10,0) 100%); }
+  background: radial-gradient(ellipse var(--sb-rx, 590px) var(--sb-ry, 140px) at 50% 50%, rgba(13,14,12,.84), rgba(13,14,12,.64) 58%, rgba(13,14,12,0) 100%); }
 #hud .h-salvo > canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; }
-#hud .h-salvo .g + .g { margin-top: 14px; }
+#hud .h-salvo .bd { display: flex; flex-direction: column; gap: 14px; }
 #hud .h-salvo .hd { display: flex; justify-content: space-between; gap: 28px; padding-bottom: 9px; margin-bottom: 5px; border-bottom: 1px solid var(--hair); }
 #hud .h-salvo .hd .lt { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 #hud .h-salvo .hd .rt { flex: none; }
@@ -242,3 +243,141 @@ body.hud-on .oniks-sbx { zoom: var(--hs, 1); left: 56px; right: auto; top: 138px
 #hud .h-salvo .r:hover .n, #hud .h-salvo .r.fo .n { color: var(--lime); }
 #hud .h-salvo .r:hover .tt, #hud .h-salvo .r:hover .d { color: #fff; }
 #hud .h-salvo .g.new .hd, #hud .h-salvo .r.new { animation: typein .42s steps(16); }
+/* a long end reason (DESTROYED) runs into the empty distance column */
+#hud .h-salvo .r.w2 .m { grid-column: span 2; }
+#hud .h-salvo .r.w2 .d { display: none; }
+/* the rounds without a lane: "+7 · 5 in the air · 2 down" */
+#hud .h-salvo .more { height: 19px; display: flex; align-items: center; padding-left: 36px; color: var(--faint); }
+#hud .h-salvo .more b { color: rgba(255,255,255,.72); margin-right: 2px; }
+/* a finished group: its header alone, the summary line (no rule) */
+#hud .h-salvo .g.sum .hd { border-bottom-color: transparent; padding-bottom: 0; margin-bottom: 0; }
+#hud .h-salvo .g.sum .more { display: none; }
+/* the strip: one line on the bottom edge while the cinematic camera, the replay's hand-back or the radar view has the
+   picture (the lanes away; the groups side by side) */
+#hud .h-salvo.strip { position: absolute; left: 50%; bottom: 13px; transform: translateX(-50%); margin: 0; contain: none; }
+#hud .h-salvo.strip::before { left: -90px; right: -90px; top: -22px; bottom: -13px; }
+#hud .h-salvo.strip > canvas, #hud .h-salvo.strip .r, #hud .h-salvo.strip .more { display: none !important; }
+#hud .h-salvo.strip .bd { flex-direction: row; gap: 56px; }
+#hud .h-salvo.strip .hd { border-bottom-color: transparent; padding-bottom: 0; margin-bottom: 0; gap: 18px; }
+
+/* ================================================================ Orbital theme (#hud.orbital: the Orbital render style)
+   The Orbital films' HUD (reference/menus/common/orbital.css): pure black, white #F6F5F2, Inter for words and DM Mono for
+   designations and figures, sentence case, no letter-spacing, hairline rules and meters, a 7 px square in front of a
+   designation instead of a chip, no backdrops. One yellow #F4D23C, used as the films' highlighter on the one key thing:
+   your selection's designation (.yl-sel) or the salvo board while your salvo flies (.yl-salvo). Coral stays only where
+   hostility or harm must read (a raid, a hostile track, damage). Toggled by ui/hud/index.js from R.style. */
+#hud.orbital { --lime: #F6F5F2; --acc: #F6F5F2; --hi: #F4D23C; --ink: #0C0C0C; --panel: rgba(0,0,0,.86);
+  --sans: 'Inter', 'Segoe UI', sans-serif; --mono: 'DM Mono', Consolas, monospace;
+  --dim: rgba(246,245,242,.62); --faint: rgba(246,245,242,.4); --ghost: rgba(246,245,242,.22); --hair: rgba(246,245,242,.16);
+  color: #F6F5F2; text-shadow: 0 0 2px #000, 0 0 5px rgba(0,0,0,.9); }
+#hud.orbital * { text-transform: none; letter-spacing: 0; }
+#hud.orbital .h-tr .read .clk, #hud.orbital .h-tr .rate { color: #F6F5F2; }
+/* the calm under the corners: black */
+#hud.orbital::before { background:
+  radial-gradient(ellipse 660px 360px at 0% 0%, rgba(0,0,0,.8), rgba(0,0,0,.42) 55%, rgba(0,0,0,0) 100%),
+  radial-gradient(ellipse 700px 560px at 100% 0%, rgba(0,0,0,.84), rgba(0,0,0,.45) 55%, rgba(0,0,0,0) 100%),
+  radial-gradient(ellipse 780px 460px at 0% 100%, rgba(0,0,0,.86), rgba(0,0,0,.45) 55%, rgba(0,0,0,0) 100%),
+  radial-gradient(ellipse 900px 290px at 50% 100%, rgba(0,0,0,.74), rgba(0,0,0,.35) 55%, rgba(0,0,0,0) 100%),
+  radial-gradient(ellipse 520px 460px at 100% 100%, rgba(0,0,0,.6), rgba(0,0,0,0) 100%); }
+
+/* the mark, the kick line, the objectives */
+#hud.orbital .h-logo { font: 500 21px/1 var(--sans); letter-spacing: -.02em; }
+#hud.orbital .h-logo svg circle { fill: #F6F5F2; }
+#hud.orbital .kick { font: 400 12.5px/1 var(--mono); color: var(--dim); }
+#hud.orbital .h-obj { font: 400 12.5px/1.9 var(--mono); color: rgba(246,245,242,.86); }
+#hud.orbital .h-obj .ob i { width: 7px; height: 7px; box-shadow: inset 0 0 0 1px rgba(246,245,242,.62); }
+#hud.orbital .h-obj .ob.done i { background: #F6F5F2; box-shadow: none; }
+#hud.orbital .h-obj .ob.done i svg { display: none; }
+#hud.orbital .h-obj .ob .p { color: #F6F5F2; }
+#hud.orbital .h-obj .ob.done .p { color: var(--faint); }
+#hud.orbital .h-obj .ob.fail i { background: var(--coral); box-shadow: none; }
+#hud.orbital .h-obj .hint { font-family: var(--sans); font-size: 13px; }
+#hud.orbital .h-sites { font: 400 12px/1 var(--mono); }
+
+/* top right: rate and clock, supply, the log */
+#hud.orbital .h-tr .read { font: 400 13px var(--mono); }
+#hud.orbital .h-tr .read .sq { width: 7px; height: 7px; background: #F6F5F2; }
+#hud.orbital .h-tr .read .sq.paused { background: transparent; box-shadow: inset 0 0 0 1px #F6F5F2; }
+#hud.orbital .h-tr .rate.l { color: #F6F5F2; }
+#hud.orbital .h-tr .sup { font: 400 12px/1.9 var(--mono); }
+#hud.orbital .h-tr .blip { font: 400 12px/1 var(--mono); color: #F6F5F2; }
+#hud.orbital .h-log { font: 400 12px/1 var(--mono); }
+#hud.orbital .h-log .h { font-family: var(--sans); font-size: 13px; color: var(--dim); }
+#hud.orbital .h-log .h b { font-family: var(--mono); font-size: 12px; }
+#hud.orbital .h-log .r.l .cd, #hud.orbital .h-log .r.new.l .cd { color: #F6F5F2; }
+
+/* chips become catalog labels: a square in front of the designation (white; coral for hostile; an outline for unknown) */
+#hud.orbital .tag { font: 400 12.5px/1 var(--mono); }
+#hud.orbital .tag b { position: relative; background: none; color: #F6F5F2; padding: 4px 8px 3px 14px; font-weight: 400; text-shadow: 0 0 2px #000; }
+#hud.orbital .tag b::before { content: ''; position: absolute; left: 0; top: 50%; width: 7px; height: 7px; margin-top: -4px; background: #F6F5F2; }
+#hud.orbital .tag.coral b::before { background: var(--coral); }
+#hud.orbital .tag.ghost b::before { background: none; box-shadow: inset 0 0 0 1px #F6F5F2; }
+#hud.orbital .tag i, #hud.orbital .tag .v { background: none; padding: 4px 6px 3px 2px; }
+#hud.orbital .tag .v, #hud.orbital .tag.coral .v { color: var(--dim); }
+/* the one yellow: your selection's designation under the films' highlighter (a slightly skewed swipe) */
+#hud.orbital.yl-sel .h-sel .tag.lime b::before { background: var(--hi); }
+#hud.orbital.yl-sel .h-sel .tag.lime i { background: var(--hi); color: var(--ink); text-shadow: none; padding: 4px 9px 3px 7px; margin-left: 2px;
+  clip-path: polygon(0 10%, 100% 0, 99% 88%, 1% 100%); }
+
+/* the selection panel */
+#hud.orbital .h-sel .grid, #hud.orbital .h-sel .grps { font: 400 12px/1.95 var(--mono); }
+#hud.orbital .h-sel .grps { line-height: 1; }
+#hud.orbital .h-sel .rw .v em { color: #F6F5F2; }
+#hud.orbital .h-sel .lk { border-bottom: 1px solid rgba(246,245,242,.38); }
+#hud.orbital .h-sel .lk:hover, #hud.orbital .h-sel .lk:hover b { color: #F6F5F2; border-bottom-color: #F6F5F2; }
+#hud.orbital .h-sel .grp > b { background: none; color: #F6F5F2; box-shadow: inset 0 0 0 1px rgba(246,245,242,.42); font-weight: 400; text-shadow: none; }
+#hud.orbital .h-sel .grp:hover > b { background: #F6F5F2; color: var(--ink); }
+
+/* meters: a hairline track, the filled part a heavier line (no square dots) */
+#hud.orbital .dbar { gap: 1px; align-items: center; margin-top: 0; }
+#hud.orbital .dbar i { width: 4px; height: 1px; background: rgba(246,245,242,.24); }
+#hud.orbital .dbar i.f, #hud.orbital .dbar i.f.l { height: 3px; background: #F6F5F2; }
+#hud.orbital .dbar i.f.c { background: var(--coral); }
+#hud.orbital .dbar.big { gap: 4px; }
+#hud.orbital .dbar.big i { width: 7px; height: 7px; background: transparent; box-shadow: inset 0 0 0 1px rgba(246,245,242,.34); }
+#hud.orbital .dbar.big i.f, #hud.orbital .dbar.big i.f.l { background: #F6F5F2; box-shadow: none; }
+
+/* underlines: a solid hairline (the menus' bar), not a row of dots */
+#hud.orbital .h-tr .rate::after, #hud.orbital .h-cmd .it .lab::after, #hud.orbital .h-sel .grp .n::after, #hud.orbital .h-buy .it .lab::after,
+#hud.orbital .h-cmd .it.on .lab::after {
+  height: 1px; bottom: -5px; background-image: linear-gradient(#F6F5F2, #F6F5F2); background-size: 100% 1px; background-repeat: no-repeat; }
+
+/* the command card: Inter, the index in DM Mono, the square white */
+#hud.orbital .h-cmd .it { font: 400 18px/1 var(--sans); letter-spacing: -.011em; color: rgba(246,245,242,.62); }
+#hud.orbital .h-cmd .it .n { font: 400 12.5px var(--mono); color: rgba(246,245,242,.38); }
+#hud.orbital .h-cmd .it .x { font: 400 12px var(--mono); }
+#hud.orbital .h-cmd .it:not(.off):hover, #hud.orbital .h-cmd .it.on { color: #F6F5F2; }
+#hud.orbital .h-cmd .it.off { color: rgba(246,245,242,.2); }
+#hud.orbital .h-cmd .hint { font: 400 14px/1 var(--sans); }
+#hud.orbital .h-cmd .hint b { font: 400 12px/1 var(--mono); color: #F6F5F2; background: none; box-shadow: inset 0 0 0 1px rgba(246,245,242,.38); padding: 3px 5px 2px; }
+#hud.orbital .h-toasts { font: 400 12.5px/1 var(--mono); }
+
+/* alerts: catalog lines, not chips */
+#hud.orbital .h-al .al { font: 400 12.5px/1 var(--mono); }
+#hud.orbital .h-al .al b { position: relative; background: none; color: #F6F5F2; padding: 5px 8px 4px 14px; font-weight: 400; }
+#hud.orbital .h-al .al b::before { content: ''; position: absolute; left: 0; top: 50%; width: 7px; height: 7px; margin-top: -4px; background: #F6F5F2; }
+#hud.orbital .h-al .al.c b::before { background: var(--coral); }
+#hud.orbital .h-al .al i { background: none; color: var(--dim); }
+#hud.orbital .h-al .al.c i { color: #F6F5F2; }
+#hud.orbital .h-al .al:hover i { box-shadow: inset 0 -1px 0 rgba(246,245,242,.5); }
+
+/* reinforcements */
+#hud.orbital .h-buy { background: rgba(0,0,0,.86); box-shadow: inset 0 0 0 1px rgba(246,245,242,.12); }
+#hud.orbital .h-buy .it { font: 400 16px/1 var(--sans); letter-spacing: -.011em; }
+#hud.orbital .h-buy .it .c { color: #F6F5F2; }
+#hud.orbital .h-buy .keys b { color: #F6F5F2; background: none; box-shadow: inset 0 0 0 1px rgba(246,245,242,.38); }
+#hud.orbital .h-buy .keys span { border-color: rgba(246,245,242,.16); }
+
+/* the minimap's frame and caption */
+#hud.orbital .h-map.frame { outline-color: rgba(246,245,242,.3); }
+#hud.orbital .frame .fl { font: 400 12px/1 var(--mono); color: var(--dim); }
+#hud.orbital .frame .fl i { color: #F6F5F2; }
+
+/* the salvo board: the films' type; while your salvo flies its name has the highlighter */
+#hud.orbital .h-salvo { font: 400 12px/1 var(--mono); }
+#hud.orbital .h-salvo::before { background: radial-gradient(ellipse 640px var(--sb-ry, 140px) at 50% 50%, rgba(0,0,0,.82), rgba(0,0,0,.55) 55%, rgba(0,0,0,0) 100%); }
+#hud.orbital .h-salvo .hd b.l { color: #F6F5F2; }
+#hud.orbital .h-salvo .r.gl .e, #hud.orbital .h-salvo .r.gl .m { color: #F6F5F2; }
+#hud.orbital .h-salvo .r:hover .n, #hud.orbital .h-salvo .r.fo .n { color: #F6F5F2; }
+#hud.orbital.yl-salvo .h-salvo .g:not(.in) .hd .lt > b:first-child { background: var(--hi); color: var(--ink); text-shadow: none; padding: 2px 7px 1px 5px;
+  clip-path: polygon(0 10%, 100% 0, 99% 88%, 1% 100%); }

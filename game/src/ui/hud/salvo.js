@@ -11,8 +11,13 @@
    attempts aimed at a round (SM-6, ESSM, 57E6 launches; Phalanx and 30 mm bursts) rise as ticks under its mark,
    closing as the interceptor closes, and stay as short stubs where they missed. A lane ends in HIT, DOWN (who took it,
    how far out), MISS (wide: the target moved, the ground) or SPENT (flown out to its aim point with the target already
-   sunk, or out of fuel); a finished salvo stays a few seconds, then fades. The board holds ten lanes, shared between
-   the salvos on it; a bigger salvo shows its rounds nearest their impact ("nearest 5").
+   sunk or destroyed, or out of fuel). A finished salvo shows its outcomes for a moment, then collapses to one summary
+   line (SALVO 01 · 6 × 3M55 · TRK 22 · DDG ··· 2 HIT · 1 DOWN · 3 MISS) that fades.
+   It never buries the picture: at most two groups are on it, your newest salvo and the nearest raid (the others fly
+   on, counted in the raid's header: "+2 raids"), each with at most four lanes (the rounds nearest their impact) and
+   a "+7" line for the rest. Under a faint graphite calm. While the cinematic camera has the picture, while the hit
+   replay hands back and in the radar view (V) it shrinks to a one-line strip on the bottom edge (the two headers and
+   the nearest time to go); a replay itself runs with the HUD away.
    Own salvos (SALVO nn): white labels, lime marks, the enemy's interceptors coral. Raids on the player's units
    (RAID nn): coral, each lane with its target (→ TEL 03), the player's interceptors lime; a raid's round shows once
    the side's sensors see it (dead reckoning, faint, while they lose it). HIT / DOWN take the colour of the side that
@@ -29,15 +34,17 @@
 import { PNAME, WNAME, unitRef, trackRef, clock, pad2, esc, LIME, CORAL } from './fmt.js';
 
 const HEAVY = { oniks: 1, tlam: 1, slam: 1, uran: 1, kalibr: 1 };
-const NAME = Object.assign({}, PNAME, { oniks: '3M55', uran: 'Kh-35U', kalibr: '3M-54', tlam: 'TLAM', slam: 'SLAM-ER' });
+const NAME = Object.assign({}, PNAME, { oniks: '3M55', uran: 'Kh-35U', kalibr: 'Kalibr', tlam: 'TLAM', slam: 'SLAM-ER' });
 const BY = Object.assign({}, WNAME, PNAME, { ciws: 'Phalanx', gun30: '2A38M', sm6: 'SM-6', pdms: 'ESSM', sam: '57E6', aam: 'AIM-120D' });
 const JOIN = 15, SPAN = 40; // sim s: a heavy launch this soon after the salvo's last one (and this soon after its first) joins it
 const HOLD = 6, FADE = 1;  // board s (real; stopped while a replay runs or the game is paused) a finished salvo stays
-const MAXROWS = 10;
+const LANES = 4;           // lanes a group shows (the rest: the "+7" line)
+const SUM = 1.8;           // board s after its last outcome a finished group collapses to its summary line
 const SOUND = 340;         // m/s at sea level (the Mach readout)
 const OPEN = .45;          // s: the lanes draw out
 const DEG = Math.PI / 180;
 const sat = v => v < 0 ? 0 : v > 1 ? 1 : v;
+const c6 = v => v < 63 ? v : 63;   // a count in a text key
 const W55 = 'rgba(255,255,255,.55)', W16 = 'rgba(255,255,255,.16)', C60 = 'rgba(255,106,61,.6)', WHITE = '#FFFFFF';
 
 const fmtD = d => d < 1000 ? Math.round(d / 10) * 10 + ' m' : (d < 10000 ? (d / 1000).toFixed(1) : Math.round(d / 1000)) + ' km';
@@ -51,9 +58,10 @@ export function createSalvo(game, hud, bc) {
   el.style.display = 'none';
   el.innerHTML = '<div class="bd"></div><canvas></canvas>';
   const body = el.firstChild, cv = el.lastChild, cx = cv.getContext('2d');
-  let host = null;
-  /* at the top of the command card (put back if the card was rebuilt) */
+  let host = null, strip = false;   // strip: the one-line form on the bottom edge (cinematic, replay hand-back, radar view)
+  /* at the top of the command card (put back if the card was rebuilt); the strip on the HUD's root */
   function place() {
+    if (strip) { if (el.parentNode !== hud.root) { hud.root.appendChild(el); host = null; } return; }
     if (host && el.parentNode === host && host.isConnected) return;
     host = bc.querySelector('.h-cmd');
     if (host) host.insertBefore(el, host.firstChild); else if (el.parentNode !== bc) bc.appendChild(el);
@@ -66,8 +74,8 @@ export function createSalvo(game, hud, bc) {
   const ticks = new Map();       // interceptor proj id -> tick
   const groups = [];             // salvos and raids, oldest first
   let gid = 0, nOwn = 0, nIn = 0, dirty = false, pickAt = -1, anyCut = false;
-  let open = false, dim = false, clockT = 0, geoAt = -1, cw = 0, ch = 0, dpr = 1, calmRy = 0;
-  let followId = 0, followT = -1, pendingReplay = null, replayEnd = -1e9;
+  let open = false, dim = false, clockT = 0, geoAt = -1, cw = 0, ch = 0, dpr = 1, calmRy = 0, calmRx = 0;
+  let followId = 0, followT = -1, pendingReplay = null, replayEnd = -1e9, sens = null;
   const lastF = [0, 0, 0];
   const stats = { ms: 0, draw: 0, lanes: 0, asked: 0 };
   const rect = [0, 0, 0, 0];     // the board in view px while it is up (game.hudRects)
@@ -81,9 +89,29 @@ export function createSalvo(game, hud, bc) {
   function newGroup(own, side) {
     const g = { id: ++gid, own, side, lanes: [], t0: sim.t, tLast: sim.t, quota: 0, cut: 0, nSeen: 0, air: 0, seen: 0, shown: false, n: 0, T0: 0, T0d: 0, tShown: 0,
       doneAt: -1, replayed: false, removed: false, el: null, lt: null, rt: null, multi: false, op: 1,
-      ver: 0, verL: -1, ltAt: -1, rtK: -1 };
+      ver: 0, verL: -1, ltAt: -1, rtK: -1,
+      vis: false, col: false, ttgMin: 1e9, more: null, moreK: '', others: 0 };   // on the board now; collapsed; nearest time to go; the "+7" line; raids not shown
     groups.push(g);
     return g;
+  }
+  /* which groups the board shows: your newest salvo (the newest still flying, else the newest) and the nearest raid
+     (the one whose next impact comes first, else the newest finished) -> true when that changed */
+  function pick() {
+    let own = null, ownAir = null, raid = null, raidAir = null, ch = false;
+    for (const g of groups) {
+      if (!g.shown || g.removed) continue;
+      if (g.own) { own = g; if (g.air) ownAir = g; }
+      else { if (!raid || g.id > raid.id) raid = g; if (g.air && (!raidAir || g.ttgMin < raidAir.ttgMin)) raidAir = g; }
+    }
+    const a = ownAir || own, b = raidAir || raid;
+    let others = 0;
+    for (const g of groups) {
+      const v = g === a || g === b;
+      if (!v && g.shown && !g.removed && !g.own && g.air) others++;
+      if (v !== g.vis) { g.vis = v; ch = true; }
+    }
+    if (b && b.others !== others) { b.others = others; b.rtK = -1; }
+    return ch;
   }
   function airIn(g) { for (const L of g.lanes) if (L.st === 'air') return true; return false; }
   function onLaunch(e) {
@@ -107,7 +135,8 @@ export function createSalvo(game, hud, bc) {
     }
     if (!g) g = newGroup(own, e.side);
     g.tLast = sim.t; g.ver++;
-    const L = { id: e.proj, kind: e.kind, name: NAME[e.kind] || e.kind, own, g, i: 0, target: e.target,
+    // (dom: the target's domain, kept for when it is gone: a round spent on a sunk ship reads SUNK, on a truck DESTROYED)
+    const L = { id: e.proj, kind: e.kind, name: NAME[e.kind] || e.kind, own, g, i: 0, target: e.target, dom: tu ? tu.def.domain : '',
       tgt: tu ? (own ? trackRef(game, tu, false) : '→ ' + unitRef(tu)) : '?',
       st: 'air', seen: own, vis: own, ttg: 0, ttg0: -1, d: 0, mach: 0, spd: 0, tSeen: sim.t, ttgSeen: 0, dSeen: 0, goneR: -1,
       xTtg: 0, endAt: 0, endC: 0, by: '', why: '', byOwn: false, dEnd: 0, endPos: null, ticks: [], row: null,
@@ -175,7 +204,7 @@ export function createSalvo(game, hud, bc) {
     const me = game.side;
     for (let gi = 0; gi < groups.length; gi++) {
       const g = groups[gi];
-      let air = 0, allEnded = true, T0 = 0;
+      let air = 0, allEnded = true, T0 = 0, tmin = 1e9;
       for (let li = 0; li < g.lanes.length; li++) {
         const L = g.lanes[li];
         if (L.st === 'air') {
@@ -194,6 +223,7 @@ export function createSalvo(game, hud, bc) {
                 L.ttg = Math.max(0, L.ttgSeen - e); L.d = Math.max(0, L.dSeen - L.spd * e);
               }
               air++;
+              if (L.ttg < tmin) tmin = L.ttg;
               for (let ki = 0; ki < L.ticks.length; ki++) {
                 const k = L.ticks[ki];
                 if (k.st !== 'fly' || k.gun) continue;
@@ -211,26 +241,35 @@ export function createSalvo(game, hud, bc) {
         if (L.seen && L.ttg0 > T0) T0 = L.ttg0;
       }
       if (air !== g.air) { g.air = air; }
+      g.ttgMin = tmin;
       if (T0 > 0) { g.T0 = T0; g.T0d = g.T0d ? g.T0d + (T0 - g.T0d) * (1 - Math.exp(-dt * 5)) : T0; }
       if (!g.shown && air >= 2) { g.shown = true; g.n = g.own ? ++nOwn : ++nIn; g.tShown = clockT; dirty = true; }
       if (allEnded) { if (g.doneAt < 0) g.doneAt = clockT; } else g.doneAt = -1;
+      // finished: the outcomes for a moment, then the one summary line
+      const col = g.doneAt >= 0 && clockT - g.doneAt > SUM;
+      if (col !== g.col) { g.col = col; g.rtK = -1; dirty = true; }
       if (g.doneAt >= 0 && (!g.shown || clockT - g.doneAt > HOLD + FADE)) { g.removed = true; dirty = true; }
       else if (g.shown) {
         const op = g.doneAt >= 0 ? 1 - sat((clockT - g.doneAt - HOLD) / FADE) : 1;
         if (Math.abs(op - g.op) > .01 || (op === 1 && g.op !== 1)) { g.op = op; if (g.el) g.el.style.opacity = op < 1 ? op.toFixed(2) : ''; }
       }
     }
+    if (pick()) dirty = true;
+    // the strip: the cinematic camera, the replay handing back, the radar view
+    if (sens === null || (!sens && game.frameN % 60 === 0)) sens = game.getSystem('sensors') || 0;
+    const sw = !!(game.cinematic || (R && R.state) || (sens && sens.scopeOn));
+    if (sw !== strip) { strip = sw; el.classList.toggle('strip', sw); place(); geoAt = -1; marg = 1e9; el.style.marginLeft = el.style.marginRight = ''; for (const g of groups) { g.rtK = -1; g.verL = -1; } dirty = true; }
     if (dirty || (anyCut && game.realT - pickAt > .5)) restructure();
     // the board is up while a salvo is on it
     let any = false, n = 0;
-    for (let gi = 0; gi < groups.length; gi++) { const g = groups[gi]; if (g.shown) { any = true; for (const L of g.lanes) if (L.row) n++; } }
+    for (let gi = 0; gi < groups.length; gi++) { const g = groups[gi]; if (g.shown && g.vis) { any = true; for (const L of g.lanes) if (L.row) n++; } }
     if (any !== open) setOpen(any);
     stats.lanes = n;
     if (open) {
       const d = !!(R && R.state);
       if (d !== dim) { dim = d; el.classList.toggle('dim', d); }
       text();
-      if (!game.ui.hidden) { if (geoAt < 0 || game.realT - geoAt > 2) geometry(); draw(); keepRect(); }
+      if (!game.ui.hidden) { if (geoAt < 0 || game.realT - geoAt > 2) geometry(); if (!strip) draw(); keepRect(); }
     }
     stats.ms = stats.ms * .95 + (performance.now() - t0) * .05;
   }
@@ -242,9 +281,9 @@ export function createSalvo(game, hud, bc) {
     geoAt = -1;
   }
 
-  /* groups and rows in the DOM, added and removed one at a time (a new row types in; the others stay put). The board
-     holds MAXROWS lanes: shared fairly between the salvos on it; a salvo with more rounds than its share shows the
-     ones nearest their impact (a fresh HIT / DOWN keeps its row a few seconds first) */
+  /* groups and rows in the DOM, added and removed one at a time (a new row types in; the others stay put). A group on
+     the board (pick()) shows at most LANES lanes: all, or the ones nearest their impact (a fresh HIT / DOWN keeps its
+     row a few seconds first) and a "+7" line for the rest; a collapsed group, a group off the board, none */
   function restructure() {
     dirty = false; pickAt = game.realT;
     let changed = false;
@@ -256,26 +295,25 @@ export function createSalvo(game, hud, bc) {
       for (const L of g.lanes) { lanes.delete(L.id); for (const k of L.ticks) if (k.by) ticks.delete(k.by); if (L.id === followId) followId = 0; }
       groups.splice(i, 1);
     }
-    // the shares (water-filling: nobody gets more than it has; what one leaves, the others take)
+    // the lanes each group may show
     const shown = groups.filter(g => g.shown);
     anyCut = false;
-    for (const g of shown) { g.nSeen = 0; for (const L of g.lanes) if (L.seen) g.nSeen++; g.quota = 0; }
-    let left = MAXROWS, act = shown.slice();
-    while (left > 0 && act.length) {
-      const share = Math.max(1, Math.floor(left / act.length));
-      for (const g of act) { const a = Math.min(share, g.nSeen - g.quota, left); g.quota += a; left -= a; if (!left) break; }
-      act = act.filter(g => g.quota < g.nSeen);
-    }
+    for (const g of shown) { g.nSeen = 0; for (const L of g.lanes) if (L.seen) g.nSeen++; g.quota = g.vis && !g.col ? Math.min(LANES, g.nSeen) : 0; }
     for (const g of shown) {
       if (!g.el) {
         const ge = g.el = document.createElement('div');
         ge.className = 'g' + (g.own ? '' : ' in') + ' new';
-        ge.innerHTML = '<div class="hd"><span class="lt"></span><span class="rt"></span></div>';
-        g.lt = ge.firstChild.firstChild; g.rt = ge.firstChild.lastChild;
+        ge.innerHTML = '<div class="hd"><span class="lt"></span><span class="rt"></span></div><div class="more"></div>';
+        g.lt = ge.firstChild.firstChild; g.rt = ge.firstChild.lastChild; g.more = ge.lastChild;
+        ge.style.order = g.own ? '0' : '1';          // your salvo above the raid
         body.appendChild(ge);
         setTimeout(() => ge.classList.remove('new'), 700);
         changed = true;
       }
+      // off the board (another salvo / raid is the one shown), collapsed to its summary line
+      const dsp = g.vis ? '' : 'none';
+      if (g.el.style.display !== dsp) { g.el.style.display = dsp; changed = true; }
+      if (g.el.classList.contains('sum') !== g.col) { g.el.classList.toggle('sum', g.col); changed = true; }
       const seen = g.lanes.filter(l => l.seen);
       const multi = !g.own || new Set(seen.map(l => l.target)).size > 1;
       if (multi !== g.multi) { g.multi = multi; g.el.classList.toggle('tg', multi); changed = true; }
@@ -286,7 +324,9 @@ export function createSalvo(game, hud, bc) {
         seen.sort((a, b) => rank(a) - rank(b));
       }
       for (let j = 0; j < seen.length; j++) seen[j].want = j < g.quota;
-      g.cut = seen.length - g.quota; if (g.cut > 0) anyCut = true;
+      const cut = g.quota ? seen.length - g.quota : 0;
+      if (cut !== g.cut) { g.cut = cut; g.moreK = ''; changed = true; }
+      if (cut > 0) anyCut = true;
       seen.sort((a, b) => a.i - b.i);
       for (const L of seen) {
         if (!L.want) { if (L.row) { L.row.el.remove(); L.row = null; changed = true; } continue; }
@@ -299,8 +339,8 @@ export function createSalvo(game, hud, bc) {
         const c = r.children;
         L.row = { el: r, tt: c[4], m: c[5], d: c[6], e: c[7], ln: c[3], x0: 0, x1: 0, y: 0, yb: 0 };
         L.nT = L.nM = L.nD = -1; L.nS = '';
-        // in lane order (a raid's rounds are numbered as they are seen)
-        let before = null;
+        // in lane order (a raid's rounds are numbered as they are seen), above the "+7" line
+        let before = g.more;
         for (const o of seen) if (o.i > L.i && o.row && o.row.el.parentNode === g.el) { before = o.row.el; break; }
         g.el.insertBefore(r, before);
         setTimeout(() => r.classList.remove('new'), 700);
@@ -322,31 +362,59 @@ export function createSalvo(game, hud, bc) {
     }
     for (const n in kinds) kk += (kk ? ' · ' : '') + kinds[n] + ' × ' + n;
     if (tg.size === 1) {
+      // (a target gone keeps the name it had: TRK 22 · DDG on the summary line, not the dropped track)
       const u = sim.units.get(L0.target);
-      tl = g.own ? (u ? trackRef(game, u, true) : L0.tgt) : (u ? '→ ' + unitRef(u) : L0.tgt);
+      tl = u && u.alive ? (g.own ? trackRef(game, u, true) : '→ ' + unitRef(u)) : g.tlLast || L0.tgt;
+      g.tlLast = tl;
     } else if (tg.size > 1) tl = tg.size + ' targets';
-    const html = `<b${g.own ? '' : ' class="c"'}>${g.own ? 'Salvo' : 'Raid'} ${pad2(g.n)}</b> · ${esc(kk)}${tl ? ' · ' + esc(tl) : ''}`;
+    // (the strip: the name and the target only)
+    const html = `<b${g.own ? '' : ' class="c"'}>${g.own ? 'Salvo' : 'Raid'} ${pad2(g.n)}</b>${strip ? '' : ' · ' + esc(kk)}${tl ? ' · ' + esc(tl) : ''}`;
     if (html !== g.ltH) { g.ltH = html; g.lt.innerHTML = html; }
   }
   function text() {
     for (let gi = 0; gi < groups.length; gi++) {
       const g = groups[gi];
-      if (!g.shown || !g.el) continue;
+      if (!g.shown || !g.el || !g.vis) continue;
       if (g.ver !== g.verL || game.realT - g.ltAt > 1) { g.verL = g.ver; g.ltAt = game.realT; header(g); }
-      let hit = 0, down = 0, miss = 0, spent = 0;
-      for (const L of g.lanes) { if (!L.seen || L.st === 'air') continue; if (L.st === 'hit') hit++; else if (L.st === 'down') down++; else if (L.st === 'spent') spent++; else miss++; }
-      const rk = g.air * 1e8 + hit * 1e6 + down * 1e4 + miss * 100 + spent + (g.cut > 0 ? g.quota * 1e10 : 0);
+      let hit = 0, down = 0, miss = 0, spent = 0, cAir = 0, cHit = 0, cDown = 0, cEnd = 0;
+      for (const L of g.lanes) {
+        if (!L.seen) continue;
+        // the lanes the "+7" line stands for
+        if (!L.row && g.cut > 0) { if (L.st === 'air') cAir++; else if (L.st === 'hit') cHit++; else if (L.st === 'down') cDown++; else cEnd++; }
+        if (L.st === 'air') continue;
+        if (L.st === 'hit') hit++; else if (L.st === 'down') down++; else if (L.st === 'spent') spent++; else miss++;
+      }
+      // the strip leads with the nearest time to go (its lanes are away)
+      const tn = strip && g.air ? Math.max(0, Math.ceil(g.ttgMin)) : -1;
+      // (the keys are numbers: nothing allocated per frame)
+      const rk = (((((c6(g.air) * 64 + c6(hit)) * 64 + c6(down)) * 64 + c6(miss)) * 64 + c6(spent)) * 16 + Math.min(g.others, 15)) * 8192 + Math.min(tn + 1, 8191);
       if (rk !== g.rtK) {
         g.rtK = rk;
         let s = '';
         const add = x => { s += (s ? ' · ' : '') + x; };
+        if (tn >= 0) add(`<b>T–${mss(tn)}</b>`);
         if (g.air) add(`<b>${g.air}</b> ${g.own ? 'in the air' : 'inbound'}`);
         if (hit) add(`<b class="${g.own ? 'l' : 'c'}">${hit} hit</b>`);
         if (down) add(`<b class="${g.own ? 'c' : 'l'}">${down} down</b>`);
         if (miss) add(`${miss} miss`);
         if (spent) add(`${spent} spent`);
-        if (g.cut > 0) add(`<i>${g.air ? 'nearest' : 'last'} ${g.quota}</i>`);
+        if (g.others) add(`<i>+${g.others} ${g.others === 1 ? 'raid' : 'raids'}</i>`);
         g.rt.innerHTML = s;
+      }
+      // "+7 · 5 in the air · 2 down": the rounds without a lane
+      const mk = g.cut > 0 ? (((c6(g.cut) * 64 + c6(cAir)) * 64 + c6(cHit)) * 64 + c6(cDown)) * 64 + c6(cEnd) : 0;
+      if (mk !== g.moreK) {
+        g.moreK = mk;
+        let s = '';
+        if (mk) {
+          s = `<b>+${g.cut}</b>`;
+          if (cAir) s += ` · ${cAir} ${g.own ? 'in the air' : 'inbound'}`;
+          if (cHit) s += ` · <span class="${g.own ? 'l' : 'c'}">${cHit} hit</span>`;
+          if (cDown) s += ` · <span class="${g.own ? 'c' : 'l'}">${cDown} down</span>`;
+          if (cEnd) s += ` · ${cEnd} ended`;
+        }
+        g.more.innerHTML = s;
+        g.more.style.display = s ? '' : 'none';
       }
       for (let li = 0; li < g.lanes.length; li++) {
         const L = g.lanes[li], R = L.row;
@@ -365,24 +433,26 @@ export function createSalvo(game, hud, bc) {
           R.d.textContent = L.st === 'down' ? fmtD(L.dEnd) : '';
           R.e.textContent = L.st === 'hit' ? 'Hit' : L.st === 'down' ? 'Down' : L.st === 'miss' ? 'Miss' : L.st === 'spent' ? 'Spent' : 'Lost';
           const good = L.st === 'hit' ? L.own : L.st === 'down' ? L.byOwn : null;
-          R.el.className = 'r hit end ' + (good === null ? 'w' : good ? 'gl' : 'gc') + (fo ? ' fo' : '');
+          // a long reason (DESTROYED) takes the empty distance column too
+          const w2 = L.st !== 'down' && String(L.why || '').length > 6;
+          R.el.className = 'r hit end ' + (good === null ? 'w' : good ? 'gl' : 'gc') + (fo ? ' fo' : '') + (w2 ? ' w2' : '');
         }
       }
     }
   }
 
   /* ------------------------------------------------------------------ the lanes (canvas) */
-  /* as wide as the room between the selection panel and the minimap allows (900 px at 1080p; narrower on a small
+  /* as wide as the room between the selection panel and the minimap allows (800 px at 1080p; narrower on a small
      window), centred on the card: the overhang is a negative margin (the board never widens the card: its CSS
-     contains its inline size) */
+     contains its inline size). The strip sizes itself. */
   let selEl = null, mapEl = null, marg = 1e9;
   function fitWidth() {
     const k = hud.scale || 1, c = host && host.getBoundingClientRect();
-    if (!c || c.width < 2) return;
+    if (strip || !c || c.width < 2) return;
     if (!selEl || !selEl.isConnected) selEl = hud.root.querySelector('.h-sel');
     if (!mapEl || !mapEl.isConnected) mapEl = hud.root.querySelector('.h-br');
     const mid = c.left + c.width / 2;
-    let half = 450 * k;
+    let half = 400 * k;
     const a = selEl && selEl.getBoundingClientRect(), m = mapEl && mapEl.getBoundingClientRect();
     if (a && a.width > 2) half = Math.min(half, mid - a.right - 24 * k);
     if (m && m.width > 2) half = Math.min(half, m.left - mid - 24 * k);
@@ -400,8 +470,9 @@ export function createSalvo(game, hud, bc) {
     if (w !== cw || h !== ch) { cv.width = cw = w; cv.height = ch = h; }
     rect[0] = Math.floor(b.left) - 10; rect[1] = Math.floor(b.top) - 10; rect[2] = Math.ceil(b.right) + 10; rect[3] = Math.ceil(b.bottom) + 4;
     // the calm under it grows with the board (1080p px)
-    const ry = Math.round(b.height / (hud.scale || 1) * .5 + 70);
-    if (ry !== calmRy) { calmRy = ry; el.style.setProperty('--sb-ry', ry + 'px'); }
+    const ry = Math.round(b.height / (hud.scale || 1) * .5 + (strip ? 26 : 70)), rx = Math.round(b.width / (hud.scale || 1) * .5 + (strip ? 160 : 190));
+    if (ry !== calmRy || rx !== calmRx) { calmRy = ry; calmRx = rx; el.style.setProperty('--sb-ry', ry + 'px'); el.style.setProperty('--sb-rx', rx + 'px'); }
+    if (strip) return;
     for (const g of groups) for (const L of g.lanes) {
       const R = L.row; if (!R) continue;
       const a = R.ln.getBoundingClientRect(), r = R.el.getBoundingClientRect();
@@ -412,7 +483,7 @@ export function createSalvo(game, hud, bc) {
   function draw() {
     const t0 = performance.now();
     if (!cw) return;
-    const c = cx, s = hud.scale || 1;
+    const c = cx, s = hud.scale || 1, orb = !!hud.orbital, LIMEo = orb ? '#F6F5F2' : LIME;
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
     c.clearRect(0, 0, cw / dpr, ch / dpr);
     c.lineWidth = 1;
@@ -421,7 +492,8 @@ export function createSalvo(game, hud, bc) {
       const g = groups[gi];
       if (!g.shown || !g.el || g.removed || g.op <= .01) continue;
       const T0 = Math.max(1, g.T0d || g.T0 || 1), grow = sat((clockT - g.tShown) / OPEN), ga = g.op;
-      const own = g.own, col = own ? LIME : CORAL;
+      // (the Orbital style: your rounds in the one yellow while they fly, the side's interceptors white)
+      const own = g.own, col = own ? (orb ? '#F4D23C' : LIME) : CORAL;
       for (let li = 0; li < g.lanes.length; li++) {
         const L = g.lanes[li], R = L.row;
         if (!R || R.x1 <= R.x0) continue;
@@ -443,7 +515,7 @@ export function createSalvo(game, hud, bc) {
         const xr = Math.round(xm);
         for (let ki = 0; ki < L.ticks.length; ki++) {
           const k = L.ticks[ki];
-          c.fillStyle = k.own ? LIME : CORAL;
+          c.fillStyle = k.own ? LIMEo : CORAL;
           if (k.st === 'fly' && !ended) {
             const kk = k.gun ? sat((clockT - k.t0) / .3) : k.k, top = yb - kk * (yb - y - 3);
             c.globalAlpha = ga;
@@ -485,7 +557,7 @@ export function createSalvo(game, hud, bc) {
           }
         } else if (L.st === 'down') {
           // taken down: a cross in the colour of the side that took it, and the tick that got there
-          const kc = L.byOwn ? LIME : CORAL, r = 3.5 * s;
+          const kc = L.byOwn ? LIMEo : CORAL, r = 3.5 * s;
           c.globalAlpha = ga; c.strokeStyle = kc; c.lineWidth = 1.5;
           c.beginPath(); c.moveTo(xm - r, y - r); c.lineTo(xm + r, y + r); c.moveTo(xm - r, y + r); c.lineTo(xm + r, y - r); c.stroke();
           c.lineWidth = 1;
@@ -586,9 +658,10 @@ export function createSalvo(game, hud, bc) {
         if (L) {
           // wide of a target that moved or behind a hill (MISS); flown out to the aim point with the target already
           // gone, or out of fuel (SPENT): the reason in the by-column
-          const u = sim.units.get(L.target), gone = !u || !u.alive;
+          // (a target already removed from the sim: its domain as it was at the launch)
+          const u = sim.units.get(L.target), gone = !u || !u.alive, dom = u ? u.def.domain : L.dom;
           const spent = e.why === 'lost' || e.why === 'selfdestruct';
-          const why = e.why === 'selfdestruct' ? 'Fuel' : e.why === 'lost' ? (gone ? (u && u.def.domain !== 'sea' ? 'Gone' : 'Sunk') : 'No trk')
+          const why = e.why === 'selfdestruct' ? 'Fuel' : e.why === 'lost' ? (gone ? (dom === 'sea' || dom === 'sub' ? 'Sunk' : 'Destroyed') : 'No trk')
             : e.why === 'moved' ? 'Moved' : e.why === 'terrain' ? 'Ground' : '';
           end(L, spent ? 'spent' : 'miss', { pos: e.pos, why });
         }

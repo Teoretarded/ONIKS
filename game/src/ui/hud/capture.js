@@ -1,7 +1,8 @@
 /* Debug: a full-resolution still of the game WITH the DOM HUD (ONIKS.hudShot(name) -> game/shots/<name>.png).
    The GL and overlay canvases are copied, then the #ui layer is painted element by element (backgrounds, 1 px
-   borders and outlines, inset hairlines, canvases, inline SVG, text with its font, spacing and case). Pseudo-element
-   ornaments (the dotted underlines) are left out. For review only; never called by the game. */
+   borders and outlines, inset hairlines, canvases, inline SVG, text with its font, spacing and case, the gradient
+   veils: linear / radial backgrounds and ::before calms). Other pseudo-element ornaments (the dotted underlines) are
+   left out. For review only; never called by the game. */
 
 export async function hudShot(name, o) {
   o = o || {};
@@ -28,15 +29,40 @@ const col = s => s && s !== 'transparent' && !/rgba\([^)]*,\s*0\)$/.test(s);
 function radials(c, bg, r, a, z) {
   const parts = bg.split(/radial-gradient\(/).slice(1);
   for (const p of parts) {
-    const m = p.match(/^(?:ellipse\s+)?([\d.]+)px\s+([\d.]+)px\s+at\s+([\d.]+)%\s+([\d.]+)%,\s*(.*)\)\s*,?\s*$/);
+    // (the computed value drops a centred position: "at 50% 50%" is optional)
+    const m = p.match(/^(?:ellipse\s+)?([\d.]+)px\s+([\d.]+)px(?:\s+at\s+([\d.]+)%\s+([\d.]+)%)?,\s*(.*)\)\s*,?\s*$/);
     if (!m) continue;
-    const W = m[1] * z, H = m[2] * z, cx = r.left + r.width * m[3] / 100, cy = r.top + r.height * m[4] / 100;
+    const px = m[3] === undefined ? 50 : +m[3], py = m[4] === undefined ? 50 : +m[4];
+    const W = m[1] * z, H = m[2] * z, cx = r.left + r.width * px / 100, cy = r.top + r.height * py / 100;
     const stops = m[5].split(/,(?![^(]*\))/).map(s => s.trim());
     c.save(); c.translate(cx, cy); c.scale(1, H / W);
     const g = c.createRadialGradient(0, 0, 0, 0, 0, W);
     stops.forEach((s, i) => { const mm = s.match(/^(rgba?\([^)]*\)|#\w+)\s*([\d.]+%)?$/); if (mm) g.addColorStop(mm[2] ? parseFloat(mm[2]) / 100 : i / Math.max(1, stops.length - 1), mm[1]); });
     c.globalAlpha = a; c.fillStyle = g; c.fillRect(-W, -W, 2 * W, 2 * W);
     c.restore();
+  }
+}
+
+/* linear-gradient(<angle | to side>, stops...) layers over a box [x0, y0, x1, y1] */
+const SIDE = { 'to top': 0, 'to right': 90, 'to bottom': 180, 'to left': 270 };
+function linears(c, bg, b, a) {
+  let i = 0;
+  while ((i = bg.indexOf('linear-gradient(', i)) >= 0) {
+    // the arguments up to the matching parenthesis
+    let j = i + 16, d = 1;
+    for (; j < bg.length && d; j++) { if (bg[j] === '(') d++; else if (bg[j] === ')') d--; }
+    const args = bg.slice(i + 16, j - 1).split(/,(?![^(]*\))/).map(s => s.trim());
+    i = j;
+    let ang = 180;
+    if (/^-?[\d.]+deg$/.test(args[0])) ang = parseFloat(args.shift());
+    else if (SIDE[args[0]] !== undefined) ang = SIDE[args.shift()];
+    const w = b[2] - b[0], h = b[3] - b[1];
+    if (w <= 0 || h <= 0 || !args.length) continue;
+    const t = ang * Math.PI / 180, dx = Math.sin(t), dy = -Math.cos(t), L = Math.abs(w * dx) + Math.abs(h * dy);
+    const cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
+    const g = c.createLinearGradient(cx - dx * L / 2, cy - dy * L / 2, cx + dx * L / 2, cy + dy * L / 2);
+    args.forEach((s, k) => { const m = s.match(/^(rgba?\([^)]*\)|#\w+|transparent)\s*([\d.]+%)?$/); if (m) g.addColorStop(Math.min(1, Math.max(0, m[2] ? parseFloat(m[2]) / 100 : k / Math.max(1, args.length - 1))), m[1] === 'transparent' ? 'rgba(0,0,0,0)' : m[1]); });
+    c.save(); c.globalAlpha = a; c.fillStyle = g; c.fillRect(b[0], b[1], w, h); c.restore();
   }
 }
 
@@ -48,8 +74,15 @@ async function paint(c, el, alpha) {
   const r = el.getBoundingClientRect();
   if (el.id === 'perf' && !el.textContent) return;
   c.globalAlpha = a;
-  const pb = getComputedStyle(el, '::before');
-  if (pb.content !== 'none' && /radial-gradient/.test(pb.backgroundImage)) radials(c, pb.backgroundImage, r, a, el.currentCSSZoom || 1);
+  const pb = getComputedStyle(el, '::before'), zz = el.currentCSSZoom || 1;
+  // the element's own gradient veil (the help's, the pause menu's), then its ::before calm (radial) or veil (linear:
+  // the film maker's), in the pseudo-element's own box
+  if (/linear-gradient/.test(cs.backgroundImage)) linears(c, cs.backgroundImage, [r.left, r.top, r.right, r.bottom], a);
+  if (pb.content !== 'none' && /radial-gradient/.test(pb.backgroundImage)) radials(c, pb.backgroundImage, r, a, zz);
+  if (pb.content !== 'none' && /linear-gradient/.test(pb.backgroundImage)) {
+    const px = v => { const n = parseFloat(v); return isFinite(n) ? n * zz : 0; };
+    linears(c, pb.backgroundImage, [r.left + px(pb.left), r.top + px(pb.top), r.right - px(pb.right), r.bottom - px(pb.bottom)], a * (+pb.opacity || 1));
+  }
   if (col(cs.backgroundColor)) { c.fillStyle = cs.backgroundColor; c.fillRect(r.left, r.top, r.width, r.height); }
   // borders
   const B = [['Top', r.left, r.top, r.width, 0], ['Bottom', r.left, r.bottom, r.width, 0], ['Left', r.left, r.top, 0, r.height], ['Right', r.right, r.top, 0, r.height]];

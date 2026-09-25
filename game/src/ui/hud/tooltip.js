@@ -7,7 +7,7 @@ export function createTooltip(game) {
   let id = null, since = 0;
   const q = [0, 0, 0];
   return {
-    draw2d(ov) {
+    draw2d(ov, orb) {
       const h = game.hover;
       if (h !== id) { id = h; since = game.realT; }
       if (!h || game.selection.has(h) || game.realT - since < .3 || !game.mouse.in) return;
@@ -22,7 +22,7 @@ export function createTooltip(game) {
       // cover the selection system's plain label first (same anchor), then the tag over it
       ctx.font = `400 ${10.5 * k}px 'Geist Mono', Consolas, monospace`;
       const w = ctx.measureText(String(tg.label).toUpperCase()).width + tg.label.length * .6 * k + 4 * k;
-      ctx.globalAlpha = 1; ctx.fillStyle = '#0B0C0A'; ctx.fillRect(Math.round(x) - 1, Math.round(base - 10 * k), Math.ceil(w), Math.ceil(14 * k));
+      ctx.globalAlpha = 1; ctx.fillStyle = orb ? '#000' : '#0B0C0A'; ctx.fillRect(Math.round(x) - 1, Math.round(base - 10 * k), Math.ceil(w), Math.ceil(14 * k));
       ov.tag(x, base - 14.5 * k, tg.id, tg.label, tg.value, { kind: own ? 'lime' : game.vis(u) === 'track' ? 'coral' : 'ghost', size: 10.5 });
     },
   };

@@ -72,6 +72,9 @@ export function createMatchFlow(game) {
     return GRADES[Math.max(0, Math.min(4, 4 - p))];
   }
   function finish(win, reason) {
+    // the objectives achieved are ticked before anything reads them (the end block, the stats, the HUD's list)
+    const os = game.getSystem('objectives');
+    if (os && os.settle) try { os.settle(win, reason); } catch (e) { console.error('objectives settle', e); }
     const st = stats(), g = grade(win, st);
     game.result = { win, reason, grade: g, stats: st, t: sim.t };
     const out = { mode: game.mode, mission: game.mission ? game.mission.n : undefined, win, grade: g, stats: st };

@@ -6,11 +6,14 @@ export const TAU = Math.PI * 2;
 export const sat = v => v < 0 ? 0 : v > 1 ? 1 : v;
 export const pad2 = n => String(n).padStart(2, '0');
 
-/* weapon (unit weapon key) and projectile (kind) short names, as the crews write them */
+/* weapon (unit weapon key) and projectile (kind) short names, as the crews write them; a weapon is named by its round's
+   public name (the Kilo's klub tubes fire the Kalibr, the Bal's launchers the Kh-35U), as the unit tags say */
 export const WNAME = { oniks: '3M55', sam: '57E6', gun30: '2A38M', pdms: 'ESSM', ciws: 'Phalanx', sm6: 'SM-6', strike: 'TLAM',
-  gun5: 'Mk 45', hellfire: 'AGM-114', slam: 'SLAM-ER', aam: 'AIM-120D' };
+  gun5: 'Mk 45', hellfire: 'AGM-114', slam: 'SLAM-ER', aam: 'AIM-120D', klub: 'Kalibr', uran: 'Kh-35U', t53: 'Torp 533',
+  svtt: 'Mk 54', mk54: 'Mk 54', mk48: 'Mk 48' };
 export const PNAME = { oniks: '3M55', tlam: 'TLAM', slam: 'SLAM-ER', hellfire: 'AGM-114', sm6: 'SM-6', pdms: 'ESSM', sam: '57E6',
-  aam: 'AIM-120D', shell: 'Mk 45', gun30: '2A38M', ciws: 'Phalanx', crash: 'crash' };
+  aam: 'AIM-120D', shell: 'Mk 45', gun30: '2A38M', ciws: 'Phalanx', crash: 'crash', uran: 'Kh-35U', kalibr: 'Kalibr',
+  mk54: 'Mk 54', mk48: 'Mk 48', t53: 'Torp 533' };
 
 /* a unit as its own side calls it: class + number (TEL 03) */
 export const unitRef = u => (u ? u.def.cls : '?') + ' ' + pad2(u ? u.id : 0);

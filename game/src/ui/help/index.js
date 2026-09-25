@@ -24,8 +24,18 @@ const pad2 = n => String(n).padStart(2, '0');
 const same = (a, b) => typeof a === 'number' && typeof b === 'number' ? Math.abs(a - b) < 1e-6 : a === b;
 const SIDE = { coast: 'Coast', fleet: 'Fleet' };
 
+/* the graphite veil behind the help: dark under the three columns (the rows never sit on bright terrain or a model),
+   easing out to the right where the battle goes on (over styles/game.css's lighter one); the campaign's mission lines
+   step back with the HUD */
+const VEIL = `.oniks-help { background: linear-gradient(90deg, rgba(11,12,10,.95) 0%, rgba(11,12,10,.91) 46%, rgba(11,12,10,.78) 66%, rgba(11,12,10,.46) 86%, rgba(11,12,10,.34) 100%); }
+body.hud-orbital .oniks-help { background: linear-gradient(90deg, rgba(0,0,0,.95) 0%, rgba(0,0,0,.91) 46%, rgba(0,0,0,.78) 66%, rgba(0,0,0,.46) 86%, rgba(0,0,0,.34) 100%); }
+body.oniks-helping #cmp { opacity: 0; }`;
+
 export function createHelp(game) {
   const root = game.uiRoot || document.body;
+  if (!document.getElementById('oniks-help-veil')) {
+    const st = document.createElement('style'); st.id = 'oniks-help-veil'; st.textContent = VEIL; document.head.appendChild(st);
+  }
   const Q = new URLSearchParams(location.search);
   const cam = game.camera;
   let helpEl = null, setEl = null, chipEl = null, open = false, setOpen = null, wasPaused = false, camKeys = true;

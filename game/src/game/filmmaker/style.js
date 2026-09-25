@@ -3,8 +3,10 @@
 const CSS = `
 .oniks-film { position: absolute; left: 0; top: 0; pointer-events: none; color: #fff; font-family: var(--sans); -webkit-font-smoothing: antialiased; }
 .oniks-film .fm-panel { position: absolute; left: 56px; right: 56px; bottom: 34px; z-index: 0; pointer-events: auto; text-shadow: 0 0 2px #0B0C0A, 0 0 5px rgba(11,12,10,.9); }
+/* the graphite veil under the panel (from the screen's bottom edge up past its header): the small type never sits on
+   bright terrain */
 .oniks-film .fm-panel::before { content: ''; position: absolute; left: -56px; right: -56px; top: -150px; bottom: -34px; pointer-events: none; z-index: -1;
-  background: linear-gradient(to top, rgba(11,12,10,.93) 0%, rgba(11,12,10,.86) 58%, rgba(11,12,10,.5) 80%, rgba(11,12,10,0) 100%); }
+  background: linear-gradient(to top, rgba(11,12,10,.94) 0%, rgba(11,12,10,.9) 56%, rgba(11,12,10,.66) 78%, rgba(11,12,10,0) 100%); }
 .oniks-film b { font-weight: 400; color: #fff; }
 .oniks-film .l { color: var(--lime); }
 .oniks-film .c { color: var(--coral); }

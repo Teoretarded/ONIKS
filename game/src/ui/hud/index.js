@@ -14,7 +14,11 @@
      hud system: .toggleBuy(on?), .log.add(code, text, 'l'|'c'|''), .minimap.ping(x, z, colour, sec)
    Keys it takes: B (reinforcements; 1-n buy and Esc close while open). The orders' own B list stays closed.
    CSS (styles/hud.css) moves the sandbox palette (.oniks-sbx) under the kick line: the top right is the log's.
-   Debug: ONIKS.hudShot(name) saves a full-resolution still with the DOM HUD painted in (capture.js). */
+   Debug: ONIKS.hudShot(name) saves a full-resolution still with the DOM HUD painted in (capture.js).
+   The Orbital render style (R.style 'orbital', live): the root gets the class .orbital (styles/hud.css: Inter and DM
+   Mono in sentence case, white on black, hairline rules and meters, catalog squares for the chips, no lime) and
+   .yl-sel / .yl-salvo after game.orbital.yellow: the one yellow highlighter goes to your selection's designation, or to
+   the salvo board while your salvo flies. The minimap and the salvo board's canvas follow (minimap.js, salvo.js). */
 import { PRI } from '../../game/game.js';
 import { createTop } from './top.js';
 import { createLog } from './log.js';
@@ -26,6 +30,7 @@ import { createMinimap } from './minimap.js';
 import { createTooltip } from './tooltip.js';
 import { createMask } from './mask.js';
 import { createSalvo } from './salvo.js';   // the salvo board (its own system; top of the command card)
+import { orbOverlay } from '../sensors/orb.js';
 
 export function createHud(game) {
   // styles
@@ -41,7 +46,7 @@ export function createHud(game) {
   root.addEventListener('contextmenu', e => e.preventDefault());   // right-click on a panel is not the browser's
 
   const hud = {
-    root, scale: 1, stats: { ms: 0, mapMs: 0, previewMs: 0 },
+    root, scale: 1, stats: { ms: 0, mapMs: 0, previewMs: 0 }, orbital: false,
     div(cls) { const d = document.createElement('div'); d.className = cls; root.appendChild(d); return d; },
     click(bad) { const a = game.getSystem('audio'); if (a && a.ui) try { a.ui(bad ? 'invalid' : 'tick'); } catch (e) { /* */ } },
     get buyOpen() { return buy ? buy.open : false; },
@@ -75,7 +80,14 @@ export function createHud(game) {
 
   // the pause menu and the end screen take the stage: the HUD steps back
   const menus = document.getElementsByClassName('oniks-menu'), ends = document.getElementsByClassName('oniks-end');
-  let veiled = false;
+  let veiled = false, orbK = false, ylK = '';
+  /* the Orbital theme follows the render style (and the yellow, the orbital system's rule) */
+  function theme() {
+    const orb = !!(game.R && game.R.style === 'orbital');
+    if (orb !== orbK) { orbK = orb; root.classList.toggle('orbital', orb); document.body.classList.toggle('hud-orbital', orb); hud.orbital = orb; }
+    const yl = orb && game.orbital ? game.orbital.yellow || '' : '';
+    if (yl !== ylK) { ylK = yl; root.classList.toggle('yl-sel', yl === 'selection'); root.classList.toggle('yl-salvo', yl === 'salvo'); }
+  }
 
   const sys = {
     name: 'hud', priority: PRI.hud, drawsObjectives: true,
@@ -96,10 +108,11 @@ export function createHud(game) {
       if (innerWidth !== fitW || innerHeight !== fitH) { fitW = innerWidth; fitH = innerHeight; fit(); }
       const v = (menus.length && menus[0].style.display !== 'none') || (ends.length && !ends[0].classList.contains('min'));
       if (v !== veiled) { veiled = v; root.classList.toggle('veil', v); }
+      theme();
       top.update(); log.update(); alerts.update(); sel.update(); cmd.update(); buy.update(); map.update();
       hud.stats.ms = hud.stats.ms * .95 + (performance.now() - t0) * .05;
     },
-    draw2d(ov) { const t0 = performance.now(); mask.apply(ov); tip.draw2d(ov); hud.stats.d2 = (hud.stats.d2 || 0) * .95 + (performance.now() - t0) * .05; },
+    draw2d(ov) { const t0 = performance.now(); mask.apply(ov); tip.draw2d(orbK ? orbOverlay(ov) : ov, orbK); hud.stats.d2 = (hud.stats.d2 || 0) * .95 + (performance.now() - t0) * .05; },
     dispose() { root.remove(); document.body.classList.remove('hud-on'); },
   };
 

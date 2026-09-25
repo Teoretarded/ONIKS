@@ -15,7 +15,7 @@ export function createLog(game, hud, parent) {
   parent.appendChild(el);
   const headB = el.querySelector('.h b'), rowsEl = el.querySelector('.rows');
   const rows = [];                  // { t, code, text, cls, key, n, real }
-  let dirty = true, lastDraw = 0, headKey = '', newest = null;
+  let dirty = true, lastDraw = 0, headKey = '', newest = null, strike = null;   // strike: the last natural lightning { pos, t }
 
   function add(code, text, cls, key, t) {
     const r = { t: t === undefined ? sim.t : t, code, text, cls: cls || '', key: key || '', n: 1, real: game.realT };
@@ -72,11 +72,18 @@ export function createLog(game, hud, parent) {
           const key = 'V' + e.kind, r = merge(key, 8);
           if (r) { r.n++; r.text = `${r.n} × ${name} inbound${where(e.pos)}`; r.t = sim.t; dirty = true; }
           else add('Vamp', `${name} inbound${where(e.pos)}`, 'c', key);
+        } else if (e.how === 'lightning') {
+          // a natural strike shows everything near it at once: one line for the flash, where it struck
+          // (LIGHTNING · 6 CONTACTS · 218° · 93 KM), the count growing while the cell keeps striking
+          const at = strike && sim.t - strike.t < 2 ? strike.pos : e.pos, r = merge('WL', 20);
+          if (r) { r.n++; r.text = `Lightning · ${r.n} contacts${where(at)}`; r.t = sim.t; r.real = game.realT; dirty = true; }
+          else add('New', `Lightning · ${e.track}${where(at)}`, '', 'WL');
         } else {
           add('New', `${e.track} · ${e.how === 'esm' ? 'emitter' : e.how}${where(e.pos)}`, '', 'N' + e.unit);
         }
         break;
       }
+      case 'lightning': strike = { pos: e.pos, t: sim.t }; break;
       case 'classify': {
         if (e.side !== side) break;
         const c = sim.contact(side, e.unit);

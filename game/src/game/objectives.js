@@ -18,7 +18,9 @@
    For the mission script (campaign/): the returned objectives system carries
      reveal(id), add(obj, { hidden }), get(id), set(id, state, prog), holdWin(on), counts { kills, losses, launches,
      reloads, identified, classified }
-   In campaign mode createObjectives also returns the mission-script system (campaign/index.js). */
+   In campaign mode createObjectives also returns the mission-script system (campaign/index.js).
+   At the result match.js calls settle(win): what was achieved is ticked (a Combat Victory by sinking the carrier shows
+   SINK THE CARRIER and KEEP THE COMMAND POST done). */
 import { spawnWave } from './setup.js';
 import { SHORT } from './labels.js';
 import { createCampaign } from './campaign/index.js';
@@ -184,6 +186,22 @@ function objectivesSystem(game) {
     remove(id) { const i = all.findIndex(q => q.id === id); if (i >= 0) { all.splice(i, 1); rebuild(); game.bus.emit('objectives', list); } },
     holdWin(on) { hold = !!on; },
     win, lose,
+    /* the match is over (match.js, before the result is read): tick what was achieved, in silence. Combat: the
+       enemy's command gone (sunk carrier / destroyed CP), your own still there, the sites held on a win by
+       objectives; what was not achieved stays open, except your own command lost (failed). The campaign's own
+       win() already ticks its end-state objectives. */
+    settle(won) {
+      let ch = false;
+      const mark = (o, st) => { if (o.state !== st) { o.state = st; ch = true; } };
+      for (const o of all) {
+        if (o.hidden || o.state !== 'active') continue;
+        if (o.kind === 'combat_hq') { const e = sim.hq(game.enemy); if (!e || !e.alive) { mark(o, 'done'); o.prog = ''; } }
+        else if (o.kind === 'protect_hq') { const h = sim.hq(side()); mark(o, h && h.alive ? 'done' : 'failed'); }
+        else if (o.kind === 'combat_obj') { if (won) mark(o, 'done'); }
+        else if (won && END.has(o.kind)) mark(o, 'done');
+      }
+      if (ch) game.bus.emit('objectives', list);
+    },
     check() { check(0); },
     init() {
       game.bus.on('inspect', d => { if (!d || d.on !== false) inspected = true; });
