@@ -270,3 +270,16 @@ waves, spray falling back in rings), torpedo launches from ships (arcing out of 
 small parachute), bubble lines on the surface, torpedo hits as a slow 110 m white water column along the hull instead
 of a fireball, wakes that follow a boat's depth (none deep, a feather at periscope depth), water pouring off the sail
 when a boat surfaces, E-2D prop discs.
+
+## 11:05 · Review 3: 8.0 / 10
+`game/reviews/review_3.md`. Up from 7.5. Combat is now a real game (the reviewer won a full Coast match on Krasnaya
+Kosa, grade B, and the AI pressed hard in every match); storms look like the Storm film; no more white slabs; the
+debrief film is "lovely"; campaign M5 and M6 won S, M3 lost then won A; 2-5 ms per frame, no console errors.
+Keeping it from 9: the salvo board covers the picture in the busiest moments, the opening shots and the open sea,
+the debrief missed the winning kill (fixed), the finale is too easy, the fleet struggles to find the land.
+Final wave launched: HUD fixes (salvo board capped and collapsing, strip mode in cinematic/replay/radar view,
+lightning log as one line, victory ticks, backing veils, first Esc opens the menu), first impressions (matches open
+60-120 m off your HQ or carrier and pull out; scan reach rings while aiming, out-of-reach said in the log), the finale
+(the carrier stays out of reach until the storm covers it, counter-fire after each salvo), a radar-scope minimap
+(lime sweep at the real rate, "?" clouds firming into coral ticks, emitters as bearing lines), look 3 (X-ray
+interiors no longer saturate, no stall after camera jumps, stronger swell rows).
