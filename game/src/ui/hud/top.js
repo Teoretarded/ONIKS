@@ -2,6 +2,7 @@
    sites as a row of squares by owner. Right: the time rate (click: faster, right-click: slower, wraps; PAUSED,
    bullet time), the sim clock, supply and income, the player's side, the auto x1 blip. */
 import { clockL, esc } from './fmt.js';
+import { RATES } from '../../game/game.js';
 
 const MARK = '<svg viewBox="0 0 24 24"><path d="M12 2 20.5 22h-4.1L12 11.4 7.6 22H3.5z" fill="#fff"/><circle cx="12" cy="18.2" r="1.7" fill="#C6F432"/></svg>';
 const TICK = '<svg viewBox="0 0 10 10"><path d="M1.2 5.4 4 8.1 8.9 1.9" fill="none" stroke="#C6F432" stroke-width="1.6"/></svg>';
@@ -28,7 +29,6 @@ export function createTop(game, hud) {
   tr.innerHTML = `<div class="read"><i class="sq"></i><span class="rate hit" title=""></span><span class="sep">·</span><span class="clk"></span><span class="cine"></span></div>
     <div class="ro sup"></div><div class="blip"></div>`;
   const sq = tr.querySelector('.sq'), rateEl = tr.querySelector('.rate'), clkEl = tr.querySelector('.clk'), supEl = tr.querySelector('.sup'), blipEl = tr.querySelector('.blip'), cineEl = tr.querySelector('.cine');
-  const RATES = [1, 2, 4, 8, 16, 32];
   rateEl.addEventListener('mousedown', e => {
     e.stopPropagation(); e.preventDefault();
     if (game.paused) { game.pause(false); return; }
