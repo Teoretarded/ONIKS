@@ -72,7 +72,7 @@ palette (P: place any unit, G fog, K wake the enemy AI, J switch side, N weather
 burn and wreck, aircraft sit on the carrier deck and bank in turns. The cinematic camera chases missiles like the films.
 Agent retries used so far: 1 of 100 (the balance agent tripped the safety filter; relaunched as a pure numbers job).
 
-## 04:40 · HUD, effects, Inspect done
+## 04:25 · HUD, effects, Inspect done
 - HUD in the films' type: objectives, rate/clock/supply, an engagement log laid out like the Ring film's, INCOMING
   alerts, selection panel, command card, minimap, reinforcements (B), tooltips.
 - Effects from the films in the game: cold launch (gas, cap tumbling, booster lighting), plumes with shock diamonds,

@@ -2,15 +2,28 @@
    Nested square lattices of dots, spacing doubling per level, every level snapped to its world lattice (dots
    never swim), jitter from a hash of the dot's absolute lattice position (stable), heights read in the vertex
    shader from a float texture of map.heights. Level transitions dissolve: in the outer band of a level the
-   dots that are not on the next level's lattice drop out one by one while the shared ones slide to the coarser
-   jitter, so the hand-over is seamless; the finest level does the same with the zoom fraction, so zooming
-   never pops. The lattice is centred on the eye's ground point, finest spacing from the lens height: from
-   20 m to 150 km the dots keep the same density on screen.
-   Land is the films' LiDAR survey (lit by a low moon from the slope, contour and ridge emphasis, a bright surf
-   band at the waterline); the sea is the films' dot sea (a swell moving in the vertex shader, brightness from
-   the swell, wind rows, sparse at range); shallow seabed shows faintly. An invisible depth mesh (lower
-   envelope of the land, then the sea surface) occludes what is behind hills and below the horizon: with the
-   Earth's curvature (d^2 / 2R) distant ships go hull-down. */
+   dots that are not on the next level's lattice drop out one by one; the finest level does the same with the
+   zoom fraction, so zooming never pops. The lattice is centred on the eye's ground point, finest spacing from
+   the lens height: from 20 m to 150 km the dots keep the same density on screen.
+
+   The films' LiDAR look comes from WHICH dots are drawn, not from random speckle:
+   - Ordered thinning. Every lattice dot has a pattern rank (from its absolute lattice index): the dots of rank
+     >= k form a regular sub-lattice of density 2^-k whose rows run east-west (scan rows) and whose jitter is
+     +-0.35 of its own spacing along the row, tighter across. Thinning keeps whole patterns, so what survives is
+     always a jittered lattice with rows, world-fixed and identical in every clipmap level.
+   - Land keeps a dot budget per screen area measured on FLAT ground with a grazing floor (the films' survey):
+     faces turned to the lens and silhouettes pile up (crisp ridgelines, walls of cliffs), the far field packs
+     toward the horizon. Shading from an exaggerated normal lit by the moon blended with a light behind the
+     lens, crests brightened, contours snapped into crisp dotted lines from high up, beaches, a field and
+     marsh texture on flat low ground.
+   - The sea keeps a constant horizontal spacing on screen (the films' Aegis sea), so rows compress into a
+     perspective gradient and dissolve into a bright horizon line. Brightness follows the swell: the faces
+     turned to the lens return more (back faces seen from low return nothing, so the swell prints as rows
+     receding along the crests), crests brighter, the films' slow flicker, glints, whitecaps in a rough sea, a
+     glassy dark sea in a calm; the coast is one crisp dotted line with a surf band walking in.
+   An invisible depth mesh (lower envelope of the land, then the sea surface) occludes what is behind hills and
+   below the horizon: with the Earth's curvature (d^2 / 2R) distant ships go hull-down. The sky is dots at
+   infinity: a band of returns riding the dipped horizon (glowing toward dusk) and sparse stars. */
 import { HEAD, FRAME, COMMON, FS_POINT, CULL } from './shaders.js';
 import { program, floatTex } from './gl.js';
 
@@ -19,6 +32,7 @@ const B = 32;                 // block side (dots)
 const MB = 8;                 // depth mesh quads per block side
 const R_EARTH = 6371000;
 const BASE_SHIFT = 6;         // absolute lattice unit = 1/64 m (hash coordinates)
+const DEG = Math.PI / 180;
 
 /* ---------- JS mirrors of the shader's hash and noise (units sit on what is drawn) ---------- */
 function hash2(x, y) {
@@ -53,18 +67,27 @@ uniform sampler2D uNTex;                  // RGBA16F: dh/dx, dh/dz, ridge, unuse
 uniform vec4 uMap;                        // world x0, z0, 1/cell, cell
 uniform ivec2 uMapN;                      // cols, rows
 uniform uint uSalt;
-uniform float uJit;
+uniform vec2 uJit;                        // jitter along the rows (x), across them (z), of the pattern spacing
 uniform float uRelief;
 
-/* one lattice dot: rte xz, effective spacing, visibility, hash; false = no dot here */
-bool latticeDot(out vec2 xz, out float sEff, out float vis, out uint hs, out float tb) {
+/* trailing zero bits (capped) */
+int ctz(int v) {
+  if (v == 0) return 15;
+  uint u = uint(v);
+  u &= (~u + 1u);
+  return min(15, int(log2(float(u)) + 0.5));
+}
+/* one lattice dot: rte xz, level spacing s, visibility (band dissolve), hash, pattern rank lr (the dot belongs to
+   the scan-row patterns 0..lr: pattern k keeps rows J % 2^ceil(k/2) == 0 and columns I % 2^floor(k/2) == 0,
+   density 2^-k). The jitter scales with the dot's coarsest pattern, so it is the same in every level. */
+bool latticeDot(out vec2 xz, out float s, out float vis, out uint hs, out float lr) {
   int l = aBlk.x;
   int li = gl_VertexID % uB, lj = gl_VertexID / uB;
   int i = aBlk.y + li, j = aBlk.z + lj;
   ivec4 hb = uHole[l];
   if (i >= hb.x && i < hb.y && j >= hb.z && j < hb.w) return false;
   vec4 L = uLv[l]; ivec4 LI = uLvI[l];
-  float s = L.x;
+  s = L.x;
   int I = LI.x + i, J = LI.y + j;
   hs = hash2(uo(I << LI.z) ^ uSalt, uo(J << LI.z));
   vec2 q = L.yz + vec2(float(i), float(j)) * s;
@@ -72,19 +95,30 @@ bool latticeDot(out vec2 xz, out float sEff, out float vis, out uint hs, out flo
   float hg = float(uG / 2);
   float t = smoothstep(hg - uBand - 2.0, hg - 2.0, dn);
   if (l == 0) t = max(t, L.w);
-  tb = t;
-  vis = 1.0; sEff = s;
-  float js = 1.0;
-  if (((I | J) & 1) == 0) { js = 1.0 + t; sEff = s * js; }
-  else {
+  vis = 1.0;
+  if (((I | J) & 1) != 0) {
     float hv = u01(hash1(hs ^ 0x68bc21ebu));
     vis = clamp((hv - t) / 0.12, 0.0, 1.0);
     if (vis <= 0.0) return false;
   }
   if (LI.w == 1) vis *= 1.0 - smoothstep(hg - uBand, hg - 2.0, dn);
+  int a = ctz(J), b = ctz(I);
+  lr = float(min(min(2 * a, 2 * b + 1), 20));
+  float X = s * exp2(floor(lr * 0.5)), Z = s * exp2(ceil(lr * 0.5));
   uint h2 = hash1(hs + 0x9e3779b9u);
-  xz = q + vec2(u01(hs) - 0.5, u01(h2) - 0.5) * uJit * s * js;
+  xz = q + vec2((u01(hs) - 0.5) * uJit.x * X, (u01(h2) - 0.5) * uJit.y * Z);
   return vis > 0.001;
+}
+/* ordered thinning to density 2^-kd of the level's lattice: whole patterns survive (rows stay rows), the last one
+   dissolving dot by dot */
+float keepOrdered(float lr, float kd, uint hs) {
+  if (kd <= 0.0) return 1.0;
+  float K = floor(kd);
+  if (lr > K + 0.5) return 1.0;
+  if (lr < K - 0.5) return 0.0;
+  float f = exp2(K + 1.0 - kd) - 1.0;
+  float u = u01(hash1(hs ^ 0x3c6ef372u));
+  return clamp((f - u * 0.8) / 0.2, 0.0, 1.0);
 }
 /* map height (bilinear on the node grid) at world xz; outside the map it falls off to open sea */
 float mapH(vec2 w, out float dout) {
@@ -129,10 +163,14 @@ float detail(vec2 w, float h, out vec2 g) {
 
 const SEA_GLSL = `
 uniform vec4 uWave[4];      // kx, kz, amplitude, phase (includes k.eye - w t)
-uniform vec4 uSeaP;         // x: brightness, y: keep fraction, z: wind-row angle, w: total amplitude
+uniform vec4 uSeaP;         // x: brightness, y: horizontal spacing of the returns on screen (1080 px), z: wind angle, w: total amplitude
+uniform vec4 uSea2;         // x: roughness 0 glassy .. 1 storm, y: whitecaps, z: glints, w: 2-px dots above this on-screen spacing
 uniform vec4 uSurf;         // x: surf width (m), y: waterline brightness, z: time, w: contour interval (m)
 uniform vec4 uLand;         // x: brightness, y: contour strength, z: ridge gain, w: outside-map dim
-uniform vec4 uDot;          // x: 2 px above this on-screen spacing, y: 3 px above, z: dim above (px), w: min screen area per dot (px^2)
+uniform vec4 uDot;          // x: 2 px above this on-screen spacing, y: 3 px above, z: dim above (px), w: screen area per land dot (px^2)
+uniform vec4 uLit;          // xyz: a light behind the lens, w: how much the land light follows it (0 = the moon)
+uniform vec4 uTex;          // x: fields, y: marsh, z: beach, w: grazing floor of the land budget
+uniform vec4 uCoast;        // x: waterline dots per px of coast, y: surf strength, z: seabed spacing factor, w: unused
 float swell(vec2 p, out vec2 g) {
   float y = 0.0; g = vec2(0.0);
   for (int k = 0; k < 4; k++) {
@@ -147,66 +185,145 @@ float swell(vec2 p, out vec2 g) {
 const VS_SURF = HEAD + FRAME + COMMON + LATTICE + SEA_GLSL + `
 out vec3 vCol;
 void main() {
-  vec2 xz; float sEff, vis, tb; uint hs;
-  if (!latticeDot(xz, sEff, vis, hs, tb)) { ${CULL} return; }
+  vec2 xz; float s, vis, lr; uint hs;
+  if (!latticeDot(xz, s, vis, hs, lr)) { ${CULL} return; }
   vec2 w = xz + uEyeW.xz;
   float dout;
   float h = mapH(w, dout);
   vec4 N = mapN(w);
+  float g2 = max(1e-6, dot(N.xy, N.xy));
+  float dsh = abs(h) * inversesqrt(g2);                 // distance to the waterline (m)
+  // where the dot lands on screen (before the fine relief and the swell): the dot budget is set from this
+  vec3 p0 = vec3(xz.x, max(h, 0.0) - uEyeW.y, xz.y);
+  p0.y -= curveDrop(p0);
+  float cw = dot(uCamF.xyz, p0);
+  if (cw < uCam.w) { ${CULL} return; }
+  float pxs = s * uCam.x / cw;                          // on-screen spacing of this level's lattice (1080 px)
+  float fg = abs(p0.y) * inversesqrt(dot(p0, p0));      // flat ground's facing: sine of the view's elevation
   vec3 col = WH;
-  float b, y, big = 0.0, seaK = 1.0;
-  vec3 n;
-  float dsh = abs(h) / max(0.002, length(N.xy));       // distance to the waterline (m)
-  float wl = max(0.75 * sEff, 2.0);
+  float b, y, big = 0.0, kd = 0.0, land = 0.0, sea = 0.0, glint = 0.0;
+  vec3 n = vec3(0.0, 1.0, 0.0);
+  float wl = max(0.75 * s, 2.0);
   if (dsh < wl && dout <= 0.0) {
     // the waterline: the returns either side of it snapped onto the h = 0 contour (a Newton step along the
-    // gradient), so the coast prints as one crisp dotted line
-    float g2 = max(1e-6, dot(N.xy, N.xy));
+    // gradient), so the coast prints as one crisp dotted line, as dense on screen at any range
+    kd = log2(max(1e-6, 2.0 * wl / (s * pxs) / uCoast.x));
+    vis *= keepOrdered(lr, kd, hs);
+    if (vis < 0.02) { ${CULL} return; }
     xz -= N.xy * (h / g2);
     y = 0.35;
-    n = vec3(0.0, 1.0, 0.0);
     b = uSurf.y * (0.72 + 0.28 * u01(hash1(hs ^ 0x51ed27u)));
     big = 1.0;
   } else if (h > 0.0) {
+    land = 1.0;
+    // the dot budget per screen area on flat ground, with a grazing floor: faces turned to the lens and
+    // silhouettes keep more returns on screen (crisp crests, walls), the far field packs toward the horizon
+    kd = log2(uDot.w / max(1e-6, pxs * pxs * max(uTex.w, fg)));
+    vis *= keepOrdered(lr, kd, hs);
+    if (vis < 0.02) { ${CULL} return; }
     vec2 dg;
     y = h + detail(w, h, dg);
     vec2 g = N.xy + dg;
     n = normalize(vec3(-g.x, 1.0, -g.y));
-    // shading from an exaggerated normal: the relief reads like the films' survey at true height
+    float slope = sqrt(g2);
+    // contours: returns within half a spacing of one snap onto it (the films' chart, dotted) - from high up
+    if (uLand.y > 0.0 && h > uSurf.w * 0.5) {
+      float dhc = (fract(h / uSurf.w + 0.5) - 0.5) * uSurf.w;
+      float kept = s * exp2(0.5 * max(kd, 0.0));
+      if (abs(dhc) * inversesqrt(g2) < 0.5 * kept) { xz -= N.xy * (dhc / g2); y -= dhc; big = 0.5; }
+    }
+    // shading from an exaggerated normal: the relief reads like the films' survey at true height; the light is
+    // the moon blended with one behind the lens, so the faces the camera sees are the lit ones
     vec2 gs = N.xy * uRelief + dg * 1.5;
-    float sh = max(0.0, dot(normalize(vec3(-gs.x, 1.0, -gs.y)), uSun.xyz));
-    b = 0.05 + 0.85 * pow(sh, 2.0);
-    b += 0.06 * clamp(h / 500.0, 0.0, 1.0);
-    b += clamp(N.z * uLand.z, 0.0, 0.28);
-    float hv = h / uSurf.w;
-    if (hv - floor(hv) < 0.1) b += uLand.y;
+    vec3 ns = normalize(vec3(-gs.x, 1.0, -gs.y));
+    vec3 Lk = normalize(mix(uSun.xyz, uLit.xyz, uLit.w));
+    float sh = max(0.0, dot(ns, Lk));
+    b = 0.045 + 0.86 * pow(sh, 2.2);
+    b += 0.07 * clamp(h / 500.0, 0.0, 1.0);
+    b += clamp(N.z * uLand.z, 0.0, 0.3);                  // crests and ridges
+    if (big > 0.25) b += uLand.y;
+    float flatk = 1.0 - smoothstep(0.012, 0.05, slope);
+    // beaches: sand just above the waterline on gentle ground returns bright and smooth
+    float beach = uTex.z * (1.0 - smoothstep(1.2, 4.5, h)) * (1.0 - smoothstep(0.03, 0.14, slope));
+    b = mix(b, 0.34 + 0.34 * sh, beach);
+    // flat low ground: a patchwork of fields (tone per plot, darker tracks between them), districts turned
+    float fk = uTex.x * flatk * smoothstep(3.0, 9.0, h) * (1.0 - smoothstep(140.0, 260.0, h));
+    if (fk > 0.01) {
+      vec2 dc = floor(w / 3100.0);
+      uint hd = hash2(uo(int(dc.x)) ^ 0x6a09e667u, uo(int(dc.y)));
+      float ang = u01(hd) * 1.5708, ca = cos(ang), sa = sin(ang);
+      vec2 r = vec2(ca * w.x + sa * w.y, -sa * w.x + ca * w.y);
+      vec2 cs = vec2(360.0 + 240.0 * u01(hash1(hd)), 170.0 + 130.0 * u01(hash1(hd ^ 0x9e37u)));
+      float row = floor(r.y / cs.y);
+      r.x += cs.x * u01(hash1(uint(int(row)) ^ hd));
+      vec2 cid = vec2(floor(r.x / cs.x), row);
+      vec2 fr = r / cs - cid;
+      uint hc = hash2(uo(int(cid.x)) ^ hd, uo(int(cid.y)));
+      float tone = u01(hc) - 0.5, ex = min(fr.x, 1.0 - fr.x) * cs.x;
+      float sp = 0.3 + 0.4 * u01(hash1(hc ^ 0x85ebu));
+      if (u01(hash1(hc)) < 0.45) { ex = min(ex, abs(fr.x - sp) * cs.x); if (fr.x > sp) tone = u01(hash1(hc ^ 0x27d4u)) - 0.5; }
+      float edge = min(ex, min(fr.y, 1.0 - fr.y) * cs.y);
+      b *= 1.0 + fk * (0.36 * tone - 0.34 * (1.0 - smoothstep(1.5, 5.5, edge)));
+    }
+    // marsh: flat ground a few metres up, standing water swallowing the pulse in patches
+    float mk = uTex.y * flatk * (1.0 - smoothstep(2.0, 5.5, h));
+    if (mk > 0.01) {
+      vec2 dm;
+      float pool = smoothstep(0.05, 0.5, vnoise(w / 170.0 + 5.3, dm)) * mk;
+      if (u01(hash1(hs ^ 0x1f83d9abu)) < pool * 0.7) { ${CULL} return; }
+      b *= 1.0 - 0.3 * pool;
+    }
     b *= uLand.x;
     b *= mix(1.0, uLand.w, smoothstep(0.0, 3000.0, dout));
   } else {
-    // sea: sparse returns riding the swell
-    vec2 g;
-    y = swell(xz, g) * uMisc.x;
-    g *= uMisc.x;
-    n = normalize(vec3(-g.x, 1.0, -g.y));
+    sea = 1.0;
+    // the sea: returns at a constant horizontal spacing on screen, denser in the surf zone
+    float sf = dout <= 0.0 ? clamp(1.0 - dsh / uSurf.x, 0.0, 1.0) : 0.0;
+    kd = 2.0 * log2(uSeaP.y * (1.0 - 0.5 * sf * sf) / pxs);
+    vis *= keepOrdered(lr, kd, hs);
+    if (vis < 0.02) { ${CULL} return; }
+    vec2 gw;
+    y = swell(xz, gw) * uMisc.x;
+    gw *= uMisc.x;
+    n = normalize(vec3(-gw.x, 1.0, -gw.y));
     float A = max(0.05, uSeaP.w * uMisc.x);
-    float sw = clamp((y / A + 1.0) * 0.5, 0.0, 1.0);
-    // more returns off the crests and the faces turned to the lens: the swell reads in the density
-    float face = clamp(-dot(n, normalize(vec3(xz.x, y - uEyeW.y, xz.y))) * 3.0, 0.0, 1.0);
-    seaK = uSeaP.y * (0.35 + 0.9 * sw * sw + 0.35 * face);
-    if (u01(hash1(hs ^ 0x2545f491u)) > seaK) { ${CULL} return; }
-    float ca = uSeaP.z, cs = cos(ca), sn = sin(ca);
+    float sw = clamp((y / A + 1.0) * 0.5, 0.0, 1.0);     // 0 trough .. 1 crest
+    vec3 pv = vec3(xz.x, y - uEyeW.y, xz.y);
+    pv.y -= curveDrop(pv);
+    vec3 v = normalize(pv);
+    // facing: the faces of the swell turned to the lens return more; its backs, seen from low, return nothing
+    float face = clamp(-dot(n, v) / max(0.003, -v.y), 0.0, 2.5);
+    vis *= smoothstep(0.03, 0.3, face);
+    if (vis < 0.02) { ${CULL} return; }
+    // the films' slow flicker: each return has its own phase
+    float tw = fract(u01(hs) + uSurf.z * 0.37);
+    tw = tw < 0.5 ? tw * 2.0 : 2.0 - tw * 2.0;
+    // wind rows: a slow texture stretched along the wind
+    float cs = cos(uSeaP.z), sn = sin(uSeaP.z);
     vec2 wr = vec2(cs * w.x - sn * w.y, sn * w.x + cs * w.y);
     vec2 dd;
-    float tex = exp(1.4 * (0.65 * vnoise(wr * vec2(0.00042, 0.0007) + 3.7, dd) + 0.35 * vnoise(wr * vec2(0.0011, 0.0019) + 9.1, dd)) - 0.25);
-    float crest = fract(u01(hs) + uEyeW.w * 0.37);
-    crest = crest < 0.5 ? crest * 2.0 : 2.0 - crest * 2.0;
-    float slope = clamp(length(g) * 6.0, 0.0, 1.0);
-    b = uSeaP.x * (0.34 + 0.5 * sw * sw + 0.18 * crest + 0.25 * slope) * mix(1.0, tex, 0.65);
+    float tex = exp(1.2 * (0.65 * vnoise(wr * vec2(0.00042, 0.0007) + 3.7, dd) + 0.35 * vnoise(wr * vec2(0.0011, 0.0019) + 9.1, dd)) - 0.2);
+    b = uSeaP.x * (0.13 + 0.25 * face + 0.3 * sw * sw + 0.12 * tw) * mix(1.0, tex, 0.45);
+    // glints: now and then a facet flashes at the lens
+    uint hg = hash1(hs ^ 0x7f4a7c15u);
+    if (u01(hg) < uSea2.z * (0.02 + 0.05 * face)) {
+      float gp = u01(hash1(hg)) * 6.2832 + uSurf.z * (1.3 + 2.6 * u01(hg ^ 0x5bd1u));
+      glint = pow(max(0.0, sin(gp)), 14.0);
+      b = max(b, glint * (0.55 + 0.25 * face));
+    }
+    // whitecaps: breaking crests in a rough sea, each patch lives a few seconds
+    if (uSea2.y > 0.0) {
+      vec2 cc = floor(w / 28.0);
+      uint hc = hash2(uo(int(cc.x)) ^ 0x2f1u, uo(int(cc.y)));
+      float cyc = fract(u01(hc) + uSurf.z / (5.0 + 5.0 * u01(hash1(hc))));
+      float life = smoothstep(0.0, 0.06, cyc) * (1.0 - smoothstep(0.2, 0.55, cyc));
+      float wc = smoothstep(0.6, 0.9, sw) * life * step(u01(hash1(hc ^ 0x7feb1u)), 0.2 + 0.5 * uSea2.y) * uSea2.y;
+      if (wc > 0.05) { b = max(b, 0.95 * wc); glint = max(glint, wc); }
+    }
     // surf: lines of foam walking in to the shore
-    if (dsh < uSurf.x) {
-      float k = 1.0 - dsh / uSurf.x;
+    if (sf > 0.0) {
       float wv = 0.5 + 0.5 * sin(dsh * 0.45 - uSurf.z * 1.3 + u01(hs) * 1.5);
-      b = max(b, (0.25 + 0.6 * wv * wv) * k * uSurf.y);
+      b = max(b, (0.2 + 0.6 * wv * wv) * sf * uSurf.y * uCoast.y);
     }
   }
   vec3 p = vec3(xz.x, y - uEyeW.y, xz.y);
@@ -214,16 +331,10 @@ void main() {
   vec4 c = toClip(p);
   if (c.w < uCam.w) { ${CULL} return; }
   gl_Position = c;
-  float pxs = sEff * uCam.x / c.w;
-  // keep the dots about as dense on screen at grazing angles as face-on (and as sparse as the films near the
-  // lens): thin where they crowd, never the waterline
-  float area = pxs * pxs * max(0.015, abs(dot(n, normalize(p))));
-  if (big < 0.5) {
-    float keep = clamp(area / uDot.w, 0.0, 1.0);
-    if (u01(hash1(hs ^ 0x3c6ef372u)) > keep) { ${CULL} return; }
-  }
-  float eff = sqrt(max(area, uDot.w));
-  if (eff > uDot.z) b *= uDot.z / eff;
+  // spacing of the kept dots on screen (1080 px): it sets the dot size (and dims the sparse near field a little)
+  float pk = s * exp2(0.5 * max(kd, 0.0)) * uCam.x / c.w;
+  float eff = land > 0.5 ? pk * sqrt(max(0.05, abs(dot(n, normalize(p))))) : pk * sqrt(max(0.02, fg));
+  if (eff > uDot.z) b *= mix(1.0, uDot.z / eff, 0.6);
   b *= depthFade(c.w) * vis * uFade.z;
   vec2 sc = scanAt(p);
   vec2 sw2 = sweepAt(p);
@@ -234,11 +345,11 @@ void main() {
   if (ke > 0.01) rgb = max(mix(rgb, LIME * max(b, 0.9), ke), rgb);
   rgb += WH * b * 0.55 * sw2.y;
   vCol = min(rgb, vec3(1.0));
-  float dth = 0.75 + 0.5 * u01(hash1(hs ^ 0x85ebca6bu));
-  float effS = eff * inversesqrt(max(0.05, seaK));      // the sea is thinned: its dots sit further apart
-  float ps = effS > uDot.y * dth ? 3.0 : (effS > uDot.x * dth ? 2.0 : 1.0);
-  if (seaK < 1.0) ps = effS > 7.5 * dth ? 2.0 : 1.0;
-  if (big > 0.5 && c.w < 32000.0) ps = max(ps, 2.0);
+  float dth = 0.8 + 0.4 * u01(hash1(hs ^ 0x85ebca6bu));
+  float ps;
+  if (sea > 0.5) ps = eff > uSea2.w * dth || glint > 0.5 ? 2.0 : 1.0;
+  else ps = eff > uDot.y * dth ? 3.0 : (eff > uDot.x * dth ? 2.0 : 1.0);
+  if (big > 0.75 && c.w < 32000.0) ps = max(ps, 2.0);
   gl_PointSize = max(1.0, floor(ps * uCam.y + 0.5));
 }
 `;
@@ -246,28 +357,27 @@ void main() {
 const VS_SEABED = HEAD + FRAME + COMMON + LATTICE + SEA_GLSL + `
 out vec3 vCol;
 void main() {
-  vec2 xz; float sEff, vis, tb; uint hs;
-  if (!latticeDot(xz, sEff, vis, hs, tb)) { ${CULL} return; }
+  vec2 xz; float s, vis, lr; uint hs;
+  if (!latticeDot(xz, s, vis, hs, lr)) { ${CULL} return; }
   vec2 w = xz + uEyeW.xz;
   float dout;
   float h = mapH(w, dout);
-  if (h > -0.4 || h < -40.0 || u01(hash1(hs ^ 0x1b873593u)) > 0.55) { ${CULL} return; }
-  vec4 N = mapN(w);
-  vec3 n = normalize(vec3(-N.x, 1.0, -N.y));
+  if (h > -0.4 || h < -40.0) { ${CULL} return; }
   vec3 p = vec3(xz.x, h - uEyeW.y, xz.y);
   p.y -= curveDrop(p);
+  float cw = dot(uCamF.xyz, p);
+  if (cw < uCam.w) { ${CULL} return; }
+  float kd = 2.0 * log2(uSeaP.y * uCoast.z * cw / (s * uCam.x));
+  vis *= keepOrdered(lr, kd, hs);
+  if (vis < 0.02) { ${CULL} return; }
+  vec4 N = mapN(w);
+  vec3 n = normalize(vec3(-N.x, 1.0, -N.y));
   vec4 c = toClip(p);
-  if (c.w < uCam.w) { ${CULL} return; }
   gl_Position = c;
-  float b = 0.3 * exp(h / 9.0) * (0.45 + 0.55 * max(0.0, dot(n, uSun.xyz)));
-  float pxs = sEff * uCam.x / c.w;
-  float area = pxs * pxs * max(0.015, abs(dot(n, normalize(p))));
-  if (u01(hash1(hs ^ 0x3c6ef372u)) > clamp(area / uDot.w, 0.0, 1.0)) { ${CULL} return; }
-  float eff = sqrt(max(area, uDot.w));
-  if (eff > uDot.z) b *= uDot.z / eff;
+  float b = 0.28 * exp(h / 9.0) * (0.45 + 0.55 * max(0.0, dot(n, uSun.xyz)));
   b *= depthFade(c.w) * vis * uFade.z;
   vCol = WH * b;
-  gl_PointSize = max(1.0, floor((eff > 10.0 ? 2.0 : 1.0) * uCam.y + 0.5));
+  gl_PointSize = max(1.0, floor(uCam.y + 0.5));
 }
 `;
 
@@ -333,22 +443,48 @@ out vec4 o;
 void main() { gl_FragDepth = log2(max(1e-6, vLz)) * uCam.z * 0.5; o = vec4(0.0); }
 `;
 
-/* sky: stars and a faint band of returns low over the horizon, at infinity */
+/* sky: dots at infinity. The band of returns rides the horizon (dipped by the lens height), glowing toward one
+   azimuth (dusk); sparse stars above it */
 const VS_SKY = HEAD + FRAME + COMMON + `
 layout(location = 0) in vec4 aDir;     // xyz direction, w brightness
-layout(location = 1) in float aPh;
+layout(location = 1) in float aPh;     // twinkle phase; + 10: a return of the horizon band
 out vec3 vCol;
-uniform float uSkyK;
+uniform vec4 uSkyP;                    // x: stars, y: band, z: horizon dip (rad), w: glow azimuth (rad, clockwise from north)
+uniform float uSkyG;                   // glow: 0 even all round .. 1 all toward the azimuth
 void main() {
-  vec4 c = uVP * vec4(aDir.xyz * 1.0e7, 1.0);
+  vec3 d = aDir.xyz;
+  float k = uSkyP.x, ph = aPh;
+  if (aPh >= 10.0) {
+    ph -= 10.0;
+    float ce = length(d.xz), se = d.y, cd = cos(uSkyP.z), sd = sin(uSkyP.z);
+    vec2 hz = d.xz / max(1e-6, ce);
+    d = vec3(hz * (ce * cd + se * sd), se * cd - ce * sd).xzy;
+    float gl = pow(max(0.0, cos(atan(hz.x, hz.y) - uSkyP.w)), 3.0);
+    k = uSkyP.y * mix(1.0, 0.3 + 0.7 * gl, uSkyG);
+  }
+  if (k <= 0.002) { ${CULL} return; }
+  vec4 c = uVP * vec4(d * 1.0e7, 1.0);
   if (c.w <= 0.0) { ${CULL} return; }
   c.z = c.w * 0.999999;
   gl_Position = c;
-  float tw = 0.8 + 0.2 * sin(uEyeW.w * 1.3 + aPh);
-  vCol = vec3(0.88, 0.9, 0.87) * aDir.w * tw * uSkyK * uFade.z;
+  float tw = 0.8 + 0.2 * sin(uEyeW.w * 1.3 + ph);
+  vCol = vec3(0.866, 0.906, 0.824) * aDir.w * tw * k * uFade.z;
   gl_PointSize = max(1.0, floor(uCam.y + 0.5));
 }
 `;
+
+/* the look per weather: sea brightness, spacing on screen, roughness, whitecaps, glints; sky stars and band */
+const WEATHER_LOOK = {
+  calm: { seaB: .82, seaPx: 1.12, stars: 1, band: 1, glintK: 1 },
+  haze: { seaB: .78, seaPx: 1.12, stars: .35, band: 1.25, glintK: .6 },
+  rain: { seaB: .95, seaPx: .95, stars: 0, band: .75, glintK: .3 },
+  storm: { seaB: 1.08, seaPx: .82, stars: 0, band: .55, glintK: .4 },
+};
+const TIME_LOOK = {
+  night: { stars: .9, band: .78, glowAz: 220, glow: .35 },
+  dusk: { stars: .45, band: 1, glowAz: 288, glow: .8 },
+  day: { stars: 0, band: .9, glowAz: 110, glow: .2 },
+};
 
 export class Terrain {
   constructor(G, map, opts) {
@@ -357,13 +493,26 @@ export class Terrain {
     this.N = opts.grid || 640;                 // dots per level side (multiple of 64)
     this.densNear = opts.densNear || 140;      // lens height / finest spacing, near the ground ...
     this.densFar = opts.densFar || 380;        // ... and from high up
-    this.jitter = opts.jitter || .7;           // of the spacing (the films' survey: +-0.35)
+    this.jitter = opts.jitter || .7;           // along the scan rows, of the pattern spacing (the films' survey: +-0.35)
+    this.rowJitter = opts.rowJitter !== undefined ? opts.rowJitter : .28;   // across the rows (smaller: the rows read)
     this.relief = opts.relief || 0;            // normal exaggeration for the shading (heights stay true); 0 = from the map's slopes
-    this.areaNear = opts.areaNear || 20;       // min screen px^2 per dot (thins the crowd at grazing angles)
-    this.areaFar = opts.areaFar || 11;
-    this.dotPx = opts.dotPx || [6, 14, 16];  // 2 px / 3 px thresholds, dimming above (on-screen spacing, 1080-px)
-    this.seaKeep = opts.seaKeep !== undefined ? opts.seaKeep : .3;
+    this.areaNear = opts.areaNear || 34;       // screen px^2 per land dot on flat ground, near the ground ...
+    this.areaFar = opts.areaFar || 16;         // ... and from high up
+    this.grazing = opts.grazing !== undefined ? opts.grazing : .1;          // floor of the land budget's facing (packs the far field)
+    this.seaPx = opts.seaPx || 9.5;            // horizontal spacing of the sea returns on screen (1080 px)
+    this.coastPx = opts.coastPx || .34;        // waterline dots per px of coast
+    this.lightFollow = opts.lightFollow !== undefined ? opts.lightFollow : .45;   // land light: 0 the moon .. 1 behind the lens
+    this.fields = opts.fields !== undefined ? opts.fields : 1;               // field patchwork on flat low ground
+    this.marsh = opts.marsh !== undefined ? opts.marsh : 1;
+    this.beach = opts.beach !== undefined ? opts.beach : .8;
+    this.dotPx = opts.dotPx || [5.2, 15, 22];  // 2 px / 3 px thresholds, dimming above (on-screen spacing, 1080-px)
+    this.seaDot2 = opts.seaDot2 || 3.4;        // sea dots are 2 px above this on-screen spacing
+    this.contours = opts.contours !== undefined ? opts.contours : 1;        // contour emphasis from high up
+    this.seaKeep = opts.seaKeep !== undefined ? opts.seaKeep : .3;          // (kept for compatibility; seaPx sets the sea)
     this.stats = { blocks: 0, levels: 0, s0: 0, dots: 0 };
+    // sky knobs (the weather and the time of day set them; SENSORS may override: stars 0 under a storm ceiling)
+    this.sky = { stars: 1, band: 1, glowAz: 220 * DEG, glow: .35 };
+    this.time = map.time || 'night';
     this._prepData();
     this._prepGL();
   }
@@ -464,14 +613,14 @@ export class Terrain {
 
     // sky
     const S = [], rs = mulberry(303);
-    for (let i = 0; i < 2600; i++) {              // stars
-      const u = rs(), az = rs() * Math.PI * 2, el = Math.asin(Math.pow(u, 1.4)) * .98 + .01, mg = Math.pow(rs(), 3.2);
-      S.push(Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az), .1 + .62 * mg, rs() * 6.28);
+    for (let i = 0; i < 1500; i++) {              // stars: sparse, above the band
+      const u = rs(), az = rs() * Math.PI * 2, el = Math.asin(.14 + .86 * Math.pow(u, 1.25)), mg = Math.pow(rs(), 3.4);
+      S.push(Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az), .07 + .5 * mg, rs() * 6.28);
     }
-    for (let i = 0; i < 9000; i++) {              // the band of returns low over the horizon
-      const az = rs() * Math.PI * 2, el = Math.pow(rs(), 2.4) * 14 * Math.PI / 180;
-      const b = (.1 + .38 * Math.exp(-el / (3 * Math.PI / 180))) * (.7 + .3 * rs());
-      S.push(Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az), b, rs() * 6.28);
+    for (let i = 0; i < 16000; i++) {             // the band of returns low over the horizon (the films' sky)
+      const az = rs() * Math.PI * 2, el = Math.pow(rs(), 2.4) * 20 * DEG;
+      const b = (.13 + .55 * Math.exp(-el / (3.4 * DEG))) * (.72 + .28 * rs());
+      S.push(Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az), b, 10 + rs() * 6.28);
     }
     this.nSky = S.length / 5;
     this.skyVao = gl.createVertexArray();
@@ -491,14 +640,26 @@ export class Terrain {
     this.setWeather(this.map.weather || {});
   }
 
-  /* sea state from the map's weather: swell components round the wind direction */
+  /* sea state from the map's weather: swell components round the wind direction. w: { kind, wind: [dx, dz],
+     sea: 0..1 } (kind is kept from before when left out). Also sets the sky's stars and band (this.sky). */
   setWeather(w) {
-    const wind = w.wind || [3, -2], ang = Math.atan2(wind[0], wind[1]), sea = w.sea !== undefined ? w.sea : .3;
+    w = w || {};
+    const wind = w.wind || this.wind || [3, -2], ang = Math.atan2(wind[0], wind[1]), sea = w.sea !== undefined ? w.sea : this.sea !== undefined ? this.sea : .3;
+    this.kind = w.kind || this.kind || 'calm';
+    this.wind = wind; this.sea = sea;
     this.seaAmp = .45 + 1.7 * sea;
     this.windAng = ang;
-    const comps = [[144, .85, 0], [96, .45, .55], [58, .25, -.7], [31, .12, 1.2]];
+    // a longer, steeper swell as the sea gets up; a glassy low swell in a calm
+    const Ls = .8 + .6 * sea;
+    const comps = [[144 * Ls, .85, 0], [96 * Ls, .45, .55], [58 * Ls, .25, -.7], [31 * Ls, .12, 1.2]];
     this.waves = comps.map(([L, A, da], k) => { const kk = 2 * Math.PI / L, a = ang + da; return { kx: Math.sin(a) * kk, kz: Math.cos(a) * kk, A, w: Math.sqrt(9.81 * kk), ph: k * 1.7 + .3 }; });
     this.waveA = comps.reduce((s, c) => s + c[1], 0);
+    const L = WEATHER_LOOK[this.kind] || WEATHER_LOOK.calm, T = TIME_LOOK[this.time] || TIME_LOOK.night;
+    this.rough = ss(.1, .8, sea);                         // 0 glassy .. 1 storm
+    this.whitecaps = ss(.45, .85, sea) * (this.kind === 'storm' ? 1 : .7);
+    this.glints = L.glintK * (1 - .5 * this.rough);
+    this.seaLook = { bright: L.seaB * (.82 + .35 * this.rough), px: this.seaPx * L.seaPx * (1.12 - .28 * this.rough) };
+    this.sky.stars = T.stars * L.stars; this.sky.band = T.band * L.band; this.sky.glowAz = T.glowAz * DEG; this.sky.glow = T.glow;
   }
 
   /* ---------- JS mirrors (what is drawn) ---------- */
@@ -634,8 +795,13 @@ export class Terrain {
       W[k * 4] = w.kx; W[k * 4 + 1] = w.kz; W[k * 4 + 2] = w.A; W[k * 4 + 3] = ph;
     });
     this.t = t;
-    // contour interval grows with the view
+    // contour interval grows with the view; contours show from high up
     this.contour = cam.dist < 3000 ? 10 : cam.dist < 15000 ? 25 : cam.dist < 60000 ? 50 : 100;
+    this.contourK = this.contours * ss(Math.log(1500), Math.log(9000), Math.log(Hc));
+    // the land's light behind the lens: from the camera's back, turned 35 degrees, 42 degrees up
+    const fh = Math.hypot(f[0], f[2]), az = (fh > 1e-4 ? Math.atan2(f[0], f[2]) : cam.yaw || 0) + Math.PI + .6;
+    this.litCam = [Math.cos(42 * DEG) * Math.sin(az), Math.sin(42 * DEG), Math.cos(42 * DEG) * Math.cos(az)];
+    this.dip = Math.acos(R_EARTH / (R_EARTH + Math.max(1, eye[1])));
     Object.assign(this.stats, { blocks: n, levels: L, s0, frac: +frac.toFixed(2), dots: n * B * B });
   }
 
@@ -653,7 +819,7 @@ export class Terrain {
     if (u.uMB) gl.uniform1i(u.uMB, MB);
     if (u.uMinLv) gl.uniform1i(u.uMinLv, this.pyr.mins.length);
     if (u.uBand) gl.uniform1f(u.uBand, this.N / 8);
-    if (u.uJit) gl.uniform1f(u.uJit, this.jitter);
+    if (u.uJit) gl.uniform2f(u.uJit, this.jitter, this.rowJitter);
     if (u.uRelief) gl.uniform1f(u.uRelief, this.relief);
     if (u.uDot) gl.uniform4f(u.uDot, this.dotPx[0], this.dotPx[1], this.dotPx[2], this.area);
     if (u.uLv) gl.uniform4fv(u.uLv, this.uLv);
@@ -662,6 +828,8 @@ export class Terrain {
     if (u.uMap) gl.uniform4f(u.uMap, this.x0, this.z0, 1 / this.cell, this.cell);
     if (u.uMapN) gl.uniform2i(u.uMapN, this.cols, this.rows);
     if (u.uWave) gl.uniform4fv(u.uWave, this.uWave);
+    if (u.uSeaP) gl.uniform4f(u.uSeaP, this._seaB || 0, this.seaLook.px, this.windAng, this.waveA);
+    if (u.uCoast) gl.uniform4f(u.uCoast, this.coastPx, 1, 1.35, 0);
     gl.bindVertexArray(this.vao);
   }
   /* depth-only occluder: pass 0 land envelope (with the seabed), pass 1 clamped up to the sea surface */
@@ -681,18 +849,23 @@ export class Terrain {
   drawSurface(o) {
     const gl = this.gl, P = this.pSurf, u = P.u;
     o = o || {};
+    const k = this.altK || 0;
+    this._seaB = (o.seaBright || .75) * this.seaLook.bright * (1 + .3 * k);
     this._bindCommon(P);
     gl.uniform1ui(u.uSalt, 0);
-    const k = this.altK || 0;
-    gl.uniform4f(u.uSeaP, (o.seaBright || .75) * (1 + .3 * k), this.seaKeep, this.windAng, this.waveA);
+    gl.uniform4f(u.uSea2, this.rough, this.whitecaps, this.glints, this.seaDot2);
     gl.uniform4f(u.uSurf, 70, 1.0, this.t, this.contour);
-    gl.uniform4f(u.uLand, (o.landBright || 1.15) * (.85 + .75 * k), .16, 1, .45);
+    gl.uniform4f(u.uLand, (o.landBright || 1.15) * (.85 + .75 * k), .2 * this.contourK, 1, .45);
+    gl.uniform4f(u.uLit, this.litCam[0], this.litCam[1], this.litCam[2], this.lightFollow);
+    gl.uniform4f(u.uTex, this.fields, this.marsh, this.beach, this.grazing);
     gl.drawArraysInstanced(gl.POINTS, 0, B * B, this.nInst);
   }
   drawSky(k) {
-    const gl = this.gl, P = this.pSky;
+    const gl = this.gl, P = this.pSky, S = this.sky;
+    k = k === undefined ? 1 : k;
     gl.useProgram(P.p);
-    gl.uniform1f(P.u.uSkyK, k === undefined ? 1 : k);
+    gl.uniform4f(P.u.uSkyP, S.stars * k, S.band * k, this.dip || 0, S.glowAz);
+    gl.uniform1f(P.u.uSkyG, S.glow);
     gl.bindVertexArray(this.skyVao);
     gl.drawArrays(gl.POINTS, 0, this.nSky);
   }
