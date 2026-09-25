@@ -54,6 +54,7 @@
     <div class="meter" id="meter"></div>
     <h4>Tests</h4>
     <div class="wrap"><button id="salvo">Salvo test · 10 s</button><button id="worst">Worst case · point blank</button><button id="measure">Level sweep · 50 m</button></div>
+    <div class="wrap" style="margin-top:5px"><button id="replay">Hit replay · x0.25</button><button id="replayJ">Replay again (J) · no event</button><button id="ramp">Rate ramps · spam check</button></div>
     <div class="res" id="res"></div>
     <h4>Thunder after lightning</h4>
     <div class="wrap" id="thunder"></div>
@@ -84,6 +85,7 @@ const map = {
 };
 const sim = { t: 0, units: new Map(), projectiles: new Map(), weather: { kind: 'calm', wind: [6, 3], sea: .35, squalls: [] } };
 const game = { camera: cam, sim, map, side: 'coast', timeRate: 1, paused: false, selection: new Set() };
+game.bus = (() => { const L = {}; return { on(n, f) { (L[n] = L[n] || []).push(f); return () => { L[n] = L[n].filter(x => x !== f); }; }, emit(n, d) { for (const f of (L[n] || []).slice()) f(d); } }; })();
 setCam(40);
 
 const audio = createAudio(game);
@@ -91,13 +93,22 @@ audio.init(game);
 window.AUDIO = audio; window.GAME = game;
 
 let nextId = 1000;
-const DOM = { tel: 'land', radar: 'land', pantsir: 'land', transloader: 'land', ddg: 'sea', carrier: 'sea', helo: 'air', fighter: 'air', drone: 'air' };
+const DOM = { tel: 'land', radar: 'land', pantsir: 'land', transloader: 'land', bal: 'land', ddg: 'sea', carrier: 'sea', helo: 'air', fighter: 'air', drone: 'air', aew: 'air', ssk: 'sea', ssn: 'sea' };
+/* what the audio reads of a unit's definition: domain, a boat's depths, sonars */
+const DEFS = {
+  ssk: { domain: 'sea', draught: 6.2, speed: 8.7, sub: { pd: 16, deep: 150, rate: 1.2 }, sensors: { sonar: { sub: 13000, ship: 28000 } } },
+  ssn: { domain: 'sea', draught: 9.3, speed: 12.8, sub: { pd: 18, deep: 180, rate: 1.5 }, sensors: { sonar: { sub: 17000, ship: 32000 } } },
+  ddg: { domain: 'sea', sensors: { sonar: { sub: 11000, hull: true } } },
+  helo: { domain: 'air', sensors: { sonar: { sub: 9000, dip: true } } },
+};
 function unit(type, pos, o) {
-  const u = { id: nextId++, type, side: 'fleet', alive: true, dying: 0, pos: pos.slice(), prev: pos.slice(), hdg: 0, pitch: 0, speed: 0, def: { domain: DOM[type] || 'land' }, aboard: false, ...o };
+  const u = { id: nextId++, type, side: 'fleet', alive: true, dying: 0, pos: pos.slice(), prev: pos.slice(), hdg: 0, pitch: 0, speed: 0, def: DEFS[type] || { domain: DOM[type] || 'land' }, aboard: false, ...o };
   sim.units.set(u.id, u); return u;
 }
-const SPEEDS = { oniks: 750, sm6: 1100, sam: 900, aam: 1200, tlam: 245, hellfire: 400, slam: 240, pdms: 1000 };
-const SEP = { oniks: 7, sm6: 6, sam: 2.4, aam: 3, tlam: 12, hellfire: 2.5, slam: 3, pdms: 3 };
+/* a boat of that type at a depth (the audio reads depth, dive, mastUp) */
+const boatAt = (type, pos, o) => { const u = unit(type, pos, { side: 'coast', depth: 6, dive: 0, mastUp: 1, ...o }); u.pos[1] = -(u.depth - u.def.draught); return u; };
+const SPEEDS = { oniks: 750, sm6: 1100, sam: 900, aam: 1200, tlam: 245, hellfire: 400, slam: 240, pdms: 1000, uran: 270, kalibr: 280 };
+const SEP = { oniks: 7, sm6: 6, sam: 2.4, aam: 3, tlam: 12, hellfire: 2.5, slam: 3, pdms: 3, uran: 2, kalibr: 5 };
 function proj(kind, pos, hdg, o) {
   const p = { id: nextId++, kind, side: 'coast', alive: true, pos: pos.slice(), prev: pos.slice(), vel: [0, 30, 0], t0: sim.t, age: 0, hdg, pitch: Math.PI / 2,
     P: { sepAt: SEP[kind], boost: SEP[kind], speed: SPEEDS[kind] || 600 }, vert: 1.4, life: 30, ...o };
@@ -137,6 +148,9 @@ const EVENTS = [
   ['launch · SM-6 <span>VLS</span>', d => { const pos = at(d, 20, 9); const p = proj('sm6', pos, 200 * DEG, { vert: 2 }); ev({ type: 'launch', kind: 'sm6', proj: p.id, pos, side: 'fleet' }); }],
   ['launch · 57E6 <span>Pantsir</span>', d => { const pos = at(d, 20, 4); const p = proj('sam', pos, 20 * DEG, { vert: 0, pitch: .5 }); ev({ type: 'launch', kind: 'sam', proj: p.id, pos, side: 'coast' }); }],
   ['launch · AIM-120 <span>rail</span>', d => { const pos = air(d, 20); const p = proj('aam', pos, 20 * DEG, { vert: 0, pitch: 0 }); ev({ type: 'launch', kind: 'aam', proj: p.id, pos, side: 'fleet' }); }],
+  ['launch · Kh-35U <span>Bal</span>', d => { const pos = at(d, 20, 5); const p = proj('uran', pos, 200 * DEG, { vert: 0, pitch: .12 }); ev({ type: 'launch', kind: 'uran', proj: p.id, pos, side: 'coast' }); }],
+  ['launch · Kalibr <span>Kilo</span>', d => { const b = boatAt('ssk', at(d, 20, 0), { depth: 16, dive: 1 }); const pos = at(d, 20, .5); const p = proj('kalibr', pos, 20 * DEG, { vert: 1.6 }); ev({ type: 'launch', kind: 'kalibr', proj: p.id, from: b.id, pos, side: 'coast' }); setTimeout(() => sim.units.delete(b.id), 20000); }],
+  ['launch · Tomahawk <span>Virginia</span>', d => { const b = boatAt('ssn', at(d, 20, 0), { depth: 18, dive: 1, side: 'fleet' }); const pos = at(d, 20, .5); const p = proj('tlam', pos, 20 * DEG, { vert: 2 }); ev({ type: 'launch', kind: 'tlam', proj: p.id, from: b.id, pos, side: 'fleet' }); setTimeout(() => sim.units.delete(b.id), 20000); }],
   ['booster sep', d => ev({ type: 'booster_sep', pos: air(d, 20), kind: 'oniks', proj: -1 })],
   ['Guns', null],
   ['gunfire · 5"/62', d => ev({ type: 'launch', kind: 'shell', pos: at(d, 20, 12), proj: -2 })],
@@ -153,8 +167,21 @@ const EVENTS = [
   ['destroyed · DDG', d => ev({ type: 'destroyed', pos: at(d, 20, 0), unit: -1, unitType: 'ddg', side: 'fleet' })],
   ['destroyed · TEL', d => ev({ type: 'destroyed', pos: at(d, 20, 2), unit: -1, unitType: 'tel', side: 'fleet' })],
   ['destroyed · F/A-18E', d => ev({ type: 'destroyed', pos: air(d, 20), unit: -1, unitType: 'fighter', side: 'fleet' })],
+  ['Sonar, torpedoes, boats', null],
+  ['sonar ping · hull <span>SQS-53C</span>', d => audio.play('sonar_ping', at(d, 20, 0), { delay: false })],
+  ['sonar ping · echo <span>3 km</span>', d => audio.play('sonar_ping', at(d, 20, 0), { delay: false, echo: 4, eg: .8 })],
+  ['sonar ping · dipping <span>AQS-22</span>', d => audio.play('sonar_ping', at(d, 20, 0), { delay: false, dip: true, echo: 2.2, eg: .9 })],
+  ['sonar · heard <span>tick</span>', d => ev({ type: 'sonar', side: 'coast', by: -5, unit: -6, pos: at(d, 20, 0), r: 600 })],
+  ['torpedo · boat bow tube', d => { const b = boatAt('ssk', at(d, 20, 0), { depth: 40, dive: 2 }); const pos = [b.pos[0], -20, b.pos[2]]; ev({ type: 'launch', kind: 't53', proj: nextId++, from: b.id, pos, side: 'coast' }); setTimeout(() => sim.units.delete(b.id), 8000); }],
+  ['torpedo · Mk 32 deck', d => { const s = unit('ddg', at(d, 20, 0)); ev({ type: 'launch', kind: 'mk54', proj: nextId++, from: s.id, pos: at(d, 20, 3), side: 'fleet' }); setTimeout(() => sim.units.delete(s.id), 4000); }],
+  ['torpedo · helo drop', d => { const h = unit('helo', at(d, 20, 40)); ev({ type: 'launch', kind: 'mk54', proj: nextId++, from: h.id, pos: at(d, 20, 38), side: 'fleet' }); setTimeout(() => sim.units.delete(h.id), 4000); }],
+  ['hit · torpedo under a DDG', d => { const u = unit('ddg', at(d, 20, 0)); ev({ type: 'hit', pos: at(d, 20, .5), kind: 'mk48', target: u.id, under: true }); sim.units.delete(u.id); }],
+  ['boat · vents <span>dive</span>', d => audio.play('sub_dive', at(d, 20, 0))],
+  ['boat · blow <span>to the surface</span>', d => audio.play('sub_blow', at(d, 20, -12))],
+  ['boat · breaks surface', d => audio.play('sub_surface', at(d, 20, 0))],
   ['Weather, scan', null],
   ['lightning <span>thunder</span>', d => ev({ type: 'lightning', pos: at(d, -30, 0), top: [...at(d, -30, 3500)] })],
+  ['lightning · in cloud <span>rumble</span>', d => ev({ type: 'lightning_ic', pos: at(Math.max(d, 1500), -30, 4200), r: 5000, seed: d | 0, s: .85 })],
   ['scan · enemy', d => ev({ type: 'scan', phase: 'hit', side: 'fleet', pos: at(d, 20, 2), hits: [] })],
   ['Machinery', null],
   ['deploy · jacks down', d => ev({ type: 'deploy', what: 'jacks', pos: at(d, 20, 2) })],
@@ -166,6 +193,7 @@ const EVENTS = [
   ['radar on', d => ev({ type: 'radar', on: true, pos: at(d, 20, 6), side: 'coast' })],
   ['takeoff · F/A-18E', d => ev({ type: 'takeoff', pos: at(d, 20, 18), unit: -1, unitType: 'fighter' })],
   ['takeoff · Orlan-10', d => ev({ type: 'takeoff', pos: at(d, 20, 4), unit: -1, unitType: 'drone' })],
+  ['takeoff · E-2D', d => ev({ type: 'takeoff', pos: at(d, 20, 18), unit: -1, unitType: 'aew' })],
 ];
 {
   const L = $('left');
@@ -199,7 +227,10 @@ function chips(el, list, get, set) {
   draw(); return draw;
 }
 const drawRates = chips($('rates'), [[0, 'Pause'], [1, 'x1'], [2, 'x2'], [4, 'x4'], [8, 'x8'], [16, 'x16'], [32, 'x32']],
-  () => game.paused ? 0 : game.timeRate, v => { if (v === 0) game.paused = !game.paused; else { game.paused = false; game.timeRate = v; } });
+  () => game.paused ? 0 : game.timeRate, v => {
+    if (v === 0) game.paused = !game.paused; else { game.paused = false; game.timeRate = v; }
+    game.bus.emit('rate', { rate: game.timeRate, paused: game.paused, why: 'user' });
+  });
 chips($('surf'), [['sea', 'Open sea'], ['coast', 'Coast'], ['land', 'Inland']], () => surface, v => surface = v);
 chips($('wx'), [['calm', 'Calm'], ['haze', 'Haze'], ['rain', 'Rain'], ['storm', 'Storm']], () => sim.weather.kind, v => {
   sim.weather.kind = map.weather.kind = v;
@@ -211,7 +242,7 @@ $('h').oninput = () => setCam(hOf());
 $('trim').oninput = () => audio.core.trim(+$('trim').value / 100);
 
 for (const n of ['select', 'order', 'invalid', 'pause', 'resume', 'alert', 'alarm', 'contact', 'contact_esm', 'classify', 'lost', 'sweep', 'confirm',
-  'objective', 'objective_lost', 'reinforce', 'radar_on', 'radar_off', 'damage', 'move', 'tick', 'enter', 'back', 'deny']) {
+  'objective', 'objective_lost', 'reinforce', 'radar_on', 'radar_off', 'damage', 'move', 'tick', 'enter', 'back', 'deny', 'sonar_contact', 'replay_in', 'replay_boom']) {
   const b = document.createElement('button'); b.textContent = n.replace('_', ' '); b.onclick = () => audio.ui(n, { pos: at(2000, 60, 0) }); $('ui').appendChild(b);
 }
 { const b = document.createElement('button'); b.textContent = 'rate x8 up'; b.onclick = () => audio.ui('rate', { rate: 8, up: true }); $('ui').appendChild(b); }
@@ -287,6 +318,61 @@ toggle('Pantsir turret slew 50 m', () => {
   const u = unit('pantsir', at(50, 70, 2), { tYaw: 0, tPitch: 0, side: 'coast' }); let t = 0;
   const m = dt => { t += dt; const c = t % 5; if (c < 2) u.tYaw += dt * 1.6 * (Math.floor(t / 5) % 2 ? -1 : 1); };
   movers.push(m); return () => { sim.units.delete(u.id); movers.splice(movers.indexOf(m), 1); };
+});
+toggle('E-2D pass 1.5 km up', () => {
+  const u = unit('aew', [600, 1500, -16000], { speed: 150 });
+  const m = dt => { u.pos[2] += 150 * dt; if (u.pos[2] > 16000) u.pos[2] = -16000; };
+  movers.push(m); return () => { sim.units.delete(u.id); movers.splice(movers.indexOf(m), 1); };
+});
+toggle('E-2D spooling on deck 60 m', () => {
+  const u = unit('aew', at(60, 40, 19), { aboard: 1, spool: 0 }); let t = 0;
+  const m = dt => { t += dt; const c = t % 24; u.spool = c < 12 ? Math.min(1, c / 8) : Math.max(0, 1 - (c - 12) / 8); };
+  movers.push(m); return () => { sim.units.delete(u.id); movers.splice(movers.indexOf(m), 1); };
+});
+toggle('Torpedo run passing 40 m', () => {
+  let p = null, on = true;
+  const spawn = () => {
+    p = proj('mk48', [40, -25, -1500], 0, { P: { speed: 28, torpedo: true }, fly: (q, dt) => { q.vel = [0, 0, 28]; q.pos[2] += 28 * dt; if (q.pos[2] > 1500) { q.alive = false; if (on) setTimeout(spawn, 0); } } });
+  };
+  spawn();
+  return () => { on = false; sim.projectiles.delete(p.id); };
+});
+toggle('Boat at PD 80 m · mast wash', () => {
+  const u = boatAt('ssk', at(80, -60, 0), { depth: 16, dive: 1, mastUp: 1, speed: 4 }); let a = 0;
+  const m = dt => { a += dt * 4 / 300; u.pos[0] = Math.sin(a) * 300 - 200; u.pos[2] = Math.cos(a) * 300 + 80; };
+  movers.push(m); return () => { sim.units.delete(u.id); movers.splice(movers.indexOf(m), 1); };
+});
+toggle('Boat dive cycle 150 m · x4', () => {
+  // surface -> deep -> periscope depth -> surface, 25 s each, depth moving at 4x the Kilo's rate (the vents, the blows, the break)
+  const u = boatAt('ssk', at(150, 50, 0), { depth: 6.2, dive: 0, mastUp: 1, speed: 3 }); let t = 0;
+  const S = u.def.sub, goal = () => u.dive === 0 ? u.def.draught : u.dive === 1 ? S.pd : 40;
+  const m = dt => {
+    t += dt; u.dive = [0, 2, 1][Math.floor(t / 25) % 3];
+    const g = goal(); u.depth += Math.max(-S.rate * 4 * dt, Math.min(S.rate * 4 * dt, g - u.depth));
+    u.pos[1] = -(u.depth - u.def.draught);
+    const up = u.depth <= S.pd + 1.5 && u.dive < 2; u.mastUp = Math.max(0, Math.min(1, u.mastUp + (up ? dt / 6 : -dt / 3)));
+  };
+  movers.push(m); return () => { sim.units.delete(u.id); movers.splice(movers.indexOf(m), 1); };
+});
+toggle('Own DDG 400 m · sonar pinging', () => {
+  const u = unit('ddg', at(400, -20, 0), { side: 'coast', speed: 4 }); let t = 0;
+  const m = dt => { t += dt; if (t > 5) { t = 0; ev({ type: 'sonar', side: 'coast', by: u.id, unit: -7, pos: at(3200, 60, 0), r: 900 }); } };
+  movers.push(m); return () => { sim.units.delete(u.id); movers.splice(movers.indexOf(m), 1); };
+});
+toggle('Own helo dipping 250 m', () => {
+  const u = unit('helo', at(250, 45, 18), { side: 'coast', speed: 0 });
+  return () => sim.units.delete(u.id);
+});
+toggle('Squall line passing · x20', () => {
+  // one storm cell (r 5 km) crossing the camera from 22 km out at 400 m/s (x20 a real line's speed): the gust front,
+  // the rain curtain, inside, then away
+  const W0 = sim.weather, c = { x: -22000, z: 3000, r: 5000, q: 1, vx: 400, vz: 0, base: 1300, top: 9000 };
+  const prof = (dx, dz, r) => { const d = Math.hypot(dx, dz); return d >= r ? 0 : d <= .7 * r ? 1 : 1 - (d / r - .7) / .3; };
+  sim.weather = { kind: W0.kind, wind: [12, 2], sea: .35, squalls: [], cells: () => [c], rainAt: (x, z) => prof(x - c.x, z - c.z, c.r * 1.05) * c.q };
+  audio.onEvent({ type: 'weather', what: 'front', phase: 'arrive', front: 99, t: sim.t, pos: [c.x, 0, c.z] });
+  const m = dt => { c.x += c.vx * dt; if (c.x > 24000) c.x = -22000; };
+  movers.push(m);
+  return () => { movers.splice(movers.indexOf(m), 1); sim.weather = W0; audio.onEvent({ type: 'weather', what: 'front', phase: 'leave', front: 99, t: sim.t }); };
 });
 toggle('Selected radar sweeping', () => {
   const u = unit('radar', at(200, -70, 8), { side: 'coast', antA: 0, antW: TAU / 6, antT: sim.t });
@@ -364,16 +450,73 @@ $('worst').onclick = () => {
   test.plan = plan; test.i = 0;
   res.textContent = 'Running';
 };
+/* the hit replay as replay.js drives it: time eases to x0.25 (bus 'rate' why 'replay'), bus 'replay' on, the impact
+   (a hit event on the watched hull, or for J only the state's tHit), then out and back to x1 */
+function fakeReplay(withEvent) {
+  if (!audio.ready) { res.textContent = 'Click once to start sound first'; return; }
+  game.timeRate = 1; game.paused = false; drawRates(); setCam(40);
+  audio.core.resetMeter();
+  const ship = unit('ddg', at(320, 25, 0));
+  const S = { id: ship.id, t: 0, tHit: -1, phase: 'in' }, t0 = performance.now();
+  game.replay = { get active() { return S.phase === 'in'; }, get state() { return S.phase === 'done' ? null : S; } };
+  game.bus.emit('rate', { rate: .25, paused: false, why: 'replay' }); game.bus.emit('replay', { on: true, id: ship.id });
+  const p = proj('oniks', at(3000, 25, 15), 205 * DEG, { fly: (q, dt) => { const d = [ship.pos[0] - q.pos[0], 6 - q.pos[1], ship.pos[2] - q.pos[2]], l = Math.hypot(...d) || 1; q.vel = d.map(x => x / l * 750); for (let k = 0; k < 3; k++) q.pos[k] += q.vel[k] * dt; if (l < 20) q.alive = false; } });
+  p.t0 = sim.t - 30; p.sepDone = true;
+  test = { name: withEvent ? 'replay' : 'replay J', t0, peak: 0, pre: 0, gr: 0, voices: 0, nodes: 0, pending: 0, loops: 0, n: 0, dur: 11, plan: [], i: 0 };
+  const iv = setInterval(() => {
+    const t = (performance.now() - t0) / 1000;
+    S.t = t;
+    if (S.phase === 'in') game.timeRate = Math.max(.25, 1 - (1 - .25) * Math.min(1, t / .35));
+    if (S.tHit < 0 && t >= 1.7) {
+      S.tHit = t;
+      if (withEvent) ev({ type: 'hit', pos: at(320, 25, 6), kind: 'oniks', target: ship.id });
+      sim.projectiles.delete(p.id);
+    }
+    if (S.phase === 'in' && t >= 7) { S.phase = 'out'; S.tOut = t; game.bus.emit('replay', { on: false, id: ship.id }); }
+    if (S.phase === 'out') { const k = Math.min(1, (t - S.tOut) / .55); game.timeRate = .25 + (1 - .25) * k; if (k >= 1) { S.phase = 'done'; game.timeRate = 1; game.bus.emit('rate', { rate: 1, paused: false, why: 'replay' }); clearInterval(iv); sim.units.delete(ship.id); } }
+  }, 16);
+  res.textContent = 'Running';
+}
+$('replay').onclick = () => fakeReplay(true);
+$('replayJ').onclick = () => fakeReplay(false);
+/* rate ramps (the film maker, the debrief, the replay's eases): game.timeRate swept through fractions for 4 s with no
+   'user' bus events, then three player steps; counts the rate / pause blips made */
+$('ramp').onclick = () => {
+  if (!audio.ready) { res.textContent = 'Click once to start sound first'; return; }
+  const counts = {}, V = audio.core.voice.bind(audio.core);
+  audio.core.voice = (cls, prio, sp, name) => { const v = V(cls, prio, sp, name); if (v) counts[name] = (counts[name] || 0) + 1; return v; };
+  const t0 = performance.now();
+  const iv = setInterval(() => {
+    const t = (performance.now() - t0) / 1000;
+    if (t < 4) game.timeRate = t < 1 ? 1 - .75 * t : t < 2.5 ? .25 + 7.75 * (t - 1) / 1.5 : 8 - 7 * (t - 2.5) / 1.5;
+    else if (t < 4.1) { game.timeRate = 1; game.bus.emit('rate', { rate: 1, paused: false, why: 'film' }); }
+    else if (!counts._steps) {
+      counts._steps = 1;
+      const step = (r, d) => setTimeout(() => { game.timeRate = r; game.bus.emit('rate', { rate: r, paused: false, why: 'user' }); }, d);
+      step(2, 0); step(4, 400); step(1, 800);
+      setTimeout(() => { game.timeRate = 1; game.bus.emit('rate', { rate: 1, paused: false, why: 'auto' }); }, 1000);
+    }
+    if (t > 5.6) {
+      clearInterval(iv); audio.core.voice = V; drawRates();
+      const r = { rampBlips: 0, stepBlips: 0 }; r.stepBlips = counts.rate || 0;
+      window.RAMP = { counts, expected: '3 player steps -> 3 rate blips, 0 during the ramps (the auto drop is a no-op at x1)' };
+      console.log('RAMP', JSON.stringify(window.RAMP));
+      res.textContent = `rate ramps: ${counts.rate || 0} rate blips (3 expected: the player's steps only)`;
+    }
+  }, 16);
+};
 function runPlan() {
   if (!test || !test.plan) return;
   const t = (performance.now() - test.t0) / 1000;
+  if (test.name.startsWith('replay') && t > 7.6) delete game.replay;
   while (test.i < test.plan.length && test.plan[test.i][0] <= t) test.plan[test.i++][1]();
   if (t > (test.dur || 16)) {             // the events + their tails
     const r = { events: test.n, peakOutDb: +db(test.peak).toFixed(2), preLimiterPeakDb: +db(test.pre).toFixed(2), maxLimiterReductionDb: +test.gr.toFixed(2),
       maxVoices: test.voices, maxLoops: test.loops, maxNodes: test.nodes, maxPending: test.pending, clipped: test.peak >= .999 };
     console.log(test.name.toUpperCase(), JSON.stringify(r));
     if (test.name === 'worst') window.WORST = r;
-    res.innerHTML = `${test.name === 'worst' ? 'worst case' : 'salvo'}\nevents        <b>${r.events}</b>\npeak out      <b>${r.peakOutDb} dBFS</b>   ${r.clipped ? 'CLIPPED' : 'no clip'}\npre-chain     ${r.preLimiterPeakDb} dBFS\nlimiter       ${r.maxLimiterReductionDb} dB max reduction\nvoices        ${r.maxVoices} max · loops ${r.maxLoops}\nnodes         ${r.maxNodes} max · fronts ${r.maxPending}`;
+    if (test.name.startsWith('replay')) window.REPLAY = r;
+    res.innerHTML = `${test.name === 'worst' ? 'worst case' : test.name}\nevents        <b>${r.events}</b>\npeak out      <b>${r.peakOutDb} dBFS</b>   ${r.clipped ? 'CLIPPED' : 'no clip'}\npre-chain     ${r.preLimiterPeakDb} dBFS\nlimiter       ${r.maxLimiterReductionDb} dB max reduction\nvoices        ${r.maxVoices} max · loops ${r.maxLoops}\nnodes         ${r.maxNodes} max · fronts ${r.maxPending}`;
     if (test.name === 'salvo') window.SALVO = r;
     test = null;
   }

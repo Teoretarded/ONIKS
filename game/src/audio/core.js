@@ -5,10 +5,11 @@
      voice: sources -> filters -> envelopes -> v.out -> lowpass (distance) -> panner -> gain (distance) -> bus
                                                                                '-> send -> reverb
      world ─┐
-     reverb ┤
-     amb ───┼-> mix -> highpass 24 Hz -> glue compressor -> limiter -> soft clip -> trim -> volume -> out
-     sig ───┤                                                              '-> out meter
-     ui ────┘         (pre meter taps mix)
+     reverb ┼-> slow lowpass ─┐   (the hit replay's slow motion; wide open at 20 kHz otherwise)
+     amb ───┘                 │
+     fx ──────────────────────┼-> mix -> highpass 24 Hz -> glue compressor -> limiter -> soft clip -> trim -> volume -> out
+     sig ─────────────────────┤                                                              '-> out meter
+     ui ──────────────────────┘         (pre meter taps mix)
 
    Everything that creates a node goes through a Voice or a Slot so the live node count is known (`live`). */
 import { getSettings, onSettings } from '../data/settings.js';
@@ -76,6 +77,7 @@ export class Voice extends Node_ {
     super();
     this.core = core; this.cls = cls; this.prio = prio; this.name = name; this.nodes = []; this.srcs = [];
     this.t = core.ac.currentTime + .015; this.end = this.t + .05; this.dead = false; this.loud = sp ? sp.gain : 1;
+    this.k = 1;                                  // pitch and time factor (slow motion: < 1 = lower and longer, like a tape)
     this.out = this.gain(1);
     if (sp && sp.flat) {                         // pan only (sensor blips point toward what they are about)
       this.pan = this.panner(sp.pan);
@@ -94,14 +96,14 @@ export class Voice extends Node_ {
 
   /* oscillator layer: { type, f0, f1, at, dur, g, a, hold, glide: 'exp'|'lin', to } */
   tone(o) {
-    const t = this.t + (o.at || 0), dur = o.dur, f0 = o.f0, f1 = o.f1 === undefined ? f0 : o.f1;
+    const k = this.k, t = this.t + (o.at || 0) / k, dur = o.dur / k, f0 = o.f0 * k, f1 = o.f1 === undefined ? f0 : o.f1 * k;
     const osc = this.osc(o.type || 'sine', f0), env = this.gain(0);
     osc.frequency.setValueAtTime(f0, t);
     if (f1 !== f0) {
       if (o.glide === 'lin') osc.frequency.linearRampToValueAtTime(f1, t + dur);
       else osc.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t + dur);
     }
-    envelope(env.gain, t, o.g === undefined ? .05 : o.g, o.a === undefined ? .004 : o.a, o.hold || 0, dur);
+    envelope(env.gain, t, o.g === undefined ? .05 : o.g, (o.a === undefined ? .004 : o.a) / k, (o.hold || 0) / k, dur);
     osc.connect(env); env.connect(o.to || this.out);
     osc.start(t); osc.stop(t + dur + .03); this.until(t + dur + .03);
     return env;
@@ -109,13 +111,13 @@ export class Voice extends Node_ {
 
   /* filtered noise layer: { buf, at, dur, ft, f, f1 (sweep), q, g, a, hold, rate, ft2, f2, q2, to } */
   noise(o) {
-    const t = this.t + (o.at || 0), dur = o.dur;
-    const s = this.src(o.buf || 'white', o.rate || 1), fl = this.filter(o.ft || 'lowpass', o.f || 1000, o.q);
-    if (o.f1) { fl.frequency.setValueAtTime(clamp(o.f, 10, 20000), t); fl.frequency.exponentialRampToValueAtTime(clamp(o.f1, 10, 20000), t + dur); }
+    const k = this.k, t = this.t + (o.at || 0) / k, dur = o.dur / k, f = (o.f || 1000) * k;
+    const s = this.src(o.buf || 'white', (o.rate || 1) * k), fl = this.filter(o.ft || 'lowpass', f, o.q);
+    if (o.f1) { fl.frequency.setValueAtTime(clamp(f, 10, 20000), t); fl.frequency.exponentialRampToValueAtTime(clamp(o.f1 * k, 10, 20000), t + dur); }
     s.connect(fl); let last = fl;
-    if (o.ft2) { const f2 = this.filter(o.ft2, o.f2, o.q2); fl.connect(f2); last = f2; }
+    if (o.ft2) { const f2 = this.filter(o.ft2, o.f2 * k, o.q2); fl.connect(f2); last = f2; }
     const env = this.gain(0);
-    envelope(env.gain, t, o.g === undefined ? .05 : o.g, o.a === undefined ? .01 : o.a, o.hold || 0, dur);
+    envelope(env.gain, t, o.g === undefined ? .05 : o.g, (o.a === undefined ? .01 : o.a) / k, (o.hold || 0) / k, dur);
     last.connect(env); env.connect(o.to || this.out);
     s.start(t, this.core.rand() * (s.buffer.duration - .01)); s.stop(t + dur + .03); this.until(t + dur + .03);
     return env;
@@ -124,16 +126,16 @@ export class Voice extends Node_ {
   /* an automatic cannon burst: noise gated by a pulse train at the rate of fire, plus a buzz body at the same
      rate. { rate (Hz), dur, f, q, g, duty, body (gain), bodyF, bodyType, at, rel } */
   burst(o) {
-    const t = this.t + (o.at || 0), dur = o.dur, rel = o.rel || .06, W = this.core.pulseWave(o.duty || .25);
-    const s = this.src(o.buf || 'white'), bp = this.filter('bandpass', o.f || 2000, o.q || .7);
-    const gate = this.gain(o.duty || .25), lfo = this.osc(W.wave, o.rate), env = this.gain(0);
+    const k = this.k, t = this.t + (o.at || 0) / k, dur = o.dur / k, rel = (o.rel || .06) / k, W = this.core.pulseWave(o.duty || .25);
+    const s = this.src(o.buf || 'white', k), bp = this.filter('bandpass', (o.f || 2000) * k, o.q || .7);
+    const gate = this.gain(o.duty || .25), lfo = this.osc(W.wave, o.rate * k), env = this.gain(0);
     lfo.connect(gate.gain);
     s.connect(bp); bp.connect(gate); gate.connect(env); env.connect(o.to || this.out);
     env.gain.setValueAtTime(0, t); env.gain.linearRampToValueAtTime(o.g, t + .004);
     env.gain.setValueAtTime(o.g, t + dur); env.gain.exponentialRampToValueAtTime(1e-4, t + dur + rel);
     s.start(t, this.core.rand() * 2); lfo.start(t); s.stop(t + dur + rel + .03); lfo.stop(t + dur + rel + .03);
     if (o.body) {
-      const b = this.osc(o.bodyType || 'sawtooth', o.bodyF || o.rate), lp = this.filter('lowpass', o.bodyLp || 420, .7), e2 = this.gain(0);
+      const b = this.osc(o.bodyType || 'sawtooth', (o.bodyF || o.rate) * k), lp = this.filter('lowpass', (o.bodyLp || 420) * k, .7), e2 = this.gain(0);
       b.connect(lp); lp.connect(e2); e2.connect(o.to || this.out);
       e2.gain.setValueAtTime(0, t); e2.gain.linearRampToValueAtTime(o.body, t + .006);
       e2.gain.setValueAtTime(o.body, t + dur); e2.gain.exponentialRampToValueAtTime(1e-4, t + dur + rel);
@@ -144,19 +146,19 @@ export class Voice extends Node_ {
 
   /* one noise source whose gain steps through a list of arrivals [[dt, gain, decay], ...] (rolling thunder, echoes) */
   roll(o) {
-    const t = this.t + (o.at || 0), s = this.src(o.buf || 'brown', o.rate || 1), fl = this.filter(o.ft || 'lowpass', o.f || 160, o.q || .7);
-    const env = this.gain(0), ev = [];
+    const k = this.k, t = this.t + (o.at || 0) / k, s = this.src(o.buf || 'brown', (o.rate || 1) * k), fl = this.filter(o.ft || 'lowpass', (o.f || 160) * k, o.q || .7);
+    const env = this.gain(0), ev = [], tail = (o.tail || 1.2) / k, rise = (o.rise || .025) / k;
     let endT = t;
     for (const [dt, g, dec] of o.bumps) {
-      ev.push([t + dt, g * o.g, .025]);
-      ev.push([t + dt + .09, g * o.g * .22, dec / 3]);
-      endT = Math.max(endT, t + dt + dec);
+      ev.push([t + dt / k, g * o.g, rise]);
+      ev.push([t + (dt + Math.max(.09, (o.rise || 0) * 3)) / k, g * o.g * .22, dec / 3 / k]);
+      endT = Math.max(endT, t + (dt + dec) / k);
     }
     ev.sort((a, b) => a[0] - b[0]);
     env.gain.setValueAtTime(0, t);
     for (const [tt, v, tc] of ev) env.gain.setTargetAtTime(v, tt, tc);
-    env.gain.setTargetAtTime(0, endT, (o.tail || 1.2) / 3);
-    const stop = endT + (o.tail || 1.2) + .1;
+    env.gain.setTargetAtTime(0, endT, tail / 3);
+    const stop = endT + tail + .1;
     s.connect(fl); fl.connect(env); env.connect(o.to || this.out);
     s.start(t, this.core.rand() * 2); s.stop(stop); this.until(stop);
     return env;
@@ -212,10 +214,11 @@ export class Core {
     this.ac = null; this.bus = null; this.rev = null; this.bufs = null;
     this.live = 0; this.made = 0;
     this.voices = [];
-    this.cap = { world: 26, sig: 8, ui: 8 };
+    this.cap = { world: 26, sig: 8, ui: 8, fx: 4 };
     this.settings = getSettings();
     this.muted = false; this.trimV = 1;
     this.rand = rng(0x51A7E);
+    this.slowK = 0;                                   // the hit replay's slow motion, 0..1 (setSlow)
     this.meter = { out: 0, pre: 0, gr: 0 };           // running maxima (reset with resetMeter)
     this.now = { out: 0, pre: 0, gr: 0 };             // last frame
     this.onUnlock = [];
@@ -257,13 +260,16 @@ export class Core {
     // meters: before the chain, and after the limiter / clip but before trim and volume (volume <= 1 only lowers it)
     this.vol.connect(ac.destination); clip.connect(this.meterOut); this.mix.connect(this.meterPre);
     this.comp = comp; this.lim = lim; this.live += 6;
-    // buses
-    this.bus = { world: G(1.6), amb: G(1), sig: G(1), ui: G(.8) };
-    for (const k in this.bus) this.bus[k].connect(this.mix);
+    // buses; the world, its reverb and the ambience pass the slow-motion lowpass (wide open unless a replay runs)
+    this.bus = { world: G(1.6), amb: G(1), sig: G(1), ui: G(.8), fx: G(1) };
+    const slow = ac.createBiquadFilter(); slow.type = 'lowpass'; slow.frequency.value = ac.sampleRate / 2; slow.Q.value = .707; this.live++;
+    slow.connect(this.mix); this.slowLp = slow;
+    for (const k in this.bus) this.bus[k].connect(k === 'world' || k === 'amb' ? slow : this.mix);
     // shared reverb: a dark outdoor tail (terrain, sea) that far sounds lean on
     const conv = ac.createConvolver(); conv.buffer = makeIR(ac, rng(77)); this.live++;
-    this.rev = G(1); const rOut = G(.42);
-    this.rev.connect(conv); conv.connect(rOut); rOut.connect(this.mix);
+    this.rev = G(1); const rOut = G(.42); this.rOut = rOut;
+    this.rev.connect(conv); conv.connect(rOut); rOut.connect(slow);
+    if (this.slowK) this.setSlow(this.slowK);
     this.apply();
     console.log(`audio: context ${ac.sampleRate} Hz, ${ac.state}`);
     for (const fn of this.onUnlock) { try { fn(this); } catch (e) { console.error(e); } }
@@ -276,6 +282,17 @@ export class Core {
     this.bus.ui.gain.setTargetAtTime(s.uiSound ? .8 : 0, t, .02);
   }
   mute(on) { this.muted = on === undefined ? !this.muted : !!on; this.apply(); return this.muted; }
+  /* the hit replay's slow motion, k 0..1: the world and its reverb darken (lowpass wide open -> 1.5 kHz), the ambience
+     ducks, the reverb grows. Pitch and time are the callers' (Voice.k, the loops' Doppler factor). */
+  setSlow(k) {
+    this.slowK = k;
+    if (!this.ac) return;
+    const t = this.ac.currentTime;
+    const top = this.ac.sampleRate / 2;         // wide open: a lowpass at Nyquist is transparent
+    this.slowLp.frequency.setTargetAtTime(Math.exp(Math.log(top) + (Math.log(1500) - Math.log(top)) * k), t, .06);
+    this.bus.amb.gain.setTargetAtTime(1 - .6 * k, t, .08);
+    this.rOut.gain.setTargetAtTime(.42 + .22 * k, t, .08);
+  }
   trim(v) { this.trimV = v; if (this.ac) this.trimG.gain.setTargetAtTime(v, this.ac.currentTime, .03); }
 
   /* band-limited pulse train (duty 0..1) for gun gates and blade slap: output is 1 on the pulse, 0 off it
@@ -344,7 +361,7 @@ export class Core {
   resetMeter() { this.meter.out = 0; this.meter.pre = 0; this.meter.gr = 0; }
 
   counts() {
-    const c = { world: 0, sig: 0, ui: 0 };
+    const c = { world: 0, sig: 0, ui: 0, fx: 0 };
     for (const v of this.voices) if (!v.dead) c[v.cls]++;
     return c;
   }
