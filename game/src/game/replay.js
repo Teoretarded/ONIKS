@@ -1,6 +1,6 @@
 /* Hit replay: a decisive hit becomes a moment from the Anatomy films.
 
-   When a heavy round (3M55 Oniks, Tomahawk, SLAM-ER) is about to hit a ship or a major unit the player can see (own,
+   When a heavy round (3M55 Oniks, Kh-35U, Kalibr, Tomahawk, SLAM-ER) is about to hit a ship or a major unit the player can see (own,
    or an enemy track), or on the final blow of the match:
      1. time eases down to x0.25 (the rate is on screen) and the camera glides in, no cut, across the target, low;
      2. the lime X-ray front sweeps the hull along its length and crosses the impact station at the moment of impact
@@ -32,7 +32,7 @@ const RAMP_IN = .35, RAMP_OUT = .55;       // real s
 const LEAD = .3;                           // real s from the camera's arrival to the impact
 const COOL = 40, COOL_KILL = 12;           // real s between automatic replays (a kill waits less)
 const RATES = [1, 2, 4, 8, 16, 32];
-const HEAVY = { oniks: 1, tlam: 1, slam: 1 };
+const HEAVY = { oniks: 1, tlam: 1, slam: 1, uran: 1, kalibr: 1 };
 const LIME = O.LIME, CORAL = O.CORAL, FAINT = 'rgba(255,255,255,.36)', WHITE = '#FFFFFF';
 const CAM_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyQ', 'KeyE', 'PageUp', 'PageDown']);
 const MODS = new Set(['ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight', 'AltLeft', 'AltRight', 'MetaLeft', 'MetaRight', 'CapsLock']);
