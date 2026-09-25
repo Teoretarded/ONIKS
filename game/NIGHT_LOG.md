@@ -316,3 +316,12 @@ deterministic recorder + kill stills on the end screen.
 The minimap is now a radar scope by default (click the header for the map): centred on your main radar, a lime sweep
 turning at the real antenna rate (Monolith-B 12 rpm), sea and rain clutter lighting as the beam passes, "?" clouds
 collapsing into coral ticks with "TRK 41 · 0.99", emitter bearing lines, white sonar rings, rounds, your units in lime.
+
+## 12:05 · First impressions done; physics and performance
+Matches now open close on your command post (84 m out) or carrier (582 m, from the port quarter), hold a beat, and
+pull out over 5 s to the play view with no cut. While aiming a scan (X), every scanner's reach is a labelled lime ring;
+out-of-reach says so in a toast and the log; "IN WEAPON REACH · NOT SCANNED" alerts tell you when to move a radar.
+Started on request: a physics pass (acceleration and turning circles, ships heeling and riding the same waves the
+renderer draws, aircraft banking with energy, flooding-based sinking with list and trim, debris ballistics, no
+overlapping units) and a performance guard (a stress suite over the worst scenes, spike fixes, and automatic quality
+scaling so the game holds 60 fps).
