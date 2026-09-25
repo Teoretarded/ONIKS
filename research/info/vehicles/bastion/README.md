@@ -8,7 +8,7 @@ rounds). A battery is typically 4 TEL + 1-2 command vehicles + transloaders + su
 
 | | |
 |---|---|
-| Length | ~11.2 m |
+| Length | ~12.7 m (MZKT-7930 chassis; 11.2 m appears in some sources) |
 | Width | ~3.1 m |
 | Height | ~3.0 m (cab roof; TEL with canisters stowed is taller) |
 | Wheelbase/axles | 4 axles (8x8), axle spacing ~1.8+2.0+1.4 m (approx, not officially published) |

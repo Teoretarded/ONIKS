@@ -1,5 +1,7 @@
 # Project 636.3 (Improved Kilo class, NATO "Kilo"), diesel-electric attack submarine
 
+> **Correction (checked against the photos, 2026-09-25):** Kilo diving planes are on the bow casing, not on the sail; the sail-plane text below is wrong.
+
 Single-hull diesel-electric submarine, export/Russian-Navy-improved version of Project 877. Russian Black Sea
 Fleet operates 6 (Novorossiysk-class boats, incl. "Rostov-on-Don"); export customers include Algeria, Vietnam,
 China, India, Iran, Myanmar.

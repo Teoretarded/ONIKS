@@ -1,5 +1,7 @@
 # SSN-774 Virginia-class fast attack submarine (Block I/II baseline)
 
+> **Correction (checked against the photos, 2026-09-25):** early Virginia boats have a cruciform (+) stern as in the photos; the X-stern text below does not apply to them.
+
 ## Dimensions and mass
 - Length overall: 377 ft (114.9 m) (Block I–IV; Block V with the Virginia Payload Module is ~460 ft / 140 m — this profile is the pre-VPM baseline).
 - Beam (hull diameter): 34 ft (10.4 m).

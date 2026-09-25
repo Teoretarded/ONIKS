@@ -1,5 +1,7 @@
 # Orlan-10, reconnaissance UAV + catapult launcher
 
+> **Correction (checked against the photos, 2026-09-25):** the photos show a nose (tractor) propeller and a single fuselage; the "rear pusher, twin fins" text below is wrong.
+
 Small fixed-wing UAV launched from a portable pneumatic/elastic catapult rail, recovered by parachute or belly
 landing. Operated as a system: air vehicle + ground control station + catapult + several payload modules.
 

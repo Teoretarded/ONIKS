@@ -8,7 +8,7 @@ missile, on the same MZKT-7930 8x8 chassis family as Bastion. A battery normally
 
 | | |
 |---|---|
-| Length | ~11.2 m |
+| Length | ~12.7 m (MZKT-7930 chassis; 11.2 m appears in some sources) |
 | Width | ~3.1 m |
 | Height | ~3.0 m (cab; launcher taller with canisters raised) |
 | Wheelbase/axles | 4 axles (8x8) |
