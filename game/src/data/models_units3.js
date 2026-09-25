@@ -544,12 +544,12 @@ function lsSuper() {
   B.push(prism(-10.5, 10.5, LFD, 19.6, 0, 14, -7.2, 7.2, 2.5, 14, { skip: [4] }));
   B.push(hex([[-10.5, LFD, 14], [10.5, LFD, 14], [7.4, LFD, 24], [-7.4, LFD, 24], [-7.2, 19.6, 14], [7.2, 19.6, 14], [6.2, 19.6, 16.5], [-6.2, 19.6, 16.5]], { skip: [2] }));
   const fb = [[-7.4, LFD, 24], [7.4, LFD, 24]], ft = [[-6.2, 19.6, 16.5], [6.2, 19.6, 16.5]];
-  const on = (u, v) => V.lerp(V.lerp(fb[0], fb[1], u), V.lerp(ft[0], ft[1], u), v), fn_ = V.norm([0, .6, .8]);
+  const on = (u, v) => V.lerp(V.lerp(fb[0], fb[1], u), V.lerp(ft[0], ft[1], u), v), nF = V.norm([0, .6, .8]);
   for (let k = 0; k < 7; k++) {
     const u0 = .08 + k * .12, u1 = u0 + .1;
-    B.push(panel([on(u0, .78), on(u1, .78), on(u1, .9), on(u0, .9)].map(p => V.mad(p, fn_, .03)), fn({ pts: false, al: .6 })));
+    B.push(panel([on(u0, .78), on(u1, .78), on(u1, .9), on(u0, .9)].map(p => V.mad(p, nF, .03)), fn({ pts: false, al: .6 })));
   }
-  for (const v of [.33, .6]) B.push(line([on(0, v), on(1, v)].map(p => V.mad(p, fn_, .02)), fn({ w: .3, pts: false })));
+  for (const v of [.33, .6]) B.push(line([on(0, v), on(1, v)].map(p => V.mad(p, nF, .02)), fn({ w: .3, pts: false })));
   B.push(lathe([4.2, 19.6, 13.2], FY, [[0, .3], [.5, .3], [.55, .35], [.95, .35]], fn({ n: 12, gen: 2 })));        // EO/IR director
   B.push(lathe([4.2, 20.55, 13.2], FY, [[0, .35], [.35, .2], [.4, 0]], fn({ n: 12, gen: 2 })));
   // the integrated mast: a faceted pyramid, the radar platform, the pole
@@ -805,7 +805,7 @@ function srAntenna() {
   P.push(cyl([0, 3.75, -5.0], [0, 4.55, -5.0], .32, { n: 14, gen: 2, caps: true }));
   P.push(crate([-.6, 4.4, -5.35], [.6, 4.75, -4.9]));
   const P8 = []; for (let i = 0; i < 8; i++) { const a = (i + .5) / 8 * TAU; P8.push(V.add(V.mad(c, h, Math.cos(a) * 1.84), V.mul(u, Math.sin(a) * 1.8))); }
-  P.push(hex([P8[3], P8[0], P8[7], P8[4], ...[P8[3], P8[0], P8[7], P8[4]].map(p => V.mad(p, n, -.34))].map(p => p), { bottom: true }));
+  P.push(hex([P8[3], P8[0], P8[7], P8[4], ...[P8[3], P8[0], P8[7], P8[4]].map(p => V.mad(p, n, -.34))], { bottom: true }));
   P.push(...octFace(V.mad(c, n, .01), h, u, n, 1.84));
   P.push(hex([P8[2], P8[1], P8[0], P8[3], ...[P8[2], P8[1], P8[0], P8[3]].map(p => V.mad(p, n, -.34))], { skip: [0] }));
   P.push(hex([P8[4], P8[7], P8[6], P8[5], ...[P8[4], P8[7], P8[6], P8[5]].map(p => V.mad(p, n, -.34))], { skip: [0] }));
