@@ -30,6 +30,7 @@ const OWN = [
   ['./game/objectives.js', 'createObjectives'],
   ['./game/match.js', 'createMatchFlow'],
   ['./game/sandbox.js', 'createSandbox'],
+  ['./game/sonar.js', 'createSonar'],
 ];
 /* the other agents' systems: dropped in later without touching this file (missing modules are skipped) */
 const OPTIONAL = [
@@ -41,6 +42,7 @@ const OPTIONAL = [
   [['./game/landmarks.js'], 'createLandmarks', 'landmarks'],
   [['./game/orbital.js'], 'createOrbital', 'orbital'],
   [['./ui/help/index.js'], 'createHelp', 'help'],
+  [['./game/filmmaker.js'], 'createFilmmaker', 'filmmaker'],
 ];
 
 async function getMap(id) {
