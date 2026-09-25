@@ -504,6 +504,80 @@ async function main() {
     return `${bolts} strikes in 4 min, ${reveals} ships revealed by flashes, ${sim.weather.squalls.length} squalls`;
   });
 
+
+  /* ---------------- the third wave (cg, lcs, s400, s400r, bereg) ---------------- */
+  await test('S-400: the launcher fires only erected and cued by a radiating 92N6E', async () => {
+    const m = map(), { shoreX } = coastPoints(m);
+    const setup = (radarOn, erect) => {
+      const sim = new Sim(m, { seed: 21, fog: true, weather: { kind: 'calm', wind: [0, 0], sea: .2 } });
+      const r = sim.spawn('s400r', 'coast', shoreX + 6000, 0, { deployed: true, hdg: -Math.PI / 2 });
+      if (!radarOn) sim.setRadar(r, false, true);
+      const l = sim.spawn('s400', 'coast', shoreX + 7000, 1500, { deployed: erect, hdg: -Math.PI / 2 });
+      const f = sim.spawn('fighter', 'fleet', shoreX - 30000, 0, { alt: 6000, hdg: Math.PI / 2 });
+      return { sim, r, l, f };
+    };
+    const go = async (S, secs) => { let first = null, pos = null; await run(S.sim, 20 * secs, s => { for (const e of s.drainEvents()) if (e.type === 'launch' && e.kind === 'sam48' && first === null) { first = s.t; pos = e.pos; } return first !== null; }); return { first, pos }; };
+    const A = setup(true, true), a = await go(A, 120);
+    ok(a.first !== null, 'erected, cued launcher never fired at the fighter');
+    const k = A.l.def.tubes[0], dx = a.pos[1] - (A.l.pos[1] + k[1]);
+    ok(Math.abs(dx) < .6, `the round did not leave a container mouth (y off by ${fmt(dx, 2)} m)`);
+    const B = setup(false, true), b = await go(B, 120);
+    ok(b.first === null, 'fired with its 92N6E silent');
+    const C = setup(true, false), c = await go(C, 120);
+    ok(c.first === null, 'fired with its containers down');
+    return `48N6 away at ${fmt(a.first)} s (the fighter 30+ km out, radar on, containers up); silent radar: no launch; stowed: no launch`;
+  });
+
+  await test('CG: SM-6 and ESSM leave its Mk 41 cells, the hatch opens', async () => {
+    const m = map(), { shoreX } = coastPoints(m);
+    const sim = new Sim(m, { seed: 23, fog: true, weather: { kind: 'calm', wind: [0, 0], sea: .2 } });
+    const cg = sim.spawn('cg', 'fleet', shoreX - 30000, 0, { hdg: Math.PI / 2 });
+    sim.spawn('drone', 'coast', shoreX - 20000, 0, { alt: 600, hdg: -Math.PI / 2 });
+    let L = null, opened = 0;
+    await run(sim, 20 * 90, s => {
+      for (const e of s.drainEvents()) if (e.type === 'launch' && e.from === cg.id && (e.kind === 'sm6' || e.kind === 'pdms') && !L) L = e;
+      opened = Math.max(opened, cg.vlsOpen.length);
+      return !!L && opened > 0;
+    });
+    ok(L, 'the cruiser never engaged the drone');
+    let best = 1e9;
+    const c = Math.cos(cg.hdg), sn = Math.sin(cg.hdg);
+    for (const q of cg.def.vlsAt) { const wx = cg.pos[0] + c * q[0] + sn * q[2], wz = cg.pos[2] - sn * q[0] + c * q[2]; best = Math.min(best, Math.hypot(wx - L.pos[0], wz - L.pos[2])); }
+    ok(best < 1.5, `launch point ${fmt(best, 2)} m from the nearest cell`);
+    ok(opened > 0, 'no VLS hatch opened');
+    return `${L.kind} at ${fmt(L.t !== undefined ? L.t : sim.t)} s from a cell (${fmt(best, 2)} m), ${cg.def.vlsAt.length} cells`;
+  });
+
+  await test('Bereg: weapons free, 130 mm rounds at a ship in reach', async () => {
+    const m = map(), { shoreX } = coastPoints(m);
+    const sim = new Sim(m, { seed: 25, fog: true, weather: { kind: 'calm', wind: [0, 0], sea: .2 } });
+    const g = sim.spawn('bereg', 'coast', shoreX + 700, 0, { hold: true, hdg: -Math.PI / 2 });
+    const ddg = sim.spawn('ddg', 'fleet', shoreX - 12000, 0, { hdg: 0 });
+    let first = null, n = 0, hits = 0;
+    await run(sim, 20 * 180, s => {
+      for (const e of s.drainEvents()) {
+        if (e.type === 'launch' && e.kind === 'shell130') { first = first === null ? s.t : first; n++; }
+        if (e.type === 'hit' && e.kind === 'shell130' && e.target === ddg.id) hits++;
+      }
+      return n >= 8;
+    });
+    ok(first !== null, 'the Bereg never fired');
+    ok(g.aimB !== null, 'the turret never took an aim bearing');
+    return `first round ${fmt(first)} s, ${n} rounds, ${hits} hits on the DDG 12 km out`;
+  });
+
+  await test('LCS: 44 kn scout', async () => {
+    const m = map(), { shoreX } = coastPoints(m);
+    const sim = new Sim(m, { seed: 27, fog: false });
+    const u = sim.spawn('lcs', 'fleet', shoreX - 40000, -20000, { hdg: 0 });
+    sim.order([u.id], { kind: 'move', x: shoreX - 40000, z: 30000 });
+    let vmax = 0;
+    await run(sim, 20 * 150, () => { vmax = Math.max(vmax, u.speed); });
+    ok(vmax > 40 * 0.5144, `top speed ${fmt(vmax / 0.5144)} kn`);
+    ok(u.def.air && u.def.air.types.includes('helo'), 'no helicopter deck');
+    return `${fmt(vmax / 0.5144)} kn after 150 s`;
+  });
+
   const battleLevels = Q.get('long') ? ['easy', 'normal', 'hard'] : ['normal'];
   for (const lvl of battleLevels) await battleTest(lvl, map(), 'stub');
   if (Q.get('map')) {

@@ -12,7 +12,11 @@
    reach and goes deep again, torpedoes what it hears close (weapons free). The fleet flies one E-2D on a station
    behind its screen, keeps a Virginia deep ahead of the destroyers (weapons free: torpedoes at a boat it hears; its
    Tomahawks join the strikes from periscope depth), and sends a helicopter to hover and dip its sonar over a boat
-   it has only heard (the destroyer and helicopter Mk 54s take a classified boat). */
+   it has only heard (the destroyer and helicopter Mk 54s take a classified boat).
+   Third wave: the coast sets its S-400 up behind the battery (the 92N6E raised on its site, the launchers round it,
+   erected; the radar radiates once aircraft or rounds come near) and its Bereg guns on the shore facing the sea
+   lanes, weapons free. The fleet puts its cruiser in the screen behind the destroyers (air defence, it keeps its
+   few strike rounds for the strikes) and runs its LCS ahead of the screen as a scout (radar on, weapons free). */
 import { UNITS, CLASSIFY, TEL_ELEV } from '../data/units.js';
 import { inbound as inboundSlow } from './weapons.js';
 import { scanBlocked, los } from './sensors.js';
@@ -145,6 +149,15 @@ export class AI {
     this.catSite = this.snap('land', ...toSea(hqp, 2500), comp) || hqp;
     this.park = this.snap('land', ...toSea(tc, -3000), comp) || hqp;
     this.telCenter = tc;
+    // S-400: behind the battery, away from the sea; the Bereg guns on the shore, where the sea lanes come closest
+    this.s400Site = this.snap('land', ...toSea(tc, -5000), comp) || this.park;
+    this.shoreSites = [];
+    for (const c of cands.filter(c => c.sd >= 250 && c.sd <= 1500 && c.dSp < 30000).sort((a, b) => a.dF - b.dF)) {
+      if (this.shoreSites.length >= 6) break;
+      if (this.shoreSites.some(q => dxz(q[0], q[1], c.x, c.z) < 3000)) continue;
+      this.shoreSites.push([c.x, c.z]);
+    }
+    if (!this.shoreSites.length) this.shoreSites.push(this.snap('land', ...toSea(tc, 2500), comp) || [sp.x, sp.z]);
     // forward radar sites for pressing (coastPress): near the shore, not steep
     this.fwd = cands.filter(c => c.sd >= 300 && c.sd <= 8000 && map.slope(c.x, c.z) < .25);
     this.note(`coast: radar site ${this.radarSite.map(Math.round)}, ${this.telSites.length} TEL sites`);
@@ -198,7 +211,41 @@ export class AI {
     this.coastScan();
     this.coastFire(by.tel, by.bal || []);
     this.coastBoats(by.ssk || []);
+    this.coastS400(by.s400r || [], by.s400 || []);
+    this.coastGuns(by.bereg || []);
     this.coastBuy(by);
+  }
+
+  /* S-400: the 92N6E on its site behind the battery, raised; it radiates once aircraft or rounds come near (or the
+     enemy has been shooting); the launchers stand round it, erected (they fire only on its cue: data/units.js cue) */
+  coastS400(radars, launchers) {
+    const t = this.sim.t;
+    radars.forEach((u, i) => {
+      const site = i ? this.snap('land', this.s400Site[0] + 2500 * i, this.s400Site[1], this.comp) || this.s400Site : this.s400Site;
+      if (!this.station(u, site, 300)) return;
+      if (u.mast < 1 && this.cur(u) !== 'deploy') { this.order(u, { kind: 'deploy' }); return; }
+      const on = t - this.lastEnemyLaunch < 600 || this.threatNear(u.pos, 90000);
+      if (u.mast >= 1 && u.radarOn !== on) this.order(u, { kind: 'radar', on });
+    });
+    const hub = radars[0] ? [radars[0].pos[0], radars[0].pos[2]] : this.s400Site;
+    launchers.forEach((u, i) => {
+      const k = this.cur(u);
+      if (k === 'reload') return;
+      if (u.ammo.sam48 === 0 && !k) { this.order(u, { kind: 'reload' }); return; }
+      const a = i * 2.4, site = this.snap('land', hub[0] + Math.cos(a) * 1200, hub[1] + Math.sin(a) * 1200, this.comp) || hub;
+      if (!this.station(u, site, 250)) return;
+      if ((u.dep < 1 || u.elev < elevOf(u.def) - 1e-6) && k !== 'deploy') this.order(u, { kind: 'deploy' });
+    });
+  }
+  /* Bereg: one per shore site, weapons free at ships and landing craft in reach; back to a depot when empty */
+  coastGuns(guns) {
+    guns.forEach((u, i) => {
+      u.hold = true;
+      const k = this.cur(u);
+      if (k === 'reload' || k === 'attack') return;
+      if (u.ammo.gun130 === 0 && !k) { this.order(u, { kind: 'reload' }); return; }
+      this.station(u, this.shoreSites[i % this.shoreSites.length], 200);
+    });
   }
 
   /* pressing: no firm track of a ship for L.press s -> the first radar drives to a forward site within scan reach of
@@ -499,7 +546,7 @@ export class AI {
     const eyes = this.pressing ? ((stock < 3 && (by.catapult || []).length && sim.t - (this.lastDrone || -1e9) > 120 ? 'drone' : null) || want('ssk', 1)) : null;
     const next = want('radar', 1) || want('tel', 3) || eyes || want('pantsir', 2) || want('transloader', 1) || want('catapult', 1) || want('transloader', Math.min(tl, 2))
       || (stock < 2 && (by.catapult || []).length && sim.t - (this.lastDrone || -1e9) > 240 ? 'drone' : null)
-      || want('pantsir', 3) || want('tel', 5) || want('bal', 1) || want('radar', 2) || want('transloader', tl) || want('tel', 6) || want('ssk', 1) || want('pantsir', 4) || want('bal', 2)
+      || want('pantsir', 3) || want('tel', 5) || want('bal', 1) || want('s400r', 1) || want('s400', 2) || want('bereg', 1) || want('radar', 2) || want('transloader', tl) || want('tel', 6) || want('ssk', 1) || want('pantsir', 4) || want('bal', 2) || want('bereg', 2)
       || want('transloader', tl) || want('tel', 8) || want('pantsir', 5) || want('tel', 10);
     if (!next) return;
     if (S.supply >= UNITS[next].cost * this.L.buyK) { if (sim.buy('coast', next)) { this.note(`buy ${next}`); if (next === 'drone') this.lastDrone = sim.t; } }
@@ -583,6 +630,9 @@ export class AI {
       else if (u.type === 'tel') { const s = this.freeSite(u); this.m(u).site = s; put(u, [s.x, s.z]); u.dep = u.depT = 1; u.elev = u.elevT = u.wantElev = TEL_ELEV; u.deployed = true; }
       else if (u.type === 'pantsir' && si < this.samSites.length) { this.samOwner[si] = u.id; this.m(u).sam = si; put(u, this.samSites[si++]); }
       else if (u.type === 'catapult') put(u, this.catSite);
+      else if (u.type === 's400r') { put(u, this.s400Site); u.mast = u.mastT = 1; u.deployed = true; }
+      else if (u.type === 's400') { const a = u.id * 2.4; put(u, [this.s400Site[0] + Math.cos(a) * 1200, this.s400Site[1] + Math.sin(a) * 1200]); u.dep = u.depT = 1; u.elev = u.elevT = u.wantElev = elevOf(u.def); u.deployed = true; }
+      else if (u.type === 'bereg') { put(u, this.shoreSites[(u.id * 7) % this.shoreSites.length]); u.hold = true; }
       else if (u.type === 'transloader') put(u, [this.park[0] + (u.id % 3) * 60, this.park[1]]);
     }
   }
@@ -618,13 +668,15 @@ export class AI {
       const back = u.hp < u.hpMax * .45 ? Math.min(this.D + 10000, 85000) : Math.min(this.D, 75000);
       this.station(u, this.at(back, 0), 2500);
     }
-    this.fleetDdgs(by.ddg);
+    const screen = by.ddg.concat(by.cg || []);
+    this.fleetDdgs(screen);
+    this.fleetLcs(by.lcs || []);
     const sams = [];
     for (const c of this.contacts().values()) if (!c.dead && c.cls === 'SAM') sams.push(c);
     this.fleetHelos(by.helo, sams);
     this.fleetScan();
     this.fleetStrike(by, sams);
-    this.fleetFighters(by.fighter, by.ddg);
+    this.fleetFighters(by.fighter, screen);
     this.fleetAew(by.aew || []);
     this.fleetBoats(by.ssn || []);
     this.fleetBuy(by);
@@ -644,16 +696,17 @@ export class AI {
       if (emcon && u.radarOn === quiet) this.order(u, { kind: 'radar', on: !quiet });
       if (m.resupply) {
         if (k !== 'reload') {
-          if (u.ammo.sm6 >= u.def.weapons.sm6.ammo * .9 && u.ammo.strike >= u.def.weapons.strike.ammo * .75) m.resupply = false;
+          if (u.ammo.sm6 >= u.def.weapons.sm6.ammo * .9 && (u.type === 'cg' || u.ammo.strike >= u.def.weapons.strike.ammo * .75)) m.resupply = false;
           else this.order(u, { kind: 'reload' });
         }
         return;
       }
-      const low = u.ammo.sm6 <= 6 || u.ammo.strike === 0;
+      const low = u.ammo.sm6 <= 6 || (u.type !== 'cg' && u.ammo.strike === 0);   // the cruiser is there for its SAMs
       if (low && (resupplying === 0 || u.ammo.sm6 === 0)) { m.resupply = true; resupplying++; this.order(u, { kind: 'reload' }); this.note(`DDG ${u.id} resupply`); return; }
       if (k === 'attack' || k === 'scan') return;
       const back = this.push2 ? 30000 : this.push ? 40000 : 60000;
-      const site = this.at(back, (i - (n - 1) / 2) * 7000);
+      // the cruiser holds the middle of the screen, 12 km behind the destroyers (between them and the carrier)
+      const site = u.type === 'cg' ? this.at(back + 12000, 0) : this.at(back, (i - (n - 1) / 2) * 7000);
       this.station(u, site, 2000);
     });
   }
@@ -765,7 +818,7 @@ export class AI {
 
   fleetStrike(by, sams) {
     const sim = this.sim;
-    const ddgs = by.ddg.filter(u => u.ammo.strike > 0 && !this.m(u).resupply && this.cur(u) !== 'attack' && !u.off.strike)
+    const ddgs = by.ddg.concat(by.cg || []).filter(u => u.ammo.strike > 0 && !this.m(u).resupply && this.cur(u) !== 'attack' && !u.off.strike)
       .concat((by.ssn || []).filter(u => u.ammo.strike > 0 && this.cur(u) !== 'attack' && !u.off.strike));
     for (const { c, want } of this.strikeTargets(sams)) {
       let need = want - this.inbound(c.unitId);
@@ -817,6 +870,24 @@ export class AI {
     }
   }
 
+  /* LCS: the scout, well ahead of the screen on a flank (re-picked every 10 min), radar on, weapons free (its
+     57 mm at boats and landing craft); back behind the screen when hurt */
+  fleetLcs(list) {
+    const t = this.sim.t;
+    list.forEach((u, i) => {
+      const m = this.m(u), k = this.cur(u);
+      u.hold = true;
+      if (!u.radarOn && !u.off.radar) this.order(u, { kind: 'radar', on: true });
+      if (k === 'attack' || k === 'scan' || k === 'reload') return;
+      if (u.hp < u.hpMax * .5) { this.station(u, this.at(this.push ? 45000 : 60000, 0), 2000); return; }
+      if (!m.st || t - m.stT > 600) {
+        const back = this.push2 ? 20000 : this.push ? 26000 : 34000;
+        m.st = this.at(back, ((i % 2) ? 1 : -1) * (6000 + this.r() * 10000)); m.stT = t;
+      }
+      this.station(u, m.st, 1500);
+    });
+  }
+
   /* E-2D: one on station behind the destroyer screen, in front of the carrier (its radar sees far over the horizon
      from there), relieved from the deck */
   fleetAew(aews) {
@@ -859,7 +930,7 @@ export class AI {
     const sim = this.sim, S = sim.sides.fleet;
     const count = type => (by[type] ? by[type].length : 0) + S.queue.filter(q => q.type === type).length;
     const want = (type, n) => count(type) < n && !UNITS[type].aiSkip ? type : null;
-    const next = want('ddg', 2) || want('fighter', 4) || want('helo', 2) || want('ddg', 3) || want('fighter', 6) || want('helo', 3) || want('ddg', 4) || want('aew', 1) || want('fighter', 8) || want('ssn', 1) || want('ddg', 5) || want('ddg', 6);
+    const next = want('ddg', 2) || want('fighter', 4) || want('helo', 2) || want('ddg', 3) || want('lcs', 1) || want('fighter', 6) || want('helo', 3) || want('cg', 1) || want('ddg', 4) || want('aew', 1) || want('fighter', 8) || want('ssn', 1) || want('ddg', 5) || want('ddg', 6);
     if (!next) return;
     if (UNITS[next].domain === 'air' && !by.carrier.length) return;
     if (S.supply >= UNITS[next].cost * this.L.buyK) { if (sim.buy('fleet', next)) this.note(`buy ${next}`); }
