@@ -368,3 +368,9 @@ head and cabin; E-2D gear; truck cabs and engines; DDG deck fittings; fuller X-r
 Hit physics is half-way: collision-based hits are in (24-round gun bursts with dispersion, gravity and drag; missiles
 hit only if their path enters a part box; interceptors only if they pass within their burst radius; damage on the
 part struck; spin-outs); the agent is finishing tests, tuning and balance.
+
+## 13:15 · Collision hits in, balance pass running
+The dice are gone: every shot is resolved by geometry (gun bursts as flown rounds, missiles and interceptors by their
+paths against part boxes), damage lands on the part actually struck, and a grazed missile spins out. The events a
+rigid-body break-up needs are documented in `src/sim/README.md`. A numbers-only balance pass is now re-tuning the
+new stat fields (burst radii, dispersion, toughness) back to fair win rates and the old intercept shares.
