@@ -198,6 +198,9 @@ function cgHouses() {
   // midships deckhouse between the two big houses (01 level)
   const m0 = cgD(CG_MH.z0), m1 = cgD(CG_MH.z1);
   M.push(sblock(5.6, CG_MH.z0, CG_MH.z1, m0 - .05, m1 - .05, 5.5, CG_MH.z0 + .1, CG_MH.z1 - .1, 9.3));
+  // 02 level between the funnels, joining the two big houses (the photos: one continuous block, not a low gap)
+  M.push(prism(-4.9, 4.9, 9.3, 12.3, CG_MH.z0 + .2, CG_MH.z1 - .2, -4.7, 4.7, CG_MH.z0 + .3, CG_MH.z1 - .3, { skip: [0] }));
+  for (const s of [-1, 1]) M.push(...windowRow([s * 4.95, 0, CG_MH.z0 + 2], [s * 4.95, 0, CG_MH.z1 - 2], 10.6, .5, 6, [s, 0, 0], { al: .35 }));
   // aft deckhouse: 01 level (the hangars in its aft end), the upper block with the aft SPY faces
   const a0 = cgD(CG_AH.z0), a1 = cgD(CG_AH.z1), ya = 11.3, yb = 16.2;
   A.push(sblock(7.7, CG_AH.z0, CG_AH.z1, a0 - .05, a1 - .05, 7.6, CG_AH.z0, CG_AH.z1 - .2, ya, { skip: [1] }));
