@@ -14,6 +14,9 @@ import { ModelLib, attitude } from './models.js';
 import { FX, LIME, CORAL, WH } from './fx.js';
 import { Overlay } from './overlay.js';
 import { Wire } from './wire.js';
+import { WireModels } from './wire_models.js';
+import { WireSea } from './wire_sea.js';
+import { OrbitalMap } from './orbital.js';
 
 const R_EARTH = 6371000;
 export const TINT = { own: [198 / 255, 244 / 255, 50 / 255], hostile: [1, 106 / 255, 61 / 255], unknown: [1, 1, 1], neutral: [1, 1, 1] };
@@ -44,6 +47,8 @@ export class Renderer {
     // GPU hairlines (the Orbital language), flushed at the end of the frame; a failure here never takes the points down
     try { this.wire = new Wire(this.G, this); } catch (e) { console.error('renderer: hairlines unavailable', e); this.wire = null; }
     this.pcOff = false;                        // skip the point passes (a hairline picture covers the whole frame)
+    this.style = 'pointcloud';                 // 'orbital': the whole frame in the Orbital films' hairlines (models,
+                                               // the map's contours, the sea's swell rows); the effect dots stay
     this.overlay = o.overlay ? new Overlay(o.overlay) : null;
     this.pBg = program(gl, VS_BG, FS_BG, 'bg');
     this.bg = [11 / 255, 12 / 255, 10 / 255]; this.vignette = .62;
@@ -137,6 +142,8 @@ export class Renderer {
   setScan(i, s) { this.scans[i] = s && s.mode !== 'off' ? s : { mode: 0 }; }
   /* the radar sweep painting the sea and the land: { origin [x, z], bearing (rad), amp, afterglow (rad), range (m), edge (rad) } or null */
   setSweep(s) { this.sweep = s; }
+  /* the map's hairline picture (coast, contours, graticule, frame; engine/orbital.js), built once on first use */
+  orbitalMap() { if (!this._om && this.wire) this._om = new OrbitalMap(this, this.map); return this._om || null; }
   /* darken the finished frame toward black by a (0..1), leaving the CSS px rect `exclude` as it is (a cross-fade
      into the hairline picture; call after end()). dissolve 0..1: the returns go out one by one instead of dimming */
   veil(a, exclude, rgb, dissolve) { if (this.wire) this.wire.veil(a, rgb, exclude, dissolve); }
@@ -241,13 +248,15 @@ export class Renderer {
     gl.viewport(0, 0, G.W, G.H);
     gl.disable(gl.CULL_FACE);
     // background (pure black under a hairline picture)
+    const orb = this.style === 'orbital' && this.wire;
     gl.disable(gl.DEPTH_TEST); gl.depthMask(false); gl.disable(gl.BLEND);
     gl.useProgram(this.pBg.p);
-    if (this.pcOff) gl.uniform4f(this.pBg.u.uBg, 0, 0, 0, 0);
+    if (this.pcOff || orb) gl.uniform4f(this.pBg.u.uBg, 0, 0, 0, 0);
     else gl.uniform4f(this.pBg.u.uBg, this.bg[0], this.bg[1], this.bg[2], this.vignette);
     gl.bindVertexArray(null);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.depthMask(true); gl.clearDepth(1); gl.clear(gl.DEPTH_BUFFER_BIT);
+    if (orb) { this._endOrbital(t0); return; }
     if (this.pcOff) { this._endWire(t0); return; }
     gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL);
     // occluder: land envelope with the seabed
@@ -293,6 +302,99 @@ export class Renderer {
     this.stats.draws = draws; this.stats.points = pts;
     this._endWire(t0);
   }
+  /* the full Orbital style: the occluders (hills and the sea surface hide what is behind and below them), the sea's
+     swell rows and the survey crosses, the map's contours, every model as facing-aware hairlines, then the effect
+     dots as in the point frame */
+  _endOrbital(t0) {
+    const gl = this.gl, W = this.wire;
+    if (!this.wireModels) { this.wireModels = new WireModels(this); this.wireSea = new WireSea(this); }
+    const look = this.orbitalLook || (this.orbitalLook = { sea: 1, map: 1, models: 1 });
+    gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL);
+    gl.depthMask(true); gl.colorMask(false, false, false, false);
+    this.terrain.drawDepth(0);
+    if (this.seaOcclude !== false) this.terrain.drawDepth(1);
+    gl.colorMask(true, true, true, true); gl.depthMask(false);
+    gl.enable(gl.BLEND); gl.blendEquation(gl.MAX); gl.blendFunc(gl.ONE, gl.ONE);
+    // the world dims for an inspect view (worldBright) as the point frame does
+    const wb = Math.max(0, Math.min(1, this.worldBright));
+    this._seaA = look.sea * wb;
+    if (this._seaA > 0) {
+      this.wireSea.horizon(this._seaA);
+      // hulls on the water (the rows break round them): instances near sea level, longer than 25 m
+      const hulls = this._hulls || (this._hulls = []);
+      hulls.length = 0;
+      for (const d of this.queue) {
+        if (!d.T || d.T[1] > 6 || d.T[1] < -30 || hulls.length >= 16) continue;
+        let p; try { p = this.wireModels.plan(d.key); } catch (err) { continue; }
+        if (p.hl < 12 || p.bottom > 3) continue;
+        const R = d.R, hdg = Math.atan2(R[2], R[8]);
+        const c = [d.T[0] + R[0] * p.cx + R[2] * p.cz, d.T[1], d.T[2] + R[6] * p.cx + R[8] * p.cz];
+        hulls.push({ T: c, hdg, hl: p.hl * 1.04, hb: p.hb * 1.1 });
+      }
+      this.wireSea.setHulls(hulls);
+    }
+    const OM = this.orbitalMap();
+    // the graticule and the frame come in from a few km up (the films' map layers by altitude)
+    const alt = this.camera.eye[1], kg = Math.max(0, Math.min(1, (alt - 2500) / 7500));
+    if (OM && look.map * wb > 0) {
+      OM.draw(1, { a: look.map * wb, depth: true, scan: true, lights: true, grid: kg * kg * (3 - 2 * kg) });
+      // close up, the contours between the main ones (a fifth of the interval), faded with range
+      const F = OM.fine(), dist = this.camera.dist, kf = 1 - Math.max(0, Math.min(1, (dist - 4000) / 12000));
+      if (F && kf > 0) W.add(F, { a: .1 * kf * look.map * wb, depth: true, scan: true, lights: true, fog: [Math.max(1500, dist * 1.6), Math.max(5000, dist * 4.5)] });
+    }
+    let segs = 0, draws = 0;
+    if (look.models > .004) for (const d of this.queue) {
+      const rgb = d._orbRgb || (Array.isArray(d.tint) ? d.tint : WHITE);
+      const n = this.wireModels.draw(d, this.frameInfo, { rgb, a: look.models, depth: true, scan: true, lights: true });
+      segs += n; if (n) draws++;
+    }
+    // the sea, the hairlines and the effect dots over them; unless the hairlines' owner draws them after its own
+    // passes (wire.auto = false: it calls orbitalPost() itself, e.g. after a veil over what came between)
+    if (W.auto && !W.flushed) this.orbitalPost();
+    else this._orbPending = true;
+    gl.bindVertexArray(null);
+    this.stats.draws = draws; this.stats.points = 0; this.stats.segs = segs;
+    this.stats.ms = performance.now() - t0;
+  }
+  /* the second half of an Orbital frame: the swell rows and survey crosses, the queued hairlines, the effect dots;
+     exclude: a CSS px rect left untouched; o.fx false: the caller draws the effect dots itself (drawFx) */
+  orbitalPost(exclude, o) {
+    this._orbPending = false;
+    if (!this.wireSea) return;
+    const gl = this.gl, G = this.G, W = this.wire;
+    gl.viewport(0, 0, G.W, G.H);
+    gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, this.ubo);
+    if (this._seaA > 0) {
+      gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.depthMask(false);
+      gl.enable(gl.BLEND); gl.blendEquation(gl.MAX); gl.blendFunc(gl.ONE, gl.ONE);
+      W._each(W._bands(exclude), () => this.wireSea.draw({ a: this._seaA }));
+    }
+    W.flush({ exclude });
+    if (!o || o.fx !== false) this.drawFx(exclude);
+  }
+  /* the effect dots (max, additive glows, alpha-over, the flash lift) over what is drawn, as the point frame does;
+     exclude: a CSS px rect left untouched. The Orbital style's hairline owner calls it after its flush */
+  drawFx(exclude) {
+    const gl = this.gl, G = this.G;
+    gl.viewport(0, 0, G.W, G.H);
+    gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, this.ubo);
+    const bands = this.wire ? this.wire._bands(exclude) : null;
+    const run = () => {
+      gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.depthMask(false);
+      gl.enable(gl.BLEND); gl.blendEquation(gl.MAX); gl.blendFunc(gl.ONE, gl.ONE);
+      this.fx.drawMax();
+      gl.blendEquation(gl.FUNC_ADD); gl.blendFunc(gl.ONE, gl.ONE);
+      this.fx.drawAdd();
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      this.fx.drawOver();
+      gl.disable(gl.DEPTH_TEST);
+      gl.blendFunc(gl.ONE, gl.ONE);
+      this.fx.drawLift();
+    };
+    if (this.wire && bands) this.wire._each(bands, run); else run();
+    gl.disable(gl.BLEND); gl.depthMask(true); gl.blendEquation(gl.FUNC_ADD);
+    gl.bindVertexArray(null);
+  }
   /* the hairlines queued this frame (unless their owner flushes them itself: wire.auto = false) */
   _endWire(t0) {
     if (this.pcOff) { this.stats.draws = 0; this.stats.points = 0; }
@@ -302,5 +404,6 @@ export class Renderer {
   }
 }
 
+const WHITE = [1, 1, 1];
 function norm(v) { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; }
 export { LIME, CORAL, WH, attitude };

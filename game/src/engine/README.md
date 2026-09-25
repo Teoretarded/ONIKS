@@ -129,6 +129,43 @@ yaw, `=` / `-` zoom, PageUp / PageDown pitch. Smooth damping; the lens never goe
 `mark(x, y, size, col, a, fill)` · `text(x, y, s, { size, col, a, align, weight, sans })` ·
 `dline(x0, y0, x1, y1, step, size, col, a)`. `COL` has the tokens (lime, coral, dim, faint, hair).
 
+## Hairlines: the Orbital language (`R.wire`, engine/wire.js, orbital.js, wire_models.js, wire_sea.js)
+
+The Orbital films' wireframe (`reference/menus/common/wire.js`, `geo.js`) on the GPU. Every segment is an instanced
+screen-space quad, 1 px at 1080p (scaled with the canvas), antialiased across, near-clipped, curved like the dots,
+optionally depth-faded (fog) and near-faded; **MAX blending** (joints never bead, crossings never burn, order-free).
+
+| | |
+|---|---|
+| `R.wire.seg(ax, ay, az, bx, by, bz, r, g, b, a)` | a world segment for this frame (colour 0..1). `path(pts, o)`, `ring(cx, y, cz, r, { rgb, a, n, a0, a1, dash: [on, off] })`. |
+| `R.wire.batch(f32 [ax, ay, az, bx, by, bz, ...], cols?)` | a static batch (world m), uploaded once. `R.wire.add(B, { rgb, a, width, fog: [full, none], near, depth, scan, lights })` queues it for this frame (`scan`: the lime scan fronts light the lines; `lights`: the dynamic lights brighten them). |
+| `R.wire.modelBatch(f32)` / `R.wire.model(B, { R, T, rgb, a, back, gen, genBack, sil, depth })` | facing-aware model segments (14 floats: a, b, n1 + weight, n2 + mode; modes: 0 plain, 1 edge (front when either face turns to the lens), 2 lathe generator, 4 exact lathe silhouette, found per frame in the shader). |
+| `R.wire.flush({ exclude })` | draws what is queued. The renderer flushes at the end of `end()` unless `R.wire.auto = false` (the strategic layer flushes after its veil). `exclude`: a CSS px rect left untouched (the EO inset). |
+| `R.veil(a, exclude, rgb, dissolve)` | after `end()`: darken the finished frame toward black by `a`; `dissolve` 0..1 makes the returns go out one by one (hash dither) instead of dimming. |
+| `R.pcOff` | skip the point passes (black background, no terrain / model / effect dots): set by the strategic layer at k = 1. |
+| `R.orbitalMap()` | the map's hairline picture (engine/orbital.js `OrbitalMap`, built once, contours in a worker ~0.1-0.3 s): coast (the 0 m line, .82), land contours at a nice interval (index lines brighter, plateaus avoided), soundings (-20 / -50 / -100 / -200 m), a 10 km graticule, the map frame with corner brackets. `draw(k, { a, depth, scan, lights, grid })` queues the layers, staggered by k. `ready`, `levels`, `layers`, `frame`. |
+| `R.style` | `'pointcloud'` (default) or `'orbital'`: the whole frame in hairlines (below). |
+
+`contours.js`: `extractContours({ heights, cols, rows, cell, x0, z0, levels, tol, tolCoast, blur, blurCoast, smooth,
+minLen, minLenCoast })` (marching squares with block skipping, saddles by the cell centre, chained, Douglas-Peucker,
+Chaikin), pure; `contours_worker.js` runs it off the main thread.
+
+**The full Orbital style** (`R.style = 'orbital'`; the game sets it from Settings `renderStyle`, or `?style=orbital`).
+`end()` draws the occluders (hills and the sea surface hide what is behind and below them), then: every queued model as
+hairlines (`wire_models.js`: GEO primitives converted once per part and level, dyn parts per quantized state, part
+transforms, explode, partX, damage in coral, `d._orbRgb` overrides the colour (the selection in yellow); the scan
+fronts light them lime), the map's contours (depth-tested), the sea as the films' swell rows (`wire_sea.js`: rows
+across the view heading in 30 degree steps cross-faded, world-fixed, thinned with range by ordered levels so they stay
+~9 px apart on screen, riding the engine's swell, breaking at the coast and round the hulls on the water, gone above
+~5 km), a horizon line, survey crosses on land round the target (close up only), then the effect dots.
+`R.orbitalLook = { sea, map, models }` scales the layers; `R.worldBright` dims the world as in the point frame. With
+`R.wire.auto = false` the second half (`R.orbitalPost(exclude, { fx })`, `R.drawFx(exclude)`) is left to the owner,
+who draws it after a veil over the point passes other systems draw after `end()`.
+
+The strategic layer that drives all this is the system `game/src/game/orbital.js` (its header documents it):
+past ~36-60 km of camera distance the point picture dissolves into this language (`game.orbital = { k, from, to,
+map, yellow, veil }`), with range rings, unit glyphs, catalog labels, the rounds' tracks and place names.
+
 ## Other
 
 `gl.js` (`createGL`, `program`, textures) · `shaders.js` (the per-frame uniform block and the shared GLSL: dot
