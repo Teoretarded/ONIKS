@@ -296,3 +296,9 @@ Stills: `game/shots/cvn_inspect_*.png`, `mus_cv_*.png`.
 Over 192 AI-vs-AI seeds per map every map is now 48-58% coast wins with median matches of 30-53 min, and only
 3 of 1,152 matches ended in under 10 minutes. The coast AI holds fire on the carrier for the opening (5 min on normal,
 3 on hard); three fleet spawns, four depots and three replenishment points moved.
+
+## 11:45 · Orbital style everywhere
+With Render style = Orbital, every layer now speaks the Orbital films: the radar beam as a hairline edge, contacts
+as hairline returns with dashed uncertainty ellipses, the scan bolt and part boxes as white hairlines with catalog
+placards, smoke as scalloped puff outlines, fireballs as opening rings, wakes as V arms, the HUD in Inter / DM Mono
+with the one yellow on your selection or your salvo in flight. Point Cloud is unchanged.
