@@ -1,7 +1,8 @@
 /* SANDBOX and COMBAT setup: rows of choices on the left, the live map preview on the right, Start below.
    Sandbox -> play.html?mode=sandbox&map=<id>&side=<coast|fleet>&fog=<0|1>&weather=<kind>
-   Combat  -> play.html?mode=combat&map=<id>&side=<coast|fleet>&ai=<easy|normal|hard>&win=<hq|obj>&fog=1[&timer=<s>] */
-import { h, esc, keysHtml, fmtTime } from '../dom.js';
+   Combat  -> play.html?mode=combat&map=<id>&side=<coast|fleet>&ai=<easy|normal|hard>&win=<hq|obj>&fog=1[&timer=<s>]
+   Sandbox also has Anatomy under Start: every model in dark space -> play.html?mode=museum&from=sandbox */
+import { h, esc, keysHtml, fmtTime, takeFocus, keepFocus } from '../dom.js';
 import { sfx } from '../sfx.js';
 import { Form } from '../form.js';
 import { previewPanel } from '../preview.js';
@@ -28,6 +29,18 @@ const WIN_BLURB = {
 };
 const WEATHERS = [['calm', 'Calm'], ['haze', 'Haze'], ['rain', 'Rain'], ['storm', 'Storm']];
 
+/* the saved battle (game/save.js keeps one slot): this screen's Continue row when it is this mode's */
+function savedGame(mode) {
+  try { const s = JSON.parse(localStorage.getItem('oniks.save') || 'null'); return s && s.v === 1 && s.mode === mode && s.url ? s : null; } catch (e) { return null; }
+}
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function continueRow(sv) {
+  const d = new Date(sv.saved || 0), hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const side = sv.side === 'fleet' ? 'Fleet' : 'Coast', ai = sv.mode === 'combat' && sv.ai ? ` against ${sv.ai === 'easy' ? 'an' : 'a'} ${sv.ai} enemy` : '';
+  return { id: 'continue', label: 'Continue', action: true, aside: `${sv.mapName} · ${sv.tl}${sv.stale ? ' · Outdated' : ''}`, off: sv.stale ? () => true : undefined,
+    blurb: `${side} on ${sv.mapName}${ai}, saved ${d.getDate()} ${MON[d.getMonth()]} at ${hm}.` };
+}
+
 function remember(k, v) { try { if (v === undefined) return JSON.parse(localStorage.getItem('oniks.setup.' + k) || 'null'); localStorage.setItem('oniks.setup.' + k, JSON.stringify(v)); } catch (e) { return null; } }
 
 export function setupScreen(app, mode) {
@@ -40,7 +53,8 @@ export function setupScreen(app, mode) {
   const pv = previewPanel({ w: 700, h: 600 });
   const deb = h('div.debrief');
   el.append(kick, deb, formEl, blurb, pv.el, keys);
-  let form = null, weatherTouched = false, mapsLive = null;
+  let form = null, weatherTouched = false, mapsLive = null, slotSeen = '';
+  const slotKey = () => { const sv = savedGame(mode); return sv ? sv.saved + (sv.stale ? 'x' : '') : ''; };
 
   function build() {
     formEl.innerHTML = '';
@@ -66,6 +80,10 @@ export function setupScreen(app, mode) {
       );
     }
     rows.push({ gap: true }, { id: 'start', label: 'Start', action: true, blurb: combat ? 'Fog of war is on. The enemy is awake.' : 'Both rosters in the spawn palette (P). The enemy AI sleeps until you wake it (K).' });
+    const sv = savedGame(mode);
+    slotSeen = slotKey();
+    if (sv) rows.push(continueRow(sv));
+    if (!combat) rows.push({ id: 'anatomy', label: 'Anatomy', action: true, aside: 'All models', blurb: 'Every model, one at a time, in dark space.' });
     form = new Form(formEl, {
       rows, blurb, enter: 'start',
       onChange(id, v, user) {
@@ -74,7 +92,7 @@ export function setupScreen(app, mode) {
         if (id === 'win') form.refresh();
         remember(mode, form.values());
       },
-      onAction: start,
+      onAction: id => (id === 'anatomy' ? museum() : id === 'continue' ? resume() : start()),
     });
     blurb.style.top = (250 + formEl.offsetHeight + 34) + 'px';
     showMap(form.value('map'));
@@ -95,13 +113,25 @@ export function setupScreen(app, mode) {
     remember(mode, v);
     app.launch('play.html?' + q.toString(), MS.byId(v.map).name);
   }
+  function resume() {
+    const sv = savedGame(mode);
+    if (!sv || sv.stale) { sfx.deny(); return; }
+    app.launch(sv.url, sv.mapName);
+  }
+  function museum() {
+    remember(mode, form.values());
+    keepFocus(mode, 'anatomy');
+    app.launch('play.html?mode=museum&from=' + mode, 'Anatomy');
+  }
 
   return {
     id: mode, el, mode: 'sub', shade: 'sub',
     async enter(p) {
       await MS.refresh();
-      if (!form || mapsLive !== MS.live()) { weatherTouched = false; build(); }
+      if (!form || mapsLive !== MS.live() || slotSeen !== slotKey()) { weatherTouched = false; build(); }
       else { form.focus(0, true); showMap(form.value('map')); }
+      // back from the museum: on its row
+      if (takeFocus(mode) === 'anatomy' && form.row('anatomy')) form.focus(form.row('anatomy').k, true);
       if (p && p.result) app.debrief(deb, p.result); else deb.classList.remove('on');
       requestAnimationFrame(() => { blurb.style.top = (250 + formEl.offsetHeight + 34) + 'px'; });
     },

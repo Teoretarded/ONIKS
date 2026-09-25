@@ -2,6 +2,8 @@
    and settings. Screens dissolve into each other over the film, which never cuts.
 
    Routes (location.hash): #sandbox #combat #campaign #settings; play.html returns to index.html#campaign etc.
+   Campaign also opens the Films list (Films row: watch the favourite films full screen) and the Anatomy museum
+   (play.html?mode=museum, also from the Sandbox screen), without a sixth entry on the menu.
    A match result in localStorage `oniks.lastResult` is shown once on the screen of its mode. */
 import { $, h, esc, pad2, fitStage } from './dom.js';
 import { Backdrop } from './backdrop.js';
@@ -15,6 +17,7 @@ import { setupScreen } from './screens/setup.js';
 import { campaignScreen } from './screens/campaign.js';
 import { cutsceneScreen, briefingScreen } from './screens/mission.js';
 import { settingsScreen } from './screens/settings.js';
+import { filmsScreen, watchScreen } from './screens/films.js';
 
 const stage = $('stage'), logo = $('logo'), veil = $('veil');
 const wait = ms => new Promise(r => setTimeout(r, ms));
@@ -118,6 +121,8 @@ S.campaign = campaignScreen(app);
 S.cutscene = cutsceneScreen(app);
 S.briefing = briefingScreen(app);
 S.settings = settingsScreen(app);
+S.films = filmsScreen(app);
+S.watch = watchScreen(app);
 for (const s of Object.values(S)) $('screens').append(s.el);
 
 /* ---------- input ---------- */

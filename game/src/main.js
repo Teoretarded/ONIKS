@@ -5,6 +5,7 @@
      ?mode=sandbox&map=&side=&fog=&weather=
      ?mode=combat&map=&side=&ai=easy|normal|hard&win=hq|obj&timer=<s>&fog=1
      ?mode=campaign&mission=<n>[&map=&side=]
+     ?mode=museum[&from=sandbox|campaign&key=<model>]   the Anatomy walk alone (ui/inspect/museum.js)
    Debug: ?seed=, ?rate=, ?scale=<render scale>, ?cam=x,z,dist,yawDeg,pitchDeg, ?ui=0, ?fps=1, ?bench=1 (BENCH after 6 s),
    ?nosys=fx,audio (skip optional systems). Console: ONIKS.game / sim / R, ONIKS.benchSync(n), ONIKS.still(name),
    ONIKS.advance(sec), ONIKS.shot(name). */
@@ -16,6 +17,8 @@ import { createRender } from './game/render.js';
 import { getSettings, onSettings, DOT_DENSITY } from './data/settings.js';
 import { getMission } from './data/campaign.js';
 import { createLoading, warmLists } from './ui/loading/index.js';
+import { opening } from './game/campaign/camera.js';
+import { MUSEUM_MODE } from './ui/inspect/museum.js';
 
 const Q = new URLSearchParams(location.search);
 const $ = id => document.getElementById(id);
@@ -23,6 +26,7 @@ const DEG = Math.PI / 180;
 
 /* the game's own systems (game/src/game/*), loaded as they exist; each exports create<Name>(game, ctx) */
 const OWN = [
+  ['./game/save.js', 'createSave'],          // first: Continue plays the saved record to its tick before any other system exists
   ['./game/select.js', 'createSelect'],
   ['./game/orders.js', 'createOrders'],
   ['./game/time.js', 'createTime'],
@@ -101,9 +105,12 @@ async function boot() {
   const settings = getSettings();
   const perf = $('perf');
   const skip = new Set((Q.get('nosys') || '').split(',').filter(Boolean));
+  // ?mode=museum: the Anatomy walk alone (ui/inspect/museum.js): Inspect, none of the match's systems
+  const MU = P.mode === 'museum' ? MUSEUM_MODE : null, own = MU ? [] : OWN;
+  if (MU) for (const [, , key] of OPTIONAL) if (!MU.systems.includes(key)) skip.add(key);
   // fetch the systems' code while the map loads (module by module the waves of imports add up); registered in order below
   const code = async paths => { for (const p of paths) if (await exists(p)) return import(new URL(p, import.meta.url).href).catch(() => null); };
-  for (const [p] of OWN) code([p]);
+  for (const [p] of own) code([p]);
   for (const [paths, , key] of OPTIONAL) if (!skip.has(key)) code(paths);
   code(['./data/models.js']);
   let mapName = mapId.replace(/_/g, ' ');
@@ -143,9 +150,9 @@ async function boot() {
   game.addSystem(createRender(game, DM));
   const ctx = { DM, params: P, mission, match: M };
   // own systems first (in order), then the optional ones
-  let nSys = 0; const allSys = OWN.length + OPTIONAL.length;
+  let nSys = 0; const allSys = own.length + OPTIONAL.length;
   load.count('Systems', 0, allSys);
-  for (const [path, exp] of OWN) { const s = await optional(path, exp, game, ctx); if (s) game.addSystem(s); load.count('Systems', ++nSys, allSys); }
+  for (const [path, exp] of own) { const s = await optional(path, exp, game, ctx); if (s) game.addSystem(s); load.count('Systems', ++nSys, allSys); }
   const firstOf = async (paths, exp) => { for (const p of paths) if (await exists(p)) return optional(p, exp, game, ctx); return null; };
   const opt = await Promise.all(OPTIONAL.map(([paths, exp, key]) => (skip.has(key) ? Promise.resolve(null) : firstOf(paths, exp)).then(s => { load.count('Systems', ++nSys, allSys); return s; })));
   opt.forEach((s, i) => { if (s) { game.addSystem(s); console.log(`ONIKS: system ${OPTIONAL[i][2]} on`); } });
@@ -154,12 +161,13 @@ async function boot() {
   onSettings(s => { game.settings = Object.assign(game.settings, s); cam.edge = s.edgePan !== false; cam.invert = !!s.invertRotate; perf.style.display = s.showFps || Q.get('fps') === '1' ? '' : 'none'; });
 
   // warm the model caches: every level of what is in play now (no stall on the first close look), the rest in idle time
-  const warm = warmLists(game);
+  const warm = MU ? await MU.warm(game) : warmLists(game);
   await load.warm(game, warm.load);
+  if (MU) await MU.start(game);
   console.log(`ONIKS: ${P.mode} on ${map.id} as ${game.side}; map ${Math.round(tMap)} ms, setup ${Math.round(performance.now() - t0 - tMap)} ms; ${sim.list().length} units`);
 
-  // camera: on the player's own force, looking toward the enemy
-  openingShot(game);
+  // camera: close on the command post / the carrier, looking toward the enemy (the pull-out starts with the reveal)
+  const open = MU ? null : openingShot(game, !Q.get('cam') && Q.get('bench') !== '1' && Q.get('ui') !== '0' && Q.get('intro') !== '0');
   if (Q.get('cam')) {
     const [x, z, d, y, p] = Q.get('cam').split(',').map(Number);
     cam.set({ target: [x, R.terrain.heightAt(x, z), z], dist: d || 500, yaw: (y || 0) * DEG, pitch: (p || 30) * DEG });
@@ -216,7 +224,8 @@ async function boot() {
   }
   requestAnimationFrame(loop);
   // the loading screen fades over the opening shot (a short push-in unless a flight, a still or a bench has the camera)
-  load.reveal(game, { glide: !Q.get('cam') && !bench && P.mode !== 'campaign' && Q.get('ui') !== '0' })
+  if (open) open.start();
+  load.reveal(game, { glide: !open && !MU && !Q.get('cam') && !bench && P.mode !== 'campaign' && Q.get('ui') !== '0' })
     .then(() => { if (!bench) load.idle(game, warm.idle); });
 
   window.ONIKS = {
@@ -246,26 +255,12 @@ async function boot() {
   };
 }
 
-/* the opening shot: over the player's force, looking out toward the enemy spawn */
-function openingShot(game) {
-  const { sim, map, camera: cam, R } = game;
-  const own = sim.alive(game.side).filter(u => !u.aboard);
-  const sp = map.spawns[game.side], en = map.spawns[game.enemy];
-  // the core of the force: the units within 4 km of the command unit (or of the first unit)
-  const hq = own.find(u => u.def.hq) || own[0];
-  const c0 = hq ? hq.pos : [sp.x, 0, sp.z];
-  const core = own.filter(u => Math.hypot(u.pos[0] - c0[0], u.pos[2] - c0[2]) < (game.side === 'fleet' ? 20000 : 4000));
-  const pts = core.length ? core : [{ pos: c0 }];
-  const c = [0, 0, 0];
-  for (const u of pts) { c[0] += u.pos[0] / pts.length; c[2] += u.pos[2] / pts.length; }
-  let r = 0; for (const u of pts) r = Math.max(r, Math.hypot(u.pos[0] - c[0], u.pos[2] - c[2]));
-  const yaw = Math.atan2(en.x - c[0], en.z - c[2]);
-  if (game.side === 'fleet') cam.set({ target: [c0[0], 0, c0[2]], dist: hq ? Math.max(700, hq.def.size[0] * 4.5) : 2600, yaw: yaw - .5, pitch: 14 * DEG });
-  else {
-    // close on the command post, the sea beyond it (the minimap has the rest of the force)
-    const t = hq ? hq.pos : c, y2 = Math.atan2(en.x - t[0], en.z - t[2]);
-    cam.set({ target: [t[0], R.terrain.heightAt(t[0], t[2]), t[2]], dist: hq ? Math.max(320, hq.def.size[0] * 12) : Math.min(9000, Math.max(260, r * 2.2)), yaw: y2 - .45, pitch: 16 * DEG });
-  }
+/* the opening shot (game/campaign/camera.js `opening`): 60-120 m from the command post (the fleet: the carrier), low,
+   looking toward the enemy's side; held while the loading screen fades, then a slow eased pull-out to the play view over
+   the force. Any input takes the camera. fly false (?cam=, a bench, ?ui=0, ?intro=0): straight to the play view. A
+   campaign mission's own intro wins over it. */
+function openingShot(game, fly) {
+  try { return opening(game, { fly }); } catch (e) { console.error('main: opening shot', e); return null; }
 }
 
 boot().catch(e => { console.error(e); if (LOAD) LOAD.fail(e && e.message); });

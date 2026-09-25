@@ -388,3 +388,48 @@ body:has(#veil:not(.off))::before { opacity: 1; }
 .binds.c3 .b { height: 23px; }
 .binds.c3 .g { margin-bottom: 22px; }
 .binds .b em { font-style: normal; color: var(--faint); margin-left: 6px; }
+
+/* =========================================================================================
+   CAMPAIGN · Films and Anatomy rows (under the missions), the FILMS list and WATCH (full screen)
+   ========================================================================================= */
+.mlist .gap { height: 26px; }
+.mlist .row .st { white-space: nowrap; }
+.mlist .row .st .ct { font: 400 11.5px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--faint); transition: color .15s; }
+.mlist .row.on .st .ct { color: var(--dim); }
+.mdet .grid .wa { cursor: pointer; pointer-events: auto; transition: color .15s; }
+.mdet .grid .wa:hover { color: #fff; }
+.mdet.nomap .frame { display: none; }
+.mdet.nomap .grid { margin-top: 0; row-gap: 12px; }
+
+/* the Films list: ten rows from higher up, the film clean behind it at full brightness */
+.flist { top: 236px; }
+.flist .row { height: 60px; }
+.flist .row .st { left: 430px; gap: 22px; }
+.fro { position: absolute; left: calc(var(--lx) + 61px); width: 980px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: .9; }
+.fro.in { animation: fadein .35s ease-out; }
+body.th-orb .fro { left: calc(var(--lx) + 50px); }
+#shade .list { background:
+  radial-gradient(ellipse 1050px 1100px at 0% 52%, rgba(11,12,10,.9), rgba(11,12,10,.55) 55%, rgba(11,12,10,0) 100%),
+  linear-gradient(90deg, rgba(11,12,10,.5), rgba(11,12,10,0) 48%); }
+body.th-orb #shade .list { background:
+  radial-gradient(ellipse 1050px 1100px at 0% 52%, rgba(0,0,0,.92), rgba(0,0,0,.58) 55%, rgba(0,0,0,0) 100%),
+  linear-gradient(90deg, rgba(0,0,0,.52), rgba(0,0,0,0) 48%); }
+
+/* WATCH: the films' own timeline bar (reference/films/common/film.js #filmbar), across the window */
+#watchbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 4; padding: 26px 28px 14px; font: 400 11.5px/1 var(--mono); color: rgba(255,255,255,.62);
+  background: linear-gradient(to top, rgba(0,0,0,.82), rgba(0,0,0,0)); opacity: 0; transition: opacity .35s; user-select: none; pointer-events: none; }
+#watchbar.on { opacity: 1; }
+#watchbar.live { pointer-events: auto; }            /* like the films' bar: the track takes a click even while faded */
+#watchbar .row { display: flex; gap: 18px; align-items: baseline; margin-bottom: 10px; white-space: nowrap; }
+#watchbar .tt { color: #fff; font-variant-numeric: tabular-nums; }
+#watchbar .ch { color: var(--acc); }
+#watchbar .sp { flex: 1; }
+#watchbar .track { position: relative; height: 18px; cursor: pointer; }
+#watchbar .line { position: absolute; left: 0; right: 0; top: 8px; height: 1px; background: rgba(255,255,255,.28); }
+#watchbar .done { position: absolute; left: 0; top: 8px; height: 1px; background: var(--acc); }
+#watchbar .tick { position: absolute; top: 3px; width: 1px; height: 11px; background: rgba(255,255,255,.5); }
+#watchbar .tick span { position: absolute; left: 5px; top: -1px; white-space: nowrap; font-size: 10.5px; color: rgba(255,255,255,.42); pointer-events: none; }
+#watchbar .tick.cur span { color: #fff; }
+#watchbar .head { position: absolute; top: 3px; width: 3px; height: 11px; margin-left: -1px; background: var(--acc); }
+body.th-orb #watchbar { color: rgba(246,245,242,.62); }
+#scr-watch .card .kick { margin-bottom: 16px; }

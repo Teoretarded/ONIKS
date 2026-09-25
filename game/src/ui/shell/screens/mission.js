@@ -1,5 +1,7 @@
 /* CUTSCENE: the mission's film plays full screen, with its own tracked tags and captions, from film.from to
    film.to, under a small title card in the film's style; Space, Enter, Esc or a click skips.
+   Rewatch (Campaign, F on a passed mission: enter({ mission, rewatch: true })): the same, but the whole film from 0
+   to its end, and back to the Campaign screen after it.
    BRIEFING: the film plays on, darkened; the mission's lines, objectives, forces and map; Begin launches
    play.html?mode=campaign&mission=<n>. */
 import { h, esc, pad2, keysHtml, replay } from '../dom.js';
@@ -21,35 +23,40 @@ export function cutsceneScreen(app) {
   const keys = h('div.keys.cutkeys', { html: keysHtml([['Space', 'Skip']]) });
   const bar = h('div.cutbar', h('i'));
   el.append(card, keys, bar);
-  let m = null, raf = 0, tms = [], done = false, t0 = 0, active = false;
+  let m = null, raf = 0, tms = [], done = false, t0 = 0, active = false, rewatch = false, lastD = 0;
   const clear = () => { cancelAnimationFrame(raf); tms.forEach(clearTimeout); tms = []; };
 
   function end() {
     if (done || !m) return; done = true;
     clear();
-    app.go('briefing', { mission: m.n });
+    if (rewatch) app.go('campaign', { focus: m.n });
+    else app.go('briefing', { mission: m.n });
   }
   el.addEventListener('click', () => { if (active) { sfx.back(); end(); } });
 
   function watch() {
     const w = app.bd.win();
     if (!w || !w.FILM) { raf = requestAnimationFrame(watch); return; }
-    const D = w.FILM.duration, span = Math.max(1, m.film.to - m.film.from);
-    let d = ((w.FILM.T - m.film.from) % D + D) % D;
+    const D = w.FILM.duration, from = rewatch ? 0 : m.film.from, span = Math.max(1, (rewatch ? D : m.film.to) - from);
+    let d = ((w.FILM.T - from) % D + D) % D;
     if (d > span + 2) d = 0;          // not yet at `from` (seek pending)
+    // the whole film: it loops, so its end is where the time wraps back to the start
+    const wrapped = rewatch && lastD > span * .8 && d < span * .2;
+    lastD = d;
     bar.firstChild.style.width = (Math.min(1, d / span) * 100).toFixed(2) + '%';
-    if (d >= span - .04 && performance.now() - t0 > 1500) { end(); return; }
+    if ((d >= span - .04 || wrapped) && performance.now() - t0 > 1500) { end(); return; }
     raf = requestAnimationFrame(watch);
   }
 
   return {
     id: 'cutscene', el, mode: 'cut', shade: 'card',
     async enter(p) {
-      clear(); done = false; active = false;
+      clear(); done = false; active = false; lastD = 0;
       m = getMission(p.mission);
+      rewatch = !!p.rewatch;
       card.classList.remove('on'); keys.classList.remove('on'); bar.classList.remove('on');
       bar.firstChild.style.width = '0';
-      await app.film(m.film.id, { at: m.film.from, veil: true });
+      await app.film(m.film.id, { at: rewatch ? 0 : m.film.from, veil: true });
       if (done || app.cur !== this) return;
       active = true; t0 = performance.now();
       const meta = MS.byId(m.map);

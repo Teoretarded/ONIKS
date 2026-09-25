@@ -1,9 +1,13 @@
 /* CAMPAIGN: the six missions as the menu's big words, locked until the one before is passed, each with its
-   grade; the selected mission's map, film and objectives on the right. Enter opens its film (the cutscene). */
-import { h, esc, pad2, swipe, keysHtml, replay } from '../dom.js';
+   grade; the selected mission's map, film and objectives on the right. Enter opens its film (the cutscene);
+   F on a passed mission plays its film again, whole (the cutscene player, back here after it).
+   Below the missions, two more rows: Films (the favourite films, full screen: screens/films.js) and Anatomy (every
+   model in dark space: play.html?mode=museum). */
+import { h, esc, pad2, swipe, keysHtml, replay, takeFocus, keepFocus } from '../dom.js';
 import { sfx } from '../sfx.js';
 import { MISSIONS, getProgress, isUnlocked as unlocked, isPassed } from '../../../data/campaign.js';
-import { FILMS } from '../films.js';
+import { FILMS, WATCH } from '../films.js';
+import { MUSEUM } from '../../inspect/museum.js';
 import * as MS from '../mapsrc.js';
 import { pixelScale } from '../preview.js';
 
@@ -13,6 +17,13 @@ const cap = s => s ? s[0].toUpperCase() + s.slice(1) : '';
    locked is not recorded (data/campaign.js recordResult), so the list below never shows a pass out of order. */
 const ALL = new URLSearchParams(location.search).has('unlock');
 const isUnlocked = (n, p) => ALL || unlocked(n, p);
+/* a mission's film can be watched again once the mission is passed (every one with ?unlock) */
+const canWatch = (n, p) => ALL || isPassed(n, p);
+
+const XTRA = [
+  { id: 'films', label: 'Films', st: () => `${WATCH.length} films`, blurb: 'Every film, full screen, from the start.' },
+  { id: 'anatomy', label: 'Anatomy', st: () => 'All models', blurb: 'Every model, one at a time, in dark space.' },
+];
 
 export function campaignScreen(app) {
   const el = h('section.scr#scr-campaign');
@@ -25,9 +36,12 @@ export function campaignScreen(app) {
   frame.append(fl, cv, wt);
   const grid = h('div.grid');
   det.append(frame, grid);
-  const keys = h('div.keys.skeys', { html: keysHtml([['↑↓', 'Select'], ['Enter', 'Play'], ['Esc', 'Back']]) });
+  grid.addEventListener('click', e => { if (e.target.closest('.wa')) film(); });
+  const keys = h('div.keys.skeys');
   el.append(kick, deb, list, blurb, det, keys);
-  let i = 0, rows = [], prog = null, token = 0, busy = false, stop = null;
+  let i = 0, rows = [], prog = null, token = 0, busy = false, stop = null, keysNow = '';
+  const NM = MISSIONS.length;
+  const xtraOf = k => (k >= NM ? XTRA[k - NM] : null);
 
   function build() {
     prog = getProgress();
@@ -40,30 +54,66 @@ export function campaignScreen(app) {
       else if (open) st = '<span class="nx">Next</span>';
       else st = '<span class="lk">Locked</span>';
       r.innerHTML = `<span class="n">${pad2(m.n)}</span><i class="sq"></i><span class="lab">${swipe('cm' + k)}<span class="tx">${esc(m.title)}</span></span><span class="st">${st}</span>`;
-      r.addEventListener('mouseenter', () => { if (!busy) set(k); });
-      r.addEventListener('click', () => { set(k, true); play(); });
-      list.append(r);
       return r;
     });
-    blurb.style.top = (300 + rows.length * 62 + 40) + 'px';
+    list.append(...rows);
+    list.append(h('div.gap'));
+    for (const x of XTRA) {
+      const r = h('div.row.xtra');
+      r.dataset.id = x.id;
+      r.innerHTML = `<span class="n"></span><i class="sq"></i><span class="lab">${swipe('cx' + x.id)}<span class="tx">${esc(x.label)}</span></span><span class="st"><span class="ct">${esc(x.st())}</span></span>`;
+      list.append(r);
+      rows.push(r);
+    }
+    rows.forEach((r, k) => {
+      r.addEventListener('mouseenter', () => { if (!busy) set(k); });
+      r.addEventListener('click', () => { set(k, true); play(); });
+    });
+  }
+
+  function setKeys(list) {
+    const html = keysHtml(list);
+    if (html !== keysNow) { keysNow = html; keys.innerHTML = html; }
   }
 
   function set(k, quiet) {
-    k = (k + MISSIONS.length) % MISSIONS.length;
+    k = (k + rows.length) % rows.length;
     const changed = k !== i || !rows[k].classList.contains('on');
     i = k;
     rows.forEach((r, j) => r.classList.toggle('on', j === k));
     if (!changed) return;
     if (!quiet) sfx.move();
+    const x = xtraOf(k);
+    if (x) {
+      blurb.textContent = x.blurb;
+      replay(blurb, 'in');
+      setKeys([['↑↓', 'Select'], ['Enter', 'Open'], ['Esc', 'Back']]);
+      xtraDetail(x);
+      return;
+    }
     const m = MISSIONS[k];
     const open = isUnlocked(m.n, prog);
     blurb.textContent = open ? m.brief[0] : `Pass ${pad2(m.n - 1)} · ${MISSIONS[k - 1].title} to open this battle.`;
     replay(blurb, 'in');
+    setKeys(canWatch(m.n, prog) ? [['↑↓', 'Select'], ['Enter', 'Play'], ['F', 'Film'], ['Esc', 'Back']] : [['↑↓', 'Select'], ['Enter', 'Play'], ['Esc', 'Back']]);
     detail(m, open);
+  }
+
+  /* Films and Anatomy: no map; what is in them, in the grid's words */
+  function xtraDetail(x) {
+    ++token;
+    if (stop) { stop(); stop = null; }
+    det.classList.add('nomap');
+    const names = th => WATCH.filter(id => FILMS[id] && FILMS[id].theme === th).map(id => `<b>${esc(FILMS[id].name)}</b>`).join('<br>');
+    grid.innerHTML = (x.id === 'films'
+      ? [['Point Cloud', names('pc')], ['Orbital', names('orb')]]
+      : [['Models', MUSEUM.map(g => `<b>${esc(g[0])}</b>`).join('<br>')], ['Walk', '<b>← →</b>'], ['Exploded', '<b>E</b>'], ['X-ray', '<b>X</b>'], ['Leave', '<b>Esc</b>']]
+    ).map(([k, v]) => `<span>${k}</span><span>${v}</span>`).join('');
   }
 
   async function detail(m, open) {
     const t = ++token;
+    det.classList.remove('nomap');
     const meta = MS.byId(m.map), f = FILMS[m.film.id];
     fl.innerHTML = `<span>${pad2(m.n)} · ${esc(meta.name)}</span><span class="sp"></span><i>${esc(cap(m.weather))} · ${esc(cap(m.time))}</i>`;
     const g = prog.grades[m.n];
@@ -72,7 +122,7 @@ export function campaignScreen(app) {
     const req = shown.filter(o => !o.optional).map(o => esc(o.text)).join('<br>');
     const opt = shown.filter(o => o.optional).map(o => esc(o.text)).join('<br>');
     grid.innerHTML = [
-      ['Film', `<b>${esc(f ? f.name : m.film.id)}</b>`],
+      ['Film', `<b>${esc(f ? f.name : m.film.id)}</b>${canWatch(m.n, prog) ? ' · <span class="wa"><span class="l">F</span> Watch again</span>' : ''}`],
       ['Objectives', `<b>${req}</b>`],
       opt ? ['Optional', opt] : null,
       ['Enemy', `<b>${esc(cap(m.ai))}</b>`],
@@ -93,17 +143,33 @@ export function campaignScreen(app) {
     if (t !== token) return;
     stop = MS.scanReveal(cv, off, { x: (cv.width - off.width) / 2, y: (cv.height - off.height) / 2, alpha: open ? 1 : .35 });
     const ids = MISSIONS.map(q => q.map);
-    MS.warm([ids[(i + 1) % ids.length]]);
+    MS.warm([ids[(Math.min(i, NM - 1) + 1) % ids.length]]);
     wt.style.display = 'none';
   }
 
   function play() {
     if (busy) return;
+    const x = xtraOf(i);
+    if (x) {
+      busy = true; sfx.enter();
+      const r = rows[i]; r.classList.add('go');
+      if (x.id === 'anatomy') { keepFocus('campaign', 'anatomy'); app.launch('play.html?mode=museum&from=campaign', 'Anatomy'); return; }
+      setTimeout(() => { r.classList.remove('go'); busy = false; app.go('films'); }, 380);
+      return;
+    }
     const m = MISSIONS[i];
     if (!isUnlocked(m.n, prog)) { sfx.deny(); return; }
     busy = true; sfx.enter();
     rows[i].classList.add('go');
     setTimeout(() => { rows[i].classList.remove('go'); busy = false; app.go('cutscene', { mission: m.n }); }, 380);
+  }
+  /* F: the mission's film again, whole */
+  function film() {
+    if (busy) return;
+    const m = xtraOf(i) ? null : MISSIONS[i];
+    if (!m || !canWatch(m.n, prog)) { sfx.deny(); return; }
+    busy = true; sfx.enter();
+    setTimeout(() => { busy = false; app.go('cutscene', { mission: m.n, rewatch: true }); }, 200);
   }
 
   return {
@@ -112,11 +178,16 @@ export function campaignScreen(app) {
       busy = false;
       await MS.refresh();
       build();
+      const back = takeFocus('campaign');
       let k = p && p.focus != null ? p.focus - 1 : -1;
       // a result that came back for a locked mission (a test run) does not steer the list onto it
       if (k >= 0 && (!MISSIONS[k] || !isUnlocked(MISSIONS[k].n, prog))) k = -1;
-      if (k < 0) { const nx = MISSIONS.findIndex(m => !isPassed(m.n, prog) && isUnlocked(m.n, prog)); k = nx >= 0 ? nx : MISSIONS.length - 1; }
+      const row = (p && p.row) || back;
+      if (row && XTRA.some(x => x.id === row)) k = NM + XTRA.findIndex(x => x.id === row);
+      if (k < 0) { const nx = MISSIONS.findIndex(m => !isPassed(m.n, prog) && isUnlocked(m.n, prog)); k = nx >= 0 ? nx : NM - 1; }
       i = -1; set(k, true);
+      requestAnimationFrame(() => { blurb.style.top = (300 + list.offsetHeight + 40) + 'px'; });
+      blurb.style.top = (300 + list.offsetHeight + 40) + 'px';
       if (p && p.result) {
         app.debrief(deb, p.result);
         // a result for a mission that is still locked (a test run) is shown but not kept
@@ -129,6 +200,7 @@ export function campaignScreen(app) {
       if (k === 'ArrowUp' || k === 'w' || k === 'W') set(i - 1);
       else if (k === 'ArrowDown' || k === 's' || k === 'S') set(i + 1);
       else if (k === 'Enter' || k === ' ') play();
+      else if (k === 'f' || k === 'F') film();
       else if (k === 'Escape') { sfx.back(); app.go('menu', { focus: 2 }); }
       else return false;
       return true;

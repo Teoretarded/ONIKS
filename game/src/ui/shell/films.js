@@ -10,7 +10,11 @@ export const FILMS = {
   oa_strike: { name: 'Scale · Strike', theme: 'orb', layout: 'L-orbA', mark: 'scale' },
   oe_ring: { name: 'Ring', theme: 'orb', layout: 'L-orbB', mark: 'globe' },
   od_salvo: { name: 'Salvo', theme: 'orb', layout: 'L-orbB', mark: 'globe' },
+  oh_storm: { name: 'Storm', theme: 'orb', layout: 'L-orbB', mark: 'globe' },
 };
+
+/* Campaign · Films: the favourites to watch full screen, in this order (Storm is in since its gallery stills are) */
+export const WATCH = ['pc_anatomy', 'pc_anatomy_ship', 'pc_anatomy_battery', 'pd_engagement', 'pe_aegis', 'oa_scale', 'oa_strike', 'oe_ring', 'od_salvo', 'oh_storm'];
 
 /* the menu picks one of these at random unless Settings pins a film */
 export const MENU_POOL = ['pc_anatomy', 'pc_anatomy_ship', 'pc_anatomy_battery', 'pd_engagement', 'pe_aegis'];

@@ -2,6 +2,7 @@
      ?mode=sandbox&map=&side=&fog=0|1&weather=calm|haze|rain|storm
      ?mode=combat&map=&side=&ai=easy|normal|hard&win=hq|obj&timer=<s>&fog=1
      ?mode=campaign&mission=<n>&map=&side=
+     ?mode=museum[&from=sandbox|campaign&key=<model>]   the Anatomy walk alone: an empty sim (ui/inspect/museum.js)
    parseParams(search) -> params; createMatch(map, params, mission) -> { sim, side, spawned }
    Also: seed=<n> (default 1337), rate=<x> (start rate), debug extras (cam=, t=, bench=, scale=, ui=0). */
 import { Sim } from '../sim/sim.js';
@@ -16,14 +17,14 @@ const SEA = { calm: .2, haze: .3, rain: .55, storm: .85 };
 
 export function parseParams(search) {
   const Q = new URLSearchParams(search || '');
-  const mode = ['sandbox', 'combat', 'campaign'].includes(Q.get('mode')) ? Q.get('mode') : 'sandbox';
+  const mode = ['sandbox', 'combat', 'campaign', 'museum'].includes(Q.get('mode')) ? Q.get('mode') : 'sandbox';
   const side = Q.get('side') === 'fleet' ? 'fleet' : 'coast';
   const num = (k, d) => Q.has(k) && Q.get(k) !== '' && isFinite(+Q.get(k)) ? +Q.get(k) : d;
   return {
     mode, side,
     map: Q.get('map') || '',
     mission: num('mission', 1),
-    fog: mode === 'combat' ? num('fog', 1) !== 0 : mode === 'campaign' ? true : num('fog', 0) !== 0,
+    fog: mode === 'combat' ? num('fog', 1) !== 0 : mode === 'campaign' ? true : mode === 'museum' ? false : num('fog', 0) !== 0,
     weather: WEATHERS.includes(Q.get('weather')) ? Q.get('weather') : null,
     ai: ['easy', 'normal', 'hard'].includes(Q.get('ai')) ? Q.get('ai') : 'normal',
     win: Q.get('win') === 'obj' ? 'obj' : 'hq',
@@ -44,6 +45,8 @@ export function createMatch(map, P, mission) {
   const side = mission ? (mission.side || 'coast') : P.side, enemy = ENEMY[side];
   const weather = weatherOf(map, mission ? mission.weather : P.weather);
   const opts = { seed: P.seed, fog: P.fog, mode: P.mode, weather, difficulty: mission ? mission.ai : P.ai };
+  // the museum: no forces, no AI, nothing fires (the exhibits are Inspect's own, far above the map)
+  if (P.mode === 'museum') return { sim: new Sim(map, Object.assign(opts, { aiSides: [] })), side: 'coast', enemy: 'fleet', weather, spawned: { coast: [], fleet: [] } };
   if (P.mode === 'combat') { opts.aiSides = [enemy]; if (P.win === 'obj') opts.timeLimit = P.timer; }
   else if (P.mode === 'campaign') opts.aiSides = [enemy];
   else opts.aiSides = [];                          // sandbox: the enemy sleeps until woken
