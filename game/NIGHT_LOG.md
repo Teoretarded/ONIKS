@@ -254,3 +254,11 @@ Orbital map with the true rate on screen, the decisive round, the wreck, and Fig
 round's track draws on in launch order with the tally ("3M55 Oniks · 8 fired · 2 hit · 4 down"). V opens a replay
 viewer with a scrub bar. Stills: `game/shots/debrief/final/`.
 Note: `game/shots/` (gitignored) holds ~2.3 GB of the agents' test stills; safe to clear.
+
+## 10:25 · Sound 2 done
+Sonar pings with a ringing decay and a faint echo after the true round trip at 1,500 m/s, torpedo launches and runs,
+submarine vents/blow/surfacing, the E-2D's turboprop beat, Bal and sub-launched missile sounds, distant in-cloud
+rumbles, rain and wind that follow the storm cells, and a slow-motion treatment for the hit replay (everything lower
+and longer, a double sub pulse, a boom at impact). Rate-change blips no longer spam during replays and film takes.
+Selecting units and giving orders now click (the sounds existed but nothing triggered them). Measured peaks stay
+under -1 dBFS in every stress test.
