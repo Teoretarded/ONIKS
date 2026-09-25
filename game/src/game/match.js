@@ -117,7 +117,7 @@ export function createMatchFlow(game) {
     const title = m ? `${String(m.n).padStart(2, '0')} · ${m.title}` : (game.mode === 'combat' ? 'Combat' : 'Sandbox') + ' · ' + (game.map.name || MAPNAME(game.map.id));
     const row = (a, lab, v) => `<span class="btn${a === 'resume' ? ' on' : ''}" data-a="${a}"><i class="sq"></i><span class="lab">${lab}</span>${v ? `<span class="v">${v}</span>` : ''}</span>`;
     menuEl.innerHTML = `<div class="blk"><div class="kick"><i></i>${title} · Paused</div>
-      <div class="list">${row('resume', 'Resume')}${row('auto', 'Auto x1', game.autoSlow ? 'On' : 'Off')}${row('settings', 'Settings')}${row('restart', 'Restart')}${row('quit', 'Quit to menu')}</div>
+      <div class="list">${row('resume', 'Resume')}${row('auto', 'Auto ×1', game.autoSlow ? 'On' : 'Off')}${row('settings', 'Settings')}${row('restart', 'Restart')}${row('quit', 'Quit to menu')}</div>
       <div class="keys"><span><b>Esc</b>Resume</span></div></div>`;
     menuEl.querySelectorAll('.btn').forEach(b => b.addEventListener('mouseenter', () => { menuEl.querySelectorAll('.btn').forEach(x => x.classList.remove('on')); b.classList.add('on'); }));
   }

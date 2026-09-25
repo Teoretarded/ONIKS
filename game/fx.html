@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>ONIKS · FX</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+  :root { --bg: #0B0C0A; --lime: #C6F432; --coral: #FF6A3D; --dim: rgba(255,255,255,.62); --faint: rgba(255,255,255,.36); --hair: rgba(255,255,255,.14);
+    --sans: 'Geist', 'Segoe UI', sans-serif; --mono: 'Geist Mono', Consolas, monospace; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: #fff; font-family: var(--sans); -webkit-font-smoothing: antialiased; user-select: none; }
+  #stage { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+  #c { width: 100vw; height: calc(100vw * 9 / 16); max-height: 100vh; max-width: calc(100vh * 16 / 9); image-rendering: pixelated; display: block; cursor: grab; }
+  .ui { position: fixed; font: 500 11px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
+  #left { left: 22px; top: 22px; display: flex; flex-direction: column; gap: 2px; }
+  #left .h { color: #fff; font: 600 15px var(--sans); letter-spacing: -.01em; text-transform: none; margin-bottom: 12px; }
+  button { font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+  .b { display: flex; align-items: center; gap: 9px; padding: 6px 0; text-align: left; color: var(--dim); }
+  .b i { width: 6px; height: 6px; background: rgba(255,255,255,.3); }
+  .b:hover { color: #fff; } .b:hover i { background: var(--lime); }
+  #right { right: 22px; top: 22px; text-align: right; display: flex; flex-direction: column; gap: 10px; align-items: flex-end; }
+  #perf { line-height: 1.8; color: var(--faint); font-variant-numeric: tabular-nums; }
+  #perf b { color: #fff; font-weight: 500; }
+  .row { display: flex; gap: 12px; }
+  .c { color: var(--faint); padding: 4px 0; border-bottom: 1px dotted transparent; }
+  .c:hover { color: #fff; } .c.on { color: var(--lime); border-bottom-color: var(--lime); }
+  label { display: flex; gap: 7px; align-items: center; color: var(--faint); cursor: pointer; }
+  input[type=checkbox] { accent-color: #C6F432; }
+  #bot { left: 22px; right: 22px; bottom: 18px; display: flex; flex-direction: column; gap: 9px; }
+  #bot .row { align-items: center; }
+  #tl { flex: 1; accent-color: #C6F432; height: 2px; }
+  #tt { min-width: 150px; color: #fff; font-variant-numeric: tabular-nums; }
+  #scr { color: var(--faint); text-transform: none; letter-spacing: .02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .k { color: var(--dim); padding: 4px 0; } .k:hover { color: #fff; }
+</style></head>
+<body>
+<div id="stage"><canvas id="c" width="1920" height="1080"></canvas></div>
+<div class="ui" id="left"><div class="h">FX</div><div id="fxb" style="display:flex;flex-direction:column;gap:0"></div></div>
+<div class="ui" id="right">
+  <div id="perf"></div>
+  <div class="row" id="focus"></div>
+  <div class="row" id="dists"></div>
+  <div class="row"><label><input type="checkbox" id="autofocus" checked>Frame on press</label><button class="k" id="orbit">Orbit</button></div>
+</div>
+<div class="ui" id="bot">
+  <div class="row"><button class="k" id="play">Pause</button><button class="k" id="rate">x1</button><span id="tt"></span><input type="range" id="tl" min="0" max="150" value="0"><button class="k" id="reset">Clear</button></div>
+  <div id="scr"></div>
+</div>
+<script src="../reference/menus/common/m3.js"></script>
+<script src="../reference/menus/common/dots.js"></script>
+<script src="../reference/menus/common/geo.js"></script>
+<script src="../reference/films/common/hd_land.js"></script>
+<script src="../reference/films/common/hd_sea_air.js"></script>
+<script type="module" src="src/fx/bench/main.js"></script>
+</body></html>
