@@ -101,6 +101,8 @@ export const KEYBINDS = [
   { group: 'View and time', binds: [
     ['C', 'Cinematic camera'], ['J', 'Replay the last hit'], ['Shift J', 'Hit replay on / off'], ['V', 'Radar view'],
     ['F10', 'Hide the interface'], ['F1', 'Help'], ['Space', 'Pause'], ['+ −', 'Time rate'], ['Esc', 'Menu'] ] },
+  { group: 'Film maker', binds: [
+    ['F9', 'Film panel · K key · Shift K follow key'], ['Shift F9', 'Play the take'], ['F8', 'Still · Shift: PNG sequence'] ] },
   { group: 'Sandbox', mode: 'sandbox', binds: [
     ['P', 'Spawn palette'], ['1-9 ⇧1-9', 'Pick a unit to place'], ['Del', 'Delete selected'], ['G', 'Fog'], ['K', 'Enemy AI'],
     ['M', 'Switch side'], ['N', 'Weather'] ] },
