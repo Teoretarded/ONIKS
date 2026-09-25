@@ -8,6 +8,7 @@
      - the range rings with their km, the display's compass ring (ticks, numbers every 30 deg), the map's coastline as
        faint dots and the land as a stipple (a raster of the height grid, rebuilt when the range changes or the radar
        moves far), the map's edge as a faint dotted line
+     - fixed-face radars (SPY-1 on the DDG / CG): no sweep; an even picture, the face seams and each face's flicking beam
      - the sweep at the antenna's true bearing and period (the sim's hdg + antA + antW (t - antT); the RPM and the time
        rate in the corner), an afterglow wedge behind it; too fast to follow at the rate: an even persistence
      - sea clutter speckle round the radar (densest near it, more in a higher sea) and the rain and storm cells
@@ -35,6 +36,12 @@ const PO = { orb: true, bg: '#000000', wh: '#F6F5F2', own: '#F6F5F2', sweep: '#F
   rgb: '246,245,242', font: "'DM Mono', monospace", fw: 400, wedge: .07, ring: .16, rim: .42 };
 const NCL = 1600, NTAG = 48, OFFMAX = .42;
 
+/* face fi's electronic beam bearing at a step (the same as ui/sensors/radar.js faceBeam and the engine's faces sweep) */
+function faceBeam(hdg, fi, step) {
+  let h = Math.imul(step, 0x9E3779B1) ^ ((Math.imul(fi + 7, 0x85EBCA77) + 0x7f4a7c15) | 0);
+  h ^= h >>> 15; h = Math.imul(h, 0x2C1B3C6D); h ^= h >>> 12; h = Math.imul(h, 0x297A2D39); h ^= h >>> 15;
+  return hdg + (fi + .06 + .88 * ((h >>> 8) / 16777216)) * Math.PI / 2;
+}
 function hsh(a, b) {
   let h = Math.imul((a | 0) ^ 0x5bd1e995, 0x9E3779B1) ^ Math.imul((b | 0) + 0x7f4a7c15, 0x85EBCA77);
   h ^= h >>> 15; h = Math.imul(h, 0x2C1B3C6D); h ^= h >>> 12; h = Math.imul(h, 0x297A2D39); h ^= h >>> 15;
@@ -50,7 +57,7 @@ export function createPPI(game, hud) {
   // the display (backing px): centre cx, cy, radius rho; the radar at rx, ry; s px per metre
   let ctx = null, bw = 0, bh = 0, k = 1, cx = 0, cy = 0, rho = 0, rx = 0, ry = 0, s = 1, pal = PC, d1 = 1;
   let cur = null, pickU = null, userR = 0, wheelAcc = 0, fastN = 0;
-  const C = { x: 0, z: 0, on: false, ph: 0, fast: false, RM: 100000, ri: 6, def: 100000, name: '', rpm: '', rate: '', ux: 0, uz: 0, off: 0 };
+  const C = { x: 0, z: 0, on: false, ph: 0, fast: false, faces: false, hdg: 0, RM: 100000, ri: 6, def: 100000, name: '', rpm: '', rate: '', ux: 0, uz: 0, off: 0 };
   let lookKey = '', lookX = 0, lookZ = 0;
   const ringC = document.createElement('canvas'), coastC = document.createElement('canvas'), wedgeC = document.createElement('canvas');
   let ringKey = '', coastKey = '', coastX = 0, coastZ = 0, coastI0 = 0, coastJ0 = 0, coastN = 0, coastM = 1, wedgeKey = '', wedgeR = 0;
@@ -126,15 +133,19 @@ export function createPPI(game, hud) {
   }
   function centre() {
     const me = game.side, u = pick();
-    C.on = false; C.fast = false;
+    C.on = false; C.fast = false; C.faces = false;
     let p = null;
     if (u) {
       const P = game.unitPose(u), R = u.def.sensors.radar;
       p = P.pos; C.name = nameOf(u); C.def = Math.max(R.surf || 0, R.air || 0);
-      if (radarWorks(u) && u.antW) {
+      if (radarWorks(u) && u.antW && R.faces) {
+        // four fixed faces (SPY-1): no turning beam; an even picture and each face's beam flicking across its sector
+        C.on = true; C.faces = true; C.fast = true; C.hdg = P.hdg; C.ph = P.hdg;
+        C.rpm = (u.type === 'cg' ? 'SPY-1B' : 'SPY-1D') + ' · 4 FIXED FACES';
+      } else if (radarWorks(u) && u.antW) {
         C.on = true; C.ph = P.hdg + u.antA + u.antW * (game.t - u.antT);
         C.fast = Math.abs(u.antW) * (game.paused ? 0 : game.timeRate) > 11;
-        C.rpm = u.type === 'ddg' ? 'SPY-1D' : rpmOf(u.antW);
+        C.rpm = rpmOf(u.antW);
       } else C.rpm = 'EMCON';
     } else {
       let h = sim.hq(me); if (!h) h = sim.alive(me)[0] || null;
@@ -509,6 +520,17 @@ export function createPPI(game, hud) {
     if (C.on) {
       wedge(); clutter();
       if (C.fast) { ctx.globalAlpha = pal.wedge * .35; ctx.fillStyle = pal.sweep; ctx.beginPath(); ctx.arc(rx, ry, RM * s, 0, TAU); ctx.fill(); }
+      if (C.faces) {
+        // the face seams (bow, beams, stern) faint; each face's beam where the array points it this step
+        const stp = Math.floor(game.t * 12);
+        for (let fi = 0; fi < 4; fi++) {
+          const bs = C.hdg + fi * Math.PI / 2, sb = Math.sin(bs), cb = -Math.cos(bs), Ls = Math.min(RM * s, toRim(rx, ry, sb, cb));
+          seg(rx, ry, rx + sb * Ls, ry + cb * Ls, pal.wh, .18, d1, 3 * d1);
+          const b = faceBeam(C.hdg, fi, stp), sn = Math.sin(b), cs = -Math.cos(b), L = Math.min(RM * s, toRim(rx, ry, sn, cs));
+          seg(rx, ry, rx + sn * L, ry + cs * L, pal.sweep, .8, 2 * d1, d1);
+        }
+        ctx.setLineDash(DASH0);
+      }
       else { ctx.save(); ctx.translate(rx, ry); ctx.rotate(C.ph); ctx.globalAlpha = 1; ctx.drawImage(wedgeC, -wedgeR, -wedgeR); ctx.restore(); }
       phosphor();
       ctx.globalAlpha = 1; ctx.drawImage(phC, 0, 0);

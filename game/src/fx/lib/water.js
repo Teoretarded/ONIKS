@@ -14,6 +14,13 @@ import { WH, TAU, GT, GM, G2, sat, ss, hsh, noise } from './core.js';
 
 const TANK = Math.tan(19.47 * Math.PI / 180);
 const RS = 7;   // row stride: t, x, z, sin, cos, speed, strength
+/* how far through its life a wake row is (0 new .. 1 gone): by the track it has spread over (len m) and by time (the
+   arms of a destroyer's Kelvin wake settle in a few minutes in a moderate sea; WAKE_T s); a row is laid with a
+   strength that falls to 0 as she slows through ~3 kn, so a stopped ship leaves no outline and the wake she made
+   behind her settles on its own time */
+export const WAKE_T = 180;
+export function wakeU(age, v, len) { return Math.max(age * v / len, age / WAKE_T); }
+export const wakeK = speed => sat((speed - .6) / 3);
 
 export class Wake {
   /* o: { L (m), B (beam, m), len (m of track the wake lasts), rate (rows / s), seed, feather (a mast's wake) } */
@@ -36,12 +43,12 @@ export class Wake {
       this.lastT += dtE;
       // where the stern was at that moment (the ship moved on since)
       const d = (t - this.lastT) * speed, o = this.head * RS, R = this.R;
-      R[o] = this.lastT; R[o + 1] = pos[0] - s * (back + d); R[o + 2] = pos[2] - c * (back + d); R[o + 3] = s; R[o + 4] = c; R[o + 5] = speed; R[o + 6] = this.kE;
+      R[o] = this.lastT; R[o + 1] = pos[0] - s * (back + d); R[o + 2] = pos[2] - c * (back + d); R[o + 3] = s; R[o + 4] = c; R[o + 5] = speed; R[o + 6] = this.kE * (this.feather ? sat(speed / 1.5) : wakeK(speed));
       this.head = (this.head + 1) % this.cap; if (this.n < this.cap) this.n++; this.k++;
     }
     this.pos[0] = pos[0]; this.pos[1] = pos[1]; this.pos[2] = pos[2]; this.hdg = hdg; this.speed = speed; this.t = t;
   }
-  done(t) { return !this.alive && (this.n === 0 || t - this.lastT > this.len / 4 + 30); }
+  done(t) { return !this.alive && (this.n === 0 || t - this.lastT > WAKE_T); }
   draw(C, a) {
     a = a === undefined ? 1 : a;
     const V = C.V, dot = C.dot, t = C.t, R = this.R, cap = this.cap, q = C.q, B = this.B, L = this.L, fe = this.feather;
@@ -55,8 +62,9 @@ export class Wake {
     for (let c = 0; c < this.n; c++) {
       const idx = this.k - 1 - c, i = (this.head - 1 - c + cap * 4) % cap, o = i * RS, age = t - R[o];
       if (age < 0) continue;
-      const v = Math.max(.5, R[o + 5]), d = age * v, u = d / this.len;
-      if (u >= 1) break;
+      if (age >= WAKE_T) break;
+      const v = Math.max(.5, R[o + 5]), d = age * v, u = wakeU(age, v, this.len);
+      if (u >= 1) continue;
       if (idx & thin) continue;
       const kr = R[o + 6]; if (kr < .01) continue;
       const x0 = R[o + 1], z0 = R[o + 2], s = R[o + 3], cc = R[o + 4], px = cc, pz = -s;
@@ -64,9 +72,11 @@ export class Wake {
       const pxm = V.fl / zc, sk = Math.min(1, v / 8), fa = a * kr * Math.pow(1 - u, 1.5) * (.35 + .65 * sk) * (thin ? 1.25 : 1);
       if (fa < .01) continue;
       // the two arms, with feathered crests just inside them
-      const lat = B * .45 + d * TANK;
+      // (each dot a little off the line, more as the arm spreads: no hard drawn outline)
+      const lat = B * .45 + d * TANK, jit = 1 + d * .012;
       for (let sd = -1; sd <= 1; sd += 2) {
-        dot(x0 + px * sd * lat, .25, z0 + pz * sd * lat, 1, WH[0], WH[1], WH[2], fa * (fe ? .4 : .6));
+        const l1 = lat + (hsh(idx * 2 + sd, this.seed + 9) - .5) * jit;
+        dot(x0 + px * sd * l1, .25, z0 + pz * sd * l1, 1, WH[0], WH[1], WH[2], fa * (fe ? .4 : .6) * (.55 + .45 * hsh(idx, this.seed + 3 + sd)));
         if (pxm > .25 && !(idx & 1)) {
           const nf = pxm > 2 ? 4 : 2;
           for (let m = 1; m <= nf; m++) { const l2 = lat * (1 - .045 * m) - m * .6, back = m * 1.4; dot(x0 + px * sd * l2 - s * back, .25, z0 + pz * sd * l2 - cc * back, 1, WH[0], WH[1], WH[2], fa * .38 * (1 - m / (nf + 1))); }
@@ -105,7 +115,10 @@ export class Wake {
       return;
     }
     // the bow wave off the stem and the foam along the waterline
-    if (this.speed > .5 && pxS > .02) {
+    // (it fades out as she slows: a ship lying stopped has no foam round her hull)
+    const kW = kE * ss(.5, 3, this.speed);
+    if (kW > .01 && pxS > .02) {
+      const kE = kW;
       const s = Math.sin(this.hdg), c = Math.cos(this.hdg), px = c, pz = -s, h = L / 2, spd = Math.min(1, this.speed / 12);
       const nb = Math.round((pxS * L > 60 ? 90 : 40) * q);
       for (let k = 0; k < nb; k++) {

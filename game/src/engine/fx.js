@@ -240,9 +240,10 @@ export class Wake {
     while (this.lastT + dtE <= t) {
       this.lastT += dtE;
       const s = Math.sin(hdg), c = Math.cos(hdg), back = this.L / 2 * .96;
+      if (speed < .6) continue;                // a ship barely moving lays no wake (no outline round her)
       this.rows.push({ t: this.lastT, x: pos[0] - s * back, z: pos[2] - c * back, s, c, v: Math.max(.5, speed), k: this.rows.length ? this.rows[this.rows.length - 1].k + 1 : 0 });
     }
-    const maxAge = this.len / Math.max(1, speed) + 2;
+    const maxAge = 180;                      // the arms settle in a few minutes
     while (this.rows.length && t - this.rows[0].t > maxAge) this.rows.shift();
     this.pos = pos; this.hdg = hdg; this.speed = speed; this.t = t;
   }
@@ -251,7 +252,7 @@ export class Wake {
     rgb = rgb || WH; a = a === undefined ? 1 : a;
     const tanK = Math.tan(19.47 * DEG), rows = this.rows, cam = fx.R.camera;
     for (let i = 0; i < rows.length; i++) {
-      const w = rows[i], age = t - w.t, d = age * w.v, u = d / this.len;
+      const w = rows[i], age = t - w.t, d = age * w.v, u = Math.max(d / this.len, age / 180);
       if (u >= 1) continue;
       const fa = a * Math.pow(1 - u, 1.5);
       const px = w.c, pz = -w.s;                                  // starboard
@@ -269,12 +270,12 @@ export class Wake {
       }
     }
     // bow wave and the foam along the waterline
-    if (this.pos) {
+    if (this.pos && this.speed > .5) {
       const s = Math.sin(this.hdg), c = Math.cos(this.hdg), px = c, pz = -s, h = this.L / 2, sp = Math.min(1, this.speed / 12);
       for (let k = 0; k < 70; k++) {
         const sd = k & 1 ? 1 : -1, f = (k >> 1) / 35, zz = h * .92 - f * this.L * .95;
         const bw = this.B / 2 * (zz > h * .3 ? Math.max(0, 1 - Math.pow((zz / h - .3) / .7, 1.75)) : 1) + .8 + 1.2 * sp * Math.exp(-f * 4);
-        fx.dotXYZ(this.pos[0] + s * zz + px * sd * bw, .35 + .3 * Math.sin(k + t * 3), this.pos[2] + c * zz + pz * sd * bw, 1, rgb[0], rgb[1], rgb[2], a * (.3 + .4 * sp) * (1 - .5 * f));
+        fx.dotXYZ(this.pos[0] + s * zz + px * sd * bw, .35 + .3 * Math.sin(k + t * 3), this.pos[2] + c * zz + pz * sd * bw, 1, rgb[0], rgb[1], rgb[2], a * (.3 + .4 * sp) * Math.min(1, (this.speed - .5) / 2.5) * (1 - .5 * f));
       }
     }
   }

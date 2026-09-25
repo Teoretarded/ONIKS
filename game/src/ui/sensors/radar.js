@@ -1,17 +1,22 @@
 /* The radar picture: every own radar that radiates paints its sweep. The main one (the selected radar, else
    the surface-search radar nearest the view) drives the engine's sweep (the sea and the land light up behind a
    lime edge and hold an afterglow); every radar also gets its dotted lime leading edge with a sparse curtain of
-   light above it (p2), the others a short dotted afterglow, and a faint ring at its reach. */
+   light above it (p2), the others a short dotted afterglow, and a faint ring at its reach.
+   Fixed-face radars (def faces: 4, the SPY-1 on the DDG and the CG) have no turning beam: the four arrays sit 45 deg
+   off the bow and quarters, the whole circle is refreshed evenly, and each face's pencil beam jumps across its
+   90 deg sector every 1/FLK sim seconds (the engine sweep's faces mode draws the same beams on the sea). */
 import { LIME, WH, TAU, sat, clamp, ss, hsh, wrap2 } from './core.js';
 import { radarWorks } from '../../sim/sensors.js';
 import { lineW } from './orb.js';
+
+const FLK = 12;                     // fixed-face beam jumps per sim second
 
 export function createRadar(S) {
   const { game } = S, sim = game.sim, R = game.R, map = game.map;
   const list = [];                  // pooled { u, x, y, z, brg, w, range, surf, air, main }
   const pool = [];
   let lastSweep = false;
-  const sweep = { origin: [0, 0], bearing: 0, amp: .85, afterglow: 1.3, range: 60000, edge: .03 };
+  const sweep = { origin: [0, 0], bearing: 0, amp: .85, afterglow: 1.3, range: 60000, edge: .03, faces: false, step: 0 };
 
   /* the world bearing of a radar's beam at time t (the sim's antenna: hull heading + antenna angle) */
   function beamAt(u, t, hdg) { return hdg + u.antA + u.antW * (t - u.antT); }
@@ -23,10 +28,11 @@ export function createRadar(S) {
       const Rd = u.def.sensors && u.def.sensors.radar;
       if (!Rd || !radarWorks(u)) continue;
       let o = pool[list.length];
-      if (!o) { o = { u: null, x: 0, y: 0, z: 0, brg: 0, w: 0, range: 0, surf: 0, air: 0, main: false, ph: 0, d: 0 }; pool[list.length] = o; }
+      if (!o) { o = { u: null, x: 0, y: 0, z: 0, brg: 0, w: 0, range: 0, surf: 0, air: 0, main: false, ph: 0, d: 0, faces: 0, hdg: 0 }; pool[list.length] = o; }
       const p = game.unitPose(u);
       o.u = u; o.x = p.pos[0]; o.y = p.pos[1]; o.z = p.pos[2];
       o.ph = beamAt(u, t, p.hdg); o.brg = wrap2(o.ph); o.w = u.antW;
+      o.faces = Rd.faces || 0; o.hdg = p.hdg;
       o.surf = Rd.surf || 0; o.air = Rd.air || 0; o.range = o.surf || o.air; o.main = false;
       list.push(o);
     }
@@ -51,15 +57,18 @@ export function createRadar(S) {
 
   function draw3d() {
     collect();
+    const t = game.t;
     const main = pickMain();
     S.mainRadar = main;
     if (main && !S.inspecting) {
       const fast = Math.abs(main.w) * (game.paused ? 0 : game.timeRate) > 9;
       sweep.origin[0] = main.x; sweep.origin[1] = main.z; sweep.bearing = main.brg;
       sweep.amp = .85 + .15 * S.scopeK; sweep.afterglow = fast ? 5 : 1.3 + .5 * S.scopeK; sweep.range = main.range; sweep.edge = .03;
+      sweep.faces = !!main.faces; sweep.step = Math.floor(t * FLK);
+      if (main.faces) sweep.bearing = main.hdg;
       R.setSweep(sweep); lastSweep = true;
     } else if (lastSweep) { R.setSweep(null); lastSweep = false; }
-    const fx = R.fx, V = S.V, T = R.terrain, scope = S.scopeK;
+    const fx = R.fx, V = S.V, T = R.terrain, scope = S.scopeK, step = Math.floor(t * FLK);
     // the nearest radars to the view get the full beam (edge, curtain, afterglow), the next few a plain edge
     const tg = game.camera.target;
     for (const o of list) o.d = o.main ? -1 : (o.x - tg[0]) ** 2 + (o.z - tg[2]) ** 2;
@@ -71,9 +80,16 @@ export function createRadar(S) {
       if (nb >= 6) break;
       const full = nb < 2; nb++;
       const dAng = Math.abs(o.w) * (game.paused ? 0 : game.timeRate) * Math.max(1 / 60, game.dtReal);
-      const blur = clamp(.35 / Math.max(1e-3, dAng), .22, 1);
+      const blur = o.faces ? 1 : clamp(.35 / Math.max(1e-3, dAng), .22, 1);
       const a = (o.main ? .7 : o.surf ? .85 : .5) * blur * (1 - .2 * scope);
-      if (S.orb) beamW(o, a, o.main, full);
+      if (o.faces) {
+        // four fixed faces: each face's beam at this step's electronic bearing, no afterglow fan
+        for (let fi = 0; fi < 4; fi++) {
+          const b = faceBeam(o.hdg, fi, step);
+          if (S.orb) { const b0 = o.brg; o.brg = wrap2(b); beamW(o, a * .8, false, false); o.brg = b0; }
+          else beam(fx, V, T, o, wrap2(b), a * .75, false);
+        }
+      } else if (S.orb) beamW(o, a, o.main, full);
       else {
         beam(fx, V, T, o, o.brg, a, full);
         if (!o.main && full) for (let k = 1; k <= 3; k++) beam(fx, V, T, o, o.brg - k * .045, a * .32 * Math.exp(-k * .6), false);
@@ -85,6 +101,12 @@ export function createRadar(S) {
     }
   }
   const byD = (a, b) => a.d - b.d;
+  /* face fi's beam bearing at a flicker step: the same hash as the engine's faces sweep (engine/shaders.js sweepAt) */
+  function faceBeam(hdg, fi, step) {
+    let h = Math.imul(step, 0x9E3779B1) ^ ((Math.imul(fi + 7, 0x85EBCA77) + 0x7f4a7c15) | 0);
+    h ^= h >>> 15; h = Math.imul(h, 0x2C1B3C6D); h ^= h >>> 12; h = Math.imul(h, 0x297A2D39); h ^= h >>> 15;
+    return hdg + (fi + .06 + .88 * ((h >>> 8) / 16777216)) * Math.PI / 2;
+  }
   const P = [0, 0, 0];
   /* the Orbital style: the beam as the films' hairlines, the leading edge draped on the ground and fading out along
      its reach, a fan of fainter lines behind it (the afterglow; the main radar's longer), no curtain */
@@ -146,5 +168,5 @@ export function createRadar(S) {
       }
     }
   }
-  return { list, draw3d, beamAt, collect, pickMain };
+  return { list, draw3d, beamAt, faceBeam, collect, pickMain };
 }

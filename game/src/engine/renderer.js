@@ -140,7 +140,8 @@ export class Renderer {
      front (m along the normal from the origin, or the sphere radius), width (m), decay (m of afterglow), amp,
      rgb (0..255), reveal (0..1 tint left behind the front) } */
   setScan(i, s) { this.scans[i] = s && s.mode !== 'off' ? s : { mode: 0 }; }
-  /* the radar sweep painting the sea and the land: { origin [x, z], bearing (rad), amp, afterglow (rad), range (m), edge (rad) } or null */
+  /* the radar sweep painting the sea and the land: { origin [x, z], bearing (rad), amp, afterglow (rad), range (m), edge (rad) } or null;
+     faces: true = four fixed arrays (bearing = hull heading, step = the electronic beams' flicker step) */
   setSweep(s) { this.sweep = s; }
   /* the map's hairline picture (coast, contours, graticule, frame; engine/orbital.js), built once on first use */
   orbitalMap() { if (!this._om && this.wire) this._om = new OrbitalMap(this, this.map); return this._om || null; }
@@ -202,7 +203,7 @@ export class Renderer {
     const sw = this.sweep;
     if (sw) {
       D.set([sw.origin[0] - e[0], sw.origin[1] - e[2], sw.bearing, sw.amp === undefined ? 1 : sw.amp], 188);
-      D.set([sw.afterglow || 1.2, sw.range || 60000, sw.edge || .035, 0], 192);
+      D.set([sw.afterglow || 1.2, sw.range || 60000, sw.faces ? (sw.step || 0) % 4096 : sw.edge || .035, sw.faces ? 1 : 0], 192);
     } else { D.set([0, 0, 0, 0], 188); D.set([1, 1, 1, 0], 192); }
     D.set([this.terrain.seaAmp, 0, this.modelBright, Math.max(25000, fadeD * 4)], 196);
     const gl = this.gl;
@@ -235,10 +236,21 @@ export class Renderer {
       if (sr < 2.5) continue;
       const sx = fl * (cx * r[0] + cyd * r[1] + cz * r[2]) / zc, sy = fl * (cx * u[0] + cyd * u[1] + cz * u[2]) / zc;
       if (Math.abs(sy) > 540 + 3 * sr || Math.abs(sx) > 540 * cam.W / Math.max(1, cam.H) + 3 * sr) continue;
-      const s = pool[list.length] || (pool[list.length] = { c: [0, 0, 0] });
+      const s = pool[list.length] || (pool[list.length] = { c: [0, 0, 0], hull: [0, 0, 0, 0] });
       s.c[0] = cx; s.c[1] = cy; s.c[2] = cz; s.sx = sx; s.sy = sy; s.sr = sr; s.z = zc;
       // the pool round it: a few radii, and never under ~34 px on screen
       s.r = Math.max(m.radius * 2.4, 34 * zc / fl);
+      // a ship on the sea: no pool and no backdrop (they read as a dark disc on the water); the water only darkens a
+      // little right round her hull (terrain subjDim, hull mode)
+      s.hull[2] = 0;
+      if (R && d.T[1] < 6 && d.T[1] > -30 && this.terrain.heightAt(d.T[0], d.T[2]) <= 0) {
+        let p = null; try { p = (this.wireModels || this._planWM || (this._planWM = new WireModels(this))).plan(d.key); } catch (err) { p = null; }
+        if (p && p.hl >= 6 && p.bottom <= 3) {
+          const sh = R[2], ch = R[8], hn = Math.hypot(sh, ch) || 1;
+          s.c[0] = d.T[0] - e[0] + R[0] * p.cx + R[2] * p.cz; s.c[1] = -e[1]; s.c[2] = d.T[2] - e[2] + R[6] * p.cx + R[8] * p.cz;
+          s.hull[0] = sh / hn; s.hull[1] = ch / hn; s.hull[2] = p.hl; s.hull[3] = p.hb;
+        }
+      }
       list.push(s);
       if (list.length >= 64) break;
     }

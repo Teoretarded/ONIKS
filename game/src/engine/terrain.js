@@ -230,6 +230,7 @@ uniform vec4 uSea4;         // x: log2 of the range the steep sea's spacing is s
                             // z: brightness of the steep sea's (denser) returns, w: jitter (of the kept spacing)
 uniform vec4 uSubA[${NSUB}];      // subjects (the units on screen): xyz centre (RTE), w: world halo radius (m)
 uniform vec4 uSubB[${NSUB}];      // x, y: screen centre (1080-px units from the centre), z: screen radius (1080 px), w: depth
+uniform vec4 uSubC[${NSUB}];      // a ship on the sea: x, y heading sin, cos; z half length, w half beam (m); z 0: not a ship
 uniform vec4 uSubP;         // x: count, y: dimming at a subject, z: aspect (W / H), w: backdrop dimming (behind a subject on screen)
 /* the world dims round the units on screen (the films keep the ground dim round their models): a pool round each
    subject in the world, and a soft backdrop behind it on screen */
@@ -240,8 +241,15 @@ float subjDim(vec3 p, vec4 c) {
   float k = 1.0;
   for (int i = 0; i < ${NSUB}; i++) {
     if (i >= n) break;
-    vec4 A = uSubA[i], Bq = uSubB[i];
+    vec4 A = uSubA[i], Bq = uSubB[i], H = uSubC[i];
     vec3 d = p - A.xyz;
+    if (H.z > 0.0) {
+      // a ship: the water a shade darker right round the hull (a capsule a few metres out), no pool, no backdrop
+      float lx = d.x * H.x + d.z * H.y, lz = d.x * H.y - d.z * H.x;
+      float q = length(vec2(max(abs(lx) - max(0.0, H.z - H.w), 0.0), lz)) / (H.w + 6.0);
+      k = min(k, 1.0 - 0.3 * (1.0 - smoothstep(0.7, 1.6, q)));
+      continue;
+    }
     float q = sqrt(dot(d, d)) / A.w;
     float w = 1.0 - smoothstep(0.15, 1.0, q);
     if (c.w > Bq.w - A.w) {
@@ -634,12 +642,15 @@ void main() {
 }
 `;
 
-/* the look per weather: sea brightness, spacing on screen, roughness, whitecaps, glints; sky stars and band */
+/* the look per weather: sea brightness, spacing on screen, roughness, whitecaps, glints; sky stars and band.
+   hazeD: even a clear night over the sea has some air between the lens and the far field (visibility tens of km):
+   the returns fade with the range, the one cue that makes 60 km of sea read as 60 km (the sea's dots keep their
+   spacing on screen at any range, so without it the far field looks as near as the near) */
 const WEATHER_LOOK = {
-  calm: { seaB: .82, seaPx: 1.12, stars: 1, band: 1, glintK: 1, hazeD: 0 },
+  calm: { seaB: .82, seaPx: 1.12, stars: 1, band: 1, glintK: 1, hazeD: 30000 },
   haze: { seaB: .82, seaPx: 1.12, stars: .35, band: .8, glintK: .6, hazeD: 9000 },
-  rain: { seaB: .9, seaPx: 1, stars: 0, band: .75, glintK: .3, hazeD: 0 },
-  storm: { seaB: .9, seaPx: 1, stars: 0, band: .55, glintK: .4, hazeD: 0 },
+  rain: { seaB: .9, seaPx: 1, stars: 0, band: .75, glintK: .3, hazeD: 16000 },
+  storm: { seaB: .9, seaPx: 1, stars: 0, band: .55, glintK: .4, hazeD: 12000 },
 };
 const TIME_LOOK = {
   night: { stars: .9, band: 1.1, glowAz: 250, glow: .6 },
@@ -842,7 +853,7 @@ export class Terrain {
     this.uLvI = new Int32Array(MAXL * 4);
     this.uHole = new Int32Array(MAXL * 4);
     this.uWave = new Float32Array(16);
-    this.subA = new Float32Array(NSUB * 4); this.subB = new Float32Array(NSUB * 4); this.nSub = 0;
+    this.subA = new Float32Array(NSUB * 4); this.subB = new Float32Array(NSUB * 4); this.subC = new Float32Array(NSUB * 4); this.nSub = 0;
     this.setWeather(this.map.weather || {});
   }
 
@@ -1035,11 +1046,12 @@ export class Terrain {
   /* the units on screen, biggest first (the renderer calls this every frame): list of { c: centre RTE [x, y, z],
      r: halo radius (m), sx, sy: screen centre (1080-px units from the centre), sr: screen radius (1080 px), z: depth } */
   setSubjects(list) {
-    const n = Math.min(NSUB, list.length), A = this.subA, Bq = this.subB;
+    const n = Math.min(NSUB, list.length), A = this.subA, Bq = this.subB, H = this.subC;
     for (let i = 0; i < n; i++) {
       const s = list[i];
       A[i * 4] = s.c[0]; A[i * 4 + 1] = s.c[1]; A[i * 4 + 2] = s.c[2]; A[i * 4 + 3] = s.r;
       Bq[i * 4] = s.sx; Bq[i * 4 + 1] = s.sy; Bq[i * 4 + 2] = s.sr; Bq[i * 4 + 3] = s.z;
+      const h = s.hull; H[i * 4] = h ? h[0] : 0; H[i * 4 + 1] = h ? h[1] : 0; H[i * 4 + 2] = h ? h[2] : 0; H[i * 4 + 3] = h ? h[3] : 0;
     }
     this.nSub = n;
   }
@@ -1108,7 +1120,7 @@ export class Terrain {
     gl.uniform4f(u.uLit, this.litCam[0], this.litCam[1], this.litCam[2], this.lightFollow);
     gl.uniform4f(u.uTex, this.fields, this.marsh, this.beach, this.grazing);
     gl.uniform4f(u.uTex2, this.prominence * (.4 + .6 * k), 0, 0, 0);
-    gl.uniform4fv(u.uSubA, this.subA); gl.uniform4fv(u.uSubB, this.subB);
+    gl.uniform4fv(u.uSubA, this.subA); gl.uniform4fv(u.uSubB, this.subB); if (u.uSubC) gl.uniform4fv(u.uSubC, this.subC);
     gl.uniform4f(u.uSubP, this.nSub, this.subjectDim, this.G.W / Math.max(1, this.G.H), this.subjectBack);
     gl.drawArraysInstanced(gl.POINTS, 0, B * B, this.nInst);
   }

@@ -60,7 +60,7 @@ export const SETTINGS = [
   { key: 'invertRotate', group: 'Controls', label: 'Invert rotate', def: false, choices: [[false, 'Off'], [true, 'On']] },
   { key: 'autoSlow', group: 'Controls', label: 'Auto ×1', def: true, choices: [[false, 'Off'], [true, 'On']] },
   { key: 'hitReplay', group: 'Controls', label: 'Hit replay', def: true, choices: [[false, 'Off'], [true, 'On']] },
-  { key: 'timeRate', group: 'Controls', label: 'Start time rate', def: 4, choices: [1, 2, 4, 8, 16, 32].map(v => [v, 'x' + v]) },
+  { key: 'timeRate', group: 'Controls', label: 'Start time rate', def: 1, choices: [1, 2, 4, 8, 16, 32].map(v => [v, 'x' + v]) },
   { key: 'menuFilm', group: 'Menu', label: 'Menu film', def: 'random', cycle: true, choices: MENU_FILMS },
 ];
 

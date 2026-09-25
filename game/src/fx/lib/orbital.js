@@ -20,7 +20,7 @@ import { ColdLaunch, VlsLaunch, HotLaunch, GunBlast, BalLaunch, SubLaunch, TorpL
 import { Burst, BoosterSep } from './burst.js';
 import { Splash, Dirt, Blast, Fire, Sinking, TorpedoHit } from './impact.js';
 import { TracerStream, GunStream, Muzzle } from './guns.js';
-import { SubWater } from './water.js';
+import { SubWater, wakeU, WAKE_T } from './water.js';
 import { Lightning, flashLead, flashLevel } from './weather.js';
 
 const WC = [246 / 255, 245 / 255, 242 / 255];
@@ -828,8 +828,9 @@ export function orbWake(w, a) {
   for (let c = 0; c < w.n; c++) {
     const idx = w.k - 1 - c, i = (w.head - 1 - c + cap * 4) % cap, o = i * RS, age = t - R[o];
     if (age < 0) continue;
-    const v = Math.max(.5, R[o + 5]), d = age * v, u = d / w.len;
-    if (u >= 1) break;
+    if (age >= WAKE_T) break;
+    const v = Math.max(.5, R[o + 5]), d = age * v, u = wakeU(age, v, w.len);
+    if (u >= 1) { has = false; continue; }
     if (idx & thin) continue;
     const kr = R[o + 6]; if (kr < .01) { has = false; continue; }
     const x0 = R[o + 1], z0 = R[o + 2], s = R[o + 3], cc = R[o + 4], px = cc, pz = -s;

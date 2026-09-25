@@ -192,7 +192,16 @@ export function createMinimap(game, hud) {
       const a = u.hdg + u.antA + u.antW * (t - u.antT);
       const spin = u.antW * game.timeRate;                 // rad per real second on screen
       dcirc(x, y, rr, OWN, orb ? .12 : .16, 5 * k);
-      if (spin < 14) {
+      if (R.faces) {
+        // four fixed faces (SPY-1): each face's beam flicking across its sector, no turning beam
+        const stp = Math.floor(t * 12);
+        for (let fi = 0; fi < 4; fi++) {
+          let h = Math.imul(stp, 0x9E3779B1) ^ ((Math.imul(fi + 7, 0x85EBCA77) + 0x7f4a7c15) | 0);
+          h ^= h >>> 15; h = Math.imul(h, 0x2C1B3C6D); h ^= h >>> 12; h = Math.imul(h, 0x297A2D39); h ^= h >>> 15;
+          const b = u.hdg + (fi + .06 + .88 * ((h >>> 8) / 16777216)) * Math.PI / 2;
+          dline(x, y, x + Math.sin(b) * rr, y - Math.cos(b) * rr, OWN, .6 * (orb ? .7 : 1), 2.5 * k);
+        }
+      } else if (spin < 14) {
         // the beam: a dotted lime edge with a short afterglow of fainter dotted lines behind it (the films' scope)
         for (let j = 3; j >= 0; j--) {
           const b = a - j * .07;

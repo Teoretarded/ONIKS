@@ -129,9 +129,9 @@ export async function createSensors(game) {
         const cp = scope.clutterParams(gpu, weather);
         const ce = weather.ceilingParams();
         let sp = null;
-        if (!cp && S.mainRadar && S.mainRadar.surf && !S.inspecting) {
+        if (!cp && S.mainRadar && S.mainRadar.surf && !S.inspecting && S.mainRadar.u.def.domain !== 'air') {   // (an airborne radar: no clutter disc on the sea under it)
           const m = S.mainRadar, L = gpu.lattice(m.u.id, m.x, m.z, m.range, game.map);
-          if (L) sp = { L, radar: [m.x, m.z], phase: m.ph, alpha: .85 * (1 - S.scopeK), scope: false, heightK: 1, wind: weather.windBrg(), rhor: scope.rhorOf(m.u, m.range), squalls: weather.squalls() };
+          if (L) sp = { L, radar: [m.x, m.z], phase: m.ph, alpha: .85 * (1 - S.scopeK), scope: false, heightK: 1, wind: weather.windBrg(), rhor: scope.rhorOf(m.u, m.range), squalls: weather.squalls(), faces: !!m.faces, step: Math.floor(game.t / (m.u.def.sensors.radar.period || 1)) };
         }
         if (cp || ce || sp) {
           gpu.begin();

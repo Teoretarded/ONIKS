@@ -28,6 +28,7 @@ uniform vec4 uO;      // lattice origin relative to the eye (x, y, z)
 uniform vec4 uOw;     // lattice origin world (x, z) in km; z: critical range (km, 64 km scale); w: wind bearing
 uniform vec4 uRad;    // radar relative to the lattice origin (x, z) m; z: range (m); w: display height (m per dB)
 uniform vec4 uS;      // x: beam phase (continuous rad); y: alpha; z: mode 1 scope / 0 rain speckle; w: stalk fraction
+uniform vec4 uF;      // x: 1 = four fixed faces (no turning beam: an even picture, redrawn every step); y: the step
 uniform vec4 uSq[8];  // squalls relative to the lattice origin: x, z, r (m), strength
 uniform int uNSq;
 out vec4 vC;
@@ -39,6 +40,7 @@ void main() {
   float dd = uS.x - az;
   float s = floor(dd / 6.2831853);
   dd -= s * 6.2831853;
+  if (uF.x > 0.5) { s = uF.y; dd = 1.1; }
   uint id = uint(aA.z), si = uint(int(s) + 1048576);
   // rain returns
   float rc = 0.0;
@@ -61,8 +63,11 @@ void main() {
   float tu = wk.x * sw + wk.y * cw, tv = wk.x * cw - wk.y * sw;
   float tex = exp(1.4 * fbm2(vec2(tu * 0.14, tv * 0.7) + 3.7) - 0.25);
   float c = 6.3 * g * (0.3 + 0.7 * wd * wd) * tex * (1.0 + 0.45 * sin(aK + s * 1.3)) + rc;
-  // the normal view keeps only the strong returns (near the radar, the rain), flat on the sea
+  // the normal view keeps only the strong returns (near the radar, the rain), flat on the sea; the polar lattice is
+  // thinned near the radar to an even density on the water (else its rings print as a striped disc round the ship,
+  // with a hole under her) and fades in from the hull
   if (!scope && c < 1.1) { ${CULL} return; }
+  if (!scope && u01(hash2(id, 977u)) > r / (RM * 0.08)) { ${CULL} return; }
   float spike = u01(hash2(id, uint(int(floor((s + float(id % 3u)) / 3.0)) + 1048576) * 7u + 3u)) < aA.w + (rc > 30.0 ? 0.0022 : 0.0) ? 14.0 : 1.0;
   float h1 = max(1e-7, u01(hash2(id, si * 2u + 1u))), h2 = max(1e-7, u01(hash2(id, si * 2u + 2u)));
   float P = -log(h1) + c * spike * -log(h2);
@@ -85,7 +90,7 @@ void main() {
   if (dd < 0.6) { float k = exp(-dd * 7.0); col = mix(col, LIME, k); b = max(b, k * 0.7); }
   if (det) b = max(b, 0.5 + 0.5 * glow);
   if (uS.w > 0.0) b *= 0.5;
-  if (!scope) b = min(1.0, c / 10.0) * br * (0.22 + 0.9 * glow) * 1.25 + (dd < 0.25 ? 0.55 * exp(-dd * 12.0) : 0.0);
+  if (!scope) b = (min(1.0, c / 10.0) * br * (0.22 + 0.9 * glow) * 1.25 + (dd < 0.25 ? 0.55 * exp(-dd * 12.0) : 0.0)) * smoothstep(RM * 0.006, RM * 0.04, r);
   vC = vec4(col, min(1.0, b) * uS.y);
   float ps = (det || cl.w < RM * 0.6) ? 2.0 : 1.0;
   if (!scope) ps = 1.0;
@@ -234,7 +239,8 @@ export function createGPU(R) {
     gl.bindVertexArray(null);
   }
   const SQ = new Float32Array(32), FL = new Float32Array(16);
-  /* o: { L (lattice), radar [x, z] world, phase, alpha, scope (bool), heightK, wind (rad), rhor (km), squalls } */
+  /* o: { L (lattice), radar [x, z] world, phase, alpha, scope (bool), heightK, wind (rad), rhor (km), squalls,
+          faces (bool: a fixed-face radar), step (its refresh step) } */
   function drawClutter(o) {
     if (!ok || !o.L || !o.L.n) return;
     const L = o.L, e = R.camera.eye, u = pC.u;
@@ -245,6 +251,7 @@ export function createGPU(R) {
     let n = 0;
     if (o.squalls) for (const s of o.squalls) { if (n >= 8) break; SQ[n * 4] = s.x - L.ox; SQ[n * 4 + 1] = s.z - L.oz; SQ[n * 4 + 2] = s.r; SQ[n * 4 + 3] = s.q; n++; }
     gl.uniform4fv(u.uSq, SQ); gl.uniform1i(u.uNSq, n);
+    if (u.uF) gl.uniform4f(u.uF, o.faces ? 1 : 0, o.faces ? o.step % 65536 : 0, 0, 0);
     gl.bindVertexArray(L.vao);
     const passes = o.scope ? [0, .25, .5, .75] : [0];
     for (const f of passes) {

@@ -438,7 +438,9 @@ export const UNITS = {
     // AN/SQS-53C hull sonar: hears submerged boats close by (less at speed)
     // radar: land units within 3 km of the water at .45 of the surface range (the coastline stands out), inland .3
     // esm: AN/SLQ-32 (cross-fixes radiating units with other listeners)
-    sensors: { radar: { surf: 45000, air: 110000, land: .3, shore: .45, period: 1, gain: .1, h: 20 }, sonar: { sub: 11000, ship: 0, gain: .12, hull: true },
+    // faces: 4 = AN/SPY-1D(V), four fixed arrays scanned electronically (no turning beam); the SPS-67(V)3 on the mast
+    // turns at its real 15 rpm (modelState sps)
+    sensors: { radar: { surf: 45000, air: 110000, land: .3, shore: .45, period: 1, faces: 4, gain: .1, h: 20 }, sonar: { sub: 11000, ship: 0, gain: .12, hull: true },
                esm: { gain: .003 } },
     emits: { range: 150000 },
     scan: { reach: 60000, r: 4000, cd: 90 },
@@ -471,7 +473,7 @@ export const UNITS = {
       decoys: { label: 'Mk 36 · Nulka', w: .3 },
     },
     modelState(u, t) {
-      const s = u.st; s.sps = spin(u, t, TAU / 2.5); s.gunYaw = u.tYaw; s.gunPitch = u.tPitch;
+      const s = u.st; s.sps = spin(u, t, TAU / 4); s.gunYaw = u.tYaw; s.gunPitch = u.tPitch;
       if (!s.ciwsYaw) { s.ciwsYaw = [0, Math.PI]; s.ciwsPitch = [.35, .35]; }
       s.ciwsYaw[0] = u.cYaw[0]; s.ciwsYaw[1] = u.cYaw[1]; s.ciwsPitch[0] = u.cPitch[0]; s.ciwsPitch[1] = u.cPitch[1];
       s.ciwsSpin = u.cSpin; s.vlsOpen = u.vlsOpen; return s;
@@ -734,7 +736,7 @@ export const UNITS = {
     speed: 32.5 * KN, turn: .026, accel: .14,
     mot: { mass: 9800, td: 3.5, yawT: 1.2, rollT: 11, heelK: 1.8, spot: [0, -46] },   // Ticonderoga: 9,800 t
     hp: 125, rcs: 1.1, dieTime: 60,
-    sensors: { radar: { surf: 45000, air: 120000, land: .3, shore: .45, period: 1, gain: .1, h: 21 }, sonar: { sub: 11000, ship: 0, gain: .12, hull: true },
+    sensors: { radar: { surf: 45000, air: 120000, land: .3, shore: .45, period: 1, faces: 4, gain: .1, h: 21 }, sonar: { sub: 11000, ship: 0, gain: .12, hull: true },
                esm: { gain: .003 } },                              // AN/SLQ-32, as the DDG's
     emits: { range: 160000 },
     scan: { reach: 60000, r: 4000, cd: 90 },
@@ -823,7 +825,7 @@ export const UNITS = {
       jets: { label: 'Waterjets ×4', w: .8, slow: .4 },
     },
     modelState(u, t) {
-      const s = u.st; s.radar = spin(u, t, TAU / 2); s.gunYaw = u.tYaw; s.gunPitch = u.tPitch;
+      const s = u.st; s.radar = spin(u, t, TAU); /* Sea Giraffe AMB: 60 rpm */ s.gunYaw = u.tYaw; s.gunPitch = u.tPitch;
       s.ramYaw = t - u.fireT < 8 && u.aimB !== null ? wrap(u.aimB - u.hdg) : Math.PI; return s;
     },
   },

@@ -79,7 +79,7 @@ export function createScope(S) {
   }
 
   /* the radar the scope is on: where it is and its beam phase */
-  const ro = { x: 0, y: 0, z: 0, ph: 0, RM: 60000, on: false, name: '' };
+  const ro = { x: 0, y: 0, z: 0, ph: 0, RM: 60000, on: false, name: '', faces: false, step: 0 };
   function radarNow() {
     const u = st.radar;
     ro.on = false;
@@ -88,6 +88,8 @@ export function createScope(S) {
     ro.x = p[0]; ro.y = p[1]; ro.z = p[2]; ro.RM = rangeOf(u); ro.name = SHORT[u.type] || u.def.name;
     ro.on = !!(S.mainRadar && S.mainRadar.u === u);
     ro.ph = ro.on ? S.mainRadar.ph : 0;
+    // fixed faces (SPY-1): no turning beam, the picture is redrawn everywhere once a revisit (the sim's period)
+    ro.faces = ro.on && !!S.mainRadar.faces; ro.step = Math.floor(game.t / (u.def.sensors.radar.period || 1));
     return ro;
   }
 
@@ -144,7 +146,8 @@ export function createScope(S) {
   function returns(fx, V, c, u, r, rg, dx, dz, HK, k) {
     if (!r.on) return;
     const az = Math.atan2(dx, dz);
-    let d = r.ph - az; const s = Math.floor(d / TAU); d -= s * TAU;
+    let d = r.ph - az, s = Math.floor(d / TAU); d -= s * TAU;
+    if (r.faces) { s = r.step; d = 1.1; }
     const glow = Math.exp(-d * .75), rise = d < .5 ? 1 - Math.exp(-d * 16) : 1, lk = d < .6 ? Math.exp(-d * 7) : 0;
     const fresh = sim.t - c.lastSeen < 8;
     const snr = (RCS_DB[u.type] || 20) - 40 * Math.log10(Math.max(1, rg / 1000 * 64000 / r.RM) / 30) - 14 + (fresh ? 0 : -12);
@@ -219,7 +222,7 @@ export function createScope(S) {
       ov.mark(q[0], q[1], 5, '#C6F432', .9 * k, true);
     }
     // the readout under the clock
-    const sweepN = r.on ? Math.floor(r.ph / TAU) : 0;
+    const sweepN = r.on ? (r.faces ? r.step : Math.floor(r.ph / TAU)) : 0;
     const txt = `RADAR VIEW · ${r.name || 'NO RADAR'} · ${r.on ? 'SWEEP ' + (sweepN % 1000) : 'EMCON'} · ${nT} TRK · ${nC} UNK · V EXIT`;
     ov.text(cam.W / 2, 64 * K, txt, { size: 10.5, col: 'rgba(255,255,255,.7)', a: k, align: 'center' });
   }
@@ -230,7 +233,7 @@ export function createScope(S) {
     const r = radarNow(); if (!r.on) return null;
     const L = gpu.lattice(st.radar.id, r.x, r.z, r.RM, game.map);
     if (!L) return null;
-    return { L, radar: [r.x, r.z], phase: r.ph, alpha: st.k, scope: true, heightK: r.RM / 64000 * 45, wind: weather.windBrg(), rhor: rhorOf(st.radar, r.RM), squalls: weather.squalls() };
+    return { L, radar: [r.x, r.z], phase: r.ph, alpha: st.k, scope: true, heightK: r.RM / 64000 * 45, wind: weather.windBrg(), rhor: rhorOf(st.radar, r.RM), squalls: weather.squalls(), faces: r.faces, step: r.step };
   }
   /* the clutter's critical range on the 64 km display scale: 18 km for a 70 m site, ~sqrt of the antenna height */
   function rhorOf(u, RM) {

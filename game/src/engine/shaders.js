@@ -24,7 +24,7 @@ layout(std140) uniform Frame {
   vec4 uLP[16];    // xyz: light position (RTE), w: radius (m)
   vec4 uLC[16];    // rgb: colour x intensity
   vec4 uSweep;     // radar sweep: x, z origin (RTE), z: beam bearing (rad, clockwise from north), w: amplitude
-  vec4 uSweep2;    // x: afterglow (rad), y: range (m), z: edge width (rad), w: unused
+  vec4 uSweep2;    // x: afterglow (rad), y: range (m), z: edge width (rad), w: 1 = four fixed faces (z: flicker step, uSweep.z: hull heading)
   vec4 uMisc;      // x: sea amplitude scale, y: unused, z: model brightness, w: model fade distance (m)
 };
 `;
@@ -102,6 +102,17 @@ vec2 sweepAt(vec3 p) {
   float r = length(d);
   if (r > uSweep2.y) return vec2(0.0);
   float b = atan(d.x, d.y);
+  if (uSweep2.w > 0.5) {
+    // four fixed arrays (SPY-1): faces centred 45 deg off the bow and quarters; the whole sector is refreshed evenly
+    // (a steady glow, a faint seam where two faces meet) and each face's pencil beam jumps across it every step
+    float x = (b - uSweep.z) / 1.5707963; x -= floor(x / 4.0) * 4.0;
+    float fi = floor(x), fr = x - fi;
+    float seam = smoothstep(0.0, 0.035, min(fr, 1.0 - fr));
+    float off = 0.06 + 0.88 * u01(hash2(uint(uSweep2.z), uint(fi) + 7u));
+    float dd = abs(fr - off) * 1.5707963;
+    float e = dd < 0.12 ? exp(-dd / 0.022) : 0.0;
+    return vec2(e * 0.8 * seam, 0.4 * seam) * uSweep.w;
+  }
   float db = uSweep.z - b; db -= floor(db / 6.2831853) * 6.2831853;
   float edge = db < uSweep2.z * 4.5 ? exp(-db / uSweep2.z) : 0.0;
   float ag = 1.0 / (1.0 + db * (0.9 + db * (0.4 + db * 0.15)) * (1.0 / max(0.05, uSweep2.x)));
