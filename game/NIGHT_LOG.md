@@ -116,3 +116,12 @@ at the same framing), land reads as LiDAR with crisp cliffs, coastlines and cont
 marsh on the flat maps, a horizon band with sparse stars. The ground dims around units so ships and trucks stand out.
 Before/after: `game/shots/look_before_after.png`, `look_film_vs_game.png`. Director + hit replay agent started
 (the cinematic camera frames the action; a decisive hit plays as a slow-motion Anatomy moment with the X-ray sweep).
+
+## 06:15 · Landmarks done
+Each map now has set pieces and life: Krasnaya Kosa's steaming mud volcanoes, fishing camp on the red spit, TV mast;
+the fjord's suspension bridge (430 m span), car ferry, hydro station, waterfalls; a 4.2 km cable-stayed bridge across
+the strait; wrecks on the archipelago's reefs with small lighthouses; gas platforms with flares that light the sea
+in the delta; the caldera cone's steam plume leaning with the storm wind. Towns with lit windows at night, lighthouse
+beams sweeping the sea, buoys blinking in real patterns, cargo ships and trawlers at real speeds. Stills: `lm_*.png`.
+Orbital agent started: past ~50 km altitude the picture dissolves into the Orbital films' hairline language
+(black, white contours, yellow for your salvo, catalog labels) and re-condenses into dots as you zoom back in.
