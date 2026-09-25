@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ONIKS · Maps</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #0B0C0A; --lime: #C6F432; --coral: #FF6A3D; --dim: rgba(255,255,255,.62); --faint: rgba(255,255,255,.36); --hair: rgba(255,255,255,.14);
+    --sans: 'Geist', 'Segoe UI', sans-serif; --mono: 'Geist Mono', Consolas, monospace; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: #fff; font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+  body { padding: 28px 32px 40px; min-height: 100vh; }
+  header { display: flex; align-items: baseline; gap: 22px; margin-bottom: 22px; }
+  header h1 { font-weight: 600; font-size: 22px; letter-spacing: -.02em; }
+  .kick { display: flex; gap: 10px; align-items: center; font: 400 12px var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--dim); }
+  .kick i { width: 7px; height: 7px; background: var(--lime); flex: none; }
+  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 26px 22px; }
+  .card { cursor: pointer; }
+  .card canvas { display: block; width: 100%; aspect-ratio: 16 / 9; background: #0B0C0A; outline: 1px solid var(--hair); }
+  .card:hover canvas { outline-color: rgba(198,244,50,.5); }
+  .meta { display: flex; align-items: baseline; gap: 12px; margin-top: 10px; }
+  .meta .n { font: 400 11.5px var(--mono); color: var(--faint); letter-spacing: .05em; }
+  .meta .name { font-weight: 500; font-size: 17px; letter-spacing: -.01em; }
+  .meta .sq { width: 8px; height: 8px; background: var(--lime); transform: scale(0); transition: transform .15s; align-self: center; }
+  .card:hover .meta .sq { transform: scale(1); }
+  .sub { font: 400 11.5px var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); margin-top: 5px; display: flex; gap: 16px; }
+  .sub b { color: var(--dim); font-weight: 400; }
+  #big { display: none; position: fixed; inset: 0; background: var(--bg); z-index: 5; }
+  #big.on { display: block; }
+  #big canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #big .bar { position: absolute; left: 28px; top: 22px; display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
+  #big .bar .name { font-weight: 600; font-size: 26px; letter-spacing: -.02em; }
+  #big .close { position: absolute; right: 28px; top: 24px; font: 500 11px var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); cursor: pointer; }
+  #big .close b { color: #0B0C0A; background: rgba(255,255,255,.78); padding: 3px 5px 2px; font-weight: 500; margin-right: 8px; }
+  #big .legend { position: absolute; left: 28px; bottom: 22px; font: 400 11px/1.7 var(--mono); letter-spacing: .04em; color: var(--faint); text-transform: uppercase; pointer-events: none; }
+  #big .legend .lime { color: var(--lime); } #big .legend .coral { color: var(--coral); }
+  #big .readout { position: absolute; right: 28px; bottom: 22px; font: 400 11.5px var(--mono); letter-spacing: .05em; color: var(--dim); pointer-events: none; }
+</style>
+</head>
+<body>
+<header><h1>ONIKS</h1><div class="kick"><i></i>Maps</div></header>
+<div id="grid"></div>
+<div id="big"><canvas id="bigc"></canvas>
+  <div class="bar"><div class="name" id="bname"></div><div class="sub" id="bsub"></div></div>
+  <div class="close" id="close"><b>Esc</b>Back</div>
+  <div class="legend" id="legend"></div>
+  <div class="readout" id="readout"></div>
+</div>
+<script type="module">
+import { MAPS, loadMap } from './src/world/maps.js';
+import { renderPreview } from './src/world/preview.js';
+
+const grid = document.getElementById('grid');
+const loaded = {};
+const q = new URLSearchParams(location.search);
+const fmtKm = m => `${Math.round(m / 1000)} km`;
+
+const only = q.get('only');
+MAPS.forEach((m, i) => {
+  if (only && !only.split(',').includes(m.id)) return;
+  const el = document.createElement('div');
+  el.className = 'card';
+  el.innerHTML = `<canvas width="640" height="360"></canvas>
+    <div class="meta"><span class="n">0${i + 1}</span><i class="sq"></i><span class="name">${m.name}</span></div>
+    <div class="sub"><span>${m.blurb}</span><span><b>${fmtKm(m.size[0])} × ${fmtKm(m.size[1])}</b></span><span class="gt">generating</span></div>`;
+  grid.appendChild(el);
+  const cv = el.querySelector('canvas');
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const t0 = performance.now();
+  loadMap(m.id, { cache: !q.has('nocache') }).then(map => {
+    loaded[m.id] = map;
+    const rect = cv.getBoundingClientRect();
+    cv.width = Math.round(rect.width * dpr); cv.height = Math.round(rect.height * dpr);
+    const tp = performance.now();
+    renderPreview(map, cv, { dpr, labels: true });
+    const pv = performance.now() - tp;
+    const t = map.timing;
+    el.querySelector('.gt').innerHTML = `gen <b>${Math.round(t.total)} ms</b> · load <b>${map.genMs} ms${map.cached ? ' cached' : ''}</b> · preview <b>${Math.round(pv)} ms</b> · ${map.cols}×${map.rows} @ ${map.cell} m`;
+    console.log(m.id, 'timing', JSON.stringify(t), 'load', map.genMs, 'preview', Math.round(pv));
+    if (q.get('map') === m.id || only === m.id) open(m.id);
+  }).catch(e => { el.querySelector('.gt').textContent = 'error'; console.error(m.id, e); });
+  el.addEventListener('click', () => loaded[m.id] && open(m.id));
+});
+
+const big = document.getElementById('big'), bc = document.getElementById('bigc');
+let cur = null, view = null, pv = null;
+function open(id) {
+  cur = loaded[id]; view = null;
+  big.classList.add('on');
+  const m = cur;
+  document.getElementById('bname').textContent = m.name;
+  const meta = MAPS.find(x => x.id === id);
+  document.getElementById('bsub').innerHTML = `<span>${meta.blurb}</span><span><b>${fmtKm(m.W)} × ${fmtKm(m.H)}</b></span><span>${m.weather.kind} · ${m.time}</span><span>cell ${m.cell} m</span>`;
+  const leg = m.objectives.map(o => `<div><span class="lime">${o.id}</span> ${o.name}</div>`).join('');
+  document.getElementById('legend').innerHTML = leg + `<div><span class="lime">COAST</span> spawn · <span class="coral">FLEET</span> spawn · RAS replenish</div>`;
+  draw();
+}
+function draw() {
+  if (!cur) return;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  bc.width = Math.round(innerWidth * dpr); bc.height = Math.round(innerHeight * dpr);
+  pv = renderPreview(cur, bc, { dpr, labels: 'full', places: true, roads: true, pad: 60, fontSize: 11, view, landDot: 2 });
+}
+function close() { big.classList.remove('on'); cur = null; }
+// for tooling: window.MAPVIEW.open(id), .shot(path) saves the large view through the server's PNG sink
+window.MAPVIEW = { open, loaded, setView: v => { view = v; draw(); },
+  shot: async path => (await fetch('/save?path=' + path, { method: 'POST', body: bc.toDataURL('image/png') })).status };
+document.getElementById('close').onclick = close;
+addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+addEventListener('resize', () => cur && draw());
+// wheel zoom about the cursor, drag to pan
+bc.addEventListener('wheel', e => {
+  if (!cur || !pv) return;
+  e.preventDefault();
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const [wx, wz] = pv.toWorld(e.offsetX * dpr, e.offsetY * dpr);
+  const v = view || [-cur.W / 2, -cur.H / 2, cur.W / 2, cur.H / 2];
+  const k = Math.exp(e.deltaY * 0.0012);
+  view = [wx + (v[0] - wx) * k, wz + (v[1] - wz) * k, wx + (v[2] - wx) * k, wz + (v[3] - wz) * k];
+  draw();
+}, { passive: false });
+let drag = null;
+bc.addEventListener('mousedown', e => { drag = [e.clientX, e.clientY]; });
+addEventListener('mouseup', () => drag = null);
+addEventListener('mousemove', e => {
+  if (!cur || !pv) return;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const [wx, wz] = pv.toWorld(e.clientX * dpr, e.clientY * dpr);
+  document.getElementById('readout').textContent = `x ${(wx / 1000).toFixed(1)} km  z ${(wz / 1000).toFixed(1)} km  h ${cur.h(wx, wz).toFixed(1)} m  slope ${cur.slope(wx, wz).toFixed(2)}`;
+  if (!drag) return;
+  const dx = (e.clientX - drag[0]) * dpr / pv.scale, dz = (e.clientY - drag[1]) * dpr / pv.scale;
+  drag = [e.clientX, e.clientY];
+  const v = view || [-cur.W / 2, -cur.H / 2, cur.W / 2, cur.H / 2];
+  view = [v[0] - dx, v[1] + dz, v[2] - dx, v[3] + dz];
+  draw();
+});
+</script>
+</body>
+</html>

@@ -131,6 +131,31 @@ Owner documents the public API in `game/src/engine/README.md`. Required capabili
   Q/E), smooth damping, follow, fly-to, picking (screen -> ground ray, screen -> unit).
 - 2D overlay canvas helpers in the Point Cloud style (tags, dotted boxes, leaders, brackets).
 
+## Game layer (`game/src/game/`, phase 2)
+
+`game/src/game/game.js` owns the running match and ties sim, engine and UI together through **systems**:
+
+```js
+game = { sim, map, renderer, camera, overlay, side /* the player's side */, settings, mode, params,
+         selection: Set<unitId>, hover, timeRate, paused, bus /* on(name, fn), emit(name, data) */,
+         addSystem(sys), unitPose(unit, alpha) -> { pos, hdg, pitch, roll }   // interpolated for render
+}
+system = { name, priority,
+  init?(game), update?(dtReal, dtSim), draw3d?(frame) /* inside the GL point passes */,
+  draw2d?(ctx) /* overlay canvas */, onEvent?(simEvent), onKey?(e) -> handled, onPointer?(e) -> handled }
+```
+
+Input goes to systems by descending priority until one handles it (inspect > targeting modes > selection >
+camera). `main.js` registers the systems:
+
+| Module | Export | Owner |
+|---|---|---|
+| `game/src/game/*` (selection, orders, HUD, minimap, time, match flow) | `createGame(...)` | INTEGRATION |
+| `game/src/fx/index.js` | `createFx(game)` | FX |
+| `game/src/ui/sensors.js` (radar sweeps, contact clouds, tracks, lightning SCAN, radar view, weather visuals) | `createSensors(game)` | SENSORS |
+| `game/src/ui/inspect.js` (Inspect / X-ray / exploded view) | `createInspect(game)` | INSPECT |
+| `game/src/audio/index.js` | `createAudio(game)` | AUDIO |
+
 ## Style tokens
 
 `#0B0C0A` background, white dots, lime `#C6F432`, coral `#FF6A3D`, text white at 0.5-0.9 alpha.

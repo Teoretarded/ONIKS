@@ -1,0 +1,107 @@
+/* ONIKS: Point Cloud tokens and the shared UI classes (menus, setup screens, in-game HUD).
+   Same look as reference/menus/common/pc.css. Fonts, in every page's <head>:
+   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=block">
+
+   Classes
+     .kick            lime square + mono caption            <div class="kick"><i></i>01 · Sandbox</div>
+     .tag             id chip + label (+ value)             <span class="tag lime"><b>TRK 21</b><i>DDG · Arleigh Burke</i><span class="v">0.89</span></span>
+                      variants: .lime .coral .ghost .sm
+     .ro              mono readout lines                    <div class="ro">Rate <b>x8</b> · <span class="l">own 4</span></div>
+     .keys            key hint chips                        <div class="keys"><span><b>Esc</b>Back</span></div>
+     .btn             a text row button, dotted underline   <span class="btn"><i class="sq"></i><span class="lab">Start</span></span>  (.on = selected)
+     .dotu            dotted underline on any inline element (.dotu.lime)
+     .dbox            dotted box (corners + dotted edges)   <div class="dbox"></div>
+     .frame           thin hairline frame with a label      <div class="frame"><div class="fl"><span>EO</span><i>0.38 km</i></div></div>
+     .rule            thin horizontal hairline
+     .meter           row of squares (0..n)                 <span class="meter"><i class="f"></i><i></i></span>
+     .lbl             small mono uppercase label
+     .panel           the only allowed backdrop: dark, translucent, no border radius, no shadow */
+
+:root {
+  --bg: #0B0C0A; --ink: #FFFFFF; --lime: #C6F432; --graphite: #2E302C; --coral: #FF6A3D;
+  --dim: rgba(255,255,255,.62); --faint: rgba(255,255,255,.36); --ghost: rgba(255,255,255,.2); --hair: rgba(255,255,255,.14);
+  --panel: rgba(11,12,10,.84);
+  --acc: var(--lime);
+  --sans: 'Geist', 'Segoe UI', sans-serif; --mono: 'Geist Mono', Consolas, monospace;
+}
+
+.mono { font-family: var(--mono); }
+.lime { color: var(--lime); }
+.coral { color: var(--coral); }
+
+.lbl { font: 400 11.5px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+
+/* kick: the film's caption line */
+.kick { display: flex; gap: 12px; align-items: center; font: 400 12.5px/1 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--dim); white-space: nowrap; }
+.kick i { width: 7px; height: 7px; background: var(--acc); flex: none; }
+.kick b { font-weight: 400; color: #fff; }
+
+/* tag: id chip + label + value */
+.tag { display: inline-flex; font: 500 11.5px/1 var(--mono); letter-spacing: .05em; text-transform: uppercase; white-space: nowrap; }
+.tag b { background: #fff; color: #0B0C0A; padding: 5px 7px 4px; font-weight: 500; }
+.tag i { font-style: normal; background: rgba(11,12,10,.86); color: #fff; padding: 5px 8px 4px; }
+.tag .v { font-style: normal; background: rgba(11,12,10,.86); color: var(--lime); padding: 5px 8px 4px; font-variant-numeric: tabular-nums; }
+.tag.lime b { background: var(--lime); }
+.tag.coral b { background: var(--coral); }
+.tag.coral .v { color: var(--coral); }
+.tag.ghost b { background: transparent; color: rgba(255,255,255,.72); box-shadow: inset 0 0 0 1px rgba(255,255,255,.42); }
+.tag.ghost i { color: rgba(255,255,255,.72); }
+.tag.sm { font-size: 10.5px; }
+.tag.sm b, .tag.sm i, .tag.sm .v { padding: 4px 6px 3px; }
+
+/* readout */
+.ro { font: 400 11.5px/1.9 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); font-variant-numeric: tabular-nums; }
+.ro b { font-weight: 400; color: #fff; }
+.ro .l { color: var(--lime); }
+.ro .c { color: var(--coral); }
+
+/* key hint chips */
+.keys { display: flex; gap: 8px; font: 500 11px/1 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); white-space: nowrap; }
+.keys span { display: flex; align-items: center; gap: 8px; padding: 6px 10px 5px 6px; border: 1px solid var(--hair); }
+.keys b { color: #0B0C0A; background: rgba(255,255,255,.78); padding: 3px 5px 2px; font-weight: 500; }
+
+/* dotted underline (the selected menu entry) */
+.dotu { position: relative; }
+.dotu::after { content: ''; position: absolute; left: 0; right: 0; bottom: -9px; height: 3px;
+  background-image: radial-gradient(circle, rgba(255,255,255,.9) 1px, transparent 1.3px); background-size: 6px 3px; background-repeat: repeat-x; }
+.dotu.lime::after { background-image: radial-gradient(circle, var(--lime) 1px, transparent 1.3px); }
+
+/* text row button */
+.btn { position: relative; display: inline-flex; align-items: center; gap: 12px; cursor: pointer; color: rgba(255,255,255,.34); transition: color .15s; }
+.btn .sq { width: 9px; height: 9px; background: var(--lime); transform: scale(0); transition: transform .18s cubic-bezier(.3,1.6,.5,1); flex: none; }
+.btn .lab { position: relative; }
+.btn .lab::after { content: ''; position: absolute; left: 0; right: 0; bottom: -9px; height: 3px;
+  background-image: radial-gradient(circle, rgba(255,255,255,.9) 1px, transparent 1.3px); background-size: 6px 3px; background-repeat: repeat-x;
+  clip-path: inset(0 100% 0 0); transition: clip-path .3s steps(12); }
+.btn.on, .btn:hover { color: #fff; }
+.btn.on .sq { transform: scale(1); }
+.btn.on .lab::after { clip-path: inset(0 0 0 0); }
+
+/* dotted box: four dotted edges, solid corner ticks */
+.dbox { position: relative;
+  background:
+    radial-gradient(circle, rgba(255,255,255,.55) .9px, transparent 1.1px) 0 0 / 5px 3px repeat-x,
+    radial-gradient(circle, rgba(255,255,255,.55) .9px, transparent 1.1px) 0 100% / 5px 3px repeat-x,
+    radial-gradient(circle, rgba(255,255,255,.55) .9px, transparent 1.1px) 0 0 / 3px 5px repeat-y,
+    radial-gradient(circle, rgba(255,255,255,.55) .9px, transparent 1.1px) 100% 0 / 3px 5px repeat-y; }
+.dbox::before, .dbox::after { content: ''; position: absolute; width: 10px; height: 10px; pointer-events: none; }
+.dbox::before { left: 0; top: 0; border-left: 1px solid #fff; border-top: 1px solid #fff; }
+.dbox::after { right: 0; bottom: 0; border-right: 1px solid #fff; border-bottom: 1px solid #fff; }
+
+/* hairline frame with a caption above it (the films' EO inset) */
+.frame { position: relative; outline: 1px solid rgba(255,255,255,.28); }
+.frame .fl { position: absolute; left: 0; right: 0; top: -24px; display: flex; gap: 10px; font: 500 11px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--dim); white-space: nowrap; }
+.frame .fl i { font-style: normal; color: var(--lime); }
+.frame .fl .sp { flex: 1; }
+
+.rule { height: 1px; background: var(--hair); }
+
+/* meter: squares, filled up to the value */
+.meter { display: inline-flex; gap: 5px; align-items: center; }
+.meter i { width: 9px; height: 9px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.3); cursor: pointer; }
+.meter i.f { background: rgba(255,255,255,.8); box-shadow: none; }
+
+.panel { background: var(--panel); }
+
+@keyframes blink { 50% { opacity: 0; } }
+@keyframes typein { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
