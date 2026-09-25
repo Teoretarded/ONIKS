@@ -72,10 +72,9 @@ export default {
       if (!allLand(A, x, z, 2200)) return -Infinity;
       return -roughness(A, x, z, 1400) * 60 - A.h(x, z) / 100;
     }, { stride: 2, seed: 5 });
-    const dep = bestSite(A, (x, z) => {
-      if (!allLand(A, x, z, 1000) || lab[A.idx(x, z)] !== mainland.L || A.coastDist(x, z) < 3000) return -Infinity;
-      return -roughness(A, x, z, 500) * 15 - Math.hypot(x - port.x, z - port.z) / 15000;
-    }, { stride: 2, seed: 7 });
+    // depot: the village at the battery (balance: the coast holds it from the start; 10 km off, behind the port, it
+    // was held now and then and the fleet won 2 matches in 3)
+    const dep = { x: coast.x, z: coast.z };
     const fleet = { x: -20000, z: 62000, r: 6000, hdg: Math.atan2(coast.x + 20000, coast.z - 62000) };   // ~114 km (balance)
     places.push(
       { name: 'Keret', kind: 'town', x: port.x, z: port.z },

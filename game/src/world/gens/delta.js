@@ -93,11 +93,14 @@ export default {
     // spawns ~94 km apart (balance): the battery on the plain by the main channel, the fleet off the north-east shelf
     const coast = { x: 4000, z: -25000, r: 2500, hdg: A.seaward(4000, -25000) };
     const fleet = { x: 60000, z: 50000, r: 6000, hdg: Math.atan2(coast.x - 60000, coast.z - 50000) };
+    // the depot: the village on the plain at the battery (balance: the coast holds it from the start; with the depot
+    // at the apex, 15 km behind, the fleet won 2 matches in 3)
+    const dep = { x: coast.x, z: coast.z };
     places.push(
       { name: 'Ust-Solyonaya', kind: 'town', x: port.x, z: port.z },
       { name: 'Razvilka', kind: 'town', x: apex.x, z: apex.z },
       { name: 'Kamyshino', kind: 'village', ...(bestSite(A, (x, z) => allLand(A, x, z, 600) && A.h(x, z) > 1 ? -Math.hypot(x - at(2, 0.55)[0] - 3000, z - at(2, 0.55)[1]) / 3000 : -Infinity, { stride: 1, box: [-40000, -30000, 0, 5000], edge: 0 }) || { x: -20000, z: -10000 }) },
-      { name: 'Zaplavnoye', kind: 'village', ...(bestSite(A, (x, z) => allLand(A, x, z, 600) && A.h(x, z) > 1 ? -Math.hypot(x - at(9, 0.55)[0] + 3000, z - at(9, 0.55)[1]) / 3000 : -Infinity, { stride: 1, box: [0, -30000, 40000, 5000], edge: 0 }) || { x: 20000, z: -10000 }) },
+      { name: 'Zaplavnoye', kind: 'village', x: dep.x, z: dep.z },
       { name: 'Stepanovka', kind: 'village', x: af.x - 3000, z: af.z - 2500 },
       { name: 'Rukav Glavny', kind: 'channel', x: at(5, 0.5)[0], z: at(5, 0.5)[1], road: false },
       { name: 'Kosa Peschanaya', kind: 'bar', x: lh.x, z: lh.z, road: false },
@@ -106,7 +109,7 @@ export default {
     );
     const objectives = [
       { id: 'OBJ 01', name: 'Port · Ust-Solyonaya', kind: 'port', x: port.x, z: port.z, r: 1000 },
-      { id: 'OBJ 02', name: 'Depot · Razvilka', kind: 'depot', x: apex.x, z: apex.z, r: 900 },
+      { id: 'OBJ 02', name: 'Depot · Zaplavnoye', kind: 'depot', x: dep.x, z: dep.z, r: 900 },
       { id: 'OBJ 03', name: `Radar hill · ${Math.round(rh[2])}`, kind: 'radar_hill', x: rh[0], z: rh[1], r: 900 },
       { id: 'OBJ 04', name: 'Lighthouse · Kosa Peschanaya', kind: 'lighthouse', x: lh.x, z: lh.z, r: 500 },
       { id: 'OBJ 05', name: 'Airfield · Stepanovka', kind: 'airfield', x: af.x, z: af.z, r: 1500 },
@@ -114,7 +117,9 @@ export default {
     return {
       places, objectives,
       spawns: { coast, fleet },
-      replenish: { x: 55000, z: 45000, r: 5000 },
+      // the replenishment point out on the shelf, 40 km short of the fleet's spawn (balance: at the spawn, with the
+      // depot at the battery, the coast won 2 matches in 3)
+      replenish: { x: 30000, z: 22000, r: 5000 },
       pads: [
         { x: coast.x, z: coast.z, r: 450, r1: 1100 },
         { x: rh[0], z: rh[1], r: 200, r1: 500 },

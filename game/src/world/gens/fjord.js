@@ -106,12 +106,6 @@ export default {
     // radar hill: the highest summit within 30 km of the open coast
     let rh = null;
     { let best = -1; for (let k = 0; k < A.P.data.length; k++) { const [x, z] = A.xz(k); if (x < -42000 || x > -8000 || Math.abs(z) > 52000) continue; const h = A.P.data[k]; if (h > best) { best = h; rh = [x, z, h]; } } }
-    // depot: a valley floor inland of the port
-    const dep = bestSite(A, (x, z) => {
-      if (!A.isLand(x, z) || A.coastDist(x, z) < 1200) return -Infinity;
-      const dp = Math.hypot(x - port.x, z - port.z); if (dp < 6000 || dp > 18000) return -Infinity;
-      return -roughness(A, x, z, 500) * 20 - A.h(x, z) / 150;
-    }, { stride: 2, seed: 9 });
     // spawns ~90 km apart (balance): the battery on the mainland between Guba Kamennaya and Dolgaya Guba, where the
     // strandflat climbs to the fjell (not out on the skerries: an island there has no room for a battery and its
     // launch sites), the fleet off the north-west coast
@@ -121,6 +115,9 @@ export default {
       maxCoast: 4500, wantRise: 300, r: 2500,
       score: (x, z) => lab[A.idx(x, z)] !== ML || A.h(x, z) < 15 ? -Infinity : Math.min(A.h(x, z), 90) / 45 - Math.hypot(x + 38000, z + 24000) / 9000,
     }) || { x: -43000, z: -28000, r: 2500, hdg: A.seaward(-43000, -28000) };
+    // depot: the village at the battery (balance: the coast holds it from the start; with the depot out in a valley
+    // 15 km away the fleet won 3 matches in 4 once the opening salvo no longer sank the carrier)
+    const dep = { x: coast.x, z: coast.z };
     const fleet = { x: -64000, z: 58000, r: 6000, hdg: Math.atan2(coast.x + 64000, coast.z - 58000) };
     places.push(
       { name: 'Rybachy', kind: 'town', x: port.x, z: port.z },
@@ -143,7 +140,9 @@ export default {
     return {
       places, objectives,
       spawns: { coast, fleet },
-      replenish: { x: -63000, z: -52000, r: 4500 },
+      // the replenishment point behind the fleet's spawn (balance: down in the south-west the destroyers sailed past
+      // the battery to restock, and with the depot at the battery the coast won 7 matches in 10)
+      replenish: { x: -55000, z: 56000, r: 4500 },
       pads: [
         { x: coast.x, z: coast.z, r: 450, r1: 1100 },
         { x: rh[0], z: rh[1], r: 220, r1: 550 },

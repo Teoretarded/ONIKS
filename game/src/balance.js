@@ -9,12 +9,13 @@
                     stepping in setTimeout chunks so the page stays responsive
      limit=7200     time limit, s (the combat default)
      set=a.b.c:v;…  experiment overrides applied before each match, e.g. set=tel.cost:400;PROJ.oniks.pk:.8
-                    (paths start at UNITS, or at PROJ)
+                    (paths start at UNITS, or at PROJ, or at LEVELS: LEVELS.normal.open:600)
      probe=1        run nothing; use window.__balProbe.emplacement(...) / story(...) from the console
      sp=map:side:x:z;…  experiment spawn override (km), e.g. sp=fjord:fleet:-66:4 (side 'replenish' moves the
                     replenishment point). The map is regenerated with those spawns (pad and roads follow);
-                    quick=1 only moves the spawn points on the stock map. Variants: maps=fjord~a,fjord~b with
-                    sp=fjord~a:coast:…;fjord~b:coast:… run the same map with different spawns side by side
+                    quick=1 only moves the spawn points on the stock map (and objN:x:z moves objective N, 0-based,
+                    quick only). Variants: maps=fjord~a,fjord~b with sp=fjord~a:coast:…;fjord~b:coast:… run the
+                    same map with different spawns side by side
      sets=A|B|…     run every match under each override set (on top of set=); rows are keyed map/k
 
    The same file is the worker: it runs matches it is sent and posts the rows back.
@@ -25,13 +26,24 @@
    command post, the coast wins. A coast radar on high ground that sees the carrier at the start gives a first
    salvo that can end a match in 3 minutes. So each map's spawns were chosen for a moderate spread and 90-115 km,
    and the global numbers only make matches decisive (lower HQ/carrier hp, weaker missile defence) and stop the
-   minute-one carrier kills (radar surface range 90 km). Results move ±10 % between seed ranges; use n >= 32. */
+   minute-one carrier kills (radar surface range 90 km). Results move ±10 % between seed ranges; use n >= 32.
+   Second pass (192 seeds): the coast AI no longer fires at the carrier in the first 5 min (LEVELS.normal.open), which
+   ends the minute-two carrier kills on the fjord and the caldera; the fleet's spawn (its bearing sets how far the
+   battery strings out toward it), the replenishment point (how far the destroyers sail to restock; at the carrier's
+   station the air wing never runs dry) and a depot at the battery (+0.8 SUP/s, it nearly doubles the coast's income)
+   are the per-map levers, and each moves a map by 20-60 points. The DDG's scan reach is the global lever that decides
+   most matches (the fleet finds the battery by scanning where a launch came from); at 50 km the coast wins 8-9 in 10
+   on Krasnaya Kosa and the strait whatever the fleet's spawn, so it stays at 60 km. The row's inc = mean income per
+   side (SUP/s). Prefer the fleet's spawn and the replenishment point: the campaign builds its battery round the
+   coast spawn. */
 import { MAPS, loadMap } from './world/maps.js';
 import { DEF } from './world/defs.js';
 import { generate } from './world/gen.js';
 import { Sim } from './sim/sim.js';
 import { setupBattle } from './sim/setup.js';
+import { spreadOut } from './sim/economy.js';
 import { UNITS, PROJ } from './data/units.js';
+import { LEVELS } from './sim/ai.js';
 
 const IS_WORKER = typeof document === 'undefined';
 const CHUNK = 2000;                      // ticks per chunk on the main thread (then yield)
@@ -46,6 +58,7 @@ function applySet(spec) {
     const keys = path.split('.');
     let root = UNITS;
     if (keys[0] === 'PROJ') { root = PROJ; keys.shift(); }
+    else if (keys[0] === 'LEVELS') { root = LEVELS; keys.shift(); }
     let o = root;
     for (let i = 0; i < keys.length - 1; i++) { o = o[keys[i]]; if (o == null) throw new Error(`set: bad path ${path}`); }
     const k = keys[keys.length - 1];
@@ -57,20 +70,24 @@ function applySet(spec) {
 function undoSet(undo) { for (let i = undo.length - 1; i >= 0; i--) { const [o, k, v] = undo[i]; if (v === undefined) delete o[k]; else o[k] = v; } }
 function spawnFor(map, spec, key) {
   if (!spec) return map;
-  let spawns = null, replenish = null;
+  let spawns = null, replenish = null, objectives = null;
   for (const item of spec.split(';').map(s => s.trim()).filter(Boolean)) {
     const [id, side, xk, zk] = item.split(':');
     if (id !== key) continue;
     if (side === 'replenish') { replenish = { ...map.replenish, x: Number(xk) * 1000, z: Number(zk) * 1000 }; continue; }
+    if (/^obj\d+$/.test(side)) {           // objN: move objective N (0-based) on the stock map (quick=1)
+      objectives = objectives || map.objectives.map(o => ({ ...o }));
+      const o = objectives[+side.slice(3)]; o.x = Number(xk) * 1000; o.z = Number(zk) * 1000; continue;
+    }
     spawns = spawns || { coast: { ...map.spawns.coast }, fleet: { ...map.spawns.fleet } };
     spawns[side].x = Number(xk) * 1000; spawns[side].z = Number(zk) * 1000;
   }
-  if (!spawns && !replenish) return map;
+  if (!spawns && !replenish && !objectives) return map;
   if (spawns) for (const s of ['coast', 'fleet']) {
     const o = spawns[s === 'coast' ? 'fleet' : 'coast'];
     spawns[s].hdg = Math.atan2(o.x - spawns[s].x, o.z - spawns[s].z);
   }
-  return Object.assign({}, map, spawns ? { spawns } : {}, replenish ? { replenish } : {});
+  return Object.assign({}, map, spawns ? { spawns } : {}, replenish ? { replenish } : {}, objectives ? { objectives } : {});
 }
 
 /* A map regenerated with other spawns (so the pad under the coast spawn and the roads to it follow, as they
@@ -134,8 +151,11 @@ async function match(job, yieldFn) {
     : spawnFor(await loadMap(job.map.split('~')[0], IS_WORKER ? { worker: false } : undefined), job.sp, job.map);
   const sim = new Sim(map, { seed: job.seed, fog: true, mode: 'combat', aiSides: ['coast', 'fleet'], difficulty: job.level || 'normal',
     timeLimit: job.limit !== undefined ? job.limit : 7200 });
-  setupBattle(sim);
+  // as the game's combat setup does (game/setup.js createMatch): no two units on one spot
+  const spawned = setupBattle(sim);
+  spreadOut(sim, [...spawned.coast, ...spawned.fleet]);
   const t0 = performance.now();
+  const earn = { coast: 0, fleet: 0, n: 0 };       // mean income (SUP/s) over the match
   const kills = { coast: {}, fleet: {} };          // side -> type -> n (enemy units that side destroyed)
   let firstHit = null;
   const tally = { launch: {}, hit: {}, icpt: {}, aim: {}, on: {} }, seenHq = { coast: null, fleet: null };
@@ -144,6 +164,7 @@ async function match(job, yieldFn) {
   for (let i = 0; i < cap && !sim.result; i++) {
     sim.step();
     if ((i & 63) === 63 || sim.result) {
+      earn.coast += sim.sides.coast.income; earn.fleet += sim.sides.fleet.income; earn.n++;
       for (const e of sim.drainEvents()) {
         if (e.type === 'destroyed') { const k = e.side === 'coast' ? 'fleet' : 'coast', ty = typeOf(sim, e.unit); kills[k][ty] = (kills[k][ty] || 0) + 1; }
         if (e.type === 'hit') { if (firstHit === null) firstHit = e.t; inc(tally.hit, e.kind); inc(tally.on, e.kind + '>' + typeOf(sim, e.target)); }
@@ -162,7 +183,7 @@ async function match(job, yieldFn) {
     firstHit: firstHit === null ? null : +(firstHit / 60).toFixed(1),
     coast: { left: s.sides.coast.units, lost: s.sides.coast.lost, fired: s.sides.coast.fired, sup: s.sides.coast.supply, score: sim.sides.coast.score, value: Math.round(sim.sides.coast.value), by: s.sides.coast.by },
     fleet: { left: s.sides.fleet.units, lost: s.sides.fleet.lost, fired: s.sides.fleet.fired, sup: s.sides.fleet.supply, score: sim.sides.fleet.score, value: Math.round(sim.sides.fleet.value), by: s.sides.fleet.by },
-    kills, tally, seenHq, ms: Math.round(performance.now() - t0),
+    kills, tally, seenHq, inc: { coast: +(earn.coast / (earn.n || 1)).toFixed(2), fleet: +(earn.fleet / (earn.n || 1)).toFixed(2) }, ms: Math.round(performance.now() - t0),
   };
 }
 function typeOf(sim, id) { const u = sim.units.get(id); return u ? u.type : '?'; }
@@ -250,7 +271,7 @@ async function main() {
 function dump(detail) {
   const o = x => Object.entries(x || {}).map(([k, v]) => k + v).join(',');
   return window.__bal.rows.slice().sort((a, b) => a.map.localeCompare(b.map) || a.seed - b.seed).map(r =>
-    `${short(r.map)} ${r.seed} ${r.winner[0]} ${r.reason} ${r.min} | lost ${r.coast.lost}/${r.fleet.lost} sc ${r.coast.score}/${r.fleet.score} seen ${r.seenHq?.coast}/${r.seenHq?.fleet}`
+    `${short(r.map)} ${r.seed} ${r.winner[0]} ${r.reason} ${r.min} | lost ${r.coast.lost}/${r.fleet.lost} sc ${r.coast.score}/${r.fleet.score} seen ${r.seenHq?.coast}/${r.seenHq?.fleet} inc ${r.inc?.coast}/${r.inc?.fleet}`
     + (detail ? ` | C> ${o(r.kills.coast)} F> ${o(r.kills.fleet)} | L ${o(r.tally?.launch)} H ${o(r.tally?.hit)} I ${o(r.tally?.icpt)}` + (detail > 1 ? ` A ${o(r.tally?.aim)} ON ${o(r.tally?.on)}` : '') : '')).join('\n');
 }
 

@@ -68,15 +68,14 @@ export default {
       return -roughness(A, x, z, 400) * 10 - A.h(x, z) / 60 - Math.abs(adiff(th, GAP + 0.9)) * 0.8;
     }, { stride: 1, box: [CX - RIM, CZ - RIM, CX + RIM, CZ + RIM], edge: 0 });
     // the coast spawn: the gentler south-west outer flank, rim crest behind it
-    // spawns ~90 km apart (balance): the battery on the south-west flank, the fleet in the far north-east corner
+    // spawns ~73 km apart (balance): the battery on the south-west flank, the fleet out east, off the gap (from the
+    // north-east corner the coast either sank the carrier in the first two minutes or lost; 3 matches in 4 went to
+    // the fleet)
     const coast = { x: -26000, z: -18000, r: 2500, hdg: A.seaward(-26000, -18000) };
-    // depot on the outer flank, south-east
-    const dep = bestSite(A, (x, z) => {
-      if (!allLand(A, x, z, 900)) return -Infinity;
-      const [r, th] = polar(x, z); if (r < RIM + 2500) return -Infinity;
-      return -roughness(A, x, z, 500) * 20 - Math.abs(adiff(th, 2.3)) * 1.5 - A.h(x, z) / 200;
-    }, { stride: 2, seed: 4 });
-    const fleet = { x: 42000, z: 42000, r: 6000, hdg: Math.atan2(coast.x - 42000, coast.z - 42000) };
+    // depot: the village on the flank at the battery (balance: the coast holds it from the start; out on the
+    // south-east flank it never did, and the fleet won 9 matches in 10 once the opening salvo no longer counted)
+    const dep = { x: coast.x, z: coast.z };
+    const fleet = { x: 45000, z: 0, r: 6000, hdg: Math.atan2(coast.x - 45000, coast.z - 0) };
     places.push(
       { name: 'Kraterny', kind: 'town', x: port.x, z: port.z },
       { name: 'Goryachy Plyazh', kind: 'village', x: dep.x, z: dep.z },
@@ -91,7 +90,9 @@ export default {
     return {
       places, objectives,
       spawns: { coast, fleet },
-      replenish: { x: 43000, z: 43000, r: 4500 },
+      // the replenishment point 12 km north of the fleet's spawn (balance: 40 km off, the coast won 2 in 3; at the
+      // carrier's station the air wing never ran dry and the fleet won them all)
+      replenish: { x: 44000, z: 12000, r: 4500 },
       pads: [
         { x: coast.x, z: coast.z, r: 450, r1: 1100 },
         { x: top[0], z: top[1], r: 200, r1: 500 },
