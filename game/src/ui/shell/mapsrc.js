@@ -9,6 +9,8 @@ const STUB = [
   { id: 'archipelago', name: 'Belye Shkhery', blurb: 'Archipelago · skerries · radar shadow', size: [140000, 140000], weather: 'calm', time: 'day' },
   { id: 'delta', name: 'Ust-Solyonaya', blurb: 'Delta · channels · shallow shelf', size: [130000, 110000], weather: 'haze', time: 'dusk' },
   { id: 'caldera', name: 'Chyortova Past', blurb: 'Caldera · one gap · lagoon', size: [100000, 100000], weather: 'storm', time: 'night' },
+  { id: 'arctic', name: 'Guba Ledyanaya', blurb: 'Sea ice · leads · naval base', size: [120000, 120000], weather: 'haze', time: 'night' },
+  { id: 'harbour', name: 'Bukhta Svetlaya', blurb: 'Harbour city · bridges', size: [120000, 120000], weather: 'calm', time: 'night' },
 ];
 
 /* short display names (true designations) for force lists; units.js labels for anything else */
