@@ -9,8 +9,6 @@ PATH; call it from PowerShell by full path).
 
 ## Working rules (from the user)
 
-- Run agents (and yourself) at **medium effort** to save weekly limits (`.claude/agents/oniks-dev.md`, `oniks-research.md`).
-  Use high/xhigh only for genuinely crucial work.
 - Be brief: no narration; short updates only when something major finishes.
 
 ## Direction (from the user)

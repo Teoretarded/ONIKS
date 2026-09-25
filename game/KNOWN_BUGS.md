@@ -112,3 +112,5 @@ Screenshots of several of these were shared in the chat. Start the next session 
 - Ship wake outline stays long after the ship stops; dark "displacement" discs under ships (and near the F/A-18).
 - **To plan: damage system rework** — how vehicles and their modules look after hits, by what hit them.
 - Requests: "Launch missiles" at a map point from any selected unit that carries them; time rates below x1 ([: 0.5, 0.2).
+- Cinematic camera (director.js, 2026-09-25 rework) is still choppy and not smooth in the user's play: below standard, redo.
+- Balance after the intercept rework: per-map coast wins lopsided (Krasnaya Kosa/Arctic 100%, Fjord/Delta 0-17%), Oniks stopped 68% (target ~45%).
