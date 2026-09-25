@@ -82,6 +82,14 @@ export class Sim {
       reloader: 0, reloadP: 0, reloadU: 0, refillU: 0, wantElev: 0, refillP: {}, eng: 0, lastFire: -1e9, busy: false, depotLoad: false,
       task: null, born: this.t,
       depth: 0, dive: 0, mastUp: 0, propA: 0, sonarT: -1,                  // submarines (sim/subs.js); a listening sonar
+      // fields other modules set later, declared (unset) here so every unit keeps one object layout: property reads
+      // across the sim stay fast (a unit that grows its own fields later forks the layout, and the reads that see many
+      // layouts slow down everywhere). undefined reads exactly as a missing field.
+      mag: undefined, aboardOf: undefined, repaths: undefined, fuelOut: undefined, recovered: undefined, salvo: undefined,
+      vy: undefined, _ax: undefined, _az: undefined, _ah: undefined,
+      cargoN: undefined, cushion: undefined, cushionT: undefined, dockT: undefined, fanA: undefined, idleT: undefined,
+      loadT: undefined, nextWell: undefined, rampB: undefined, rampT: undefined, rud: undefined, slot: undefined,
+      transit: undefined, well: undefined, wellHost: undefined, wellReq: undefined, wellT: undefined, wellUse: undefined,
     };
     for (const w in def.weapons) { u.ammo[w] = def.weapons[w].ammo; u.cooldowns[w] = 0; u.refillP[w] = 0; }
     for (const p of def.partNames) u.parts[p] = 0;

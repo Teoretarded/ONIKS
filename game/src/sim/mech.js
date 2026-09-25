@@ -12,11 +12,18 @@ export const erectW = d => d.erectW || (d.erectW = Object.keys(d.weapons).find(k
 
 const SLEW = 1.6;   // rad/s turret slew
 
+/* the timers a unit has ('scan' and one per weapon, sim.spawn: the same keys for every unit of a type) count down:
+   one small function per type, so each reads its own fixed fields (a loop over keys reads them generically, slowly) */
+function cdStepper(cd) {
+  const ks = Object.keys(cd);
+  if (!ks.every(k => /^[A-Za-z_$][\w$]*$/.test(k))) return c => { for (const k in c) if (c[k] > 0) c[k] -= DT; };
+  try { return new Function('DT', `return c => { ${ks.map(k => `if (c.${k} > 0) c.${k} -= DT;`).join(' ')} }`)(DT); }
+  catch (e) { return c => { for (const k in c) if (c[k] > 0) c[k] -= DT; }; }     // no eval allowed (CSP): the plain loop
+}
+
 export function mechanics(sim, u) {
   const d = u.def, t = sim.t, cd = u.cooldowns;
-  // the timers a unit has: 'scan' and one per weapon (sim.spawn), the same keys for every unit of a type
-  const ks = d._cdKeys || (d._cdKeys = Object.keys(cd));
-  for (let i = 0; i < ks.length; i++) { const k = ks[i]; if (cd[k] > 0) cd[k] -= DT; }
+  (d._cdStep || (d._cdStep = cdStepper(cd)))(cd);
 
   // TEL / Bal: jacks down, then erect (the Bal raises its pack); lower before raising the jacks
   if (d.deploy) {

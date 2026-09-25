@@ -314,7 +314,8 @@ async function fileProfile(BO, warm, secs) {
 /* ---------------------------------------------------------------- hash (determinism proof) */
 /* A deep hash of everything that holds game state: every own field of units, projectiles, bursts, contacts, sides,
    the AI, objectives, weather and scans, at full float precision (the raw bits), plus every event emitted. Keys
-   starting with '_' are caches (skipped); keys are sorted so the proof does not depend on field order. */
+   starting with '_' are caches (skipped), a field holding undefined counts as absent (reads the same), and keys are
+   sorted, so the proof does not depend on how an object's fields are declared. */
 function deepHasher() {
   let h1 = 0x811c9dc5 | 0, h2 = 0x01000193 | 0;
   const f64 = new Float64Array(1), u32 = new Uint32Array(f64.buffer);
@@ -341,7 +342,7 @@ function deepHasher() {
     if (v instanceof Map) { word(13); word(v.size); for (const [k, x] of v) { val(k, depth + 1); val(x, depth + 1); } return; }
     if (v instanceof Set) { word(14); word(v.size); for (const x of v) val(x, depth + 1); return; }
     word(15);
-    const keys = Object.keys(v).filter(k => k[0] !== '_' && !skip.has(k)).sort();
+    const keys = Object.keys(v).filter(k => k[0] !== '_' && !skip.has(k) && v[k] !== undefined).sort();   // undefined = absent
     word(keys.length);
     for (const k of keys) { str(k); val(v[k], depth + 1); }
   }
