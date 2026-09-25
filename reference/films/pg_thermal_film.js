@@ -56,8 +56,9 @@
   /* keys in film time; the last one runs on across the loop's seam into the first (T = 0 falls inside that slew,
      with the hero still out of frame) */
   const K = [];
-  const key = (t, f, fov, e, g) => K.push({ t, f: typeof f === 'function' ? f : Pt(f), fov, e: e || 'ss', g: AGC[g || 'A'] });
-  key(4.0, HERO, 4.6, 'ss', 'A');                             // down off the horizon onto the hero
+  /* gw: the part of the move [u0, u1] over which the AGC settles on the new scene (default the whole move) */
+  const key = (t, f, fov, e, g, gw) => K.push({ t, f: typeof f === 'function' ? f : Pt(f), fov, e: e || 'ss', g: AGC[g || 'A'], gw: gw || [0, 1] });
+  key(4.0, HERO, 4.6, 'ss', 'A', [.62, 1]);                  // down off the horizon onto the hero (AGC as it enters)
   key(12.5, [0, 16, -12], 3.4, 'ss', 'A');                    // push in
   key(17, [0, 20.6, -7.4], 1.7, 'ss', 'S');                   // the uptakes
   key(22, [-1, 23.5, -9], 1.6, 'ss', 'S');
@@ -73,9 +74,10 @@
   key(60.4, GRP, 1.15, 'ss', 'R');                            // four hot points: lock on
   key(63.8, GRP, .95, 'lin', 'R');
   key(66.0, OFF(HERO, .5, 2.4), 9.0, 'q', 'Wb');            // back on the hero, headroom for the launches (66.0, 67.6)
-  key(69.8, OFF(HERO, 2.6, 7.0), 17.5, 'ss', 'W');           // widening with the climbs
-  key(74.4, OFF(HERO, 5.6, 4.6), 15.5, 'ss', 'W');           // the whole picture: ship, arcs, the raid
-  key(78.6, OFF(STOP0, 0, .5), 3.1, 'ss', 'W');              // onto the first meeting point (80.0)
+  key(69.8, OFF(HERO, 2.6, 3.0), 12.0, 'ss', 'W');           // widening with the climbs
+  key(74.4, OFF(HERO, 4.1, 3.8), 14.7, 'ss', 'W');           // the whole picture: ship, arcs, the raid
+  key(76.7, OFF(HERO, 4.4, 3.85), 14.3, 'ss', 'W');          // held through I3's launch (75.6)
+  key(78.9, OFF(STOP0, 0, .5), 3.1, 'ss', 'W');              // onto the first meeting point (80.0)
   key(81.3, OFF(STOP0, 0, .4), 3.1, 'ss', 'W');
   key(82.8, OFF(STOP1, 0, .4), 3.1, 'ss', 'W');              // the second (83.2)
   key(84.6, OFF(STOP1, 0, .4), 3.1, 'ss', 'W');
@@ -92,8 +94,8 @@
   key(123, [0, 16, -44], 3.0, 'ss', 'A');                     // the aft half
   key(127.2, [0, 15.4, -47.5], 1.5, 'ss', 'A2');             // the aft Phalanx back to stow (127.5-131.5)
   key(131.8, [0, 15.2, -48], 1.45, 'ss', 'A2');
-  key(137, [-14, 75, -100], 2.8, 'ss', 'A');                  // up the exhaust as it trails away
-  key(142.5, SK(BH + 3, 3.2), 5.2, 'ss', 'K');                // into the night sky: the cloud deck
+  key(137, OFF(HERO, .2, .9), 2.8, 'ss', 'A');                // up the exhaust as it trails away
+  key(142.5, SK(BH - 1.5, 3.2), 5.2, 'ss', 'K');              // into the night sky: the cloud deck
   key(148.5, SK(BH - 14, 2.2), 5.6, 'lin', 'K');              // along it
   key(153.5, HZ(BH - 20, .5), 4.0, 'ss', 'Hz');               // down to the horizon, and on across the seam
   const q5 = u => u * u * u * (u * (u * 6 - 15) + 10);
@@ -111,7 +113,8 @@
     const da = V.norm(V.sub(a.f(T), EYE)), db = V.norm(V.sub(b.f(T), EYE));
     let dir = slerpDir(da, db, e);
     const fov = Math.exp(Math.log(a.fov) + (Math.log(b.fov) - Math.log(a.fov)) * e);
-    SENS.lo = a.g[0] + (b.g[0] - a.g[0]) * e; SENS.hi = a.g[1] + (b.g[1] - a.g[1]) * e; SENS.fov = fov;
+    const ge = ss(b.gw[0], b.gw[1], e);
+    SENS.lo = a.g[0] + (b.g[0] - a.g[0]) * ge; SENS.hi = a.g[1] + (b.g[1] - a.g[1]) * ge; SENS.fov = fov;
     // the stabiliser's residual: a few microradians (whole cycles per film)
     const rt = V.norm(V.cross([0, 1, 0], dir)), up = V.cross(dir, rt);
     const jx = 1.1e-5 * (Math.sin(TAU * 37 * T / D) + .6 * Math.sin(TAU * 83 * T / D + 1)), jy = 1.1e-5 * (Math.sin(TAU * 29 * T / D + 2) + .5 * Math.sin(TAU * 71 * T / D));
