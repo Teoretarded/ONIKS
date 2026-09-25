@@ -165,7 +165,9 @@ export default {
     return {
       places, objectives,
       spawns: { coast, fleet },
-      replenish: { x: 5000, z: 66000, r: 5000 },
+      // the replenishment point ~21 km north-east of the fleet's spawn (balance, collision hit model, 48 seeds: at (5, 66)
+      // km, 28 km off, the coast won 65-67 %; here 48 %)
+      replenish: { x: -3000, z: 65000, r: 5000 },
       pads: [
         { x: coast.x, z: coast.z, r: 450, r1: 1100 },
         { x: rh[0], z: rh[1], r: 220, r1: 550 },

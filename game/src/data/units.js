@@ -31,7 +31,7 @@ export const UNITS = {
     type: 'hq', side: 'coast', name: 'K380R', cls: 'HQ', label: 'K380R command post · Bastion-P',
     domain: 'land', model: 'hq', hq: true, static: true,
     size: [28, 28, 4], top: 18.6, speed: 0, road: 0, turn: 0,          // site: two shelter trucks, comms, 18 m mast
-    hp: 140, rcs: 0.5, dieTime: 20,                               // balance: 150 -> 80 -> 140 (four TLAM hits: the coast AI presses now)
+    hp: 135, rcs: 0.5, dieTime: 20,                               // balance: 150 -> 80 -> 140 -> 135 (three TLAM hits under the collision model)
     sensors: { esm: 120000 },
     emits: { range: 70000, fix: .3 },                             // comms: always radiating; in bursts, slow to cross-fix (x.3)
     scan: { reach: 50000, r: 4000, cd: 90 },
@@ -115,7 +115,7 @@ export const UNITS = {
       sam: { proj: 'sam', ammo: 12, range: 18000, min: 1000, cd: 2.0, vs: ['missile', 'air'], auto: true, maxEng: 2, maxShots: 3, needsRadar: true,
              muzzle: [1.3, 3.6, .5], refill: 50 },
       gun30: { gun: true, ammo: 28, range: 4000, cd: 1.0, vs: ['missile', 'air'], auto: true, needsRadar: true,
-               v0: 960, rpm: 5000, rounds: 24, disp: .0028, drag: 1.6e-4, dmgR: .15, muzzle: [0, 3.4, 2.2], burst: 1.0, refill: 10 },
+               v0: 960, rpm: 5000, rounds: 24, disp: .0022, drag: 1.6e-4, dmgR: .15, muzzle: [0, 3.4, 2.2], burst: 1.0, refill: 10 },   // balance: disp .0028 -> .0022
     },
     cost: 380, buildTime: 80,
     parts: {
@@ -312,7 +312,7 @@ export const UNITS = {
     mot: { mass: 101600, td: 4.5, yawT: 1.5, rollT: 21, heelK: 3.2, beam: 40.8,   // Nimitz: 101,600 t, tactical diameter ~4.5 lengths
          cat: [[-12.6, -24.8], [-27.3, 68]],                          // waist catapult 3 (deck frame x starboard, z bow): 94 m
          trap: { td: [-6.5, -87.4], ang: -.157, roll: 90 }, spot: [-8, -120] },   // wires on the 9 deg angled deck, 90 m roll-out; helo spot
-    hp: 300, rcs: 1.6, dieTime: 60,                               // balance: 400 -> 300 (four Oniks hits)
+    hp: 400, rcs: 1.6, dieTime: 60,                               // balance: 400 -> 300 -> 400 (five Oniks hits under the collision model)
     sensors: { radar: { surf: 45000, air: 110000, land: .3, period: 4, gain: .15, h: 45 } },
     emits: { range: 150000 },
     air: { cap: 12, launchGap: 20, deckY: 19.5, types: ['fighter', 'helo', 'aew'] },   // launches F/A-18E, MH-60R and E-2D
@@ -320,8 +320,8 @@ export const UNITS = {
     weapons: {
       pdms: { proj: 'pdms', ammo: 16, range: 15000, min: 1000, cd: 2.0, vs: ['missile', 'air'], auto: true, maxEng: 2, maxShots: 4,
               muzzle: [30, 21, -140], vert: false, refill: 30 },
-      ciws: { gun: true, ammo: 60, range: 2000, cd: 1.0, vs: ['missile', 'air'], auto: true,
-              v0: 1100, rpm: 4500, rounds: 24, disp: .0022, drag: 2.2e-4, dmgR: .15, muzzle: [-34, 20, 120], burst: .9, refill: 8 },
+      ciws: { gun: true, ammo: 60, range: 2000, cd: 2.5, vs: ['missile', 'air'], auto: true,   // balance: cd 1.0 -> 2.5, disp .0022 -> .007
+              v0: 1100, rpm: 4500, rounds: 24, disp: .007, drag: 2.2e-4, dmgR: .15, muzzle: [-34, 20, 120], burst: .9, refill: 8 },
     },
     cost: 0, buildTime: 0,
     parts: {
@@ -357,8 +357,8 @@ export const UNITS = {
       strike: { proj: 'tlam', ammo: 8, range: 120000, min: 10000, cd: 2.0, vs: ['land'], salvo: 2, vls: true, refill: 30 },
       gun5: { proj: 'shell', ammo: 300, range: 24000, min: 1500, cd: 3.0, vs: ['land', 'sea'], salvo: 6,
               muzzle: [0, 9, 60], refill: 2 },
-      ciws: { gun: true, ammo: 40, range: 2000, cd: 1.0, vs: ['missile', 'air'], auto: true, mounts: ['ciwsF', 'ciwsA'],
-              v0: 1100, rpm: 4500, rounds: 24, disp: .0022, drag: 2.2e-4, dmgR: .15, burst: .9, refill: 8 },
+      ciws: { gun: true, ammo: 40, range: 2000, cd: 2.5, vs: ['missile', 'air'], auto: true, mounts: ['ciwsF', 'ciwsA'],   // balance: cd 1.0 -> 2.5, disp .0022 -> .007
+              v0: 1100, rpm: 4500, rounds: 24, disp: .007, drag: 2.2e-4, dmgR: .15, burst: .9, refill: 8 },
       svtt: { proj: 'mk54', ammo: 6, range: 8000, min: 500, cd: 6, vs: ['sub'], salvo: 1, muzzle: [4.6, 3.2, -14], refill: 30 },   // Mk 32 tubes ×2
     },
     cost: 1400, buildTime: 240,
@@ -465,7 +465,9 @@ export const UNITS = {
     // AN/APY-9: the rotodome turns once in 10 s (the sweep period); game-scaled reach over the horizon
     // over land it looks down: parked vehicles to .45 of the surface range, moving ones (gmti) to .7, slowly (landGain:
     // ~5 min to classify a parked launcher 25 km off); a paint holds a contact 40 s (hold: the dome turns in 10 s and
-    // misses some paints far out). esm: AN/ALQ-217, the best listener: hears emitters 1.3x farther than their range
+    // misses some paints far out). esm: AN/ALQ-217, the best listener: hears emitters 1.3x farther than their range,
+    // so it fixes the command post (comms 70 km) from outside the SAM cover (balance note: the archipelago's coast
+    // wins 29 % with it at 1.3, 32 % at 1, 38 % at .7, 54 % at .5; below 1 a player's E-2D cannot hear the HQ safely)
     sensors: { radar: { surf: 110000, air: 140000, land: .45, gmti: .7, landGain: .25, hold: 40, period: 10, gain: .14, h: 0, skim: .45 },
                esm: { gain: .005, reach: 1.3 } },
     emits: { range: 200000 },
@@ -548,8 +550,8 @@ export const UNITS = {
     weapons: {
       pdms: { proj: 'pdms', ammo: 16, range: 15000, min: 1000, cd: 2.0, vs: ['missile', 'air'], auto: true, maxEng: 2, maxShots: 4,
               muzzle: [12, 17, 105], vert: false, refill: 30 },
-      ciws: { gun: true, ammo: 50, range: 2000, cd: 1.0, vs: ['missile', 'air'], auto: true,
-              v0: 1100, rpm: 4500, rounds: 24, disp: .0022, drag: 2.2e-4, dmgR: .15, muzzle: [13, 24, 10], burst: .9, refill: 8 },
+      ciws: { gun: true, ammo: 50, range: 2000, cd: 2.5, vs: ['missile', 'air'], auto: true,   // balance: cd 1.0 -> 2.5, disp .0022 -> .007
+              v0: 1100, rpm: 4500, rounds: 24, disp: .007, drag: 2.2e-4, dmgR: .15, muzzle: [13, 24, 10], burst: .9, refill: 8 },
     },
     cost: 1500, buildTime: 360,
     // (part names = the model's, so hits tint the right parts)
@@ -655,11 +657,11 @@ export const PROJ = {
   hellfire: { name: 'AGM-114 Hellfire', cls: 'ATGM', model: 'hellfire', mode: 'direct', threat: true, speed: 400, dmg: 25, reach: 400,
               rcs: .03, vert: 0, v0: 0, boost: 2.5, turn: .6, pitchRate: .6, body: [1.63, .178, 45], sig0: .6, sigR: .0002, tough: 1 },
   sm6: { name: 'RIM-174 SM-6', cls: 'SAM', model: 'sm6', boosterModel: 'mk72', mode: 'direct', speed: 1100, dmg: 15,
-         vert: 2.0, v0: 20, boost: 6, sepAt: 6, turn: .35, pitchRate: .28, gMax: 300, body: [6.55, .34, 1500], burst: 8, sig0: 16, sigR: .0008 },
+         vert: 2.0, v0: 20, boost: 6, sepAt: 6, turn: .35, pitchRate: .28, gMax: 300, body: [6.55, .34, 1500], burst: 8, sig0: 14, sigR: .0008 },   // balance: sig0 16 -> 14
   pdms: { name: 'RIM-162 ESSM', cls: 'SAM', model: 'essm', mode: 'direct', speed: 1000, dmg: 12,
-          vert: 1.0, v0: 20, boost: 3, turn: .5, pitchRate: .45, gMax: 400, body: [3.66, .254, 280], burst: 7, sig0: 16, sigR: .0008 },
+          vert: 1.0, v0: 20, boost: 3, turn: .5, pitchRate: .45, gMax: 400, body: [3.66, .254, 280], burst: 7, sig0: 34, sigR: .0008 },   // balance: sig0 16 -> 34
   sam: { name: '57E6', cls: 'SAM', model: 'sam57e6', mode: 'direct', speed: 900, dmg: 12,
-         vert: 0, v0: 60, boost: 2.4, sepAt: 2.4, turn: .6, pitchRate: .6, gMax: 350, body: [3.2, .17, 90], burst: 5, sig0: 10, sigR: .0006 },
+         vert: 0, v0: 60, boost: 2.4, sepAt: 2.4, turn: .6, pitchRate: .6, gMax: 350, body: [3.2, .17, 90], burst: 5, sig0: 7, sigR: .0006 },   // balance: sig0 10 -> 7
   aam: { name: 'AIM-120D', cls: 'AAM', model: 'aim120', mode: 'direct', speed: 1200, dmg: 15,
          vert: 0, v0: 0, boost: 3, turn: .5, pitchRate: .5, gMax: 400, body: [3.66, .178, 152], burst: 7, sig0: 6, sigR: .0003 },
   shell: { name: '5"/62 round', cls: 'SHELL', model: 'shell', mode: 'ballistic', speed: 810, dmg: 6, sigma: 40, body: [.66, .127, 32], blast: 10 },

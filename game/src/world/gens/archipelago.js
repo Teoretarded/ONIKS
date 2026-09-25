@@ -75,7 +75,11 @@ export default {
     // depot: the village at the battery (balance: the coast holds it from the start; 10 km off, behind the port, it
     // was held now and then and the fleet won 2 matches in 3)
     const dep = { x: coast.x, z: coast.z };
-    const fleet = { x: -20000, z: 62000, r: 6000, hdg: Math.atan2(coast.x + 20000, coast.z - 62000) };   // ~114 km (balance)
+    // ~122 km (balance; collision hit model and E-2D ESM, 24-40 seeds: from (-20, 62) km, the battery set out facing
+    // the open sea to the north-east, the fleet cross-fixed the command post in ~7 min and the coast won 25-31 %; the
+    // battery facing the fleet's bearing instead, (-40, 62) 38 %, (-30, 65) 42 %)
+    const fleet = { x: -30000, z: 65000, r: 6000, hdg: Math.atan2(coast.x + 30000, coast.z - 65000) };
+    coast.hdg = Math.atan2(fleet.x - coast.x, fleet.z - coast.z);
     places.push(
       { name: 'Keret', kind: 'town', x: port.x, z: port.z },
       { name: 'Shkhernoye', kind: 'village', x: dep.x, z: dep.z },

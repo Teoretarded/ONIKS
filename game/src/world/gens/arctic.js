@@ -123,8 +123,10 @@ export default {
     }) || { x: -26000, z: -18000, r: 2500, hdg: A.seaward(-26000, -18000) };
     // the depot: the village at the battery (the coast holds it from the start; see balance.js)
     const dep = { x: coast.x, z: coast.z };
-    // the fleet in open water north of the ice, ~95 km off
-    const fleet = fleetSpawn(A, 30000, 51000, 5000, [coast.x, coast.z], { clear: 8000, depth: -120 });
+    // the fleet in open water north of the ice, ~98 km off (balance, collision hit model, 24-48 seeds: from (30, 51) km
+    // its destroyers started inside the battery's reach and the coast won 92-94 %; from (33, 53) 83 %; (40, 56) 46 % but
+    // a 25 min median; here 56 %, median 33 min)
+    const fleet = fleetSpawn(A, 38000, 55000, 5000, [coast.x, coast.z], { clear: 8000, depth: -120 });
     // radar hill: the highest ground within reach of the battery and the sea
     let rh = null;
     { let best = -1; for (let k = 0; k < A.P.data.length; k++) { const [x, z] = A.xz(k); if (x < -50000 || x > -5000 || z < -42000 || z > -6000) continue; if (A.coastDist(x, z) > 14000) continue; const h = A.P.data[k]; if (h > best) { best = h; rh = [x, z, h]; } } }

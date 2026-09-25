@@ -2,7 +2,7 @@
    DOM-free (imported by the Worker too). */
 
 // bump whenever a change in world/ changes what the generators produce (invalidates the IndexedDB cache)
-export const GEN_VERSION = 'w20';
+export const GEN_VERSION = 'w26';
 
 export const DEFS = [
   {

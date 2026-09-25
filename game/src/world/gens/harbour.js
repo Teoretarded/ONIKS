@@ -109,12 +109,12 @@ export default {
     // the battery: among the blocks of Zarechye on the estuary's north bank, the city's north-west edge under the ridge
     // (balance, 12-16 seeds each: on the bay's west shore in the city the fleet won 16 in 16, its destroyers' scans
     // reaching it from the sea off the mouth; 3 km short of the estuary's end the coast won 4 in 16; here, at its end,
-    // ~105 km from the fleet, 7 in 12)
-    const coast = coastSpawn(A, [-20000, 19000, -14000, 24000], {
-      maxCoast: 5000, wantRise: 200, r: 2400,
-      score: (x, z) => A.h(x, z) < 8 ? -Infinity : -Math.hypot(x + 17000, z - 21000) / 1500,
-    }) || { x: -17000, z: 21000, r: 2400, hdg: A.seaward(-17000, 21000) };
-    const dep = { x: coast.x, z: coast.z };
+    // ~105 km from the fleet, 7 in 12. Collision hit model, 24-40 seeds: battery and depot in Zarechye at the end, (-18,
+    // 19.5) km, the coast won 81-88 %; the battery 6 km east on the north bank, (-12, 20.5), the depot left in
+    // Zarechye, 45 %)
+    const zar = { x: -18000, z: 19500 };                          // Zarechye: the village at the estuary's end
+    const coast = { x: -12000, z: 20500, r: 2400, hdg: A.seaward(-12000, 20500) };
+    const dep = { x: zar.x, z: zar.z };
     // the fleet off the south-east, ~90 km out; its replenishment point 13 km west of its station
     const fleet = fleetSpawn(A, 54000, -56500, 4000, [coast.x, coast.z], { clear: 8000, depth: -150 });
     // the city's districts (the landmarks build the city from these): centre, blocks of flats on the hills, private
@@ -134,12 +134,12 @@ export default {
       { name: 'Gornostay', kind: 'private', x: -10000, z: -15500, a: 2000, b: 1300, rot: .5 },
       { name: 'Portovy', kind: 'industrial', x: -9200, z: -8200, a: 1500, b: 1400, rot: TERM.rot },
       { name: 'Sudoverf', kind: 'industrial', x: 12400, z: 8900, a: 1300, b: 900, rot: .6 },
-      { name: 'Zarechye', kind: 'mikro', x: coast.x + 300, z: coast.z - 700, a: 2400, b: 1500, rot: -.45 },
+      { name: 'Zarechye', kind: 'mikro', x: zar.x + 300, z: zar.z - 700, a: 2400, b: 1500, rot: -.45 },
     ];
 
     places.push(
       { name: 'Svetlomorsk', kind: 'town', x: 1500, z: 8500, road: true },
-      { name: 'Zarechye', kind: 'village', x: coast.x, z: coast.z },
+      { name: 'Zarechye', kind: 'village', x: zar.x, z: zar.z },
       { name: 'Aeroport Svetlomorsk', kind: 'village', x: af.x + 2800, z: af.z + 1500 },
     );
     const objectives = [

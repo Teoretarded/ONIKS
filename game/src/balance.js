@@ -1,6 +1,8 @@
 /* ONIKS balance runner (game/balance.html): headless AI-vs-AI matches on every map, several seeds each, as fast
    as the machine allows. Prints one row per match (map, seed, winner, reason, sim minutes) and per map the win
-   rate and the median length; a summary goes into document.title and window.__bal.
+   rate and the median length, and per projectile kind what became of the rounds fired (stopped: broken up, knocked
+   out of control or splashed short; landed; missed) with who stopped them; a summary goes into document.title and
+   window.__bal (summary.fates, summary.stopBy).
 
    URL params
      n=4            seeds per map                   seed=1     first seed (seeds seed .. seed+n-1)
@@ -35,7 +37,15 @@
    most matches (the fleet finds the battery by scanning where a launch came from); at 50 km the coast wins 8-9 in 10
    on Krasnaya Kosa and the strait whatever the fleet's spawn, so it stays at 60 km. The row's inc = mean income per
    side (SUP/s). Prefer the fleet's spawn and the replenishment point: the campaign builds its battery round the
-   coast spawn. */
+   coast spawn.
+   Third pass (collision hit model, 24-48 seeds a map): the stopped shares per round kind (the fate table) are set by
+   the defences' track error (sig0) and the guns' dispersion and burst interval; the Phalanx is speed-sensitive (a
+   subsonic round crosses its 2 km in 7 s, the 3M55 in under 3), so slow rounds are stopped more than fast ones whatever
+   its numbers; ESSM was the layer that hit the Kh-35 hardest. HQ and carrier hp are counted in hits (135 = three TLAM,
+   400 = five Oniks). The Kornet-EMs holding a port objective raise the coast's income (3 SUP/s on the arctic). sp=
+   variants are not faithful for everything: quick=1 turns the battery to face the fleet (the archipelago moved 15
+   points on that alone) and a regenerated variant keeps the objectives (the depot) where the layout put them and lacks
+   the map's extras (sea ice); confirm a spawn by editing the gens and bumping GEN_VERSION. */
 import { MAPS, loadMap } from './world/maps.js';
 import { DEF } from './world/defs.js';
 import { generate } from './world/gen.js';
@@ -158,8 +168,13 @@ async function match(job, yieldFn) {
   const earn = { coast: 0, fleet: 0, n: 0 };       // mean income (SUP/s) over the match
   const kills = { coast: {}, fleet: {} };          // side -> type -> n (enemy units that side destroyed)
   let firstHit = null;
-  const tally = { launch: {}, hit: {}, icpt: {}, aim: {}, on: {} }, seenHq = { coast: null, fleet: null };
+  const tally = { launch: {}, hit: {}, icpt: {}, aim: {}, on: {}, stopBy: {} }, seenHq = { coast: null, fleet: null };
   const inc = (o, k) => { o[k] = (o[k] || 0) + 1; };
+  // the fate of every round launched (proj id -> { k: kind, f }): f 'open' (still flying at the end), 'icpt' (broken up
+  // by an interceptor or guns), 'spin' (knocked out of control, came down), 'short' (splashed short), 'hit', 'spinhit'
+  // (tumbling, fell on its target), 'miss' (any other splash: wide, over, lost, terrain, ...)
+  const fate = new Map();
+  const setF = (id, f, force) => { const r = fate.get(id); if (r && (force || r.f === 'open')) r.f = f; };
   const cap = ((job.limit || 7200) + 30) * 20;
   for (let i = 0; i < cap && !sim.result; i++) {
     sim.step();
@@ -167,13 +182,26 @@ async function match(job, yieldFn) {
       earn.coast += sim.sides.coast.income; earn.fleet += sim.sides.fleet.income; earn.n++;
       for (const e of sim.drainEvents()) {
         if (e.type === 'destroyed') { const k = e.side === 'coast' ? 'fleet' : 'coast', ty = typeOf(sim, e.unit); kills[k][ty] = (kills[k][ty] || 0) + 1; }
-        if (e.type === 'hit') { if (firstHit === null) firstHit = e.t; inc(tally.hit, e.kind); inc(tally.on, e.kind + '>' + typeOf(sim, e.target)); }
-        else if (e.type === 'launch') { inc(tally.launch, e.kind); if (e.tk === 'unit' && e.kind !== 'shell') inc(tally.aim, e.kind + '>' + typeOf(sim, e.target)); }
-        else if (e.type === 'intercept') inc(tally.icpt, e.kind);
+        if (e.type === 'hit') {
+          if (firstHit === null) firstHit = e.t; inc(tally.hit, e.kind); inc(tally.on, e.kind + '>' + typeOf(sim, e.target));
+          const r = e.proj != null && fate.get(e.proj); if (r && (r.f === 'open' || r.f === 'spin')) r.f = e.spin ? 'spinhit' : 'hit';
+        }
+        else if (e.type === 'launch') { inc(tally.launch, e.kind); if (e.tk === 'unit' && e.kind !== 'shell') inc(tally.aim, e.kind + '>' + typeOf(sim, e.target)); if (e.proj != null) fate.set(e.proj, { k: e.kind, f: 'open' }); }
+        else if (e.type === 'intercept') { inc(tally.icpt, e.kind); inc(tally.stopBy, e.kind + '<' + (e.byKind || '?')); setF(e.proj, 'icpt', true); }
+        else if (e.type === 'spinout') { inc(tally.stopBy, e.kind + '<' + (e.byKind || '?') + '~'); setF(e.proj, 'spin'); }
+        else if (e.type === 'splash' && e.proj != null) {
+          const r = fate.get(e.proj);
+          if (r && r.f === 'open') { r.f = e.why === 'short' ? 'short' : e.why === 'spinout' ? 'spin' : 'miss'; if (r.f === 'miss') r.w = e.why; }
+        }
         else if (e.type === 'classify' && (e.cls === 'HQ' || e.cls === 'CVN') && seenHq[e.side] === null) seenHq[e.side] = +(e.t / 60).toFixed(1);
       }
     }
     if (yieldFn && i % CHUNK === CHUNK - 1) await yieldFn();
+  }
+  const fates = {};                                // kind -> { n, open, icpt, spin, short, hit, spinhit, miss, 'm:why' }
+  for (const r of fate.values()) {
+    const o = fates[r.k] || (fates[r.k] = { n: 0 }); o.n++; o[r.f] = (o[r.f] || 0) + 1;
+    if (r.w) o['m:' + r.w] = (o['m:' + r.w] || 0) + 1;
   }
   const s = sim.summary(), sp = map.spawns;
   const r = sim.result || { winner: '-', reason: 'none', t: sim.t };
@@ -183,7 +211,7 @@ async function match(job, yieldFn) {
     firstHit: firstHit === null ? null : +(firstHit / 60).toFixed(1),
     coast: { left: s.sides.coast.units, lost: s.sides.coast.lost, fired: s.sides.coast.fired, sup: s.sides.coast.supply, score: sim.sides.coast.score, value: Math.round(sim.sides.coast.value), by: s.sides.coast.by },
     fleet: { left: s.sides.fleet.units, lost: s.sides.fleet.lost, fired: s.sides.fleet.fired, sup: s.sides.fleet.supply, score: sim.sides.fleet.score, value: Math.round(sim.sides.fleet.value), by: s.sides.fleet.by },
-    kills, tally, seenHq, inc: { coast: +(earn.coast / (earn.n || 1)).toFixed(2), fleet: +(earn.fleet / (earn.n || 1)).toFixed(2) }, ms: Math.round(performance.now() - t0),
+    kills, tally, fates, seenHq, inc: { coast: +(earn.coast / (earn.n || 1)).toFixed(2), fleet: +(earn.fleet / (earn.n || 1)).toFixed(2) }, ms: Math.round(performance.now() - t0),
   };
 }
 function typeOf(sim, id) { const u = sim.units.get(id); return u ? u.type : '?'; }
@@ -298,7 +326,43 @@ function summarise(rows, ids) {
   const all = rows.filter(r => r.winner !== 'ERR');
   const ca = all.filter(r => r.winner === 'coast').length;
   lines.push(`${'all'.padEnd(16)} ${String(all.length).padStart(5)}  ${(100 * ca / (all.length || 1)).toFixed(0).padStart(5)}%  ${(100 * (all.length - ca) / (all.length || 1)).toFixed(0).padStart(5)}%  ${median(all.map(r => r.min)).toFixed(1).padStart(10)}`);
-  return { per, text: lines.join('\n'), short: short.join(' | ') };
+  const RF = roundFates(all, 'rounds (all)');
+  lines.push('', ...RF.lines);
+  // sets=: the strike rounds' stopped shares per override set
+  const setIdx = [...new Set(ids.filter(id => id.includes('/')).map(id => id.split('/').pop()))];
+  const bySet = {};
+  for (const si of setIdx) {
+    const S = roundFates(all.filter(r => r.map.endsWith('/' + si)), `set ${si}`, true);
+    const R = all.filter(r => r.map.endsWith('/' + si)), c = R.filter(r => r.winner === 'coast').length;
+    bySet[si] = { fates: S.fates, coast: c / (R.length || 1), median: median(R.map(r => r.min)) };
+    lines.push(`set ${si}: coast ${(100 * c / (R.length || 1)).toFixed(0)}% of ${R.length}, median ${median(R.map(r => r.min)).toFixed(0)} min · stopped `
+      + ['oniks', 'tlam', 'slam', 'uran', 'kalibr'].filter(k => S.fates[k]).map(k => `${k} ${(100 * S.fates[k].stopped).toFixed(0)}% (${S.fates[k].resolved})`).join(' '));
+  }
+  return { per, fates: RF.fates, stopBy: RF.by, bySet, text: lines.join('\n'), short: short.join(' | ') };
+}
+
+/* rounds by fate: stopped = broken up (icpt) + knocked out of control and down (spin) + splashed short; landed = hit +
+   spinhit (tumbling onto its target); shares of the rounds resolved (fired less those still flying at the end) */
+function roundFates(rows, title, quiet) {
+  const F = {}, by = {};
+  for (const r of rows) {
+    for (const [k, o] of Object.entries(r.fates || {})) { const a = F[k] || (F[k] = {}); for (const [f, v] of Object.entries(o)) a[f] = (a[f] || 0) + v; }
+    for (const [k, v] of Object.entries(r.tally?.stopBy || {})) by[k] = (by[k] || 0) + v;
+  }
+  const fates = {}, lines = [`${title.padEnd(16)} fired  stopped (icpt spin short)  landed (spinhit)  missed  open`];
+  const pc = (v, n) => (100 * (v || 0) / (n || 1)).toFixed(0);
+  for (const k of ['oniks', 'tlam', 'slam', 'uran', 'kalibr', 'hellfire', 'kornet', 'shell', 'sm6', 'pdms', 'sam', 'aam', 'mk48', 'mk54', 't53']) {
+    const a = F[k]; if (!a) continue;
+    const n = a.n - (a.open || 0), st = (a.icpt || 0) + (a.spin || 0) + (a.short || 0), ld = (a.hit || 0) + (a.spinhit || 0);
+    fates[k] = { fired: a.n, resolved: n, stopped: st / (n || 1), landed: ld / (n || 1), icpt: a.icpt || 0, spin: a.spin || 0, short: a.short || 0, hit: a.hit || 0, spinhit: a.spinhit || 0, miss: a.miss || 0, open: a.open || 0 };
+    if (quiet) continue;
+    const why = Object.keys(a).filter(w => w.startsWith('m:')).sort((x, y) => a[y] - a[x]).map(w => `${w.slice(2)} ${pc(a[w], n)}`).join(' ');
+    lines.push(`${k.padEnd(16)} ${String(a.n).padStart(5)}  ${pc(st, n).padStart(6)}% (${pc(a.icpt, n)} ${pc(a.spin, n)} ${pc(a.short, n)})`.padEnd(44)
+      + `${pc(ld, n).padStart(6)}% (${pc(a.spinhit, n)})`.padEnd(18) + `${pc(a.miss, n).padStart(6)}%  ${String(a.open || 0).padStart(4)}${why ? '  miss: ' + why : ''}`);
+  }
+  const byTxt = Object.entries(by).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(' · ');
+  if (byTxt && !quiet) lines.push('stopped by (round<by, ~ = out of control): ' + byTxt);
+  return { fates, by, lines };
 }
 
 /* ---------------------------------------------------------------- probes (console) */
