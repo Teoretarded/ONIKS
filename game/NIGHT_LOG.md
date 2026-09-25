@@ -389,3 +389,9 @@ ACV-1.1s ashore, then return for more. Landed vehicles capture objectives, and h
 command post for 120 s overruns it: a second way for the fleet to win. The coast gets Kornet-EM teams on Tigr-M
 trucks whose launchers rise through the roof. Keys: T Land / Unload / Dock / Board (fleet). 3 new tests pass.
 Balance is off right now (the new collision hits stop ~87% of Oniks); the balance pass is on it.
+
+## 13:55 · After the limit
+Every agent was cut off at the 5-hour limit around 13:40; after the reset they were all resumed with their context:
+physics, rigid-body break-ups, the hit-model balance pass, the 60 fps guard, the two new maps, fleet sensing, the
+model detail pass and world detail. The two cloud routines (four new units; sim performance + Node harness) were
+re-fired now that the Claude GitHub app has write access, so they can push `cloud/units3` and `cloud/simperf`.
