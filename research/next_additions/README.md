@@ -3,8 +3,11 @@
 Candidate real, modern systems for the coastal RTS (Russian-style coastal defence vs. US carrier group,
 ~170x140 km coast). Public, encyclopaedic facts only — game-catalogue framing, no tactics or weapon internals.
 
-Twenty folders below carry full detail (`README.md` + `images/`); the rest are catalogued here only, pending a
-future pass. Every "High" map-fit candidate now has a folder; "Med" fit is next when time allows.
+Twenty-eight folders below carry full detail (`README.md` + `images/`); the rest are catalogued here only, pending
+a future pass. Every "High" map-fit candidate now has a folder; most "Med" fit candidates do too.
+
+**New folders added (2026-09-25, second pass):** eight more folders from user-supplied photos — Admiral
+Kuznetsov, Steregushchiy, Zumwalt, Mi-28N/Mi-28NM, MQ-25, Su-34, Su-30SM2, Tu-22M3.
 
 **Checked (2026-09-25):** Su-57, F-35C, Tor-M2, LRASM, NSM, Gorshkov, Constellation, SPY-6/Aegis ✓ (specs verified
 against a second source, all 35 image licences re-checked live via the Commons API — no changes needed).
@@ -26,25 +29,25 @@ mechanic rather than hardware and was left for a dedicated design note instead o
 |---|---|---|---|---|
 | [Su-57 (Felon)](aircraft/su57/) | RU | Aircraft | 5th-gen strike fighter, contests the F-35C for local air superiority | High |
 | [Su-35S (Flanker-E)](aircraft/su35s/) | RU | Aircraft | High-agility fighter/escort, counters F/A-18E | High |
-| Su-34 (Fullback) | RU | Aircraft | Strike bomber, stand-off land-attack rounds | Med |
-| Su-30SM2 (Flanker-H) | RU | Aircraft | Multirole strike/air-superiority, Kalibr/Kh-carrier | Med |
-| Tu-22M3 (Backfire) | RU | Aircraft | Long-range bomber, heavy anti-ship missile salvos | Low (map is small for its radius) |
+| [Su-34 (Fullback)](aircraft/su34/) | RU | Aircraft | Strike bomber, stand-off land-attack rounds | Med |
+| [Su-30SM2 (Flanker-H)](aircraft/su30sm2/) | RU | Aircraft | Multirole strike/air-superiority, Kalibr/Kh-carrier | Med |
+| [Tu-22M3 (Backfire)](aircraft/tu22m3/) | RU | Aircraft | Long-range bomber, heavy anti-ship missile salvos | Low (map is small for its radius) |
 | [Ka-52K (Katran)](aircraft/ka52k/) | RU | Aircraft | Naval attack helicopter, Kornet/rocket strikes on landing craft | High |
-| Mi-28N (Havoc) | RU | Aircraft | Attack helicopter, coastal armour/landing suppression | Med |
+| [Mi-28N (Havoc)](aircraft/mi28n/) | RU | Aircraft | Attack helicopter, coastal armour/landing suppression | Med |
 | A-50U (Mainstay) | RU | Sensors/C2 | Airborne early warning, extends coastal radar picture | Med |
 | [F-35C (Lightning II)](aircraft/f35c/) | US | Aircraft | Carrier-based 5th-gen strike fighter, stealth ingress | High |
 | [EA-18G (Growler)](aircraft/ea18g/) | US | Aircraft | Electronic-attack jamming escort (visual EW effects) | High |
 | [P-8A (Poseidon)](aircraft/p8a/) | US | Aircraft | Maritime patrol, ASW and sub detection | High |
 | [MQ-4C (Triton)](aircraft/mq4c/) | US | Aircraft/Sensors | High-altitude UAV, wide-area maritime surveillance | High |
-| MQ-25 (Stingray) | US | Aircraft | Carrier-based tanker UAV, extends strike-fighter range | Med |
+| [MQ-25 (Stingray)](aircraft/mq25/) | US | Aircraft | Carrier-based tanker UAV, extends strike-fighter range | Med |
 | SH-60/MH-60S | US | Aircraft | Utility/ASW helicopter, VERTREP and screening | Med |
-| Admiral Kuznetsov | RU | Ships | Carrier, STOBAR air wing projection | Low (single unit, huge, map-scale mismatch) |
+| [Admiral Kuznetsov](ships/kuznetsov/) | RU | Ships | Carrier, STOBAR air wing projection | Low (single unit, huge, map-scale mismatch) |
 | [Admiral Gorshkov (Project 22350)](ships/gorshkov/) | RU | Ships | Modern frigate, long-range Zircon/Kalibr/Poliment-Redut | High |
 | [Admiral Grigorovich (Project 11356)](ships/grigorovich/) | RU | Ships | Frigate, Kalibr strike + medium air defence | High |
 | [Buyan-M (Project 21631)](ships/buyan_m/) | RU | Ships | Small missile corvette, Kalibr from shallow coastal water | High |
 | [Karakurt (Project 22800)](ships/karakurt/) | RU | Ships | Fast corvette, Kalibr/Oniks in a compact hull | High |
-| Steregushchiy (Project 20380) | RU | Ships | Corvette, ASW + point air defence for the coast | Med |
-| Zumwalt (DDG-1000) | US | Ships | Stealth destroyer, land-attack gun + missile cells | Med |
+| [Steregushchiy (Project 20380)](ships/steregushchiy/) | RU | Ships | Corvette, ASW + point air defence for the coast | Med |
+| [Zumwalt (DDG-1000)](ships/zumwalt/) | US | Ships | Stealth destroyer, land-attack gun + missile cells | Med |
 | [Constellation (FFG-62)](ships/constellation/) | US | Ships | New-build frigate, fills the escort gap around the carrier | High |
 | Freedom/Independence LCS | US | Ships | Already represented; consider a second hull variant | Low |
 | [Yasen-M (Severodvinsk, Project 885M)](subs/yasen_m/) | RU | Subs | Nuclear multi-purpose sub, Oniks/Kalibr from submerged cells | High |
