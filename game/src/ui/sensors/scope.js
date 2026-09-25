@@ -83,7 +83,7 @@ export function createScope(S) {
   function radarNow() {
     const u = st.radar;
     ro.on = false;
-    if (!u) { ro.x = cam.target[0]; ro.z = cam.target[2]; ro.RM = 60000; return ro; }
+    if (!u) { ro.x = cam.target[0]; ro.y = 0; ro.z = cam.target[2]; ro.RM = 60000; ro.name = ''; return ro; }   // no radar left: NO RADAR, not the last one's name
     const p = game.unitPose(u).pos;
     ro.x = p[0]; ro.y = p[1]; ro.z = p[2]; ro.RM = rangeOf(u); ro.name = SHORT[u.type] || u.def.name;
     ro.on = !!(S.mainRadar && S.mainRadar.u === u);
