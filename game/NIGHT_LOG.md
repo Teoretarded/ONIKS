@@ -283,3 +283,11 @@ lightning log as one line, victory ticks, backing veils, first Esc opens the men
 (the carrier stays out of reach until the storm covers it, counter-fire after each salvo), a radar-scope minimap
 (lime sweep at the real rate, "?" clouds firming into coral ticks, emitters as bearing lines), look 3 (X-ray
 interiors no longer saturate, no stall after camera jumps, stronger swell rows).
+
+## 11:25 · The Nimitz
+A film-quality carrier replaces the old far-view one: 332.8 m, the 9° angled deck with markings, four catapults with
+blast deflectors, arresting wires, four elevators, the island with Pri-Fly glazing and turning SPS-48E / SPS-49, NSSM,
+RAM and Phalanx as closed shapes, the underwater hull with four shafts and 6.4 m screws. Inspect it (I, E, X): the
+radars go first, the island rises level by level, the flight deck lifts off, the hangar rises out of the hull with
+eight F/A-18Es and two E-2Ds inside, the reactor spaces and magazines as closed volumes, the hull splits in three.
+Stills: `game/shots/cvn_inspect_*.png`, `mus_cv_*.png`.
