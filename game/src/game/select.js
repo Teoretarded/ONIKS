@@ -1,11 +1,15 @@
 /* Selection: click, Shift-click add / remove, drag a box, double-click (every unit of that type on screen),
    Ctrl 1-9 set a group, 1-9 recall (twice quickly: fly to it), Tab / Shift-Tab cycle own units, F follow.
-   Draws lime brackets that fit the object (R.screenBox) with a short tag, hover highlight, the drag box.
+   Draws lime brackets that fit the object (R.screenBox) with a short tag, hover highlight, the drag box. Tags stay on
+   screen and out of the HUD panels (ov.fitBox), with a leader back to the object when they had to move.
+   Aircraft parked on a deck are picked by a click on them (close enough to tell them apart) or a double-click (that
+   deck's aircraft of the type), and from the selection panel's Air row; box select and Tab leave them on the deck.
    Enemy tracks can be selected alone (for their readout); they are never ordered. */
 import { PRI } from './game.js';
 import { unitTag, SHORT } from './labels.js';
 
 const LIME = '#C6F432', CORAL = '#FF6A3D';
+const TS = 10.5;                 // tag size (px at 1080p)
 
 export function createSelect(game) {
   const { sim, R } = game, cam = R.camera;
@@ -14,10 +18,36 @@ export function createSelect(game) {
   let followId = 0;
   const q = [0, 0, 0], placed = [];
 
+  /* where a unit is drawn: aircraft on a deck sit at their parking spot, not at the carrier's centre */
+  function posOf(u) {
+    if (u.aboard) { const d = game.drawn.get(u.id); if (d) return d.T; }
+    return game.unitPose(u).pos;
+  }
+  game.unitScreenPos = posOf;
+  /* an own aircraft parked under (x, y), when the deck is close enough to tell them apart */
+  function pickParked(x, y) {
+    let best = null, bd = 1e18;
+    for (const u of sim.alive(game.side)) {
+      if (!u.aboard) continue;
+      const d = game.drawn.get(u.id); if (!d) continue;
+      if (!cam.project(d.T, q)) continue;
+      const e = R.models.has(d.key) ? R.models.get(d.key) : null;
+      const rpx = e ? cam.fl * e.radius / q[2] : 0;
+      if (rpx < 4) continue;
+      const dd = (q[0] - x) ** 2 + (q[1] - y) ** 2, r = Math.max(7, rpx * .9);
+      if (dd < r * r && dd < bd) { bd = dd; best = u; }
+    }
+    return best;
+  }
   /* the unit under a screen point: drawn instances first, then own units' specks and tracks by their screen point */
   function pickUnit(x, y) {
     const d = R.pick(x, y);
-    if (d && d.id !== undefined && sim.units.has(d.id)) return sim.units.get(d.id);
+    if (d && d.id !== undefined && sim.units.has(d.id)) {
+      const u = sim.units.get(d.id);
+      // a jet parked on the deck wins over the carrier under it
+      if (u.def.air && u.side === game.side) { const p = pickParked(x, y); if (p) return p; }
+      return u;
+    }
     let best = null, bd = 12 * 12;
     for (const u of sim.list()) {
       if (u.aboard) continue;
@@ -125,7 +155,9 @@ export function createSelect(game) {
       if (ev.type === 'dblclick' && ev.button === 0) {
         const u = pickUnit(ev.x, ev.y);
         if (!u || u.side !== game.side) return false;
-        const ids = sim.alive(game.side).filter(v => v.type === u.type && !v.aboard && onScreen(v)).map(v => v.id);
+        // on a deck: that deck's aircraft of the type; else every one of the type on screen (not the parked ones)
+        const ids = u.aboard ? sim.alive(game.side).filter(v => v.type === u.type && v.aboard === u.aboard).map(v => v.id)
+          : sim.alive(game.side).filter(v => v.type === u.type && !v.aboard && onScreen(v)).map(v => v.id);
         game.select(ids, { add: ev.shift });
         return true;
       }
@@ -166,43 +198,56 @@ export function createSelect(game) {
     },
   };
 
-  /* a tag goes up only where it does not cover another (a crowded selection keeps its marks) */
-  function tagFree(ov, x, y, tg, kind, lead) {
-    const s = 10.5, w = (tg.id.length + tg.label.length + String(tg.value).length) * s * .66 + 50, h = 20;
-    for (const b of placed) if (x < b[2] && x + w > b[0] && y < b[3] && y + h > b[1]) return false;
-    if (lead) ov.leader(lead[0], lead[1], lead[2], lead[3], 'rgba(255,255,255,.7)', .8);
-    const b = ov.tag(x, y, tg.id, tg.label, tg.value, { kind, size: s });
+  /* a tag goes up only where it does not cover another (a crowded selection keeps its marks). It stays on screen and
+     out of the HUD panels; when it had to move away from its place, a leader runs back to the object (anchor). */
+  /* at = { x, y, ax, ay (the object's point the tag belongs to), lead: short leader [x0, y0, x1, y1] }; alt = the same
+     below the object, used when there is no room above */
+  function tagFree(ov, tg, kind, at, alt) {
+    const sz = ov.tagSize(tg.id, tg.label, tg.value, { size: TS }), w = sz[0], h = sz[1];
+    let p = at;
+    if (alt && (at.y < ov.margin || hits(ov.avoid, at.x, at.y, w, h))) p = alt;
+    const f = ov.fitBox(p.x, p.y, w, h);
+    for (const b of placed) if (f[0] < b[2] && f[0] + w > b[0] && f[1] < b[3] && f[1] + h > b[1]) return false;
+    const moved = Math.abs(f[0] - p.x) > 1 || Math.abs(f[1] - p.y) > 1;
+    // the short leader of a small mark when the tag sits where it belongs, else a leader from the object to the tag
+    if (p.lead && !moved) ov.leader(p.lead[0], p.lead[1], p.lead[2], p.lead[3], 'rgba(255,255,255,.7)', .8);
+    const b = ov.tag(f[0], f[1], tg.id, tg.label, tg.value, { kind, size: TS, anchor: moved ? [p.ax, p.ay] : null, leadMin: 8 });
     if (b) placed.push(b);
     return true;
   }
+  function hits(av, x, y, w, h) { if (av) for (const r of av) if (x < r[2] && x + w > r[0] && y < r[3] && y + h > r[1]) return true; return false; }
   /* bracket + tag on one unit (or a mark, a leader and the tag when it is small on screen) */
   function mark(ov, u, sel, a, full, many) {
-    const p = game.unitPose(u), own = u.side === game.side;
-    if (!cam.project(p.pos, q)) return;
+    const P = posOf(u), own = u.side === game.side;
+    if (!cam.project(P, q)) return;
     if (q[0] < -60 || q[1] < -60 || q[0] > cam.W + 60 || q[1] > cam.H + 60) return;
     const col = own ? LIME : CORAL, kind = own ? 'lime' : 'coral';
     const d = game.drawn.get(u.id);
     const e = R.models.has(u.def.model) ? R.models.get(u.def.model) : null;
     const rpx = e ? cam.fl * e.radius / q[2] : 0;
     const tg = unitTag(game, u);
+    // a unit just off the edge keeps its mark on the edge
+    const sx = Math.max(5, Math.min(cam.W - 5, q[0])), sy = Math.max(5, Math.min(cam.H - 5, q[1]));
     if (!sel) {
       // hover: thin white corners, the name only
-      if (d && rpx > 16) { const b = R.screenBox(d); if (b) ov.bracket(b, 'rgba(255,255,255,.8)', a, 5, 9); }
-      else ov.mark(q[0], q[1], 9, 'rgba(255,255,255,.85)', a);
-      ov.text(q[0] + 10, q[1] - 12, tg.label, { size: 10.5, col: '#fff', a: .75 });
+      if (d && rpx > 16) { const b = ov.clampBox(R.screenBox(d), 6); if (b) ov.bracket(b, 'rgba(255,255,255,.8)', a, 5, 9); }
+      else ov.mark(sx, sy, 9, 'rgba(255,255,255,.85)', a);
+      ov.text(Math.max(8, Math.min(sx + 10, cam.W - 12 - tg.label.length * 7.2)), Math.max(18, sy - 12), tg.label, { size: 10.5, col: '#fff', a: .75 });
       return;
     }
     if (full !== false && d && rpx > 16) {
-      const b = R.screenBox(d);
+      const b = ov.clampBox(R.screenBox(d), 6);
       if (b) {
         ov.bracket(b, col, a, 5, 12);
-        tagFree(ov, b[0] - 5, b[1] - 5 - 21, tg, kind, null);
+        // above the top-left corner; below the bracket when the top is off screen or under a panel
+        tagFree(ov, tg, kind, { x: b[0] - 5, y: b[1] - 26, ax: b[0] - 5, ay: b[1] - 5 }, { x: b[0] - 5, y: b[3] + 9, ax: b[0] - 5, ay: b[3] + 5 });
         return;
       }
     }
-    ov.mark(q[0], q[1], 8, col, a);
+    ov.mark(sx, sy, 8, col, a);
     if (full === false || (many && placed.length >= 12)) return;
-    tagFree(ov, q[0] + 16, q[1] - 16 - 19, tg, kind, [q[0] + 4, q[1] - 4, q[0] + 16, q[1] - 16]);
+    tagFree(ov, tg, kind, { x: sx + 16, y: sy - 35, ax: sx + 4, ay: sy - 4, lead: [sx + 4, sy - 4, sx + 16, sy - 16] },
+      { x: sx + 16, y: sy + 16, ax: sx + 4, ay: sy + 4, lead: [sx + 4, sy + 4, sx + 16, sy + 16] });
   }
 }
 

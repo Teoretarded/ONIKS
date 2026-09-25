@@ -49,7 +49,8 @@ export class Overlay {
       for (let i = 0; i < av.length; i++) if (inside(x, y, av[i])) { hit = av[i]; break; }
       if (!hit) break;
       let best = null, bd = 1e18;
-      for (const c of [[hit[0] - w - 2, y], [hit[2] + 2, y], [x, hit[1] - h - 2], [x, hit[3] + 2]]) {
+      // clear of the rect by more than the HUD mask's soft edge
+      for (const c of [[hit[0] - w - 10, y], [hit[2] + 10, y], [x, hit[1] - h - 10], [x, hit[3] + 10]]) {
         const nx = cx(c[0]), ny = cy(c[1]);
         if (inside(nx, ny, hit)) continue;
         const dd = (nx - x) * (nx - x) + (ny - y) * (ny - y);

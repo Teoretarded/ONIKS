@@ -2,9 +2,10 @@
    (exponential zoom toward the cursor), pan with WASD / arrows / screen edges / middle-drag, rotate with
    right-drag and Q/E, smooth damping, follow, fly-to, frame a set of points. Picking: screen -> ground (with
    the Earth's curvature, as drawn), project() for overlays.
-   Looking up: close to the ground (dist < lookUpFar) the pitch may go below minPitch, down to -lookUp (25 deg above
-   the horizon at dist <= lookUpNear, fading to none at lookUpFar). The lens then stays where the minPitch orbit puts
-   it (never under the terrain) and tilts up about itself, so a climbing round can be watched from beside the TEL.
+   Looking up: close to the ground (dist < lookUpFar) the pitch may go below minPitch by up to lookUp (16 deg: -13,
+   the line of sight ~13 deg above the horizon, at dist <= lookUpNear, fading to none at lookUpFar). The lens then
+   stays where the minPitch orbit puts it (never under the terrain) and tilts up about itself, so a climbing round can
+   be watched from beside the TEL with the TEL still at the bottom of the frame.
    M3 conventions: X east, Y up, Z north; yaw 0 looks north, pi/2 looks east; pitch > 0 looks down. */
 
 const DEG = Math.PI / 180;
@@ -20,7 +21,8 @@ export class RTSCamera {
     this.maxDist = opts.maxDist || 150000;
     this.minPitch = 3 * DEG;
     this.maxPitch = 89 * DEG;
-    this.lookUp = 28 * DEG;                          // how far below minPitch the view may tilt (up) when low
+    this.lookUp = 16 * DEG;                          // how far below minPitch the view may tilt (up) when low: the orbit
+                                                     // target (the unit) stays in the bottom tenth of the frame, the sky above
     this.lookUpNear = 2500; this.lookUpFar = 9000;   // full tilt inside this distance, none beyond the far one
     this.ground = opts.ground || (() => 0);          // (x, z) -> surface height (sea = 0)
     this.bounds = opts.bounds || null;               // [x0, z0, x1, z1] the target stays inside

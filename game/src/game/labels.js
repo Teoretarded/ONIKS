@@ -11,6 +11,14 @@ export const TRACK = { hq: 'CP · K380R', tel: 'TEL · K340P', radar: 'RADAR · 
 
 const pad2 = n => String(n).padStart(2, '0');
 
+/* a unit with weapons the player releases (strike missiles, Oniks, guns vs ships / land); defensive weapons (SAM,
+   SM-6, ESSM, Phalanx, 30 mm, AIM-120) fire by themselves. The sim's `u.hold` flag is this unit's weapons free. */
+export function offensive(u) {
+  const W = u && u.def && u.def.weapons;
+  if (W) for (const k in W) { const w = W[k]; if (!w.auto && (w.vs.includes('land') || w.vs.includes('sea'))) return true; }
+  return false;
+}
+
 export function status(u) {
   if (!u.alive) return u.def.domain === 'sea' ? 'SINKING' : 'DESTROYED';
   const o = u.orders && u.orders[0], k = o && o.kind;
@@ -37,7 +45,7 @@ export function status(u) {
 export function unitTag(game, u) {
   if (u.side === game.side) {
     const hp = u.alive && u.hp < u.hpMax ? ` · ${Math.round(100 * u.hp / u.hpMax)}%` : '';
-    return { id: pad2(u.id), label: SHORT[u.type] || u.def.name, value: status(u) + (u.hold && u.alive ? ' · HOLD' : '') + hp };
+    return { id: pad2(u.id), label: SHORT[u.type] || u.def.name, value: status(u) + (u.hold && u.alive && offensive(u) ? ' · FREE' : '') + hp };
   }
   const c = game.sim.contact(game.side, u.id);
   if (c) {

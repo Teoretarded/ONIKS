@@ -1,12 +1,15 @@
 /* Clean ground under the HUD: world tags and brackets drawn on the overlay canvas (tracks at the horizon, selection
    tags) fade out under the HUD's panels, with soft edges, so readouts never sit on top of other text. The panel
-   rectangles are also published as game.hudRects ([x0, y0, x1, y1] in view px) for systems that place tags. */
+   rectangles are also published as game.hudRects ([x0, y0, x1, y1] in view px) for systems that place tags, and as
+   the overlay's avoid list: ov.tag(x, y, id, label, value, { fit: true, anchor: [ox, oy] }) keeps a tag on screen and
+   out of the panels, with a leader back to the object. */
 
 const PAD = 10, FEATHER = 14;
 
 export function createMask(game, hud) {
   let rects = [], key = '', last = -1, mask = null, mw = 0, mh = 0, dpr = 1;
   game.hudRects = rects;
+  if (game.overlay) game.overlay.avoid = rects;     // fitted tags (ov.tag(..., { fit: true })) keep out of the panels
 
   function measure() {
     const out = [];

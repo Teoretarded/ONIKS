@@ -1,7 +1,10 @@
 /* Match flow: the result (the sim's HQ / objectives / time rule, or the campaign objectives), the grade and the
    short stats, localStorage `oniks.lastResult` = { mode, mission, win, grade, stats }, the end overlay in the
    films' style over the live battle (it keeps playing behind, the cinematic camera takes it), the pause menu
-   (Esc: resume / auto x1 / settings / restart / quit to the menu). */
+   (Esc: resume / auto x1 / settings / restart / quit to the menu).
+   While the end block or the pause menu is up the stage is theirs: body.oniks-veiled hides the HUD, the sandbox
+   palette, the reinforcement list and the mission lines, and the world tags under the block are wiped from the
+   overlay (the block's own dark gradient, so nothing reads through it). */
 import { PRI } from './game.js';
 import { GRADES } from '../data/campaign.js';
 
@@ -122,9 +125,17 @@ export function createMatchFlow(game) {
     menuEl.querySelectorAll('.btn').forEach(b => b.addEventListener('mouseenter', () => { menuEl.querySelectorAll('.btn').forEach(x => x.classList.remove('on')); b.classList.add('on'); }));
   }
 
+  /* the end block or the pause menu has the stage */
+  let veiled = false;
+  const endUp = () => endShown && endEl && !endEl.classList.contains('min');
+  function veil() {
+    const v = menuOpen || endUp();
+    if (v !== veiled) { veiled = v; document.body.classList.toggle('oniks-veiled', v); }
+  }
+
   /* high: while the menu or the end screen is up, it takes the keys */
   const menu = {
-    name: 'menu', priority: PRI.menu,
+    name: 'menu', priority: PRI.menu, always2d: true,
     onKey(e) {
       if (endShown && endEl && !endEl.classList.contains('min')) {
         if (e.type !== 'keydown') return true;
@@ -150,7 +161,21 @@ export function createMatchFlow(game) {
         }
         else if (sim.result && game.mode === 'sandbox' && !game._sandboxResultSeen) { game._sandboxResultSeen = true; game.bus.emit('toast', { text: (sim.result.winner === game.side ? 'WON · ' : 'LOST · ') + sim.result.reason.toUpperCase() }); }
       } else if (!endShown && game.realT >= endAt) showEnd();
+      veil();
     },
+    /* drawn last: wipe the world tags under the block (same fall-off as its gradient) */
+    draw2d(ov) {
+      veil();
+      if (!veiled) return;
+      const c = ov.ctx, w = ov.W * .72;
+      c.save();
+      c.globalCompositeOperation = 'destination-out';
+      const g = c.createLinearGradient(0, 0, w, 0);
+      g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(.6, 'rgba(0,0,0,.92)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+      c.fillStyle = g; c.fillRect(0, 0, w, ov.H);
+      c.restore();
+    },
+    dispose() { document.body.classList.remove('oniks-veiled'); },
   };
   /* low: Esc that nobody else wanted opens the pause menu */
   const esc = {
@@ -187,6 +212,8 @@ function addStyle() {
   .oniks-menu .list { margin-top: 40px; }
   .oniks-menu .btn .v { font: 400 12px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--lime); margin-left: 8px; }
   .oniks-end.min { background: none; pointer-events: none; }
-  .oniks-end.min .blk { display: none; }`;
+  .oniks-end.min .blk { display: none; }
+  body.oniks-veiled #hud, body.oniks-veiled .oniks-sbx, body.oniks-veiled .oniks-buy, body.oniks-veiled #cmp { opacity: 0 !important; }
+  body.oniks-veiled #hud *, body.oniks-veiled .oniks-sbx, body.oniks-veiled .oniks-sbx *, body.oniks-veiled .oniks-buy, body.oniks-veiled .oniks-buy * { pointer-events: none !important; }`;
   document.head.appendChild(s);
 }

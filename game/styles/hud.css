@@ -3,10 +3,12 @@
    the one backdrop is var(--panel) (the reinforcement list). No cards, no radii, no shadows. */
 
 #hud { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; pointer-events: none;
-  color: #fff; font-family: var(--sans); -webkit-font-smoothing: antialiased; transition: opacity .3s;
+  color: #fff; font-family: var(--sans); -webkit-font-smoothing: antialiased;
   --faint: rgba(255,255,255,.5); --ghost: rgba(255,255,255,.26);
   /* a tight halo in the background colour keeps small text readable over the dot field (not a visible shadow) */
   text-shadow: 0 0 2px #0B0C0A, 0 0 5px rgba(11,12,10,.9); }
+/* the pause menu / end block has the stage: the HUD goes at once (no fade: a fade never finishes in a background tab,
+   where stills are taken) */
 #hud.veil { opacity: 0; }
 #hud.veil .hit { pointer-events: none !important; }
 #hud .hit { pointer-events: auto; }
@@ -95,7 +97,8 @@
 .h-log .r.idle { color: var(--ghost); }
 .h-log .r.in .tx, .h-log .r.in .cd { animation: typein .42s steps(16); }
 .h-cmd .hint.in { animation: typein .4s steps(18); }
-.h-al .al.in { animation: typein .3s steps(12); }
+/* the chip's parts type in, not the chip itself: its box stays clickable from the first frame */
+.h-al .al.in b, .h-al .al.in i { animation: typein .3s steps(12); }
 
 /* ---------------------------------------------------------------- alerts: right column, under the log */
 .h-al { margin-top: 16px; display: flex; flex-direction: column; align-items: flex-end; gap: 7px; }
@@ -118,6 +121,10 @@
 .h-sel .rw .v { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .h-sel .rw .v em { font-style: normal; color: #fff; margin-left: 12px; }
 .h-sel .rw.c .k, .h-sel .rw.c .v { color: var(--coral); }
+/* a count you can click (the air wing on deck / up): dotted underline, lime on hover */
+.h-sel .lk { cursor: pointer; padding-bottom: 1px; border-bottom: 1px dotted rgba(255,255,255,.42); transition: color .15s, border-color .15s; }
+.h-sel .lk:hover { color: var(--lime); border-bottom-color: var(--lime); }
+.h-sel .lk:hover b { color: var(--lime); }
 .h-sel .grps { font: 400 11.5px/1 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--dim); }
 .h-sel .grp { display: grid; grid-template-columns: 34px 150px 70px 1fr; align-items: center; column-gap: 10px; padding: 5px 0; cursor: pointer; white-space: nowrap; }
 .h-sel .grp > b { justify-self: start; min-width: 22px; text-align: center; background: rgba(255,255,255,.78); color: #0B0C0A; padding: 3px 5px 2px; font-weight: 500; }
@@ -132,15 +139,18 @@
 
 /* ---------------------------------------------------------------- bottom centre: command card, toasts, reinforcements */
 .h-bc { left: 50%; bottom: 48px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; }
-.h-cmd .rows { display: grid; grid-template-columns: repeat(4, 142px); row-gap: 8px; }
-.h-cmd .it { position: relative; display: flex; align-items: center; gap: 10px; height: 30px; cursor: pointer; color: rgba(255,255,255,.66); font: 500 18px/1 var(--sans); letter-spacing: -.02em; white-space: nowrap; transition: color .15s; }
-.h-cmd .it .n { font: 400 12px var(--mono); letter-spacing: .05em; color: rgba(255,255,255,.42); width: 12px; transition: color .15s; }
+.h-cmd .rows { display: grid; grid-template-columns: 142px 182px 142px 142px; row-gap: 8px; }
+/* colours ease only under the pointer: a state change (greyed, lit) shows at once, also in a background tab's stills */
+.h-cmd .it { position: relative; display: flex; align-items: center; gap: 10px; height: 30px; cursor: pointer; color: rgba(255,255,255,.66); font: 500 18px/1 var(--sans); letter-spacing: -.02em; white-space: nowrap; }
+.h-cmd .it .n { font: 400 12px var(--mono); letter-spacing: .05em; color: rgba(255,255,255,.42); width: 12px; }
+.h-cmd .it:hover, .h-cmd .it:hover .n { transition: color .15s; }
 .h-cmd .it .sq { width: 7px; height: 7px; background: var(--lime); transform: scale(0); transition: transform .18s cubic-bezier(.3,1.6,.5,1); flex: none; }
 .h-cmd .it .lab { position: relative; }
 .h-cmd .it .lab::after { content: ''; position: absolute; left: 0; right: 0; bottom: -7px; height: 3px;
   background-image: radial-gradient(circle, rgba(255,255,255,.9) 1px, transparent 1.3px); background-size: 6px 3px; background-repeat: repeat-x;
   clip-path: inset(0 100% 0 0); transition: clip-path .3s steps(12); }
 .h-cmd .it .x { font: 400 11px var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); margin-left: -2px; }
+.h-cmd .it.on .x { color: var(--lime); }
 .h-cmd .it:not(.off):hover { color: #fff; }
 .h-cmd .it:not(.off):hover .n { color: var(--lime); }
 .h-cmd .it:not(.off):hover .sq, .h-cmd .it.on .sq { transform: scale(1); }

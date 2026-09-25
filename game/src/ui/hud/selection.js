@@ -1,10 +1,12 @@
 /* Selection panel (bottom left). One own unit: id chip + designation, HP as a dotted bar, ammunition per weapon,
-   what it is doing (deployed, radar on, reloading 40 %...), damaged parts in coral. An enemy track: only what the
+   weapons held / free (offensive fire; defence is automatic), what it is doing (deployed, radar on, reloading 40 %...),
+   damaged parts in coral. A carrier (or a DDG's hangar): its air wing on deck by type and in the air; click a count to
+   select those aircraft (then L launches them, or right-click a point / a track). An enemy track: only what the
    picture holds (confidence, error, speed, bearing). Several units: grouped by type with counts; click a group to
    narrow the selection to it, Shift-click to drop it. */
 import { TEL_ELEV, CLASSIFY } from '../../data/units.js';
 import { WNAME, pad2, esc, dots, speedOf, km, brg, sat, dur } from './fmt.js';
-import { TRACK } from '../../game/labels.js';
+import { TRACK, offensive } from '../../game/labels.js';
 
 const TYPE_ORDER = ['hq', 'carrier', 'ddg', 'tel', 'radar', 'pantsir', 'transloader', 'catapult', 'drone', 'fighter', 'helo'];
 const SHORTN = { hq: 'K380R CP', tel: 'K340P TEL', radar: 'Monolith-B', pantsir: 'Pantsir-S1', catapult: 'Orlan-10 rail', drone: 'Orlan-10',
@@ -17,6 +19,20 @@ export function createSelection(game, hud) {
   let key = '', last = -1;
 
   box.addEventListener('mousedown', e => {
+    const a = e.target.closest('[data-air]');
+    if (a) {
+      // the air wing of a deck: 'deck' / 'deck:<type>' (parked) or 'up' (airborne from it)
+      e.stopPropagation(); e.preventDefault();
+      const cv = +a.dataset.cv, [where, type] = a.dataset.air.split(':');
+      const ids = sim.alive(game.side).filter(v => v.def.domain === 'air' && (!type || v.type === type)
+        && (where === 'deck' ? v.aboard === cv : !v.aboard && v.aboardOf === cv)).map(v => v.id);
+      if (!ids.length) { hud.click(true); return; }
+      if (e.shiftKey) game.select(ids, { add: true }); else game.select(ids);
+      if (where === 'up' && game.frameUnits) game.frameUnits(ids.map(id => sim.units.get(id)));
+      hud.click();
+      last = -1;
+      return;
+    }
     const g = e.target.closest('[data-type]');
     if (!g) return;
     e.stopPropagation(); e.preventDefault();
@@ -53,7 +69,6 @@ export function createSelection(game, hud) {
       out.push(`On deck${cv ? ' · ' + (cv.def.cls) + ' ' + pad2(cv.id) : ''}`);
       if (u.rearmT > sim.t) out.push(`Rearming ${dur(u.rearmT - sim.t)}`);
     }
-    if (u.hold) out.push('<b>Hold</b>');
     if (k === 'move' || k === 'patrol' || k === 'return' || k === 'attack' || k === 'scan' || k === 'reload') {
       const w = { move: 'Moving', patrol: 'Patrol', return: 'Returning', attack: 'Attacking', scan: 'Scan', reload: 'Reload' }[k];
       out.push(w + (tgt && k === 'attack' ? ' ' + esc(trk(tgt)) : tgt && k === 'reload' ? ' ' + tgt.def.cls + ' ' + pad2(tgt.id) : ''));
@@ -77,11 +92,18 @@ export function createSelection(game, hud) {
     if (u.type === 'transloader') h += row('TLC', dots(u.cargo / d.cargo, d.cargo) + `<em>${u.cargo}/${d.cargo}</em>`);
     if (u.type === 'catapult') h += row('Orlan-10', dots(u.drones / 6, 6) + `<em>${u.drones}</em>`);
     if (d.air) {
-      let deck = 0, up = 0;
-      for (const v of sim.alive(u.side)) if (v.aboardOf === u.id || v.aboard === u.id) { if (v.aboard === u.id) deck++; else up++; }
-      h += row('Air', `<b>${deck}</b> on deck · <b>${up}</b> up`);
+      // the air wing: parked by type (click: select them), airborne (click: select and frame them)
+      const deck = {}, order = []; let up = 0, nd = 0;
+      for (const v of sim.alive(u.side)) {
+        if (v.aboard === u.id) { if (!deck[v.type]) { deck[v.type] = 0; order.push(v.type); } deck[v.type]++; nd++; }
+        else if (v.aboardOf === u.id && v.def.domain === 'air') up++;
+      }
+      const lk = (air, txt) => `<span class="lk hit" data-cv="${u.id}" data-air="${air}">${txt}</span>`;
+      const parked = order.sort((a, b) => (a === 'fighter' ? -1 : 1) - (b === 'fighter' ? -1 : 1)).map(t => lk('deck:' + t, `<b>${deck[t]}</b> ${esc(SHORTN[t] || t)}`)).join(' · ');
+      h += row('Air', (nd ? parked + ' on deck' : '<b>0</b> on deck') + ' · ' + (up ? lk('up', `<b>${up}</b> up`) : '<b>0</b> up'), 'air');
     }
     if (u.mag) h += row('Mag', Object.keys(u.mag).map(k => `${WNAME[k] || k} <b>${u.mag[k]}</b>`).join(' · '));
+    if (offensive(u)) h += row('Fire', u.hold ? '<span class="l">Weapons free</span> · engages tracks in reach' : 'Weapons held · fires on your order');
     if (d.domain === 'air' && !u.aboard) h += row('Flt', `Alt <b>${Math.round(u.pos[1] / 10) * 10} m</b> · <b>${speedOf(u)}</b>${d.endurance ? ` · fuel <b>${pct(u.fuel / d.endurance)}</b>` : ''}`);
     else if (d.speed > 0 && !u.aboard) h += row('Nav', `<b>${speedOf(u)}</b> · hdg <b>${brg(Math.sin(u.hdg), Math.cos(u.hdg))}°</b>`);
     h += row('State', state(u));
@@ -115,7 +137,9 @@ export function createSelection(game, hud) {
     const by = new Map();
     for (const u of us) { let g = by.get(u.type); if (!g) by.set(u.type, g = []); g.push(u); }
     const types = [...by.keys()].sort((a, b) => TYPE_ORDER.indexOf(a) - TYPE_ORDER.indexOf(b));
-    let h = `<div class="hd"><span class="tag lime"><b>${us.length}</b><i>Selected · ${types.length} ${types.length === 1 ? 'type' : 'types'}</i></span></div><div class="grps">`;
+    const arm = us.filter(offensive), free = arm.filter(u => u.hold).length;
+    const roe = !arm.length ? '' : free === arm.length ? ' · <span class="l">weapons free</span>' : free ? ' · weapons mixed' : ' · weapons held';
+    let h = `<div class="hd"><span class="tag lime"><b>${us.length}</b><i>Selected · ${types.length} ${types.length === 1 ? 'type' : 'types'}${roe}</i></span></div><div class="grps">`;
     for (const t of types) {
       const g = by.get(t), d = g[0].def;
       let hp = 0; for (const u of g) hp += u.hp / u.hpMax; hp /= g.length;
@@ -125,6 +149,8 @@ export function createSelection(game, hud) {
       else if (t === 'transloader') { let a = 0; for (const u of g) a += u.cargo; v = `TLC <b>${a}/${g.length * d.cargo}</b>`; }
       else if (t === 'catapult') { let a = 0; for (const u of g) a += u.drones; v = `UAV <b>${a}</b>`; }
       else if (d.sensors.radar) { let a = 0; for (const u of g) if (u.radarOn) a++; v = a ? `<span class="l">Radar on ${a}</span>` : 'EMCON'; }
+      const parked = g.filter(u => u.aboard).length;
+      if (parked) v += ` · ${parked === g.length ? 'on deck' : parked + ' on deck'}`;
       h += `<div class="grp hit" data-type="${t}"><b>${g.length}</b><span class="n">${esc(SHORTN[t] || d.name)}</span>${dots(hp, 10, hp < .4 ? 'c' : '')}<span class="v">${v}</span></div>`;
     }
     return h + '</div>';

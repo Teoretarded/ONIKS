@@ -1,21 +1,34 @@
-/* Orders: right-click (ground / sea: move in formation; hostile track: attack; own TEL with a transloader selected:
-   reload; own carrier with aircraft selected: return), Shift queues. Hotkeys (none of them the camera's):
-   Z stop · H hold · T deploy / undeploy · R reload · X scan (click a point) · Y radar on / off · L launch drone
-   (click a point) · B reinforcements. Feedback in the world: a dotted lime path and marker for moves, a coral
-   dotted line for attacks, fading; the remaining route of selected units; weapon range of the selection.
-   Targeting modes (scan, drone) run as a second system above the selection. */
+/* Orders: right-click (ground / sea: move in formation; hostile track: attack, and with a carrier selected its ready
+   F/A-18Es launch on it; own TEL with a transloader selected: reload; own carrier with aircraft selected: return;
+   aircraft on a deck: they launch toward the point / track), Shift queues. Hotkeys (none of them the camera's):
+   Z stop · H weapons free / hold fire · T deploy / undeploy · R reload · X scan (click a point) · Y radar on / off ·
+   L launch: the Orlan-10 off its rail (coast), or the strike package off the deck (fleet: the selected deck aircraft,
+   else every F/A-18E on the selected / any deck; click a track to strike it, a point to fly a patrol there) ·
+   U launch one MH-60R (click a search point or a track) · B reinforcements.
+   Weapons: offensive fire (Oniks, TLAM, SLAM-ER, Hellfire, the 5" gun) is the player's decision: units start with
+   weapons held and fire on an attack order; H sets weapons free (they pick tracks in reach themselves) and back.
+   Defensive weapons (SAM, SM-6, ESSM, Phalanx, 30 mm, AIM-120) always engage incoming rounds and aircraft.
+   Scan: the nearest scanner that reaches the point fires (the selection's first, else any on the side); nothing ever
+   drives toward a scan point: beyond every scanner's reach the click is refused ("OUT OF REACH · 82 / 70 KM").
+   Feedback in the world: a dotted lime path and marker for moves, a coral dotted line for attacks, fading; the
+   remaining route of selected units; weapon range of the selection. Targeting modes (scan, drone, launch, helo) run
+   as a second system above the selection. */
 import { PRI } from './game.js';
-import { SHORT } from './labels.js';
+import { SHORT, offensive } from './labels.js';
 import { buyable } from '../data/units.js';
+import { scanBlocked } from '../sim/sensors.js';
 
 const LIME = [198, 244, 50], CORAL = [255, 106, 61], WH = [238, 238, 228];
 const sat = v => v < 0 ? 0 : v > 1 ? 1 : v;
+const km = m => (m < 10000 ? (m / 1000).toFixed(1) : String(Math.round(m / 1000)));
+const pad2 = n => String(n).padStart(2, '0');
+const CAP_R = { fighter: 8000, helo: 3000 };      // patrol radius of a launch to a point (m)
 
 export function createOrders(game) {
   const { sim, R } = game, cam = R.camera, T = R.terrain;
-  const marks = [];            // feedback: { kind: 'move'|'attack'|'scan'|'no', pts, at, t0, dur, ids, target }
-  let mode = null;             // targeting: { kind: 'scan'|'drone', units }
-  let buyOpen = false, buyEl = null;
+  const marks = [];            // feedback: { kind: 'move'|'attack'|'scan'|'no'|'say', at, t0, dur, ids, target }
+  let mode = null;             // targeting: { kind: 'scan'|'drone'|'launch'|'helo', units }
+  let buyOpen = false, buyEl = null, told = false;
   const q = [0, 0, 0];
 
   const own = () => game.selected().filter(u => !u.aboard || u.def.domain === 'air');
@@ -25,7 +38,48 @@ export function createOrders(game) {
     if (dom === 'land') return h > .5 && game.map.slope(x, z) < (u.def.slopeMax || .4) + .15;
     return h < -(u.def.draught || 5) - 2;
   };
-  const say = (text, x, y) => marks.push({ kind: 'say', text, sx: x, sy: y, t0: game.realT, dur: 1.4 });
+  const say = (text, x, y) => marks.push({ kind: 'say', text, sx: x, sy: y, t0: game.realT, dur: 1.6 });
+  const bad = () => { const a = game.getSystem('audio'); if (a && a.ui) try { a.ui('invalid'); } catch (e) { /* */ } };
+  const posOf = u => game.unitScreenPos ? game.unitScreenPos(u) : game.unitPose(u).pos;
+  const ref = u => u.def.cls + ' ' + pad2(u.id);
+
+  /* ---------- aircraft on the decks ---------- */
+  const ready = u => !u.rearmT || u.rearmT <= sim.t;
+  const queued = u => { const cv = sim.units.get(u.aboard); return !!(cv && cv.launchQ && cv.launchQ.includes(u.id)); };
+  function onDeck(decks, types) {
+    const ids = new Set(decks.map(d => d.id)), out = [];
+    for (const u of sim.alive(game.side)) if (u.aboard && ids.has(u.aboard) && (!types || types.includes(u.type))) out.push(u);
+    return out;
+  }
+  /* weapons that can be ordered on a target domain (the sim's attack rule; with rounds aboard now) */
+  const strikes = (u, dom) => { const W = u.def.weapons; for (const k in W) { const w = W[k]; if (!w.gun && w.vs.includes(dom) && (!w.auto || dom === 'air') && u.ammo[k] > 0 && !u.off[k]) return true; } return false; };
+  /* the aircraft a launch sends: the selected deck aircraft, else (launch) every F/A-18E on the selected decks (or any
+     own deck) / (helo) one MH-60R; ready ones first, none already on a launch queue */
+  function pkg(kind) {
+    const us = own();
+    const sel = us.filter(u => u.aboard && u.def.domain === 'air' && (kind !== 'helo' || u.type === 'helo') && !queued(u));
+    if (sel.length) return { units: sel, picked: true };
+    let decks = us.filter(u => u.def.air);
+    if (!decks.length) decks = sim.alive(game.side).filter(u => u.def.air);
+    const types = kind === 'helo' ? ['helo'] : ['fighter'];
+    const all = onDeck(decks, types);
+    const list = all.filter(u => !queued(u)).sort((a, b) => (ready(b) - ready(a)) || a.id - b.id);
+    if (!list.length) return { units: [], why: all.length ? 'ALREADY ON THE LAUNCH QUEUE' : kind === 'helo' ? 'NO MH-60R ON DECK' : 'NO F/A-18E ON DECK' };
+    return { units: kind === 'helo' ? list.slice(0, 1) : list };
+  }
+  const pkgName = us => {
+    const n = {}; for (const u of us) n[u.type] = (n[u.type] || 0) + 1;
+    return Object.keys(n).map(t => `${SHORT[t] || t} ×${n[t]}`).join(' · ');
+  };
+  /* L: the Orlan-10 when this is the coast's rail, else the deck */
+  function droneContext() {
+    const us = own();
+    if (us.some(u => u.type === 'catapult')) return true;
+    if (us.some(u => u.def.air || (u.aboard && u.def.domain === 'air'))) return false;
+    const side = sim.alive(game.side);
+    if (side.some(u => u.type === 'catapult')) return true;
+    return !side.some(u => u.def.air);
+  }
 
   /* ---------- the orders ---------- */
   function moveTo(x, z, queue, sx, sy) {
@@ -45,6 +99,8 @@ export function createOrders(game) {
     if (sea.length) game.order(sea, { kind: 'move', x, z, queue });
     if (airMove.length) game.order(airMove, { kind: 'move', x, z, queue });
     if (airOrbit.length) game.order(airOrbit, { kind: 'patrol', x, z, r: 1500, queue });
+    const deck = us.filter(u => u.aboard);
+    if (deck.length) game.bus.emit('toast', { text: `LAUNCH · ${pkgName(deck)}` });
     marks.push({ kind: 'move', at: [x, Math.max(0, T.heightAt(x, z)), z], ids: all, t0: game.realT, dur: 2.6 });
     return true;
   }
@@ -52,11 +108,15 @@ export function createOrders(game) {
   function attack(t, queue, sx, sy) {
     const dom = domOf(t);
     const us = own().filter(u => Object.values(u.def.weapons).some(w => !w.gun && w.vs.includes(dom) && !(w.auto && !w.salvo)));
-    if (!us.length) { say('NO WEAPON FOR ' + dom.toUpperCase(), sx, sy); return true; }
+    // a carrier's strike weapon is its air wing: its F/A-18Es with rounds for the target go with it
+    for (const cv of own().filter(u => u.type === 'carrier')) for (const f of onDeck([cv], ['fighter'])) if (!us.includes(f) && !queued(f) && strikes(f, dom)) us.push(f);
+    if (!us.length) { say('NO WEAPON FOR ' + dom.toUpperCase(), sx, sy); bad(); return true; }
     // weapons need a classified track from the side's own sensors (fog off shows everything, it does not aim)
     const c = sim.contact(game.side, t.id);
-    if (!c || c.conf < game.CLASSIFY) { say('NOT TRACKED · SCAN IT (X)', sx, sy); marks.push({ kind: 'no', at: game.unitPose(t).pos.slice(), t0: game.realT, dur: 1.2 }); return true; }
+    if (!c || c.conf < game.CLASSIFY) { say('NOT TRACKED · SCAN IT (X)', sx, sy); bad(); marks.push({ kind: 'no', at: game.unitPose(t).pos.slice(), t0: game.realT, dur: 1.2 }); return true; }
     game.order(us.map(u => u.id), { kind: 'attack', target: t.id, queue });
+    const deck = us.filter(u => u.aboard);
+    if (deck.length) game.bus.emit('toast', { text: `STRIKE · ${pkgName(deck)} · ${c.track}` });
     marks.push({ kind: 'attack', target: t.id, ids: us.map(u => u.id), t0: game.realT, dur: 2.6 });
     return true;
   }
@@ -69,10 +129,21 @@ export function createOrders(game) {
   }
   function hotkey(kind) {
     const us = own();
-    if (!us.length && kind !== 'scan' && kind !== 'drone' && kind !== 'buy') return false;
+    const mx = game.mouse.x, my = game.mouse.y;
+    if (kind === 'hold') kind = 'weapons';
+    if (kind === 'launch' && droneContext()) kind = 'drone';
+    if (!us.length && kind !== 'scan' && kind !== 'drone' && kind !== 'launch' && kind !== 'helo' && kind !== 'buy') return false;
     switch (kind) {
       case 'stop': game.order(us.map(u => u.id), { kind: 'stop' }); return true;
-      case 'hold': { const on = !us.every(u => u.hold); game.order(us.map(u => u.id), { kind: 'hold', on }); game.bus.emit('toast', { text: on ? 'HOLD' : 'HOLD OFF' }); return true; }
+      case 'weapons': {
+        // weapons free / hold fire: offensive weapons only (defence is always automatic); units keep their orders
+        const arm = us.filter(offensive);
+        if (!arm.length) { say('NO OFFENSIVE WEAPONS · DEFENCE IS AUTOMATIC', mx, my); bad(); return true; }
+        const free = !arm.every(u => u.hold);
+        game.order(arm.map(u => u.id), { kind: 'weapons', free });
+        game.bus.emit('toast', { text: free ? 'WEAPONS FREE' : 'HOLD FIRE' });
+        return true;
+      }
       case 'deploy': {
         const dep = us.filter(u => u.type === 'tel' || u.type === 'radar');
         if (!dep.length) return true;
@@ -94,17 +165,26 @@ export function createOrders(game) {
         return true;
       }
       case 'scan': {
-        let sc = us.filter(u => u.def.scan && !u.off.scan);
+        if (mode && mode.kind === 'scan') { setMode(null); return true; }
+        let sc = us.filter(u => u.def.scan && !u.off.scan && !u.aboard);
         if (!sc.length) sc = sim.alive(game.side).filter(u => u.def.scan && !u.off.scan && !u.aboard);
-        if (!sc.length) { say('NO SCANNER', game.mouse.x, game.mouse.y); return true; }
+        if (!sc.length) { say('NO SCANNER', mx, my); bad(); return true; }
         setMode({ kind: 'scan', units: sc });
         return true;
       }
       case 'drone': {
+        if (mode && mode.kind === 'drone') { setMode(null); return true; }
         let cs = us.filter(u => u.type === 'catapult' && u.drones > 0);
         if (!cs.length) cs = sim.alive(game.side).filter(u => u.type === 'catapult' && u.drones > 0 && !u.off.launch);
-        if (!cs.length) { say('NO DRONE', game.mouse.x, game.mouse.y); return true; }
+        if (!cs.length) { say('NO DRONE', mx, my); bad(); return true; }
         setMode({ kind: 'drone', units: cs });
+        return true;
+      }
+      case 'launch': case 'helo': {
+        if (mode && mode.kind === kind) { setMode(null); return true; }
+        const pk = pkg(kind);
+        if (!pk.units.length) { say(pk.why, mx, my); bad(); return true; }
+        setMode({ kind, units: pk.units });
         return true;
       }
     }
@@ -112,17 +192,31 @@ export function createOrders(game) {
   }
   function setMode(m) { mode = m; game.bus.emit('mode', m ? { mode: m.kind } : { mode: null }); }
 
-  /* the best scanner for a point: in reach, off cooldown, nearest */
-  function scanner(x, z, list) {
-    let best = null, bd = 1e18;
+  /* ---------- scan: who reaches the point ---------- */
+  /* the best scanner in `list` that reaches (x, z) (ready ones and radars already radiating first, then the nearest),
+     and the one that comes closest when none does: { u, near: { u, d } } */
+  function scanPick(x, z, list) {
+    let best = null, bs = 1e18, near = null, nk = 1e18;
     for (const u of list) {
-      if (!u.alive || u.off.scan) continue;
-      const d = Math.hypot(u.pos[0] - x, u.pos[2] - z), reach = u.def.scan.reach, cd = u.cooldowns.scan || 0;
-      const score = d / reach + cd * .05 + (d > reach && u.def.speed === 0 ? 100 : 0);
-      if (score < bd) { bd = score; best = u; }
+      if (!u.alive || u.off.scan || u.aboard || !u.def.scan) continue;
+      const d = Math.hypot(u.pos[0] - x, u.pos[2] - z), reach = u.def.scan.reach;
+      if (d / reach < nk) { nk = d / reach; near = { u, d }; }
+      if (d > reach) continue;
+      const why = scanBlocked(sim, u);
+      const s = d / reach + (u.cooldowns.scan || 0) * .05 + (why === 'radar' ? .6 : 0);
+      if (s < bs) { bs = s; best = u; }
     }
-    return best;
+    return { u: best, near };
   }
+  /* the scanner for a click: the mode's own (the selection's) first, else any other on the side -> { u, alt, near } */
+  function scanFor(x, z) {
+    const a = scanPick(x, z, mode ? (mode.pref || mode.units) : []);
+    if (a.u) return { u: a.u, alt: false, near: a.near };
+    const b = scanPick(x, z, sim.alive(game.side));
+    if (b.u) return { u: b.u, alt: true, near: b.near };
+    return { u: null, alt: false, near: a.near || b.near };
+  }
+  const reachTxt = n => `OUT OF REACH · ${km(n.d)} / ${km(n.u.def.scan.reach)} KM`;
 
   /* ---------- reinforcements (B) ---------- */
   function buyList() { return buyable(game.side).map(t => ({ type: t, def: game.UNITS[t] })); }
@@ -154,6 +248,48 @@ export function createOrders(game) {
   }
   addStyle();
 
+  /* ---------- clicks of the targeting modes; true = done (the mode closes unless Shift) ---------- */
+  function scanClick(ev, w) {
+    const side = sim.sides[game.side];
+    const s = scanFor(w[0], w[2]);
+    if (!s.u) {
+      // never drive toward it: the cursor tag says why (it blinks), and the mode stays
+      if (!s.near) say('NO SCANNER', ev.x, ev.y);
+      bad(); mode.flash = game.realT;
+      marks.push({ kind: 'no', at: w.slice(), t0: game.realT, dur: 1.2 });
+      return false;
+    }
+    const u = s.u;
+    if (side.scanCd > 0 || (u.cooldowns.scan || 0) > 0) { say(`SCAN · ${Math.ceil(Math.max(side.scanCd, u.cooldowns.scan || 0))} S`, ev.x, ev.y); bad(); return false; }
+    game.order([u.id], { kind: 'scan', x: w[0], z: w[2], stay: true });
+    if (s.alt) game.bus.emit('toast', { text: `SCAN · BY ${ref(u)}` });
+    marks.push({ kind: 'scan', at: w, ids: [u.id], t0: game.realT, dur: 2 });
+    return true;
+  }
+  function launchClick(ev, w) {
+    const pk = mode.kind === 'launch' && mode.units.length && mode.units.every(u => u.alive && u.aboard && !queued(u)) ? { units: mode.units } : pkg(mode.kind);
+    if (!pk.units.length) { say(pk.why || 'NOTHING ON DECK', ev.x, ev.y); bad(); return true; }
+    const t = game.pickUnit ? game.pickUnit(ev.x, ev.y) : null;
+    if (t && t.alive && t.side !== game.side && game.vis(t) === 'track') {
+      const c = sim.contact(game.side, t.id);
+      if (!c || c.conf < game.CLASSIFY) { say('NOT TRACKED · SCAN IT (X)', ev.x, ev.y); bad(); return false; }
+      const dom = domOf(t), us = pk.units.filter(u => strikes(u, dom));
+      if (!us.length) { say(`NO WEAPON FOR ${dom.toUpperCase()} ON DECK`, ev.x, ev.y); bad(); return false; }
+      game.order(us.map(u => u.id), { kind: 'attack', target: t.id });
+      game.bus.emit('toast', { text: `STRIKE · ${pkgName(us)} · ${c.track}` });
+      marks.push({ kind: 'attack', target: t.id, ids: us.map(u => u.id), t0: game.realT, dur: 2.6 });
+      return true;
+    }
+    if (!w) return false;
+    // a point: the jets fly a patrol there, the Seahawks search there
+    const byR = {};
+    for (const u of pk.units) { const r = CAP_R[u.type] || 1500; (byR[r] = byR[r] || []).push(u.id); }
+    for (const r in byR) game.order(byR[r], { kind: 'patrol', x: w[0], z: w[2], r: +r });
+    game.bus.emit('toast', { text: `LAUNCH · ${pkgName(pk.units)} · ${mode.kind === 'helo' ? 'SEARCH' : 'PATROL'}` });
+    marks.push({ kind: 'move', at: w.slice(), ids: pk.units.map(u => u.id), t0: game.realT, dur: 2.6 });
+    return true;
+  }
+
   /* ---------- the targeting system (above selection) ---------- */
   const targeting = {
     name: 'targeting', priority: PRI.targeting,
@@ -172,54 +308,114 @@ export function createOrders(game) {
       if (ev.type === 'click' && ev.button === 2) { setMode(null); return true; }
       if (ev.type === 'click' && ev.button === 0) {
         const w = cam.pickGround(ev.x, ev.y);
-        if (!w) return true;
-        if (mode.kind === 'scan') {
-          const u = scanner(w[0], w[2], mode.units);
-          if (!u) { setMode(null); return true; }
-          const side = sim.sides[game.side];
-          if (side.scanCd > 0 || (u.cooldowns.scan || 0) > 0) { say(`SCAN · ${Math.ceil(Math.max(side.scanCd, u.cooldowns.scan || 0))} S`, ev.x, ev.y); return true; }
-          game.order([u.id], { kind: 'scan', x: w[0], z: w[2] });
-          marks.push({ kind: 'scan', at: w, ids: [u.id], t0: game.realT, dur: 2 });
-        } else if (mode.kind === 'drone') {
+        let done = true;
+        if (mode.kind === 'scan') { if (!w) return true; done = scanClick(ev, w); }
+        else if (mode.kind === 'drone') {
+          if (!w) return true;
           const cs = mode.units.filter(u => u.alive && u.drones > 0);
           const c = cs.sort((a, b) => Math.hypot(a.pos[0] - w[0], a.pos[2] - w[2]) - Math.hypot(b.pos[0] - w[0], b.pos[2] - w[2]))[0];
           if (c) { game.order([c.id], { kind: 'launch_drone', x: w[0], z: w[2] }); marks.push({ kind: 'move', at: w, ids: [c.id], t0: game.realT, dur: 2.4 }); }
+        } else done = launchClick(ev, w);
+        if (done && !ev.shift) setMode(null);
+        else if (done && mode && (mode.kind === 'launch' || mode.kind === 'helo')) {
+          // Shift keeps launching: the next aircraft on deck
+          const pk = pkg(mode.kind);
+          if (pk.units.length) mode.units = pk.units; else setMode(null);
         }
-        if (!ev.shift) setMode(null);
         return true;
       }
       return ev.type === 'down' || ev.type === 'up';
     },
+    update() {
+      // scan: the list the other systems read (the sensors' reticle names mode.units[0]) is the scanner this click
+      // would use, or the nearest one when none reaches
+      if (mode && mode.kind === 'scan') {
+        if (!mode.pref) mode.pref = mode.units;
+        const w = game.mouse.in ? cam.pickGround(game.mouse.x, game.mouse.y) : null;
+        const s = w ? scanFor(w[0], w[2]) : null, u = s && (s.u || (s.near && s.near.u));
+        mode.aim = { w, s, f: game.frameN };           // this frame's ground point and scanner (draw3d / draw2d)
+        if (u) { if (mode.units.length !== 1 || mode.units[0] !== u) mode.units = [u]; }
+        else if (mode.units !== mode.pref) mode.units = mode.pref;
+      }
+      // a launch mode whose aircraft all went (or died) closes
+      if (mode && (mode.kind === 'launch' || mode.kind === 'helo') && game.frameN % 15 === 0) {
+        if (!mode.units.some(u => u.alive && u.aboard && !queued(u))) { const pk = pkg(mode.kind); if (pk.units.length) mode.units = pk.units; else setMode(null); }
+      }
+    },
     draw3d() {
       if (!mode) return;
-      const w = game.mouse.in ? cam.pickGround(game.mouse.x, game.mouse.y) : null;
+      const A = mode.kind === 'scan' && mode.aim && mode.aim.f === game.frameN ? mode.aim : null;
+      const w = A ? A.w : game.mouse.in ? cam.pickGround(game.mouse.x, game.mouse.y) : null;
       if (mode.kind === 'scan') {
-        const u = w ? scanner(w[0], w[2], mode.units) : mode.units[0];
-        if (u) {
-          const p = game.unitPose(u).pos;
-          R.fx.ring([p[0], 0, p[2]], u.def.scan.reach, { rgb: LIME, a: .45, step: 6, drape: true, lift: 2, mode: 'over' });
+        const s = A && A.s ? A.s : w ? scanFor(w[0], w[2]) : { u: mode.units[0] };
+        if (s.u) {
+          const p = game.unitPose(s.u).pos;
+          R.fx.ring([p[0], 0, p[2]], s.u.def.scan.reach, { rgb: LIME, a: .45, step: 6, drape: true, lift: 2, mode: 'over' });
           if (w) {
-            R.fx.ring(w, u.def.scan.r, { rgb: LIME, a: .8, step: 4, drape: true, lift: 2, mode: 'over' });
+            R.fx.ring(w, s.u.def.scan.r, { rgb: LIME, a: .8, step: 4, drape: true, lift: 2, mode: 'over' });
             R.fx.line([p[0], p[1] + 10, p[2]], [w[0], w[1] + 30, w[2]], { rgb: LIME, a: .5, step: 7, mode: 'over' });
           }
+        } else if (s.near) {
+          // out of reach: the nearest scanner's reach in coral, and the refused point
+          const p = game.unitPose(s.near.u).pos;
+          R.fx.ring([p[0], 0, p[2]], s.near.u.def.scan.reach, { rgb: CORAL, a: .5, step: 6, drape: true, lift: 2, mode: 'over' });
+          if (w) R.fx.ring(w, s.near.u.def.scan.r, { rgb: CORAL, a: .7, step: 4, drape: true, lift: 2, mode: 'over' });
         }
       } else if (mode.kind === 'drone' && w) {
         R.fx.ring(w, 1500, { rgb: LIME, a: .7, step: 5, drape: true, lift: 2, mode: 'over' });
+      } else if (mode.kind === 'launch' || mode.kind === 'helo') {
+        const t = game.hover ? sim.units.get(game.hover) : null;
+        const onTrack = t && t.alive && t.side !== game.side && game.vis(t) === 'track';
+        const decks = new Set(mode.units.map(u => u.aboard).filter(Boolean));
+        const to = onTrack ? game.unitPose(t).pos : w;
+        if (onTrack) {
+          const tp = game.unitPose(t).pos, de = Math.hypot(tp[0] - cam.eye[0], tp[1] - cam.eye[1], tp[2] - cam.eye[2]);
+          R.fx.ring(tp, Math.max(t.def.size[0] * .7, 26 * de / cam.fl), { rgb: CORAL, a: .9, step: 4, size: 1.5, lift: 2, mode: 'over' });
+        } else if (w) {
+          const r = mode.units.some(u => u.type !== 'helo') ? CAP_R.fighter : CAP_R.helo;
+          R.fx.ring(w, r, { rgb: LIME, a: .6, step: 6, drape: true, lift: 2, mode: 'over' });
+        }
+        if (to) for (const id of decks) {
+          const cv = sim.units.get(id); if (!cv) continue;
+          const p = game.unitPose(cv).pos;
+          R.fx.line([p[0], p[1] + 25, p[2]], [to[0], to[1] + 40, to[2]], { rgb: onTrack ? CORAL : LIME, a: .5, step: 8, mode: 'over' });
+        }
       }
     },
     draw2d(ov) {
       if (buyOpen) { if (game.frameN % 15 === 0) renderBuy(); }
       if (!mode || !game.mouse.in) return;
-      const x = game.mouse.x, y = game.mouse.y;
-      const txt = mode.kind === 'scan' ? 'SCAN · CLICK THE AREA' : 'ORLAN-10 · CLICK THE PATROL POINT';
-      ov.mark(x, y, 11, '#C6F432', 1);
-      ov.dline(x - 18, y, x - 8, y, 3, 1, '#C6F432', 1); ov.dline(x + 8, y, x + 18, y, 3, 1, '#C6F432', 1);
-      ov.dline(x, y - 18, x, y - 8, 3, 1, '#C6F432', 1); ov.dline(x, y + 8, x, y + 18, 3, 1, '#C6F432', 1);
-      ov.tag(x + 16, y + 14, mode.kind === 'scan' ? 'X' : 'L', txt, '', { kind: 'lime', size: 10 });
+      const x = game.mouse.x, y = game.mouse.y, LI = '#C6F432', CO = '#FF6A3D';
+      let key = 'X', txt = '', col = LI, sub = '', subCol = LI;
       if (mode.kind === 'scan') {
-        const cd = sim.sides[game.side].scanCd;
-        if (cd > 0) ov.text(x + 16, y + 48, `SIDE COOLDOWN ${Math.ceil(cd)} S`, { size: 10, col: '#FF6A3D' });
+        const A = mode.aim && mode.aim.f === game.frameN ? mode.aim : null;
+        const w = A ? A.w : cam.pickGround(x, y), s = A ? A.s : w ? scanFor(w[0], w[2]) : null;
+        const out = s && !s.u && s.near;
+        txt = out ? reachTxt(s.near) : 'SCAN · CLICK THE AREA';
+        if (out) col = CO;
+        // the sensors' reticle names the scanner, its range and cooldown under the cursor; without it, say it here
+        if (!game.getSystem('sensors')) {
+          if (s && s.u && s.alt) sub = `BY ${ref(s.u)} · ${km(Math.hypot(s.u.pos[0] - w[0], s.u.pos[2] - w[2]))} KM`;
+          const cd = sim.sides[game.side].scanCd;
+          if (cd > 0 && !sub) { sub = `SIDE COOLDOWN ${Math.ceil(cd)} S`; subCol = CO; }
+        }
+      } else if (mode.kind === 'drone') { key = 'L'; txt = 'ORLAN-10 · CLICK THE PATROL POINT'; }
+      else {
+        key = mode.kind === 'helo' ? 'U' : 'L';
+        const t = game.hover ? sim.units.get(game.hover) : null;
+        const onTrack = t && t.alive && t.side !== game.side && game.vis(t) === 'track';
+        const c = onTrack ? sim.contact(game.side, t.id) : null;
+        txt = `${pkgName(mode.units)} · ${onTrack ? 'STRIKE ' + (c ? c.track : 'TRK') : mode.kind === 'helo' ? 'CLICK A SEARCH POINT OR A TRACK' : 'CLICK A TRACK OR A PATROL POINT'}`;
+        if (onTrack) col = CO;
+        const wait = mode.units.filter(u => !ready(u));
+        if (wait.length) { sub = `${wait.length} REARMING · OFF THE DECK WHEN READY`; subCol = 'rgba(255,255,255,.7)'; }
       }
+      ov.mark(x, y, 11, col, 1);
+      ov.dline(x - 18, y, x - 8, y, 3, 1, col, 1); ov.dline(x + 8, y, x + 18, y, 3, 1, col, 1);
+      ov.dline(x, y - 18, x, y - 8, 3, 1, col, 1); ov.dline(x, y + 8, x, y + 18, 3, 1, col, 1);
+      const fl = mode.flash !== undefined && game.realT - mode.flash < .6 ? (Math.floor((game.realT - mode.flash) * 10) % 2 ? .25 : 1) : 1;
+      const b = ov.tag(x + 16, y + 14, key, txt, '', { kind: col === CO ? 'coral' : 'lime', size: 10, fit: [], a: fl });
+      if (sub && b) ov.text(b[0], b[3] + 15, sub, { size: 10, col: subCol });
     },
   };
 
@@ -227,10 +423,10 @@ export function createOrders(game) {
   const orders = {
     name: 'orders', priority: PRI.orders,
     get mode() { return mode; },
-    marks, setMode, hotkey, toggleBuy,
+    marks, setMode, hotkey, toggleBuy, pkg, droneContext,
     onKey(e) {
       if (e.type !== 'keydown' || e.ctrlKey || e.metaKey || e.altKey) return false;
-      const K = { KeyZ: 'stop', KeyH: 'hold', KeyT: 'deploy', KeyR: 'reload', KeyX: 'scan', KeyY: 'radar', KeyL: 'drone' }[e.code];
+      const K = { KeyZ: 'stop', KeyH: 'weapons', KeyT: 'deploy', KeyR: 'reload', KeyX: 'scan', KeyY: 'radar', KeyL: 'launch', KeyU: 'helo' }[e.code];
       if (K) return hotkey(K);
       if (e.code === 'KeyB') { toggleBuy(); return true; }
       return false;
@@ -242,7 +438,7 @@ export function createOrders(game) {
       if (t && t.side !== game.side && game.vis(t) === 'track') return attack(t, ev.shift, ev.x, ev.y);
       if (t && t.side === game.side) {
         if (t.type === 'tel' && reloadOn(t, ev.shift)) return true;
-        if (t.type === 'carrier') { const air = own().filter(u => u.def.domain === 'air' && u.type !== 'drone'); if (air.length) { game.order(air.map(u => u.id), { kind: 'return' }); return true; } }
+        if (t.def.air) { const air = own().filter(u => u.def.domain === 'air' && u.type !== 'drone' && !u.aboard && t.def.air.types.includes(u.type)); if (air.length) { game.order(air.map(u => u.id), { kind: 'return' }); marks.push({ kind: 'move', at: game.unitPose(t).pos.slice(), ids: air.map(u => u.id), t0: game.realT, dur: 2.2 }); return true; } }
         if (t.type === 'catapult') { const dr = own().filter(u => u.type === 'drone'); if (dr.length) { game.order(dr.map(u => u.id), { kind: 'return' }); return true; } }
       }
       const w = cam.pickGround(ev.x, ev.y);
@@ -251,6 +447,11 @@ export function createOrders(game) {
     },
     update() {
       for (let i = marks.length - 1; i >= 0; i--) if (game.realT - marks[i].t0 > marks[i].dur) marks.splice(i, 1);
+      // combat: say once, when the opening shot has settled, that the first shot waits for the player
+      if (!told && game.mode === 'combat' && game.realT > 3) {
+        told = true;
+        if (sim.alive(game.side).some(u => offensive(u) && !u.hold)) game.bus.emit('toast', { text: 'WEAPONS HELD · H WEAPONS FREE · RIGHT-CLICK A TRACK TO ATTACK' });
+      }
     },
     draw3d() {
       const now = game.realT;
@@ -258,6 +459,7 @@ export function createOrders(game) {
       let n = 0;
       for (const u of game.selected()) {
         if (n++ > 30) break;
+        if (u.aboard) continue;
         const p = game.unitPose(u).pos;
         if (u.path && u.wi < u.path.length) {
           const pts = [[p[0], p[1], p[2]]];
@@ -270,7 +472,7 @@ export function createOrders(game) {
         if (game.selection.size <= 6) for (const k in u.def.weapons) {
           const w = u.def.weapons[k];
           if (w.gun || w.auto || w.range < 3000) continue;
-          R.fx.ring([p[0], 0, p[2]], w.range, { rgb: LIME, a: .16, step: 9, drape: true, lift: 3 });
+          R.fx.ring([p[0], 0, p[2]], w.range, { rgb: LIME, a: u.hold ? .22 : .16, step: 9, drape: true, lift: 3 });
         }
       }
       // fading feedback
@@ -284,7 +486,7 @@ export function createOrders(game) {
           R.fx.ring(m.at, r * .3, { rgb: LIME, a: a * .8, step: 3, size: 1.5, drape: true, lift: 1, mode: 'over' });
           if (m.ids) for (const id of m.ids) {
             const u = sim.units.get(id); if (!u) continue;
-            const p = game.unitPose(u).pos;
+            const p = posOf(u);
             R.fx.line(p, m.at, { rgb: LIME, a: a * .85, step: 5, size: 1.5, drape: u.def.domain !== 'air', lift: 1.5, mode: 'over' });
           }
         } else if (m.kind === 'attack') {
@@ -294,7 +496,7 @@ export function createOrders(game) {
           R.fx.ring(tp, Math.max(t.def.size[0] * .7, 26 * de / cam.fl), { rgb: CORAL, a: a, step: 4, size: 1.5, lift: 2, mode: 'over' });
           for (const id of m.ids) {
             const u = sim.units.get(id); if (!u) continue;
-            const p = game.unitPose(u).pos;
+            const p = posOf(u);
             R.fx.line([p[0], p[1] + 4, p[2]], [tp[0], tp[1] + 6, tp[2]], { rgb: CORAL, a: a * .85, step: 5, size: 1.5, mode: 'over' });
           }
         } else if (m.kind === 'no') {
@@ -307,7 +509,7 @@ export function createOrders(game) {
     draw2d(ov) {
       for (const m of marks) if (m.kind === 'say') {
         const a = sat(1 - (game.realT - m.t0) / m.dur);
-        ov.text(m.sx + 14, m.sy - 10, m.text, { size: 10.5, col: '#FF6A3D', a });
+        ov.text(Math.min(m.sx + 14, ov.W - 12 - m.text.length * 7.4), Math.max(18, m.sy - 10), m.text, { size: 10.5, col: '#FF6A3D', a });
       }
     },
   };

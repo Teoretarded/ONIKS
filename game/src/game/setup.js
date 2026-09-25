@@ -52,8 +52,9 @@ export function createMatch(map, P, mission) {
   if (P.mode === 'campaign' && mission) spawned = campaignForces(sim, mission);
   else if (P.mode === 'combat') {
     spawned = setupBattle(sim, { coast: 1, fleet: 1, emplaced: true });
-    // the player's launchers start weapons free (hold: they engage tracks in reach on their own; H toggles)
-    for (const u of spawned[side] || []) if (u.type === 'tel' || u.type === 'ddg') u.hold = true;
+    // the first shot is the player's: offensive weapons start held (the sim's `hold` flag is weapons free; H toggles it,
+    // right-click on a track orders an attack). Defensive fire (SAM, SM-6, ESSM, Phalanx, 30 mm) is always automatic.
+    for (const u of spawned[side] || []) u.hold = false;
   }
   else spawned = setupBattle(sim, { coast: .5, fleet: .5, emplaced: true });
   return { sim, side, enemy, weather, spawned };

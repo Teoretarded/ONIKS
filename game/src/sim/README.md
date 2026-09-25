@@ -62,11 +62,12 @@ Unit = { id, type, side, def /* UNITS[type] */, pos, prev, hdg, prevHdg, pitch (
 |---|---|
 | `move` | path on land (roads faster) / at sea (draught) / direct in the air. Several units: line-abreast formation at the slowest speed |
 | `attack` | `target` = enemy unit id (must be a track: conf ≥ CLASSIFY). Closes to range, deploys (TEL), fires `n` rounds (default the weapon's salvo) |
-| `stop` | clear orders and halt |
+| `stop` | clear orders and halt (an aircraft on deck also leaves the launch queue) |
 | `hold` | `on` (default true): hold position, offensive weapons pick their own targets. Defensive weapons always fire by themselves |
+| `weapons` | `free` true/false: set the weapons-free flag (`u.hold`) without touching the orders (the player's Weapons free / Hold fire); `free: false` also drops attack orders |
 | `deploy` / `undeploy` | TEL: jacks 10 s, erect 15 s (immobile while deployed). Radar: mast 15 s (needed to radiate) |
 | `reload` | transloader + `target` TEL: drive beside it, 45 s per round. Transloader alone: refill at a depot. TEL: calls a transloader, else drives to a depot (90 s per round). Ships: sail to `map.replenish`. Pantsir: depot |
-| `scan` | at x, z within the unit's scan reach (moves closer if mobile). Needs the side's and the unit's cooldowns |
+| `scan` | at x, z within the unit's scan reach (moves closer if mobile, unless `stay` and not an aircraft: the player's scans pass `stay`). Needs the side's and the unit's cooldowns |
 | `radar` | `on` true/false (EMCON). A radiating radar can be heard by the enemy |
 | `launch_drone` | catapult: 12 s, then a drone patrols x, z |
 | `patrol` | aircraft: orbit x, z (radius r). Surface: shuttle between here and x, z |

@@ -52,6 +52,7 @@ game = {
   frame(dtReal), attachInput(canvas), dispatchEvents(),
   // added by the game's own systems
   pickUnit(sx, sy) -> unit | null     // what a click there would pick (selection)
+  unitScreenPos(u) -> [x, y, z]       // where the unit is drawn (aircraft on a deck: their parking spot) (selection)
   follow(unit | null), frameUnits(units)   // camera helpers (selection)
   endMatch({ win, reason })           // end now (objectives use it; match.js does the rest)
   fmtTime(s) -> 'mm:ss'               // (time)
@@ -125,11 +126,18 @@ cinematic caption to it, and its B key takes over from the orders system's reinf
 
 ## Controls (the game's own systems)
 
-Camera: WASD / arrows pan, Q E rotate, wheel zoom, right-drag rotate, middle-drag pan, PageUp / PageDown pitch.
-Select: click, Shift-click add / remove, drag a box, double-click (all of that type on screen), Ctrl / Alt 1-9 set a group,
-1-9 recall (twice: fly to it), Tab cycle, F follow. Orders: right-click (ground / sea: move in formation; hostile
-track: attack; a TEL with a transloader selected: reload), Z stop, H hold, T deploy / undeploy, R reload,
-X scan (then click), Y radar on / off, L launch drone (then click), B reinforcements, Esc cancel / pause menu.
+Camera: WASD / arrows pan, Q E rotate, wheel zoom, right-drag rotate, middle-drag pan, PageUp / PageDown pitch (close to
+the ground PageUp goes on past level: the view tilts up to 13 deg above the horizon to watch a climbing round).
+Select: click, Shift-click add / remove, drag a box, double-click (all of that type on screen; on a deck: that deck's
+aircraft of the type), Ctrl / Alt 1-9 set a group, 1-9 recall (twice: fly to it), Tab cycle, F follow. Aircraft parked
+on a deck: click one (close in), or the selection panel's Air row of the carrier (its counts are links).
+Orders: right-click (ground / sea: move in formation; hostile track: attack, and with a carrier selected its F/A-18Es
+launch on it; a TEL with a transloader selected: reload; deck aircraft: launch toward the point / track), Z stop,
+H weapons free / hold fire (offensive fire starts held: nothing launches until you order an attack or go weapons free;
+defence is always automatic), T deploy / undeploy, R reload, X scan (then click; the nearest scanner in reach fires, a
+point beyond every reach is refused, nothing drives), Y radar on / off, L launch (coast: the Orlan-10; fleet: the
+strike package off the deck, then click a track to strike or a point to patrol), U launch an MH-60R (fleet),
+B reinforcements, Esc cancel / pause menu.
 Time: Space pause, + / - rate. View: C cinematic camera, F10 hide the UI, I inspect (Inspect system), V radar view
 (Sensors system).
 

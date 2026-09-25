@@ -1,6 +1,10 @@
 /* Orders: issue (with formations for groups) and per-tick processing of each unit's order queue.
-   order = { kind: 'move'|'attack'|'stop'|'hold'|'deploy'|'undeploy'|'reload'|'scan'|'radar'|'launch_drone'
-             |'patrol'|'return', x?, z?, target?, on?, n?, r?, queue? } */
+   order = { kind: 'move'|'attack'|'stop'|'hold'|'weapons'|'deploy'|'undeploy'|'reload'|'scan'|'radar'|'launch_drone'
+             |'patrol'|'return', x?, z?, target?, on?, free?, n?, r?, queue?, stay? }
+   Rules of engagement: `u.hold` is the unit's weapons-free flag (offensive weapons pick their own targets in reach;
+   defensive weapons always fire by themselves). 'hold' { on } sets it AND halts the unit (the AI's stance);
+   'weapons' { free } only sets it (the player's Weapons free / Hold fire toggle: the unit keeps its orders; hold fire
+   also drops attack orders, so nothing fires until the next order). 'stop' also takes an aircraft off the launch queue. */
 import { CLASSIFY, TEL_ELEV, UNITS } from '../data/units.js';
 import { canMove, stow } from './movement.js';
 import { startScan, scanBlocked } from './sensors.js';
@@ -39,8 +43,17 @@ export function issue(sim, ids, o) {
 
 function give(sim, u, o) {
   // immediate orders (never queued)
-  if (o.kind === 'stop') { cancel(sim, u); u.orders.length = 0; u.path = null; u.spdCap = 0; if (u.def.domain === 'air' && !u.aboard) { u.goal = [u.pos[0], u.pos[2]]; u.orbitR = u.def.domain === 'air' && u.type !== 'helo' ? 1500 : 0; } return; }
+  if (o.kind === 'stop') { cancel(sim, u); unqueue(sim, u); u.orders.length = 0; u.path = null; u.spdCap = 0; if (u.def.domain === 'air' && !u.aboard) { u.goal = [u.pos[0], u.pos[2]]; u.orbitR = u.def.domain === 'air' && u.type !== 'helo' ? 1500 : 0; } return; }
   if (o.kind === 'radar') { if (u.def.sensors.radar) sim.setRadar(u, o.on === undefined ? !u.radarOn : o.on); return; }
+  if (o.kind === 'weapons') {
+    u.hold = !!o.free;
+    if (!o.free && u.orders.some(x => x.kind === 'attack')) {
+      const head = u.orders[0].kind === 'attack';
+      for (let i = u.orders.length - 1; i >= 0; i--) if (u.orders[i].kind === 'attack') u.orders.splice(i, 1);
+      if (head) { u.path = null; u.spdCap = 0; if (!u.orders.length) unqueue(sim, u); }
+    }
+    return;
+  }
   if (o.kind === 'hold' && !o.queue) {
     u.hold = o.on !== false;
     if (u.hold) { cancel(sim, u); u.orders.length = 0; u.path = null; }
@@ -50,6 +63,13 @@ function give(sim, u, o) {
   cancel(sim, u);
   u.orders.length = 0; u.orders.push(o);
   u.path = null; u.spdCap = 0; u.landing = false;
+}
+
+/* an aircraft on deck that no longer has anywhere to go leaves the carrier's launch queue */
+function unqueue(sim, u) {
+  if (!u.aboard) return;
+  const cv = sim.units.get(u.aboard), i = cv && cv.launchQ ? cv.launchQ.indexOf(u.id) : -1;
+  if (i >= 0) cv.launchQ.splice(i, 1);
 }
 
 /* leaving the current order: a transloader drops a reload in progress */
