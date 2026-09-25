@@ -141,7 +141,7 @@ function onEvent(e) {
 
 /* ------------------------------------------------------------------ draw */
 const sideCol = (side) => view === 'truth' ? (side === 'coast' ? LIME : CORAL) : (side === view ? LIME : CORAL);
-const SHORT = { hq: 'HQ', tel: 'TEL', radar: 'RDR', pantsir: 'SAM', catapult: 'CAT', drone: 'UAV', transloader: 'TLV', carrier: 'CVN', ddg: 'DDG', helo: 'HELO', fighter: 'FTR' };
+const SHORT = { hq: 'HQ', tel: 'TEL', radar: 'RDR', pantsir: 'SAM', catapult: 'CAT', drone: 'UAV', transloader: 'TLV', carrier: 'CVN', ddg: 'DDG', helo: 'HELO', fighter: 'FTR', s400: 'S400', s400r: '92N6', bereg: 'GUN', cg: 'CG', lcs: 'LCS' };
 
 function draw() {
   g.fillStyle = BG; g.fillRect(0, 0, W, H);

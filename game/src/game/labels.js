@@ -6,12 +6,14 @@ export const SHORT = {
   transloader: 'K342P TLV', carrier: 'CVN NIMITZ', ddg: 'DDG ARLEIGH BURKE', helo: 'MH-60R', fighter: 'F/A-18E',
   bal: 'BAL 3K60', ssk: 'KILO 636.3', aew: 'E-2D', ssn: 'VIRGINIA SSN',
   lhd: 'LHD WASP', lcac: 'LCAC', acv: 'ACV-1.1', kornet: 'KORNET-EM',
+  s400: 'S-400 5P85SM2-01', s400r: 'S-400 92N6E', bereg: 'A-222 BEREG', cg: 'CG TICONDEROGA', lcs: 'LCS INDEPENDENCE',
 };
 /* the class line a track shows once classified (the sensors' `cls` + the type's short name) */
 export const TRACK = { hq: 'CP · K380R', tel: 'TEL · K340P', radar: 'RADAR · MONOLITH-B', pantsir: 'SAM · PANTSIR-S1', catapult: 'UAV-L · ORLAN-10',
   drone: 'UAV · ORLAN-10', transloader: 'TLV · K342P', carrier: 'CVN · NIMITZ', ddg: 'DDG · ARLEIGH BURKE', helo: 'HELO · MH-60R', fighter: 'FTR · F/A-18E',
   bal: 'TEL · BAL', ssk: 'SSK · KILO', aew: 'AEW · E-2D', ssn: 'SSN · VIRGINIA',
-  lhd: 'LHD · WASP', lcac: 'LCAC', acv: 'ACV · ACV-1.1', kornet: 'ATGM · KORNET-EM' };
+  lhd: 'LHD · WASP', lcac: 'LCAC', acv: 'ACV · ACV-1.1', kornet: 'ATGM · KORNET-EM',
+  s400: 'SAM · S-400 5P85SM2-01', s400r: 'RADAR · 92N6E', bereg: 'GUN · A-222 BEREG', cg: 'CG · TICONDEROGA', lcs: 'LCS · INDEPENDENCE' };
 
 const pad2 = n => String(n).padStart(2, '0');
 
@@ -57,6 +59,14 @@ export function status(u) {
       return u.cargoN ? `${s} · ${u.cargoN} ACV` : s;
     }
     case 'kornet': return `${u.lift >= 1 ? 'UP' : u.lift > 0 ? 'RAISING' : 'STOWED'} · ${u.ammo.kornet} RD`;
+    case 's400': {
+      const s = u.elev >= 1.5 ? 'VERTICAL' : u.dep >= 1 && u.elevT > 0 ? 'RAISING' : u.dep > 0 && u.depT > 0 ? 'JACKS' : u.dep > 0 ? 'STOWING' : 'STOWED';
+      return `${s} · ${u.ammo.sam48} 48N6`;
+    }
+    case 's400r': return u.mast < 1 ? (u.mastT > 0 ? 'RAISING' : u.mast > 0 ? 'FOLDING' : 'STOWED') : u.radarOn ? 'RADIATING' : 'EMCON';
+    case 'bereg': return `${u.radarOn ? 'RDR' : 'EMCON'} · ${u.ammo.gun130} RD`;
+    case 'cg': return `SM-6 ${u.ammo.sm6} · ESSM ${u.ammo.pdms} · TLAM ${u.ammo.strike}`;
+    case 'lcs': return `57 MM ${u.ammo.gun57} · RAM ${u.ammo.searam}`;
     case 'acv': return k === 'embark' ? 'BOARDING' : k ? k.toUpperCase() : 'ASHORE';
   }
   return k ? k.toUpperCase() : '';

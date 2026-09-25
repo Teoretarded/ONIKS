@@ -4,9 +4,9 @@
    menu: play.html?mode=museum, the walk on its own (MUSEUM_MODE below). */
 
 export const MUSEUM = [
-  ['Coast', ['tel', 'transloader', 'radar', 'pantsir', 'drone', 'catapult', 'hq', 'bal', 'ssk']],
-  ['Fleet', ['destroyer', 'carrier', 'helo', 'fighter', 'aew', 'ssn']],
-  ['Munitions', ['oniks', 'tlc', 'oniks_booster', 'pantsir_missile', 'sm6', 'mk72', 'mk41_can', 'strike_missile', 'essm', 'slam', 'hellfire', 'aam', 'shell', 'kh35', 'kalibr', 'torpedo533', 'vpt_can']],
+  ['Coast', ['tel', 'transloader', 'radar', 'pantsir', 'drone', 'catapult', 'hq', 'bal', 'ssk', 's400', 's400r', 'bereg']],
+  ['Fleet', ['destroyer', 'carrier', 'helo', 'fighter', 'aew', 'ssn', 'cg', 'lcs']],
+  ['Munitions', ['oniks', 'tlc', 'oniks_booster', 'pantsir_missile', 'sm6', 'mk72', 'mk41_can', 'strike_missile', 'essm', 'slam', 'hellfire', 'aam', 'shell', 'kh35', 'kalibr', 'torpedo533', 'vpt_can', 's400_msl', 'rim116', 'shell130', 'shell57']],
   ['Structures', ['depot', 'port', 'lighthouse', 'radar_hill', 'airfield']],
 ];
 export const MUSEUM_KEYS = MUSEUM.flatMap(g => g[1]);

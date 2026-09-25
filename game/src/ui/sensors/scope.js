@@ -7,7 +7,7 @@ import { LIME, CORAL, WH, TAU, DEG, sat, clamp, ss, hsh, gH, pad2, mix } from '.
 import { TRACK, SHORT } from '../../game/labels.js';
 import { crossW, W1 } from './orb.js';
 
-const RCS_DB = { carrier: 51, ddg: 40, helo: 12, fighter: 8, drone: -2, tel: 22, radar: 22, pantsir: 22, transloader: 22, catapult: 12, hq: 26 };
+const RCS_DB = { carrier: 51, ddg: 40, helo: 12, fighter: 8, drone: -2, tel: 22, radar: 22, pantsir: 22, transloader: 22, catapult: 12, hq: 26, cg: 42, lcs: 34, s400: 22, s400r: 22, bereg: 22 };
 
 export function createScope(S) {
   const { game } = S, sim = game.sim, R = game.R, cam = R.camera;

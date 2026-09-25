@@ -77,6 +77,8 @@ export function weaponsTick(sim) {
       if (w.mounts && allOff(u, w.mounts)) continue;
       if (w.needsRadar && !radarWorks(u)) continue;
       if (w.sub && isSub(u) && !atPD(u)) continue;               // missiles leave a boat from periscope depth
+      if (w.auto && w.needs === 'erect' && (u.elev < elevOf(u.def) - 1e-6 || u.dep < 1 || u.reloader)) continue;   // S-400: containers up
+      if (w.cue && !cued(sim, u, w.cue)) continue;                 // S-400: a radiating 92N6E of its side near it
       if (w.auto && autoFire(sim, u, w)) continue;
       if (vsOf(w) & VS_SURF) offensive(sim, u, w);
     }
@@ -84,6 +86,11 @@ export function weaponsTick(sim) {
 }
 function allOff(u, mounts) { for (let i = 0; i < mounts.length; i++) if (!u.off[mounts[i]]) return false; return true; }
 
+/* a launcher's fire-control radar: a unit of type c.type of its side, radiating, within c.r */
+function cued(sim, u, c) {
+  for (const v of sim.alive(u.side)) if (v.type === c.type && radarWorks(v) && dxz(u.pos[0], u.pos[2], v.pos[0], v.pos[2]) <= c.r) return true;
+  return false;
+}
 function threatsFor(sim, u, w) {
   const side = u.side, t = sim.t, ux = u.pos[0], uy = u.pos[1], uz = u.pos[2];
   let best = null, bs = 1e18;
@@ -230,7 +237,7 @@ function burst(sim, u, w, tgt, isProj) {
   const mz = muzzleOf(u, w, mount);
   if (w.mounts) {
     const b = Math.atan2(tgt.pos[0] - u.pos[0], tgt.pos[2] - u.pos[2]);
-    u.cYaw[mount] = angTo(u.hdg, b) - (mount ? Math.PI : 0);
+    u.cYaw[mount] = angTo(u.hdg, b);                         // the mount's yaw off the bow (the models turn R.y(yaw) from +Z)
     u.cPitch[mount] = Math.atan2(tgt.pos[1] - mz[1], Math.max(1, dxz(mz[0], mz[2], tgt.pos[0], tgt.pos[2])));
   }
   aimTurret(u, tgt.pos);
@@ -257,7 +264,7 @@ export function fireGun(sim, u, wn, tgt) {
   return sim.bursts[sim.bursts.length - 1];
 }
 function muzzleOf(u, w, mount) {
-  return w.mounts ? local(u, MOUNT[mount]) : w.muzzle ? local(u, w.muzzle) : [u.pos[0], u.pos[1] + 12, u.pos[2]];
+  return w.mounts ? local(u, (w.mountAt || MOUNT)[mount]) : w.muzzle ? local(u, w.muzzle) : [u.pos[0], u.pos[1] + 12, u.pos[2]];
 }
 /* where to point: the target's position plus its velocity relative to the gun times the time of flight (drag slows
    the round: v = v0 e^(-drag x), so a distance d takes (e^(drag d) - 1) / (drag v0)), raised by what the round falls
@@ -458,6 +465,10 @@ export function launch(sim, u, w, target, tk, aimAt) {
     const a = u.elev, dy = K.rows[r], dz = -K.len - .2, ca = Math.cos(a), sa = Math.sin(a);
     pos = local(u, [K.cols[c], K.piv[1] + ca * dy - sa * dz, K.piv[2] + sa * dy + ca * dz]);
     hdg = u.hdg + Math.PI; pitch = a;
+  } else if (w.needs === 'erect' && u.def.tubes) {
+    // S-400: out of the vertical containers in turn (def.tubes: the mouths, erect), a cold launch straight up
+    const T = u.def.tubes, k = Math.max(0, Math.min(T.length - 1, w.ammo - before));
+    pos = local(u, T[k]); pitch = Math.PI / 2;
   } else if (w.needs === 'erect') {
     const tube = 2 - before;                    // first round from the right tube
     const side = tube === 0 ? 1 : -1;

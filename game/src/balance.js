@@ -186,7 +186,7 @@ async function match(job, yieldFn) {
           if (firstHit === null) firstHit = e.t; inc(tally.hit, e.kind); inc(tally.on, e.kind + '>' + typeOf(sim, e.target));
           const r = e.proj != null && fate.get(e.proj); if (r && (r.f === 'open' || r.f === 'spin')) r.f = e.spin ? 'spinhit' : 'hit';
         }
-        else if (e.type === 'launch') { inc(tally.launch, e.kind); if (e.tk === 'unit' && e.kind !== 'shell') inc(tally.aim, e.kind + '>' + typeOf(sim, e.target)); if (e.proj != null) fate.set(e.proj, { k: e.kind, f: 'open' }); }
+        else if (e.type === 'launch') { inc(tally.launch, e.kind); if (e.tk === 'unit' && e.kind !== 'shell' && e.kind !== 'shell57' && e.kind !== 'shell130') inc(tally.aim, e.kind + '>' + typeOf(sim, e.target)); if (e.proj != null) fate.set(e.proj, { k: e.kind, f: 'open' }); }
         else if (e.type === 'intercept') { inc(tally.icpt, e.kind); inc(tally.stopBy, e.kind + '<' + (e.byKind || '?')); setF(e.proj, 'icpt', true); }
         else if (e.type === 'spinout') { inc(tally.stopBy, e.kind + '<' + (e.byKind || '?') + '~'); setF(e.proj, 'spin'); }
         else if (e.type === 'splash' && e.proj != null) {

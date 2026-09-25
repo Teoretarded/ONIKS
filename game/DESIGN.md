@@ -19,8 +19,8 @@ through in 360°, from a metre off a missile's skin to 150 km up.
 
 | Side | Colour (when it is yours) | Units |
 |---|---|---|
-| **Coast** (Bastion coastal battery) | lime | Command post (HQ), K340P TEL (2 × 3M55 Oniks), Monolith-B radar, Pantsir-S1, Orlan-10 drone + catapult truck, transloader (reload crane truck) |
-| **Fleet** (naval strike group) | lime when played; coral when enemy | Arleigh Burke DDG (SM-6 interceptors, strike missiles, 5" gun, 2 × Phalanx), Nimitz carrier (HQ; launches F/A-18E and MH-60R), MH-60R Seahawk, F/A-18E Super Hornet |
+| **Coast** (Bastion coastal battery) | lime | Command post (HQ), K340P TEL (2 × 3M55 Oniks), Monolith-B radar, Pantsir-S1, Orlan-10 drone + catapult truck, transloader (reload crane truck); S-400 (5P85SM2-01 launcher + 92N6E radar), A-222 Bereg 130 mm gun |
+| **Fleet** (naval strike group) | lime when played; coral when enemy | Arleigh Burke DDG (SM-6 interceptors, strike missiles, 5" gun, 2 × Phalanx), Nimitz carrier (HQ; launches F/A-18E and MH-60R), MH-60R Seahawk, F/A-18E Super Hornet; Ticonderoga CG (air defence), Independence LCS (fast scout) |
 
 The opposing side is always coral; unknown contacts are white.
 
