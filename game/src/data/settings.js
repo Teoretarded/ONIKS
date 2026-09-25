@@ -82,14 +82,17 @@ export const DEFAULTS = Object.fromEntries(SETTINGS.map(s => [s.key, s.def]));
 
 /* Keybinds reference: the real bindings of the game's systems (camera.js, select.js, orders.js, time.js, director.js,
    sensors, inspect, sandbox.js, match.js). Shown by the Settings screen and the in-game help (F1).
-   [key, what, { side: 'coast' | 'fleet', mode: 'sandbox' }?]: the help shows a row only for that side / mode. */
+   [key, what, { side: 'coast' | 'fleet', mode: 'sandbox', ctx }?]: the help shows a row only for that side / mode.
+   ctx: where the key does this (a key is bound once per context; tools/validate.mjs checks it): 'play' (the default:
+   the battle view), 'selection' (while units are selected; it comes before 'play'), 'inspect' (in the Inspect view),
+   'film' (the film panel open, F9), 'palette' (the sandbox spawn palette open, P). */
 export const KEYBINDS = [
   { group: 'Camera', binds: [
     ['W A S D', 'Pan · Shift faster'], ['Edges', 'Pan'], ['Middle drag', 'Pan'], ['Right drag', 'Rotate 360° · pitch'],
     ['Q E', 'Rotate'], ['PgUp PgDn', 'Pitch'], ['Wheel', 'Zoom to the pointer'], ['F', 'Follow · again: stop'] ] },
   { group: 'Select', binds: [
     ['Click', 'Select'], ['Shift click', 'Add / remove'], ['Drag', 'Box select'], ['Double click', 'All of that type'],
-    ['Ctrl 1-9', 'Set group · Alt 1-9 too'], ['1-9', 'Recall group · twice: fly'], ['Tab', 'Next unit'], ['Esc', 'Clear selection'] ] },
+    ['Ctrl 1-9', 'Set group · Alt 1-9 too'], ['1-9', 'Recall group · twice: fly'], ['Tab', 'Next unit'], ['Esc', 'Clear selection', { ctx: 'selection' }] ] },
   { group: 'Orders', binds: [
     ['Right click', 'Move · attack a track'], ['Shift', 'Queue the order'], ['Z', 'Stop'], ['H', 'Weapons free / hold'],
     ['~', 'Salvo 1 / 2 / all · Shift: back'],
@@ -97,16 +100,17 @@ export const KEYBINDS = [
     ['L', 'Launch Orlan-10', { side: 'coast' }], ['L', 'Launch strike package', { side: 'fleet' }], ['U', 'Launch MH-60R', { side: 'fleet' }],
     ['O', 'Boats: dive / come up · Shift: surface'], ['B', 'Reinforcements'] ] },
   { group: 'Inspect', binds: [
-    ['I', 'Inspect the selection'], ['Alt click', 'Inspect a unit or round'], ['E', 'Exploded view'], ['X', 'X-ray on / off'],
-    ['H', 'Hide the tags'], ['Esc', 'Leave'], ['Shift I', 'Anatomy browser', { mode: 'sandbox' }] ] },
+    ['I', 'Inspect the selection'], ['Alt click', 'Inspect a unit or round'], ['E', 'Exploded view', { ctx: 'inspect' }],
+    ['X', 'X-ray on / off', { ctx: 'inspect' }], ['H', 'Hide the tags', { ctx: 'inspect' }], ['Esc', 'Leave', { ctx: 'inspect' }],
+    ['Shift I', 'Anatomy browser', { mode: 'sandbox' }] ] },
   { group: 'View and time', binds: [
     ['C', 'Cinematic camera'], ['J', 'Replay the last hit'], ['Shift J', 'Hit replay on / off'], ['V', 'Radar view'],
     ['F10', 'Hide the interface'], ['F1', 'Help'], ['Space', 'Pause'], ['+ −', 'Time rate'], ['Esc', 'Menu'] ] },
   { group: 'Film maker', binds: [
-    ['F9', 'Film panel'], ['K', 'Key at this view'], ['Shift K', 'Key that follows'], ['Shift F9', 'Play the take'],
+    ['F9', 'Film panel'], ['K', 'Key at this view', { ctx: 'film' }], ['Shift K', 'Key that follows', { ctx: 'film' }], ['Shift F9', 'Play the take'],
     ['F8', 'Still · Shift: sequence'] ] },
   { group: 'Sandbox', mode: 'sandbox', binds: [
-    ['P', 'Spawn palette'], ['1-9 ⇧1-9', 'Pick a unit to place'], ['Del', 'Delete selected'], ['G', 'Fog'], ['K', 'Enemy AI'],
+    ['P', 'Spawn palette'], ['1-9 ⇧1-9', 'Pick a unit to place', { ctx: 'palette' }], ['Del', 'Delete selected'], ['G', 'Fog'], ['K', 'Enemy AI'],
     ['M', 'Switch side'], ['N', 'Weather'] ] },
 ];
 
