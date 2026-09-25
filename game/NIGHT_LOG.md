@@ -352,3 +352,10 @@ the plain loop B/C (A at best), storm + fire-and-move S on two seeds.
 (42 models including the new ones; ← → walk, E explode, X x-ray). On the Campaign screen, F replays a passed
 mission's whole film, and a Films row lists the ten favourites to watch full screen with the films' timeline bar
 and keys. The main menu still has exactly its five entries.
+
+## 12:50 · Save / Continue and kill stills
+Pause menu → Save (Combat, Sandbox) keeps one slot; the setup screen shows "Continue · KRASNAYA KOSA · T+08:56". A
+restore replays the recorded match to the saved tick in 1-2 s ("RESTORING · T+…" on the loading screen) and checks the
+state hash; every test restore landed exactly. A save from an older version of the code is refused cleanly.
+The end screen now shows the match's three best hit-replay moments as film stills beside Victory / Defeat
+("Fig. 3 · COAST COMMAND POST · 02 COMMAND SHELTER · OUT · T+26:40"); click to open full size.
