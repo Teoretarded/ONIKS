@@ -665,14 +665,17 @@ export const LCS = {
    ====================================================================================================== */
 const SL = {
   TR_AX: [6.9, 3.0, 1.55], TL_AX: [-5.5, -6.9], WR: .66,
-  PIV: [0, 1.95, -8.05], LEN: 7.55, CR: .36, AXY: .6,           // containers: length, radius, axis above the pivot
-  COLS: [-1.14, -.38, .38, 1.14], ORDER: [0, 3, 1, 2],           // firing order: outboard first
+  PIV: [0, 1.95, -8.05], LEN: 7.55, CR: .47, AXY: .6,           // containers: length, radius (Ø 0.94), lower axis above the pivot
+  // two tiers of two (the photos: a 2 × 2 stack, not a row of four): cell -> [x, axis above the pivot]
+  CELLS: [[-.52, .6], [.52, .6], [-.52, 1.6], [.52, 1.6]], ORDER: [2, 3, 0, 1],   // firing order: top tier first
+  COLS: [-.52, .52],
   ELEV: PI / 2, JACKS: [[1.55, -7.75], [1.55, -.9]], JT: .62,
   ZF: 8.15, ZR: -8.3,
 };
 const slPackXf = st => X.pivotX(SL.PIV, -(st.elev || 0));
 /* container k (0..3 in the firing order) mouth centre, model frame, at elev */
-const slMouth = (k, elev) => X.ap(slPackXf({ elev }), [SL.COLS[SL.ORDER[k]], SL.PIV[1] + SL.AXY, SL.PIV[2] + SL.LEN + .05]);
+const slCell = k => SL.CELLS[SL.ORDER[k]];
+const slMouth = (k, elev) => X.ap(slPackXf({ elev }), [slCell(k)[0], SL.PIV[1] + slCell(k)[1], SL.PIV[2] + SL.LEN + .05]);
 function bazCab() {
   // BAZ-64022 forward-control cab: flat front, split windscreen, side doors; engine cover behind
   const P = [], zb = 5.55, zf = 8.0, hw = 1.27, y0 = 1.3, yw = 2.35, yt = 3.3;
@@ -731,23 +734,27 @@ function slCabin() {
 }
 /* the erector: cradle beams, cross members, side trusses and the four containers (pack frame, before the raise) */
 function slPack() {
-  const P = [], y0 = SL.PIV[1], z0 = SL.PIV[2] + .05, z1 = z0 + SL.LEN, yA = y0 + SL.AXY;
-  P.push(box([-1.55, y0 - .12, z0], [1.55, y0 + .1, z1 - .2]));
-  for (const s of [-1, 1]) P.push(box([s * 1.52 - .07, y0 + .1, z0 + .2], [s * 1.52 + .07, yA + .45, z1 - .4]));
-  for (const z of [z0 + .6, z0 + 3.2, z1 - .9]) P.push(box([-1.58, y0 + .1, z - .09], [1.58, yA + .5, z + .09], fn({ skip: [0, 1] })));
-  for (const x of SL.COLS) {
-    P.push(lathe([x, yA, z0], FZ, [[0, SL.CR - .03], [.04, SL.CR], [SL.LEN - .04, SL.CR], [SL.LEN, SL.CR - .02]], { n: 22, gen: 4, rings: [1, 2], caps: true }));
-    for (let k = 1; k < 7; k++) P.push(ringW([x, yA, z0 + k * SL.LEN / 7], FZ, SL.CR + .025, fn({ n: 16 })));
+  const P = [], y0 = SL.PIV[1], z0 = SL.PIV[2] + .05, z1 = z0 + SL.LEN, yT = y0 + SL.CELLS[2][1];
+  P.push(box([-1.25, y0 - .12, z0], [1.25, y0 + .1, z1 - .2]));
+  for (const s of [-1, 1]) P.push(box([s * 1.1 - .07, y0 + .1, z0 + .2], [s * 1.1 + .07, yT + .2, z1 - .4]));
+  for (const z of [z0 + .6, z0 + 3.2, z1 - .9]) {
+    for (const s of [-1, 1]) P.push(box([s * 1.1 - .09, y0 + .1, z - .09], [s * 1.1 + .09, yT + SL.CR + .08, z + .09], fn()));
+    P.push(box([-1.19, yT + SL.CR - .02, z - .09], [1.19, yT + SL.CR + .1, z + .09], fn({ skip: [0] })));      // clamp band over the top tier
+  }
+  for (const [x, ya] of SL.CELLS) {
+    const yA = y0 + ya;
+    P.push(lathe([x, yA, z0], FZ, [[0, SL.CR - .03], [.04, SL.CR], [SL.LEN - .04, SL.CR], [SL.LEN, SL.CR - .02]], { n: 24, gen: 4, rings: [1, 2], caps: true }));
+    for (let k = 1; k < 9; k++) P.push(ringW([x, yA, z0 + k * SL.LEN / 9], FZ, SL.CR + .025, fn({ n: 18 })));
     P.push(circle([x, yA, z0 - .01], [0, 0, -1], SL.CR * .7, 12, fn({ w: .5, pts: false })));
   }
-  P.push(crate([-.45, yA + .38, z0 + 1.2], [.45, yA + .55, z0 + 2.2], fn()));                // cable box
+  P.push(crate([-.3, yT + SL.CR + .1, z0 + 1.2], [.3, yT + SL.CR + .3, z0 + 2.2], fn()));                // cable box
   return P;
 }
 /* front covers of the containers still loaded (dyn on n): they fly off at the launch */
 function slCaps(st) {
-  const n = st.n === undefined ? 4 : Math.max(0, Math.min(4, Math.round(st.n))), P = [], yA = SL.PIV[1] + SL.AXY, z = SL.PIV[2] + .05 + SL.LEN;
+  const n = st.n === undefined ? 4 : Math.max(0, Math.min(4, Math.round(st.n))), P = [], z = SL.PIV[2] + .05 + SL.LEN;
   for (let k = 4 - n; k < 4; k++) {
-    const x = SL.COLS[SL.ORDER[k]];
+    const x = slCell(k)[0], yA = SL.PIV[1] + slCell(k)[1];
     P.push(lathe([x, yA, z], FZ, [[0, SL.CR + .02], [.06, SL.CR + .02], [.1, SL.CR * .6], [.12, 0]], { n: 18, gen: 2, rings: [0, 1] }));
   }
   return P;
@@ -788,29 +795,38 @@ function s400() {
     ],
   };
 }
-export const S400 = { PIV: SL.PIV, LEN: SL.LEN, ELEV: SL.ELEV, COLS: SL.COLS, ORDER: SL.ORDER, packXf: slPackXf, mouth: slMouth };
+export const S400 = { PIV: SL.PIV, LEN: SL.LEN, ELEV: SL.ELEV, COLS: SL.COLS, CELLS: SL.CELLS, ORDER: SL.ORDER, packXf: slPackXf, mouth: slMouth };
 
 /* ======================================================================================================
-   S-400 · 92N6E ENGAGEMENT RADAR on an MZKT-7930 8×8: the equipment shelter behind the cab, the antenna post at
-   the rear on a turntable. Travelling, the phased-array antenna lies flat, face down, on the shelter roof; raised
-   (st.mast 1) it stands upright and turns with st.ant. Vehicle-local frame as the TEL.
+   S-400 · 92N6E ENGAGEMENT RADAR on an MZKT-7930 8×8: the antenna post on a turntable right behind the power pack,
+   the equipment shelter on the rear half. Travelling, the phased-array antenna lies flat, face up, back along the
+   shelter roof; raised (st.mast 1) it stands upright (leaning back 12°) and turns with st.ant. The array is a
+   rectangular radome-covered panel (~3.2 × 3.9 m), not an octagon (photos: Army-2016, Kuzmin). Vehicle-local frame
+   as the TEL.
    ====================================================================================================== */
-const SR = { AXLES: [4.45, 2.25, -2.75, -4.95], H: [0, 3.75, -5.0], TURN: [0, 0, -5.0] };
+const SR = { AXLES: [4.45, 2.25, -2.75, -4.95], H: [0, 3.75, 1.85], TURN: [0, 0, 1.85], W: 1.6, HH: 1.95, D: .45, TILT: 12 * DEG };
 const ss = (a, b, v) => { const t = sat((v - a) / (b - a)); return t * t * (3 - 2 * t); };
-const srRaiseXf = st => about(R.x((1 - (st.mast === undefined ? 1 : sat(st.mast))) * PI / 2), SR.H);
+const srRaiseXf = st => about(R.x(-(1 - (st.mast === undefined ? 1 : sat(st.mast))) * (PI / 2 - SR.TILT)), SR.H);   // folded: the panel lies flat
 const srAntXf = st => X.mul(about(R.y((st.ant || 0) * ss(.85, 1, st.mast === undefined ? 1 : st.mast)), SR.TURN), srRaiseXf(st));
+const SR_N = V.norm([0, Math.sin(SR.TILT), Math.cos(SR.TILT)]), SR_U = V.norm(V.cross(SR_N, FX));
+const SR_C = V.add(V.mad([0, SR.H[1] + .3, SR.H[2] + .35], SR_U, SR.HH), [0, 0, 0]);
 function srAntenna() {
-  // in the raised frame: a short column, the planar array (octagonal face, element grid), its back frame
-  const P = [], c = [0, 6.3, -4.82], n = V.norm([0, .08, 1]), h = FX, u = V.norm(V.cross(n, h));
-  P.push(cyl([0, 3.75, -5.0], [0, 4.55, -5.0], .32, { n: 14, gen: 2, caps: true }));
-  P.push(crate([-.6, 4.4, -5.35], [.6, 4.75, -4.9]));
-  const P8 = []; for (let i = 0; i < 8; i++) { const a = (i + .5) / 8 * TAU; P8.push(V.add(V.mad(c, h, Math.cos(a) * 1.84), V.mul(u, Math.sin(a) * 1.8))); }
-  P.push(hex([P8[3], P8[0], P8[7], P8[4], ...[P8[3], P8[0], P8[7], P8[4]].map(p => V.mad(p, n, -.34))], { bottom: true }));
-  P.push(...octFace(V.mad(c, n, .01), h, u, n, 1.84));
-  P.push(hex([P8[2], P8[1], P8[0], P8[3], ...[P8[2], P8[1], P8[0], P8[3]].map(p => V.mad(p, n, -.34))], { skip: [0] }));
-  P.push(hex([P8[4], P8[7], P8[6], P8[5], ...[P8[4], P8[7], P8[6], P8[5]].map(p => V.mad(p, n, -.34))], { skip: [0] }));
-  P.push(crate(V.add(c, [-.35, 1.75, -.35]), V.add(c, [.35, 2.05, -.05]), fn()));                     // IFF / aux antenna
-  for (const s of [-1, 1]) P.push(cyl([s * .45, 4.6, -5.25], V.add(c, [s * 1.1, -.6, -.35]), .06, fn({ n: 6, gen: 0 })));
+  // in the raised frame: the yoke on the turntable, the panel (radome face, element rows, back shell), its back truss
+  const P = [], c = SR_C, n = SR_N, h = FX, u = SR_U, W = SR.W, H = SR.HH, D = SR.D, Z = SR.H[2];
+  const q = (a, b, d) => V.mad(V.add(V.mad(c, h, a), V.mul(u, b)), n, -d);
+  P.push(cyl([0, 3.75, Z], [0, 4.25, Z], .5, { n: 16, gen: 2, caps: true }));
+  P.push(crate([-.95, 4.1, Z - .55], [.95, 4.45, Z + .45]));
+  for (const s of [-1, 1]) P.push(prism(s * .75, s * .95, 4.45, 5.0, Z - .5, Z + .4, s * .75, s * .95, Z - .2, Z + .3));      // yoke cheeks
+  const r = .32;   // rounded upper corners (radome)
+  const face = [q(-W, -H, 0), q(W, -H, 0), q(W, H - r, 0), q(W - r * .3, H - r * .3, 0), q(W - r, H, 0), q(-W + r, H, 0), q(-W + r * .3, H - r * .3, 0), q(-W, H - r, 0)];
+  P.push(hex([q(-W, H - r, 0), q(W, H - r, 0), q(W, -H, 0), q(-W, -H, 0), q(-W, H - r, D), q(W, H - r, D), q(W, -H, D), q(-W, -H, D)], { bottom: true }));
+  P.push(hex([q(-W + r, H, 0), q(W - r, H, 0), q(W, H - r, 0), q(-W, H - r, 0), q(-W + r, H, D), q(W - r, H, D), q(W, H - r, D), q(-W, H - r, D)], { bottom: true }));
+  P.push(line(face.map(p => V.mad(p, n, .015)), { closed: true, w: .95, pts: false }));
+  for (let k = 1; k < 12; k++) { const b = -H + k * (2 * H) / 12; P.push(line([V.mad(q(-W + .12, b, 0), n, .02), V.mad(q(W - .12, b, 0), n, .02)], fn({ w: .3, pts: false }))); }
+  for (const a of [-W / 2, 0, W / 2]) P.push(line([V.mad(q(a, -H + .1, 0), n, .02), V.mad(q(a, H - .1, 0), n, .02)], fn({ w: .25, pts: false })));
+  P.push(crate(q(-.35, H - .05, .1), q(.35, H + .25, .35), fn()));                                   // IFF / aux antenna on the top edge
+  for (const s of [-1, 1]) P.push(cyl([s * .85, 4.9, Z - .1], q(s * 1.1, -H * .2, D), .07, fn({ n: 6, gen: 0 })));
+  P.push(crate(q(-.6, -H + .2, D), q(.6, -H + 1.4, D + .35)));                                       // back: drive / electronics box
   return P;
 }
 const SR_GEO = memo(() => {
@@ -819,18 +835,19 @@ const SR_GEO = memo(() => {
   K.push(...partOf(HD.tel(), 'cab').prims);
   B.push(box([-1.36, 1.45, 2.95], [1.36, 2.95, 4.1]));
   for (const s of [-1, 1]) B.push(panel([[s * 1.365, 1.62, 3.05], [s * 1.365, 1.62, 4.0], [s * 1.365, 2.78, 4.0], [s * 1.365, 2.78, 3.05]], { hatch: 5, edge: .6, pts: false }));
-  // equipment shelter
-  S.push(crate([-1.35, 1.45, -4.2], [1.35, 3.45, 2.85]));
+  // equipment shelter on the rear half (behind the antenna post)
+  S.push(crate([-1.35, 1.45, -6.35], [1.35, 3.6, .75]));
   for (const s of [-1, 1]) {
-    S.push(rect([s * 1.36, 2.45, -.4], FZ, FY, .45, .8, { edge: .7 }));
-    for (const z of [-3.2, 1.6]) S.push(rect([s * 1.36, 2.9, z], FZ, FY, .35, .3, fn({ hatch: 4, edge: .5 })));
+    S.push(rect([s * 1.36, 2.45, -2.6], FZ, FY, .45, .8, { edge: .7 }));
+    for (const z of [-5.2, -.6]) S.push(rect([s * 1.36, 2.95, z], FZ, FY, .35, .3, fn({ hatch: 4, edge: .5 })));
   }
-  S.push(crate([-.7, 3.45, 1.0], [.7, 3.7, 2.2], fn()));
-  S.push(line([[-1.1, 3.45, 2.5], [-1.08, 5.0, 2.45]], fn({ w: .5 })));
-  // antenna pedestal and turntable ring
-  PD.push(crate([-.75, 1.45, -5.65], [.75, 3.55, -4.35]));
-  PD.push(lathe([0, 3.55, -5.0], FY, [[0, .7], [.2, .7]], { n: 20, gen: 0, caps: true }));
-  for (const s of [-1, 1]) for (const z of [-6.6, -3.0]) PD.push(lathe([s * 1.3, .76, z], FY, [[0, .15], [.08, .15], [.08, .12], [.72, .12]], fn({ n: 10, gen: 2, rings: [0, 1], caps: true })));
+  S.push(crate([-.7, 3.6, -4.8], [.7, 3.85, -3.6], fn()));
+  for (const x of [-.6, .6]) S.push(line([[x, .45, -6.45], [x, 1.45, -6.4]], fn({ w: .6 })));                               // rear ladder
+  S.push(line([[-1.1, 3.6, -6.0], [-1.08, 5.1, -6.05]], fn({ w: .5 })));
+  // antenna post: equipment block under the turntable between the power pack and the shelter, turntable ring
+  PD.push(crate([-1.3, 1.45, .8], [1.3, 3.55, 2.9]));
+  PD.push(lathe([0, 3.55, SR.H[2]], FY, [[0, .85], [.2, .85]], { n: 22, gen: 0, caps: true }));
+  for (const s of [-1, 1]) for (const z of [-6.6, 1.2]) PD.push(lathe([s * 1.3, .76, z], FY, [[0, .15], [.08, .15], [.08, .12], [.72, .12]], fn({ n: 10, gen: 2, rings: [0, 1], caps: true })));
   return { C, K, B, S, PD, A: srAntenna() };
 });
 function s400r() {
@@ -850,7 +867,7 @@ function s400r() {
     ],
   };
 }
-export const S400R = { H: SR.H, TURN: SR.TURN, antXf: srAntXf, ARRAY: [0, 6.3, -4.82] };
+export const S400R = { H: SR.H, TURN: SR.TURN, antXf: srAntXf, ARRAY: SR_C };
 
 /* ======================================================================================================
    A-222 BEREG · 130 mm self-propelled coastal gun on the MAZ-543M 8×8: the two separate cabs either side of the
@@ -1079,7 +1096,7 @@ function s400rCut() {
   const M = s400r();
   return cutOf(M, 's400r_cut', [
     O({ name: 'engine', label: 'YaMZ-846 · V12 diesel', prims: [crate([-.62, 1.0, 2.95], [.62, 2.4, 4.05])] }, hidden),
-    O({ name: 'consoles', label: 'Operator consoles · processing racks', prims: [crate([-1.2, 1.5, -3.9], [-.5, 3.3, -.6]), crate([.5, 1.5, -3.9], [1.2, 3.3, -.6]), crate([-.9, 1.5, .4], [.9, 2.4, 2.6])] }, hidden),
+    O({ name: 'consoles', label: 'Operator consoles · processing racks', prims: [crate([-1.2, 1.5, -4.4], [-.5, 3.4, -.3]), crate([.5, 1.5, -4.4], [1.2, 3.4, -.3]), crate([-.9, 1.5, -6.1], [.9, 2.5, -4.8])] }, hidden),
   ]);
 }
 function beregCut() {
@@ -1189,7 +1206,7 @@ export const UNITS3_ANATOMY = {
     ],
     xray: [0, 1, 2, 3].map(k => ({
       id: 'M' + (k + 1), label: '48N6E3 · container ' + (k + 1), model: 's400_msl', st: {}, parent: 'pack',
-      inst: st => [X.mul(slPackXf(st), T3([SL.COLS[SL.ORDER[k]], SL.PIV[1] + SL.AXY, SL.PIV[2] + .05 + SL.LEN / 2]))],
+      inst: st => [X.mul(slPackXf(st), T3([slCell(k)[0], SL.PIV[1] + slCell(k)[1], SL.PIV[2] + .05 + SL.LEN / 2]))],
       when: st => (st.n === undefined ? 4 : st.n) > k,
     })),
   },

@@ -777,8 +777,49 @@ function truckPatch(m, o) {
 }
 const MZ_O = { kind: 'mzkt', axles: MZ_AX, wo: MZ_WH, lamps: [.3, -3.9] };
 const KZ_O = { kind: 'kamaz', axles: [3.9, 2.1, -1.9, -3.3], wo: KZ_WH, lamps: [.8, -2.6] };
+/* Monolith-B antenna post (photos: IMDS-2011, Army-2022/23, the Leningrad exercise): not a flat panel on a tall pole
+   but a squared-off radome (~2.4 m across, ~1.7 m deep, ~2.8 m tall) on a pedestal and turntable at the rear of the
+   shelter, and a separate telescopic comms mast further forward. state mast: 0 stowed (the radome lies forward on the
+   shelter roof) .. .5 upright .. 1 lifted and the comms mast run up; ant turns the radome once it is up. */
+const MB = { Z: -5.1, ST: 3.4, LIFT: 1.1, CM: [-.95, -1.3], CM_H: 9.4 };
+const mbPose = st => { const u = st.mast === undefined ? 1 : st.mast; return { u, tilt: (1 - ss(0, .5, u)) * PI / 2, lift: MB.LIFT * ss(.5, 1, u), yaw: (st.ant || 0) * ss(.85, 1, u) }; };
+const mbArrayXf = st => { const p = mbPose(st); return X.mul(X.make(R.y(p.yaw), [0, MB.ST + .35 + p.lift, MB.Z]), about(R.x(p.tilt), [0, .05, .62])); };
+const MB_ARRAY = memo(() => {
+  const P = [];
+  P.push(box([-.8, 0, -.6], [.8, .75, .6], { bottom: true }));                                                        // pedestal · drive
+  for (const s of [-1, 1]) P.push(panel([[s * .805, .12, -.45], [s * .805, .12, .45], [s * .805, .62, .45], [s * .805, .62, -.45]], fn({ hatch: 5, edge: .6, pts: false })));
+  const H = [[.75, 1.08, .74], [.82, 1.2, .85], [1.6, 1.2, .85], [2.4, 1.2, .85], [3.18, 1.2, .85], [3.34, 1.1, .78], [3.46, .85, .6], [3.53, .35, .25]];
+  const S = H.map(([y, w, d]) => SA.sec(y, w, -d, d, 4.2, 28));
+  const up = X.make(R.x(-PI / 2), [0, 0, 0]);
+  P.push(...tps(up, SA.loft(SA.skin(S, false), { lines: [0, 7, 14, 21], rings: [1, 4, 6], al: .9, ral: .6 })));
+  // the radiating face (forward): window outline and seams; hoisting eyes on the lid
+  const zf = .835;
+  P.push(line([[-.78, 1.0, zf], [.78, 1.0, zf], [.78, 3.0, zf], [-.78, 3.0, zf]], { closed: true, w: .7, pts: false }));
+  for (const y of [1.5, 2.0, 2.5]) P.push(line([[-.74, y, zf + .005], [.74, y, zf + .005]], fn({ w: .3, pts: false })));
+  for (const x of [-.6, .6]) P.push(ringW([x, 3.52, 0], FX, .07, fn({ n: 8 })));
+  return P;
+});
+function mbMast(st) {
+  const p = mbPose(st), P = [], y0 = MB.ST, top = y0 + .35 + p.lift;
+  P.push(lathe([0, y0, MB.Z], FY, [[0, .62], [.12, .62], [.14, .42], [top - y0 - .06, .38], [top - y0, .55]], { n: 18, gen: 2, rings: [0, 1, 4], caps: true }));
+  // comms mast: three telescopic sections, a whip cluster and a small dish at the head
+  const [cx, cz] = MB.CM, ext = MB.CM_H * ss(.5, 1, p.u), h0 = y0 + .9;
+  P.push(lathe([cx, y0, cz], FY, [[0, .2], [.9, .2]], { n: 10, gen: 0, rings: [0, 1], caps: true }));
+  const secs = [[.12, 0, .36], [.09, .3, .68], [.065, .6, 1]];
+  for (const [r, a, b] of secs) P.push(cyl([cx, h0 + ext * a, cz], [cx, h0 + ext * b + .4, cz], r, { n: 8, gen: 1 }));
+  const ht = h0 + ext + .4;
+  P.push(lathe([cx + .25, ht - .5, cz], FX, [[0, .02], [.1, .22], [.14, .24]], fn({ n: 12, gen: 0, rings: [2] })));
+  for (const a of [0, 2.1, 4.2]) P.push(line([[cx, ht, cz], [cx + Math.sin(a) * .6, ht - .7, cz + Math.cos(a) * .6]], fn({ w: .4 })));
+  P.push(line([[cx, ht, cz], [cx, ht + 1.2, cz]], { w: .5 }));
+  return P;
+}
+function monolith(m) {
+  const parts = m.parts.map(p => p.name === 'mast' ? O(p, { label: 'Antenna lift · comms mast', prims: mbMast({}), dyn: mbMast })
+    : p.name === 'array' ? O(p, { label: 'Monolith-B · antenna radome', prims: MB_ARRAY(), xf: mbArrayXf }) : p);
+  return O(m, { parts, ARRAY: [0, MB.ST + .35 + MB.LIFT + 2.1, MB.Z], arrayX: mbArrayXf });
+}
 const telD = () => truckPatch(HD.tel(), MZ_O);
-const radarD = () => truckPatch(HD.radar(), MZ_O);
+const radarD = () => monolith(truckPatch(HD.radar(), MZ_O));
 const pantsirD = () => truckPatch(HD.pantsir(), KZ_O);
 const balD = () => truckPatch(K.bal(), MZ_O);
 const transloaderD = () => truckPatch(K.transloader(), MZ_O);
@@ -801,7 +842,7 @@ function truckCut(C, o, drive, driveLabel) {
   return M;
 }
 const telCutD = () => truckCut(K.telCut(), MZ_O);
-const radarCutD = () => truckCut(K.radarCut(), MZ_O, mzDrive(), 'Transmission · transfer case · cardan shafts · hub reductions');
+const radarCutD = () => monolith(truckCut(K.radarCut(), MZ_O, mzDrive(), 'Transmission · transfer case · cardan shafts · hub reductions'));
 const balCutD = () => truckCut(K.balCut(), MZ_O, mzDrive(), 'Transmission · transfer case · cardan shafts · hub reductions');
 const pantsirCutD = () => truckCut(K.pantsirCut(), KZ_O, kzDrive(), 'Transfer case · cardan shafts · hub reductions');
 function transloaderCutD() {

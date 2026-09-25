@@ -316,7 +316,7 @@ export const UNITS = {
     hp: 28, rcs: 0.5, dieTime: 20,
     deploy: { jacks: 12, erect: 18, elev: Math.PI / 2 },          // ~30 s from driving to containers vertical
     // the container mouths when vertical (models_units3.js S400.mouth(k, π/2)), in the firing order: outboard first
-    tubes: [[-1.14, 9.5, -8.65], [1.14, 9.5, -8.65], [-.38, 9.5, -8.65], [.38, 9.5, -8.65]],
+    tubes: [[-.52, 9.55, -9.65], [.52, 9.55, -9.65], [-.52, 9.55, -8.65], [.52, 9.55, -8.65]],
     depotRefill: true,                                            // restocks at a depot / the spawn, like the Pantsir
     sensors: {},
     weapons: {

@@ -77,12 +77,12 @@ export const ANATOMY = {
     })),
   },
   radar: {
-    model: 'radar_cut', frame: 'chassis', title: 'Monolith-B · coastal radar', size: '13.8 × 3.1 m · mast 12.3 m',
-    note: 'Search radar on an MZKT-7930: a planar array on a five-section telescopic mast over the equipment shelter.',
+    model: 'radar_cut', frame: 'chassis', title: 'Monolith-B · coastal radar', size: '13.8 × 3.1 m',
+    note: 'Surface-search radar on an MZKT-7930: the antenna in a squared radome on a turntable at the rear of the shelter, laid forward on the roof to travel; a telescopic comms mast beside it.',
     view: { yaw: -1.15, pitch: .18 },
     parts: [
-      E('01', ['array'], 'Monolith-B · active array', '5.0 × 1.7 m', [0, 3.2, 0], 0, 'part', { side: 'R' }),
-      E('02', ['mast'], 'Telescopic mast · 5 sections', '10.5 m', [0, 2.2, 0], .1, 'part', { side: 'L' }),
+      E('01', ['array'], 'Monolith-B · antenna radome', '2.4 × 1.7 m', [0, 3.2, 0], 0, 'part', { side: 'R' }),
+      E('02', ['mast'], 'Antenna lift · comms mast', '', [0, 2.2, 0], .1, 'part', { side: 'L' }),
       E('03', ['body'], 'Equipment shelter', '9.3 m', [0, 3.6, 0], .2, 'shell', { side: 'L' }),
       E('04', ['inside'], 'Operator consoles ×2 · racks ×4', '', [0, 1.6, 0], .3, 'part', { side: 'L' }),
       E('05', ['cab'], 'Cab · crew 3', '', [0, 2.0, 1.5], .1, 'shell', { side: 'R' }),

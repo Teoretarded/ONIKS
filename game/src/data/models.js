@@ -1999,11 +1999,13 @@ const BL_GEO = memo(() => {
   PK.push(box([-1.32, P0[1] - .1, z1 - .05], [1.32, P0[1] + .06, z0]));                                         // cradle
   for (const sx of [-1, 1]) PK.push(box([sx * 1.28 - .06, P0[1] + .06, z1], [sx * 1.28 + .06, P0[1] + 1.32, z0 - .1]));
   for (const z of [z0 - .5, z0 - 3.15, z1 + .5]) PK.push(box([-1.34, P0[1] + .06, z - .08], [1.34, P0[1] + 1.36, z + .08], fn()));
+  // round containers (3S60 / Kh-35U TPK: tubes with end flanges and three clamp bands; the photos show no square boxes)
+  const cr = h - .015;
   for (let k = 0; k < 8; k++) {
     const [x, y] = blCont(k);
-    PK.push(box([x - h, y - h, z1], [x + h, y + h, z0], { bottom: true }));
-    for (let q = 1; q < 6; q++) { const z = z0 - q * BL.LEN / 6; PK.push(box([x - h - .02, y - h - .02, z - .05], [x + h + .02, y + h + .02, z + .05], fn({ skip: [0, 1] }))); }
-    PK.push(SA.fquad([[x - h + .05, y - h + .05, z0 + .01], [x + h - .05, y - h + .05, z0 + .01], [x + h - .05, y + h - .05, z0 + .01], [x - h + .05, y + h - .05, z0 + .01]], FZ, fn({ al: .5 })));
+    PK.push(lathe([x, y, z1], FZ, [[0, cr + .02], [.1, cr + .02], [.12, cr], [BL.LEN - .12, cr], [BL.LEN - .1, cr + .02], [BL.LEN, cr + .02]], { n: 20, gen: 4, rings: [0, 1, 4, 5] }));
+    for (const q of [1.15, 3.15, 5.15]) PK.push(ringW([x, y, z1 + q], FZ, cr + .018, fn({ n: 16 })));
+    PK.push(lathe([x, y, z0 - .01], FZ, [[0, cr - .03], [.02, 0]], fn({ n: 16, gen: 0, rings: [0] })));
   }
   PK.push(box([-.5, P0[1] + 1.32, z0 - 1.2], [.5, P0[1] + 1.46, z0 - .3], fn()));                               // cable box
   return { C, K, CB, B, PK };
@@ -2014,7 +2016,7 @@ function blCaps(st) {
   const n = st.n === undefined ? 8 : st.n, P = [], z = BL.PIV[2] - BL.LEN - .03, h = BL.BOX / 2;
   for (let k = 8 - Math.max(0, Math.min(8, Math.round(n))); k < 8; k++) {
     const [x, y] = blCont(k);
-    P.push(box([x - h - .03, y - h - .03, z - .07], [x + h + .03, y + h + .03, z + .03], { bottom: true }));
+    P.push(lathe([x, y, z + .03], [0, 0, -1], [[0, h + .01], [.06, h + .01], [.09, h * .7], [.1, 0]], { n: 18, gen: 2, rings: [0, 1] }));
     P.push(line([[x - .15, y, z - .09], [x + .15, y, z - .09]], fn({ w: .5 })));
   }
   return P;
@@ -3015,7 +3017,7 @@ MODEL_STATES.depot = { xray: false }; MODEL_STATES.radar_hill.xray = false;
 
 export const MODEL_INFO = {
   tel: { name: 'K340P TEL · Bastion-P', kind: 'unit', size: [13.8, 3.1, 3.4], s: [.035, .08, .25] },
-  radar: { name: 'Monolith-B radar', kind: 'unit', size: [13.8, 3.1, 12.3], s: [.035, .08, .25] },
+  radar: { name: 'Monolith-B radar', kind: 'unit', size: [13.8, 3.1, 15.3], s: [.035, .08, .25] },
   pantsir: { name: 'Pantsir-S1', kind: 'unit', size: [10.9, 2.5, 4.7], s: [.03, .07, .2] },
   drone: { name: 'Orlan-10', kind: 'unit', size: [2.0, 3.1, .6], s: [.008, .02, .06] },
   catapult: { name: 'Orlan-10 launch rail', kind: 'unit', size: [4.9, 1.9, 2.3], s: [.015, .04, .1] },
