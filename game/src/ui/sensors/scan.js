@@ -21,6 +21,7 @@ import { Fork, reachOf } from './chain.js';
 import { sampleOf, revealFrom } from './samples.js';
 import { decode, flicker, seedOf } from './decode.js';
 import { TRACK, SHORT } from '../../game/labels.js';
+import { submerged } from '../../sim/subs.js';
 import { W1, CO1, crossW } from './orb.js';
 
 const TF = 2.3;                              // s for the front to reach the edge of the radius
@@ -92,9 +93,9 @@ export function createScan(S, AN, inset) {
         list.push({ u, d: Math.hypot(u.pos[0] - sc.pos[0], u.pos[2] - sc.pos[2]) });
       }
     } else {
-      // the player's own units inside the radius: struck by the coral forks and warned
+      // the player's own units inside the radius: struck by the coral forks and warned (a boat under water is not reached)
       for (const u of sim.alive(game.side)) {
-        if (u.aboard) continue;
+        if (u.aboard || submerged(u)) continue;
         const d = Math.hypot(u.pos[0] - sc.pos[0], u.pos[2] - sc.pos[2]);
         if (d <= sc.r) list.push({ u, d });
       }
