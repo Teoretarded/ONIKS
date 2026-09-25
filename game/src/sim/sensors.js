@@ -315,8 +315,10 @@ export function startScan(sim, u, x, z) {
   const sc = u.def.scan, S = sim.sides[u.side];
   S.scanCd = SIDE_SCAN_CD; u.cooldowns.scan = sc.cd;
   const y = ground(sim.map, x, z);
-  sim.scans.push({ side: u.side, by: u.id, x, z, r: sc.r, at: sim.t + SCAN_DELAY });
-  sim.emit('scan', { phase: 'start', side: u.side, by: u.id, from: u.pos.slice(), pos: [x, y, z], r: sc.r, delay: SCAN_DELAY });
+  // a scan fired into a storm cell chains through the cloud: up to x1.5 radius at a storm core
+  const boost = sim.weather && sim.weather.scanBoost ? sim.weather.scanBoost(x, z) : 1, r = sc.r * boost;
+  sim.scans.push({ side: u.side, by: u.id, x, z, r, at: sim.t + SCAN_DELAY });
+  sim.emit('scan', { phase: 'start', side: u.side, by: u.id, from: u.pos.slice(), pos: [x, y, z], r, boost, delay: SCAN_DELAY });
   // scanning shows the scanner to the other side for a moment
   const c = roughContact(sim, ENEMY[u.side], u, 400, .5, .55);
   if (c) { c.emitting = true; c.lastEmit = sim.t; }
