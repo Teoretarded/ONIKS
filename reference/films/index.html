@@ -14,7 +14,7 @@
   section { margin-top: 40px; }
   h2 { display: flex; align-items: center; gap: 12px; font: 500 12.5px 'DM Mono', monospace; letter-spacing: .08em; text-transform: uppercase; color: var(--w2); margin-bottom: 18px; }
   h2 i { width: 8px; height: 8px; flex: none; }
-  .o h2 i, .od h2 i { background: var(--hi); } .p h2 i, .pd h2 i { background: var(--lime); } .x h2 i { background: #FF6A3D; } .a h2 i { background: var(--lime); }
+  .o h2 i, .od h2 i { background: var(--hi); } .p h2 i, .pd h2 i { background: var(--lime); } .x h2 i { background: #FF6A3D; } .a h2 i, .s h2 i { background: var(--lime); }
   h2 span { color: var(--w3); letter-spacing: 0; text-transform: none; font-weight: 400; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(520px, 100%), 1fr)); gap: 32px 28px; }
   .tile { cursor: pointer; }
@@ -98,6 +98,8 @@ const V = [
   ['x', 'pb_battle', 'X·PB', 'Survey · Battle', 'Survey where the drone watches a whole engagement from standoff: interceptors climbing, tracer, several strikes on the ship, smoke columns on the horizon.'],
   ['a', 'pc_anatomy_ship', 'A·2', 'Anatomy · Ship', 'X-ray dots through the destroyer: gas turbines with their fan blades, reduction gears, shafts and propellers, VLS modules, radar faces, the gun and the Phalanx float apart into a cutaway and back, then a pierside crane reloads the launch cells.'],
   ['a', 'pc_anatomy_battery', 'A·3', 'Anatomy · Battery', 'X-ray dots through the Pantsir and the radar truck: turret, guns, radars and mast float apart and back together, and a reload vehicle swings fresh missile packs onto the turret.'],
+  ['s', 'pc_scan_railgun', 'S·1', 'Scan · Railgun', 'A destroyer on station at night. A scan mast unfolds on the bridge roof, its coils charge with lime arcs and it fires a probe straight up; the probe bursts at 22 km and the lime lightning forks 17 km down onto a coastal battery, which the scan identifies part by part. The mast folds back down.'],
+  ['s', 'pc_scan_satellite', 'S·2', 'Scan · Satellite', 'A strike satellite over the curve of the Earth unfolds its wings, radiators and coil rings, slews onto the coast, spins its coils up and fires down the line. The probe glows through the atmosphere, bursts and forks into the lightning scan of a coastal battery; the camera climbs back up the line as it folds.'],
 ];
 const src = (id, k) => `thumbs/${id}_${k}.jpg`;
 const ready = {};
@@ -111,7 +113,7 @@ function tile([, id, n, t, d], idx) {
 function mark(id) { ready[id] = true; document.getElementById('tile-' + id).classList.remove('pending'); }
 const sec = (cls, title, sub) => `<section class="${cls}"><h2><i></i>${title}<span>${sub}</span></h2><div class="grid">` +
   V.map((v, i) => [v, i]).filter(([v]) => v[0] === cls).map(([v, i]) => tile(v, i)).join('') + '</div></section>';
-document.getElementById('g').innerHTML = sec('o', 'Orbital', ' — black, white hairline wireframe, yellow highlighter') + sec('p', 'Point Cloud', ' — graphite, LiDAR dots, lime identification') + sec('od', 'Ship defence · Orbital', ' — long takes of the destroyer fighting off raids, after O5') + sec('pd', 'Ship defence · Point Cloud', ' — the same fights through sensors and dots') + sec('x', 'Combat editions', ' — the films above with much more fighting') + sec('a', 'Anatomy', ' — X-ray scans, exploded views and reloads');
+document.getElementById('g').innerHTML = sec('o', 'Orbital', ' — black, white hairline wireframe, yellow highlighter') + sec('p', 'Point Cloud', ' — graphite, LiDAR dots, lime identification') + sec('od', 'Ship defence · Orbital', ' — long takes of the destroyer fighting off raids, after O5') + sec('pd', 'Ship defence · Point Cloud', ' — the same fights through sensors and dots') + sec('x', 'Combat editions', ' — the films above with much more fighting') + sec('a', 'Anatomy', ' — X-ray scans, exploded views and reloads') + sec('s', 'Scan', ' — drafts of the game’s scan with a source');
 
 /* big view */
 const lb = document.getElementById('lb'), lbf = document.getElementById('lbf'), lbm = document.getElementById('lbm');
