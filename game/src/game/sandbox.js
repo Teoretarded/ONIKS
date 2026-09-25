@@ -207,6 +207,13 @@ function addStyle() {
   .oniks-sbx .r.on b { background: var(--lime); }
   .oniks-sbx .r.en b { background: rgba(255,106,61,.85); }
   .oniks-sbx .tools { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--hair); display: grid; grid-template-columns: 1fr 1fr; column-gap: 18px; }
-  .oniks-sbx .t em { font-style: normal; color: var(--lime); margin-left: auto; }`;
+  .oniks-sbx .t em { font-style: normal; color: var(--lime); margin-left: auto; }
+  /* the Orbital render style (ui/hud: body.hud-orbital): white hairline chips, the one yellow for the unit being placed */
+  body.hud-orbital .oniks-sbx { --lime: #F4D23C; }
+  body.hud-orbital .oniks-sbx b { background: transparent; color: #F6F5F2; box-shadow: inset 0 0 0 1px rgba(246,245,242,.7); }
+  body.hud-orbital .oniks-sbx .r.en b { background: transparent; color: rgba(246,245,242,.62); box-shadow: inset 0 0 0 1px rgba(246,245,242,.3); }
+  body.hud-orbital .oniks-sbx .r.on b { background: #F4D23C; color: #000; box-shadow: none; }
+  body.hud-orbital .oniks-sbx .t em { color: #F6F5F2; }
+  body.hud-orbital .oniks-sbx .kick i { background: #F6F5F2; }`;
   document.head.appendChild(s);
 }

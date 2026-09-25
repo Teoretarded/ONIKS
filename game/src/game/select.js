@@ -24,6 +24,7 @@ const LIME = '#C6F432', CORAL = '#FF6A3D';
 const TS = 10.5;                 // tag size (px at 1080p)
 const BOX_MIN = 8;               // px: a shorter drag is a click
 const BT_RATE = .1;              // bullet time on selected rounds
+const BT_HOLD = 4, BT_POST = .5;  // s (real) the break-up is held after the last round is down, easing to x0.5
 const DEG = Math.PI / 180;
 
 export function createSelect(game) {
@@ -334,6 +335,17 @@ export function createSelect(game) {
         const u = sim.units.get(game.hover);
         if (u && (u.alive || u.dying < 1)) mark(ov, u, false, .55);
       }
+      // own units too small to make out at this range (true size: a TEL is ~1 px at 6 km, lost in the ground's dots): the
+      // films' small contact square on each, so the force stays findable between close range and the Orbital glyphs
+      if (!muted) {
+        const col = orb ? 'rgba(246,245,242,.9)' : LIME, sq = 7;
+        for (const u of sim.alive(game.side)) {
+          if (u.aboard || game.selection.has(u.id) || game.hover === u.id) continue;
+          if (!cam.project(posOf(u), q) || q[0] < 0 || q[1] < 0 || q[0] > cam.W || q[1] > cam.H) continue;
+          if (cam.fl * Math.max(u.def.size[0], u.def.size[1]) * .5 / q[2] >= 4) continue;
+          ov.mark(q[0], q[1], sq, col, .75);
+        }
+      }
       let n = 0;
       placed.length = 0;
       const many = game.selection.size > 12;
@@ -468,7 +480,7 @@ export function createSelect(game) {
   }
   function btStop(restore) {
     if (!bt) return;
-    if (restore && Math.abs(game.timeRate - BT_RATE) < 1e-6) { game.timeRate = bt.rate0; game.bus.emit('rate', { rate: game.timeRate, paused: game.paused, why: 'bullet' }); }
+    if (restore && (Math.abs(game.timeRate - BT_RATE) < 1e-6 || (bt.end > 0 && game.timeRate < 1))) { game.timeRate = bt.rate0; game.bus.emit('rate', { rate: game.timeRate, paused: game.paused, why: 'bullet' }); }
     bt = null;
     game.bus.emit('bullet', { on: false });
   }
@@ -504,11 +516,13 @@ export function createSelect(game) {
     update(dtReal) {
       if (!bt) return;
       if (game.replay && game.replay.active) return;
-      // the rounds are down: hold a moment on the hit, then time comes back
+      // the rounds are down: the break-up plays out slowed (the rate eases from x0.1 to x0.5 over BT_HOLD s), then time
+      // comes back
       const live = bt.ids.some(id => projSeen(sim.projectiles.get(id)));
       if (live) { bt.end = 0; if (Math.abs(game.timeRate - BT_RATE) > 1e-6 && !game.paused) btStop(false); return; }
-      bt.end += dtReal;
-      if (bt.end > 1.6) btStop(true);
+      if (!game.paused) bt.end += dtReal;
+      if (bt.end > BT_HOLD) { btStop(true); return; }
+      if (!game.paused && bt.end > 0) game.timeRate = BT_RATE * Math.pow(BT_POST / BT_RATE, bt.end / BT_HOLD);
     },
   };
   return [selection, orderNotes, watch];

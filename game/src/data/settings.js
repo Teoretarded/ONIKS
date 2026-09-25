@@ -11,7 +11,7 @@
 
    Keys (the shell's Settings screen edits all of them; the in-game panel (ui/help, pause menu > Settings) the ones
    marked *, applied live):
-     renderStyle   'pointcloud' | 'orbital'     the look: Point Cloud (graphite, white dots) or Orbital (black, hairlines)
+     renderStyle * 'pointcloud' | 'orbital'     the look: Point Cloud (graphite, white dots) or Orbital (black, hairlines)
      renderScale * 0.5 | 0.67 | 0.75 | 1        fraction of the device-pixel canvas size
      dotDensity  * 'low' | 'medium' | 'high' | 'ultra'
      effects     * 'low' | 'medium' | 'high'    smoke, debris and spark dots, dynamic lights, landmark detail
