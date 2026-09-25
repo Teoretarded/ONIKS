@@ -419,6 +419,7 @@ class FxSystem {
     for (const p of sim.projectiles.values()) {
       let tr = this.trk.get(p.id);
       if (!tr) {
+        if (!p.alive) { this.lnch.delete(p.id); continue; }   // killed after this tick's collection (sim/weapons.js): its tracker is already gone
         const torp = !!TORP[p.kind] || !!(p.P && p.P.torpedo);
         tr = { id: p.id, kind: p.kind, t0: p.t0 !== undefined ? p.t0 : t, trail: new Trail(torp ? 4 : p.kind === 'sm6' ? 14000 : p.kind === 'oniks' ? 8000 : 6000, p.id, this.C.ground), vel: [0, 0, 0], pos: p.pos.slice(), seen: false, killed: false, P: p.P,
           ig: this.lnch.get(p.id) || 0, bub: torp ? new Bubbles(p.id) : null };
