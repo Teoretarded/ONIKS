@@ -54,8 +54,14 @@ function opt(name, def) {
 const fmt = (x, n = 1) => Number(x).toFixed(n);
 
 /* ---------------------------------------------------------------- maps */
+/* one map object per id for the whole process, as in a match (every map object carries its own h() closure: several
+   of them make every terrain lookup in the sim a polymorphic call, which a single match never sees) */
+const MAPS_LOADED = new Map();
 async function getMap(id) {
-  if (!id || id === 'stub') { const { stubMap } = await mod('sim/stubmap.js'); return stubMap(); }
+  if (!id || id === 'stub') {
+    if (!MAPS_LOADED.has('stub')) { const { stubMap } = await mod('sim/stubmap.js'); MAPS_LOADED.set('stub', stubMap()); }
+    return MAPS_LOADED.get('stub');
+  }
   const { loadMap } = await mod('world/maps.js');
   return loadMap(id, { worker: false, cache: false });
 }

@@ -1,7 +1,7 @@
 /* Per-unit timers and animations that are game state: TEL jacks and erector, radar mast, reloads from a
    transloader, refills at depots and at the replenishment point, turret slews, VLS hatches, aircraft rearm,
    carrier flight deck launches. */
-import { TEL_ELEV } from '../data/units.js';
+import { TEL_ELEV, UNITS } from '../data/units.js';
 import { DT } from './consts.js';
 import { clamp, angTo, wrapPi, dxz, local } from './util.js';
 import { subStep } from './subs.js';
@@ -19,6 +19,14 @@ function cdStepper(cd) {
   if (!ks.every(k => /^[A-Za-z_$][\w$]*$/.test(k))) return c => { for (const k in c) if (c[k] > 0) c[k] -= DT; };
   try { return new Function('DT', `return c => { ${ks.map(k => `if (c.${k} > 0) c.${k} -= DT;`).join(' ')} }`)(DT); }
   catch (e) { return c => { for (const k in c) if (c[k] > 0) c[k] -= DT; }; }     // no eval allowed (CSP): the plain loop
+}
+
+// the per-type caches, made now rather than mid-match (adding a field to a unit type's table changes its layout)
+for (const k in UNITS) {
+  const d = UNITS[k], cd = { scan: 0 };
+  for (const w in d.weapons) cd[w] = 0;                     // the keys sim.spawn gives u.cooldowns
+  d._cdStep = cdStepper(cd);
+  erectW(d);
 }
 
 export function mechanics(sim, u) {

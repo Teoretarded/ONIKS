@@ -78,7 +78,11 @@ function rangeVs(R, e) {
 }
 
 /* ---------- contacts ---------- */
+/* bumped by everything here that adds, drops or updates a contact: a cache of a side's picture (weapons.js, within
+   one weapons tick) is good while it has not moved */
+export const PICTURE = { v: 0 };
 export function getContact(sim, side, e) {
+  PICTURE.v++;
   const S = sim.sides[side];
   let c = S.contacts.get(e.id);
   if (!c) {
@@ -95,6 +99,7 @@ export function getContact(sim, side, e) {
 /* a detection with measurement noise sigma (m) and confidence gain */
 export function detect(sim, side, e, sigma, gain, how) {
   if (!e.alive || e.aboard) return null;
+  PICTURE.v++;
   const S = sim.sides[side], isNew = !S.contacts.has(e.id);
   const c = getContact(sim, side, e), r = sim.rng.sense, t = sim.t;
   const mx = e.pos[0] + gauss(r) * sigma, mz = e.pos[2] + gauss(r) * sigma;
@@ -129,6 +134,7 @@ function classify(sim, side, c, e) {
 /* a rough contact from hearing a radiating unit or seeing a launch: never classifies by itself */
 export function roughContact(sim, side, e, err, gain, cap) {
   if (!e.alive || e.aboard) return null;
+  PICTURE.v++;
   const S = sim.sides[side], isNew = !S.contacts.has(e.id), c = getContact(sim, side, e), r = sim.rng.sense;
   c.dom = domOf(e);
   // fuse the fix by accuracy (a precise track barely moves; repeated rough fixes average down, not below err / 3)
@@ -304,6 +310,7 @@ function seeProjectiles(sim, side, own) {
 
 function decay(sim, side, dt) {
   const S = sim.sides[side], t = sim.t;
+  PICTURE.v++;
   for (const [id, c] of S.contacts) {
     c.pos[0] += c.vel[0] * dt; c.pos[2] += c.vel[2] * dt;
     if (c.dom === 'air') c.pos[1] += c.vel[1] * dt;
@@ -389,6 +396,7 @@ export function startScan(sim, u, x, z) {
 }
 export function resolveScans(sim) {
   const t = sim.t;
+  PICTURE.v++;
   for (let i = sim.scans.length - 1; i >= 0; i--) {
     const s = sim.scans[i];
     if (t < s.at) continue;

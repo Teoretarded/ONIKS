@@ -107,6 +107,8 @@ export class Sim {
     for (const side of opts.aiSides || []) this.ai[side] = new AI(this, side, (opts.ai && opts.ai[side]) || opts.difficulty || 'normal');
     this._list = []; this._dirty = true; this._alive = { coast: [], fleet: [] };
     this._subBase = undefined;                                     // the coast boats' base (mech.replenishPoint)
+    // set later by weapons.js / amphib.js (declared, unset, so the sim object keeps one layout; see primeLayouts)
+    this.bursts = undefined; this.nextBurst = undefined; this._beaches = undefined; this.prof = undefined;
   }
 
   /* ---------- units ---------- */

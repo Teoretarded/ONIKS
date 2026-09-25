@@ -7,10 +7,10 @@
    that does not destroy it outright loses control and tumbles down (spinout).
    Defensive weapons fire by themselves at incoming rounds and aircraft in range; offensive weapons fire at an
    explicit attack target, or pick their own targets when the unit is on hold. */
-import { PROJ, CLASSIFY, ENEMY, TEL_ELEV } from '../data/units.js';
+import { PROJ, CLASSIFY, ENEMY, TEL_ELEV, UNITS } from '../data/units.js';
 import { DT } from './consts.js';
 import { applyDamage } from './damage.js';
-import { launchSeen, radarWorks, torpedoHeard } from './sensors.js';
+import { launchSeen, radarWorks, torpedoHeard, PICTURE } from './sensors.js';
 import { gauss } from './rand.js';
 import { clamp, angTo, local, closest, ground, dxz, d3 } from './util.js';
 import { atPD, submerged, isSub, domOf } from './subs.js';
@@ -55,10 +55,12 @@ function vsOf(w) {
   return f;
 }
 const VS_SURF = 1, VS_MISSILE = 2, VS_AIR = 4;
+for (const k in UNITS) for (const wn in UNITS[k].weapons) vsOf(UNITS[k].weapons[wn]);   // now, not mid-match (layouts)
 const THREATS = { coast: [], fleet: [] }, INB = { coast: new Map(), fleet: new Map() };
 export function weaponsTick(sim) {
   const list = sim.list(), t = sim.t;
   THREATS.coast.length = 0; THREATS.fleet.length = 0; INB.coast.clear(); INB.fleet.clear();
+  AIRC.coast.v = AIRC.fleet.v = TRKS.coast.v = TRKS.fleet.v = -1;   // the pictures may have changed since the last tick (scripts, UI)
   for (const p of sim.projectiles.values()) {
     if (!p.alive || !(p.P.threat || p.P.torpedo)) continue;
     const foe = p.side === 'coast' ? 'fleet' : 'coast';
@@ -100,14 +102,42 @@ function threatsFor(sim, u, w) {
   }
   return best;
 }
+/* the side's engageable air tracks (fresh, classified, the aircraft airborne), in the picture's order: made once per
+   weapons tick and again whenever the picture changes under it (a launch shows the shooter to the other side) */
+const AIRC = { coast: { v: -1, list: [] }, fleet: { v: -1, list: [] } };
+function airTracks(sim, side) {
+  const A = AIRC[side];
+  if (A.v !== PICTURE.v) {
+    A.v = PICTURE.v;
+    const L = A.list, t = sim.t;
+    L.length = 0;
+    for (const c of sim.sides[side].contacts.values()) {
+      if (c.dom !== 'air' || c.dead || c.conf < CLASSIFY || t - c.lastSeen > 5) continue;
+      const e = sim.units.get(c.unitId);
+      if (!e || !e.alive || e.aboard) continue;
+      L.push(c, e);
+    }
+  }
+  return A.list;
+}
+/* the side's classified live tracks, in the picture's order (the same lifetime as airTracks) */
+const TRKS = { coast: { v: -1, list: [] }, fleet: { v: -1, list: [] } };
+function tracks(sim, side) {
+  const A = TRKS[side];
+  if (A.v !== PICTURE.v) {
+    A.v = PICTURE.v;
+    const L = A.list;
+    L.length = 0;
+    for (const c of sim.sides[side].contacts.values()) if (!c.dead && c.conf >= CLASSIFY) L.push(c);
+  }
+  return A.list;
+}
 function aircraftFor(sim, u, w) {
   if (!(vsOf(w) & VS_AIR)) return null;
-  const S = sim.sides[u.side], t = sim.t;
+  const L = airTracks(sim, u.side);
   let best = null, bd = 1e18;
-  for (const c of S.contacts.values()) {
-    if (c.dom !== 'air' || c.dead || c.conf < CLASSIFY || t - c.lastSeen > 5) continue;
-    const e = sim.units.get(c.unitId);
-    if (!e || !e.alive || e.aboard) continue;
+  for (let i = 0; i < L.length; i += 2) {
+    const c = L[i], e = L[i + 1];
     const d = Math.sqrt((c.pos[0] - u.pos[0]) ** 2 + (c.pos[1] - u.pos[1]) ** 2 + (c.pos[2] - u.pos[2]) ** 2);
     if (d > (w.airRange || w.range) || d < (w.min || 0)) continue;
     if (!w.gun && e.eng >= (w.maxEng || 1)) continue;
@@ -136,8 +166,10 @@ function offensive(sim, u, w) {
     if (!o.hot || (o.fired || 0) >= (o.vn || 1)) return;
   } else if (u.hold) {
     let bs = -1e18;
-    for (const cc of S.contacts.values()) {
-      if (cc.dead || cc.conf < CLASSIFY || !w.vs.includes(cc.dom)) continue;
+    const L = tracks(sim, u.side);
+    for (let i = 0; i < L.length; i++) {
+      const cc = L[i];
+      if (!w.vs.includes(cc.dom)) continue;
       if (cc.cls === 'LCAC' && PROJ[w.proj] && PROJ[w.proj].torpedo) continue;
       const d = dxz(u.pos[0], u.pos[2], cc.pos[0], cc.pos[2]);
       if (d > w.range || d < (w.min || 0)) continue;
