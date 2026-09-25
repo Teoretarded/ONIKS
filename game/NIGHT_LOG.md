@@ -71,3 +71,16 @@ F10 hide UI), time rate x1..x32 shown on screen, win/lose screens, campaign resu
 palette (P: place any unit, G fog, K wake the enemy AI, J switch side, N weather). Ships list and sink, vehicles
 burn and wreck, aircraft sit on the carrier deck and bank in turns. The cinematic camera chases missiles like the films.
 Agent retries used so far: 1 of 100 (the balance agent tripped the safety filter; relaunched as a pure numbers job).
+
+## 04:40 · HUD, effects, Inspect done
+- HUD in the films' type: objectives, rate/clock/supply, an engagement log laid out like the Ring film's, INCOMING
+  alerts, selection panel, command card, minimap, reinforcements (B), tooltips.
+- Effects from the films in the game: cold launch (gas, cap tumbling, booster lighting), plumes with shock diamonds,
+  trails that drift with the wind, booster casings tumbling into the sea, intercept bursts, CIWS / 30 mm tracer
+  streams, 5" gun blast, ship fireballs and leaning smoke columns, sinking, splashes, wakes, rotor downwash, lightning.
+- **Inspect (I)**: the Anatomy films as gameplay. The camera flies in, the world dims, a lime X-ray slice runs along
+  the unit and shows what's inside (rounds in the TEL's containers, the Pantsir's 57E6s, 96 VLS canisters, the
+  destroyer's turbines and shafts below the waterline), tags condense in clean columns, E explodes it (parts leave in
+  order and come home in reverse, the films' timing), damage shows coral per part. Click a missile in flight:
+  bullet time (x0.05) and orbit the round. Sandbox: Shift+I opens an anatomy museum of all 29 models.
+  Stills: `game/shots/final_*.png`.
