@@ -38,3 +38,12 @@ Kalibr launcher family rather than needing new hardware.
 
 Note: free-licence photography of the missile itself in flight is scarce (it remains a recent, closely-guarded
 system); the two Zircon-specific images above are the clearest currently on Commons.
+
+## Videos
+
+- [Russia launches Zircon in joint drills with Belarus](https://www.youtube.com/watch?v=y6QGIC47x90) 0:00-1:02
+  (AP) — cold-launch gas puff, booster ignition and near-vertical rise from *Gorshkov*'s deck hatch, Zapad 2025.
+- [Russia test fires Zircon hypersonic cruise missile](https://www.youtube.com/watch?v=1WQqGaSce04) 0:00-0:41 —
+  a second, tighter-framed angle on the same 3S14-cell launch sequence.
+- [Russia launches 7,000mph Zircon hypersonic missile](https://www.youtube.com/watch?v=YZW8oMo8Irk) — March 2022
+  test-launch footage, deck-level cold-launch and booster-plume shot.

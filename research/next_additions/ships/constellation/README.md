@@ -33,6 +33,17 @@ capability slot around a US carrier group that the LCS in the current roster doe
 | `profile_side_view.jpg` | FFG(X)/Constellation-class side profile concept view | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:FFG(X)_side_view.jpg) (US Navy) | CC BY-SA 4.0 |
 | `detail_bow_view.jpg` | FFG(X) port bow view, showing forward VLS/gun area | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:FFG(X)_port_bow_view.jpg) (US Navy) | CC BY-SA 4.0 |
 | `detail_stern_view.jpg` | FFG(X) starboard quarter view, showing flight deck/hangar | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:FFG(X)_stbd_qtr_view.jpg) (US Navy) | CC BY-SA 4.0 |
+| `detail_sna2022.jpg` | FFG(X)/Constellation-class display board, Surface Navy Association 2022 | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:FFG(X)_SNA_2022.png) (US Navy) | Public domain |
+| `profile_rendering_2020.jpg` | US Navy artist rendering of the FFG(X) design, 30 April 2020 | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:U.S._Navy_guided-missile_frigate_FFG(X)_artist_rendering,_30_April_2020_(200430-N-NO101-150).JPG) (US Navy) | Public domain |
 
 Note: since no Constellation-class hull is yet in service, all images are pre-construction renderings/concept
 art rather than photographs of a physical ship.
+
+## Videos
+
+- [Constellation (FFG-62) Keel Authentication](https://www.dvidshub.net/video/919008/constellation-ffg62-keel-authentication)
+  (DVIDS, Defense Media Activity, 12 Apr 2024) — full keel-laying ceremony, Fincantieri Marinette Marine.
+- [USS Constellation FFG-62: corroded hull under construction](https://www.youtube.com/watch?v=H8mUiJ_Bn9g) —
+  recent yard-visit footage of the part-built hull, showing frame/plating state.
+- [The Rise & Fall of the Constellation Class](https://www.youtube.com/watch?v=-QT_D3BEqlQ) — programme-status
+  explainer using yard photography of the hull in build.

@@ -40,3 +40,13 @@ ship's sensor cue another ship's missile (Cooperative Engagement Capability).
 | `detail_test_proofhouse.jpg` | AN/SPY-6 ground test-bed array in its test proofhouse | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:AN_SPY-6_AMDR_ground_test-bed_proofhouse.jpg) (US Navy) | Public domain |
 | `profile_ddg124_highlighted.jpg` | DDG-124, Flight III Burke, with the AMDR/SPY-6 array location highlighted | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:DDG_124_with_AMDR_highlighted.png) (US Navy) | Public domain |
 | `action_ddg125_trials.jpg` | USS *Jack H. Lucas* (DDG-125), first SPY-6-equipped destroyer, at sea on acceptance trials | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:DDG-125_acceptance_trials.jpg) (US Navy) | Public domain |
+| `detail_array_subsystems.jpg` | AMDR/SPY-6 array subsystem breakdown diagram | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:AMDR_Array_Subsystems.png) (US Navy) | Public domain |
+
+## Videos
+
+- [SPY-6 enters the fleet with USS Jack H. Lucas commissioning](https://www.youtube.com/watch?v=7SHJ_yAdvCA)
+  0:00-1:25 (RTX) — the four flat array faces on the Flight III deckhouse, commissioning day, Oct 2023.
+- [Jack H. Lucas DDG-125 Sea Trials](https://www.youtube.com/watch?v=9EFB1vsd4PA) 0:00-0:35 (HII/Ingalls) — hull
+  underway on acceptance trials, array faces visible from multiple angles.
+- [Video: US Navy completes final development test of SPY-6 AMDR](https://www.naval-technology.com/news/us-navy-spy-6-amdr/)
+  (Naval Technology, embedded clip) — Vigilant Nemesis land-based ballistic-target tracking test, Hawaii.

@@ -35,3 +35,14 @@ arms ship, air and land platforms.
 | `action_launch_lcs.jpg` | NSM launch from USS *Gabrielle Giffords* (LCS-10), 1 Oct 2019 | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:USS_Gabrielle_Giffords_(LCS-10)_launches_a_Naval_Strike_Missile_on_1_October_2019_(191001-N-FC670-004).JPG) (US Navy) | Public domain |
 | `action_launch_burke.jpg` | First NSM firing from a US destroyer, USS *Fitzgerald*, RIMPAC 2024 | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:USS_Fitzgerald_(DDG-62)_fires_a_Naval_Strike_Missile,_as_the_first_firing_of_the_missile_from_a_U.S._destroyer,_during_RIMPAC_2024_exercise_on_18_July_2024_-_1.jpg) (US Navy) | Public domain |
 | `detail_canister_launch.jpg` | NSM leaving its angled canister launcher, exercise Pacific Griffin | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:USS_Gabrielle_Giffords_(LCS_10)_launches_a_Naval_Strike_Missile_(NSM)_during_exercise_Pacific_Griffin._(48831412138).jpg) (US Navy) | Public domain |
+| `action_launch_coronado.jpg` | First US Navy NSM firing, USS *Coronado* (LCS-4), Sept 2014 | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Naval_Strike_Missile_launch_from_USS_Coronado_(LCS-4)_in_September_2014.JPG) (US Navy) | Public domain |
+| `detail_launch_burke_angle2.jpg` | USS *Fitzgerald* NSM firing, second angle, RIMPAC 2024 | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:USS_Fitzgerald_(DDG-62)_fires_a_Naval_Strike_Missile,_as_the_first_firing_of_the_missile_from_a_U.S._destroyer,_during_RIMPAC_2024_exercise_on_18_July_2024_-_2.jpg) (US Navy) | Public domain |
+
+## Videos
+
+- [Kongsberg NSM Anti-Ship Live Firing](https://www.youtube.com/watch?v=nueJcto63Fc) 0:00-1:01 — canister flash/
+  smoke burst, shallow climb-out then nose-over to sea-skimming cruise.
+- [Royal Navy's Naval Strike Missile](https://www.youtube.com/watch?v=Erzs1TbPJHg) ~1:30-3:00 — canister launcher
+  hardware and integration detail on a UK escort.
+- [This is the Royal Navy's Powerful New Ship-Busting Missile](https://www.youtube.com/watch?v=wvyxHt8fKzU)
+  ~2:00-4:00 — low-altitude cruise footage and warhead/seeker discussion.

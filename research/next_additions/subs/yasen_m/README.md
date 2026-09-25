@@ -38,3 +38,14 @@ the surface Kalibr/Oniks/Zircon ships — a submerged-launch complement to the r
 | `profile_severodvinsk.jpg` | Lead boat *Severodvinsk* (K-560), surfaced | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:%D0%9A-560_%C2%AB%D0%A1%D0%B5%D0%B2%D0%B5%D1%80%D0%BE%D0%B4%D0%B2%D0%B8%D0%BD%D1%81%D0%BA%C2%BB.jpg) | CC BY 4.0 |
 | `action_kazan_surfaced.jpg` | *Kazan* arriving at its Northern Fleet base, May 2021 | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:The_nuclear_submarine_Kazan_has_arrived_at_a_permanent_base_in_the_Northern_Fleet._May_2021.png) | CC BY 4.0 |
 | `detail_kazan.jpg` | *Kazan* (Project 885M, Yasen-M), hull detail | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Kazan_1.jpg) | CC BY-SA 4.0 |
+| `detail_severodvinsk_2.jpg` | *Severodvinsk*, additional hull view | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:%D0%90%D0%9F%D0%9A%D0%A0_%22%D0%A1%D0%B5%D0%B2%D0%B5%D1%80%D0%BE%D0%B4%D0%B2%D0%B8%D0%BD%D1%81%D0%BA%22.jpg) | CC BY-SA 4.0 |
+| `detail_model_army2016.jpg` | Yasen-class exhibition model, Army 2016 — shows hull-form/cutaway not visible on the real boat | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Model_Yasen-class_submarine_at_the_exhibition_%C2%ABArmy_2016%C2%BB.jpg) | CC BY-SA 4.0 |
+
+## Videos
+
+- [Kazan Yasen-M (Project 885M) Sub Brief](https://www.youtube.com/watch?v=-ipgrWkB31c) ~1:00-5:00 (Sub Brief) —
+  hull-form walk-through, sail shape and stern control-surface layout.
+- [Russia commissions Kazan Yasen-M class submarine](https://www.youtube.com/watch?v=1B3YbY7jOVY) ~0:30-2:00 —
+  surfaced arrival and commissioning-day footage at the Northern Fleet base.
+- [The 32,000-Ton Underwater Ghost Armed with Hypersonic Missiles](https://www.youtube.com/watch?v=u7LYOrfhuRM) —
+  overview using shipyard float-out and sea-trial clips of later Yasen-M hulls.

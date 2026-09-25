@@ -34,3 +34,14 @@ Arleigh Burke/Ticonderoga already in the roster.
 | `detail_forward_deck.jpg` | Forward VLS deck and gun turret detail | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Admiral_Gorshkov_frigate_04.jpg) (Russian MoD) | CC BY 4.0 |
 | `detail_superstructure.jpg` | Mast and Poliment-Redut radar faces detail | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Admiral_Gorshkov_frigate_05.jpg) (Russian MoD) | CC BY 4.0 |
 | `action_underway_murmansk.jpg` | *Admiral Gorshkov* underway near Murmansk, 2022 | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Admiral_Gorshkov_frigate_2022-05_Murmansk.jpg) | CC0 |
+| `detail_deck_03.jpg` | *Admiral Gorshkov*, additional deck/superstructure detail | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Admiral_Gorshkov_frigate_03.jpg) (Russian MoD) | CC BY 4.0 |
+| `profile_01.jpg` | *Admiral Gorshkov*, further broadside profile | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Admiral_Gorshkov_frigate_01.jpg) (Russian MoD) | CC BY 4.0 |
+
+## Videos
+
+- [Admiral Sergei Gorshkov-class Project 22350 Ship Brief](https://www.youtube.com/watch?v=F4MBKI5CIOc) ~2:00-6:00
+  (Sub Brief) — walk-around of hull, mast/Poliment-Redut array and forward VLS layout.
+- [Russia launches Zircon in joint drills with Belarus](https://www.youtube.com/watch?v=y6QGIC47x90) 0:00-1:02
+  (AP) — Zircon leaving *Gorshkov*'s deck hatch, Zapad 2025 exercise.
+- [Russia Navy - Admiral Gorshkov Class Frigate](https://www.youtube.com/watch?v=irGyduOP_Sc) 0:00-1:56 — underway
+  broadside and stern shots showing the 130 mm gun and helicopter deck.

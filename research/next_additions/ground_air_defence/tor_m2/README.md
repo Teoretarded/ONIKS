@@ -34,3 +34,13 @@ roster (S-400 far layer, Pantsir near layer) doesn't quite cover for fast-reacti
 | `detail_launcher_army2022.jpg` | Tor-E2 (export variant) launch modules, Army-2022 | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Tor-E2_SAM_Army-2022_2022-08-20_2636.jpg) (Vitaly V. Kuzmin) | CC BY-SA 4.0 |
 | `detail_turret_army2022.jpg` | Tor-E2 turret and radar detail, Army-2022 | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Tor-E2_SAM_Army-2022_2022-08-20_2633.jpg) (Vitaly V. Kuzmin) | CC BY-SA 4.0 |
 | `action_parade.jpg` | Tor-M2 column, 2008 Moscow Victory Day Parade | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:2008_Moscow_Victory_Day_Parade_-_TorM2.jpg) | CC BY 3.0 |
+| `profile_tor_m2e_maks2007.jpg` | Tor-M2E export variant, side profile, MAKS 2007 | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Tor-M2E_sideview_at_2007_MAKS_Airshow.jpg) | CC BY-SA 2.0 |
+
+## Videos
+
+- [Tor-M2 destroys a Switchblade drone](https://www.youtube.com/watch?v=Hq4t06vFTYg) 0:00-0:20 — radar dish up and
+  turning, vertical pop-up launch and missile tip-over toward a small UAV target.
+- [Tor M2 Short Range Air Defense System overview](https://www.youtube.com/watch?v=sh772ECUQDo) 0:00-0:40 —
+  turret/launch-module walk-around and a launch clip.
+- [TOR-M2U overview](https://www.youtube.com/watch?v=NI9sy9AbKV4) ~2:00-3:00 — radar-antenna fold/deploy cycle and
+  the two 4-round launch modules in detail.

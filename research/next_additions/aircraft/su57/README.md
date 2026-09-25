@@ -33,3 +33,13 @@ superiority/strike. The coastal-defence side's natural counter to the carrier gr
 | `detail_static_054.jpg` | Su-57 "054" nose/intake detail, Sukhoi Design Bureau | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Sukhoi_Design_Bureau,_054,_Sukhoi_Su-57_(49581306132).jpg) | CC BY-SA 2.0 |
 | `detail_static_051.jpg` | Su-57 "051" static display detail | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Sukhoi_Design_Bureau,_051,_Sukhoi_Su-57_(49580577488).jpg) | CC BY-SA 2.0 |
 | `action_maks_display.jpg` | Su-57 in flight display, MAKS Airshow 2019 | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:MAKS_Airshow_2019_(2019-08-30)_303.jpg) | CC0 |
+| `detail_static_054_side.jpg` | Su-57 "054" prototype, alternate side-angle static detail | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Sukhoi_Design_Bureau,_054,_Sukhoi_T-50_(Su-57_prototype)_(49581303977).jpg) | CC BY-SA 2.0 |
+
+## Videos
+
+- [Weapons bay reveal, Dubai Airshow 2025](https://www.youtube.com/watch?v=qjmWvR5ONHw) 0:00-0:06 — both internal
+  bays open in flight, Kh-58UShK/R-74M2 visible on ejector racks.
+- [Cobra maneuver, MAKS 2017 (remastered)](https://www.youtube.com/watch?v=cmQoXZ9NIiM) ~1:00-2:30 — Sergey Bogdan's
+  full display run, nose-up cobra and yaw-spin using thrust vectoring.
+- [Flying demonstration, Zhuhai Airshow 2024](https://www.youtube.com/watch?v=3iaYyYFicMw) whole clip — low, slow
+  high-AoA pass and afterburner climb-out, good afterburner-nozzle reference.

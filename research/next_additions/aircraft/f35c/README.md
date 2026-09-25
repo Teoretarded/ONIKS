@@ -34,3 +34,14 @@ stealthy first-day-of-strike capability distinct from the Super Hornet.
 | `profile_flying.jpg` | F-35C in flight near NAS Fallon | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:F-35C_NAS_Fallon.jpg) (US Navy) | Public domain |
 | `action_carrier_landing.jpg` | F-35C on carrier landing approach, tailhook down | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:F-35C_Lightning_II_Landing.jpg) (US Navy) | Public domain |
 | `detail_catapult_launch.jpg` | Catapult shooters launching an F-35C, deck-level detail | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Shooters_Launch_an_F-35C_Lightning_II_(8201177).jpg) (US Navy) | Public domain |
+| `detail_weapons_bay.jpg` | F-35C displaying its open internal weapons bay | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:An_F-35C_Lightning_II_displays_its_internal_weapons_bay._(8390303370).jpg) (US Navy) | Public domain |
+| `detail_test_catapult.jpg` | F-35C test aircraft positioned on a land-based test catapult | [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:An_F-35C_test_aircraft_is_brought_to_launch_position_on_a_test_catapult._(5977970856).jpg) (US Navy) | Public domain |
+
+## Videos
+
+- [First arrested landing aboard a carrier](https://www.youtube.com/watch?v=STVAM85y3i0) 0:00-1:00 — full trap,
+  tailhook catch and abrupt stop, USS *Nimitz*, Nov 2014.
+- [Stunning catapult takeoff and arrested landing at sea](https://www.youtube.com/watch?v=9_LrvqD98JE) ~0:30-1:15
+  and ~5:00-5:40 — bow catapult shot then a separate wire trap, both close-up deck angles.
+- [Catapult launch on USS Nimitz](https://www.youtube.com/watch?v=tFGzgvgltMw) 0:00-0:40 — nose-tow-bar hookup
+  through shuttle stroke and airborne climb-out.
