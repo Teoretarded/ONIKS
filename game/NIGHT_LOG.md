@@ -207,3 +207,12 @@ Wave 3 launched: combat depth (attack orders persist, salvo size, "in reach" ale
 storm fronts crossing the map with white lightning lighting a dot cloud ceiling, a bugfix sweep. Next: hull dot
 saturation and the mid-altitude sea, and a salvo board (the Salvo film's lanes when rounds are in the air).
 `game/README.md` is the player's guide.
+
+## 09:10 · Bugfix sweep done; wave 3 running
+Right-clicking a "?" contact now says "NOT TRACKED · SCAN IT (X)" and names the scanner in reach; the fjord battery
+spawns on the mainland and units never stack; the replay survives units being removed; the cinematic camera frames
+round and target mid-course and holds the last kill through the end screen; tags never sit on HUD panels; true slice
+labels (CHASSIS / HULL); the main menu is titles only (no subtext); R explains why nothing reloads.
+Running: combat depth, storm fronts + white lightning, look pass 2 (hull dot saturation, mid-altitude sea, haze),
+the salvo board, and the debrief film (a Combat match is recorded and re-simulated exactly, then its best moments play
+as one continuous take ending in the Orbital map).
