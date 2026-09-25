@@ -147,8 +147,53 @@ export function roughContact(sim, side, e, err, gain, cap) {
   return c;
 }
 
-/* ---------- the sensor tick (every SENSE_EVERY ticks) ---------- */
+/* ---------- the sensor tick (every SENSE_EVERY ticks) ----------
+   Hot path. Per side and tick the enemy units are copied once into flat tables (position, range class, what a
+   submerged boat still shows) and the per-foe terms every sensor would recompute (weather at the target, its
+   height, rcs^.25) are cached on first use; each sensor then scans the tables. Only pure tests are cached or
+   reordered: the seeded draws (sim.rng.sense) happen for the same pairs in the same order as a plain loop. */
 const SENSORS = [];
+const FE = [];                                          // the foes (not aboard), in sim.alive() order
+let FCAP = 0, FX, FZ, FDOM, FSVR, FSVC, FK4, FWR, FWC, FTOP;
+function foeTables(foes) {
+  if (foes.length > FCAP) {
+    FCAP = Math.max(64, foes.length * 2);
+    FX = new Float64Array(FCAP); FZ = new Float64Array(FCAP); FDOM = new Uint8Array(FCAP);
+    FSVR = new Float64Array(FCAP); FSVC = new Float64Array(FCAP); FK4 = new Float64Array(FCAP);
+    FWR = new Float64Array(FCAP); FWC = new Float64Array(FCAP); FTOP = new Float64Array(FCAP);
+  }
+  let n = 0;
+  for (let j = 0; j < foes.length; j++) {
+    const e = foes[j];
+    if (e.aboard) continue;
+    FE[n] = e; FX[n] = e.pos[0]; FZ[n] = e.pos[2];
+    const dom = e.def.domain;
+    FDOM[n] = dom === 'air' ? 0 : dom === 'land' ? 1 : 2;
+    FSVR[n] = subVis(e, false); FSVC[n] = subVis(e, true);
+    FK4[n] = NaN; FWR[n] = NaN; FWC[n] = NaN; FTOP[n] = NaN;       // computed on first use
+    n++;
+  }
+  FE.length = n;
+  return n;
+}
+/* the side's looking units, flattened (seeProjectiles reuses them) */
+let SCAP = 0, SX, SZ, SY, SHA, SAIR, SSKIM, SCAM, SRAD;
+function sensorTables(own) {
+  if (own.length > SCAP) {
+    SCAP = Math.max(64, own.length * 2);
+    SX = new Float64Array(SCAP); SZ = new Float64Array(SCAP); SY = new Float64Array(SCAP); SHA = new Float64Array(SCAP);
+    SAIR = new Float64Array(SCAP); SSKIM = new Float64Array(SCAP); SCAM = new Float64Array(SCAP); SRAD = new Uint8Array(SCAP);
+  }
+  for (let i = 0; i < own.length; i++) {
+    const u = own[i], Sd = u.def.sensors;
+    SX[i] = u.pos[0]; SZ[i] = u.pos[2]; SY[i] = u.pos[1];
+    const R = Sd.radar, on = !!R && radarWorks(u);
+    SRAD[i] = on ? 1 : 0;
+    SAIR[i] = on ? R.air : 0; SHA[i] = on ? antH(u, R) : 0; SSKIM[i] = on && R.skim ? R.skim : 0;
+    SCAM[i] = Sd.camera && !u.off.camera ? Sd.camera.range : 0;
+  }
+}
+const SQ4120 = 4120;
 export function senseTick(sim, dt) {
   const t = sim.t, map = sim.map, wx = sim.weather;
   // fog off (sandbox): both pictures are ground truth, silently, so attacks work on anything in view
@@ -160,37 +205,43 @@ export function senseTick(sim, dt) {
     if (!c.cls) { c.cls = e.def.cls; c.type = e.type; c.name = e.def.name; }
   }
   for (const side of ['coast', 'fleet']) {
-    const all = sim.alive(side), foes = sim.alive(ENEMY[side]);
+    const all = sim.alive(side), nf = foeTables(sim.alive(ENEMY[side]));
     // only units that carry a radar or a camera look
     const own = SENSORS; own.length = 0;
     for (let i = 0; i < all.length; i++) { const u = all[i]; if (!u.aboard && (u.def.sensors.radar || u.def.sensors.camera)) own.push(u); }
+    sensorTables(own);
     for (let i = 0; i < own.length; i++) {
       const u = own[i];
-      if (u.aboard) continue;
-      const Sd = u.def.sensors;
+      const Sd = u.def.sensors, ux = SX[i], uz = SZ[i];
       // radar sweep: world-bearing sector covered since the last tick
-      if (Sd.radar && radarWorks(u)) {
-        const R = Sd.radar, ha = antH(u, R);
+      if (SRAD[i]) {
+        const R = Sd.radar, ha = SHA[i], sha = Math.sqrt(ha > 0 ? ha : 0);
         const a1 = u.hdg + u.antA + u.antW * (t - u.antT), sweep = u.antW * dt, a0 = a1 - sweep;
         const full = sweep >= TAU - 1e-6;
-        const rmax = Math.max(R.air, R.surf);
-        for (let j = 0; j < foes.length; j++) {
-          const e = foes[j];
-          if (e.aboard) continue;
-          const dx = e.pos[0] - u.pos[0], dz = e.pos[2] - u.pos[2];
+        const rmax = Math.max(R.air, R.surf), rA = R.air, rL = R.surf * (R.land || 0), rS = R.surf;
+        // a cheap pre-test of the sector: the angle from the sector's centre, well outside its half-width (the
+        // margin dwarfs the rounding of either test), rejects the pair; anything near the edge takes the exact test
+        const hw = sweep * .5, pre = !full && hw + 1e-3 < Math.PI;
+        const cs = pre ? Math.sin(a0 + hw) : 0, cc = pre ? Math.cos(a0 + hw) : 0, cl = pre ? Math.cos(hw + 1e-3) : 0;
+        for (let j = 0; j < nf; j++) {
+          const dx = FX[j] - ux, dz = FZ[j] - uz;
           if (Math.abs(dx) > rmax || Math.abs(dz) > rmax) continue;
-          const d = Math.sqrt(dx * dx + dz * dz);
-          let rng = rangeVs(R, e) * subVis(e, false);
+          const d = Math.sqrt(dx * dx + dz * dz), dm = FDOM[j];
+          let rng = (dm === 0 ? rA : dm === 1 ? rL : rS) * FSVR[j];
           if (!rng || d > rng) continue;
           if (!full) {
+            if (pre && dx * cs + dz * cc < cl * d) continue;
             const b = Math.atan2(dx, dz), off = wrapPi(b - a0);
             if ((off < 0 ? off + TAU : off) > sweep) continue;
           }
-          rng *= Math.pow(e.def.rcs, .25) * wx.radar(e.pos[0], e.pos[2]);
+          const e = FE[j];
+          let k4 = FK4[j]; if (k4 !== k4) k4 = FK4[j] = Math.pow(e.def.rcs, .25);
+          let wr = FWR[j]; if (wr !== wr) wr = FWR[j] = wx.radar(FX[j], FZ[j]);
+          rng *= k4 * wr;
           if (d > rng) continue;
-          const ht = topH(e);
-          if (d > horizon(ha, ht)) continue;
-          if (!los(map, u.pos[0], ha, u.pos[2], e.pos[0], ht, e.pos[2])) continue;
+          let ht = FTOP[j]; if (ht !== ht) ht = FTOP[j] = topH(e);
+          if (d > SQ4120 * (sha + Math.sqrt(ht > 0 ? ht : 0))) continue;          // horizon(ha, ht)
+          if (!los(map, ux, ha, uz, FX[j], ht, FZ[j])) continue;
           const f = d / rng, pd = .95 - .55 * f * f;
           if (sim.rng.sense() > pd) continue;
           detect(sim, side, e, 30 + .004 * d, R.gain, 'radar');
@@ -198,15 +249,16 @@ export function senseTick(sim, dt) {
       }
       // camera: every tick, all around, short range
       if (Sd.camera && !u.off.camera && !(Sd.camera.mast && (u.mastUp || 0) < .8)) {
-        const C = Sd.camera, ha = u.def.sub ? mastTop(u) : u.pos[1];
-        for (let j = 0; j < foes.length; j++) {
-          const e = foes[j];
-          if (e.aboard) continue;
-          const dx = e.pos[0] - u.pos[0], dz = e.pos[2] - u.pos[2];
-          if (Math.abs(dx) > C.range || Math.abs(dz) > C.range) continue;
-          const d = Math.sqrt(dx * dx + dz * dz), rng = C.range * wx.camera(e.pos[0], e.pos[2]) * subVis(e, true);
+        const C = Sd.camera, ha = u.def.sub ? mastTop(u) : u.pos[1], CR = C.range;
+        for (let j = 0; j < nf; j++) {
+          const dx = FX[j] - ux, dz = FZ[j] - uz;
+          if (Math.abs(dx) > CR || Math.abs(dz) > CR) continue;
+          let wc = FWC[j]; if (wc !== wc) wc = FWC[j] = wx.camera(FX[j], FZ[j]);
+          const d = Math.sqrt(dx * dx + dz * dz), rng = CR * wc * FSVC[j];
           if (d > rng) continue;
-          if (!los(map, u.pos[0], ha, u.pos[2], e.pos[0], topH(e), e.pos[2])) continue;
+          const e = FE[j];
+          let ht = FTOP[j]; if (ht !== ht) ht = FTOP[j] = topH(e);
+          if (!los(map, ux, ha, uz, FX[j], ht, FZ[j])) continue;
           if (sim.rng.sense() > .92 - .3 * (d / rng)) continue;
           detect(sim, side, e, 8 + .002 * d, C.gain, 'camera');
           u.aimB = Math.atan2(dx, dz);
@@ -218,30 +270,31 @@ export function senseTick(sim, dt) {
   }
 }
 
-/* projectiles are not contacts; a side "sees" one while any of its radars or cameras covers it */
+/* projectiles are not contacts; a side "sees" one while any of its radars or cameras covers it (the sensor tables
+   of senseTick: filled for this side just before) */
 function seeProjectiles(sim, side, own) {
-  const t = sim.t, map = sim.map;
+  const t = sim.t, map = sim.map, n = own.length, wx = sim.weather;
   for (const p of sim.projectiles.values()) {
     if (p.side === side || !p.alive || p.P.torpedo) continue;
     if (t - p.seen[side] < .3) continue;
     const rcs = p.P.rcs || .1, k = Math.pow(rcs, .25);
-    for (let i = 0; i < own.length; i++) {
-      const u = own[i];
-      if (u.aboard) continue;
-      const Sd = u.def.sensors;
+    const px = p.pos[0], py = p.pos[1], pz = p.pos[2], sp = Math.sqrt(py > 0 ? py : 0);
+    let wr = NaN;
+    for (let i = 0; i < n; i++) {
       let rng = 0, ha = 0;
-      if (Sd.radar && radarWorks(u)) {
-        rng = Sd.radar.air * k * sim.weather.radar(p.pos[0], p.pos[2]); ha = antH(u, Sd.radar);
+      if (SRAD[i]) {
+        if (wr !== wr) wr = wx.radar(px, pz);
+        rng = SAIR[i] * k * wr; ha = SHA[i];
         // a look-down radar (the E-2D's) loses sea-skimmers in the sea clutter: skim = its range factor under 80 m
-        if (Sd.radar.skim && p.pos[1] < 80) rng *= Sd.radar.skim;
+        if (SSKIM[i] && py < 80) rng *= SSKIM[i];
       }
-      if (Sd.camera && !u.off.camera && Sd.camera.range > rng) { rng = Sd.camera.range; ha = u.pos[1]; }
+      if (SCAM[i] > rng) { rng = SCAM[i]; ha = SY[i]; }
       if (!rng) continue;
-      const dx = p.pos[0] - u.pos[0], dz = p.pos[2] - u.pos[2];
+      const dx = px - SX[i], dz = pz - SZ[i];
       if (Math.abs(dx) > rng || Math.abs(dz) > rng) continue;
       const d = Math.sqrt(dx * dx + dz * dz);
-      if (d > rng || d > horizon(ha, p.pos[1])) continue;
-      if (!los(map, u.pos[0], ha, u.pos[2], p.pos[0], p.pos[1], p.pos[2])) continue;
+      if (d > rng || d > SQ4120 * (Math.sqrt(ha > 0 ? ha : 0) + sp)) continue;     // horizon(ha, p.pos[1])
+      if (!los(map, SX[i], ha, SZ[i], px, py, pz)) continue;
       if (p.seen[side] < 0) sim.emit('detect', { side, proj: p.id, kind: p.kind, pos: p.pos.slice(), how: 'radar', dom: 'missile' });
       p.seen[side] = t;
       break;
