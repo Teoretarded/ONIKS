@@ -23,6 +23,7 @@
    on a phosphor layer that fades as the beam turns, and each draw paints only the sector swept since the last one
    (square dots batched by alpha into one path per level); nothing allocated in the loops. */
 import { radarWorks } from '../../../sim/sensors.js';
+import { facePlace } from '../../sensors/radar.js';
 
 const TAU = Math.PI * 2, DEG = Math.PI / 180;
 const RANGES = [10, 20, 30, 40, 60, 80, 100, 120, 160, 200];      // km: the wheel's steps
@@ -36,12 +37,8 @@ const PO = { orb: true, bg: '#000000', wh: '#F6F5F2', own: '#F6F5F2', sweep: '#F
   rgb: '246,245,242', font: "'DM Mono', monospace", fw: 400, wedge: .07, ring: .16, rim: .42 };
 const NCL = 1600, NTAG = 48, OFFMAX = .42;
 
-/* face fi's electronic beam bearing at a step (the same as ui/sensors/radar.js faceBeam and the engine's faces sweep) */
-function faceBeam(hdg, fi, step) {
-  let h = Math.imul(step, 0x9E3779B1) ^ ((Math.imul(fi + 7, 0x85EBCA77) + 0x7f4a7c15) | 0);
-  h ^= h >>> 15; h = Math.imul(h, 0x2C1B3C6D); h ^= h >>> 12; h = Math.imul(h, 0x297A2D39); h ^= h >>> 15;
-  return hdg + (fi + .06 + .88 * ((h >>> 8) / 16777216)) * Math.PI / 2;
-}
+/* face fi's electronic beam bearing at display time td (ui/sensors/radar.js facePlace: the world's faces sweep too) */
+function faceBeam(hdg, fi, td) { return hdg + (fi + facePlace(td, fi)) * Math.PI / 2; }
 function hsh(a, b) {
   let h = Math.imul((a | 0) ^ 0x5bd1e995, 0x9E3779B1) ^ Math.imul((b | 0) + 0x7f4a7c15, 0x85EBCA77);
   h ^= h >>> 15; h = Math.imul(h, 0x2C1B3C6D); h ^= h >>> 12; h = Math.imul(h, 0x297A2D39); h ^= h >>> 15;
@@ -521,8 +518,8 @@ export function createPPI(game, hud) {
       wedge(); clutter();
       if (C.fast) { ctx.globalAlpha = pal.wedge * .35; ctx.fillStyle = pal.sweep; ctx.beginPath(); ctx.arc(rx, ry, RM * s, 0, TAU); ctx.fill(); }
       if (C.faces) {
-        // the face seams (bow, beams, stern) faint; each face's beam where the array points it this step
-        const stp = Math.floor(game.t * 12);
+        // the face seams (bow, beams, stern) faint; each face's beam where the array points it now
+        const stp = game.seaT || 0;
         for (let fi = 0; fi < 4; fi++) {
           const bs = C.hdg + fi * Math.PI / 2, sb = Math.sin(bs), cb = -Math.cos(bs), Ls = Math.min(RM * s, toRim(rx, ry, sb, cb));
           seg(rx, ry, rx + sb * Ls, ry + cb * Ls, pal.wh, .18, d1, 3 * d1);

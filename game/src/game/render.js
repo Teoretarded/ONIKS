@@ -296,7 +296,7 @@ export function createRender(game, DM) {
     const tgt = game.camera.target;
     for (const u of sim.alive(game.side)) {
       const S = u.def.sensors && u.def.sensors.radar;
-      if (!S || !u.radarOn || !S.surf || u.aboard || u.off.radar) continue;
+      if (!S || !u.radarOn || !S.surf || u.aboard || u.off.radar || (game.settings && game.settings.radarSweep === false)) continue;
       if (S.needsMast && u.mast < 1) continue;
       const dd = (u.pos[0] - tgt[0]) ** 2 + (u.pos[2] - tgt[2]) ** 2;
       if (dd < bd) { bd = dd; best = u; }

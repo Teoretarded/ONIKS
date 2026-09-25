@@ -141,7 +141,8 @@ export class Renderer {
      rgb (0..255), reveal (0..1 tint left behind the front) } */
   setScan(i, s) { this.scans[i] = s && s.mode !== 'off' ? s : { mode: 0 }; }
   /* the radar sweep painting the sea and the land: { origin [x, z], bearing (rad), amp, afterglow (rad), range (m), edge (rad) } or null;
-     faces: true = four fixed arrays (bearing = hull heading, step = the electronic beams' flicker step) */
+     faces: true = four fixed arrays (bearing = hull heading, dwells = beam dwells for one crossing of a face's 90 deg
+     sector, dwell = dwells elapsed (display time), afterglow = the paint's decay per crossing) */
   setSweep(s) { this.sweep = s; }
   /* the map's hairline picture (coast, contours, graticule, frame; engine/orbital.js), built once on first use */
   orbitalMap() { if (!this._om && this.wire) this._om = new OrbitalMap(this, this.map); return this._om || null; }
@@ -203,7 +204,8 @@ export class Renderer {
     const sw = this.sweep;
     if (sw) {
       D.set([sw.origin[0] - e[0], sw.origin[1] - e[2], sw.bearing, sw.amp === undefined ? 1 : sw.amp], 188);
-      D.set([sw.afterglow || 1.2, sw.range || 60000, sw.faces ? (sw.step || 0) % 4096 : sw.edge || .035, sw.faces ? 1 : 0], 192);
+      const nd = sw.faces ? sw.dwells || 16 : 0;
+      D.set([sw.afterglow || 1.2, sw.range || 60000, sw.faces ? (sw.dwell || 0) % (2 * nd) : sw.edge || .035, nd], 192);
     } else { D.set([0, 0, 0, 0], 188); D.set([1, 1, 1, 0], 192); }
     D.set([this.terrain.seaAmp, 0, this.modelBright, Math.max(25000, fadeD * 4)], 196);
     const gl = this.gl;

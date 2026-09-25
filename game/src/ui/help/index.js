@@ -18,7 +18,7 @@
 import { KEYBINDS, SETTINGS, NOTES, DOT_DENSITY, getSettings, setSetting, onSettings } from '../../data/settings.js';
 
 const PRI_HELP = 130;
-const IN_GAME = ['renderStyle', 'renderScale', 'dotDensity', 'effects', 'autoQuality', 'showFps', 'volume', 'edgePan', 'autoSlow', 'hitReplay'];
+const IN_GAME = ['renderStyle', 'renderScale', 'dotDensity', 'effects', 'autoQuality', 'showFps', 'radarSweep', 'volume', 'edgePan', 'autoSlow', 'hitReplay'];
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const pad2 = n => String(n).padStart(2, '0');
 const same = (a, b) => typeof a === 'number' && typeof b === 'number' ? Math.abs(a - b) < 1e-6 : a === b;

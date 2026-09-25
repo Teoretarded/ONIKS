@@ -14,7 +14,8 @@
      scope     radar view (V): the world dims, the sea becomes the clutter height field, rings, ticks, glyphs
      weather   the storm's cloud ceiling lit by lightning, rain squalls as clutter speckle; natural strikes fork in
                white to the units they reveal (both sides), which flash with a white bracket and tag
-   Keys: V radar view. Everything else follows the sim's events and the orders system's targeting mode.
+   Keys: V radar view, Shift V radar sweeps on / off (the radarSweep setting). Everything else follows the sim's
+   events and the orders system's targeting mode.
    Cost: its own dots go through R.fx (no per-frame allocation in the hot loops), the clutter field and the cloud
    ceiling are GPU point passes drawn right after the engine's frame (sensors/gpu.js).
    The Orbital render style (R.style 'orbital', read every frame: S.orb): the same layers in the Orbital films' language
@@ -171,6 +172,7 @@ export async function createSensors(game) {
     },
     onKey(e) {
       if (e.type !== 'keydown' || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return false;
+      if (e.code === 'KeyV' && e.shiftKey) { radar.toggleShown(); return true; }
       if (e.code === 'KeyV') { scope.toggle(); return true; }
       return false;
     },

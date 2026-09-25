@@ -24,7 +24,7 @@ layout(std140) uniform Frame {
   vec4 uLP[16];    // xyz: light position (RTE), w: radius (m)
   vec4 uLC[16];    // rgb: colour x intensity
   vec4 uSweep;     // radar sweep: x, z origin (RTE), z: beam bearing (rad, clockwise from north), w: amplitude
-  vec4 uSweep2;    // x: afterglow (rad), y: range (m), z: edge width (rad), w: 1 = four fixed faces (z: flicker step, uSweep.z: hull heading)
+  vec4 uSweep2;    // x: afterglow (rad), y: range (m), z: edge width (rad), w > 0: four fixed faces, w dwells a crossing (x: decay per crossing, z: dwells elapsed, uSweep.z: hull heading)
   vec4 uMisc;      // x: sea amplitude scale, y: unused, z: model brightness, w: model fade distance (m)
 };
 `;
@@ -103,15 +103,27 @@ vec2 sweepAt(vec3 p) {
   if (r > uSweep2.y) return vec2(0.0);
   float b = atan(d.x, d.y);
   if (uSweep2.w > 0.5) {
-    // four fixed arrays (SPY-1): faces centred 45 deg off the bow and quarters; the whole sector is refreshed evenly
-    // (a steady glow, a faint seam where two faces meet) and each face's pencil beam jumps across it every step
+    // four fixed arrays (SPY-1): faces centred 45 deg off the bow and quarters (uSweep.z: hull heading), a 90 deg
+    // sector each, fixed to the hull. A soft steady fill that thins with range, a faint seam where two faces meet,
+    // and each face's pencil beam stepping dwell by dwell across its sector and back (uSweep2.w dwells a crossing,
+    // each step eased; uSweep2.z: dwells elapsed, mod 2 crossings), the faces a quarter cycle apart, the paint
+    // behind the beam decaying (uSweep2.x: decay per crossing). Same function as ui/sensors/radar.js facePlace.
     float x = (b - uSweep.z) / 1.5707963; x -= floor(x / 4.0) * 4.0;
     float fi = floor(x), fr = x - fi;
-    float seam = smoothstep(0.0, 0.035, min(fr, 1.0 - fr));
-    float off = 0.06 + 0.88 * u01(hash2(uint(uSweep2.z), uint(fi) + 7u));
-    float dd = abs(fr - off) * 1.5707963;
-    float e = dd < 0.12 ? exp(-dd / 0.022) : 0.0;
-    return vec2(e * 0.8 * seam, 0.4 * seam) * uSweep.w;
+    float n = uSweep2.w;
+    float q = uSweep2.z + fi * 0.5 * n; q -= floor(q / (2.0 * n)) * 2.0 * n;
+    float qi = floor(q), g = clamp((q - qi - 0.55) / 0.45, 0.0, 1.0);
+    float dq = (qi + g * g * (3.0 - 2.0 * g)) / n;          // 0..2: out and back
+    float s = dq <= 1.0 ? dq : 2.0 - dq;                    // the beam's place in the sector
+    float lag = dq <= 1.0 ? (fr <= s ? s - fr : s + fr) : (fr >= s ? fr - s : 2.0 - s - fr);   // crossings since painted
+    float seam = 0.35 + 0.65 * smoothstep(0.0, 0.02, min(fr, 1.0 - fr));
+    float rn = r / uSweep2.y;
+    float rf = (1.0 - 0.6 * rn) * (1.0 - smoothstep(0.88, 1.0, rn)) * smoothstep(0.0, 250.0, r);
+    float da = abs(fr - s) * 1.5707963;                     // angle off the beam (rad)
+    float w = max(0.01, 60.0 / max(r, 1.0));               // ~0.6 deg, at least 60 m across near the ship
+    float e = exp(-(da * da) / (w * w)) + 0.35 * exp(-lag * 40.0);
+    float ag = exp(-lag * uSweep2.x);
+    return vec2(min(e, 1.0) * 0.7 * rf, (0.07 + 0.45 * ag) * rf * seam) * uSweep.w;
   }
   float db = uSweep.z - b; db -= floor(db / 6.2831853) * 6.2831853;
   float edge = db < uSweep2.z * 4.5 ? exp(-db / uSweep2.z) : 0.0;
