@@ -302,3 +302,12 @@ With Render style = Orbital, every layer now speaks the Orbital films: the radar
 as hairline returns with dashed uncertainty ellipses, the scan bolt and part boxes as white hairlines with catalog
 placards, smoke as scalloped puff outlines, fireballs as opening rings, wakes as V arms, the HUD in Inter / DM Mono
 with the one yellow on your selection or your salvo in flight. Point Cloud is unchanged.
+
+## 11:40 · HUD fixes done; scaling up
+Salvo board capped at two groups of four lanes, finished groups collapse to one line, a strip in cinematic / radar
+view, "DESTROYED" for land targets; combat victories tick their objectives; lightning logs one line; round names
+consistent; drone launches aimed from the minimap; tags keep off the title band.
+With usage to spare, nine agents now: first impressions, the finale, the radar-scope minimap, look 3, fleet sensing +
+rebalance, two new maps (an Arctic coast with sea ice, and rias or a harbour city), museum mode + film rewatch from
+the menus, an amphibious expansion (LHD, LCAC hovercraft, landing vehicles, beach defence), save/continue built on the
+deterministic recorder + kill stills on the end screen.
