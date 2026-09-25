@@ -18,8 +18,9 @@
        sonar: white rings (another opens at each sonar fix); the hostile rounds the side can see
      - own units lime, the sites by owner, the camera's view as a dotted outline, the minimap's pings
    The Orbital render style (hud.orbital): black, white hairlines, own units white, rounds and the selection yellow.
-   Cost: the rings, the coast and the wedge are cached canvases; ~1-2k square dots a frame; nothing allocated in the
-   loops. */
+   Cost (~0.2-0.3 ms a draw at 30 Hz, 1080p): the rings, the coast and the wedge are cached canvases; the returns live
+   on a phosphor layer that fades as the beam turns, and each draw paints only the sector swept since the last one
+   (square dots batched by alpha into one path per level); nothing allocated in the loops. */
 import { radarWorks } from '../../../sim/sensors.js';
 
 const TAU = Math.PI * 2, DEG = Math.PI / 180;
@@ -57,7 +58,6 @@ export function createPPI(game, hud) {
   // sea clutter: fixed scatterers round the radar (px from the radar, bearing, strength)
   const cdx = new Float32Array(NCL), cdy = new Float32Array(NCL), caz = new Float32Array(NCL), camp = new Float32Array(NCL);
   let ncl = 0, clKey = '', clX = 0, clZ = 0;
-  const limeI = new Int32Array(NCL); let nLime = 0;
   // the hostile picture of this frame (pooled)
   const HL = []; let nH = 0;
   const TG = []; let nT = 0;
@@ -113,10 +113,16 @@ export function createPPI(game, hud) {
     pickU = after || first;
     return pickU;
   }
+  let nmU = null, nmM = false, nmS = '', rpmW = NaN, rpmS = '', rateR = 0, rateS = '';
+  const rpmOf = w => { if (w !== rpmW) { rpmW = w; rpmS = Math.round(60 * Math.abs(w) / TAU) + ' RPM'; } return rpmS; };
+  const rateOf = r => { if (r !== rateR) { rateR = r; rateS = '×' + r; } return rateS; };
   function nameOf(u) {
-    const base = NAME[u.type] || u.def.cls || 'RADAR';
     let n = 0; for (const o of sim.alive(u.side)) if (o.type === u.type) n++;
-    return n > 1 ? base + ' ' + String(u.id).padStart(2, '0') : base;
+    if (u !== nmU || (n > 1) !== nmM) {
+      const base = NAME[u.type] || u.def.cls || 'RADAR';
+      nmU = u; nmM = n > 1; nmS = nmM ? base + ' ' + String(u.id).padStart(2, '0') : base;
+    }
+    return nmS;
   }
   function centre() {
     const me = game.side, u = pick();
@@ -128,7 +134,7 @@ export function createPPI(game, hud) {
       if (radarWorks(u) && u.antW) {
         C.on = true; C.ph = P.hdg + u.antA + u.antW * (game.t - u.antT);
         C.fast = Math.abs(u.antW) * (game.paused ? 0 : game.timeRate) > 11;
-        C.rpm = u.type === 'ddg' ? 'SPY-1D' : Math.round(60 * Math.abs(u.antW) / TAU) + ' RPM';
+        C.rpm = u.type === 'ddg' ? 'SPY-1D' : rpmOf(u.antW);
       } else C.rpm = 'EMCON';
     } else {
       let h = sim.hq(me); if (!h) h = sim.alive(me)[0] || null;
@@ -137,7 +143,7 @@ export function createPPI(game, hud) {
     }
     if (p) { C.x = p[0]; C.z = p[2]; }
     else { const sp = map.spawns && map.spawns[me]; if (sp) { C.x = sp.x; C.z = sp.z; } }
-    C.rate = C.on && game.timeRate > 1 && !game.paused ? '×' + game.timeRate : '';
+    C.rate = C.on && game.timeRate > 1 && !game.paused ? rateOf(game.timeRate) : '';
     const want = userR || C.def / 1000;
     let ri = RANGES.length - 1;
     for (let i = 0; i < RANGES.length; i++) if (RANGES[i] >= want * .98) { ri = i; break; }
@@ -214,13 +220,15 @@ export function createPPI(game, hud) {
 
   /* the coast and the land: a raster of the height grid in world-aligned cells of one css px, blitted every frame */
   function coast() {
-    const RM = C.RM, OM = pal.orb && game.R && game.R.orbitalMap ? game.R.orbitalMap() : null;
+    const OM = pal.orb && game.R && game.R.orbitalMap ? game.R.orbitalMap() : null;
     const lines = OM && OM.ready && OM.coast && OM.coast.lines ? OM.coast.lines : null;
-    const key = s.toFixed(9) + '|' + k + '|' + pal.orb + '|' + !!lines;
-    if (key === coastKey && Math.abs(C.x - coastX) < RM * .5 && Math.abs(C.z - coastZ) < RM * .5) return;
-    coastKey = key; coastX = C.x; coastZ = C.z;
-    const m = k / s, L = RM * 1.6, N = Math.ceil(2 * L / m);
-    const i0 = Math.floor((C.x - L) / m), j0 = Math.floor((C.z + L) / m);
+    // the layer covers the display (its middle in the world: Dx, Dz) with a margin for a moving radar
+    const Rw = rho / s, Dx = C.x + (cx - rx) / s, Dz = C.z - (cy - ry) / s;
+    const key = s.toFixed(9) + '|' + k + '|' + pal.orb + '|' + !!lines + '|' + rho;
+    if (key === coastKey && Math.abs(Dx - coastX) < Rw * .22 && Math.abs(Dz - coastZ) < Rw * .22) return;
+    coastKey = key; coastX = Dx; coastZ = Dz;
+    const m = k / s, L = Rw * 1.25, N = Math.ceil(2 * L / m);
+    const i0 = Math.floor((Dx - L) / m), j0 = Math.floor((Dz + L) / m);
     coastI0 = i0; coastJ0 = j0; coastN = N; coastM = m;
     coastC.width = N; coastC.height = N;
     const c = coastC.getContext('2d');
@@ -311,7 +319,90 @@ export function createPPI(game, hud) {
       if (x > -W2 && x < W2 && z > -H2 && z < H2 && map.h(x, z) > -1) continue;    // land (past the map: open sea)
       cdx[n] = dx; cdy[n] = dy; caz[n] = a; camp[n] = .2 + .8 * Math.exp(-r / (rc * 1.4)); n++;
     }
-    ncl = n;
+    // by bearing: the beam paints a sector at a time
+    const ord = new Array(n); for (let i = 0; i < n; i++) ord[i] = i;
+    ord.sort((a, b) => caz[a] - caz[b]);
+    const t1 = cdx.slice(0, n), t2 = cdy.slice(0, n), t3 = caz.slice(0, n), t4 = camp.slice(0, n);
+    for (let i = 0; i < n; i++) { const j = ord[i]; cdx[i] = t1[j]; cdy[i] = t2[j]; caz[i] = t3[j]; camp[i] = t4[j]; }
+    ncl = n; phValid = false;
+  }
+  /* the clutter's index ranges (RG, nRg) for the bearings a0 .. a0 + w (w < 2 pi; the array is sorted by bearing) */
+  const RG = new Int32Array(4); let nRg = 0;
+  function lb(a) { let lo = 0, hi = ncl; while (lo < hi) { const m = (lo + hi) >> 1; if (caz[m] < a) lo = m + 1; else hi = m; } return lo; }
+  function arcIdx(a0, w) {
+    a0 -= Math.floor(a0 / TAU) * TAU; const a1 = a0 + w;
+    if (a1 <= TAU) { RG[0] = lb(a0); RG[1] = lb(a1); nRg = 1; }
+    else { RG[0] = lb(a0); RG[1] = ncl; RG[2] = 0; RG[3] = lb(a1 - TAU); nRg = 2; }
+  }
+
+  /* the phosphor: the returns the beam paints (sea clutter, rain) on their own layer, fading as the beam turns on
+     (e^-DECAY per rad); each frame paints only the sector swept since the last (a full repaint when the scope changes,
+     time jumps, or 3 times a second while the beam is too fast to follow) */
+  const phC = document.createElement('canvas'), DECAY = .55;
+  let pctx = null, phKey = '', phPh = 0, phValid = false, phFast = -1, phAcc = 0;
+  function phosphor() {
+    const key = bw + '|' + bh + '|' + clKey + '|' + pal.orb;
+    if (key !== phKey || !pctx) { phKey = key; phC.width = bw; phC.height = bh; pctx = phC.getContext('2d'); phValid = false; }
+    if (C.fast) { if (!phValid || phFast !== fastN) { phFast = fastN; repaint(); } return; }
+    const dA = C.ph - phPh;
+    if (!phValid || phFast >= 0 || dA < 0 || dA >= TAU) { phFast = -1; repaint(); return; }
+    if (dA < 1e-5) return;
+    // fade in steps of a quarter radian or more (8-bit alpha would stall on smaller steps)
+    phAcc += dA;
+    if (phAcc >= .25) {
+      pctx.globalCompositeOperation = 'destination-out'; pctx.globalAlpha = 1 - Math.exp(-DECAY * phAcc); pctx.fillRect(0, 0, bw, bh);
+      pctx.globalCompositeOperation = 'source-over'; phAcc = 0;
+    }
+    arcIdx(phPh, dA);
+    for (let r = 0; r < nRg; r++) paintClutter(RG[r * 2], RG[r * 2 + 1]);
+    paintRain(dA);
+    bflush(pctx, pal.wh, d1);
+    phPh = C.ph;
+  }
+  function repaint() {
+    pctx.globalCompositeOperation = 'source-over'; pctx.clearRect(0, 0, bw, bh);
+    paintClutter(0, ncl); paintRain(TAU);
+    bflush(pctx, pal.wh, d1);
+    phPh = C.ph; phValid = true; phAcc = 0;
+  }
+  /* sea clutter i0 .. i1: this turn's return of each (new every turn), as bright as the time since the beam passed */
+  function paintClutter(i0, i1) {
+    for (let i = i0; i < i1; i++) {
+      const d = since(caz[i]), A = hsh(i * 7 + 1, swN), th = .3 + .5 * camp[i];
+      if (A > th) continue;
+      const a = camp[i] * (C.fast ? .45 : Math.exp(-DECAY * d)) * (.5 + .5 * (1 - A / th));
+      if (a < .02) continue;
+      bdot(Math.round(rx + cdx[i]), Math.round(ry + cdy[i]), a);
+    }
+  }
+  /* rain and storm cells: clutter blobs drifting with the cells; only the parts the beam swept (d < dA) */
+  function paintRain(dA) {
+    const W = sim.weather, cells = W && W.cells ? W.cells() : null;
+    if (!cells) return;
+    const RM = C.RM, rho2 = rho * rho;
+    for (let ci = 0; ci < cells.length; ci++) {
+      const cc = cells[ci], q = cc.q === undefined ? 1 : cc.q, rr = cc.r || 0;
+      if (q < .02 || rr < 100 || Math.hypot(cc.x - C.x, cc.z - C.z) - rr > RM) continue;
+      const px0 = X(cc.x), py0 = Z(cc.z), rpx = rr * s;
+      if ((px0 - cx) ** 2 + (py0 - cy) ** 2 > (rho + rpx) ** 2) continue;
+      const sg = rr * .5, sp = sg * s, R0 = Math.hypot(px0 - rx, py0 - ry);
+      // the cell's bearings from the radar: skip it when the swept sector misses them
+      const w = R0 > 2.6 * sp ? Math.asin(2.6 * sp / R0) : Math.PI, az0 = brgOf(px0, py0), d0 = since(az0);
+      if (dA < TAU && w < Math.PI && d0 - w >= dA && d0 + w < TAU) continue;
+      const rc = rpx / k, n = Math.max(20, Math.min(240, Math.round(rc * rc * .7 * q))), seed = (cc.seed | 0) & 0xfffff;
+      const G = rainOf(seed), el = .75 + .25 * hsh(seed, 9), far = R0 > 6 * sp, cb = Math.cos(az0) / R0, sb = Math.sin(az0) / R0;
+      for (let j = 0; j < n; j++) {
+        const gx = G[j * 2], gz = G[j * 2 + 1] * el, ox = gx * sp, oy = -gz * sp, px = px0 + ox, py = py0 + oy;
+        if ((px - cx) ** 2 + (py - cy) ** 2 > rho2) continue;
+        const d = since(far ? az0 + ox * cb + oy * sb : brgOf(px, py));
+        if (d >= dA) continue;
+        const core = Math.exp(-.5 * (gx * gx + gz * gz)), A = hsh(seed + j * 5 + 1, swN);
+        if (A > .3 + .6 * core) continue;
+        const a = q * (C.fast ? .45 : Math.exp(-DECAY * d)) * (.3 + .7 * core);
+        if (a < .02) continue;
+        bdot(Math.round(px), Math.round(py), a > .95 ? .95 : a);
+      }
+    }
   }
 
   /* ---------------- drawing helpers (backing px) ---------------- */
@@ -351,14 +442,14 @@ export function createPPI(game, hud) {
     const n = BN[b]; if (n >= BCAP) return;
     const o = (b * BCAP + n) * 2; BK[o] = x; BK[o + 1] = y; BN[b] = n + 1;
   }
-  function bflush(col, sz) {
-    ctx.fillStyle = col;
+  function bflush(c, col, sz) {
+    c.fillStyle = col;
     for (let b = 1; b < NBK; b++) {
       const n = BN[b]; if (!n) continue;
-      const v = (b + .6) / NBK; ctx.globalAlpha = v * v;
-      ctx.beginPath();
-      for (let i = 0, o = b * BCAP * 2; i < n; i++, o += 2) ctx.rect(BK[o], BK[o + 1], sz, sz);
-      ctx.fill();
+      const v = (b + .6) / NBK; c.globalAlpha = v * v;
+      c.beginPath();
+      for (let i = 0, o = b * BCAP * 2; i < n; i++, o += 2) c.rect(BK[o], BK[o + 1], sz, sz);
+      c.fill();
     }
     BN.fill(0);
   }
@@ -401,53 +492,27 @@ export function createPPI(game, hud) {
     ctx.drawImage(coastC, Math.round(rx + (coastI0 * coastM - C.x) * s), Math.round(ry - (coastJ0 * coastM - C.z) * s), coastN * k, coastN * k);
     ctx.imageSmoothingEnabled = true;
 
-    // the beam: afterglow, clutter, rain, the edge
+    // the beam: afterglow, the phosphor (clutter, rain), the lime edge, the edge line
     if (C.on) {
       wedge(); clutter();
       if (C.fast) { ctx.globalAlpha = pal.wedge * .35; ctx.fillStyle = pal.sweep; ctx.beginPath(); ctx.arc(rx, ry, RM * s, 0, TAU); ctx.fill(); }
       else { ctx.save(); ctx.translate(rx, ry); ctx.rotate(C.ph); ctx.globalAlpha = 1; ctx.drawImage(wedgeC, -wedgeR, -wedgeR); ctx.restore(); }
-      nLime = 0;
-      for (let i = 0; i < ncl; i++) {
-        const d = since(caz[i]), A = hsh(i * 7 + 1, swN), th = .3 + .5 * camp[i];
-        if (A > th) continue;
-        const P = C.fast ? .45 : Math.exp(-d * .8), a = camp[i] * (.22 + .78 * P) * (.5 + .5 * (1 - A / th));
-        if (a < .03) continue;
-        bdot(Math.round(rx + cdx[i]), Math.round(ry + cdy[i]), a);
-        if (d < .28) limeI[nLime++] = i;
-      }
-      // rain and storm cells: clutter blobs drifting with the cells
-      const W = sim.weather, cells = W && W.cells ? W.cells() : null;
-      if (cells) for (let ci = 0; ci < cells.length; ci++) {
-        const cc = cells[ci], q = cc.q === undefined ? 1 : cc.q, rr = cc.r || 0;
-        if (q < .02 || rr < 100 || Math.hypot(cc.x - C.x, cc.z - C.z) - rr > RM) continue;
-        const px0 = X(cc.x), py0 = Z(cc.z), rpx = rr * s;
-        if ((px0 - cx) ** 2 + (py0 - cy) ** 2 > (rho + rpx) ** 2) continue;
-        const rc = rpx / k, n = Math.max(20, Math.min(240, Math.round(rc * rc * .7 * q))), seed = (cc.seed | 0) & 0xfffff, sg = rr * .5;
-        const G = rainOf(seed), el = .75 + .25 * hsh(seed, 9), sp = sg * s;
-        for (let j = 0; j < n; j++) {
-          const gx = G[j * 2], gz = G[j * 2 + 1] * el, px = px0 + gx * sp, py = py0 - gz * sp;
-          if ((px - cx) ** 2 + (py - cy) ** 2 > rho2) continue;
-          const core = Math.exp(-.5 * (gx * gx + gz * gz)), d = since(brgOf(px, py)), A = hsh(seed + j * 5 + 1, swN);
-          if (A > .3 + .6 * core) continue;
-          const P = C.fast ? .45 : Math.exp(-d * .8), a = q * (.2 + .8 * P) * (.3 + .7 * core);
-          if (a < .03) continue;
-          bdot(Math.round(px), Math.round(py), a > .95 ? .95 : a);
-        }
-      }
-      bflush(pal.wh, ds);
+      phosphor();
+      ctx.globalAlpha = 1; ctx.drawImage(phC, 0, 0);
       if (!C.fast) {
         // the leading edge lights the returns lime
-        for (let j = 0; j < nLime; j++) {
-          const i = limeI[j]; let d = C.ph - caz[i]; d -= Math.floor(d / TAU) * TAU;
+        arcIdx(C.ph - .28, .28);
+        for (let r = 0; r < nRg; r++) for (let i = RG[r * 2]; i < RG[r * 2 + 1]; i++) {
+          let d = C.ph - caz[i]; d -= Math.floor(d / TAU) * TAU;
           bdot(Math.round(rx + cdx[i]), Math.round(ry + cdy[i]), Math.exp(-d * 11) * .95 * camp[i]);
         }
-        bflush(pal.sweep, ds);
+        bflush(ctx, pal.sweep, ds);
         // the beam's edge, to the rim
         const sn = Math.sin(C.ph), cs = -Math.cos(C.ph), L = Math.min(RM * s, toRim(rx, ry, sn, cs));
         seg(rx, ry, rx + sn * L, ry + cs * L, pal.sweep, .95, 2 * d1, d1);
         ctx.setLineDash(DASH0);
       }
-    }
+    } else phValid = false;
 
     // the sites by owner
     for (const o of sim.objectives) {
