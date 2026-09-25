@@ -426,3 +426,10 @@ in the fjord, tundra shrub in the Arctic, willows and reeds in the delta, pine o
 and boulder fields, the whole road network drawn (two dotted edges close up, one line far off, faint on the Orbital
 map), power lines on towers, fences round objective sites, farms and more houses with lit windows at night. Trees
 fade in front of the camera so a close look at a unit is never through leaves. Cost 0.2-1.2 ms per frame.
+
+## 15:10 · Handover
+All agents finished. Last in: the balance pass for the collision-based hits (every map 42-58% coast wins over 24
+seeds; Oniks stopped 43% of the time, Tomahawk 40%, SLAM-ER 47%; spawns moved on four maps) and fleet sensing.
+The user play-tested ("absolutely amazing") and listed bugs: they are in `game/KNOWN_BUGS.md` with likely causes,
+together with the open issues (four cloud branches to merge: `cloud/simperf`, `cloud/units3`, `cloud/audit`,
+`cloud/validate`). Everything is committed on `game-v1` and pushed to GitHub. Next session starts from KNOWN_BUGS.md.

@@ -49,10 +49,9 @@ Screenshots of several of these were shared in the chat. Start the next session 
 
 ## Reported by agents at the end of the build
 
-- **Balance is off after the switch to collision-based hits.** Last runs: the coast won ~17% of AI-vs-AI matches;
-  defences stop 83-91% of coast missiles. A numbers-only balance pass was running at handover (see git log for its
-  final commit). Archipelago also dropped to ~29% coast wins after the fleet-sensing change (the E-2D's ESM range
-  is the lever). Tool: `game/balance.html`.
+- **Balance** was re-tuned after the switch to collision-based hits: every map 42-58% coast wins over 24 seeds,
+  defences stop ~43% of Oniks (target ~45%). Kh-35 (58%) and Kalibr (64%) are still stopped a bit more than
+  intended. Per-map numbers carry about ±10 points of seed noise. Tool: `game/balance.html`.
 - **Big battles at x32 are CPU-heavy**: a 200-unit battle runs 30-70 ms per frame (smoke trails, debris, the sim
   and its event handlers). Normal play is 2-6 ms. Tools: `ONIKS.perf()`, `game/perf.html`, `game.profile = true`.
 - **Tests:** the 200-unit perf test fails whenever the machine is loaded (re-run on a quiet machine); the two new
@@ -68,3 +67,6 @@ Screenshots of several of these were shared in the chat. Start the next session 
 - On a cold first open the Combat screen could list only six maps (fixed in the fallback list; watch for it).
 - Saves made with older code are refused on Continue (by design: the sim changed).
 - Campaign missions override some HP values (M5, M6); re-check campaign difficulty after the balance changes.
+- Two untracked files, `game/src/data/models_u3kit.js` and `units_u3.js`, are partial work from a local agent that
+  was stopped (the same four units were then built on `cloud/units3`). Not imported anywhere; delete or ignore them
+  when merging `cloud/units3`.
