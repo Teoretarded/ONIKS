@@ -1249,4 +1249,49 @@ export const UNITS3_ANATOMY = {
     xray: [{ id: 'SH', label: '130 mm rounds · ready rack', model: 'shell130', st: {}, parent: 'turret',
       inst: st => { const out = [], T = bgTurretXf(st); for (let k = 0; k < 8; k++) out.push(X.mul(T, T3([-1.0 + k * .28, .6, -2.55]))); return out; } }],
   },
+  /* the rounds (the viewer frames every key through its entry) */
+  s400_msl: {
+    model: 's400_msl', title: '48N6E3', size: '7.5 m · Ø 0.52 m',
+    note: 'Long-range round of the S-400: cold-launched upright from its sealed container, four tail control fins.',
+    view: { yaw: -1.3, pitch: .2 },
+    parts: [
+      E('01', ['radome'], 'Radome', '', [0, 0, .9], 0, 'part', { side: 'R' }),
+      E('02', ['fins'], 'Tail control fins ×4', '', [0, 0, -.8], .25, 'part', { side: 'L' }),
+      E('03', ['body'], '48N6E3 · Ø 519 mm', '7.5 m', [0, 0, 0], .5, 'shell', { side: 'L' }),
+    ],
+    xray: [],
+  },
+  rim116: {
+    model: 'rim116', title: 'RIM-116 RAM', size: '2.79 m · Ø 127 mm',
+    note: 'Rolling Airframe Missile: spins in flight, two canards behind the nose, four tail fins.',
+    view: { yaw: -1.3, pitch: .2 },
+    parts: [
+      E('01', ['nose'], 'Nose · IR / RF', '', [0, 0, .4], 0, 'part', { side: 'R' }),
+      E('02', ['fins'], 'Tail fins ×4 · canards ×2', '', [0, 0, -.4], .25, 'part', { side: 'L' }),
+      E('03', ['body'], 'RIM-116 RAM · Ø 127 mm', '2.79 m', [0, 0, 0], .5, 'shell', { side: 'L' }),
+    ],
+    xray: [],
+  },
+  shell130: {
+    model: 'shell130', title: '130 mm projectile', size: '130 mm · 0.67 m',
+    note: 'A-222 Bereg round (projectile only).',
+    view: { yaw: -1.3, pitch: .2 },
+    parts: [
+      E('01', ['ogive'], 'Ogive nose', '', [0, 0, .12], 0, 'part', { side: 'R' }),
+      E('02', ['band'], 'Rotating band', '', [0, 0, -.07], .25, 'part', { side: 'L' }),
+      E('03', ['body'], 'Projectile body · 130 mm', '0.67 m', [0, 0, 0], .5, 'part', { side: 'L' }),
+    ],
+    xray: [],
+  },
+  shell57: {
+    model: 'shell57', title: '57 mm projectile', size: '57 mm · 0.25 m',
+    note: 'Mk 110 round (projectile only).',
+    view: { yaw: -1.3, pitch: .2 },
+    parts: [
+      E('01', ['ogive'], 'Ogive nose', '', [0, 0, .05], 0, 'part', { side: 'R' }),
+      E('02', ['band'], 'Rotating band', '', [0, 0, -.03], .25, 'part', { side: 'L' }),
+      E('03', ['body'], 'Projectile body · 57 mm', '0.25 m', [0, 0, 0], .5, 'part', { side: 'L' }),
+    ],
+    xray: [],
+  },
 };
