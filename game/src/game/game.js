@@ -186,7 +186,9 @@ export function createGame(o) {
     bus.emit('rate', { rate: game.timeRate, paused: on, why: 'user' });
   };
   game.setAutoSlow = on => { game.autoSlow = !!on; try { localStorage.setItem('oniks.autoSlow', on ? '1' : '0'); } catch (e) { /* */ } bus.emit('autoslow_setting', game.autoSlow); };
-  /* drop to x1 for something worth watching (a launch, a new hostile contact) */
+  /* drop to x1 for something worth watching (a launch, a new hostile contact; the orders system: a track that has
+     come within reach of the player's weapons, why 'engage') */
+  game.slowFor = (why, e) => autoSlow(why, e);
   function autoSlow(why, e) {
     if (!game.autoSlow || game.paused || game.timeRate <= 1 || sim.result) return;
     if (game.realT - lastManual < 8) return;          // the player just chose this rate

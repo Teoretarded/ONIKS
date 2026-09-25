@@ -5,7 +5,7 @@ import { Sim, DT } from './sim.js';
 import { UNITS, TEL_ELEV, CLASSIFY } from '../data/units.js';
 import { stubMap } from './stubmap.js';
 import { setupBattle } from './setup.js';
-import { horizon, los } from './sensors.js';
+import { horizon, los, getContact } from './sensors.js';
 
 const Q = new URLSearchParams(location.search);
 const out = document.getElementById('out');
@@ -64,6 +64,33 @@ function coastPoints(m) {
 
 /* ------------------------------------------------------------------ tests */
 async function main() {
+  // the cost test first: later tests leave the page's JIT and heap full of other sims' shapes, which slows every
+  // sim after them by ~20 % (a match runs one sim, as this test does when it runs on its own)
+  await test('perf: 200 units, ms per sim-second', async () => {
+    const m = map(), sim = new Sim(m, { seed: 77, fog: true, aiSides: ['coast', 'fleet'] });
+    setupBattle(sim);
+    const r = sim.rng.place;
+    const mix = { coast: ['tel', 'tel', 'pantsir', 'radar', 'transloader', 'catapult', 'drone'], fleet: ['ddg', 'ddg', 'helo', 'fighter'] };
+    const { shoreX } = coastPoints(m);
+    let n = sim.units.size;
+    while (n < 200) {
+      const side = n % 2 ? 'coast' : 'fleet', type = mix[side][Math.floor(r() * mix[side].length)];
+      let x, z;
+      if (side === 'coast') { x = shoreX + 3000 + r() * 25000; z = (r() - .5) * 60000; if (m.h(x, z) < 2) continue; }
+      else { x = shoreX - 20000 - r() * 40000; z = (r() - .5) * 70000; if (m.h(x, z) > -40) continue; }
+      sim.spawn(type, side, x, z, { hold: true, deployed: true, alt: type === 'fighter' ? 6000 : undefined });
+      n++;
+    }
+    await run(sim, 200);
+    // best of three one-minute windows (the machine is shared; the minimum is the honest cost)
+    const T = 20 * 60;
+    let perSec = 1e9;
+    for (let k = 0; k < 3; k++) { const t0 = performance.now(); await run(sim, T); perSec = Math.min(perSec, (performance.now() - t0) / (T * DT)); }
+    const units = sim.units.size;
+    ok(perSec < 10, `${fmt(perSec, 2)} ms per sim-second: too heavy for x32 (budget 10 ms per sim-second)`);
+    return `${units} units, ${sim.projectiles.size} missiles in flight at the end: ${fmt(perSec, 2)} ms per sim-second → x32 costs ${fmt(perSec * 32 / 10, 2)}% of a core · ${fmt(perSec * 32 / 60, 2)} ms per 60 Hz frame`;
+  });
+
   await test('radar horizon math', () => {
     ok(Math.abs(horizon(0, 0)) < 1e-9, 'horizon(0,0) != 0');
     ok(Math.abs(horizon(25, 0) - 20600) < 1, `horizon(25,0) = ${horizon(25, 0)}`);
@@ -262,6 +289,94 @@ async function main() {
     return `launcher lowered ${fmt(lowered)} s, rounds at ${done.map(x => fmt(x)).join(' / ')} s, re-erected; refilled at depot by ${fmt(sim.t / 60)} min`;
   });
 
+  await test('attack order persists: volley, watch the round down, volley again (salvo 1), ends when empty', async () => {
+    const m = map(), sim = new Sim(m, { seed: 3, fog: false });
+    const { shoreX } = coastPoints(m);
+    const tel = sim.spawn('tel', 'coast', shoreX + 5000, 0, { deployed: true, hdg: -Math.PI / 2 });
+    const ddg = sim.spawn('ddg', 'fleet', shoreX - 50000, 0, {});
+    sim.run(10);                                                   // fog off: the picture fills on the first sensor tick
+    sim.order([tel.id], { kind: 'salvo', n: 1 });
+    sim.order([tel.id], { kind: 'attack', target: ddg.id });       // no n: the player's standing attack
+    const launches = [], volleys = [], downs = [];
+    let held = 0, done = null;
+    await run(sim, 20 * 900, s => {
+      for (const e of s.drainEvents()) {
+        if (e.type === 'launch' && e.kind === 'oniks') launches.push(s.t);
+        if (e.type === 'engage' && e.unit === tel.id) { if (e.state === 'volley') volleys.push(s.t); if (e.state === 'done') done = e.why; }
+        if ((e.type === 'hit' || e.type === 'intercept' || e.type === 'splash') && e.kind === 'oniks') downs.push(s.t);
+      }
+      const o = tel.orders[0];
+      if (launches.length === 1 && o && o.kind === 'attack' && o.st === 'look') held++;
+      return done !== null;
+    });
+    ok(launches.length === 2, `launched ${launches.length} rounds`);
+    ok(volleys.length === 2, `volleys ${volleys.length}`);
+    ok(held > 20, 'the order did not stay on between the volleys');
+    ok(downs.length >= 1 && launches[1] >= downs[0] + 3.9, `second volley at ${fmt(launches[1])} s, first round down at ${fmt(downs[0])} s`);
+    ok(done === 'empty' || done === 'destroyed', `ended: ${done}`);
+    ok(!tel.orders.length, 'order still in hand');
+    return `volley 1 at ${fmt(launches[0])} s, round down at ${fmt(downs[0])} s, volley 2 at ${fmt(launches[1])} s, order ended (${done})`;
+  });
+
+  await test('attack order holds a lost track (no fire) and resumes when the track is back', async () => {
+    const m = map(), sim = new Sim(m, { seed: 4, fog: true, weather: { kind: 'calm' } });
+    const { shoreX } = coastPoints(m);
+    const tel = sim.spawn('tel', 'coast', shoreX + 5000, 0, { deployed: true, hdg: -Math.PI / 2 });
+    const ddg = sim.spawn('ddg', 'fleet', shoreX - 50000, 0, {});
+    const c = getContact(sim, 'coast', ddg);
+    // a sensor the test controls: the track held at conf, or let down below classification
+    const hold = conf => { c.conf = conf; c.lastSeen = sim.t; c.pos[0] = ddg.pos[0]; c.pos[1] = 0; c.pos[2] = ddg.pos[2]; c.err = 50; c.cls = 'DDG'; c.type = 'ddg'; c.name = ddg.def.name; };
+    hold(.9);
+    sim.order([tel.id], { kind: 'salvo', n: 1 });
+    sim.order([tel.id], { kind: 'attack', target: ddg.id });
+    const launches = [], states = [];
+    let lostAt = null, firedLost = 0, stLost = 0;
+    await run(sim, 20 * 600, s => {
+      const since = launches.length ? s.t - launches[0] : 0;
+      const lost = launches.length === 1 && since > 1 && since < 61;
+      hold(lost ? .3 : .9);
+      for (const e of s.drainEvents()) {
+        if (e.type === 'launch' && e.kind === 'oniks') { launches.push(s.t); if (lost) firedLost++; }
+        if (e.type === 'engage' && e.unit === tel.id) { states.push(e.state); if (e.state === 'lost' && lostAt === null) lostAt = s.t; }
+      }
+      if (lost && tel.orders[0] && tel.orders[0].st === 'lost') stLost++;
+      return launches.length === 2;
+    });
+    ok(lostAt !== null, 'no lost event');
+    ok(stLost > 100 && firedLost === 0, `held ${stLost} ticks, fired ${firedLost} while lost`);
+    ok(states.includes('resume'), `states ${states.join(',')}`);
+    ok(launches.length === 2 && launches[1] > launches[0] + 61, `launches ${launches.map(x => fmt(x)).join(' / ')}`);
+    return `lost ${fmt(lostAt - launches[0])} s after volley 1, held, resumed; volley 2 at ${fmt(launches[1])} s (${states.join(' → ')})`;
+  });
+
+  await test('attack order: salvo ALL, the empty TEL calls a transloader, reloads and fires again', async () => {
+    const m = map(), sim = new Sim(m, { seed: 5, fog: false });
+    const { shoreX } = coastPoints(m);
+    const tel = sim.spawn('tel', 'coast', shoreX + 5000, 0, { deployed: true, hdg: -Math.PI / 2 });
+    const tl = sim.spawn('transloader', 'coast', shoreX + 6500, 600, { hdg: -Math.PI / 2 });
+    const ddg = sim.spawn('ddg', 'fleet', shoreX - 55000, 0, {});
+    ddg.hp = ddg.hpMax = 5000;                                     // it has to outlast two volleys
+    sim.run(10);
+    sim.order([tel.id], { kind: 'salvo', n: 0 });
+    sim.order([tel.id], { kind: 'attack', target: ddg.id });
+    const launches = [], volleys = [];
+    let called = null, reloaded = null;
+    await run(sim, 20 * 1200, s => {
+      for (const e of s.drainEvents()) {
+        if (e.type === 'launch' && e.kind === 'oniks') launches.push(s.t);
+        if (e.type === 'engage' && e.unit === tel.id && e.state === 'volley') volleys.push(s.t);
+        if (e.type === 'reload_done' && e.unit === tel.id && e.ammo === 2) reloaded = s.t;
+      }
+      if (called === null && tl.orders[0] && tl.orders[0].kind === 'reload' && tl.orders[0].target === tel.id) called = s.t;
+      return launches.length >= 4;
+    });
+    ok(volleys.length >= 2 && launches.length === 4, `launches ${launches.length}, volleys ${volleys.length}`);
+    ok(launches[1] - launches[0] < 4, 'volley 1 was not both rounds at once');
+    ok(called !== null && called < launches[2], 'the transloader was not called');
+    ok(reloaded !== null && launches[2] > reloaded, `fired again at ${fmt(launches[2])} s before the reload was done (${reloaded})`);
+    return `volley 1 (2 rounds) at ${fmt(launches[0])} s, transloader called ${fmt(called)} s, reloaded ${fmt(reloaded)} s, volley 2 at ${fmt(launches[2])} s`;
+  });
+
   await test('scan: identify everything in the radius, cooldown, scanner revealed', async () => {
     const m = map(), sim = new Sim(m, { seed: 21, fog: true, weather: { kind: 'calm' } });
     const { shoreX } = coastPoints(m);
@@ -398,31 +513,6 @@ async function main() {
       await battleTest('normal', mm, mm.id);
     } catch (e) { await test(`battle on map ${Q.get('map')}`, () => { throw e; }); }
   }
-
-  await test('perf: 200 units, ms per sim-second', async () => {
-    const m = map(), sim = new Sim(m, { seed: 77, fog: true, aiSides: ['coast', 'fleet'] });
-    setupBattle(sim);
-    const r = sim.rng.place;
-    const mix = { coast: ['tel', 'tel', 'pantsir', 'radar', 'transloader', 'catapult', 'drone'], fleet: ['ddg', 'ddg', 'helo', 'fighter'] };
-    const { shoreX } = coastPoints(m);
-    let n = sim.units.size;
-    while (n < 200) {
-      const side = n % 2 ? 'coast' : 'fleet', type = mix[side][Math.floor(r() * mix[side].length)];
-      let x, z;
-      if (side === 'coast') { x = shoreX + 3000 + r() * 25000; z = (r() - .5) * 60000; if (m.h(x, z) < 2) continue; }
-      else { x = shoreX - 20000 - r() * 40000; z = (r() - .5) * 70000; if (m.h(x, z) > -40) continue; }
-      sim.spawn(type, side, x, z, { hold: true, deployed: true, alt: type === 'fighter' ? 6000 : undefined });
-      n++;
-    }
-    await run(sim, 200);
-    // best of three one-minute windows (the machine is shared; the minimum is the honest cost)
-    const T = 20 * 60;
-    let perSec = 1e9;
-    for (let k = 0; k < 3; k++) { const t0 = performance.now(); await run(sim, T); perSec = Math.min(perSec, (performance.now() - t0) / (T * DT)); }
-    const units = sim.units.size;
-    ok(perSec < 10, `${fmt(perSec, 2)} ms per sim-second: too heavy for x32 (budget 10 ms per sim-second)`);
-    return `${units} units, ${sim.projectiles.size} missiles in flight at the end: ${fmt(perSec, 2)} ms per sim-second → x32 costs ${fmt(perSec * 32 / 10, 2)}% of a core · ${fmt(perSec * 32 / 60, 2)} ms per 60 Hz frame`;
-  });
 
   const pass = results.filter(Boolean).length;
   document.getElementById('sum').textContent = `${pass}/${results.length} passed`;

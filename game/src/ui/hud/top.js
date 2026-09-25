@@ -6,6 +6,14 @@ import { clockL, esc } from './fmt.js';
 const MARK = '<svg viewBox="0 0 24 24"><path d="M12 2 20.5 22h-4.1L12 11.4 7.6 22H3.5z" fill="#fff"/><circle cx="12" cy="18.2" r="1.7" fill="#C6F432"/></svg>';
 const TICK = '<svg viewBox="0 0 10 10"><path d="M1.2 5.4 4 8.1 8.9 1.9" fill="none" stroke="#C6F432" stroke-width="1.6"/></svg>';
 const SIDE = { coast: 'Coast · Bastion-P', fleet: 'Fleet · CSG' };
+/* the named time rates; a rate in between (a replay easing back to x1) reads as the nearest (in ratio) of them */
+const NAMED = [.1, .25, .5, 1, 2, 4, 8, 16, 32];
+function snapRate(r) {
+  if (!(r > 0)) return 1;
+  let best = 1, bd = 1e9;
+  for (const n of NAMED) { const d = Math.abs(Math.log(r / n)); if (d < bd) { bd = d; best = n; } }
+  return best;
+}
 
 export function createTop(game, hud) {
   const { sim } = game;
@@ -31,7 +39,7 @@ export function createTop(game, hud) {
   rateEl.addEventListener('contextmenu', e => e.preventDefault());
 
   let blip = -99, blipWhy = '';
-  game.bus.on('autoslow', d => { blip = game.realT; blipWhy = d.why === 'launch' ? 'Launch' : 'New contact'; });
+  game.bus.on('autoslow', d => { blip = game.realT; blipWhy = d.why === 'launch' ? 'Launch' : d.why === 'engage' ? 'In reach' : 'New contact'; });
 
   let objKey = '', siteKey = '', rateKey = '', clkKey = '', supKey = '', blipKey = '', cineKey = '';
   function objectives() {
@@ -70,8 +78,8 @@ export function createTop(game, hud) {
   return {
     update() {
       objectives(); sites();
-      // rate
-      const r = game.timeRate, bt = r < 1;
+      // rate (the hit replay eases it back out through fractions: the readout snaps to the nearest named rate)
+      const r = snapRate(game.timeRate), bt = r < 1;
       const rk = game.paused ? 'P' : r + '';
       if (rk !== rateKey) {
         rateKey = rk;

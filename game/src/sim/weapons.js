@@ -91,7 +91,8 @@ function offensive(sim, u, w) {
     const cc = S.contacts.get(o.target);
     if (cc && !cc.dead && cc.conf >= CLASSIFY && w.vs.includes(cc.dom) && (o.w === w.name || !o.w)) c = cc;
     if (!c) return;
-    if ((o.fired || 0) >= (o.n || w.salvo || 1)) return;
+    // the order's volley (orders.js): o.hot while a volley is on, o.vn rounds in it
+    if (!o.hot || (o.fired || 0) >= (o.vn || 1)) return;
   } else if (u.hold) {
     let bs = -1e18;
     for (const cc of S.contacts.values()) {

@@ -69,7 +69,8 @@ export function createSelection(game, hud) {
       out.push(`On deck${cv ? ' · ' + (cv.def.cls) + ' ' + pad2(cv.id) : ''}`);
       if (u.rearmT > sim.t) out.push(`Rearming ${dur(u.rearmT - sim.t)}`);
     }
-    if (k === 'move' || k === 'patrol' || k === 'return' || k === 'attack' || k === 'scan' || k === 'reload') {
+    if (k === 'attack' && o.n === undefined) out.push(attackState(u, o));
+    else if (k === 'move' || k === 'patrol' || k === 'return' || k === 'attack' || k === 'scan' || k === 'reload') {
       const w = { move: 'Moving', patrol: 'Patrol', return: 'Returning', attack: 'Attacking', scan: 'Scan', reload: 'Reload' }[k];
       out.push(w + (tgt && k === 'attack' ? ' ' + esc(trk(tgt)) : tgt && k === 'reload' ? ' ' + tgt.def.cls + ' ' + pad2(tgt.id) : ''));
     }
@@ -77,6 +78,19 @@ export function createSelection(game, hud) {
     return out.join(' · ');
   }
   const trk = t => { const c = sim.contact(game.side, t.id); return c ? c.track : t.def.cls; };
+  /* a standing attack (sim/orders.js o.st): closing, firing volley n, watching its rounds, reloading, or holding a lost
+     track (with the time left before the order gives it up) */
+  function attackState(u, o) {
+    const c = sim.contact(game.side, o.target), name = esc(o.track || (c ? c.track : 'track')), v = (o.vol || 0) + 1;
+    switch (o.st) {
+      case 'lost': return `<span class="c">${name} · lost · holding ${dur(Math.max(0, 300 - (sim.t - (o.lostT || sim.t))))}</span>`;
+      case 'look': return `Attacking ${name} · <b>volley ${o.vol || 1}</b> away · watching`;
+      case 'reload': return `Attacking ${name} · <span class="l">reloading</span>`;
+      case 'fire': return `Attacking ${name} · <b>volley ${v}</b>`;
+      default: return `Closing on ${name}`;
+    }
+  }
+  const salvoTxt = u => { const O = game.getSystem('orders'); return O && O.salvoText ? O.salvoText([u]) : ''; };
 
   function single(u) {
     const d = u.def;
@@ -103,7 +117,7 @@ export function createSelection(game, hud) {
       h += row('Air', (nd ? parked + ' on deck' : '<b>0</b> on deck') + ' · ' + (up ? lk('up', `<b>${up}</b> up`) : '<b>0</b> up'), 'air');
     }
     if (u.mag) h += row('Mag', Object.keys(u.mag).map(k => `${WNAME[k] || k} <b>${u.mag[k]}</b>`).join(' · '));
-    if (offensive(u)) h += row('Fire', u.hold ? '<span class="l">Weapons free</span> · engages tracks in reach' : 'Weapons held · fires on your order');
+    if (offensive(u)) h += row('Fire', (u.hold ? '<span class="l">Weapons free</span> · engages tracks in reach' : 'Weapons held · fires on your order') + (salvoTxt(u) ? ` · salvo <b>${salvoTxt(u)}</b>` : ''));
     if (d.domain === 'air' && !u.aboard) h += row('Flt', `Alt <b>${Math.round(u.pos[1] / 10) * 10} m</b> · <b>${speedOf(u)}</b>${d.endurance ? ` · fuel <b>${pct(u.fuel / d.endurance)}</b>` : ''}`);
     else if (d.speed > 0 && !u.aboard) h += row('Nav', `<b>${speedOf(u)}</b> · hdg <b>${brg(Math.sin(u.hdg), Math.cos(u.hdg))}°</b>`);
     h += row('State', state(u));

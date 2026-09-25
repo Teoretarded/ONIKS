@@ -29,7 +29,7 @@ export const UNITS = {
     type: 'hq', side: 'coast', name: 'K380R', cls: 'HQ', label: 'K380R command post · Bastion-P',
     domain: 'land', model: 'hq', hq: true, static: true,
     size: [28, 28, 4], top: 18.6, speed: 0, road: 0, turn: 0,          // site: two shelter trucks, comms, 18 m mast
-    hp: 80, rcs: 0.5, dieTime: 20,                                // balance: 150 -> 80 (two TLAM or SLAM hits)
+    hp: 140, rcs: 0.5, dieTime: 20,                               // balance: 150 -> 80 -> 140 (four TLAM hits: the coast AI presses now)
     sensors: { esm: 120000 },
     emits: { range: 70000 },                                      // comms: always radiating
     scan: { reach: 50000, r: 4000, cd: 90 },

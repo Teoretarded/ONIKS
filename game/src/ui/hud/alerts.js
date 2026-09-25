@@ -1,7 +1,9 @@
 /* Alerts (right column, under the engagement log, clear of the horizon where the tracks sit): rounds inbound on own
-   units (coral, blinking softly, with the bearing and the range of the nearest), a new hostile contact, an own unit
-   hit or lost. Click one: the camera flies there. Toasts (the game's short confirmations, bus 'toast') fade in the
-   bottom centre, above the command card. */
+   units (coral, blinking softly, with the bearing and the range of the nearest), a new hostile contact, a track that
+   has come within reach of the side's weapons (lime: "TRK 25 · DDG 0.90 · IN REACH OF 4 TEL", the orders system's
+   bus 'engageable'), a standing attack whose track is lost ("TRK 25 · LOST · HOLDING") or back, one that ended
+   (magazine empty, track lost for good), an own unit hit or lost. Click one: the camera flies there. Toasts (the
+   game's short confirmations, bus 'toast') fade in the bottom centre, above the command card. */
 import { unitRef, esc, brg, km, dur } from './fmt.js';
 
 export function createAlerts(game, hud, parent, toastParent) {
@@ -32,6 +34,10 @@ export function createAlerts(game, hud, parent, toastParent) {
   });
   game.bus.on('side', () => { list.length = 0; inc = null; lastInc = -1; });
   game.bus.on('toast', d => { toasts.push({ text: d.text, bad: !!d.bad, t0: game.realT }); if (toasts.length > 3) toasts.shift(); });
+  // a track within reach of the side's weapons (game/orders.js): lime, held longer, a click flies to it
+  game.bus.on('engageable', d => push('reach', 'In reach', d.text, 'l', { track: d.unit, pos: d.pos, merge: 4, dur: 12, dist: 14000,
+    textN: n => `${n} tracks in reach · ${d.text.replace(' · in reach of ', ' · ')}` }));
+  addStyle();
 
   function push(k, chip, text, cls, o) {
     let a = list.find(x => x.key === k && game.realT - x.t0 < (x.merge || 0));
@@ -52,6 +58,18 @@ export function createAlerts(game, hud, parent, toastParent) {
       const u = sim.units.get(e.unit);
       push('lost' + e.unit, 'Lost', u ? `${unitRef(u)} · ${u.def.name}` : 'Unit', 'c', { pos: e.pos.slice(), dur: 9, dist: 3000 });
       for (let i = list.length - 1; i >= 0; i--) if (list[i].key === 'hit' + e.unit) list.splice(i, 1);
+    } else if (e.type === 'engage' && e.side === me) {
+      // standing attacks (sim/orders.js): the track lost and the order holding, the track back, the order ended
+      const u = sim.units.get(e.unit), trk = e.track || 'Track';
+      const merge = (k, chip, cls, txt, o) => push(k, chip, txt(1), cls, Object.assign({ merge: 6, textN: txt }, o));
+      if (e.state === 'lost') merge('hold' + e.target, 'Holding', 'c', n => `${trk} · lost · holding${n > 1 ? ` · ${n} units` : ''}`, { track: e.target, pos: e.pos, dur: 9, dist: 12000 });
+      else if (e.state === 'resume') merge('back' + e.target, 'Engaging', 'l', n => `${trk} · back · engaging${n > 1 ? ` · ${n} units` : ''}`, { track: e.target, dur: 6, dist: 12000 });
+      else if (e.state === 'done' && e.why === 'empty' && u) merge('dry', 'Empty', 'c', n => n > 1 ? `${n} launchers · magazines empty · R reload` : `${unitRef(u)} · magazine empty · R reload`, { unit: u.id, dur: 8, dist: 3000 });
+      else if (e.state === 'done' && e.why === 'lost') merge('end' + e.target, 'Ended', 'c', () => `${trk} · lost 5 min · attack ended`, { pos: e.pos, dur: 8, dist: 12000 });
+      for (let i = list.length - 1; i >= 0; i--) {
+        const a = list[i];
+        if ((e.state === 'resume' && a.key === 'hold' + e.target) || (e.state === 'lost' && a.key === 'back' + e.target)) list.splice(i, 1);
+      }
     } else if (e.type === 'hit') {
       const t = sim.units.get(e.target);
       if (t && t.side === me && t.alive) push('hit' + t.id, 'Hit', `${unitRef(t)} · ${Math.round(100 * t.hp / t.hpMax)}%`, 'c', { unit: t.id, merge: 6, dist: Math.max(1500, t.def.size[0] * 12),
@@ -81,6 +99,7 @@ export function createAlerts(game, hud, parent, toastParent) {
 
   let shown = [];
   return {
+    push,
     onEvent,
     update() {
       if (game.realT - lastInc > .2) { lastInc = game.realT; inc = incoming(); }
@@ -107,4 +126,12 @@ export function createAlerts(game, hud, parent, toastParent) {
       }
     },
   };
+}
+
+/* lime alerts (own opportunities): the kit's hud.css has white and coral */
+function addStyle() {
+  if (document.getElementById('oniks-alerts-css')) return;
+  const st = document.createElement('style'); st.id = 'oniks-alerts-css';
+  st.textContent = `.h-al .al.l b { background: var(--lime, #C6F432); } .h-al .al.l i { color: var(--lime, #C6F432); }`;
+  document.head.appendChild(st);
 }

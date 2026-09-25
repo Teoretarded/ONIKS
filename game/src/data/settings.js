@@ -92,6 +92,7 @@ export const KEYBINDS = [
     ['Ctrl 1-9', 'Set group · Alt 1-9 too'], ['1-9', 'Recall group · twice: fly'], ['Tab', 'Next unit'], ['Esc', 'Clear selection'] ] },
   { group: 'Orders', binds: [
     ['Right click', 'Move · attack a track'], ['Shift', 'Queue the order'], ['Z', 'Stop'], ['H', 'Weapons free / hold'],
+    ['~', 'Salvo 1 / 2 / all · Shift: back'],
     ['T', 'Deploy / undeploy', { side: 'coast' }], ['R', 'Reload'], ['X', 'Scan, then click'], ['Y', 'Radar on / off'],
     ['L', 'Launch Orlan-10', { side: 'coast' }], ['L', 'Launch strike package', { side: 'fleet' }], ['U', 'Launch MH-60R', { side: 'fleet' }],
     ['O', 'Boats: dive / come up · Shift: surface'], ['B', 'Reinforcements'] ] },

@@ -5,7 +5,8 @@
    H reads "Weapons held" / "Weapons free" (lime) for the selection's offensive weapons; defence is always automatic.
    The coast card has T Deploy and L Drone; the fleet's has U Helo and L Launch (the strike package off the deck).
    O Depth (the sonar system's key, game/sonar.js) shows while the side has a submarine: deep boats come up to
-   periscope depth, others go deep; Shift+O surfaces. */
+   periscope depth, others go deep; Shift+O surfaces. ~ Salvo (the key left of 1): rounds per volley of the
+   selection's attacks, 1 / 2 / ALL (the row reads the value; Shift+~ steps back). */
 import { scanBlocked } from '../../sim/sensors.js';
 import { isSub, depthName } from '../../sim/subs.js';
 import { offensive } from '../../game/labels.js';
@@ -14,6 +15,7 @@ import { esc, dur } from './fmt.js';
 const ROWS = [
   { k: 'Z', id: 'stop', lab: 'Stop' },
   { k: 'H', id: 'weapons', lab: 'Weapons' },
+  { k: '~', id: 'salvo', lab: 'Salvo' },
   { k: 'T', id: 'deploy', lab: 'Deploy', side: 'coast' },
   { k: 'U', id: 'helo', lab: 'Helo', side: 'fleet' },
   { k: 'R', id: 'reload', lab: 'Reload' },
@@ -67,6 +69,15 @@ export function createCommands(game, hud, parent) {
         hint: free ? 'Hold fire · offensive weapons fire only on your order · defence stays automatic'
           : 'Weapons free · launchers engage tracks in reach on their own · defence is always automatic' };
     } else S.weapons = { ok: false, x: '', hint: any ? 'No offensive weapons · defensive fire is always automatic' : 'Select launchers first · they fire only on your order until weapons free' };
+    // salvo size of the selection's attacks (the orders system cycles it: 1 -> 2 -> ALL)
+    const ord0 = game.getSystem('orders');
+    if (arm.length && ord0 && ord0.salvoText) {
+      const v = ord0.salvoText(arm);
+      S.salvo = { ok: true, x: v === 'MIXED' ? 'mixed' : v,
+        hint: v === '1' ? 'One round a volley · the next when it is down · shoot, look, shoot'
+          : v === 'ALL' ? 'Every round in hand in one volley · the heaviest blow, then reload'
+          : `${v} rounds a volley · the next when they are down · ~ cycles 1 / 2 / all` };
+    } else S.salvo = { ok: false, x: '', hint: 'Rounds per volley of an attack · select launchers first' };
     const dep = us.filter(u => u.type === 'tel' || u.type === 'bal' || u.type === 'radar');
     if (dep.length) {
       const up = dep.every(u => u.type !== 'radar' ? (u.dep > 0 || u.depT > 0 || u.elevT > 0) : (u.mast > 0 || u.mastT > 0));

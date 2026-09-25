@@ -4,7 +4,12 @@
    Z stop · H weapons free / hold fire · T deploy / undeploy · R reload · X scan (click a point) · Y radar on / off ·
    L launch: the Orlan-10 off its rail (coast), or the strike package off the deck (fleet: the selected deck aircraft,
    else every F/A-18E on the selected / any deck; click a track to strike it, a point to fly a patrol there) ·
-   U launch one MH-60R (click a search point or a track) · B reinforcements.
+   U launch one MH-60R (click a search point or a track) · ~ (the key left of 1) salvo size 1 / 2 / ALL (Shift: back) ·
+   B reinforcements.
+   Attacks persist (sim/orders.js): volleys of the salvo size, each watched until its rounds are down, until the target
+   is destroyed, the weapon is empty with no reload coming, or the track has been lost for 5 min (held meanwhile:
+   "TRK 25 · LOST · HOLDING"). A hostile track that is classified and within reach of the side's weapons raises an
+   alert once ("TRK 25 · DDG 0.90 · IN REACH OF 4 TEL", bus 'engageable'; auto x1 when that setting is on).
    Weapons: offensive fire (Oniks, TLAM, SLAM-ER, Hellfire, the 5" gun) is the player's decision: units start with
    weapons held and fire on an attack order; H sets weapons free (they pick tracks in reach themselves) and back.
    Defensive weapons (SAM, SM-6, ESSM, Phalanx, 30 mm, AIM-120) always engage incoming rounds and aircraft.
@@ -23,6 +28,7 @@ const sat = v => v < 0 ? 0 : v > 1 ? 1 : v;
 const km = m => (m < 10000 ? (m / 1000).toFixed(1) : String(Math.round(m / 1000)));
 const pad2 = n => String(n).padStart(2, '0');
 const CAP_R = { fighter: 8000, helo: 3000 };      // patrol radius of a launch to a point (m)
+const CLS = { tel: 'TEL', bal: 'BAL', ddg: 'DDG', ssn: 'SSN', ssk: 'SSK', fighter: 'F/A-18E', helo: 'MH-60R' };
 
 export function createOrders(game) {
   const { sim, R } = game, cam = R.camera, T = R.terrain;
@@ -117,8 +123,77 @@ export function createOrders(game) {
     game.order(us.map(u => u.id), { kind: 'attack', target: t.id, queue });
     const deck = us.filter(u => u.aboard);
     if (deck.length) game.bus.emit('toast', { text: `STRIKE · ${pkgName(deck)} · ${c.track}` });
+    else game.bus.emit('toast', { text: `ATTACK · ${c.track} · ${countBy(us)} · SALVO ${salvoText(us)}` });
     marks.push({ kind: 'attack', target: t.id, ids: us.map(u => u.id), t0: game.realT, dur: 2.6 });
     return true;
+  }
+  /* "3 DDG" / "2 TEL · 1 BAL" */
+  function countBy(us) {
+    const n = new Map();
+    for (const u of us) { const k = CLS[u.type] || u.def.cls; n.set(k, (n.get(k) || 0) + 1); }
+    return [...n].map(([k, v]) => `${v} ${k}`).join(' · ');
+  }
+  /* salvo size: the unit's setting, else its main weapon's own (1, 2, ... ; 0 = all in hand) */
+  function salvoOf(u) {
+    if (u.salvo !== undefined) return u.salvo;
+    const W = u.def.weapons;
+    for (const k in W) { const w = W[k]; if (!w.auto && !w.gun && (w.vs.includes('land') || w.vs.includes('sea'))) return w.salvo || 1; }
+    return 2;
+  }
+  function salvoText(us) {
+    const arm = us.filter(offensive);
+    if (!arm.length) return '';
+    const v = salvoOf(arm[0]);
+    if (arm.some(u => salvoOf(u) !== v)) return 'MIXED';
+    return v === 0 ? 'ALL' : String(v);
+  }
+  /* the side's units that can put a round on a contact from where they are now (offensive weapons with rounds) */
+  function reachOf(c) {
+    const out = [];
+    for (const u of sim.alive(game.side)) {
+      if (u.aboard) continue;
+      const W = u.def.weapons;
+      for (const k in W) {
+        const w = W[k];
+        if (w.auto || w.gun || !w.vs.includes(c.dom) || u.ammo[k] <= 0 || u.off[k]) continue;
+        const d = Math.hypot(u.pos[0] - c.pos[0], u.pos[2] - c.pos[2]);
+        if (d <= w.range * .97 && d >= (w.min || 0)) { out.push(u); break; }
+      }
+    }
+    return out;
+  }
+  /* a hostile track that is classified and within reach of the side's weapons: one alert per track (bus 'engageable')
+     and auto x1; a track that leaves the picture and comes back is new */
+  const reachTold = new Map();
+  let reachT = -1;
+  game.bus.on('side', () => reachTold.clear());
+  function checkReach() {
+    const S = sim.sides[game.side];
+    if (!S || !sim.fog || sim.result) return;
+    const t = sim.t;
+    for (const id of reachTold.keys()) if (!S.contacts.has(id)) reachTold.delete(id);
+    let slowed = false;
+    for (const [id, c] of S.contacts) {
+      if (reachTold.has(id) || c.dead || c.conf < game.CLASSIFY || c.dom === 'air' || t - c.lastSeen > 30) continue;
+      const us = reachOf(c);
+      if (!us.length) continue;
+      reachTold.set(id, t);
+      // already under attack by the side: nothing to tell
+      if (sim.alive(game.side).some(u => u.orders[0] && u.orders[0].kind === 'attack' && u.orders[0].target === id)) continue;
+      const text = `${c.track} · ${c.cls || '?'} ${c.conf.toFixed(2)} · in reach of ${countBy(us)}`;
+      game.bus.emit('engageable', { unit: id, track: c.track, cls: c.cls, conf: c.conf, units: us.map(u => u.id), text, pos: c.pos.slice() });
+      if (!slowed && game.slowFor) { slowed = true; game.slowFor('engage', { unit: id }); }
+    }
+  }
+
+  /* ~: the next salvo size for the selection's launchers: 1 -> 2 -> ALL -> 1 (Shift: back) */
+  function cycleSalvo(back) {
+    const arm = own().filter(offensive);
+    if (!arm.length) return null;
+    const CYC = [1, 2, 0], i = CYC.indexOf(salvoOf(arm[0]));
+    const next = i < 0 ? (back ? 0 : 1) : CYC[(i + (back ? 2 : 1)) % 3];
+    game.order(arm.map(u => u.id), { kind: 'salvo', n: next });
+    return { next, arm };
   }
   function reloadOn(tel, queue) {
     const tl = own().filter(u => u.type === 'transloader');
@@ -127,7 +202,7 @@ export function createOrders(game) {
     marks.push({ kind: 'move', at: game.unitPose(tel).pos.slice(), ids: tl.map(u => u.id), t0: game.realT, dur: 2.2 });
     return true;
   }
-  function hotkey(kind) {
+  function hotkey(kind, back) {
     const us = own();
     const mx = game.mouse.x, my = game.mouse.y;
     if (kind === 'hold') kind = 'weapons';
@@ -142,6 +217,12 @@ export function createOrders(game) {
         const free = !arm.every(u => u.hold);
         game.order(arm.map(u => u.id), { kind: 'weapons', free });
         game.bus.emit('toast', { text: free ? 'WEAPONS FREE' : 'HOLD FIRE' });
+        return true;
+      }
+      case 'salvo': {
+        const r = cycleSalvo(back);
+        if (!r) { say('NO OFFENSIVE WEAPONS · DEFENCE IS AUTOMATIC', mx, my); bad(); return true; }
+        game.bus.emit('toast', { text: `SALVO ${r.next === 0 ? 'ALL' : r.next} · ${countBy(r.arm)}` });
         return true;
       }
       case 'deploy': {
@@ -424,11 +505,12 @@ export function createOrders(game) {
   const orders = {
     name: 'orders', priority: PRI.orders,
     get mode() { return mode; },
-    marks, setMode, hotkey, toggleBuy, pkg, droneContext,
+    marks, setMode, hotkey, toggleBuy, pkg, droneContext, salvoOf, salvoText, reachOf,
     onKey(e) {
       if (e.type !== 'keydown' || e.ctrlKey || e.metaKey || e.altKey) return false;
-      const K = { KeyZ: 'stop', KeyH: 'weapons', KeyT: 'deploy', KeyR: 'reload', KeyX: 'scan', KeyY: 'radar', KeyL: 'launch', KeyU: 'helo' }[e.code];
-      if (K) return hotkey(K);
+      const K = { KeyZ: 'stop', KeyH: 'weapons', KeyT: 'deploy', KeyR: 'reload', KeyX: 'scan', KeyY: 'radar', KeyL: 'launch', KeyU: 'helo', Backquote: 'salvo' }[e.code]
+        || (e.key === '`' || e.key === '~' ? 'salvo' : null);          // the key left of 1 (by its character when no code comes)
+      if (K) return hotkey(K, e.shiftKey);
       if (e.code === 'KeyB') { toggleBuy(); return true; }
       return false;
     },
@@ -448,6 +530,7 @@ export function createOrders(game) {
     },
     update() {
       for (let i = marks.length - 1; i >= 0; i--) if (game.realT - marks[i].t0 > marks[i].dur) marks.splice(i, 1);
+      if (sim.t - reachT >= 1 || sim.t < reachT) { reachT = sim.t; checkReach(); }
       // combat: say once, when the opening shot has settled, that the first shot waits for the player
       if (!told && game.mode === 'combat' && game.realT > 3) {
         told = true;
@@ -468,6 +551,12 @@ export function createOrders(game) {
           R.fx.path(pts, { rgb: LIME, a: .6, step: 6, size: 1.5, drape: u.def.domain !== 'air', lift: 1.5, mode: 'over' });
         } else if (u.def.domain === 'air' && u.goal) {
           R.fx.line(p, [u.goal[0], p[1], u.goal[1]], { rgb: LIME, a: .35, step: 8, mode: 'over' });
+        }
+        // a standing attack: a faint coral line to the track (sparser while the track is lost and the order holds)
+        const o = u.orders[0];
+        if (o && o.kind === 'attack') {
+          const c = sim.contact(game.side, o.target);
+          if (c) { const lost = o.st === 'lost'; R.fx.line([p[0], p[1] + 4, p[2]], [c.pos[0], Math.max(0, c.pos[1]) + 6, c.pos[2]], { rgb: CORAL, a: lost ? .22 : .4, step: lost ? 16 : 9, mode: 'over' }); }
         }
         // offensive reach of a small selection, faint (a crowd of rings says nothing)
         if (game.selection.size <= 6) for (const k in u.def.weapons) {

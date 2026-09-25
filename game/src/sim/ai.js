@@ -15,15 +15,22 @@
    it has only heard (the destroyer and helicopter Mk 54s take a classified boat). */
 import { UNITS, CLASSIFY, TEL_ELEV } from '../data/units.js';
 import { inbound as inboundSlow } from './weapons.js';
-import { scanBlocked } from './sensors.js';
+import { scanBlocked, los } from './sensors.js';
 import { atPD } from './subs.js';
 import { elevOf } from './mech.js';
 import { dxz } from './util.js';
+import { nearestDepot } from './orders.js';
 
-const LEVELS = {
-  easy: { every: 100, drones: 1, salvo: 2, cvn: 5, ddg: 3, buyK: 1.6, scanP: .4, relocate: 0, helos: 1, cap: 1, strikeK: 0, pushT: 2400, emcon: false },
-  normal: { every: 40, drones: 2, salvo: 4, cvn: 8, ddg: 4, buyK: 1.0, scanP: .9, relocate: .7, helos: 2, cap: 1, strikeK: 1, pushT: 1500, emcon: true },
-  hard: { every: 20, drones: 3, salvo: 6, cvn: 10, ddg: 5, buyK: 1.0, scanP: 1, relocate: 1, helos: 2, cap: 2, strikeK: 2, pushT: 1000, emcon: true },
+/* every: ticks between decisions · salvo: rounds the coast waits to gather (up to `wait` s) · cvn / ddg: rounds it wants
+   in the air at a carrier / another ship, + firm on a scanned or high-confidence track · fresh: s a track stays
+   fireable after its last hit · open: s of the opening, when the coast fires at the screen and not yet at the carrier
+   · press: s without a firm sea track before the coast moves a radar forward (and its drones and boat) to find the
+   fleet · dodge: a launcher that sees a strike coming at it drives to another site · the fleet: pushT when it closes
+   in, strikeK extra rounds per strike, ddgEmcon: destroyers silent until the coast shoots */
+export const LEVELS = {
+  easy: { every: 100, drones: 1, salvo: 2, cvn: 5, ddg: 3, firm: 0, fresh: 30, wait: 150, press: 1800, open: 600, dodge: false, buyK: 1.6, scanP: .4, relocate: 0, helos: 1, cap: 1, strikeK: 0, pushT: 2400, emcon: false, ddgEmcon: false },
+  normal: { every: 40, drones: 2, salvo: 4, cvn: 8, ddg: 4, firm: 2, fresh: 60, wait: 60, press: 600, open: 0, dodge: true, buyK: 1.0, scanP: .9, relocate: .7, helos: 2, cap: 1, strikeK: 1, pushT: 1500, emcon: true, ddgEmcon: true },
+  hard: { every: 20, drones: 3, salvo: 6, cvn: 10, ddg: 5, firm: 3, fresh: 90, wait: 30, press: 300, open: 0, dodge: true, buyK: 1.0, scanP: 1, relocate: 1, helos: 2, cap: 2, strikeK: 2, pushT: 1000, emcon: true, ddgEmcon: true },
 };
 const PRIO_LAND = { HQ: 10, TEL: 8, RADAR: 6, SAM: 5, TLV: 4, 'UAV-L': 3 };
 
@@ -53,8 +60,12 @@ export class AI {
     for (const id of this.mem.keys()) { const u = sim.units.get(id); if (!u || !u.alive) this.mem.delete(id); }
     // enemy launches seen (own picture of their missiles)
     this.inb = new Map();
+    this.aims = [];                // where the enemy rounds our sensors see are headed, and when they get there
     for (const p of sim.projectiles.values()) {
-      if (p.side !== this.side && p.P.threat && sim.t - p.seen[this.side] < 1.5) this.lastEnemyLaunch = sim.t;
+      if (p.side !== this.side && p.P.threat && sim.t - p.seen[this.side] < 1.5) {
+        this.lastEnemyLaunch = sim.t;
+        if (p.alive) this.aims.push({ x: p.aim[0], z: p.aim[2], eta: Math.hypot(p.aim[0] - p.pos[0], p.aim[2] - p.pos[2]) / Math.max(100, p.spd) });
+      }
       if (p.side === this.side && p.alive && p.tk === 'unit' && p.P.threat) this.inb.set(p.target, (this.inb.get(p.target) || 0) + 1);
     }
     this._targets = null;
@@ -121,7 +132,9 @@ export class AI {
       this.telSites.push({ x: c.x, z: c.z, owner: 0, burnt: -1e9 });
     }
     if (!this.telSites.length) this.telSites.push({ x: sp.x, z: sp.z, owner: 0, burnt: -1e9 });
-    const n3 = this.telSites.slice(0, 3);
+    // the battery's centre: the sites nearest the spawn, where the TELs set up first (they take the nearest free
+    // sites); the Pantsirs, the transloaders' park and the drone rail are placed from it
+    const n3 = this.telSites.slice().sort((a, b) => dxz(a.x, a.z, sp.x, sp.z) - dxz(b.x, b.z, sp.x, sp.z)).slice(0, 4);
     const tc = [n3.reduce((a, s) => a + s.x, 0) / n3.length, n3.reduce((a, s) => a + s.z, 0) / n3.length];
     const toSea = (p, d) => { const dx = fs.x - p[0], dz = fs.z - p[1], L = Math.hypot(dx, dz) || 1; return [p[0] + dx / L * d, p[1] + dz / L * d]; };
     const hq = this.own('hq')[0];
@@ -132,6 +145,8 @@ export class AI {
     this.catSite = this.snap('land', ...toSea(hqp, 2500), comp) || hqp;
     this.park = this.snap('land', ...toSea(tc, -3000), comp) || hqp;
     this.telCenter = tc;
+    // forward radar sites for pressing (coastPress): near the shore, not steep
+    this.fwd = cands.filter(c => c.sd >= 300 && c.sd <= 8000 && map.slope(c.x, c.z) < .25);
     this.note(`coast: radar site ${this.radarSite.map(Math.round)}, ${this.telSites.length} TEL sites`);
   }
 
@@ -139,17 +154,26 @@ export class AI {
     const sim = this.sim, t = sim.t, S = sim.sides.coast;
     const by = { hq: [], tel: [], radar: [], pantsir: [], catapult: [], drone: [], transloader: [] };
     for (const u of sim.alive('coast')) (by[u.type] || (by[u.type] = [])).push(u);
-    // radars: the first one radiates from the best hill; a spare waits silent on another hill
+    // radars: the first one radiates from the best hill; a spare waits silent on another hill. With no firm track of
+    // the fleet for a while, the first one drives forward to a site that sees (and scans) where the fleet was heard
     by.radar.sort((a, b) => a.id - b.id);
+    this.coastPress(by.radar);
+    let lead = null;
     by.radar.forEach((u, i) => {
       const m = this.m(u);
       if (!m.site) m.site = by.radar.some(v => v !== u && this.m(v).site === this.radarSite) ? this.radarSite2 : this.radarSite;
-      if (!this.station(u, m.site, 300)) return;
+      if (i === 0 && this.pressSite) m.site = this.pressSite;
+      m.there = this.station(u, m.site, 300);
+      if (!m.there) return;
       if (u.mast < 1 && this.cur(u) !== 'deploy') this.order(u, { kind: 'deploy' });
-      // the radiating radar blinks (EMCON) so it is harder to pin down: 90 s on, 60 s off
-      const on = i === 0 && (!this.L.emcon || (t % 150) < 90);
-      if (u.mast >= 1 && u.radarOn !== on) this.order(u, { kind: 'radar', on });
+      if (!lead && u.mast >= 1) lead = u;
     });
+    // the lead (the first one up on its site; the spare while the first one drives) radiates, blinking under EMCON so
+    // it is harder to pin down: 90 s on, 60 s off
+    for (const u of by.radar) {
+      const on = u === lead && (!this.L.emcon || (t % 150) < 90);
+      if (u.mast >= 1 && u.radarOn !== on) this.order(u, { kind: 'radar', on });
+    }
     // Pantsirs over the command post, the battery, the radar
     for (const u of by.pantsir) {
       const m = this.m(u);
@@ -177,6 +201,44 @@ export class AI {
     this.coastBuy(by);
   }
 
+  /* pressing: no firm track of a ship for L.press s -> the first radar drives to a forward site within scan reach of
+     where the fleet was last heard or seen (else of the fleet's side of the map), with a line of sight to it if one
+     can be had. Re-planned every 10 min while the picture stays empty; kept once it has found the fleet. */
+  coastPress(radars) {
+    const sim = this.sim, t = sim.t, map = sim.map;
+    let firm = false, tgt = null, bd = 1e18;
+    const home = this.radarSite;
+    for (const c of this.contacts().values()) {
+      if (c.dead || c.dom !== 'sea') continue;
+      if (c.conf >= CLASSIFY && t - c.lastSeen < 120) firm = true;
+      if (t - c.lastSeen > 600) continue;
+      const d = dxz(c.pos[0], c.pos[2], home[0], home[1]) - (c.cls === 'CVN' ? 15000 : 0);
+      if (d < bd) { bd = d; tgt = c; }
+    }
+    if (firm || this.lastFirm === undefined) this.lastFirm = t;
+    this.pressing = !firm && t - this.lastFirm >= this.L.press;
+    this.pressTgt = this.pressing ? tgt : null;
+    if (firm || !radars.length || !this.fwd || !this.fwd.length) return;
+    if (t - this.lastFirm < this.L.press || t - (this.pressT || -1e9) < 600) return;
+    const fs = map.spawns.fleet, tx = tgt ? tgt.pos[0] : fs.x, tz = tgt ? tgt.pos[2] : fs.z;
+    const u = radars[0], R = u.def.scan.reach, H = u.def.sensors.radar.h;
+    // the nearest few hundred sites to the target, then the best of them by reach, line of sight, height and drive
+    const near = [];
+    const step = Math.max(1, Math.floor(this.fwd.length / 3000));
+    for (let i = 0; i < this.fwd.length; i += step) { const c = this.fwd[i]; near.push({ c, d: dxz(c.x, c.z, tx, tz) }); }
+    near.sort((a, b) => a.d - b.d);
+    let best = null, bs = -1e18;
+    for (const { c, d } of near.slice(0, 160)) {
+      const see = los(map, c.x, c.h + H, c.z, tx, 25, tz);
+      const s = (d < R * .9 ? 100 : 0) + (see ? 60 : 0) + c.h * .03 - d / 1500 - dxz(c.x, c.z, u.pos[0], u.pos[2]) / 4000;
+      if (s > bs) { bs = s; best = c; }
+    }
+    this.pressT = t;
+    if (!best) return;
+    this.pressSite = [best.x, best.z];
+    this.note(`press: radar forward to ${this.pressSite.map(Math.round)} (${tgt ? tgt.track : 'fleet side'} ${Math.round(bd / 1000)} km)`);
+  }
+
   /* an enemy aircraft or missile in our picture within r of p */
   threatNear(p, r) {
     const sim = this.sim, t = sim.t;
@@ -187,14 +249,53 @@ export class AI {
 
   telReady(u) { return u.dep >= 1 && u.elev >= TEL_ELEV - 1e-6 && u.ammo.oniks > 0 && !u.reloader && !u.off.oniks; }
 
-  freeSite(u, avoid) {
+  /* a round our sensors see is headed at (near) this unit, far enough out to drive clear of it */
+  threatened(u) {
+    for (const a of this.aims) if (a.eta > 50 && dxz(a.x, a.z, u.pos[0], u.pos[2]) < 2500) return true;
+    return false;
+  }
+  /* shoot and scoot, under fire: a launcher that sees a strike coming at it (and is not firing) drives to another
+     site close by; true when it has been sent */
+  dodge(u, m) {
+    const t = this.sim.t;
+    if (!this.L.dodge || t - (m.dodgeT || -1e9) < 180 || !this.threatened(u)) return false;
+    m.dodgeT = t;
+    if (m.site) m.site.burnt = t;
+    const n = this.freeSite(u, m.site, 7000);
+    const q = n && !n.bad && n !== m.site ? null : this.snap('land', u.pos[0] + (this.r() - .5) * 5000, u.pos[2] + (this.r() - .5) * 5000, this.comp) || [u.pos[0], u.pos[2]];
+    m.site = q ? { x: q[0], z: q[1], owner: u.id, burnt: -1e9, here: true } : n;
+    m.tryT = t;
+    this.station(u, [m.site.x, m.site.z], 200);
+    this.note(`${u.type} ${u.id} dodges`);
+    return true;
+  }
+
+  /* drive to the unit's site; a site it has tried to reach for 10 min (a route that keeps failing) is given up for
+     the next free one, or for the spot where it stands. True when it is there. */
+  goSite(u, m) {
+    const t = this.sim.t, s = m.site;
+    if (dxz(u.pos[0], u.pos[2], s.x, s.z) <= 200) { m.tryT = undefined; return true; }
+    if (m.tryT === undefined) m.tryT = t;
+    if (t - m.tryT > 600) {
+      s.bad = true;
+      const n = this.freeSite(u, s, 12000);
+      m.site = n && n !== s && !n.bad ? n : { x: u.pos[0], z: u.pos[2], owner: u.id, burnt: -1e9, here: true };
+      m.tryT = t;
+      this.note(`${u.type} ${u.id} gives up a site`);
+    }
+    return this.station(u, [m.site.x, m.site.z], 200);
+  }
+
+  freeSite(u, avoid, maxD) {
     const t = this.sim.t;
     let best = null, bd = 1e18;
     for (const s of this.telSites) {
       const o = s.owner && this.sim.units.get(s.owner);
       if (o && o.alive && s.owner !== u.id) continue;
-      if (s === avoid || t - s.burnt < 900) continue;
-      const d = dxz(u.pos[0], u.pos[2], s.x, s.z) + this.r() * 3000;
+      if (s === avoid || s.bad || t - s.burnt < 900) continue;
+      const dd = dxz(u.pos[0], u.pos[2], s.x, s.z);
+      if (maxD && dd > maxD) continue;                      // a move after firing stays close (a short scoot)
+      const d = dd + this.r() * 3000;
       if (d < bd) { bd = d; best = s; }
     }
     if (!best) best = avoid || this.telSites[0];
@@ -208,19 +309,28 @@ export class AI {
     for (const u of tels) {
       const m = this.m(u), k = this.cur(u);
       if (!m.site || m.site.owner !== u.id) m.site = this.freeSite(u);
-      if (k === 'attack' || u.reloader || k === 'reload') continue;
-      if (m.fired && (u.ammo.oniks === 0 || u.ammo.oniks >= 2) && t - m.fired > 5) {
-        if (this.r() < this.L.relocate) { m.site.burnt = m.fired; m.site = this.freeSite(u, m.site); }
+      // a transloader alongside: stand still for it (a drive ordered before it arrived would stall the reload)
+      if (u.reloader) { if (k === 'move') this.order(u, { kind: 'stop' }); m.tryT = undefined; continue; }
+      if (k === 'attack' || k === 'reload') { m.tryT = undefined; continue; }
+      if (this.dodge(u, m)) continue;
+      // shoot, reload where it stands, then (sometimes) scoot to a fresh site close by
+      if (m.fired && u.ammo.oniks >= 2 && t - m.fired > 5) {
+        if (this.r() < this.L.relocate) { m.site.burnt = m.fired; m.site = this.freeSite(u, m.site, 9000); }
         m.fired = 0;
       }
-      if (u.ammo.oniks === 0 && !this.loaderFree && this.r() < .5) { this.order(u, { kind: 'reload' }); continue; }
-      if (!this.station(u, [m.site.x, m.site.z], 200)) continue;
+      // empty with every transloader busy: a depot close by reloads it (slower); a far one is not worth the drive
+      if (u.ammo.oniks === 0 && !this.loaderFree && this.r() < .5) {
+        const dp = nearestDepot(this.sim, u);
+        if (dp && (dxz(u.pos[0], u.pos[2], dp[0], dp[1]) < 15000 || !this.loaderAny)) { this.order(u, { kind: 'reload' }); continue; }
+      }
+      if (!this.goSite(u, m)) continue;
       if (!(u.dep >= 1 && u.elev >= TEL_ELEV) && k !== 'deploy') this.order(u, { kind: 'deploy' });
     }
   }
 
   coastLoaders(loaders, tels) {
     this.loaderFree = loaders.some(L => L.cargo > 0 && this.cur(L) !== 'reload');
+    this.loaderAny = loaders.some(L => !L.off.reload);
     const claimed = new Set();
     for (const L of loaders) { const o = L.orders[0]; if (o && o.kind === 'reload' && o.target) claimed.add(o.target); }
     for (const L of loaders) {
@@ -262,13 +372,14 @@ export class AI {
     // look at unknown sea contacts; otherwise search
     const unk = [], ships = [];
     for (const c of this.contacts().values()) if (!c.dead && c.dom === 'sea') { ships.push(c); if (c.conf < CLASSIFY || t - c.lastSeen > 90) unk.push(c); }
-    const safe = (x, z, skip) => !ships.some(s => s !== skip && s.cls === 'DDG' && dxz(x, z, s.pos[0], s.pos[2]) < 38000);
+    // clear of the destroyers' air defence, unless the coast is pressing (it has lost the fleet: the drones go and look)
+    const safe = (x, z, skip) => this.pressing || !ships.some(s => s !== skip && s.cls === 'DDG' && dxz(x, z, s.pos[0], s.pos[2]) < 38000);
     for (const d of flying) {
       const m = this.m(d), k = this.cur(d);
       if (k === 'return' || k === 'scan') continue;
       let tgt = null, bd = 1e18;
       for (const c of unk) { const dd = dxz(d.pos[0], d.pos[2], c.pos[0], c.pos[2]); if (dd < bd && safe(c.pos[0], c.pos[2], c)) { bd = dd; tgt = c; } }
-      if (tgt && bd < 60000) {
+      if (tgt && (bd < 60000 || this.pressing)) {
         if (m.look !== tgt.unitId || t - m.lookT > 60) { m.look = tgt.unitId; m.lookT = t; this.order(d, { kind: 'patrol', x: tgt.pos[0], z: tgt.pos[2], r: 2500 }); }
         continue;
       }
@@ -293,14 +404,24 @@ export class AI {
     cands.sort((a, b) => b.s - a.s);
     const scanners = this.own().filter(u => u.def.scan && !scanBlocked(sim, u));
     for (const { c } of cands) {
-      let best = null, bd = 1e18;
-      for (const u of scanners) {
-        const d = dxz(u.pos[0], u.pos[2], c.pos[0], c.pos[2]);
-        if (d > u.def.scan.reach * .95) continue;
-        if (d < bd) { bd = d; best = u; }
-      }
-      if (best) { this.order(best, { kind: 'scan', x: c.pos[0], z: c.pos[2], stay: true }); this.note(`scan ${c.track} by ${best.type}`); return; }
+      const s = this.scanAt(scanners, c);
+      if (s) { this.order(s.u, { kind: 'scan', x: s.x, z: s.z, stay: true }); this.note(`scan ${c.track} by ${s.u.type}`); return; }
     }
+  }
+  /* the nearest scanner that reaches a contact: a contact just past the reach is scanned at the edge of it (the scan's
+     radius still covers the estimate) -> { u, x, z } */
+  scanAt(scanners, c) {
+    let best = null, bd = 1e18;
+    for (const u of scanners) {
+      const d = dxz(u.pos[0], u.pos[2], c.pos[0], c.pos[2]), R = u.def.scan.reach;
+      if (d > R * .98 + u.def.scan.r * .6) continue;
+      if (d < bd) { bd = d; best = u; }
+    }
+    if (!best) return null;
+    const R = best.def.scan.reach * .98;
+    if (bd <= R) return { u: best, x: c.pos[0], z: c.pos[2] };
+    const k = R / bd;
+    return { u: best, x: best.pos[0] + (c.pos[0] - best.pos[0]) * k, z: best.pos[2] + (c.pos[2] - best.pos[2]) * k };
   }
 
   balReady(u) { return u.dep >= 1 && u.elev >= elevOf(u.def) - 1e-6 && u.ammo.uran > 0 && !u.off.uran; }
@@ -310,42 +431,50 @@ export class AI {
     for (const u of bals) {
       const m = this.m(u), k = this.cur(u);
       if (!m.site || m.site.owner !== u.id) m.site = this.freeSite(u);
-      if (k === 'attack' || k === 'reload') continue;
+      if (k === 'attack' || k === 'reload') { m.tryT = undefined; continue; }
+      if (this.dodge(u, m)) continue;
       if (u.ammo.uran === 0 && !u.off.move) { this.order(u, { kind: 'reload' }); continue; }
       if (m.fired && t - m.fired > 5) {
-        if (this.r() < this.L.relocate) { m.site.burnt = m.fired; m.site = this.freeSite(u, m.site); }
+        if (this.r() < this.L.relocate) { m.site.burnt = m.fired; m.site = this.freeSite(u, m.site, 9000); }
         m.fired = 0;
       }
-      if (!this.station(u, [m.site.x, m.site.z], 200)) continue;
+      if (!this.goSite(u, m)) continue;
       if (!(u.dep >= 1 && u.elev >= elevOf(u.def)) && k !== 'deploy') this.order(u, { kind: 'deploy' });
     }
   }
 
   coastFire(tels, bals) {
-    const sim = this.sim, t = sim.t;
+    const sim = this.sim, t = sim.t, L = this.L;
     const ready = tels.filter(u => this.telReady(u) && this.cur(u) !== 'attack').concat((bals || []).filter(u => this.balReady(u) && this.cur(u) !== 'attack'));
     if (!ready.length) return;
     const wn = u => u.type === 'bal' ? 'uran' : 'oniks';
+    const reach = (u, c) => { const d = dxz(u.pos[0], u.pos[2], c.pos[0], c.pos[2]), W = u.def.weapons[wn(u)]; return d < W.range * .97 && d > W.min; };
     const targets = [];
+    // the load is kept for the carrier while it is known and some launcher (loaded or not) can reach it; destroyers
+    // are fair game when it is not, when it is out of every launcher's reach, or when they come close
+    // (the opening: the first L.open s go to the screen; the carrier waits for the massed salvo after it)
     let cvn = false;
-    for (const c of this.contacts().values()) if (!c.dead && c.cls === 'CVN' && t - c.lastSeen < 600) cvn = true;
+    const all = tels.concat(bals || []), open = t < L.open;
+    for (const c of this.contacts().values()) if (!c.dead && c.cls === 'CVN' && t - c.lastSeen < 600 && all.some(u => reach(u, c))) cvn = true;
     for (const c of this.contacts().values()) {
-      if (c.dead || c.dom !== 'sea' || c.conf < CLASSIFY || t - c.lastSeen > 45) continue;
-      // the load is kept for the carrier while it is known; destroyers are fair game when it is not, or when close
-      if (c.cls !== 'CVN' && (t < 240 || cvn) && !ready.some(u => dxz(u.pos[0], u.pos[2], c.pos[0], c.pos[2]) < 45000)) continue;
+      if (c.dead || c.dom !== 'sea' || c.conf < CLASSIFY || t - c.lastSeen > L.fresh) continue;
+      if (c.cls === 'CVN' && open) continue;
+      if (c.cls !== 'CVN' && cvn && !open && !ready.some(u => dxz(u.pos[0], u.pos[2], c.pos[0], c.pos[2]) < 45000)) continue;
       targets.push(c);
     }
     targets.sort((a, b) => (b.cls === 'CVN') - (a.cls === 'CVN') || b.conf - a.conf);
     for (const c of targets) {
-      let need = (c.cls === 'CVN' ? this.L.cvn : this.L.ddg) - this.inbound(c.unitId);
+      // a firm track (scanned, or held at high confidence) gets a heavier volley
+      const firm = c.identified || c.conf >= .9;
+      let need = (c.cls === 'CVN' ? L.cvn : L.ddg) + (firm ? L.firm : 0) - this.inbound(c.unitId);
       if (need <= 0) continue;
-      const shooters = ready.filter(u => { const d = dxz(u.pos[0], u.pos[2], c.pos[0], c.pos[2]), W = u.def.weapons[wn(u)]; return d < W.range * .97 && d > W.min; })
-        .sort((a, b) => b.ammo[wn(b)] - a.ammo[wn(a)]);
+      const shooters = ready.filter(u => reach(u, c)).sort((a, b) => b.ammo[wn(b)] - a.ammo[wn(a)]);
       const avail = shooters.reduce((a, u) => a + u.ammo[wn(u)], 0);
-      // wait for a proper salvo, but not for ever
+      // wait for a proper salvo, but not for ever (and not at all on a firm track that is going stale)
       this.waitT = this.waitT || new Map();
       if (!this.waitT.has(c.unitId)) this.waitT.set(c.unitId, t);
-      if (!avail || (avail < Math.min(this.L.salvo, need) && t - this.waitT.get(c.unitId) < 150)) continue;
+      const hurry = firm && t - c.lastSeen > L.fresh * .5;
+      if (!avail || (avail < Math.min(L.salvo, need) && !hurry && t - this.waitT.get(c.unitId) < L.wait)) continue;
       this.waitT.delete(c.unitId);
       for (const u of shooters) {
         if (need <= 0) break;
@@ -366,7 +495,9 @@ export class AI {
     const stock = (by.catapult || []).reduce((a, c) => a + c.drones, 0) + (by.drone || []).length + S.queue.filter(q => q.type === 'drone').length;
     const want = (type, n) => count(type) < n && !UNITS[type].aiSkip ? type : null;     // aiSkip: experiments (balance set=)
     const tl = Math.max(1, Math.ceil(count('tel') / 2));
-    const next = want('radar', 1) || want('tel', 3) || want('pantsir', 2) || want('transloader', 1) || want('catapult', 1) || want('transloader', Math.min(tl, 2))
+    // pressing (the fleet is lost): eyes before more launchers: drones on the rail and a boat to go and listen
+    const eyes = this.pressing ? ((stock < 3 && (by.catapult || []).length && sim.t - (this.lastDrone || -1e9) > 120 ? 'drone' : null) || want('ssk', 1)) : null;
+    const next = want('radar', 1) || want('tel', 3) || eyes || want('pantsir', 2) || want('transloader', 1) || want('catapult', 1) || want('transloader', Math.min(tl, 2))
       || (stock < 2 && (by.catapult || []).length && sim.t - (this.lastDrone || -1e9) > 240 ? 'drone' : null)
       || want('pantsir', 3) || want('tel', 5) || want('bal', 1) || want('radar', 2) || want('transloader', tl) || want('tel', 6) || want('ssk', 1) || want('pantsir', 4) || want('bal', 2)
       || want('transloader', tl) || want('tel', 8) || want('pantsir', 5) || want('tel', 10);
@@ -386,6 +517,14 @@ export class AI {
     }
     const k = sim.nav.nearestOpen('sub', sim.nav.cellOf(fs.x * .5 + sp.x * .5, fs.z * .5 + sp.z * .5), -1, 120);
     return k >= 0 ? [sim.nav.cx(k), sim.nav.cz(k)] : null;
+  }
+
+  /* deep water `short` metres short of (x, z) on the line from the coast spawn */
+  subNear(x, z, short) {
+    const sim = this.sim, sp = sim.map.spawns.coast, L = Math.hypot(x - sp.x, z - sp.z) || 1;
+    const k = Math.max(0, L - short) / L, px = sp.x + (x - sp.x) * k, pz = sp.z + (z - sp.z) * k;
+    const c = sim.nav.nearestOpen('sub', sim.nav.cellOf(px, pz), -1, 40);
+    return c >= 0 ? [sim.nav.cx(c), sim.nav.cz(c)] : null;
   }
 
   /* Kilo: deep on a patrol box toward the fleet; up to periscope depth for a Kalibr salvo at a classified ship in
@@ -412,6 +551,15 @@ export class AI {
         }
       }
       if (u.dive !== 2 && (!m.fired || t - m.fired > 15)) this.order(u, { kind: 'dive', depth: 2 });
+      // pressing: the boat goes to listen where the fleet was last heard (its sonar classifies what it hears close)
+      const pt = this.pressTgt;
+      if (pt && (!m.hunt || dxz(m.hunt[0], m.hunt[1], pt.pos[0], pt.pos[2]) > 15000)) {
+        const p = this.subNear(pt.pos[0], pt.pos[2], 12000);
+        if (p) { m.hunt = [pt.pos[0], pt.pos[2]]; m.box = p; m.boxT = t; this.order(u, { kind: 'move', x: p[0], z: p[1] }); this.note(`SSK hunts ${pt.track}`); }
+        continue;
+      }
+      if (pt) continue;
+      m.hunt = null;
       if (!m.box || t - m.boxT > 900 || (k !== 'move' && dxz(u.pos[0], u.pos[2], m.box[0], m.box[1]) < 3000 && t - m.boxT > 420)) {
         const p = this.subPoint(22000, 50000);
         if (p) { m.box = p; m.boxT = t; this.order(u, { kind: 'move', x: p[0], z: p[1] }); }
@@ -486,9 +634,14 @@ export class AI {
     const n = ddgs.length, t = this.sim.t;
     let resupplying = ddgs.filter(u => this.m(u).resupply).length;
     ddgs.sort((a, b) => a.id - b.id);
+    // EMCON (skirmish only: the campaign's scripted fleets keep radiating): the destroyers sail silent (nothing for the
+    // coast's ESM to hear) until rounds or aircraft come at the fleet; then they radiate, and their SM-6s can engage
+    const emcon = this.L.ddgEmcon && this.sim.mode === 'combat';
+    const quiet = emcon && t - this.lastEnemyLaunch > 300 && !ddgs.some(u => this.threatNear(u.pos, 60000));
     ddgs.forEach((u, i) => {
       const m = this.m(u), k = this.cur(u);
       u.hold = true;
+      if (emcon && u.radarOn === quiet) this.order(u, { kind: 'radar', on: !quiet });
       if (m.resupply) {
         if (k !== 'reload') {
           if (u.ammo.sm6 >= u.def.weapons.sm6.ammo * .9 && u.ammo.strike >= u.def.weapons.strike.ammo * .75) m.resupply = false;
@@ -549,8 +702,8 @@ export class AI {
       if (i === 0 && !h.aboard) {
         const em = [...this.contacts().values()].find(c => !c.dead && c.dom === 'land' && c.conf < CLASSIFY && c.emitting);
         if (em && h.cooldowns.scan <= 0) {
-          const dx = h.pos[0] - em.pos[0], dz = h.pos[2] - em.pos[2], L = Math.hypot(dx, dz) || 1;
-          const p = [em.pos[0] + dx / L * 17000, em.pos[2] + dz / L * 17000];
+          const dx = h.pos[0] - em.pos[0], dz = h.pos[2] - em.pos[2], L = Math.hypot(dx, dz) || 1, st = h.def.scan.reach * .85;
+          const p = [em.pos[0] + dx / L * st, em.pos[2] + dz / L * st];
           if (!sams.some(s => dxz(p[0], p[1], s.pos[0], s.pos[2]) < 19000) && (m.hunt !== em.unitId || t - m.huntT > 120)) {
             m.hunt = em.unitId; m.huntT = t; m.st = p; m.stT = t;
             this.order(h, { kind: 'move', x: p[0], z: p[1] });
@@ -588,16 +741,8 @@ export class AI {
     cands.sort((a, b) => b.s - a.s);
     const scanners = this.own().filter(u => u.def.scan && !scanBlocked(sim, u) && !u.aboard);
     for (const { c } of cands) {
-      let best = null, bd = 1e18;
-      for (const u of scanners) {
-        const d = dxz(u.pos[0], u.pos[2], c.pos[0], c.pos[2]);
-        if (d > u.def.scan.reach * .95) continue;
-        if (d < bd) { bd = d; best = u; }
-      }
-      if (best) {
-        this.order(best, { kind: 'scan', x: c.pos[0], z: c.pos[2], stay: true });
-        this.note(`scan ${c.track} by ${best.type}`); return;
-      }
+      const s = this.scanAt(scanners, c);
+      if (s) { this.order(s.u, { kind: 'scan', x: s.x, z: s.z, stay: true }); this.note(`scan ${c.track} by ${s.u.type}`); return; }
     }
   }
 

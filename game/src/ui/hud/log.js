@@ -40,6 +40,9 @@ export function createLog(game, hud, parent) {
   const ownPos = () => { const h = sim.hq(me()) || sim.alive(me()).find(u => !u.aboard); return h ? h.pos : null; };
   const where = p => { const o = ownPos(); if (!o || !p) return ''; return ' · ' + brg(p[0] - o[0], p[2] - o[2]) + '° · ' + km(Math.hypot(p[0] - o[0], p[2] - o[2])); };
 
+  // a track that came within reach of the side's weapons (game/orders.js)
+  game.bus.on('engageable', d => { add('Reach', d.text.replace(' · in reach of', ' ·'), 'l', 'R' + d.unit); });
+
   function onEvent(e) {
     const side = me();
     switch (e.type) {
@@ -120,6 +123,16 @@ export function createLog(game, hud, parent) {
         if (!u) break;
         if (e.side === side) add('Lost', `${unitRef(u)} · ${u.def.name}`, 'c');
         else if (!sim.fog || sim.contact(side, u.id)) add(u.def.domain === 'sea' ? 'Sunk' : 'Kill', trackRef(game, u, true), 'l');
+        break;
+      }
+      case 'engage': {
+        // standing attacks: a lost track holds the order, the track back, an order that ran dry or lost its track
+        if (e.side !== side) break;
+        const u = sim.units.get(e.unit), trk = e.track || '';
+        if (e.state === 'lost') { const r = merge('G' + e.target, 10); if (r) { r.n++; r.text = `${trk} · lost · ${r.n} holding`; dirty = true; } else add('Hold', `${trk} · lost · holding`, 'c', 'G' + e.target); }
+        else if (e.state === 'resume') { if (!merge('B' + e.target, 10)) add('Trk', `${trk} · back · engaging`, 'l', 'B' + e.target); }
+        else if (e.state === 'done' && e.why === 'empty' && u) add('Dry', `${unitRef(u)} · magazine empty`, 'c');
+        else if (e.state === 'done' && e.why === 'lost') { if (!merge('E' + e.target, 10)) add('End', `${trk} · attack ended · track lost`, 'c', 'E' + e.target); }
         break;
       }
       case 'reload_done': {
