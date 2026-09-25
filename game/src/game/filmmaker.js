@@ -485,10 +485,11 @@ export function createFilmmaker(game) {
   function begin(glide) {
     const p = play;
     p.armed = false; p.t = p.from;
-    p.saved = { ui: game.ui.hidden, rate: game.timeRate, paused: game.paused, autoSlow: game.autoSlow, sel: [...game.selection], keys: cam.keys, edge: cam.edge };
     if (game.inspect && game.inspect.active) try { game.inspect.close(); } catch (e) { /* */ }
     if (game.replay && game.replay.active) try { game.replay.skip(); } catch (e) { /* */ }
     const dir = game.getSystem('director'); if (dir && dir.on) dir.set(false);
+    // saved after those hand back what they held (the director's cam.edge, Inspect's keys and time), not their values
+    p.saved = { ui: game.ui.hidden, rate: game.timeRate, paused: game.paused, autoSlow: game.autoSlow, sel: [...game.selection], keys: cam.keys, edge: cam.edge };
     if (game.follow) game.follow(null);
     if (game.selection.size) game.clearSelection();
     if (game.paused && !p.seq) game.pause(false);

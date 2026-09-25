@@ -7,7 +7,7 @@ let cached = null;
 
 export function loadTheatre() {
   if (cached) return cached;
-  cached = (async () => {
+  const p = cached = (async () => {
     let T = (typeof self !== 'undefined' && self.THEATRE) || null, q;
     if (T && T.hq) q = T.hq;
     else {
@@ -27,5 +27,6 @@ export function loadTheatre() {
     }
     return { rows: R, cols: C, ext: T.extent_km, hs, base_km: T.base_km, radars_km: T.player_radars_km, pantsirs_km: T.pantsirs_km };
   })();
+  p.catch(() => { if (cached === p) cached = null; });   // a failed fetch is retried next time (maps.js drops its own cache too)
   return cached;
 }

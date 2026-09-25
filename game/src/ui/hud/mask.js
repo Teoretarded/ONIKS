@@ -65,8 +65,8 @@ export function createMask(game, hud) {
     return out;
   }
 
-  function build(W, H) {
-    dpr = window.devicePixelRatio || 1;
+  function build(W, H, pr) {
+    dpr = pr || window.devicePixelRatio || 1;          // the overlay's own ratio (clamped by the renderer), not the window's
     const w = Math.round(W * dpr), h = Math.round(H * dpr);
     if (!mask || mw !== w || mh !== h) { mask = document.createElement('canvas'); mask.width = mw = w; mask.height = mh = h; }
     const c = mask.getContext('2d');
@@ -84,8 +84,8 @@ export function createMask(game, hud) {
       if (game.realT - last > .25) {
         last = game.realT;
         const m = measure();
-        const k = m.map(r => r.join(',')).join('|') + '@' + ov.W + 'x' + ov.H;
-        if (k !== key) { key = k; rects.length = 0; for (const r of m) rects.push(r); build(ov.W, ov.H); }
+        const k = m.map(r => r.join(',')).join('|') + '@' + ov.W + 'x' + ov.H + '@' + ov.dpr;
+        if (k !== key) { key = k; rects.length = 0; for (const r of m) rects.push(r); build(ov.W, ov.H, ov.dpr); }
       }
       if (!rects.length || !mask) return;
       const c = ov.ctx;

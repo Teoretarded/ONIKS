@@ -140,6 +140,7 @@ export function createSelect(game) {
         const cur = game.selected()[0];
         const pool = cur && game.selection.size === 1 ? own : own;
         let i = cur ? pool.findIndex(u => u.id === cur.id) : -1;
+        if (i < 0 && e.shiftKey) i = 0;                  // none current: Shift+Tab lands on the last
         i = (i + (e.shiftKey ? -1 : 1) + pool.length) % pool.length;
         game.select([pool[i].id]);
         frameUnits([pool[i]]);

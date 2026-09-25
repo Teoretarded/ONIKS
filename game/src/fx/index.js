@@ -428,6 +428,7 @@ class FxSystem {
     for (const p of sim.projectiles.values()) {
       let tr = this.trk.get(p.id);
       if (!tr) {
+        if (!p.alive) { this.lnch.delete(p.id); continue; }   // killed after this tick's collection (sim/weapons.js): its tracker is already gone
         const torp = !!TORP[p.kind] || !!(p.P && p.P.torpedo);
         tr = { id: p.id, kind: p.kind, t0: p.t0 !== undefined ? p.t0 : t, trail: new Trail(torp ? 4 : p.kind === 'sm6' ? 14000 : p.kind === 'oniks' ? 8000 : 6000, p.id, this.C.ground), vel: [0, 0, 0], pos: p.pos.slice(), seen: false, killed: false, P: p.P,
           ig: this.lnch.get(p.id) || 0, bub: torp ? new Bubbles(p.id) : null };
@@ -606,8 +607,8 @@ class FxSystem {
         else if (!u.alive) continue;
         else if (u.type === 'fighter') {
           const ab = Math.max(u.ab || 0, (this.abUntil.get(u.id) || 0) > t ? 1 : 0);
-          if (orb) orbJet(pos, u.hdg, u.pitch, u.roll, ab, PLUME.ab, u.id);
-          else drawJet(C, pos, u.hdg, u.pitch, u.roll, ab, .6, u.id);
+          if (orb) orbJet(pos, ps.hdg, ps.pitch, ps.roll, ab, PLUME.ab, u.id);
+          else drawJet(C, pos, ps.hdg, ps.pitch, ps.roll, ab, .6, u.id);
         } else if (u.type === 'helo') {
           const gy = this.groundAt(pos[0], pos[2]);
           this.down.seed = u.id;

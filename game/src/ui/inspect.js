@@ -813,7 +813,7 @@ export async function createInspect(game, ctx) {
   }
   /* a dotted scale bar, a round number of metres near 120 px at the focus distance */
   function drawScale(ctx, W, H, A) {
-    const V = S, d = Math.max(1e-3, cam.dist), mpp = d / cam.fl;       // metres per px at the focus
+    const V = S, d = Math.max(1e-3, cam.dist), mpp = d / cam.fl * K;   // metres per px at the focus (cam.fl is in CSS px; this layer draws in 1080p px, x K)
     const target = 130 * mpp, steps = [.1, .2, .5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
     let m = steps[0]; for (const s of steps) if (s <= target) m = s;
     const len = m / mpp;

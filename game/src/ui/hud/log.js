@@ -165,14 +165,13 @@ export function createLog(game, hud, parent) {
       case 'reinforce': {
         if (e.side !== side) break;
         const u = sim.units.get(e.unit);
-        add('Arr', e.stock ? `Orlan-10 · to ${u ? unitRef(u) : 'rail'}` : `${u ? unitRef(u) : e.type} · ${u ? u.def.name : ''} arrived`, 'l');
+        add('Arr', e.stock ? `Orlan-10 · to ${u ? unitRef(u) : 'rail'}` : `${u ? unitRef(u) : e.utype} · ${u ? u.def.name : ''} arrived`, 'l');
         break;
       }
       case 'order_unit': {
         if (e.side !== side) break;
-        // (the event's `type` field is the event name: the ordered type is in the side's queue)
-        const q = sim.sides[side].queue.find(x => x.at === e.at && Math.abs(x.ordered - e.t) < 1e-6);
-        const d = q && game.UNITS[q.type];
+        // (the event's `type` field is the event name: the ordered unit type is `utype`)
+        const d = game.UNITS[e.utype];
         add('Ord', `${d ? d.name + ' ' + d.cls : 'Reinforcement'} · ETA ${clock(e.at)}`, '');
         break;
       }
