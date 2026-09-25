@@ -590,8 +590,8 @@ class FxSystem {
         if (u.type === 'aew') { if (u.alive) { if (orb) orbProps(pos, ps.hdg, ps.pitch, ps.roll, 1, u.id); else drawProps(C, pos, ps.hdg, ps.pitch, ps.roll, 1, u.id); } }
         else if (u.type === 'fighter') {
           const ab = Math.max(u.ab || 0, (this.abUntil.get(u.id) || 0) > t ? 1 : 0);
-          if (orb) orbJet(pos, u.hdg, u.pitch, u.roll, ab, PLUME.ab, u.id);
-          else drawJet(C, pos, u.hdg, u.pitch, u.roll, ab, .6, u.id);
+          if (orb) orbJet(pos, ps.hdg, ps.pitch, ps.roll, ab, PLUME.ab, u.id);
+          else drawJet(C, pos, ps.hdg, ps.pitch, ps.roll, ab, .6, u.id);
         } else if (u.type === 'helo') {
           const gy = this.groundAt(pos[0], pos[2]);
           this.down.seed = u.id;
