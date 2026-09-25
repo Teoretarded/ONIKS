@@ -36,7 +36,7 @@ const SIM_PARTS = {
 const CONTENT = { oniks: '3M55', oniks_booster: 'Booster', pantsir_missile: '57E6', sam57e6: '57E6', mk41_can: 'Mk 41', tlc: 'TLC' };
 
 /* the slice tag's word for the thing it runs through */
-const KIND_WORD = { unit: 'carrier', structure: 'site', munition: 'body', cut: 'carrier' };
+const KIND_WORD = { unit: 'body', structure: 'site', munition: 'body', cut: 'body' };
 const KEY_WORD = { destroyer: 'hull', carrier: 'hull', helo: 'airframe', fighter: 'airframe', drone: 'airframe', catapult: 'trailer', hq: 'site' };
 
 export function stateDefaults(DM, key) {
@@ -154,7 +154,7 @@ export function makeSubject(R, AN, DM, key) {
     axis: { i: ai, u: ui, dir: [ai === 0 ? 1 : 0, ai === 1 ? 1 : 0, ai === 2 ? 1 : 0], name: 'xyz'[ai], z0, z1, L, y0, y1, x0, x1, zx0, zx1 },
     top, stn, NB,
     radius: e.radius, center: e.center,
-    scanWord: KEY_WORD[key] || KIND_WORD[info.kind] || 'body',
+    scanWord: (A && A.frame) || KEY_WORD[key] || KIND_WORD[info.kind] || 'body',
     shortTitle: title.split(' · ')[0],
     xrayGroups: A && A.xray ? A.xray : [],
     contentName: m => CONTENT[m] || m,

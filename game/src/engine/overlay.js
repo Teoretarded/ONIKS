@@ -5,7 +5,11 @@
    UI scale: `ui` follows the HUD's (1 at 1080p, never below .8, up to 1.6 at 4K: uiScaleOf(W, H)); tag, text, mark,
    bracket, tagSize and fitBox sizes are multiplied by it, so a caller's size 11.5 is 11.5 px at 1080p. Callers that lay
    tags out themselves (offsets, rows, columns) multiply their own px by `ov.ui`. `uiScale` pins it (null: auto);
-   `o.raw` on one call draws at the size given. */
+   `o.raw` on one call draws at the size given.
+   The world under the HUD: a tag (no `fit` given, not `raw`) that would sit on a HUD panel (`avoid`: game.hudRects)
+   moves off it by the smallest step that stays on screen; `fit: false` opts out. While the pause menu or the end
+   block has the stage (body.oniks-veiled) everything drawn through these calls fades out (`worldA`, ~.3 s): the menu
+   over a clean live picture. Callers drawing on `ctx` themselves multiply their alpha by `worldA`. */
 
 /* the HUD's scale for a view of W x H CSS px (ui/hud/index.js fit(): 1 at 1080p, never below .8, up to 1.6) */
 export const uiScaleOf = (W, H) => Math.max(.8, Math.min(1.6, Math.min(W / 1920, H / 1080)));
@@ -22,6 +26,8 @@ export class Overlay {
     this._w = new Map();
     this.avoid = null;         // [[x0, y0, x1, y1], ...] screen rects a fitted tag keeps out of (the HUD panels: game.hudRects)
     this.margin = 6;           // a fitted tag stays this far inside the view
+    this.worldA = 1;           // 0 while the pause menu / end block is up (eased), multiplies every draw below
+    this._hT = 0;
   }
   resize(cssW, cssH, dpr) {
     const W = Math.round(cssW * dpr), H = Math.round(cssH * dpr);
@@ -29,7 +35,15 @@ export class Overlay {
     this.W = cssW; this.H = cssH; this.dpr = dpr;
     this.ui = this.uiScale || uiScaleOf(cssW, cssH);
   }
-  clear() { const c = this.ctx; c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, this.cv.width, this.cv.height); c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0); }
+  clear() {
+    const c = this.ctx; c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, this.cv.width, this.cv.height); c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    // the pause menu / end block (match.js sets body.oniks-veiled): the world's tags fade out, and back in after
+    // (every frame counts at least 1/60 s: frames rendered back to back for a still still finish the fade)
+    const now = performance.now(), dt = this._hT ? Math.min(.1, Math.max(1 / 60, (now - this._hT) / 1000)) : 1; this._hT = now;
+    const veiled = typeof document !== 'undefined' && !!document.body && document.body.classList.contains('oniks-veiled');
+    const a = this.worldA + ((veiled ? 0 : 1) - this.worldA) * Math.min(1, dt * 9);
+    this.worldA = a < .02 ? 0 : a > .98 ? 1 : a;
+  }
   _font(px, weight, fam) { const c = this.ctx; c.font = `${weight || 500} ${px}px ${fam || MONO}`; }
   _meas(txt, px, spacing) { const k = txt + '|' + px; let w = this._w.get(k); if (w === undefined) { w = this.ctx.measureText(txt).width + spacing * txt.length; if (this._w.size > 4000) this._w.clear(); this._w.set(k, w); } return w; }
   _txt(s, x, y, spacing) {
@@ -82,12 +96,13 @@ export class Overlay {
 
   /* object tag: [ID][ label ][ value ] at (x, y) = its top-left (or anchored: o.align 'left' | 'right' | 'center').
      o: { kind: 'white' | 'lime' | 'coral' | 'ghost', a, size (px, default 11.5), align, valCol,
-          fit: true (keep it inside the view and out of this.avoid) | [rects] (out of these instead),
+          fit: true (keep it inside the view and out of this.avoid) | [rects] (out of these instead) | false (never
+               moved; left out, a tag is moved only when it would sit on one of this.avoid, the HUD panels),
           anchor: [x, y] (the object: a dotted leader runs from it to the tag when the tag sits away from it) }
      -> [x0, y0, x1, y1] */
   tag(x, y, id, label, value, o) {
     o = o || {};
-    const k = o.raw ? 1 : this.ui, c = this.ctx, px = (o.size || 11.5) * k, sp = px * .05, a = o.a === undefined ? 1 : o.a;
+    const k = o.raw ? 1 : this.ui, c = this.ctx, px = (o.size || 11.5) * k, sp = px * .05, a = (o.a === undefined ? 1 : o.a) * this.worldA;
     if (a <= 0.005) return null;
     this._font(px, 500);
     const U = s => (s || '').toString().toUpperCase();
@@ -97,12 +112,17 @@ export class Overlay {
     const W = wId + wL + wV;
     if (o.align === 'right') x -= W; else if (o.align === 'center') x -= W / 2;
     if (o.fit) { const f = this.fitBox(x, y, W, hB, Array.isArray(o.fit) ? o.fit : undefined); x = f[0]; y = f[1]; }
+    else if (o.fit === undefined && !o.raw && this.avoid && this.avoid.length) {
+      // a world tag never sits on a HUD panel: off it by the smallest step that stays on screen
+      const av = this.avoid;
+      for (let i = 0; i < av.length; i++) { const r = av[i]; if (x < r[2] && x + W > r[0] && y < r[3] && y + hB > r[1]) { const f = this.fitBox(x, y, W, hB); x = f[0]; y = f[1]; break; } }
+    }
     x = Math.round(x); y = Math.round(y);
     if (o.anchor) {
       // leader from the object to the nearest point of the tag (only when the tag is not already at it)
       const ax = o.anchor[0], ay = o.anchor[1], nx = Math.max(x, Math.min(x + W, ax)), ny = Math.max(y, Math.min(y + hB, ay));
       if (Math.hypot(nx - ax, ny - ay) > (o.leadMin === undefined ? 10 : o.leadMin) * k) {
-        this.leader(ax, ay, nx, ny, o.kind === 'coral' ? 'rgba(255,106,61,.8)' : 'rgba(255,255,255,.7)', .8 * a);
+        this.leader(ax, ay, nx, ny, o.kind === 'coral' ? 'rgba(255,106,61,.8)' : 'rgba(255,255,255,.7)', .8 * a / (this.worldA || 1));
         this.ctx.fillStyle = o.kind === 'coral' ? COL.coral : o.kind === 'lime' ? COL.lime : '#fff'; this.ctx.globalAlpha = a;
         this.ctx.fillRect(Math.round(ax) - 1, Math.round(ay) - 1, 3, 3); this.ctx.globalAlpha = 1;
       }
@@ -128,7 +148,8 @@ export class Overlay {
   /* identification bracket round a screen box: corners + a faint dotted frame (films' bracket()) */
   bracket(b, col, a, pad, len) {
     if (!b) return null;
-    const c = this.ctx; pad = (pad === undefined ? 6 : pad) * this.ui; len = (len || 14) * this.ui; a = a === undefined ? 1 : a;
+    const c = this.ctx; pad = (pad === undefined ? 6 : pad) * this.ui; len = (len || 14) * this.ui; a = (a === undefined ? 1 : a) * this.worldA;
+    if (a <= 0.005) return null;
     const x0 = Math.round(b[0] - pad) + .5, y0 = Math.round(b[1] - pad) + .5, x1 = Math.round(b[2] + pad) + .5, y1 = Math.round(b[3] + pad) + .5;
     const k = Math.min(len, (x1 - x0) * .35, (y1 - y0) * .35);
     c.strokeStyle = col || COL.lime; c.globalAlpha = a; c.lineWidth = 1.5; c.beginPath();
@@ -139,17 +160,20 @@ export class Overlay {
   /* dotted box (the films' part boxes) */
   box(b, col, a, dash) {
     if (!b) return;
-    const c = this.ctx; c.strokeStyle = col || 'rgba(255,255,255,.8)'; c.globalAlpha = a === undefined ? .8 : a; c.lineWidth = 1;
+    a = (a === undefined ? .8 : a) * this.worldA; if (a <= 0.005) return;
+    const c = this.ctx; c.strokeStyle = col || 'rgba(255,255,255,.8)'; c.globalAlpha = a; c.lineWidth = 1;
     c.setLineDash(dash || [2, 3]); c.strokeRect(Math.round(b[0]) + .5, Math.round(b[1]) + .5, Math.round(b[2] - b[0]), Math.round(b[3] - b[1])); c.setLineDash([]); c.globalAlpha = 1;
   }
   /* thin dotted leader */
   leader(x0, y0, x1, y1, col, a) {
-    const c = this.ctx; c.strokeStyle = col || 'rgba(255,255,255,.8)'; c.globalAlpha = a === undefined ? .8 : a; c.lineWidth = 1; c.setLineDash([2, 3]);
+    a = (a === undefined ? .8 : a) * this.worldA; if (a <= 0.005) return;
+    const c = this.ctx; c.strokeStyle = col || 'rgba(255,255,255,.8)'; c.globalAlpha = a; c.lineWidth = 1; c.setLineDash([2, 3]);
     c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke(); c.setLineDash([]); c.globalAlpha = 1;
   }
   /* square marker (the films' contact square) */
   mark(x, y, s, col, a, fill) {
-    const c = this.ctx; s = Math.round((s || 7) * this.ui); c.globalAlpha = a === undefined ? 1 : a;
+    a = (a === undefined ? 1 : a) * this.worldA; if (a <= 0.005) return;
+    const c = this.ctx; s = Math.round((s || 7) * this.ui); c.globalAlpha = a;
     if (fill) { c.fillStyle = col || COL.lime; c.fillRect(Math.round(x - s / 2), Math.round(y - s / 2), s, s); }
     else { c.strokeStyle = col || COL.lime; c.lineWidth = 1; c.strokeRect(Math.round(x - s / 2) + .5, Math.round(y - s / 2) + .5, s - 1, s - 1); }
     c.globalAlpha = 1;
@@ -157,17 +181,19 @@ export class Overlay {
   /* small mono text (uppercase readouts); o: { size, col, a, align, weight, sans, upper, raw } */
   text(x, y, s, o) {
     o = o || {};
-    const c = this.ctx, px = (o.size || 11.5) * (o.raw ? 1 : this.ui);
+    const c = this.ctx, px = (o.size || 11.5) * (o.raw ? 1 : this.ui), a = (o.a === undefined ? 1 : o.a) * this.worldA;
+    if (a <= 0.005) return;
     this._font(px, o.weight || 400, o.sans ? SANS : MONO);
-    c.fillStyle = o.col || COL.dim; c.globalAlpha = o.a === undefined ? 1 : o.a;
+    c.fillStyle = o.col || COL.dim; c.globalAlpha = a;
     c.textAlign = o.align || 'left'; c.textBaseline = o.base || 'alphabetic';
     this._txt(o.upper === false ? s : String(s).toUpperCase(), Math.round(x), Math.round(y), o.sans ? 0 : px * .05);
     c.textAlign = 'left'; c.globalAlpha = 1;
   }
   /* screen-space dotted line of square dots (the films' dline) */
   dline(x0, y0, x1, y1, step, s, col, a) {
+    a = (a === undefined ? 1 : a) * this.worldA; if (a <= 0.005) return;
     const c = this.ctx, L = Math.hypot(x1 - x0, y1 - y0), n = Math.max(1, Math.floor(L / (step || 4)));
-    c.fillStyle = col || '#fff'; c.globalAlpha = a === undefined ? 1 : a; s = s || 1;
+    c.fillStyle = col || '#fff'; c.globalAlpha = a; s = s || 1;
     for (let i = 0; i <= n; i++) { const t = i / n; c.fillRect(Math.round(x0 + (x1 - x0) * t - s / 2), Math.round(y0 + (y1 - y0) * t - s / 2), s, s); }
     c.globalAlpha = 1;
   }

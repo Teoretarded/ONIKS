@@ -8,10 +8,10 @@ and calls `game.addSystem(await createX(game, ctx))`:
 | Module | Export | Name (priority): what it is |
 |---|---|---|
 | `render.js` | `createRender(game, DM)` | `render` (10): units, projectiles, wakes, sites (registered first, directly) |
-| `select.js` | `createSelect` | `selection` (40): click / box / groups / follow, brackets and tags |
+| `select.js` | `createSelect` | `selection` (40): click / box / groups / follow, brackets and tags; `order-notes` (55): a right-click on an unclassified contact's cloud answers "NOT TRACKED · SCAN IT (X)" and which scanner reaches it (no move order), R says why nothing reloads |
 | `orders.js` | `createOrders` | `orders` (50) + `targeting` (80): right-click and hotkey orders, the scan / launch aim modes |
 | `time.js` | `createTime` | `time` (30): Space, + / -, F10; rate readout and toasts without a HUD |
-| `director.js` | `createDirector` | `director` (20): the cinematic camera (C); also loads `replay.js` and returns both |
+| `director.js` | `createDirector` | `director` (20): the cinematic camera (C; it also takes the picture when the match ends, holding the last kill to the result screen); also loads `replay.js` and returns both |
 | `replay.js` | `createReplay` (via director) | `replay` (110): a decisive hit in slow motion with the X-ray sweep; J the last one again, Shift J (or the Hit replay setting) auto on / off |
 | `objectives.js` | `createObjectives` | `objectives` (3; + the campaign script, `campaign/`): objectives, waves |
 | `match.js` | `createMatchFlow` | `menu` (120) + `escape` (2): result, grade, end overlay, pause menu |
@@ -63,10 +63,12 @@ game = {
   unitPose(u) -> { pos, hdg, pitch, roll, speed }   // the drawn pose: interpolated, land on the drawn ground,
                                                      // ships on the swell (and sinking), aircraft banked; cached per frame
   projPose(p) -> { pos, hdg, pitch }                 // interpolated, along the velocity
-  setRate(r), stepRate(±1), pause(on?), setAutoSlow(on), setUiHidden(on?), setSide(side),
+  setRate(r), stepRate(±1), pause(on?), setAutoSlow(on), slowFor(why, event) /* auto x1 now, if the setting is on */,
+  setUiHidden(on?), setSide(side),
   frame(dtReal), attachInput(canvas), dispatchEvents(),
   // added by the game's own systems
   pickUnit(sx, sy) -> unit | null     // what a click there would pick (selection)
+  pickContact(sx, sy) -> { u, c, at } | null   // an unclassified contact's cloud there, picked at its estimate (selection)
   unitScreenPos(u) -> [x, y, z]       // where the unit is drawn (aircraft on a deck: their parking spot) (selection)
   follow(unit | null), frameUnits(units)   // camera helpers (selection)
   endMatch({ win, reason })           // end now (objectives use it; match.js does the rest)
@@ -92,7 +94,7 @@ frame = { game, R, cam, fx /* R.fx */, sink, t, alpha, dt, dtSim, realT, seaT }
 ```
 
 Priorities (`PRI` in game.js; input goes high to low, drawing low to high):
-help 130 · filmmaker 125 · menu 120 · replay 110 · inspect 100 · targeting 80 · hud 70 · sandbox 60 · orders 50 · selection 40 ·
+help 130 · filmmaker 125 · menu 120 · replay 110 · inspect 100 · targeting 80 · hud 70 · sandbox 60 · order-notes 55 · orders 50 · selection 40 ·
 time 30 · director 20 · orbital 16 · sensors 15 · sonar / orbital-pre 14 · landmarks 12 · render 10 · fx 5 · objectives 3 ·
 escape 2 · audio 1. The camera takes its own keys (WASD / arrows pan, Q E rotate, PageUp / PageDown pitch, wheel zoom,
 right-drag rotate, middle-drag pan) below everything; a system that needs the keys for itself sets
@@ -121,7 +123,8 @@ sink.cam = { eye, f, r, u, fl /* px at 1080p */, tanX, tanY, near, W, H, dist }
 | `select` | the selection Set |
 | `order` | `{ ids, order }` (a player order; orders feedback, audio, objectives) |
 | `rate` | `{ rate, paused, why: 'user'|'auto' }` |
-| `autoslow` | `{ why: 'launch'|'contact', event }` (the lime blip) |
+| `autoslow` | `{ why: 'launch'|'contact'|'engage', event }` (the lime blip) |
+| `engageable` | `{ unit, track, cls, conf, units, text, pos }` a hostile track first classified and within reach of the side's weapons (orders.js; alert + auto x1) |
 | `mode` | `{ mode: 'scan'|'move'|'attack'|'place'|null, ... }` (a targeting mode in the orders / sandbox systems) |
 | `inspect` | `{ id, on }`: **the Inspect system emits this** when it opens / closes on a unit (campaign objective) |
 | `cinematic` | `{ on }` |
@@ -150,7 +153,8 @@ on a deck: click one (close in), or the selection panel's Air row of the carrier
 Orders: right-click (ground / sea: move in formation; hostile track: attack, and with a carrier selected its F/A-18Es
 launch on it; a TEL with a transloader selected: reload; deck aircraft: launch toward the point / track), Z stop,
 H weapons free / hold fire (offensive fire starts held: nothing launches until you order an attack or go weapons free;
-defence is always automatic), T deploy / undeploy, R reload, X scan (then click; the nearest scanner in reach fires, a
+defence is always automatic), ~ salvo size of the selection's attacks 1 / 2 / ALL (Shift: back; an attack persists,
+volley after volley, until the target is destroyed, the launcher is empty or its track has been lost for 5 min), T deploy / undeploy, R reload, X scan (then click; the nearest scanner in reach fires, a
 point beyond every reach is refused, nothing drives), Y radar on / off, L launch (coast: the Orlan-10; fleet: the
 strike package off the deck, then click a track to strike or a point to patrol), U launch an MH-60R (fleet),
 B reinforcements, Esc cancel / pause menu.
@@ -161,6 +165,9 @@ N weather, Del delete.
 
 2D overlay: world tags and labels scale with the HUD (`ov.ui`: 1 at 1080p, never below .8); sizes given to
 `ov.tag` / `ov.text` are px at 1080p, a caller's own offsets are multiplied by `ov.ui` (engine/overlay.js).
+An `ov.tag` that would sit on a HUD panel (`game.hudRects`) is moved off it (`fit: false` opts out), and while the
+pause menu or the end block is up (`body.oniks-veiled`) everything drawn through `ov.*` fades out (`ov.worldA`;
+a system drawing on `ov.ctx` itself multiplies its alpha by it).
 
 Loading (`src/ui/loading`): play.html shows the loading screen from its first paint; main.js reports the real steps
 (map, terrain, forces, systems, models), pre-samples every level of the models in play (`warmLists`), renders two

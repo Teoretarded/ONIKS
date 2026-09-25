@@ -3,7 +3,7 @@
    sill at each mouth, rivers carved down to the fjords. */
 import { flow, blur, carve } from '../grid.js';
 import { ss, sat } from '../noise.js';
-import { wind, lineField } from '../lines.js';
+import { wind, lineField, labelLand } from '../lines.js';
 import { shorePoint, roughness, coastSpawn, fleetSpawn, bestSite } from './common.js';
 
 const K = 1000;
@@ -112,9 +112,15 @@ export default {
       const dp = Math.hypot(x - port.x, z - port.z); if (dp < 6000 || dp > 18000) return -Infinity;
       return -roughness(A, x, z, 500) * 20 - A.h(x, z) / 150;
     }, { stride: 2, seed: 9 });
-    // spawns ~90 km apart (balance): the battery on the strandflat north of Guba Kamennaya, the fleet off the
-    // north-west coast
-    const coast = { x: -43000, z: -28000, r: 2500, hdg: A.seaward(-43000, -28000) };
+    // spawns ~90 km apart (balance): the battery on the mainland between Guba Kamennaya and Dolgaya Guba, where the
+    // strandflat climbs to the fjell (not out on the skerries: an island there has no room for a battery and its
+    // launch sites), the fleet off the north-west coast
+    const { lab, sizes } = labelLand(A.P.data, A.P.cols, A.P.rows);
+    let ML = 1; for (let i = 2; i < sizes.length; i++) if (sizes[i] > sizes[ML]) ML = i;
+    const coast = coastSpawn(A, [-44000, -31000, -26000, -12000], {
+      maxCoast: 4500, wantRise: 300, r: 2500,
+      score: (x, z) => lab[A.idx(x, z)] !== ML || A.h(x, z) < 15 ? -Infinity : Math.min(A.h(x, z), 90) / 45 - Math.hypot(x + 38000, z + 24000) / 9000,
+    }) || { x: -43000, z: -28000, r: 2500, hdg: A.seaward(-43000, -28000) };
     const fleet = { x: -64000, z: 58000, r: 6000, hdg: Math.atan2(coast.x + 64000, coast.z - 58000) };
     places.push(
       { name: 'Rybachy', kind: 'town', x: port.x, z: port.z },

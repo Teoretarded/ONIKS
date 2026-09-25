@@ -38,7 +38,9 @@ const CAM_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown'
 const HERO = { oniks: 10, tlam: 8, slam: 7, sm6: 5, hellfire: 4, pdms: 3, sam: 3, aam: 3, shell: 0 };
 /* how much a unit is worth watching */
 const RANK = { carrier: 10, hq: 9, ddg: 8, tel: 6, radar: 5, pantsir: 4, transloader: 3, helo: 2, fighter: 2, catapult: 1, drone: 1 };
-const APPROACH_REAL = 4.6;         // s of real time before the impact the approach shot takes over
+const APPROACH_REAL = 4.6;         // s of real time before the impact the approach shot takes over at the latest
+const MID_REAL = 12, MID_SEP = 12000;   // it takes over earlier, inside 12 s and 12 km: the round and its target framed
+                                        // together from the side, closing in as the round closes (no empty mid-course)
 const BOX = [.06, .08, .94, .92];  // the frame the named points must stay in (fractions of the view)
 const INNER = [.17, .19, .83, .81];
 
@@ -173,12 +175,12 @@ function makeDirector(game) {
   const { sim, R } = game, cam = R.camera;
   let on = false, shot = null, lastPick = -99, edgeWas = true, waiting = false, fitK = 1, dirInit = false;
   const recent = [];           // interesting events: { kind, pos, t, w, unit, seen }
-  let lastKill = null, final = null;
+  let lastKill = null, lastHq = null, final = null;
   const eye = [0, 0, 0], look = [0, 0, 0], q3 = [0, 0, 0], c3 = [0, 0, 0], w3 = [0, 0, 0];
   const dirS = [0, 0, 1];
   const want = newPose(), cur = newPose();
   const KP = Array.from({ length: 32 }, () => [0, 0, 0]);
-  const HC = Array.from({ length: 8 }, () => [0, 0, 0]);
+  const HC = Array.from({ length: 9 }, () => [0, 0, 0]);     // a hull's 8 corners (+ the round coming in)
   let nKeys = 0;
   const follow = () => cur.T;
   const addKey = p => { if (nKeys < KP.length) { const k = KP[nKeys++]; k[0] = p[0]; k[1] = p[1]; k[2] = p[2]; } };
@@ -222,10 +224,15 @@ function makeDirector(game) {
     const d = Math.max(0, Math.hypot(u.pos[0] - p.pos[0], u.pos[1] + H - p.pos[1], u.pos[2] - p.pos[2]) - Math.max(6, u.def.size[1] * .5));
     return d / Math.max(80, p.spd || 200) / Math.max(.05, game.timeRate);
   }
+  /* the round is close enough to share the frame with its target (or about to hit it) */
+  function closing(p, u) {
+    const tt = ttiReal(p, u);
+    return tt < APPROACH_REAL || (tt < MID_REAL && Math.hypot(u.pos[0] - p.pos[0], u.pos[2] - p.pos[2]) < MID_SEP);
+  }
   function phaseOf(p) {
     if ((p.age || 0) < launchAge(p) && heroOf(p) >= 5) return 'launch';
     const u = tgtUnit(p);
-    if (u && ttiReal(p, u) < APPROACH_REAL) return 'approach';
+    if (u && closing(p, u)) return 'approach';
     return 'chase';
   }
   function score(p, ph) {
@@ -390,7 +397,7 @@ function makeDirector(game) {
         return desired();
       }
       const u = tgtUnit(p);
-      if (u && ttiReal(p, u) < APPROACH_REAL) {
+      if (u && closing(p, u)) {
         const a = Math.atan2(p.vel[0], p.vel[2]);
         toKind('approach', { tgt: u.id, appr: a, until: t + 60 }, clamp(ttiReal(p, u) * .45, .9, 2));
         shot.side = sideFor(a + 1.2, a - 1.2, centreOf(u, c3), u.def.size[0] * 2.5);
@@ -404,14 +411,17 @@ function makeDirector(game) {
       const p = shot.kind === 'approach' ? sim.projectiles.get(shot.id) : null;
       if (shot.kind === 'approach' && (!p || !p.alive)) { toKind('after', { tgt: u.id, appr: shot.appr, until: t + 11 }, .8); shot.side = shot.side || 1; return desired(); }
       const pose = game.unitPose(u), T = centreOf(u, c3);
-      const n = hullCorners(pose, u.def, HC, 0);
+      let n = hullCorners(pose, u.def, HC, 0);
       const sea = u.def.domain === 'sea';
       const pull = shot.kind === 'after' ? ss(1.5, 11, age) : 0;
       const pitch = ((sea ? 5.5 : 10) + shot.raise + 7 * pull) * DEG;
       const appr = shot.appr + (shot.kind === 'after' ? shot.side * .05 * age : 0);
+      // the round on its way in is framed with the target from the start (the shot closes in as it closes)
+      const pp = p ? game.projPose(p).pos : null;
+      if (pp) { const k = HC[n++]; k[0] = pp[0]; k[1] = pp[1]; k[2] = pp[2]; }
       acrossView(cam, T, HC, n, appr, shot.side, pitch, { min: sea ? 170 : Math.max(30, u.def.size[0] * 2.2), k: fitK * (1 + 1.3 * pull), shift: endShift() }, eye, look);
       addKey(T);
-      if (p) { const pp = game.projPose(p).pos; if (Math.hypot(pp[0] - T[0], pp[2] - T[2]) < Math.hypot(eye[0] - T[0], eye[2] - T[2]) * 1.3) addKey(pp); }
+      if (pp) addKey(pp);
       if (!sea) clearance(T);
       return true;
     }
@@ -568,9 +578,17 @@ function makeDirector(game) {
     },
     init() {
       game.bus.on('result', () => {
-        // the end: the last kill, held (the most important of the last few, the command post first)
+        // the end: the last kill, held (the most important of the last few, the command post first); else the command
+        // post or carrier the match was lost with, where it went down
         if (lastKill && sim.t - lastKill.t < 90) final = { unit: lastKill.unit, pos: lastKill.pos.slice(), L: lastKill.L, sea: lastKill.sea, t: lastKill.t };
-        if (on) { shot = null; lastPick = -99; }
+        else if (lastHq) final = { unit: lastHq.unit, pos: lastHq.pos.slice(), L: lastHq.L, sea: lastHq.sea, t: lastHq.t };
+        // the cinematic camera takes the picture at once (the end block turns it on 3.5 s later anyway): the last
+        // subject held from here to the result screen, not the empty sea a player's view (or a finished replay) was on.
+        // A replay still playing keeps the camera and hands over to this when it ends; Inspect and a film-maker take
+        // playing are left alone.
+        const busy = (game.inspect && game.inspect.active) || (game.film && game.film.playing);
+        if (!busy && !on) set(true);
+        else if (on) { shot = null; lastPick = -99; }
       });
     },
     onEvent(e) {
@@ -583,6 +601,7 @@ function makeDirector(game) {
         if (u && seen(u) || (u && u.side === game.side)) {
           const r = (RANK[u.type] || 1) + (u.def.hq ? 20 : 0);
           if (!lastKill || sim.t - lastKill.t > 30 || r >= lastKill.r) lastKill = { unit: u.id, pos: e.pos.slice(), L: u.def.size[0], sea: u.def.domain === 'sea', t: sim.t, r };
+          if (u.def.hq) lastHq = { unit: u.id, pos: e.pos.slice(), L: u.def.size[0], sea: u.def.domain === 'sea', t: sim.t };
         }
       }
       else if (e.type === 'intercept') rec = { kind: 'intercept', pos: e.pos, t, w: 5 };

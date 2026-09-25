@@ -1,23 +1,16 @@
 /* MAIN MENU: the five entries in the layout of the film behind (bottom row, left column, Orbital rows),
    and QUIT: the menu stands down, the film plays on alone. */
-import { h, esc, pad2, swipe, keysHtml, replay } from '../dom.js';
+import { h, esc, pad2, swipe, keysHtml } from '../dom.js';
 import { sfx } from '../sfx.js';
 
-/* wording from the kit (reference/menus/common/stage.js ITEMS / BLURBS) */
+/* the entries only: no line of subtext under them (the user's rule: titles, nothing that explains them) */
 export const ITEMS = ['Sandbox', 'Combat', 'Campaign', 'Settings', 'Quit'];
-export const BLURBS = [
-  'Free war sandbox. Everything unlocked; the red force stays passive until you wake it.',
-  'Set up a fog-of-war battle: map, enemy fleet, armory and defenses.',
-  'Six escalating battles. Ammunition carries over and every grade is kept.',
-  'Graphics, display, interface and keybinds.',
-  'Stand the battery down.',
-];
 const TARGET = ['sandbox', 'combat', 'campaign', 'settings', 'quit'];
 
 export function menuScreen(app) {
   const el = h('section.scr#scr-menu');
-  const mm = h('div#mm'), blurb = h('div.abs#mmBlurb'), keys = h('div.abs.keys#mmKeys');
-  el.append(mm, blurb, keys);
+  const mm = h('div#mm'), keys = h('div.abs.keys#mmKeys');
+  el.append(mm, keys);
   let i = 0, busy = false, items = [];
 
   function build() {
@@ -37,7 +30,6 @@ export function menuScreen(app) {
     if (k === i && !quiet && items[k].classList.contains('on')) return;
     i = k;
     items.forEach((it, j) => it.classList.toggle('on', j === k));
-    blurb.textContent = BLURBS[k]; replay(blurb, 'in');
     if (!quiet) sfx.move();
   }
   function go() {

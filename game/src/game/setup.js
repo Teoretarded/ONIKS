@@ -6,7 +6,7 @@
    Also: seed=<n> (default 1337), rate=<x> (start rate), debug extras (cam=, t=, bench=, scale=, ui=0). */
 import { Sim } from '../sim/sim.js';
 import { setupBattle } from '../sim/setup.js';
-import { findSpot } from '../sim/economy.js';
+import { findSpot, spreadOut } from '../sim/economy.js';
 import { AI } from '../sim/ai.js';
 import { UNITS, ENEMY, TEL_ELEV } from '../data/units.js';
 import { applyCarry } from './campaign/grade.js';
@@ -57,6 +57,8 @@ export function createMatch(map, P, mission) {
     for (const u of spawned[side] || []) u.hold = false;
   }
   else spawned = setupBattle(sim, { coast: .5, fleet: .5, emplaced: true });
+  // no two units on one spot: a planner's shared site or a shared fallback cell steps the later ones outward
+  if (spawned) spreadOut(sim, [...(spawned.coast || []), ...(spawned.fleet || [])]);
   return { sim, side, enemy, weather, spawned };
 }
 

@@ -3,7 +3,8 @@
    thing they name. Items are pooled (no per-frame allocation).
    Sizes are the overlay's own metrics at its UI scale (ov.ui: 1 at 1080p, the HUD's scale above), the class bars
    included: a tag and its bars stay inside the view (a tag that would run off the right edge goes to the other
-   side of what it names) and out of the HUD panels. Callers give their offsets at 1080p times ov.ui. */
+   side of what it names) and out of the HUD panels (a tag with no room off them is left out, the thing keeps its mark).
+   Nothing while the pause menu or the end block is up (ov.worldA). Callers give their offsets at 1080p times ov.ui. */
 import { sat } from './core.js';
 
 const LIME = '#C6F432', CORAL = '#FF6A3D';
@@ -27,6 +28,9 @@ export class TagLayer {
   /* obst: [[x0, y0, x1, y1], ...] screen rects no tag may sit on (the HUD panels, the scan inset) */
   flush(ov, W, H, obst) {
     const L = this.sorted; L.length = 0;
+    // the pause menu / end block has the stage: the overlay fades the world's tags out (ov.worldA), nothing to place
+    const wa = ov.worldA === undefined ? 1 : ov.worldA;
+    if (wa <= .01) return;
     const k = ov.ui || 1, m = 8 * k;
     for (let i = 0; i < this.n; i++) {
       const t = this.pool[i];
@@ -75,7 +79,7 @@ export class TagLayer {
         if (Math.hypot(lx - t.ax, ly - t.ay) > 6) ov.leader(t.ax, t.ay, lx, ly, t.leadCol || (t.kind === 'coral' ? 'rgba(255,150,120,.9)' : t.kind === 'lime' ? LIME : 'rgba(238,238,228,.85)'), .75 * t.a);
       }
       ov.tag(tx, t.y, t.id, t.label, t.value, { kind: t.kind, a: t.a, size: t.size, valCol: t.valCol });
-      if (t.bars) drawBars(ctx, right ? t.x + t.fw - t.bw : t.x, t.y + t.h + 4 * k, t.bars, t.a, k);
+      if (t.bars) drawBars(ctx, right ? t.x + t.fw - t.bw : t.x, t.y + t.h + 4 * k, t.bars, t.a * wa, k);
     }
   }
 }

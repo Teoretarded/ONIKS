@@ -77,20 +77,87 @@ export function deckFor(sim, side, type) {
   return null;
 }
 
-/* a random valid spot near (x, z) for a domain */
-export function findSpot(sim, dom, x, z, r, rnd) {
+/* the room a unit keeps from every other when it is placed (m, between centres): vehicles 60, ships and boats 450
+   (a carrier more), aircraft placed in the air 150 */
+export const GAP = { land: 60, sea: 450, sub: 450, air: 150 };
+const domOf = d => d.sub ? 'sub' : d.domain === 'sea' ? 'sea' : d.domain === 'air' ? 'air' : 'land';
+export const gapOf = d => domOf(d) === 'sea' ? Math.max(GAP.sea, d.size[0] * 1.6) : GAP[domOf(d)];
+
+/* a spot a unit of that domain can stand on; strict = the placement rule (flat dry land, deep water), else anything
+   the unit can move on */
+function validAt(sim, dom, px, pz, strict) {
   const map = sim.map;
+  if (Math.abs(px) > map.W / 2 - 500 || Math.abs(pz) > map.H / 2 - 500) return false;
+  if (dom === 'land') return (strict ? map.h(px, pz) > 1 && map.slope(px, pz) < .3 : map.h(px, pz) > .5) && sim.nav.open('land', px, pz);
+  if (dom === 'sea') return (strict ? map.h(px, pz) < -25 : map.h(px, pz) < -8) && sim.nav.open('sea', px, pz);
+  if (dom === 'sub') return (!strict || map.h(px, pz) < -60) && sim.nav.open('sub', px, pz);
+  return true;
+}
+/* no other unit (alive, not on a deck; `skip` excepted) within gap of (px, pz) */
+function clearAt(sim, px, pz, gap, skip) {
+  if (!gap) return true;
+  const g2 = gap * gap;
+  for (const v of sim.units.values()) {
+    if (v === skip || v.aboard || !v.alive) continue;
+    const dx = v.pos[0] - px, dz = v.pos[2] - pz;
+    if (dx * dx + dz * dz < g2) return false;
+  }
+  return true;
+}
+/* outward from (x, z), ring by ring (deterministic): the nearest spot that is valid and clear, out to rMax */
+function outward(sim, dom, x, z, gap, rMax, skip) {
+  const step = Math.max(gap, 40);
+  for (const strict of [true, false]) {
+    if (validAt(sim, dom, x, z, strict) && clearAt(sim, x, z, gap, skip)) return [x, z];
+    for (let k = 1, rr = step; rr <= rMax; k++) {
+      const n = Math.max(8, Math.min(96, Math.ceil(Math.PI * 2 * rr / Math.max(step, rr * .1)))), a0 = k * 2.39996;
+      for (let i = 0; i < n; i++) {
+        const a = a0 + i / n * Math.PI * 2, px = x + Math.sin(a) * rr, pz = z + Math.cos(a) * rr;
+        if (validAt(sim, dom, px, pz, strict) && clearAt(sim, px, pz, gap, skip)) return [px, pz];
+      }
+      rr = k < 40 ? rr + step : rr * 1.12;
+    }
+  }
+  return null;
+}
+
+/* a valid spot near (x, z) for a domain, clear of the units already there by `gap` (default GAP[dom]): random tries
+   inside r first, then outward ring by ring; never the one fallback cell for everybody */
+export function findSpot(sim, dom, x, z, r, rnd, gap) {
+  gap = gap === undefined ? GAP[dom] || 0 : gap;
   for (let k = 0; k < 60; k++) {
     const a = rnd() * Math.PI * 2, d = Math.sqrt(rnd()) * r * (1 + k / 30);
     const px = x + Math.sin(a) * d, pz = z + Math.cos(a) * d;
-    if (Math.abs(px) > map.W / 2 - 500 || Math.abs(pz) > map.H / 2 - 500) continue;
-    if (dom === 'land') { if (map.h(px, pz) > 1 && map.slope(px, pz) < .3 && sim.nav.open('land', px, pz)) return [px, pz]; }
-    else if (dom === 'sea') { if (map.h(px, pz) < -25 && sim.nav.open('sea', px, pz)) return [px, pz]; }
-    else if (dom === 'sub') { if (map.h(px, pz) < -60 && sim.nav.open('sub', px, pz)) return [px, pz]; }
-    else return [px, pz];
+    if (validAt(sim, dom, px, pz, true) && clearAt(sim, px, pz, gap)) return [px, pz];
   }
-  const k = sim.nav.nearestOpen(dom === 'land' ? 'land' : dom, sim.nav.cellOf(x, z), -1, 80);
-  return k >= 0 ? [sim.nav.cx(k), sim.nav.cz(k)] : [x, z];
+  const p = outward(sim, dom, x, z, gap, Math.max(r * 4, 15000));
+  if (p) return p;
+  // nothing valid anywhere near: the nearest open cell, stepped round a spiral so two units never share a point
+  const k = sim.nav.nearestOpen(dom === 'air' ? 'land' : dom, sim.nav.cellOf(x, z), -1, 80);
+  const c = k >= 0 ? [sim.nav.cx(k), sim.nav.cz(k)] : [x, z];
+  for (let m = 0; m < 64; m++) {
+    const rr = gap * Math.sqrt(m), a = m * 2.39996, px = c[0] + Math.sin(a) * rr, pz = c[1] + Math.cos(a) * rr;
+    if (clearAt(sim, px, pz, gap)) return [px, pz];
+  }
+  return c;
+}
+
+/* after a planner put units on their sites: any unit standing within its gap of another steps outward to the nearest
+   clear spot (a shared site, a shared fallback); of two on one spot the later in the list keeps it. */
+export function spreadOut(sim, units) {
+  const map = sim.map;
+  let moved = 0;
+  for (const u of units) {
+    if (!u || !u.alive || u.aboard || u.def.domain === 'air') continue;
+    const gap = gapOf(u.def), dom = domOf(u.def);
+    if (clearAt(sim, u.pos[0], u.pos[2], gap, u)) continue;
+    const p = outward(sim, dom, u.pos[0], u.pos[2], gap, 6000, u);
+    if (!p) continue;
+    u.pos[0] = u.prev[0] = p[0]; u.pos[2] = u.prev[2] = p[1];
+    if (dom === 'land') u.pos[1] = u.prev[1] = Math.max(0, map.h(p[0], p[1]));
+    moved++;
+  }
+  return moved;
 }
 
 export function checkResult(sim) {

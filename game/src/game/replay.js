@@ -185,6 +185,9 @@ export async function createReplay(game, ctx) {
       front: null, flash: new Map(), dmgCut: {}, before: null, after: null,
       tags: [], passed: new Map(), rows: new Map(), inst: null, pull: 0, roundGone: false, handsOff: false,
       track: rec ? rec.track : null, pending: o.mode === 'live', tLast: -1,
+      // the hull as it was when the replay began: its type and parts outlive the unit (a sunk hull is removed while
+      // the replay still plays; strike() and the readout fall back to this)
+      keep: u ? { id: u.id, type: u.type, def: u.def, parts: copyParts(u), hpMax: u.hpMax } : null,
     };
     if (!resolve(V)) { S = prev; return false; }
     // what the hull looked like before (the hit's damage shows at the impact)
@@ -260,6 +263,8 @@ export async function createReplay(game, ctx) {
     const u = sim.units.get(V.id);
     if (u) {
       V.u = u;
+      // the latest parts, kept for when the unit is gone
+      if (V.keep) { const k = V.keep.parts; for (const n in u.parts) k[n] = u.parts[n]; }
       const p = game.unitPose(u);
       V.T0[0] = p.pos[0]; V.T0[1] = p.pos[1]; V.T0[2] = p.pos[2]; V.hdg = p.hdg;
       const Ra = attitude(p.hdg, p.pitch, p.roll); for (let i = 0; i < 9; i++) V.R0[i] = Ra[i];
@@ -326,9 +331,10 @@ export async function createReplay(game, ctx) {
     }
     const il = V.impLocal || [0, 0, 0], ax = subj.axis;
     if (V.front && V.impLocal) V.front.zImp = clamp(il[ax.i], ax.z0, ax.z1);
-    const inv = u ? inverseMap(subj, u) : invFromRec(subj, V.rec);
+    // the unit, else the hull kept at the start (the unit was removed), else the record (J)
+    const inv = u ? inverseMap(subj, u) : V.keep ? inverseMap(subj, V.keep) : V.rec ? invFromRec(subj, V.rec) : null;
     for (const sp in changed) {
-      const cuts = inv.get(sp) || [];
+      const cuts = (inv && inv.get(sp)) || [];
       let best = null, bd = 1e18;
       for (const n of cuts) {
         const p = subj.byName.get(n); if (!p) continue;
@@ -421,7 +427,7 @@ export async function createReplay(game, ctx) {
     // after / again: the impact beats on arrival
     if ((V.mode === 'after' || V.mode === 'again') && V.tHit < 0 && t >= V.tI) {
       V.tHit = V.tLast = t;
-      let before = V.before || {}, after = V.after || (u ? copyParts(u) : {});
+      let before = V.before || {}, after = V.after || (u ? copyParts(u) : V.keep ? V.keep.parts : {});
       const ch = diffParts(after, before) || {};
       if (V.mode === 'again' && V.rec && V.rec.impLocal) { const w = toWorld(V.R0, V.T0, V.rec.impLocal, [0, 0, 0]); strike(V, ch, w); }
       else strike(V, ch, V.imp);
@@ -626,7 +632,7 @@ export async function createReplay(game, ctx) {
     let src;
     if (V.mode === 'again') src = V.tHit >= 0 ? V.after : V.before;
     else if (V.u) src = V.tHit >= 0 || V.mode === 'live' ? V.u.parts : V.before;
-    else src = V.after || V.before || {};
+    else src = V.after || (V.keep && (V.tHit >= 0 || V.mode === 'live') ? V.keep.parts : null) || V.before || {};
     if (V.mode === 'live' && V.tHit < 0) src = V.before || src;
     if (!subj.simMap) return null;
     let any = false;
@@ -706,21 +712,26 @@ export async function createReplay(game, ctx) {
   function readout(ctx, V, A) {
     const x = 40; let y = 58;
     const P = game.PROJ[V.kind] || {};
-    O.kick(ctx, x + 2, y, `${V.mode === 'again' ? 'Replay' : 'Hit'} · ${P.name || 'Hit'}`, A);
+    // the round's name when the blow was a round's (a gun or a lesser hit has none: not "Hit · Hit")
+    const head = V.mode === 'again' ? 'Replay' : 'Hit';
+    O.kick(ctx, x + 2, y, P.name ? `${head} · ${P.name}` : head, A);
     y += 34;
     O.sans(ctx, x, y, V.subj.title, { size: 22, weight: 600, ls: -.4, a: A });
     y += 30;
     const u = V.u, own = V.side === game.side;
+    const type = u ? u.type : V.rec ? V.rec.type : V.keep ? V.keep.type : null;
     const L = [];
     if (!own) {
       const c = sim.contact(game.side, V.id);
       if (c && c.track) V.track = c.track;
-      L.push([[V.track || 'TRK', CORAL], [' · ', FAINT], [TRACK[u ? u.type : V.rec.type] || V.def.name, WHITE]]);
+      L.push([[V.track || 'TRK', CORAL], [' · ', FAINT], [(type && TRACK[type]) || V.def.name, WHITE]]);
     }
     if (u) {
       const hk = u.hp / u.hpMax;
       L.push([['HP ', FAINT], [`${Math.max(0, Math.ceil(u.hp))} / ${u.hpMax}`, hk < 1 ? CORAL : WHITE]].concat(!u.alive ? [[' · ', FAINT], [V.sea ? 'Sinking' : 'Destroyed', CORAL]] : []));
     } else if (V.rec) L.push([[V.rec.destroyed ? (V.sea ? 'Sunk' : 'Destroyed') : 'Hit', CORAL], [' · T+', FAINT], [game.fmtTime ? game.fmtTime(V.rec.t) : Math.floor(V.rec.t), WHITE]]);
+    // the unit is gone (removed while the replay plays): it went down
+    else if (V.keep) L.push([['HP ', FAINT], [`0 / ${V.keep.hpMax}`, CORAL], [' · ', FAINT], [V.sea ? 'Sunk' : 'Destroyed', CORAL]]);
     for (const segs of L) { O.runs(ctx, x, y, segs, { size: 11.5, a: A }); y += 21; }
     return y;
   }

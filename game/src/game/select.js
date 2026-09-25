@@ -7,6 +7,7 @@
    Enemy tracks can be selected alone (for their readout); they are never ordered. */
 import { PRI } from './game.js';
 import { unitTag, SHORT } from './labels.js';
+import { ammoFull } from '../sim/mech.js';
 
 const LIME = '#C6F432', CORAL = '#FF6A3D';
 const TS = 10.5;                 // tag size (px at 1080p)
@@ -66,6 +67,28 @@ export function createSelect(game) {
   }
   game.pickUnit = pickUnit;
 
+  /* an unclassified contact's cloud under a screen point: the cloud is drawn round the ESTIMATE (never the truth), so
+     it is picked there, within its dense core (about 1 sigma + the hull; 14 to 120 px, so a big cloud does not swallow
+     every move order near it) -> { u, c, at } | null */
+  const cq = [0, 0, 0];
+  function pickContact(x, y) {
+    const sens = game.getSystem('sensors'), clouds = sens && sens.contacts ? sens.contacts.vis : null;
+    let best = null, bs = 1;
+    for (const u of sim.list()) {
+      if (u.side === game.side || u.aboard || !u.alive || game.vis(u) !== 'contact') continue;
+      const c = sim.contact(game.side, u.id); if (!c || !c.pos) continue;
+      const cv = clouds ? clouds.get(u.id) : null;
+      const P = cv && cv.state !== 'lost' ? cv.ctr : c.pos;
+      if (!cam.project(P, cq) || cq[0] < -40 || cq[1] < -40 || cq[0] > cam.W + 40 || cq[1] > cam.H + 40) continue;
+      const L = Math.max(u.def.size[0], 1), sig = cv && cv.sig ? cv.sig : Math.min(Math.max(Math.min(c.err || 0, 5000) * 1.15 * (1.12 - c.conf), L * .06), 3500);
+      const rpx = Math.min(120, Math.max(14 * (game.overlay ? game.overlay.ui || 1 : 1), (sig * 1.2 + L * .5) * cam.fl / Math.max(1, cq[2])));
+      const s = Math.hypot(cq[0] - x, cq[1] - y) / rpx;
+      if (s < bs) { bs = s; best = { u, c, at: [P[0], P[1], P[2]] }; }
+    }
+    return best;
+  }
+  game.pickContact = pickContact;
+
   function onScreen(u) {
     if (!cam.project(game.unitPose(u).pos, q)) return false;
     return q[0] >= 0 && q[1] >= 0 && q[0] <= cam.W && q[1] <= cam.H;
@@ -85,7 +108,7 @@ export function createSelect(game) {
   game.follow = follow;
   game.frameUnits = frameUnits;
 
-  return {
+  const selection = {
     name: 'selection', priority: PRI.selection,
     onKey(e) {
       if (e.type !== 'keydown') return false;
@@ -197,6 +220,88 @@ export function createSelect(game) {
       }
     },
   };
+
+  /* ---------- answers the orders system does not give (just above it, so it sees the input first) ----------
+     - a right-click on an unclassified contact's cloud is an attack the sensors cannot aim yet: it says so (the
+       same words as a click on an unaimable track) and which scanner reaches the cloud, instead of a move order to
+       the sea under it;
+     - R with nothing that can happen (all full, the transloaders empty or none): a short line, not silence. */
+  const notes = [];            // { lines: [[text, col]], sx, sy, t0, dur }
+  const say = (lines, sx, sy) => { notes.length = 0; notes.push({ lines, sx, sy, t0: game.realT, dur: 1.9 }); };
+  const bad = () => { const a = game.getSystem('audio'); if (a && a.ui) try { a.ui('invalid'); } catch (e) { /* */ } };
+  const pad2 = n => String(n).padStart(2, '0');
+  const kmTxt = m => (m < 10000 ? (m / 1000).toFixed(1) : String(Math.round(m / 1000)));
+  const domOf = u => u.def.domain === 'air' ? 'air' : u.def.domain === 'sea' ? 'sea' : 'land';
+  function contactClick(hit, sx, sy) {
+    const us = game.selected().filter(u => !u.aboard || u.def.domain === 'air');
+    const dom = hit.c.dom === 'sub' ? 'sub' : domOf(hit.u);
+    const armed = us.some(u => Object.values(u.def.weapons || {}).some(w => !w.gun && w.vs && w.vs.includes(dom) && !(w.auto && !w.salvo)))
+      || us.some(u => u.type === 'carrier');
+    const orders = game.getSystem('orders');
+    if (orders && orders.marks) orders.marks.push({ kind: 'no', at: hit.at, t0: game.realT, dur: 1.2 });
+    bad();
+    if (!armed) { say([['NO WEAPON FOR ' + dom.toUpperCase(), CORAL]], sx, sy); return; }
+    // who can scan it: the selection's scanners first, then any on the side; the one that reaches it, else the nearest
+    const pool = u => u.alive && u.def.scan && !u.off.scan && !u.aboard;
+    let sc = null, near = null;
+    for (const list of [us.filter(pool), sim.alive(game.side).filter(pool)]) {
+      for (const u of list) {
+        const d = Math.hypot(u.pos[0] - hit.at[0], u.pos[2] - hit.at[2]), k = d / u.def.scan.reach;
+        if (k <= 1 && (!sc || k < sc.k)) sc = { u, d, k };
+        if (!near || k < near.k) near = { u, d, k };
+      }
+      if (sc) break;
+    }
+    const line2 = sc ? [`${sc.u.def.cls} ${pad2(sc.u.id)} IN REACH · ${kmTxt(sc.d)} / ${kmTxt(sc.u.def.scan.reach)} KM`, LIME]
+      : near ? [`OUT OF REACH · ${kmTxt(near.d)} / ${kmTxt(near.u.def.scan.reach)} KM`, CORAL] : ['NO SCANNER', CORAL];
+    say([['NOT TRACKED · SCAN IT (X)', CORAL], line2], sx, sy);
+  }
+  /* R: what the reload order will find (the sim's reload rule), said only when it comes to nothing or to less */
+  function reloadNote() {
+    const us = game.selected().filter(u => !u.aboard);
+    if (!us.length) return;
+    const r = us.filter(u => u.type === 'tel' || u.type === 'bal' || u.type === 'transloader' || u.def.domain === 'sea' || u.type === 'pantsir');
+    if (!r.length) { game.bus.emit('toast', { text: 'NOTHING TO RELOAD', bad: true }); return; }
+    const full = u => u.type === 'transloader' ? u.cargo >= u.def.cargo
+      : ammoFull(u) && (!u.mag || Object.keys(u.mag).every(k => u.mag[k] >= u.def.magazine[k]));
+    const need = r.filter(u => !full(u));
+    if (!need.length) { game.bus.emit('toast', { text: 'FULL · NOTHING TO RELOAD', bad: true }); return; }
+    const tels = need.filter(u => u.type === 'tel' && !u.reloader);
+    if (!tels.length) return;
+    const loaders = sim.alive(game.side).filter(v => v.type === 'transloader' && !v.off.reload);
+    if (loaders.some(v => v.cargo > 0 && !v.busy)) return;            // a transloader comes to the TEL
+    const text = !loaders.length ? 'NO TRANSLOADER · TEL TO DEPOT' : loaders.every(v => v.cargo <= 0) ? 'TLV EMPTY · REFILL AT DEPOT' : 'TLV BUSY · TEL TO DEPOT';
+    game.bus.emit('toast', { text, bad: true });
+  }
+  const orderNotes = {
+    name: 'order-notes', priority: PRI.orders + 5,
+    onKey(e) {
+      if (e.type === 'keydown' && e.code === 'KeyR' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat) reloadNote();
+      return false;          // the orders system still gives the order
+    },
+    onPointer(ev) {
+      if (ev.type !== 'click' || ev.button !== 2 || !game.selected().length) return false;
+      if (pickUnit(ev.x, ev.y)) return false;                            // a unit or a track: the orders system's
+      const hit = pickContact(ev.x, ev.y);
+      if (!hit) return false;
+      contactClick(hit, ev.x, ev.y);
+      return true;
+    },
+    update() { for (let i = notes.length - 1; i >= 0; i--) if (game.realT - notes[i].t0 > notes[i].dur) notes.splice(i, 1); },
+    draw2d(ov) {
+      // below and right of the click (the cloud's own tag and class bars sit above it), each line on its dark strip
+      const k = ov.ui || 1;
+      for (const n of notes) {
+        const a = Math.max(0, Math.min(1, (n.dur - (game.realT - n.t0)) / .5));
+        let y = n.sy + 16 * k;
+        for (const [text, col] of n.lines) {
+          const b = ov.tag(n.sx + 14 * k, y, '', '', text, { kind: 'coral', valCol: col, a, size: 10.5, fit: true });
+          y = (b ? b[3] : y + 20 * k) + 2 * k;
+        }
+      }
+    },
+  };
+  return [selection, orderNotes];
 
   /* a tag goes up only where it does not cover another (a crowded selection keeps its marks). It stays on screen and
      out of the HUD panels; when it had to move away from its place, a leader runs back to the object (anchor). */

@@ -71,7 +71,8 @@ Unit = { id, type, side, def /* UNITS[type] */, pos, prev, hdg, prevHdg, pitch (
 | kind | effect |
 |---|---|
 | `move` | path on land (roads faster) / at sea (draught) / direct in the air. Several units: line-abreast formation at the slowest speed |
-| `attack` | `target` = enemy unit id (must be a track: conf ≥ CLASSIFY). Closes to range, deploys (TEL), fires `n` rounds (default the weapon's salvo) |
+| `attack` | `target` = enemy unit id (must be a track: conf ≥ CLASSIFY). Closes to range, deploys (TEL). With `n`: one volley of n rounds, then done (the AI, campaign scripts). Without `n` (the player's): persists, volleys of the salvo size (`salvo`, else the unit's `u.salvo`, else the weapon's own; 0 = all in hand), each watched until its rounds are down (+4 s), until the target is destroyed, the weapon is empty with no reload coming (an empty TEL calls a free transloader and waits), or the track has been lost for 300 s (the order holds meanwhile, the unit stops, and resumes when the track is back). `o.st` = 'close' / 'fire' / 'look' / 'reload' / 'lost', `o.vol` volleys fired |
+| `salvo` | immediate: `n` = 1 / 2 / 0 (all in hand): the unit's volley size for its persistent attacks (`u.salvo`) |
 | `stop` | clear orders and halt (an aircraft on deck also leaves the launch queue) |
 | `hold` | `on` (default true): hold position, offensive weapons pick their own targets. Defensive weapons always fire by themselves |
 | `weapons` | `free` true/false: set the weapons-free flag (`u.hold`) without touching the orders (the player's Weapons free / Hold fire); `free: false` also drops attack orders |
@@ -122,6 +123,9 @@ Guns (Phalanx, 2A38M) fire bursts resolved at once: `gunfire` events.
 
 `sim.buy(side, type)` → true if paid; arrives at the side's spawn after `UNITS[type].buildTime` (aircraft on the
 carrier, drones into a catapult). Supply: base 1.2/s + per held objective (held = own units inside r, no enemy).
+Placement (`findSpot`, economy.js): a valid spot clear of every other unit by `GAP` (vehicles 60 m, ships 450 m, a
+carrier more), random tries near the point first, then outward ring by ring; `spreadOut(sim, units)` steps apart any
+units a planner put on one spot (game/setup.js runs it on the starting forces).
 
 ## Events
 
@@ -147,6 +151,7 @@ carrier, drones into a catapult). Supply: base 1.2/s + per held objective (held 
 | `sonar` | side, by (listener), unit, track, pos (the fix), r (its roughness, m): the side heard a contact (≤ 1 per 5 s per contact) |
 | `dive` / `torpedo_end` | unit, side, depth / pos, kind, side, proj, why |
 | `order_unit` / `reinforce` / `objective` / `result` | side, type, unit / id, owner / winner, reason |
+| `engage` | unit, side, target, track, state ('volley' / 'lost' / 'resume' / 'done'), why ('destroyed' / 'empty' / 'lost' / 'out' / 'noweapon' / 'reach'), n (volleys), weapon: a persistent attack order |
 
 ## AI
 

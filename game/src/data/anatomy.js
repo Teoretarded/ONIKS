@@ -4,6 +4,8 @@
      model   model key to draw in Inspect: the cutaway from CUT_MODELS when there is one (same frame and
              state as the unit model, finer parts + interior parts), else the model itself
      title   'K340P TEL · Bastion-P'          size  overall size string        note  one public-reference line
+     frame   the word the X-ray slice tag uses for what it runs through ('chassis', 'hull', 'airframe', 'container'...;
+             optional: ui/inspect/subject.js has defaults for the rest)
      st      state the cutaway reads best in (merge under the unit's own state; optional)
      view    { yaw, pitch } suggested camera angles (rad; fitView() computes target and distance)
      parts   ordered entries; every model part appears in exactly one entry:
@@ -40,7 +42,7 @@ const E = (id, parts, label, size, explode, w0, cls, more) => Object.assign({ id
 export const ANATOMY = {
   /* ---------------------------------------------------------------- coast */
   tel: {
-    model: 'tel_cut', title: 'K340P TEL · Bastion-P', size: '13.8 × 3.1 × 3.4 m',
+    model: 'tel_cut', frame: 'chassis', title: 'K340P TEL · Bastion-P', size: '13.8 × 3.1 × 3.4 m',
     note: 'Self-propelled launcher on the MZKT-7930 8×8: two 3M55 rounds in sealed transport-launch containers, erected to near-vertical to fire.',
     st: { elev: 0, dep: 1 }, view: { yaw: -1.2, pitch: .2 },
     parts: [
@@ -71,7 +73,7 @@ export const ANATOMY = {
     })),
   },
   radar: {
-    model: 'radar_cut', title: 'Monolith-B · coastal radar', size: '13.8 × 3.1 m · mast 12.3 m',
+    model: 'radar_cut', frame: 'chassis', title: 'Monolith-B · coastal radar', size: '13.8 × 3.1 m · mast 12.3 m',
     note: 'Search radar on an MZKT-7930: a planar array on a five-section telescopic mast over the equipment shelter.',
     view: { yaw: -1.15, pitch: .18 },
     parts: [
@@ -89,7 +91,7 @@ export const ANATOMY = {
     xray: [],
   },
   pantsir: {
-    model: 'pantsir_cut', title: 'Pantsir-S1 · 72V6', size: '10.9 × 2.5 m',
+    model: 'pantsir_cut', frame: 'chassis', title: 'Pantsir-S1 · 72V6', size: '10.9 × 2.5 m',
     note: 'Gun-missile air defence on a KamAZ-6560 8×8: twin 30 mm guns, twelve 57E6 in two packs, search and tracking radars.',
     st: { yaw: 0, pitch: .2 }, view: { yaw: -1.0, pitch: .2 },
     parts: [
@@ -143,7 +145,7 @@ export const ANATOMY = {
     xray: [],
   },
   transloader: {
-    model: 'transloader', title: 'K342P transloader', size: '14.0 × 3.1 m',
+    model: 'transloader', frame: 'chassis', title: 'K342P transloader', size: '14.0 × 3.1 m',
     note: 'Reload vehicle on the MZKT-7930: carries two TLCs and swings them onto the launcher with its own crane.',
     st: { bedR: true, bedL: true }, view: { yaw: -1.1, pitch: .2 },
     parts: [
@@ -345,7 +347,7 @@ export const ANATOMY = {
     xray: [],
   },
   aew: {
-    model: 'aew_cut', title: 'E-2D Advanced Hawkeye', size: '17.6 × 24.6 m · rotodome Ø 7.32 m',
+    model: 'aew_cut', frame: 'airframe', title: 'E-2D Advanced Hawkeye', size: '17.6 × 24.6 m · rotodome Ø 7.32 m',
     note: 'Carrier-borne airborne early warning aircraft: the AN/APY-9 radar turns in its rotodome about six times a minute; two T56 turboprops, eight-blade propellers, four fins.',
     st: { dome: .5, prop: .3, fold: 0 }, view: { yaw: -.95, pitch: .36 },
     parts: [
@@ -368,7 +370,7 @@ export const ANATOMY = {
     xray: [],
   },
   ssn: {
-    model: 'ssn_cut', title: 'SSN Virginia class · Block III', size: '114.9 × 10.4 m',
+    model: 'ssn_cut', frame: 'hull', title: 'SSN Virginia class · Block III', size: '114.9 × 10.4 m',
     note: 'Nuclear attack submarine: large-aperture bow sonar, two Virginia Payload Tubes of six Tomahawk cells, four 533 mm torpedo tubes, photonics masts instead of periscopes, a pump-jet.',
     st: { mast: 1, vptA: 0, vptB: 0 }, view: { yaw: -1.05, pitch: .3 },
     parts: [
@@ -405,7 +407,7 @@ export const ANATOMY = {
     ],
   },
   ssk: {
-    model: 'ssk_cut', title: 'Kilo class · Project 636.3', size: '73.8 × 9.9 m',
+    model: 'ssk_cut', frame: 'hull', title: 'Kilo class · Project 636.3', size: '73.8 × 9.9 m',
     note: 'Diesel-electric attack submarine: six 533 mm bow tubes for torpedoes and Kalibr missiles, a large bow sonar, very quiet running on its batteries.',
     st: { mast: 1 }, view: { yaw: -1.05, pitch: .3 },
     parts: [
@@ -432,7 +434,7 @@ export const ANATOMY = {
     ],
   },
   bal: {
-    model: 'bal_cut', title: 'Bal · 3K60 coastal missile system', size: '14.0 × 3.1 m',
+    model: 'bal_cut', frame: 'chassis', title: 'Bal · 3K60 coastal missile system', size: '14.0 × 3.1 m',
     note: 'Self-propelled launcher on the MZKT-7930 8×8: eight Kh-35U anti-ship missiles in containers; the pack rises at the rear and the rounds leave over the back.',
     st: { elev: 0, dep: 1, n: 8 }, view: { yaw: -2.1, pitch: .2 },
     parts: [
@@ -490,7 +492,7 @@ export const ANATOMY = {
     xray: [],
   },
   tlc: {
-    model: 'tlc', title: 'TLC · 3M55 Oniks', size: '9.6 m · Ø 1.1 m',
+    model: 'tlc', frame: 'container', title: 'TLC · 3M55 Oniks', size: '9.6 m · Ø 1.1 m',
     note: 'Sealed transport-launch container: the round is stored, carried and fired from it.',
     view: { yaw: -1.3, pitch: .2 },
     parts: [
@@ -636,13 +638,13 @@ export const ANATOMY = {
     xray: [],
   },
   vpt_can: {
-    model: 'vpt_can', title: 'VPT cell canister', size: '6.35 m · Ø 0.6 m',
+    model: 'vpt_can', frame: 'canister', title: 'VPT cell canister', size: '6.35 m · Ø 0.6 m',
     view: { yaw: -1.3, pitch: .2 },
     parts: [E('01', ['canister'], 'Cell canister · Tomahawk · closed', '6.35 m', [0, 0, 0], 0, 'shell')],
     xray: [],
   },
   mk41_can: {
-    model: 'mk41_can', title: 'Mk 41 canister', size: '6.7 m',
+    model: 'mk41_can', frame: 'canister', title: 'Mk 41 canister', size: '6.7 m',
     view: { yaw: -1.3, pitch: .2 },
     parts: [E('01', ['canister'], 'Mk 41 canister · closed', '6.7 m', [0, 0, 0], 0, 'shell')],
     xray: [],

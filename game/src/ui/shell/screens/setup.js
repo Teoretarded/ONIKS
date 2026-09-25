@@ -65,7 +65,7 @@ export function setupScreen(app, mode) {
         { id: 'weather', label: 'Weather', choices: WEATHERS, value: MS.byId(mapId).weather || 'calm', blurb: v => WEATHER_BLURB[v] },
       );
     }
-    rows.push({ gap: true }, { id: 'start', label: 'Start', action: true, blurb: combat ? 'Fog of war is on. The enemy is awake.' : 'Both rosters in the spawn palette; the red force waits for you.' });
+    rows.push({ gap: true }, { id: 'start', label: 'Start', action: true, blurb: combat ? 'Fog of war is on. The enemy is awake.' : 'Both rosters in the spawn palette (P). The enemy AI sleeps until you wake it (K).' });
     form = new Form(formEl, {
       rows, blurb, enter: 'start',
       onChange(id, v, user) {
