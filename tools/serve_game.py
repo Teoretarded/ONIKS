@@ -9,7 +9,9 @@ PNG sink:  POST /save?path=<repo-relative .png> with a PNG data URL body.
 import base64
 import http.server
 import os
+import socket
 import sys
+import threading
 import urllib.parse
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -45,6 +47,17 @@ class H(http.server.SimpleHTTPRequestHandler):
         pass
 
 
+class V6(http.server.ThreadingHTTPServer):
+    address_family = socket.AF_INET6
+
+
 if __name__ == '__main__':
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8771
+    # 'localhost' resolves to ::1 first (Windows): with nothing listening there every request waits ~0.5 s before the
+    # browser falls back to 127.0.0.1, and the game's ~130 modules took 10-15 s to load. Serve both loopbacks.
+    try:
+        v6 = V6(('::1', port), H)
+        threading.Thread(target=v6.serve_forever, daemon=True).start()
+    except OSError as e:
+        print('serve_game: no IPv6 loopback (%s); http://127.0.0.1:%d/ is the fast address' % (e, port))
     http.server.ThreadingHTTPServer(('127.0.0.1', port), H).serve_forever()
