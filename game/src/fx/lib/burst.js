@@ -204,7 +204,7 @@ export class BoosterSep {
       dot(p[0], p[1], p[2], 3, 255, 255, 240, w);
       C.halo(p[0], p[1], p[2], -4, 245, 255, 215, .5 * w * w);
       const n = Math.round(30 * C.q);
-      for (let m = 0; m < n; m++) { const j = (m * 7 + this.seed) & GM, rr = .5 + 5 * age; dot(p[0] + GT[j] * rr - this.a[0] * age * 20, p[1] + GT[j + 1] * rr - this.a[1] * age * 20, p[2] + GT[j + 2] * rr - this.a[2] * age * 20, 1, 226, 238, 205, .5 * w); }
+      for (let m = 0; m < n; m++) { const j = (m * 7 + this.seed) & GM, rr = .5 + 5 * age; dot(p[0] + GT[j] * rr - this.a[0] * age * 20, p[1] + GT[(j + 1) & GM] * rr - this.a[1] * age * 20, p[2] + GT[(j + 2) & GM] * rr - this.a[2] * age * 20, 1, 226, 238, 205, .5 * w); }
     }
     if (F.wet && age > F.landed + .1) return;
     const p = F.at(age, this.Q), pxm = V.pxm(p[0], p[1], p[2]);
