@@ -158,7 +158,7 @@ export function createOrbital(game) {
     const kn = Math.round((u.speed || 0) * KN);
     switch (u.type) {
       case 'tel': {
-        const s = u.reloadU > 0 ? 'reloading' : u.elev >= 1.5 ? 'erect' : u.elevT > 0 ? 'erecting' : u.dep > 0 && u.depT > 0 ? 'on jacks' : u.dep > 0 ? 'stowing' : u.speed > .5 ? 'driving' : 'stowed';
+        const s = u.reloader || (u.depotLoad && u.reloadP > 0) ? 'reloading' : u.elev >= 1.5 ? 'erect' : u.elevT > 0 ? 'erecting' : u.dep > 0 && u.depT > 0 ? 'on jacks' : u.dep > 0 ? 'stowing' : u.speed > .5 ? 'driving' : 'stowed';
         add('3M55 '); add('×' + (u.ammo.oniks || 0), 1); add(' · ' + s); break;
       }
       case 'radar': add(u.mast < 1 ? (u.mastT > 0 ? 'mast going up' : 'mast stowed') : u.radarOn ? 'radiating' : 'EMCON', 1); add(' · ' + (u.st && u.st.ant !== undefined && u.radarOn ? Math.round(60 / d.sensors.radar.period) + ' rpm' : 'surface search')); break;

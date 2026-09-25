@@ -29,7 +29,7 @@ export function status(u) {
   switch (u.type) {
     case 'tel': {
       const s = u.elev >= 1.5 ? 'ERECT' : u.dep >= 1 && u.elevT > 0 ? 'ERECTING' : u.dep > 0 && u.depT > 0 ? 'JACKS' : u.dep > 0 ? 'STOWING' : 'STOWED';
-      return `${u.reloadU > 0 ? 'RELOAD' : s} · ${u.ammo.oniks} RD`;
+      return `${u.reloader || (u.depotLoad && u.reloadP > 0) ? 'RELOAD' : s} · ${u.ammo.oniks} RD`;   // the TEL side of a reload (sim/mech.js); reloadU is the transloader's
     }
     case 'radar': return u.mast < 1 ? (u.mastT > 0 ? 'MAST UP' : u.mast > 0 ? 'MAST DOWN' : 'STOWED') : u.radarOn ? 'RADIATING' : 'EMCON';
     case 'pantsir': return `${u.radarOn ? 'RDR' : 'EMCON'} · ${u.ammo.sam} SAM`;
