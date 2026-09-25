@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>ONIKS</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+  :root { --bg: #0B0C0A; --lime: #C6F432; --coral: #FF6A3D; --dim: rgba(255,255,255,.62); --faint: rgba(255,255,255,.36);
+    --sans: 'Geist', 'Segoe UI', sans-serif; --mono: 'Geist Mono', Consolas, monospace; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: #fff; font-family: var(--sans); -webkit-font-smoothing: antialiased; user-select: none; }
+  #view { position: fixed; inset: 0; }
+  #gl, #ov { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: block; }
+  #gl { image-rendering: pixelated; }
+  #ov { pointer-events: none; }
+  #ui { position: absolute; inset: 0; pointer-events: none; }
+  #perf { position: absolute; right: 18px; top: 14px; font: 400 11px/1.6 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); text-align: right; font-variant-numeric: tabular-nums; white-space: pre; }
+  #perf b { font-weight: 400; color: #fff; }
+  #boot { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font: 500 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); gap: 12px; background: var(--bg); transition: opacity .4s; }
+  #boot i { width: 8px; height: 8px; background: var(--lime); animation: blink .5s steps(2) infinite; }
+  #boot.off { opacity: 0; pointer-events: none; }
+  @keyframes blink { 50% { opacity: 0; } }
+</style></head>
+<body>
+<div id="view">
+  <canvas id="gl"></canvas>
+  <canvas id="ov"></canvas>
+  <div id="ui"><div id="perf"></div></div>
+  <div id="boot"><i></i><span id="bootmsg">Loading</span></div>
+</div>
+<script src="../reference/menus/common/m3.js"></script>
+<script src="../reference/menus/common/geo.js"></script>
+<script src="../reference/films/common/hd_land.js"></script>
+<script src="../reference/films/common/hd_sea_air.js"></script>
+<script type="module" src="src/main.js"></script>
+</body></html>
