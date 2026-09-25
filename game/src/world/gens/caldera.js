@@ -68,14 +68,15 @@ export default {
       return -roughness(A, x, z, 400) * 10 - A.h(x, z) / 60 - Math.abs(adiff(th, GAP + 0.9)) * 0.8;
     }, { stride: 1, box: [CX - RIM, CZ - RIM, CX + RIM, CZ + RIM], edge: 0 });
     // the coast spawn: the gentler south-west outer flank, rim crest behind it
-    const coast = coastSpawn(A, [CX - 30000, CZ - 30000, CX + 3000, CZ + 3000], { maxCoast: 4500, wantRise: 400, score: (x, z) => { const [r] = polar(x, z); return r > RIM + 2000 ? 1 : -Infinity; } });
+    // spawns ~90 km apart (balance): the battery on the south-west flank, the fleet in the far north-east corner
+    const coast = { x: -26000, z: -18000, r: 2500, hdg: A.seaward(-26000, -18000) };
     // depot on the outer flank, south-east
     const dep = bestSite(A, (x, z) => {
       if (!allLand(A, x, z, 900)) return -Infinity;
       const [r, th] = polar(x, z); if (r < RIM + 2500) return -Infinity;
       return -roughness(A, x, z, 500) * 20 - Math.abs(adiff(th, 2.3)) * 1.5 - A.h(x, z) / 200;
     }, { stride: 2, seed: 4 });
-    const fleet = fleetSpawn(A, 33000, 33000, 9000, [CX, CZ], { clear: 6000, depth: -100 });
+    const fleet = { x: 42000, z: 42000, r: 6000, hdg: Math.atan2(coast.x - 42000, coast.z - 42000) };
     places.push(
       { name: 'Kraterny', kind: 'town', x: port.x, z: port.z },
       { name: 'Goryachy Plyazh', kind: 'village', x: dep.x, z: dep.z },

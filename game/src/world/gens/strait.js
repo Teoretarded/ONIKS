@@ -136,8 +136,10 @@ export default {
     }, { stride: 2, seed: 6 });
     const lh = bestSite(A, (x, z) => A.isLand(x, z) && A.coastDist(x, z) < 300 && Math.hypot(x - isl[0], z - isl[1]) < 5000 ? A.seaFrac(x, z, 1200) - (z - isl[1]) / 8000 : -Infinity,
       { box: [isl[0] - 5000, isl[1] - 5000, isl[0] + 5000, isl[1] + 5000], stride: 1, edge: 0 });
-    const coast = coastSpawn(A, [-40000, -26000, -7000, 26000], { maxCoast: 3500, wantRise: 300 });
-    const fleet = fleetSpawn(A, 0, -60000, 8000, [0, 0], { clear: 6000, depth: -60 });
+    // spawns ~96 km apart (balance): the battery on the south coast of the west shore, the fleet in the north-west
+    // sea (it comes through the strait)
+    const coast = { x: -42000, z: -41000, r: 2500, hdg: A.seaward(-42000, -41000) };
+    const fleet = { x: -50000, z: 55000, r: 6000, hdg: Math.atan2(coast.x + 50000, coast.z - 55000) };
     places.push(
       { name: 'Zapadny', kind: 'town', x: pW.x, z: pW.z },
       { name: 'Vostochny', kind: 'town', x: pE.x, z: pE.z },
@@ -162,7 +164,7 @@ export default {
     return {
       places, objectives,
       spawns: { coast, fleet },
-      replenish: { x: 50000, z: -63000, r: 5000 },
+      replenish: { x: 5000, z: 66000, r: 5000 },
       pads: [
         { x: coast.x, z: coast.z, r: 450, r1: 1100 },
         { x: rh[0], z: rh[1], r: 220, r1: 550 },

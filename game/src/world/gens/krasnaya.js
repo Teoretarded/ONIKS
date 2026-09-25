@@ -157,10 +157,10 @@ export default {
       { id: 'OBJ 05', name: 'Lighthouse · Ostrov Chaika', kind: 'lighthouse', x: lh.x, z: lh.z, r: 700 },
     ];
     const base = P(0, -0.6);
-    const fleet = P(12, 99);
+    const fleet = P(-63, 77);                 // north-west, ~100 km from the battery (balance)
     return {
       places, objectives,
-      spawns: { coast: { x: base.x, z: base.z, r: 2500, hdg: 0 }, fleet: { x: fleet.x, z: fleet.z, r: 6000, hdg: Math.PI } },
+      spawns: { coast: { x: base.x, z: base.z, r: 2500, hdg: 0 }, fleet: { x: fleet.x, z: fleet.z, r: 6000, hdg: Math.atan2(base.x - fleet.x, base.z - fleet.z) } },
       replenish: { ...P(52, 105), r: 5000 },
       pads: [
         { x: base.x, z: base.z, r: 560, r1: 1200 },

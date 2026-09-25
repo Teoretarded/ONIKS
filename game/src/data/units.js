@@ -29,7 +29,7 @@ export const UNITS = {
     type: 'hq', side: 'coast', name: 'K380R', cls: 'HQ', label: 'K380R command post · Bastion-P',
     domain: 'land', model: 'hq', hq: true, static: true,
     size: [28, 28, 4], top: 18.6, speed: 0, road: 0, turn: 0,          // site: two shelter trucks, comms, 18 m mast
-    hp: 150, rcs: 0.5, dieTime: 20,
+    hp: 80, rcs: 0.5, dieTime: 20,                                // balance: 150 -> 80 (two TLAM or SLAM hits)
     sensors: { esm: 120000 },
     emits: { range: 70000 },                                      // comms: always radiating
     scan: { reach: 50000, r: 4000, cd: 90 },
@@ -82,9 +82,9 @@ export const UNITS = {
     speed: 8, road: 16.7, turn: .45, accel: 1.2, slopeMax: .4,
     hp: 25, rcs: 0.5, dieTime: 20,
     mast: { time: 15, h: 14 },                                    // raise the mast before radiating
-    sensors: { radar: { surf: 110000, air: 40000, land: 0, period: 5, gain: .16, h: 14, needsMast: true } },
+    sensors: { radar: { surf: 90000, air: 40000, land: 0, period: 5, gain: .16, h: 14, needsMast: true } },   // balance: surf 110 -> 90 km
     emits: { range: 140000 },
-    scan: { reach: 70000, r: 4000, cd: 90 },
+    scan: { reach: 85000, r: 4000, cd: 90 },                      // balance: 70 -> 85 km (finds the carrier as it closes)
     weapons: {},
     cost: 350, buildTime: 90,
     parts: {
@@ -207,7 +207,7 @@ export const UNITS = {
     domain: 'sea', model: 'carrier', hq: true,
     size: [332.8, 76.8, 62], top: 62, draught: 11.3,
     speed: 30 * KN, turn: .02, accel: .08,
-    hp: 400, rcs: 1.6, dieTime: 60,
+    hp: 300, rcs: 1.6, dieTime: 60,                               // balance: 400 -> 300 (four Oniks hits)
     sensors: { radar: { surf: 45000, air: 110000, land: .3, period: 4, gain: .15, h: 45 } },
     emits: { range: 150000 },
     air: { cap: 12, launchGap: 20, deckY: 19.5, types: ['fighter', 'helo'] },   // launches F/A-18E and MH-60R
@@ -351,11 +351,11 @@ export const PROJ = {
           rcs: .15, vert: 0, v0: 0, boost: 3, alt: 90, pitchMax: .35, pitchRate: .25, turn: .12, finalDist: 4000, finalAlt: 25 },
   hellfire: { name: 'AGM-114 Hellfire', cls: 'ATGM', model: 'hellfire', mode: 'direct', threat: true, speed: 400, dmg: 25, pk: .8, reach: 400,
               rcs: .03, vert: 0, v0: 0, boost: 2.5, turn: .6, pitchRate: .6 },
-  sm6: { name: 'RIM-174 SM-6', cls: 'SAM', model: 'sm6', boosterModel: 'mk72', mode: 'direct', speed: 1100, dmg: 15, pk: { missile: .3, air: .75 },
+  sm6: { name: 'RIM-174 SM-6', cls: 'SAM', model: 'sm6', boosterModel: 'mk72', mode: 'direct', speed: 1100, dmg: 15, pk: { missile: .15, air: .75 },
          vert: 2.0, v0: 20, boost: 6, sepAt: 6, turn: .35, pitchRate: .28 },
-  pdms: { name: 'RIM-162 ESSM', cls: 'SAM', model: 'essm', mode: 'direct', speed: 1000, dmg: 12, pk: { missile: .3, air: .7 },
+  pdms: { name: 'RIM-162 ESSM', cls: 'SAM', model: 'essm', mode: 'direct', speed: 1000, dmg: 12, pk: { missile: .15, air: .7 },
           vert: 1.0, v0: 20, boost: 3, turn: .5, pitchRate: .45 },
-  sam: { name: '57E6', cls: 'SAM', model: 'sam57e6', mode: 'direct', speed: 900, dmg: 12, pk: { missile: .45, air: .75 },
+  sam: { name: '57E6', cls: 'SAM', model: 'sam57e6', mode: 'direct', speed: 900, dmg: 12, pk: { missile: .22, air: .75 },
          vert: 0, v0: 60, boost: 2.4, sepAt: 2.4, turn: .6, pitchRate: .6 },
   aam: { name: 'AIM-120D', cls: 'AAM', model: 'aim120', mode: 'direct', speed: 1200, dmg: 15, pk: { air: .7, missile: 0 },
          vert: 0, v0: 0, boost: 3, turn: .5, pitchRate: .5 },

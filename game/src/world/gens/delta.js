@@ -90,8 +90,9 @@ export default {
       if (!allLand(A, x, z, 2200) || x < 18000 || x > 48000 || A.h(x, z) < 4) return -Infinity;
       return -roughness(A, x, z, 1500) * 80 - Math.abs(z + 30000) / 30000;
     }, { stride: 2, seed: 5 });
-    const coast = coastSpawn(A, [-62000, -45000, -28000, 0], { maxCoast: 4500, wantRise: 50, score: (x, z) => Math.min(A.h(x, z), 40) / 12 });
-    const fleet = fleetSpawn(A, 5000, 44000, 9000, [0, 0], { clear: 6000, depth: -20 });
+    // spawns ~94 km apart (balance): the battery on the plain by the main channel, the fleet off the north-east shelf
+    const coast = { x: 4000, z: -25000, r: 2500, hdg: A.seaward(4000, -25000) };
+    const fleet = { x: 60000, z: 50000, r: 6000, hdg: Math.atan2(coast.x - 60000, coast.z - 50000) };
     places.push(
       { name: 'Ust-Solyonaya', kind: 'town', x: port.x, z: port.z },
       { name: 'Razvilka', kind: 'town', x: apex.x, z: apex.z },

@@ -112,8 +112,10 @@ export default {
       const dp = Math.hypot(x - port.x, z - port.z); if (dp < 6000 || dp > 18000) return -Infinity;
       return -roughness(A, x, z, 500) * 20 - A.h(x, z) / 150;
     }, { stride: 2, seed: 9 });
-    const coast = coastSpawn(A, [-34000, -30000, -10000, 30000], { maxCoast: 3500, wantRise: 450 });
-    const fleet = fleetSpawn(A, -62000, 2000, 7000, [0, 0], { clear: 5000, depth: -40 });
+    // spawns ~90 km apart (balance): the battery on the strandflat north of Guba Kamennaya, the fleet off the
+    // north-west coast
+    const coast = { x: -43000, z: -28000, r: 2500, hdg: A.seaward(-43000, -28000) };
+    const fleet = { x: -64000, z: 58000, r: 6000, hdg: Math.atan2(coast.x + 64000, coast.z - 58000) };
     places.push(
       { name: 'Rybachy', kind: 'town', x: port.x, z: port.z },
       { name: 'Lodeinoye', kind: 'town', x: town2.x, z: town2.z },

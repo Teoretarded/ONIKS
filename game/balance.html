@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>BAL …</title>
+<link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #0B0C0A; --ink: rgba(255,255,255,.82); --dim: rgba(255,255,255,.42); --lime: #C6F432; --coral: #FF6A3D; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font: 12px/1.5 'Geist Mono', ui-monospace, monospace; }
+  main { padding: 24px 28px; }
+  h1 { font-weight: 500; font-size: 13px; letter-spacing: .18em; color: var(--dim); margin: 0 0 6px; }
+  #head { color: var(--dim); margin-bottom: 14px; }
+  #sum { white-space: pre; margin: 0 0 18px; }
+  table { border-collapse: collapse; }
+  th { font-weight: 400; color: var(--dim); text-align: left; padding: 2px 12px 4px 0; }
+  td { padding: 1px 12px 1px 0; border-bottom: 1px dotted rgba(255,255,255,.07); white-space: nowrap; }
+  td.n { text-align: right; }
+  td.k { color: var(--dim); font-size: 11px; }
+  tr.coast td.w { color: var(--lime); }
+  tr.fleet td.w { color: var(--coral); }
+</style>
+</head>
+<body>
+<main>
+  <h1>ONIKS · BALANCE</h1>
+  <div id="head"></div>
+  <div id="sum"></div>
+  <table>
+    <thead><tr><th>map</th><th>seed</th><th>winner</th><th>reason</th><th>sim min</th><th>spawn km</th><th>1st hit</th><th>lost c/f</th><th>score c/f</th><th>coast killed</th><th>fleet killed</th><th>wall s</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+</main>
+<script src="../reference/menus/common/m3.js"></script>
+<script type="module" src="src/balance.js"></script>
+</body>
+</html>

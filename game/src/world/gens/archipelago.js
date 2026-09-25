@@ -76,7 +76,7 @@ export default {
       if (!allLand(A, x, z, 1000) || lab[A.idx(x, z)] !== mainland.L || A.coastDist(x, z) < 3000) return -Infinity;
       return -roughness(A, x, z, 500) * 15 - Math.hypot(x - port.x, z - port.z) / 15000;
     }, { stride: 2, seed: 7 });
-    const fleet = fleetSpawn(A, -52000, 52000, 12000, [0, 0], { clear: 6000, depth: -40 });
+    const fleet = { x: -20000, z: 62000, r: 6000, hdg: Math.atan2(coast.x + 20000, coast.z - 62000) };   // ~114 km (balance)
     places.push(
       { name: 'Keret', kind: 'town', x: port.x, z: port.z },
       { name: 'Shkhernoye', kind: 'village', x: dep.x, z: dep.z },
