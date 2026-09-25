@@ -145,20 +145,40 @@ function autoReturn(sim, u) {
 
 /* where an aircraft lands: drones at a catapult; others on a deck that takes their type (carrier; helos also a DDG) */
 function homeOf(sim, u) {
-  let best = null, bd = 1e18;
-  for (const v of sim.alive(u.side)) {
+  let best = null, bd = 1e18, occ = null;
+  const own = u.type !== 'drone' ? sim.units.get(u.aboardOf || 0) : null, al = hostsOf(sim, u.side);
+  for (let i = 0; i < al.length; i++) {
+    const v = al[i];
     if (u.type === 'drone') { if (v.type !== 'catapult') continue; }
     else if (!v.def.air || !v.def.air.types.includes(u.type) || v.off.air) continue;
-    else if (v.type !== 'carrier' && v !== sim.units.get(u.aboardOf || 0) && deckFull(sim, v)) continue;
+    else if (v.type !== 'carrier' && v !== own && (occ || (occ = deckCounts(sim, u.side)))[v.id] >= v.def.air.cap) continue;
     const dd = dxz(u.pos[0], u.pos[2], v.pos[0], v.pos[2]);
     if (dd < bd) { bd = dd; best = v; }
   }
   return best;
 }
 
-function deckFull(sim, v) {
-  let n = 0; for (const w of sim.alive(v.side)) if (w.aboard === v.id || w.landing === v.id) n++;
-  return n >= v.def.air.cap;
+/* the side's units with a deck or a catapult, in sim.alive() order (rebuilt whenever sim.alive() gives a new array) */
+const HOSTS = { coast: { al: null, list: [] }, fleet: { al: null, list: [] } };
+function hostsOf(sim, side) {
+  const al = sim.alive(side), H = HOSTS[side];
+  if (H.al !== al) {
+    H.al = al; H.list.length = 0;
+    for (let i = 0; i < al.length; i++) { const v = al[i]; if (v.def.air || v.type === 'catapult') H.list.push(v); }
+  }
+  return H.list;
+}
+
+/* aircraft on or landing on each deck of a side, by host id (deckFull for every deck in one pass) */
+let OCC = new Int32Array(256);
+function deckCounts(sim, side) {
+  if (OCC.length < sim.nextId) OCC = new Int32Array(sim.nextId * 2);
+  else OCC.fill(0, 0, sim.nextId);
+  for (const w of sim.alive(side)) {
+    if (w.aboard) OCC[w.aboard]++;
+    if (w.landing && w.landing !== w.aboard) OCC[w.landing]++;
+  }
+  return OCC;
 }
 
 function requestLaunch(sim, u) {

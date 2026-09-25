@@ -45,6 +45,16 @@ function dispAt(p, range) {
 }
 
 /* ---------- target choice and firing (every SENSE_EVERY ticks) ---------- */
+/* what a weapon engages, from its `vs` list (cached on the weapon's table entry; `vs` is never changed at run time) */
+function vsOf(w) {
+  let f = w._vs;
+  if (f === undefined) {
+    const v = w.vs;
+    f = w._vs = (v.includes('land') || v.includes('sea') || v.includes('sub') ? 1 : 0) | (v.includes('missile') ? 2 : 0) | (v.includes('air') ? 4 : 0);
+  }
+  return f;
+}
+const VS_SURF = 1, VS_MISSILE = 2, VS_AIR = 4;
 const THREATS = { coast: [], fleet: [] }, INB = { coast: new Map(), fleet: new Map() };
 export function weaponsTick(sim) {
   const list = sim.list(), t = sim.t;
@@ -62,19 +72,20 @@ export function weaponsTick(sim) {
     for (const wn in W) {
       const w = W[wn];
       if (u.ammo[wn] <= 0 || u.cooldowns[wn] > 0 || u.off[wn]) continue;
-      if (w.mounts && w.mounts.every(m => u.off[m])) continue;
+      if (w.mounts && allOff(u, w.mounts)) continue;
       if (w.needsRadar && !radarWorks(u)) continue;
       if (w.sub && isSub(u) && !atPD(u)) continue;               // missiles leave a boat from periscope depth
       if (w.auto && autoFire(sim, u, w)) continue;
-      if (w.vs.includes('land') || w.vs.includes('sea') || w.vs.includes('sub')) offensive(sim, u, w);
+      if (vsOf(w) & VS_SURF) offensive(sim, u, w);
     }
   }
 }
+function allOff(u, mounts) { for (let i = 0; i < mounts.length; i++) if (!u.off[mounts[i]]) return false; return true; }
 
 function threatsFor(sim, u, w) {
   const side = u.side, t = sim.t, ux = u.pos[0], uy = u.pos[1], uz = u.pos[2];
   let best = null, bs = 1e18;
-  if (!w.vs.includes('missile')) return null;
+  if (!(vsOf(w) & VS_MISSILE)) return null;
   const list = THREATS[side];
   for (let i = 0; i < list.length; i++) {
     const p = list[i];
@@ -90,7 +101,7 @@ function threatsFor(sim, u, w) {
   return best;
 }
 function aircraftFor(sim, u, w) {
-  if (!w.vs.includes('air')) return null;
+  if (!(vsOf(w) & VS_AIR)) return null;
   const S = sim.sides[u.side], t = sim.t;
   let best = null, bd = 1e18;
   for (const c of S.contacts.values()) {

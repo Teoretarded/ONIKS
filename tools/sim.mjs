@@ -191,9 +191,9 @@ async function profiledStepper() {
   const { stepDying } = await mod('sim/damage.js');
   const { economyTick, checkResult } = await mod('sim/economy.js');
   const { SIDES } = await mod('data/units.js');
-  const T = {}, now = () => performance.now();
+  const T = {}, N = {}, now = () => performance.now();
   const K = ['ai', 'orders', 'mech', 'move', 'scans', 'sense', 'esm', 'sonar', 'weapons', 'proj', 'guns', 'dying', 'weather', 'model', 'economy'];
-  for (const k of K) T[k] = 0;
+  for (const k of K) { T[k] = 0; N[k] = 0; }
   function step(sim) {
     sim.tick++;
     const t = sim.t = sim.tick * DT, tick = sim.tick;
@@ -213,6 +213,7 @@ async function profiledStepper() {
       if (u.launchQ) carrierOps(sim, u);
       b = now(); T.mech += b - a; a = b;
       moveUnit(sim, u); b = now(); T.move += b - a; a = b;
+      N.orders++; N.mech++; N.move++;
     }
     if (sim.scans.length) resolveScans(sim);
     b = now(); T.scans += b - a; a = b;
@@ -236,7 +237,7 @@ async function profiledStepper() {
     if (tick % 20 === 0) checkResult(sim);
     b = now(); T.economy += b - a;
   }
-  return { step, T, K };
+  return { step, T, K, N };
 }
 
 async function cmdBench() {
@@ -260,7 +261,10 @@ async function cmdBench() {
   console.log(`step: ${fmt(best, 2)} ms per sim-second (t = ${warm}..${warm + secs} s, best of ${reps}) → x32 costs ${fmt(best * 32 / 10, 1)} % of a core`);
   // the per-module breakdown, on a twin of the same battle, stepped by the profiled copy of step()
   const twin = await benchSim(BO);
-  const { step, T, K } = await profiledStepper();
+  const { step, T, K, N } = await profiledStepper();
+  // what one clock read costs (subtracted per read from the stages that take one per unit)
+  let clk = 0;
+  { const n = 2e6; let x = 0; const t0 = performance.now(); for (let i = 0; i < n; i++) x += performance.now(); clk = (performance.now() - t0) / n; if (x === 1) console.log(''); }
   for (let i = 0; i < warm / DT; i++) { twin.step(); twin.drainEvents(); }
   twin.prof = { proj: 0, guns: 0 };
   const P = Math.round(secs / DT);
@@ -268,12 +272,43 @@ async function cmdBench() {
   for (let i = 0; i < P; i++) { step(twin); twin.drainEvents(); }
   const tot = performance.now() - t0;
   T.proj = twin.prof.proj; T.guns = twin.prof.guns;
+  for (const k of K) T[k] = Math.max(0, T[k] - N[k] * clk);
   const per = x => x / (P * DT);
-  console.log(`\nper module (profiled copy of step(), ${fmt(P * DT, 0)} s; unclocked (prev copies, timers) ${fmt(per(tot - K.reduce((a, k) => a + T[k], 0)), 2)} ms/s):`);
+  console.log(`\nper stage (a copy of step() with a clock round each stage, ${fmt(P * DT, 0)} s; a clock read ${fmt(clk * 1e6, 0)} ns, taken out of the per-unit stages; the rest: prev copies and clocks ${fmt(per(tot - K.reduce((a, k) => a + T[k], 0)), 2)} ms/s):`);
   for (const k of K.slice().sort((a, b) => T[b] - T[a])) console.log(`  ${k.padEnd(9)} ${fmt(per(T[k]), 3).padStart(8)} ms/s  ${fmt(100 * T[k] / tot, 1).padStart(5)} %`);
   console.log(`  ${'total'.padEnd(9)} ${fmt(per(tot), 3).padStart(8)} ms/s`);
   // the profiled stepper must be the same step: same state after the same ticks
+  if (!opt('noprof')) await fileProfile(BO, warm, secs);
   console.log(`\nprofiled step == sim.step: ${sim.hash() === twin.hash() ? 'yes' : 'NO'} (${sim.hash()} / ${twin.hash()})`);
+}
+
+/* self time per source file over the same stretch (V8's sampling profiler, through node:inspector): the split by
+   module, callees included where they live (map.h in the map's file, helpers in util.js) */
+async function fileProfile(BO, warm, secs) {
+  const { Session } = await import('node:inspector/promises');
+  const { DT } = await mod('sim/consts.js');
+  const sim = await benchSim(BO);
+  for (let i = 0; i < warm / DT; i++) { sim.step(); sim.drainEvents(); }
+  const ss = new Session(); ss.connect();
+  await ss.post('Profiler.enable'); await ss.post('Profiler.setSamplingInterval', { interval: 100 });
+  await ss.post('Profiler.start');
+  const t0 = performance.now();
+  for (let i = 0; i < secs / DT; i++) { sim.step(); sim.drainEvents(); }
+  const ms = performance.now() - t0;
+  const { profile: P } = await ss.post('Profiler.stop');
+  ss.disconnect();
+  const dt = new Map();
+  for (let i = 0; i < P.samples.length; i++) dt.set(P.samples[i], (dt.get(P.samples[i]) || 0) + (P.timeDeltas[i] || 0));
+  const F = new Map(); let tot = 0;
+  for (const n of P.nodes) {
+    const t = dt.get(n.id) || 0; if (!t) continue;
+    const u = n.callFrame.url, i = u.indexOf('/game/src/');
+    const k = i >= 0 ? u.slice(i + 10) : n.callFrame.functionName === '(garbage collector)' ? '(gc)' : '(other)';
+    if (n.callFrame.functionName === '(idle)' || n.callFrame.functionName === '(program)') continue;
+    F.set(k, (F.get(k) || 0) + t); tot += t;
+  }
+  console.log(`\nper file (CPU profile self time, ${fmt(secs, 0)} s, ${fmt(ms / secs, 2)} ms/s while sampled):`);
+  for (const [k, t] of [...F].sort((a, b) => b[1] - a[1])) if (t / tot >= .003) console.log(`  ${k.padEnd(20)} ${fmt(ms / secs * t / tot, 3).padStart(8)} ms/s  ${fmt(100 * t / tot, 1).padStart(5)} %`);
 }
 
 /* ---------------------------------------------------------------- hash (determinism proof) */

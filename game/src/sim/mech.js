@@ -13,8 +13,10 @@ export const erectW = d => d.erectW || (d.erectW = Object.keys(d.weapons).find(k
 const SLEW = 1.6;   // rad/s turret slew
 
 export function mechanics(sim, u) {
-  const d = u.def, t = sim.t;
-  for (const k in u.cooldowns) if (u.cooldowns[k] > 0) u.cooldowns[k] -= DT;
+  const d = u.def, t = sim.t, cd = u.cooldowns;
+  // the timers a unit has: 'scan' and one per weapon (sim.spawn), the same keys for every unit of a type
+  const ks = d._cdKeys || (d._cdKeys = Object.keys(cd));
+  for (let i = 0; i < ks.length; i++) { const k = ks[i]; if (cd[k] > 0) cd[k] -= DT; }
 
   // TEL / Bal: jacks down, then erect (the Bal raises its pack); lower before raising the jacks
   if (d.deploy) {
@@ -169,7 +171,7 @@ function replenish(sim, u) {
   const R = replenishPoint(sim, u);
   if (!R || u.speed > 4 || dxz(u.pos[0], u.pos[2], R.x, R.z) > R.r) return;
   refillWeapons(sim, u);
-  if (u.mag) for (const k in u.def.magazine) if (u.mag[k] < u.def.magazine[k] && sim.tick % 60 === 0) u.mag[k]++;
+  if (u.mag && sim.tick % 60 === 0) for (const k in u.def.magazine) if (u.mag[k] < u.def.magazine[k]) u.mag[k]++;
 }
 export function ammoFull(u) { for (const w in u.def.weapons) if (u.ammo[w] < u.def.weapons[w].ammo) return false; return true; }
 

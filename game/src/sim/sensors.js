@@ -323,20 +323,31 @@ function decay(sim, side, dt) {
 }
 
 /* ---------- emitters (1 Hz): radiating units are heard by the other side ---------- */
+let LCAP = 0, LX, LZ, LTOP;
 export function esmTick(sim) {
   for (const side of ['coast', 'fleet']) {
     const own = sim.alive(side), foes = sim.alive(ENEMY[side]);
+    // the listeners, flattened once (roughContact below changes contacts only, never a unit)
+    let n = 0;
+    if (own.length > LCAP) { LCAP = Math.max(64, own.length * 2); LX = new Float64Array(LCAP); LZ = new Float64Array(LCAP); LTOP = new Float64Array(LCAP); }
+    for (const u of own) {
+      if (u.aboard || deep(u)) continue;                          // a deep boat has no mast up to listen with
+      const h = topH(u);
+      LX[n] = u.pos[0]; LZ[n] = u.pos[2]; LTOP[n] = Math.sqrt(h > 0 ? h : 0); n++;
+    }
     for (const e of foes) {
       if (!emitting(e)) continue;
       const er = e.def.emits ? e.def.emits.range : 0;
       if (!er) continue;
       const he = e.def.domain === 'air' ? e.pos[1] : e.pos[1] + (e.def.sensors.radar ? e.def.sensors.radar.h || 5 : 10);
+      const ex = e.pos[0], ez = e.pos[2], she = Math.sqrt(he > 0 ? he : 0);
       let best = 1e18;
-      for (const u of own) {
-        if (u.aboard || deep(u)) continue;                        // a deep boat has no mast up to listen with
-        const d = dxz(u.pos[0], u.pos[2], e.pos[0], e.pos[2]);
+      for (let i = 0; i < n; i++) {
+        const ax = LX[i], az = LZ[i];
+        if (Math.abs(ex - ax) > er || Math.abs(ez - az) > er) continue;
+        const d = Math.sqrt((ex - ax) ** 2 + (ez - az) ** 2);              // dxz(u, e)
         if (d > er || d >= best) continue;
-        if (d > horizon(he, topH(u)) * 1.15) continue;
+        if (d > 4120 * (she + LTOP[i]) * 1.15) continue;                   // horizon(he, topH(u))
         best = d;
       }
       if (best === 1e18) continue;
