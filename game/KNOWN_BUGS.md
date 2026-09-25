@@ -98,3 +98,17 @@ Screenshots of several of these were shared in the chat. Start the next session 
 - Two untracked files, `game/src/data/models_u3kit.js` and `units_u3.js`, are partial work from a local agent that
   was stopped (the same four units were then built on `cloud/units3`). Not imported anywhere; delete or ignore them
   when merging `cloud/units3`.
+
+## From the user's second play-test (2026-09-25, evening)
+
+- Radar spin-up bug still happens right after loading into sandbox (maybe other modes).
+- DDG radar: SPY-1D is four fixed faces, it must not show a rotating sweep; recheck all ship radars and rates.
+- Selection/tracking brackets on the F/A-18 (maybe others) broken again.
+- Pantsir rarely kills missiles: check blast/proximity physics; interceptors miss a lot (SM-6, ESSM 1/12).
+- F/A-18 launches at odd angles right after take-off; should ingress fast/low, launch inside a sensible envelope.
+- Scale still feels wrong (ships/missiles look huge; a 64 km leg doesn't read as 64 km): prove with measured stills.
+- Bullet-time slowdown near an intercept starts too late and stutters; cinematic / terminal camera needs a redesign
+  (missile in view along its line of sight; pull back when it's being engaged so the interceptors are seen).
+- Ship wake outline stays long after the ship stops; dark "displacement" discs under ships (and near the F/A-18).
+- **To plan: damage system rework** — how vehicles and their modules look after hits, by what hit them.
+- Requests: "Launch missiles" at a map point from any selected unit that carries them; time rates below x1 ([: 0.5, 0.2).
