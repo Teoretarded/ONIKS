@@ -163,7 +163,8 @@ export default {
     return {
       places, objectives,
       spawns: { coast: { x: base.x, z: base.z, r: 2500, hdg: 0 }, fleet: { x: fleet.x, z: fleet.z, r: 6000, hdg: Math.atan2(base.x - fleet.x, base.z - fleet.z) } },
-      replenish: { ...P(52, 105), r: 5000 },
+      // 2026-09-26 (SM-6 30 km, 56 seeds): far off in the north-east the coast won 19 in 20; west of the fleet ~49 %
+      replenish: { ...P(-67, 59), r: 5000 },
       pads: [
         { x: base.x, z: base.z, r: 560, r1: 1200 },
         { x: peak[0], z: peak[1], r: 300, r1: 700 },

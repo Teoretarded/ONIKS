@@ -113,4 +113,4 @@ Screenshots of several of these were shared in the chat. Start the next session 
 - **To plan: damage system rework** — how vehicles and their modules look after hits, by what hit them.
 - Requests: "Launch missiles" at a map point from any selected unit that carries them; time rates below x1 ([: 0.5, 0.2).
 - Cinematic camera (director.js, 2026-09-25 rework) is still choppy and not smooth in the user's play: below standard, redo.
-- Balance after the intercept rework: per-map coast wins lopsided (Krasnaya Kosa/Arctic 100%, Fjord/Delta 0-17%), Oniks stopped 68% (target ~45%).
+- Balance re-tuned after the intercept rework (2026-09-26, 24 seeds a map): coast wins Krasnaya Kosa 58, Fjord 58 (48 % over 48 seeds), Strait 54, Archipelago 58, Delta 54, Caldera 42, Arctic 50, Harbour 46 %; stopped Oniks 49 %, Tomahawk 55 %, SLAM-ER 61 %, Kh-35 79 %, Kalibr 85 %. Levers: SM-6 range vs missiles 30 km, Pantsir 8 57E6, TEL/Pantsir cost 550/420, replenishment points (Krasnaya Kosa, Fjord, Delta, Arctic), Arctic fleet spawn, Caldera depot 10 km up the flank. Per-map numbers still carry ±10-15 points of seed noise.

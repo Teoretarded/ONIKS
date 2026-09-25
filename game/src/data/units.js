@@ -65,7 +65,7 @@ export const UNITS = {
       oniks: { proj: 'oniks', ammo: 2, range: 110000, min: 10000, cd: 2.5, vs: ['sea'], salvo: 2,
                muzzle: [.66, 10.9, -7.2], alt: true, needs: 'erect' },
     },
-    cost: 450, buildTime: 90,
+    cost: 550, buildTime: 90,
     parts: {
       chassis: { label: 'MZKT-7930 chassis', w: 3, slow: .6 },
       wheels: { label: 'Wheels 8x8', w: 2, disables: ['move'] },
@@ -114,13 +114,14 @@ export const UNITS = {
     sensors: { radar: { surf: 0, air: 32000, land: 0, period: 1.5, gain: .28, h: 6 } },
     emits: { range: 45000 },
     weapons: {
-      sam: { proj: 'sam', ammo: 12, range: 18000, min: 1000, cd: 2.0, vs: ['missile', 'air'], auto: true, maxEng: 1, maxShots: 1, needsRadar: true,
+      // balance 2026-09-26: 57E6 ready rounds 12 -> 8 (Tomahawk / SLAM-ER stopped 61 / 65 % -> ~55 / 59 %); cost 380 -> 420, TEL 450 -> 550
+      sam: { proj: 'sam', ammo: 8, range: 18000, min: 1000, cd: 2.0, vs: ['missile', 'air'], auto: true, maxEng: 1, maxShots: 1, needsRadar: true,
              muzzle: [1.3, 3.6, .5], refill: 50 },
       gun30: { gun: true, ammo: 17, range: 4000, cd: 1.0, vs: ['missile', 'air'], auto: true, needsRadar: true,
                v0: 960, rpm: 5000, rounds: 24, disp: .0018, drag: 1.6e-4, dmgR: .15, muzzle: [0, 3.4, 2.2], burst: 1.0, refill: 10,
                open: 3200, frag: .3, fragK: .35 },   // 17 one-second bursts: ~1400 rounds; HE-frag: a pass within .3 m of the skin is a third of a hit
     },
-    cost: 380, buildTime: 80,
+    cost: 420, buildTime: 80,
     parts: {
       chassis: { label: 'KamAZ-6560 chassis', w: 3, slow: .6 },
       wheels: { label: 'Wheels 8x8', w: 2, disables: ['move'] },
@@ -449,7 +450,8 @@ export const UNITS = {
     scan: { reach: 60000, r: 4000, cd: 90 },
     air: { cap: 2, launchGap: 30, deckY: 8, types: ['helo'] },       // Flight IIA hangar: two MH-60R
     weapons: {
-      sm6: { proj: 'sm6', ammo: 32, range: 60000, airRange: 35000, min: 2000, cd: 1.0, vs: ['missile', 'air'], auto: true, maxEng: 1, maxShots: 1, needsRadar: true,
+      // balance 2026-09-26: SM-6 range against missiles 60 -> 30 km (Oniks stopped 67 % -> ~48 %); stocks alone barely moved it
+      sm6: { proj: 'sm6', ammo: 32, range: 30000, airRange: 35000, min: 2000, cd: 1.0, vs: ['missile', 'air'], auto: true, maxEng: 1, maxShots: 1, needsRadar: true,
              vls: true, refill: 20 },
       strike: { proj: 'tlam', ammo: 8, range: 120000, min: 10000, cd: 2.0, vs: ['land'], salvo: 2, vls: true, refill: 30 },
       gun5: { proj: 'shell', ammo: 300, range: 24000, min: 1500, cd: 3.0, vs: ['land', 'sea'], salvo: 6,
@@ -746,7 +748,7 @@ export const UNITS = {
     air: { cap: 2, launchGap: 30, deckY: 6.0, types: ['helo'], spot: [0, 6.0, -46], park: [[0, 6.0, -46], [0, 6.0, -30]] },   // twin hangars
     // air-defence heavy: more SM-6 and quad-packed ESSM than a DDG, fewer strike rounds (122 Mk 41 cells)
     weapons: {
-      sm6: { proj: 'sm6', ammo: 48, range: 60000, airRange: 35000, min: 2000, cd: .8, vs: ['missile', 'air'], auto: true, maxEng: 1, maxShots: 1, needsRadar: true,
+      sm6: { proj: 'sm6', ammo: 48, range: 30000, airRange: 35000, min: 2000, cd: .8, vs: ['missile', 'air'], auto: true, maxEng: 1, maxShots: 1, needsRadar: true,
              vls: true, refill: 20 },
       pdms: { proj: 'pdms', ammo: 32, range: 15000, min: 1000, cd: 1.5, vs: ['missile', 'air'], auto: true, maxEng: 1, maxShots: 2, needsRadar: true,
               vls: true, refill: 20 },

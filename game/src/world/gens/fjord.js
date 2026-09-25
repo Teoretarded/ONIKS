@@ -142,7 +142,8 @@ export default {
       spawns: { coast, fleet },
       // the replenishment point behind the fleet's spawn (balance: down in the south-west the destroyers sailed past
       // the battery to restock, and with the depot at the battery the coast won 7 matches in 10)
-      replenish: { x: -55000, z: 56000, r: 4500 },
+      // 2026-09-26 (SM-6 30 km, 24-48 seeds): at (-55, 56) the fleet won 3 in 4; (-43, 59) 56 % coast; (-40, 59) 88 %
+      replenish: { x: -43000, z: 59000, r: 4500 },
       pads: [
         { x: coast.x, z: coast.z, r: 450, r1: 1100 },
         { x: rh[0], z: rh[1], r: 220, r1: 550 },

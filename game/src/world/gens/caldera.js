@@ -74,7 +74,8 @@ export default {
     const coast = { x: -26000, z: -18000, r: 2500, hdg: A.seaward(-26000, -18000) };
     // depot: the village on the flank at the battery (balance: the coast holds it from the start; out on the
     // south-east flank it never did, and the fleet won 9 matches in 10 once the opening salvo no longer counted)
-    const dep = { x: coast.x, z: coast.z };
+    // 2026-09-26 (SM-6 30 km, 16-40 seeds): at the battery the coast won ~70 %; 6 km up the flank 56-71 %, here (10 km) 38-42 %
+    const dep = { x: -20000, z: -10000 };
     const fleet = { x: 45000, z: 0, r: 6000, hdg: Math.atan2(coast.x - 45000, coast.z - 0) };
     places.push(
       { name: 'Kraterny', kind: 'town', x: port.x, z: port.z },

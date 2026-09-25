@@ -126,7 +126,7 @@ export default {
     // the fleet in open water north of the ice, ~98 km off (balance, collision hit model, 24-48 seeds: from (30, 51) km
     // its destroyers started inside the battery's reach and the coast won 92-94 %; from (33, 53) 83 %; (40, 56) 46 % but
     // a 25 min median; here 56 %, median 33 min)
-    const fleet = fleetSpawn(A, 38000, 55000, 5000, [coast.x, coast.z], { clear: 8000, depth: -120 });
+    const fleet = fleetSpawn(A, 44000, 56000, 5000, [coast.x, coast.z], { clear: 8000, depth: -120 });
     // radar hill: the highest ground within reach of the battery and the sea
     let rh = null;
     { let best = -1; for (let k = 0; k < A.P.data.length; k++) { const [x, z] = A.xz(k); if (x < -50000 || x > -5000 || z < -42000 || z > -6000) continue; if (A.coastDist(x, z) > 14000) continue; const h = A.P.data[k]; if (h > best) { best = h; rh = [x, z, h]; } } }
@@ -160,7 +160,8 @@ export default {
       spawns: { coast, fleet },
       // the replenishment point in open water at the north edge, 35 km west of the fleet's station (balance, 12-16 seeds:
       // 13 km off the coast won 0 in 12; 58 km off 11 in 16; here 6 in 12: the destroyers sail along the ice to restock)
-      replenish: { x: -5000, z: 55000, r: 4500 },
+      // 2026-09-26 (SM-6 30 km, fleet from (38, 55) to (44, 56), 24-32 seeds): at (-5, 55) the coast won ~70 %, here 50 %
+      replenish: { x: 30000, z: 57000, r: 4500 },
       pads: [
         { x: coast.x, z: coast.z, r: 450, r1: 1100 },
         { x: rh[0], z: rh[1], r: 220, r1: 550 },
