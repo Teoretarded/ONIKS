@@ -167,7 +167,7 @@ export function createAudio(game) {
     let s = null;
     if (pos && isPos(pos) && L.ok) {
       const d = dist(pos);
-      if (d > 1) s = { flat: true, pan: clamp(dot([(pos[0] - L.eye[0]) / d, (pos[1] - L.eye[1]) / d, (pos[2] - L.eye[2]) / d], L.r) * .45, -.45, .45) };
+      if (d > 1) s = { flat: true, gain: 1, pan: clamp(dot([(pos[0] - L.eye[0]) / d, (pos[1] - L.eye[1]) / d, (pos[2] - L.eye[2]) / d], L.r) * .45, -.45, .45) };
     }
     const v = core.voice(sp.cls, sp.prio, s, name);
     if (!v) return null;
