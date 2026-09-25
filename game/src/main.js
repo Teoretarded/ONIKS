@@ -37,6 +37,7 @@ const OPTIONAL = [
   [['./ui/inspect.js', './ui/inspect/index.js'], 'createInspect', 'inspect'],
   [['./audio/index.js'], 'createAudio', 'audio'],
   [['./ui/hud/index.js', './ui/hud.js'], 'createHud', 'hud'],
+  [['./game/landmarks.js'], 'createLandmarks', 'landmarks'],
 ];
 
 async function getMap(id) {
