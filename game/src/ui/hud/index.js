@@ -25,6 +25,7 @@ import { createReinforce } from './reinforce.js';
 import { createMinimap } from './minimap.js';
 import { createTooltip } from './tooltip.js';
 import { createMask } from './mask.js';
+import { createSalvo } from './salvo.js';   // the salvo board (its own system; top of the command card)
 
 export function createHud(game) {
   // styles
@@ -54,6 +55,7 @@ export function createHud(game) {
   const buy = createReinforce(game, hud, bc);
   const alerts = createAlerts(game, hud, tr, bc);
   const cmd = createCommands(game, hud, bc);
+  createSalvo(game, hud, bc);
   const sel = createSelection(game, hud);
   const map = createMinimap(game, hud);
   const tip = createTooltip(game);

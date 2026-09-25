@@ -204,3 +204,41 @@
 /* ---------------------------------------------------------------- other systems' panels, placed around the HUD */
 /* the sandbox palette moves under the kick line (top right is the log's) */
 body.hud-on .oniks-sbx { zoom: var(--hs, 1); left: 56px; right: auto; top: 138px; }
+
+/* ================================================================ salvo board (src/ui/hud/salvo.js) */
+/* At the top of the command card while a salvo or a raid is in the air: a header over a hairline rule, then one lane
+   per round in the engagement log's type. No panel. Wider than the card (negative margins, set by salvo.js to the room
+   between the selection and the minimap; the contained inline size leaves the card's own width alone). The lanes' marks and interceptor ticks are the canvas laid over it. */
+#hud .h-salvo { position: relative; margin: 0 -146px 22px; contain: inline-size; font: 400 11.5px/1 var(--mono); letter-spacing: .05em;
+  text-transform: uppercase; color: var(--faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+#hud .h-salvo.dim { opacity: .35; }
+/* the films' calm under the text (a soft ellipse, no edge): the lanes read over the sea's dots */
+#hud .h-salvo::before { content: ''; position: absolute; left: -110px; right: -110px; top: -46px; bottom: -40px; pointer-events: none;
+  background: radial-gradient(ellipse 640px var(--sb-ry, 140px) at 50% 50%, rgba(11,12,10,.8), rgba(11,12,10,.55) 55%, rgba(11,12,10,0) 100%); }
+#hud .h-salvo > canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; }
+#hud .h-salvo .g + .g { margin-top: 14px; }
+#hud .h-salvo .hd { display: flex; justify-content: space-between; gap: 28px; padding-bottom: 9px; margin-bottom: 5px; border-bottom: 1px solid var(--hair); }
+#hud .h-salvo .hd .lt { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+#hud .h-salvo .hd .rt { flex: none; }
+#hud .h-salvo .hd b { color: #fff; }
+#hud .h-salvo .hd b.c { color: var(--coral); }
+#hud .h-salvo .hd b.l { color: var(--lime); }
+#hud .h-salvo .hd i { font-style: normal; color: var(--ghost); }
+#hud .h-salvo .r { display: grid; grid-template-columns: 24px 58px minmax(0, 1fr) 58px 54px 58px 40px; column-gap: 12px; align-items: center; height: 19px; cursor: pointer; color: var(--dim); }
+#hud .h-salvo .g.tg .r { grid-template-columns: 24px 58px 70px minmax(0, 1fr) 58px 54px 58px 40px; }
+#hud .h-salvo .g:not(.tg) .r .tg { display: none; }
+#hud .h-salvo .r .n { color: rgba(255,255,255,.34); }
+#hud .h-salvo .r .k { color: #fff; }
+#hud .h-salvo .g.in .r .k { color: var(--coral); }
+#hud .h-salvo .r .tg { color: var(--faint); overflow: hidden; }
+#hud .h-salvo .r .ln { display: block; height: 1px; }
+#hud .h-salvo .r .tt, #hud .h-salvo .r .m, #hud .h-salvo .r .d, #hud .h-salvo .r .e { text-align: right; }
+#hud .h-salvo .r .tt { color: #fff; }
+#hud .h-salvo .r.q .tt, #hud .h-salvo .r.q .m, #hud .h-salvo .r.q .d { color: var(--ghost); }
+#hud .h-salvo .r.end, #hud .h-salvo .r.end .k, #hud .h-salvo .r.end .tt { color: var(--faint); }
+#hud .h-salvo .g.in .r.end .k { color: rgba(255,106,61,.6); }
+#hud .h-salvo .r.gl .e, #hud .h-salvo .r.gl .m { color: var(--lime); }
+#hud .h-salvo .r.gc .e, #hud .h-salvo .r.gc .m { color: var(--coral); }
+#hud .h-salvo .r:hover .n, #hud .h-salvo .r.fo .n { color: var(--lime); }
+#hud .h-salvo .r:hover .tt, #hud .h-salvo .r:hover .d { color: #fff; }
+#hud .h-salvo .g.new .hd, #hud .h-salvo .r.new { animation: typein .42s steps(16); }
