@@ -1,23 +1,30 @@
 /* Cinematic camera (C): an auto-director that frames the action the way the films do. With rounds selected
    (game/select.js: click or box them) C and B hand it those rounds: director.watch(ids, i) pins the shot to them (the
-   i-th, then the next still flying; its hit plays out, then the director chooses again). bus 'watch' { ids, id }.
+   i-th first, then whichever's moment comes next; B: bullet time on them). bus 'watch' { ids, id }.
 
-   Shots (one continuous take: every change of subject is an eased glide from wherever the camera is, pulling back
-   on long moves; never a cut):
-     launch    the salvo from the side: the launchers and the rising rounds held in the frame together, low, a little
-               behind the line of fire (Scale · Strike, Aegis)
-     chase     just behind and above the plume, the lens on the round's target, so the round rides low in the frame
-               with the target ahead of it (Engagement's chase)
-     approach  the last seconds: across the target, low over the sea, the target off centre and the round's side of
-               the frame left open for it to come in (Aegis' close-in)
+   Shots (one continuous take: the eye and the look point ride critically damped springs toward each shot's goal,
+   the goal's own velocity fed forward, so a change of subject is a glide from wherever the camera is, never a cut):
+     round     one shot for a round's whole flight, its framings eased into each other by weights:
+                 launch  low beside the launcher, rising with the round (Scale · Strike, Aegis)
+                 chase   close behind and a little above and beside it, the lens along its line of sight to its
+                         target: the target grows ahead (Engagement's chase)
+                 engaged an interceptor on its way (game/director/predict.js: time to go from range and closing
+                         speed): back and out to the side, just far enough for the round and the interceptor to meet
+                         in the frame; never out to the interceptor
+                 guns    a gun about to fire or firing at it: low beside and behind the mount, the mount big in the
+                         corner, the tracers streaming out to the round (Engagement)
+                 end     the last seconds: a witness angle across the target, the round coming in
+               the round never leaves the frame (the goal turns toward it past 14 deg, the lens past 17 deg)
+     break     the round came apart: in close, a slow orbit round the pieces (their centre from the debris bodies)
      after     the hit: held on the target, then slowly up and off its quarter (Engagement after the hit)
      site      a hit, an intercept or a loss seen after the fact: a slow low orbit of the place
      death     a dying unit at a low angle, the sinking hull; at the end of the match the last kill, held
-     idle      nothing happening: slow low orbits of the most important own unit, then of the enemy group, from over
-               the sea when there is sea to stand on
-   Framing: every shot names the points that must stay in frame (the round, its target, the launchers). The shot is
-   fitted to them, and a box check against the drawn view pulls the camera back while one of them is outside it, so
-   the frame is never empty sky. Land shots rise until the line of sight clears the ground.
+     idle      nothing happening: slow low orbits of the most important own unit, then of the enemy group
+   Rounds: with rounds selected (C / B) the director takes the one whose moment (intercept, burst, impact) comes
+   next, stays through its moment and the break-up, then moves on; alone it scores every round (being engaged first).
+   Time (game/director/pace.js): B eases the rate down ahead of each predicted moment (x0.1; x0.3 while bursts are on
+   their way), holds through it and the break-up, eases back up; the cinematic alone does the same at x0.25 for an
+   intercept or a burst (with the Hit replay setting, 12 s apart). Presentation only: the sim never changes.
    Hand-over: any camera input (WASD / arrows / Q E / PageUp / PageDown, wheel, right or middle drag) hands the camera
    back; C again resumes. While the hit replay (replay.js) has the camera the director waits, then glides on from
    where the replay left it. createDirector returns [director, replay] (the replay loads with it; see replay.js).
@@ -27,6 +34,8 @@
    the orbit target goes on the floor ray ahead of the eye). fitDist() is the distance at which points fill a
    screen box; blendPose() the glide (log distance, a pull-back bump on long moves); putCam() writes the camera. */
 import { PRI } from './game.js';
+import { createPace } from './director/pace.js';
+import { predict, newPrediction } from './director/predict.js';
 
 export const DEG = Math.PI / 180;
 const TAU = Math.PI * 2;
@@ -40,9 +49,6 @@ const CAM_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown'
 const HERO = { oniks: 10, tlam: 8, slam: 7, sm6: 5, hellfire: 4, pdms: 3, sam: 3, aam: 3, shell: 0 };
 /* how much a unit is worth watching */
 const RANK = { carrier: 10, hq: 9, cg: 8, ddg: 8, lcs: 6, tel: 6, s400: 5, radar: 5, s400r: 5, pantsir: 4, bereg: 4, transloader: 3, helo: 2, fighter: 2, catapult: 1, drone: 1 };
-const APPROACH_REAL = 4.6;         // s of real time before the impact the approach shot takes over at the latest
-const MID_REAL = 12, MID_SEP = 12000;   // it takes over earlier, inside 12 s and 12 km: the round and its target framed
-                                        // together from the side, closing in as the round closes (no empty mid-course)
 const BOX = [.06, .08, .94, .92];  // the frame the named points must stay in (fractions of the view)
 const INNER = [.17, .19, .83, .81];
 
@@ -173,30 +179,80 @@ export async function createDirector(game, ctx) {
   return rep ? [dir, rep] : dir;
 }
 
+const FAR = 1e9;
+const up3 = (o, x, y, z) => { o[0] = x; o[1] = y; o[2] = z; return o; };
+const norm3 = o => { const l = Math.hypot(o[0], o[1], o[2]) || 1; o[0] /= l; o[1] /= l; o[2] /= l; return o; };
+const mix3 = (o, a, b, k) => { o[0] = a[0] + (b[0] - a[0]) * k; o[1] = a[1] + (b[1] - a[1]) * k; o[2] = a[2] + (b[2] - a[2]) * k; return o; };
+const dist3 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+/* a weight eased toward its target at its own rates (1/s up, down): real time, frame-rate independent */
+const toward = (v, tgt, dt, rUp, rDn) => v + (tgt - v) * (1 - Math.exp(-dt * (tgt > v ? rUp : rDn)));
+
 function makeDirector(game) {
   const { sim, R } = game, cam = R.camera;
-  let on = false, shot = null, lastPick = -99, edgeWas = true, waiting = false, fitK = 1, dirInit = false;
-  const recent = [];           // interesting events: { kind, pos, t, w, unit, seen }
+  const pace = createPace(game);
+  let on = false, shot = null, lastPick = -99, edgeWas = true, waiting = false, fitK = 1;
+  const recent = [];           // interesting events: { kind, pos, t, w, unit, proj, seen }
   let lastKill = null, lastHq = null, final = null;
-  let pin = null;              // the player's own subject: { ids: [projectile ids], i } (C / B on selected rounds)
+  let pin = null;              // the player's own subject: { ids, i, lock (real t: a manual choice holds), bullet }
+  let autoNext = 0;            // real t: the next automatic slow-down may start
   const eye = [0, 0, 0], look = [0, 0, 0], q3 = [0, 0, 0], c3 = [0, 0, 0], w3 = [0, 0, 0];
-  const dirS = [0, 0, 1];
   const want = newPose(), cur = newPose();
   const KP = Array.from({ length: 32 }, () => [0, 0, 0]);
   const HC = Array.from({ length: 9 }, () => [0, 0, 0]);     // a hull's 8 corners (+ the round coming in)
-  let nKeys = 0;
+  let nKeys = 0, near = 0, subj = null;   // subj: the round the lens must keep in the frame (round shots)
   const follow = () => cur.T;
   const addKey = p => { if (nKeys < KP.length) { const k = KP[nKeys++]; k[0] = p[0]; k[1] = p[1]; k[2] = p[2]; } };
+  const PR = newPrediction(), PX = newPrediction();
+  // scratch for the round shot
+  const F = [0, 0, 1], FH = [0, 0, 1], SV = [1, 0, 0], LOS = [0, 0, 1], BD = [0, 0, 1];
+  const eA = [0, 0, 0], dA = [0, 0, 1], eB = [0, 0, 0], dB = [0, 0, 1], tmp = [0, 0, 0], tmp2 = [0, 0, 0], M3 = [0, 0, 0], Q3 = [0, 0, 0], C3 = [0, 0, 0];
+
+  /* ---------- the rig: critically damped springs on the eye and on the look point (world space, real time) ----------
+     Each tracks its goal with the goal's own velocity fed forward (no lag behind a round at Mach 2.5, however fast it
+     flies); every change of subject is a spring glide from wherever the camera is, never a cut. The look point is
+     kept at the subject's distance, so the spring smooths the direction the lens turns. */
+  const rig = { init: false, e: [0, 0, 0], ev: [0, 0, 0], l: [0, 0, 0], lv: [0, 0, 0], ge: [0, 0, 0], gl: [0, 0, 0], gve: [0, 0, 0], gvl: [0, 0, 0], jump: true, t0: 0 };
+  function rigFromCam() {
+    const e = cam.eye, f = cam.f, d = Math.max(50, Math.min(cam.dist || 500, 3000));
+    for (let k = 0; k < 3; k++) { rig.e[k] = e[k]; rig.l[k] = e[k] + f[k] * d; rig.ev[k] = rig.lv[k] = 0; rig.gve[k] = rig.gvl[k] = 0; }
+    rig.init = true; rig.jump = true; rig.t0 = game.realT;
+  }
+  function springAxis(x, v, g, gp, gv, w, dt, k) {
+    const e0 = x[k] - gp[k], w0 = v[k] - gv[k], ex = Math.exp(-w * dt), a = w0 + w * e0;
+    x[k] = g[k] + (e0 + a * dt) * ex; v[k] = gv[k] + (w0 - w * a * dt) * ex;
+  }
+  function rigStep(dt, wEye, wLook) {
+    if (!rig.init) rigFromCam();
+    const kf = 1 - Math.exp(-dt * 10);
+    if (rig.jump || dt <= 0) {
+      for (let k = 0; k < 3; k++) { rig.ge[k] = eye[k]; rig.gl[k] = look[k]; }
+      rig.jump = false;
+    } else for (let k = 0; k < 3; k++) {
+      const ve = (eye[k] - rig.ge[k]) / dt, vl = (look[k] - rig.gl[k]) / dt;
+      rig.gve[k] += (ve - rig.gve[k]) * kf; rig.gvl[k] += (vl - rig.gvl[k]) * kf;
+    }
+    if (dt > 0) for (let k = 0; k < 3; k++) {
+      springAxis(rig.e, rig.ev, eye, rig.ge, rig.gve, wEye, dt, k);
+      springAxis(rig.l, rig.lv, look, rig.gl, rig.gvl, wLook, dt, k);
+      rig.ge[k] = eye[k]; rig.gl[k] = look[k];
+    }
+    // the lens stays above the ground and the swell
+    const g = game.ground(rig.e[0], rig.e[2]), floor = Math.max(0, g) + (g > .5 ? 2 : 3.5);
+    if (rig.e[1] < floor) { rig.e[1] = floor; if (rig.ev[1] < 0) rig.ev[1] = 0; }
+  }
+  /* a new subject: the goals jump, the springs glide (soft at first, then as tight as the shot wants) */
+  function newGoal() { rig.jump = true; rig.t0 = game.realT; }
 
   function set(v) {
     v = !!v;
     if (v === on) return;
     on = v; game.cinematic = on;
-    shot = null; lastPick = -99;
+    shot = null; lastPick = -99; rig.init = false;
     if (!on && pin) { pin = null; game.bus.emit('watch', { ids: [] }); }
+    if (!on && pace.active) pace.stop(pace.owner === 'bullet');
     // the screen edges do not pan while the director flies (a resting mouse would fight it)
     if (on) { edgeWas = game.replay && game.replay.state && game.replay.state.edge0 !== undefined ? game.replay.state.edge0 : cam.edge; cam.edge = false; }
-    else { cam.edge = edgeWas; if (!(game.replay && game.replay.active)) { cam.follow(null); cam.fly = null; } }
+    else { cam.edge = edgeWas; cam.view = null; if (!(game.replay && game.replay.active)) { cam.follow(null); cam.fly = null; } }
     game.bus.emit('cinematic', { on });
   }
 
@@ -205,6 +261,9 @@ function makeDirector(game) {
   const heroOf = p => HERO[p.kind] || 1;
   const launchAge = p => { const P = p.P || game.PROJ[p.kind] || {}; return clamp((P.sepAt || P.boost || 4) + 2, 4, 10); };
   const upFrom = p => { const f = p.fromPos || p.pos; return Math.hypot(p.pos[0] - f[0], p.pos[1] - f[1], p.pos[2] - f[2]); };
+  const lenOf = p => { const P = p.P || game.PROJ[p.kind] || {}; return P.body ? P.body[0] : 4; };
+  /* the rate the shot timings are scaled by: the player's (not the bullet time's own) */
+  const rateRef = () => Math.max(1, pace.active ? pace.base : game.timeRate);
   function tgtUnit(p) {
     if (p.tk !== 'unit') return null;
     const u = sim.units.get(p.target);
@@ -222,27 +281,14 @@ function makeDirector(game) {
     out[0] = p[0]; out[1] = p[1] + Math.min(H * .28, 12); out[2] = p[2];
     return out;
   }
-  /* real seconds until the round reaches its unit target */
-  function ttiReal(p, u) {
-    const H = Math.min(u.def.size[2] * .4, 14);
-    const d = Math.max(0, Math.hypot(u.pos[0] - p.pos[0], u.pos[1] + H - p.pos[1], u.pos[2] - p.pos[2]) - Math.max(6, u.def.size[1] * .5));
-    return d / Math.max(80, p.spd || 200) / Math.max(.05, game.timeRate);
-  }
-  /* the round is close enough to share the frame with its target (or about to hit it) */
-  function closing(p, u) {
-    const tt = ttiReal(p, u);
-    return tt < APPROACH_REAL || (tt < MID_REAL && Math.hypot(u.pos[0] - p.pos[0], u.pos[2] - p.pos[2]) < MID_SEP);
-  }
-  function phaseOf(p) {
-    if ((p.age || 0) < launchAge(p) && heroOf(p) >= 5) return 'launch';
-    const u = tgtUnit(p);
-    if (u && closing(p, u)) return 'approach';
-    return 'chase';
-  }
-  function score(p, ph) {
+  /* the soonest thing about to happen to the round (game s): an intercept, a gun burst, the impact */
+  const nextOf = r => Math.min(r.tEv, r.gunSoon, r.tImpact);
+  function score(p, r) {
     let s = heroOf(p);
-    if (ph === 'launch') s += (p.age || 0) < 4 ? 6 : 3;
-    if (ph === 'approach') s += 12;
+    const k = Math.sqrt(rateRef());
+    if ((p.age || 0) < 4 && heroOf(p) >= 5) s += 6;
+    if (r.tEv < 6 || r.gunSoon < 4) s += 13;                 // being engaged: the first thing worth watching
+    if (r.tImpact < 9 * k) s += 12;
     if (p.side === game.side) s += 1;
     const u = p.tk === 'unit' ? sim.units.get(p.target) : null;
     if (u && u.side === game.side) s += 3;           // something is coming at us
@@ -257,39 +303,59 @@ function makeDirector(game) {
     lastPick = game.realT;
     const t = game.realT;
     if (final) { if (!shot || shot.kind !== 'death' || !shot.final) startDeath(final, true); return; }
-    // the player's rounds (C / B on a selection of rounds): the pinned one, else the next of the group still flying;
-    // the hit of the last one plays out (approach -> after) before the director chooses again
+    // a break-up or a hit plays out before anything else takes the picture
+    if (shot && (shot.kind === 'break' || shot.kind === 'after') && t < shot.minUntil) return;
+    // the player's rounds (C / B on a selection of rounds): the one whose moment comes next; a manual choice holds
     if (pin) {
-      const n = pin.ids.length;
-      let p = null;
-      for (let k = 0; k < n && !p; k++) { const q = sim.projectiles.get(pin.ids[(pin.i + k) % n]); if (q && q.alive) { p = q; pin.i = (pin.i + k) % n; } }
-      if (p) { if (!shot || shot.id !== p.id || shot.kind === 'after') startProj(p, phaseOf(p)); return; }
+      // a moment the camera could not reach in time (under 2.5 real s away) is not one to move to
+      const rr = Math.max(.1, game.timeRate);
+      let best = null, bt = FAR, curAlive = false, curT = FAR;
+      for (const id of pin.ids) {
+        const q = sim.projectiles.get(id);
+        if (!q || !q.alive) continue;
+        const tt = nextOf(predict(game, q, PX));
+        if (shot && shot.kind === 'round' && shot.id === id) { curAlive = true; curT = tt; continue; }
+        const tq = tt / rr < 2.5 ? FAR * .5 : tt;
+        if (tq < bt || !best) { bt = tq; best = q; }
+      }
+      if (curAlive && (!best || bt >= FAR * .5)) return;
+      if (!best && curAlive) return;
+      if (best) {
+        if (curAlive) {
+          // stay, unless another's moment comes clearly sooner and ours is not about to happen
+          if (t < pin.lock || curT < 3.5 || bt > curT - 2 || t - shot.t0 < 3 || t - (shot.evT || -99) < 4 || pace.holding) return;
+        }
+        startRound(best);
+        pin.i = Math.max(0, pin.ids.indexOf(best.id));
+        game.bus.emit('watch', { ids: pin.ids.slice(), id: best.id });
+        return;
+      }
+      if (shot && (shot.kind === 'break' || shot.kind === 'after') && t < shot.until) return;
+      const wasBullet = pin.bullet;
       pin = null; game.bus.emit('watch', { ids: [] });
-      if (shot && shot.kind === 'after' && t < shot.until) return;
+      if (wasBullet && pace.active && pace.owner === 'bullet') pace.finish();
     }
     // the rounds
-    let best = null, bs = 0, bph = null;
+    let best = null, bs = 0;
     for (const p of sim.projectiles.values()) {
       if (!p.alive || !sim.projVisible(game.side, p) || heroOf(p) < 3) continue;
-      const ph = phaseOf(p), s = score(p, ph);
-      if (s > bs) { bs = s; best = p; bph = ph; }
+      const s = score(p, predict(game, p, PX));
+      if (s > bs) { bs = s; best = p; }
     }
-    const curP = shot && shot.id ? sim.projectiles.get(shot.id) : null;
-    const curLive = curP && curP.alive;
-    // an approach runs to its end
-    if (shot && shot.kind === 'approach' && curLive) return;
-    if (best && bph === 'approach' && (!shot || shot.id !== best.id)) { startProj(best, 'approach'); return; }
-    if (shot && (shot.kind === 'launch' || shot.kind === 'chase') && curLive) {
-      const age = t - shot.t0;
-      if (best && best.id !== curP.id && bs > score(curP, shot.kind) + 6 && age > 5) { startProj(best, bph); return; }
+    const curP = shot && shot.kind === 'round' ? sim.projectiles.get(shot.id) : null;
+    if (curP && curP.alive) {
+      const age = t - shot.t0, cs = score(curP, predict(game, curP, PX));
+      // a round in its moment (engaged, closing on its target) keeps the shot
+      if (nextOf(PX) < 6) return;
+      if (best && best.id !== curP.id && bs > cs + 6 && age > 5) { startRound(best); return; }
       if (age < 28) return;
     }
-    // the moments after a hit and the losses hold for a while (a new launch or approach may take over)
-    if (shot && (shot.kind === 'after' || shot.kind === 'site' || shot.kind === 'death') && t < shot.until) {
-      if (best && bs >= 14 && t - shot.t0 > 2.5) { startProj(best, bph); return; }
+    // the moments after a hit and the losses hold for a while (a round in its moment may take over)
+    if (shot && (shot.kind === 'after' || shot.kind === 'site' || shot.kind === 'death' || shot.kind === 'break') && t < shot.until) {
+      if (best && bs >= 14 && t - shot.t0 > 2.5) { startRound(best); return; }
       return;
     }
-    if (best && bs >= 6) { if (!shot || shot.id !== best.id) startProj(best, bph); return; }
+    if (best && bs >= 6) { if (!shot || shot.id !== best.id || shot.kind !== 'round') startRound(best); return; }
     // what happened recently
     let ev = null, es = 0;
     for (const e of recent) {
@@ -308,10 +374,9 @@ function makeDirector(game) {
     if (!shot || t > shot.until) startIdle();
   }
 
-  function begin(kind, o, glide) {
-    shot = Object.assign({ kind, t0: game.realT, until: game.realT + 24, side: 1, raise: 0, chk: 0 }, o);
-    shot.blend = { t0: game.realT, dur: glide || 1.6, from: camState(cam), bump: -1 };
-    fitK = 1; dirInit = false;
+  function begin(kind, o) {
+    shot = Object.assign({ kind, t0: game.realT, until: game.realT + 24, minUntil: 0, side: 1, raise: 0, chk: 0 }, o);
+    fitK = 1; newGoal();
   }
   /* which side of a line the camera goes: the one it is on now, over water if it can */
   function sideFor(yawA, yawB, P, d) {
@@ -325,31 +390,40 @@ function makeDirector(game) {
     }
     return best;
   }
-  function startProj(p, ph) {
-    const pp = game.projPose(p).pos;
-    if (ph === 'launch') {
-      const f = p.fromPos || pp, a = Math.atan2(p.aim[0] - f[0], p.aim[2] - f[2]);
-      const lu = sim.units.get(p.from);
-      begin('launch', { id: p.id, aim: a, L: lu ? lu.def.size[0] : 12, until: game.realT + 60 }, 1.7);
-      shot.side = sideFor(a + 1.1, a - 1.1, f, 600);
-    } else if (ph === 'approach') {
-      const u = tgtUnit(p);
-      const a = Math.atan2(p.vel[0], p.vel[2]);
-      begin('approach', { id: p.id, tgt: u.id, appr: a, until: game.realT + 60 }, clamp(ttiReal(p, u) * .45, .9, 2));
-      const T = centreOf(u, c3);
-      shot.side = sideFor(a + 1.2, a - 1.2, T, u.def.size[0] * 2.5);
-    } else {
-      begin('chase', { id: p.id, until: game.realT + 90 }, 2);
-      const v = p.vel || [0, 0, 1], h = Math.atan2(v[0], v[2]);
-      shot.side = Math.sin(wrapPi(cam.yaw - h)) >= 0 ? 1 : -1;
-    }
+  /* a round: from the launch (low beside the launcher) through the chase (close behind it, along its line of sight),
+     the engagement (pulled back to the side: the round and what comes at it), the guns (low by the mount, the round
+     in the tracers), the end (a witness angle on the target); one shot, its weights eased, the springs gliding */
+  function startRound(p) {
+    const v = p.vel || [0, 0, 1], h = Math.atan2(v[0], v[2]);
+    const f = p.fromPos || p.pos, aim = p.aim ? Math.atan2(p.aim[0] - f[0], p.aim[2] - f[2]) : h;
+    const young = (p.age || 0) < 3 && heroOf(p) >= 5 && upFrom(p) < 400;
+    begin('round', { id: p.id, until: game.realT + 1e9, launch: young, aim,
+      wL: young ? 1 : 0, wE: 0, wG: 0, wT: 0, appr: null, wside: 1, gside: 1, gun: 0, gunT: -99, eng: null, pr: null,
+      lastP: game.projPose(p).pos.slice(), lastV: v.slice(), L: lenOf(p), tgt: p.tk === 'unit' ? p.target : 0, prevEv: FAR, prevSrc: 0 });
+    shot.side = Math.sin(wrapPi(cam.yaw - h)) >= 0 ? 1 : -1;
+    if (young) shot.side = sideFor(aim + 1.1, aim - 1.1, f, 300);
+  }
+  function startBreak(pos, vel, L, id) {
+    const off = [rig.e[0] - pos[0], rig.e[1] - pos[1], rig.e[2] - pos[2]];
+    const d = Math.hypot(off[0], off[1], off[2]) || 1;
+    const dd = clamp(d, L * 5, 160);
+    for (let k = 0; k < 3; k++) off[k] *= dd / d;
+    if (off[1] < dd * .12) off[1] = dd * .12;
+    const yaw0 = Math.atan2(-off[0], -off[2]);
+    const spin = shot && shot.side ? shot.side : 1;
+    begin('break', { id, pos: pos.slice(), vel: vel.slice(), L, t0s: sim.t, yaw0, pitch0: Math.asin(clamp(off[1] / dd, -.5, .8)), d0: dd,
+      c: pos.slice(), minUntil: game.realT + 4.5, until: game.realT + 7.5, spin });
+  }
+  function startAfter(u, appr, side) {
+    begin('after', { tgt: u.id, appr, until: game.realT + 11, minUntil: game.realT + 4 });
+    shot.side = side || 1;
   }
   function startSite(e, u) {
     begin('site', { unit: u ? u.id : 0, pos: e.pos.slice(), L: u ? u.def.size[0] : 60, sea: u ? u.def.domain === 'sea' : game.ground(e.pos[0], e.pos[2]) < .5,
-      yaw0: cam.yaw + .4, until: game.realT + (e.kind === 'intercept' ? 6 : 9) }, 2.2);
+      yaw0: cam.yaw + .4, until: game.realT + (e.kind === 'intercept' ? 6 : 9) });
   }
   function startDeath(k, isFinal) {
-    begin('death', { unit: k.unit, pos: k.pos.slice(), L: k.L, sea: k.sea, final: isFinal, yaw0: cam.yaw + .3, until: game.realT + (isFinal ? 1e9 : k.sea ? 18 : 10) }, 2.4);
+    begin('death', { unit: k.unit, pos: k.pos.slice(), L: k.L, sea: k.sea, final: isFinal, yaw0: cam.yaw + .3, until: game.realT + (isFinal ? 1e9 : k.sea ? 18 : 10) });
   }
   function startIdle() {
     const own = sim.alive(game.side).filter(u => !u.aboard);
@@ -357,7 +431,6 @@ function makeDirector(game) {
     const turn = Math.floor(game.realT / 26) % 2;
     let pts = null, L = 12, sea = false, id = 0;
     if (tracks.length && (turn || !own.length)) {
-      // the enemy group: round its most important track, what is within 8 km of it
       let lead = tracks[0]; for (const u of tracks) if ((RANK[u.type] || 1) > (RANK[lead.type] || 1)) lead = u;
       const grp = tracks.filter(u => Math.hypot(u.pos[0] - lead.pos[0], u.pos[2] - lead.pos[2]) < 8000);
       pts = grp; L = Math.max(...grp.map(u => u.def.size[0])); id = lead.id; sea = lead.def.domain === 'sea';
@@ -366,8 +439,7 @@ function makeDirector(game) {
       pts = [lead]; L = Math.max(lead.def.size[0], 12); id = lead.id; sea = lead.def.domain === 'sea';
     }
     if (!pts) return;
-    begin('idle', { unit: id, group: pts.map(u => u.id), L, sea, yaw0: cam.yaw, until: game.realT + 24 }, 3);
-    // stand over the sea if there is sea round the subject
+    begin('idle', { unit: id, group: pts.map(u => u.id), L, sea, yaw0: cam.yaw, until: game.realT + 24 });
     const c = centreOf(sim.units.get(id), c3);
     let bestYaw = cam.yaw, bc = 1e9;
     for (let i = 0; i < 12; i++) {
@@ -377,10 +449,6 @@ function makeDirector(game) {
       if (cost < bc) { bc = cost; bestYaw = yaw; }
     }
     shot.yaw0 = bestYaw;
-  }
-  function toKind(kind, o, glide) {
-    const keep = { id: shot.id, side: shot.side };
-    begin(kind, Object.assign(keep, o), glide);
   }
 
   /* ---------- where the camera wants to be ---------- */
@@ -397,52 +465,42 @@ function makeDirector(game) {
     if (b > -3) shot.raise = Math.min(30, shot.raise + 4);
     else if (b < -40 && shot.raise > 0) shot.raise = Math.max(0, shot.raise - 1);
   }
-  function desired() {
+  /* eye e, direction d (unit) -> the goal: the look point at the subject's distance */
+  function goal(e, d, Ls) {
+    eye[0] = e[0]; eye[1] = e[1]; eye[2] = e[2];
+    const L = clamp(Ls, 20, 4000);
+    look[0] = e[0] + d[0] * L; look[1] = e[1] + d[1] * L; look[2] = e[2] + d[2] * L;
+  }
+  /* blend (eA, dA) toward (eB, dB) by k */
+  function blendInto(k) {
+    if (k <= 0) return;
+    mix3(eA, eA, eB, k);
+    mix3(dA, dA, dB, k); norm3(dA);
+  }
+  function floorAt(e, m) { const g = game.ground(e[0], e[2]); const f = Math.max(0, g) + (g > .5 ? m * .6 : m); if (e[1] < f) e[1] = f; }
+
+  function desired(dt) {
     const t = game.realT, age = t - shot.t0;
-    nKeys = 0;
-    if (shot.kind === 'launch' || shot.kind === 'chase') {
-      const p = sim.projectiles.get(shot.id);
-      if (!p || !p.alive) return false;
-      if (shot.kind === 'launch' && ((p.age || 0) > launchAge(p) || upFrom(p) > 1100)) {
-        // the next round of the salvo still on the pad keeps the shot; else chase this one
-        let nx = null;
-        for (const q of sim.projectiles.values()) if (q.alive && q !== p && q.side === p.side && heroOf(q) >= 5 && (q.age || 0) < 3 && upFrom(q) < 900 && sim.projVisible(game.side, q) && Math.hypot(q.fromPos[0] - p.fromPos[0], q.fromPos[2] - p.fromPos[2]) < 3500) { nx = q; break; }
-        if (nx && !pin) shot.id = nx.id;
-        else { toKind('chase', {}, 2.2); return desired(); }
-        return desired();
-      }
-      const u = tgtUnit(p);
-      if (u && closing(p, u)) {
-        const a = Math.atan2(p.vel[0], p.vel[2]);
-        toKind('approach', { tgt: u.id, appr: a, until: t + 60 }, clamp(ttiReal(p, u) * .45, .9, 2));
-        shot.side = sideFor(a + 1.2, a - 1.2, centreOf(u, c3), u.def.size[0] * 2.5);
-        return desired();
-      }
-      return shot.kind === 'launch' ? launchShot(p) : chaseShot(p, age);
-    }
-    if (shot.kind === 'approach' || shot.kind === 'after') {
+    nKeys = 0; near = 0; subj = null;
+    if (shot.kind === 'round') return roundShot(dt, age);
+    if (shot.kind === 'break') return breakShot(dt, age);
+    if (shot.kind === 'after') {
       const u = sim.units.get(shot.tgt);
       if (!u) return false;
-      const p = shot.kind === 'approach' ? sim.projectiles.get(shot.id) : null;
-      if (shot.kind === 'approach' && (!p || !p.alive)) { toKind('after', { tgt: u.id, appr: shot.appr, until: t + 11 }, .8); shot.side = shot.side || 1; return desired(); }
       const pose = game.unitPose(u), T = centreOf(u, c3);
-      let n = hullCorners(pose, u.def, HC, 0);
+      const n = hullCorners(pose, u.def, HC, 0);
       const sea = u.def.domain === 'sea';
-      const pull = shot.kind === 'after' ? ss(1.5, 11, age) : 0;
+      const pull = ss(1.5, 11, age);
       const pitch = ((sea ? 5.5 : 10) + shot.raise + 7 * pull) * DEG;
-      const appr = shot.appr + (shot.kind === 'after' ? shot.side * .05 * age : 0);
-      // the round on its way in is framed with the target from the start (the shot closes in as it closes)
-      const pp = p ? game.projPose(p).pos : null;
-      if (pp) { const k = HC[n++]; k[0] = pp[0]; k[1] = pp[1]; k[2] = pp[2]; }
+      const appr = shot.appr + shot.side * .05 * age;
       acrossView(cam, T, HC, n, appr, shot.side, pitch, { min: sea ? 170 : Math.max(30, u.def.size[0] * 2.2), k: fitK * (1 + 1.3 * pull), shift: endShift() }, eye, look);
       addKey(T);
-      if (pp) addKey(pp);
       if (!sea) clearance(T);
       return true;
     }
     if (shot.kind === 'site' || shot.kind === 'death') {
       const u = shot.unit ? sim.units.get(shot.unit) : null;
-      if (u) centreOf(u, shot.pos); else if (shot.kind === 'site' && shot.unit) { /* gone: stay on the place */ }
+      if (u) centreOf(u, shot.pos);
       const T = shot.pos, sea = shot.sea;
       const pull = ss(2, shot.kind === 'death' ? 20 : 12, age);
       const pitch = ((sea ? (shot.kind === 'death' ? 4.5 : 7) : 13) + shot.raise + 4 * pull) * DEG;
@@ -457,7 +515,6 @@ function makeDirector(game) {
     if (shot.kind === 'idle') {
       const u = sim.units.get(shot.unit);
       if (!u || !u.alive) return false;
-      // the group's centre and extent
       let n = 0; c3[0] = c3[1] = c3[2] = 0;
       for (const id of shot.group) { const g = sim.units.get(id); if (!g || !g.alive) continue; const p = centreOf(g, w3); c3[0] += p[0]; c3[1] += p[1]; c3[2] += p[2]; n++; addKey(p); }
       if (!n) return false;
@@ -471,48 +528,208 @@ function makeDirector(game) {
     }
     return false;
   }
-  /* the salvo from the side, a little behind the line of fire: the launchers and every round of the salvo in frame */
-  function launchShot(p) {
-    const f0 = p.fromPos || p.pos;
-    let x0 = 1e18, y0 = 1e18, z0 = 1e18, x1 = -1e18, y1 = -1e18, z1 = -1e18;
-    for (const q of sim.projectiles.values()) {
-      if (!q.alive || q.side !== p.side || (q.age || 0) > launchAge(q) || heroOf(q) < 5 || !sim.projVisible(game.side, q)) continue;
-      const f = q.fromPos || q.pos;
-      if (q !== p && Math.hypot(f[0] - f0[0], f[2] - f0[2]) > 3500) continue;
-      q3[0] = f[0]; q3[1] = f[1] + 3; q3[2] = f[2]; addKey(q3);
-      // the rounds while they are still near the pad (one high above is left to climb out of the frame)
-      if (upFrom(q) < 800) addKey(game.projPose(q).pos);
+
+  /* the round shot (see startRound) */
+  function roundShot(dt, age) {
+    const p = sim.projectiles.get(shot.id);
+    if (!p || !p.alive) return roundEnded();
+    const pp = game.projPose(p), P = pp.pos, v = p.vel || shot.lastV;
+    shot.lastP[0] = P[0]; shot.lastP[1] = P[1]; shot.lastP[2] = P[2];
+    shot.lastV[0] = v[0]; shot.lastV[1] = v[1]; shot.lastV[2] = v[2];
+    const spd = Math.hypot(v[0], v[1], v[2]);
+    if (spd > 1) up3(F, v[0] / spd, v[1] / spd, v[2] / spd);
+    else up3(F, Math.sin(pp.hdg) * Math.cos(pp.pitch), Math.sin(pp.pitch), Math.cos(pp.hdg) * Math.cos(pp.pitch));
+    up3(FH, F[0], 0, F[2]); if (Math.hypot(FH[0], FH[2]) < 1e-3) up3(FH, Math.sin(cam.yaw), 0, Math.cos(cam.yaw)); norm3(FH);
+    up3(SV, FH[2] * shot.side, 0, -FH[0] * shot.side);
+    const Lr = shot.L, r = predict(game, p, PR);
+    shot.pr = r;
+    const k = Math.sqrt(rateRef()), t = game.realT;
+
+    // chase: close behind and a little beside and above, the lens along the round's line of sight to its target
+    const T = tgtPoint(p, c3);
+    if (T && dist3(T, P) < 80000) { up3(LOS, T[0] - P[0], T[1] - P[1], T[2] - P[2]); norm3(LOS); }
+    else { up3(LOS, F[0], F[1] * .5, F[2]); norm3(LOS); }
+    mix3(BD, F, LOS, .35); norm3(BD);
+    const back = clamp(Lr * 5.8, 26, 90) * (1 + .08 * Math.sin(age * .21));
+    for (let i = 0; i < 3; i++) eA[i] = P[i] - BD[i] * back + SV[i] * back * (.2 + .04 * Math.sin(age * .13 + 1));
+    eA[1] += back * (.12 + .03 * Math.sin(age * .17 + 2));
+    floorAt(eA, 3);
+    for (let i = 0; i < 3; i++) dA[i] = P[i] + LOS[i] * back * 9 - eA[i];
+    norm3(dA);
+    let Ls = dist3(P, eA) * 1.5;
+
+    // launch: low beside the launcher, rising with the round
+    if (shot.launch) {
+      const la = launchAge(p), uf = upFrom(p);
+      const wl = (1 - ss(la * .55, la, p.age || 0)) * (1 - ss(300, 900, uf));
+      shot.wL = toward(shot.wL, wl, dt, 3, 1.2);
+      if (shot.wL > .002) {
+        const f0 = p.fromPos || P, lu = sim.units.get(p.from), Lu = lu ? lu.def.size[0] : 12, sea = game.ground(f0[0], f0[2]) < .5;
+        const dS = clamp(Lu * 1.5 + 30, 45, 300), sa = Math.sin(shot.aim), ca = Math.cos(shot.aim);
+        eB[0] = f0[0] + ca * shot.side * dS - sa * dS * .35; eB[2] = f0[2] - sa * shot.side * dS - ca * dS * .35;
+        const g = Math.max(0, game.ground(eB[0], eB[2]));
+        eB[1] = g + (sea ? 6 : 2.5) + Math.min(260, .38 * Math.max(0, P[1] - f0[1]));
+        up3(tmp, f0[0], f0[1] + (lu ? lu.def.size[2] * .5 : 3), f0[2]);
+        mix3(tmp, tmp, P, .45 + .5 * ss(0, 140, uf));
+        up3(dB, tmp[0] - eB[0], tmp[1] - eB[1], tmp[2] - eB[2]); norm3(dB);
+        blendInto(shot.wL);
+        Ls = Ls + (Math.max(dS, dist3(P, eB)) - Ls) * shot.wL;
+      }
     }
-    for (let i = 0; i < nKeys; i++) { const k = KP[i]; x0 = Math.min(x0, k[0]); x1 = Math.max(x1, k[0]); y0 = Math.min(y0, k[1]); y1 = Math.max(y1, k[1]); z0 = Math.min(z0, k[2]); z1 = Math.max(z1, k[2]); }
-    c3[0] = (x0 + x1) / 2; c3[1] = (y0 + y1) / 2; c3[2] = (z0 + z1) / 2;
-    const yaw = shot.aim + shot.side * 1.1, pitch = (6 + shot.raise) * DEG;
-    const d = Math.max(fitDist(cam, c3, KP, nKeys, yaw, pitch, .62, .56), shot.L * 7, 150) * fitK;
-    orbit(c3, yaw, pitch, d);
-    q3[0] = f0[0]; q3[1] = f0[1] + 2; q3[2] = f0[2];
-    clearance(q3);
+
+    // engaged by interceptors: back and to the side, just enough for the round, the interceptor and where they meet
+    let we = 0;
+    if (r.kind === 'intercept' && r.tEv < 8) {
+      we = ss(8, 3, r.tEv);
+      const q = sim.projectiles.get(r.qId);
+      const Qp = q ? game.projPose(q).pos : r.q;
+      shot.eng = shot.eng || { Q: [0, 0, 0], M: [0, 0, 0] };
+      for (let i = 0; i < 3; i++) { shot.eng.Q[i] = Qp[i]; shot.eng.M[i] = P[i] + v[i] * r.tEv; }
+    }
+    shot.wE = toward(shot.wE, we, dt, 1.4, .55);
+    if (shot.wE > .002 && shot.eng) {
+      // still round the round (never out to the interceptor): back and out to its side, farther the farther off the
+      // interceptor still is
+      const Qp = shot.eng.Q, dq = dist3(Qp, P);
+      // how far out: set by the interceptor's distance, but changed only slowly (a closing interceptor must not pull
+      // the camera in faster than the springs can follow)
+      const Dt = clamp(dq * .1, Lr * 7, 260);
+      shot.engD = shot.engD ? toward(shot.engD, Dt, dt, .35, .6) : Dt;
+      const D = shot.engD;
+      for (let i = 0; i < 3; i++) eB[i] = P[i] - F[i] * D * .8 + SV[i] * D * .45;
+      eB[1] += D * .12;
+      floorAt(eB, 4);
+      // the lens between the round and the interceptor (held in close: past 1.3 D it only shows where it comes from)
+      const dc = Math.min(dq, D * 1.3);
+      mix3(Q3, P, Qp, dq > 1 ? dc / dq : 0);
+      mix3(C3, P, Q3, .35);
+      up3(dB, C3[0] - eB[0], C3[1] - eB[1], C3[2] - eB[2]); norm3(dB);
+      blendInto(shot.wE);
+      Ls = Ls + (dist3(eB, C3) - Ls) * shot.wE;
+    }
+
+    // the end: the target grows ahead, then a witness angle across it for the hit
+    const u = tgtUnit(p);
+    let wt = 0;
+    if (u) {
+      wt = ss(9 * k, 2.4 * k, r.tImpact);
+      if (wt > 0 && shot.appr === null) {
+        const Tc = centreOf(u, tmp);
+        shot.appr = Math.atan2(Tc[0] - P[0], Tc[2] - P[2]);
+        shot.wside = sideFor(shot.appr + 1.2, shot.appr - 1.2, Tc, u.def.size[0] * 2.5);
+      }
+    }
+    shot.wT = toward(shot.wT, wt, dt, 2, .8);
+    if (shot.wT > .002 && u && shot.appr !== null) {
+      const pose = game.unitPose(u), Tc = centreOf(u, tmp2);
+      let n = hullCorners(pose, u.def, HC, 0);
+      const k9 = HC[n++]; k9[0] = P[0]; k9[1] = P[1]; k9[2] = P[2];
+      const sea = u.def.domain === 'sea';
+      acrossView(cam, Tc, HC, n, shot.appr, shot.wside, (sea ? 5.5 : 10) * DEG, { min: sea ? 150 : Math.max(30, u.def.size[0] * 2.2) }, eB, tmp);
+      floorAt(eB, 4);
+      const d = dist3(eB, tmp);
+      up3(dB, tmp[0] - eB[0], tmp[1] - eB[1], tmp[2] - eB[2]); norm3(dB);
+      blendInto(shot.wT);
+      Ls = Ls + (d - Ls) * shot.wT;
+    }
+
+    // the guns: low by the mount, the tracers streaming out to the round (Engagement)
+    let gid = 0;
+    if (r.kind === 'gun' && r.tEv < 6) gid = r.gunUnit;
+    else if (r.gunSoon < 4.5 * k) gid = r.gunSoonUnit;
+    if (gid) {
+      shot.gunT = t;
+      if (gid !== shot.gun && (shot.wG < .3 || !sim.units.get(shot.gun))) {
+        const gu = sim.units.get(gid);
+        if (gu) {
+          shot.gun = gid;
+          // the camera on the left of the line of fire: the mount stands on the right of the frame (clear of the
+          // HUD's left column)
+          shot.gside = -1;
+        }
+      }
+    }
+    shot.wG = toward(shot.wG, t - shot.gunT < 1.2 ? 1 : 0, dt, 1.6, .5);
+    const gu = shot.gun ? sim.units.get(shot.gun) : null;
+    if (shot.wG > .002 && gu) {
+      const gpose = game.unitPose(gu), A = gpose.pos, Lu = gu.def.size[0], Hu = gu.def.size[2];
+      const dx = P[0] - A[0], dz = P[2] - A[2], h = Math.hypot(dx, dz) || 1, ux = dx / h, uz = dz / h;
+      const sx = uz * shot.gside, sz = -ux * shot.gside;
+      // low beside and behind the mount, the mount big in the corner of the frame, the lens up the line of fire
+      const gb = (Lu * .75 + 7) * (1 + .05 * Math.sin(age * .3)), side = Lu * .3 + 4;
+      eB[0] = A[0] - ux * gb + sx * side; eB[2] = A[2] - uz * gb + sz * side;
+      eB[1] = A[1] + Hu * .45 + 1.2;
+      floorAt(eB, 2.5);
+      up3(tmp, A[0] - eB[0], A[1] + Hu * .6 - eB[1], A[2] - eB[2]); norm3(tmp);
+      up3(dB, P[0] - eB[0], P[1] - eB[1], P[2] - eB[2]); norm3(dB);
+      mix3(dB, tmp, dB, .75); norm3(dB);
+      blendInto(shot.wG);
+      Ls = Ls + (Math.max(60, dist3(eB, P) * .5) - Ls) * shot.wG;
+      near = Math.max(.3, Math.min(gb * .2, 5));
+    }
+    // whatever the blend, the round stays in the frame: the lens turns toward it until it is within ~14 deg of the
+    // centre (the launch climbing out of a low eye, a glide between two framings)
+    up3(tmp, P[0] - eA[0], P[1] - eA[1], P[2] - eA[2]);
+    if (Math.hypot(tmp[0], tmp[1], tmp[2]) > 1) {
+      norm3(tmp);
+      const c = clamp(dA[0] * tmp[0] + dA[1] * tmp[1] + dA[2] * tmp[2], -1, 1), a = Math.acos(c), amax = 14 * DEG;
+      if (a > amax) { mix3(dA, dA, tmp, (a - amax) / a); norm3(dA); }
+    }
+    goal(eA, dA, Ls);
+    subj = P;
+    if (!near) near = clamp(Math.min(back * .2, dist3(eA, P) * .3), .3, 12);
     return true;
   }
-  /* just behind and above the plume; the lens between the target and the round (the round low in the frame) */
-  function chaseShot(p, age) {
-    const pp = game.projPose(p), P = pp.pos, v = p.vel || [0, 0, 1];
-    const spd = Math.hypot(v[0], v[1], v[2]) || p.spd || 200;
-    const sh = Math.sin(pp.hdg), ch = Math.cos(pp.hdg), vy = v[1] / Math.max(1, spd);
-    const k = fitK * clamp(spd / 600, .55, 1.3);
-    const back = (40 + 12 * Math.sin(age * .21)) * k, side = shot.side * (12 + 6 * Math.sin(age * .13 + 1)) * k, up = (6 + 3 * Math.sin(age * .17 + 2)) * k;
-    eye[0] = P[0] - sh * back + ch * side; eye[2] = P[2] - ch * back - sh * side;
-    eye[1] = P[1] - vy * back * .6 + up;
-    const g = game.ground(eye[0], eye[2]); if (eye[1] < g + 4) eye[1] = g + 4;
-    // toward the target (or ahead along the flight), weighted toward the round so it rides low in the frame
-    const T = tgtPoint(p, c3);
-    let ax, ay, az;
-    if (T && Math.hypot(T[0] - P[0], T[2] - P[2]) < 60000) { ax = T[0] - eye[0]; ay = T[1] - eye[1]; az = T[2] - eye[2]; }
-    else { ax = sh * 1500; ay = -eye[1] * .4 + Math.max(0, vy) * 600; az = ch * 1500; }
-    let l = Math.hypot(ax, ay, az) || 1; ax /= l; ay /= l; az /= l;
-    let bx = P[0] - eye[0], by = P[1] - eye[1], bz = P[2] - eye[2];
-    l = Math.hypot(bx, by, bz) || 1; bx /= l; by /= l; bz /= l;
-    const w = .4;
-    look[0] = eye[0] + (ax * (1 - w) + bx * w) * 600; look[1] = eye[1] + (ay * (1 - w) + by * w) * 600; look[2] = eye[2] + (az * (1 - w) + bz * w) * 600;
-    addKey(P);
+  /* the watched round is gone: its hit (after), else its break-up (break) */
+  function roundEnded() {
+    const id = shot.id;
+    const h = recent.find(e => e.kind === 'hit' && e.proj === id);
+    const u = shot.tgt ? sim.units.get(shot.tgt) : null;
+    if (h && u) {
+      const appr = shot.appr !== null ? shot.appr : Math.atan2(u.pos[0] - shot.lastP[0], u.pos[2] - shot.lastP[2]);
+      startAfter(u, appr, shot.wside);
+    } else startBreak(shot.lastP, shot.lastV, shot.L, id);
+    markEv();
+    return desired(0);
+  }
+  /* the break-up: in close, a slow orbit round the pieces as they come apart and fall (their centre from the debris
+     bodies born with it; the round's own path, slowing and falling, until there are any) */
+  function breakShot(dt, age) {
+    const W = game.debris && game.debris.world, s = shot;
+    let n = 0, cx = 0, cy = 0, cz = 0, ext = 0;
+    const inWin = b => b.t0 >= s.t0s - .3 && b.t0 <= s.t0s + 2.2;
+    if (W) {
+      W.each(b => {
+        if (!inWin(b)) return;
+        const dx = b.p[0] - s.c[0], dy = b.p[1] - s.c[1], dz = b.p[2] - s.c[2];
+        if (dx * dx + dy * dy + dz * dz > 700 * 700) return;
+        cx += b.p[0]; cy += b.p[1]; cz += b.p[2]; n++;
+      });
+    }
+    if (n) {
+      cx /= n; cy /= n; cz /= n;
+      W.each(b => {
+        if (!inWin(b)) return;
+        const d = Math.hypot(b.p[0] - cx, b.p[1] - cy, b.p[2] - cz);
+        if (d < 700) ext = Math.max(ext, d);
+      });
+      const kk = dt > 0 ? 1 - Math.exp(-dt * 6) : 1;
+      s.c[0] += (cx - s.c[0]) * kk; s.c[1] += (cy - s.c[1]) * kk; s.c[2] += (cz - s.c[2]) * kk;
+    } else {
+      // no pieces (yet): where the round would be, slowing and falling
+      const tg = Math.max(0, sim.t - s.t0s), dr = Math.exp(-tg * .5);
+      for (let i = 0; i < 3; i++) s.c[i] = s.pos[i] + s.vel[i] * (1 - dr) / .5;
+      s.c[1] -= 4.9 * tg * tg;
+      ext = s.L;
+    }
+    const g = Math.max(0, game.ground(s.c[0], s.c[2]));
+    if (s.c[1] < g + 2) s.c[1] = g + 2;
+    const d = clamp(Math.max(s.L * 4.5, ext * 2.3), 22, 260) * (1 + .15 * ss(2, 7, age));
+    s.d0 += (d - s.d0) * (dt > 0 ? 1 - Math.exp(-dt * 1.5) : 0);
+    const yaw = s.yaw0 + s.spin * age * .16, pitch = clamp(s.pitch0 + .05 * Math.sin(age * .4), 4 * DEG, 40 * DEG);
+    orbit(s.c, yaw, pitch, s.d0);
+    floorAt(eye, 3);
+    near = clamp(s.d0 * .15, .3, 10);
     return true;
   }
   /* the end screen covers the left of the view: the subject goes right of centre (the menu over a live film) */
@@ -529,7 +746,7 @@ function makeDirector(game) {
 
   /* the named points stay in the frame: while one is outside the box the shot pulls back, then it eases in again */
   function frameCheck(dt) {
-    if (!shot || shot.blend || !nKeys) return;
+    if (!shot || !nKeys || shot.kind === 'round' || shot.kind === 'break') return;
     const W = cam.W, H = cam.H;
     let out = false, inner = true;
     for (let i = 0; i < nKeys; i++) {
@@ -543,52 +760,113 @@ function makeDirector(game) {
     else if (inner && fitK > 1) fitK = Math.max(1, fitK * (1 - .3 * dt));
   }
 
-  /* put the camera there: the eye as the shot says, the look smoothed, glided in from where the shot began */
+  /* the springs to the goal, then the camera: the exact view, and the orbit pose kept with it for the hand-over */
+  const OMEGA = { round: 3.6, break: 3, after: 1.8, site: 1.6, death: 1.5, idle: 1.3 };
   function apply(dt) {
-    let dx = look[0] - eye[0], dy = look[1] - eye[1], dz = look[2] - eye[2];
-    const L = Math.hypot(dx, dy, dz) || 1; dx /= L; dy /= L; dz /= L;
-    if (!dirInit) { dirS[0] = dx; dirS[1] = dy; dirS[2] = dz; dirInit = true; }
-    else {
-      const k = 1 - Math.exp(-dt * (shot.kind === 'chase' ? 5 : 3.2));
-      dirS[0] += (dx - dirS[0]) * k; dirS[1] += (dy - dirS[1]) * k; dirS[2] += (dz - dirS[2]) * k;
-      const n = Math.hypot(dirS[0], dirS[1], dirS[2]) || 1; dirS[0] /= n; dirS[1] /= n; dirS[2] /= n;
+    const age = game.realT - rig.t0, wS = OMEGA[shot.kind] || 1.6;
+    // soft at the start of a move, then as tight as the shot wants
+    const w0 = shot.kind === 'break' ? 2.2 : 1.5, w = wS - (wS - w0) * Math.exp(-age * 1.8);
+    // a long move lifts the eye on the way (the pull-back arc), fading as it arrives
+    if (rig.init && age < 4) {
+      const far = Math.hypot(rig.e[0] - eye[0], rig.e[2] - eye[2]);
+      if (far > 1500) eye[1] += Math.min(2500, (far - 1500) * .15) * (1 - age / 4);
     }
-    w3[0] = eye[0] + dirS[0] * L; w3[1] = eye[1] + dirS[1] * L; w3[2] = eye[2] + dirS[2] * L;
-    lookFrom(cam, eye, w3, want);
-    // a hand on the camera, low over the sea
-    const t = game.realT, hk = eye[1] < 600 ? 1 : .3;
-    want.yaw += (.0042 * Math.sin(t * .63) + .0028 * Math.sin(t * 1.37 + 1.1)) * hk;
-    want.pitch += (.0026 * Math.sin(t * .81 + 2.3) + .0016 * Math.sin(t * 1.9)) * hk;
-    const B = shot.blend;
-    if (B) {
-      if (B.bump < 0) { B.bump = bumpOf(B.from, want); B.dur = Math.max(B.dur, glideDur(B.from, want, 1.2, 3.4)); }
-      const u = clamp((game.realT - B.t0) / B.dur, 0, 1);
-      blendPose(B.from, want, ease(u), B.bump, cur);
-      if (u >= 1) shot.blend = null;
-    } else {
-      cur.T[0] = want.T[0]; cur.T[1] = want.T[1]; cur.T[2] = want.T[2];
-      cur.dist = want.dist; cur.pitch = want.pitch;
-      cur.yaw = cur.yaw + wrapPi(want.yaw - cur.yaw);
+    rigStep(dt, w, w * 1.35);
+    // the round never leaves the frame, whatever the springs lag: past 17 deg off the lens the look point is turned
+    // toward it (a boundary, not a snap: inside it the springs alone move the lens)
+    if (subj) {
+      const L0 = dist3(rig.l, rig.e);
+      up3(tmp, rig.l[0] - rig.e[0], rig.l[1] - rig.e[1], rig.l[2] - rig.e[2]); norm3(tmp);
+      up3(tmp2, subj[0] - rig.e[0], subj[1] - rig.e[1], subj[2] - rig.e[2]);
+      if (Math.hypot(tmp2[0], tmp2[1], tmp2[2]) > 1) {
+        norm3(tmp2);
+        const a = Math.acos(clamp(tmp[0] * tmp2[0] + tmp[1] * tmp2[1] + tmp[2] * tmp2[2], -1, 1)), amax = 17 * DEG;
+        if (a > amax) {
+          mix3(tmp, tmp, tmp2, (a - amax) / a); norm3(tmp);
+          for (let k = 0; k < 3; k++) rig.l[k] = rig.e[k] + tmp[k] * L0;
+        }
+      }
     }
+    // a hand on the camera: a slow drift of the look point (sub-degree)
+    const t = game.realT, L = dist3(rig.l, rig.e), hk = rig.e[1] < 600 ? 1 : .3;
+    const ly = (.0035 * Math.sin(t * .63) + .0022 * Math.sin(t * 1.37 + 1.1)) * hk * L, lx = (.0026 * Math.sin(t * .81 + 2.3) + .0016 * Math.sin(t * 1.9)) * hk * L;
+    const f = norm3(up3(tmp, rig.l[0] - rig.e[0], rig.l[1] - rig.e[1], rig.l[2] - rig.e[2]));
+    const rx = f[2], rz = -f[0], rl = Math.hypot(rx, rz) || 1;
+    w3[0] = rig.l[0] + rx / rl * lx; w3[1] = rig.l[1] + ly; w3[2] = rig.l[2] + rz / rl * lx;
+    lookFrom(cam, rig.e, w3, want);
+    cur.T[0] = want.T[0]; cur.T[1] = want.T[1]; cur.T[2] = want.T[2];
+    cur.dist = want.dist; cur.pitch = want.pitch; cur.yaw = cur.yaw + wrapPi(want.yaw - cur.yaw);
     putCam(cam, cur, follow);
+    cam.view = { eye: rig.e.slice(), look: w3.slice(), near: near || undefined };
+  }
+
+  /* the watched round's moment is now: the rate holds, the shot stays on it a while */
+  function markEv() { pace.mark(); if (shot) shot.evT = game.realT; }
+
+  /* ---------- the time rate: bullet time (B) and the automatic moments ---------- */
+  function paceFrame() {
+    const r = shot && shot.kind === 'round' ? shot.pr : null;
+    // what the rate waits for: an interceptor or a burst (both), the impact (bullet time only: the hit replay takes
+    // the automatic ones)
+    let tEv = FAR;
+    if (r) {
+      if (r.kind) tEv = r.tEv;
+      if (pin && pin.bullet) tEv = Math.min(tEv, r.tImpact);
+      // the moment passed (the interceptor went by, the burst ended): hold
+      if (r.kind === 'intercept' && shot.prevEv < .35 && (tEv > shot.prevEv + .6 || (r.src !== shot.prevSrc && shot.prevSrc))) markEv();
+      shot.prevEv = tEv; shot.prevSrc = r.src;
+    }
+    if (pin && pin.bullet) {
+      if (!pace.active) { pin.bullet = false; return; }
+      if (tEv < FAR) pace.feed(tEv, r && r.kind === 'gun' && tEv === r.tEv ? .3 : 0);
+      return;
+    }
+    // the automatic moment (the cinematic without B): only with the Hit replay setting, as the break-up bullet time
+    const auto = game.replay && game.replay.auto !== undefined ? game.replay.auto : !(game.settings && game.settings.hitReplay === false);
+    if (!auto || game.result || game.paused || (game.inspect && game.inspect.active) || (game.film && game.film.playing)) return;
+    if (pace.active) { if (pace.owner === 'auto' && tEv < FAR) pace.feed(tEv, r.kind === 'gun' ? .4 : 0); return; }
+    if (!r || !r.kind || game.realT < autoNext || game.timeRate < 1) return;
+    const lead = game.timeRate * Math.min(1.8, Math.max(.6, 2 / Math.sqrt(game.timeRate))) + .2;
+    if (tEv < lead) {
+      pace.start('auto', { slow: .25, hold: 1.7, up: 1.3 });
+      pace.feed(tEv); pace.finish();
+      autoNext = game.realT + 12;
+    }
   }
 
   return {
     name: 'director', priority: PRI.director,
     set, get on() { return on; }, get shot() { return shot; },
-    /* the player's rounds: the cinematic takes them (the i-th first, then the next still flying); [] lets go */
+    /* the player's rounds: the cinematic takes them (the i-th first, then whichever's moment comes next); [] lets go */
     watch(ids, i) {
       ids = (ids || []).filter(id => { const p = sim.projectiles.get(id); return p && p.alive; });
-      pin = ids.length ? { ids, i: i || 0 } : null;
+      const bullet = !!(pin && pin.bullet);
+      pin = ids.length ? { ids, i: (i || 0) % ids.length, lock: game.realT + 6, bullet } : null;
       if (pin && !on) set(true);
-      shot = null; lastPick = -99;
+      if (pin) { const p = sim.projectiles.get(ids[pin.i]); if (p) startRound(p); else shot = null; }
+      else shot = null;
+      lastPick = game.realT;
       game.bus.emit('watch', { ids: pin ? pin.ids.slice() : [], id: pin ? pin.ids[pin.i] : 0 });
       return !!pin;
     },
     get watching() { return pin ? { ids: pin.ids.slice(), i: pin.i, id: pin.ids[pin.i] } : null; },
+    /* bullet time on the watched rounds (select.js, B): the rate eases down before each moment, holds, eases back */
+    bullet(v, restore) {
+      if (v) {
+        if (!pin) return false;
+        pin.bullet = true;
+        if (!pace.active || pace.owner !== 'bullet') { if (pace.active) pace.stop(false); pace.start('bullet', { slow: .1, hold: 2.4, up: 1.6, keep: true }); }
+        return true;
+      }
+      if (pin) pin.bullet = false;
+      if (pace.active && pace.owner === 'bullet') pace.stop(restore);
+      return true;
+    },
+    get bulletOn() { return pace.active && pace.owner === 'bullet'; },
+    pace,
     get edgeWas() { return edgeWas; }, set edgeWas(v) { edgeWas = v; },
     /* for the replay: glide on from where the camera is now */
-    resync() { shot = null; lastPick = -99; },
+    resync() { shot = null; lastPick = -99; rig.init = false; },
     onKey(e) {
       if (e.type !== 'keydown') return false;
       if (e.code === 'KeyC' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) { set(!on); game.bus.emit('toast', { text: on ? 'CINEMATIC' : 'CINEMATIC OFF' }); return true; }
@@ -609,16 +887,13 @@ function makeDirector(game) {
         const r = recent.find(x => x.kind === 'intercept' && Math.abs(x.t - b.t) < .2);
         if (r) r.w = Math.max(r.w, b.w || 7);
         else { recent.push({ kind: 'intercept', pos: b.pos.slice(), t: b.t, w: b.w || 7, unit: b.unit }); if (recent.length > 24) recent.shift(); }
+        if (on && shot && shot.kind === 'round' && b.id === shot.id) markEv();
       });
       game.bus.on('result', () => {
         // the end: the last kill, held (the most important of the last few, the command post first); else the command
         // post or carrier the match was lost with, where it went down
         if (lastKill && sim.t - lastKill.t < 90) final = { unit: lastKill.unit, pos: lastKill.pos.slice(), L: lastKill.L, sea: lastKill.sea, t: lastKill.t };
         else if (lastHq) final = { unit: lastHq.unit, pos: lastHq.pos.slice(), L: lastHq.L, sea: lastHq.sea, t: lastHq.t };
-        // the cinematic camera takes the picture at once (the end block turns it on 3.5 s later anyway): the last
-        // subject held from here to the result screen, not the empty sea a player's view (or a finished replay) was on.
-        // A replay still playing keeps the camera and hands over to this when it ends; Inspect and a film-maker take
-        // playing are left alone.
         const busy = (game.inspect && game.inspect.active) || (game.film && game.film.playing);
         if (!busy && !on) set(true);
         else if (on) { shot = null; lastPick = -99; }
@@ -626,8 +901,14 @@ function makeDirector(game) {
     },
     onEvent(e) {
       const t = e.t;
+      // the watched round's moment is now (a burst on it, a hit, an intercept)
+      if (on && shot && shot.kind === 'round') {
+        const id = shot.id;
+        if ((e.type === 'intercept' && e.proj === id) || (e.type === 'gunhit' && e.target === id) || (e.type === 'hit' && e.proj === id) ||
+          (e.type === 'splash' && e.air && (e.proj === id || e.target === id))) markEv();
+      }
       let rec = null;
-      if (e.type === 'hit') rec = { kind: 'hit', pos: e.pos, t, w: 9, unit: e.target };
+      if (e.type === 'hit') rec = { kind: 'hit', pos: e.pos, t, w: 9, unit: e.target, proj: e.proj };
       else if (e.type === 'destroyed') {
         const u = sim.units.get(e.unit);
         rec = { kind: 'destroyed', pos: e.pos, t, w: u && u.def.domain === 'sea' ? 12 : 8, unit: e.unit };
@@ -640,20 +921,27 @@ function makeDirector(game) {
       else if (e.type === 'intercept') rec = { kind: 'intercept', pos: e.pos, t, w: 5 };
       if (!rec) return;
       if (rec.unit) { const u = sim.units.get(rec.unit); if (u && !game.vis(u)) return; }   // only what the player may see
-      // the hit we are already framing is not a new subject
-      if (shot && (shot.kind === 'approach' || shot.kind === 'after') && rec.unit === shot.tgt && rec.kind === 'hit') rec.seen = true;
+      // the moment we are already framing is not a new subject
+      if (shot && (shot.kind === 'round' || shot.kind === 'after') && rec.unit && rec.unit === shot.tgt && rec.kind === 'hit') rec.seen = true;
+      if (shot && shot.kind === 'round' && rec.kind === 'intercept' && dist3(rec.pos, shot.lastP) < 400) rec.seen = true;
       recent.push(rec);
       if (recent.length > 24) recent.splice(0, recent.length - 24);
     },
     update(dt) {
-      if (!on) return;
-      if (game.replay && game.replay.active) { waiting = true; return; }
-      if (waiting) { waiting = false; shot = null; lastPick = -99; }
+      // the break-up bullet time (debris/slowmo.js) stands aside while this one has the rate
+      const bt = game.bulletTime;
+      if (bt && bt.want && !bt._dirWrap) { const w0 = bt.want; bt.want = b => pace.active ? false : w0.call(bt, b); bt._dirWrap = true; }
+      if (!on) { if (pace.active) pace.update(dt); return; }
+      if (game.replay && game.replay.active) { waiting = true; pace.update(dt); return; }
+      if (waiting) { waiting = false; shot = null; lastPick = -99; rig.init = false; }
       frameCheck(dt);
       if (game.realT - lastPick > .5 || !shot || game.realT > shot.until) pick();
-      if (!shot) return;
-      if (!desired()) { shot = null; lastPick = -99; pick(); if (!shot || !desired()) return; }
-      apply(dt);
+      if (shot) {
+        if (!desired(dt)) { shot = null; lastPick = -99; pick(); if (shot && !desired(dt)) shot = null; }
+        if (shot) apply(dt);
+      }
+      paceFrame();
+      pace.update(dt);
     },
     draw2d(ov) {
       if (!on || game.getSystem('hud') || (game.replay && game.replay.active)) return;

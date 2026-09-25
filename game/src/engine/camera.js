@@ -7,6 +7,9 @@
    the line of sight ~13 deg above the horizon, at dist <= lookUpNear, fading to none at lookUpFar). The lens then
    stays where the minPitch orbit puts it (never under the terrain) and tilts up about itself, so a climbing round can
    be watched from beside the TEL with the TEL still at the bottom of the frame.
+   Exact view (the cinematic camera, game/director.js): cam.view = { eye, look, near? } set before update() replaces the
+   orbit's view for that one frame (any angle, up or down; consumed by update()). The orbit state should be kept close
+   to it (the director writes both) so a hand on the camera takes over without a jump.
    M3 conventions: X east, Y up, Z north; yaw 0 looks north, pi/2 looks east; pitch > 0 looks down. */
 
 const DEG = Math.PI / 180;
@@ -42,6 +45,7 @@ export class RTSCamera {
     this.fl = 1; this.near = .1; this.far = 1e6;
     this.followFn = null; this.followOff = [0, 0, 0];
     this.fly = null;
+    this.view = null;                                // one frame's exact view (see the header)
     this.down = new Set();
     this.mouse = { x: 0, y: 0, in: false, moved: false, btn: -1, lx: 0, ly: 0, grab: null };
     this.onClick = null;                             // (sx, sy, button, event) for left/right clicks without drag
@@ -253,7 +257,23 @@ export class RTSCamera {
     g.followY = false;
     this.target[1] = dt > 0 && !(this.tight && this.followFn) ? this.target[1] + (gy - this.target[1]) * (1 - Math.exp(-8 * dt)) : gy;
     this._pose();
+    if (this.view) { this._exact(this.view); this.view = null; }
     return this;
+  }
+  /* the exact view: eye, look point (no roll); near from the subject distance when given */
+  _exact(v) {
+    const e = v.eye, l = v.look;
+    let fx = l[0] - e[0], fy = l[1] - e[1], fz = l[2] - e[2];
+    const D = Math.hypot(fx, fy, fz) || 1; fx /= D; fy /= D; fz /= D;
+    let rx = fz, rz = -fx; const rl = Math.hypot(rx, rz);
+    if (rl < 1e-6) { rx = Math.cos(this.yaw); rz = -Math.sin(this.yaw); } else { rx /= rl; rz /= rl; }
+    this.eye = [e[0], e[1], e[2]]; this.f = [fx, fy, fz]; this.r = [rx, 0, rz];
+    this.u = [fy * rz, fz * rx - fx * rz, -fy * rx];
+    this.fl = (this.H / 2) / Math.tan(this.fov / 2); this.tilt = 0;
+    const clear = Math.max(.5, e[1] - Math.max(0, this.ground(e[0], e[2])));
+    this.clearance = clear;
+    this.near = clamp(Math.min(v.near || D * .02, clear * .4), .03, 200);
+    this.far = Math.max(60000, Math.sqrt(2 * R_EARTH * Math.max(1, e[1])) * 1.25 + D * 3);
   }
   _pose() {
     // below minPitch (looking up) the lens keeps the minPitch orbit position and tilts about itself

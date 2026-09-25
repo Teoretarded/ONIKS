@@ -4,8 +4,8 @@
    leaves; the unit stays selected for orders), Ctrl double-click (every unit of that type on screen),
    Ctrl 1-9 set a group, 1-9 recall (twice quickly: fly to it), Tab / Shift-Tab cycle own units, F follow.
    Rounds: a click on one (or a box round some) selects rounds (game.selProj, projectile ids; never mixed with units).
-   With rounds selected C hands them to the cinematic camera and B runs bullet time (x0.1) on them, the camera on
-   them; again: the next round of the group (one round: off). Esc leaves the spectate / bullet time / round selection.
+   With rounds selected C hands them to the cinematic camera and B runs bullet time on them (the director eases the
+   rate down to x0.1 ahead of each moment), again: the next round of the group (one round: off). Esc leaves the spectate / bullet time / round selection.
    Draws lime brackets that fit the object (R.screenBox) with a short tag, hover highlight, the drag box. Tags stay on
    screen and out of the HUD panels (ov.fitBox), with a leader back to the object when they had to move.
    Aircraft parked on a deck are picked by a click on them (close enough to tell them apart) or a double-click (that
@@ -23,8 +23,6 @@ import { PNAME } from '../ui/hud/fmt.js';
 const LIME = '#C6F432', CORAL = '#FF6A3D';
 const TS = 10.5;                 // tag size (px at 1080p)
 const BOX_MIN = 8;               // px: a shorter drag is a click
-const BT_RATE = .1;              // bullet time on selected rounds
-const BT_HOLD = 4, BT_POST = .5;  // s (real) the break-up is held after the last round is down, easing to x0.5
 const DEG = Math.PI / 180;
 
 export function createSelect(game) {
@@ -34,7 +32,7 @@ export function createSelect(game) {
   let followId = 0;
   let spec = null;             // spectating: { kind: 'unit' | 'proj', id, fn, name }
   let orbitDrag = null;        // a left-drag orbiting the spectated subject: { x, y }
-  let bt = null;               // bullet time on selected rounds: { rate0, ids, end }
+  let bt = null;               // bullet time on selected rounds: { ids } (the director runs it)
   const selProj = game.selProj = new Set();
   const q = [0, 0, 0], placed = [];
 
@@ -467,22 +465,17 @@ export function createSelect(game) {
     game.bus.emit('toast', { text: `${kind} · ${p ? projName(p) : 'ROUND'}${v.ids.length > 1 ? ` · ${v.i + 1} / ${v.ids.length}` : ''}` });
     return true;
   }
+  /* bullet time: the director's (director.bullet: the rate eases down ahead of each moment, holds, eases back up) */
   function btStart(ids) {
-    if (!bt) {
-      const r0 = game.paused ? 1 : game.timeRate < 1 ? 1 : game.timeRate;
-      bt = { rate0: r0, ids, end: 0 };
-      if (game.bulletTime && game.bulletTime.active) game.bulletTime.take();
-      game.paused = false; game.timeRate = BT_RATE;
-      game.bus.emit('rate', { rate: BT_RATE, paused: false, why: 'bullet' });
-      game.bus.emit('bullet', { on: true, rounds: ids });
-    }
+    const d = director();
+    if (!bt) { bt = { ids }; if (d && d.bullet) d.bullet(true); }
     bt.ids = ids;
   }
   function btStop(restore) {
     if (!bt) return;
-    if (restore && (Math.abs(game.timeRate - BT_RATE) < 1e-6 || (bt.end > 0 && game.timeRate < 1))) { game.timeRate = bt.rate0; game.bus.emit('rate', { rate: game.timeRate, paused: game.paused, why: 'bullet' }); }
     bt = null;
-    game.bus.emit('bullet', { on: false });
+    const d = director();
+    if (d && d.bullet) d.bullet(false, restore);
   }
   // the player's own rate ([ / ], Space) ends it where it is
   game.bus.on('rate', d => { if (bt && d && d.why === 'user') btStop(false); });
@@ -513,16 +506,9 @@ export function createSelect(game) {
       btStart(ids);
       return true;
     },
-    update(dtReal) {
-      if (!bt) return;
-      if (game.replay && game.replay.active) return;
-      // the rounds are down: the break-up plays out slowed (the rate eases from x0.1 to x0.5 over BT_HOLD s), then time
-      // comes back
-      const live = bt.ids.some(id => projSeen(sim.projectiles.get(id)));
-      if (live) { bt.end = 0; if (Math.abs(game.timeRate - BT_RATE) > 1e-6 && !game.paused) btStop(false); return; }
-      if (!game.paused) bt.end += dtReal;
-      if (bt.end > BT_HOLD) { btStop(true); return; }
-      if (!game.paused && bt.end > 0) game.timeRate = BT_RATE * Math.pow(BT_POST / BT_RATE, bt.end / BT_HOLD);
+    update() {
+      // the director ends it (the rounds are down and time is back up) or the player's own rate did
+      if (bt) { const d = director(); if (!d || !d.bulletOn) bt = null; }
     },
   };
   return [selection, orderNotes, watch];

@@ -44,7 +44,7 @@ game = {
   settings,             // data/settings.js getSettings() (kept live)
   mode, params, mission,// 'sandbox' | 'combat' | 'campaign'; parsed URL (game/setup.js parseParams); campaign mission or null
   selection: Set<unitId>, hover /* unit id or null */, groups /* {1..9: [ids]} */,
-  timeRate /* 1 2 4 8 16 32 */, paused, autoSlow /* drop to x1 on launch / new contact */,
+  timeRate /* RATES: .1 .2 .5 1 2 4 8 16 32 (other values: bullet time) */, paused, autoSlow /* drop to x1 on launch / new contact */,
   alpha,                // render interpolation 0..1 between the sim's last two ticks
   t,                    // interpolated sim time (what is drawn)
   seaT,                 // swell clock (terrain.seaAt(x, z, game.seaT)); runs at min(rate, 2)
@@ -167,11 +167,13 @@ H weapons free / hold fire (offensive fire starts held: nothing launches until y
 defence is always automatic), ~ salvo size of the selection's attacks 1 / 2 / ALL (Shift: back; an attack persists,
 volley after volley, until the target is destroyed, the launcher is empty or its track has been lost for 5 min), T deploy / undeploy, R reload, X scan (then click; the nearest scanner in reach fires, a
 point beyond every reach is refused, nothing drives), Y radar on / off, L launch (coast: the Orlan-10; fleet: the
-strike package off the deck, then click a track to strike or a point to patrol), U launch an MH-60R (fleet),
+strike package off the deck, then click a track to strike or a point to patrol), U launch an MH-60R (fleet), G launch at a point (the
+selection's rounds: which and how many, 1-9; click the map or the minimap; a round is greyed where it cannot hit,
+with the reason; the sim's 'strike' order),
 B reinforcements, Esc cancel / pause menu.
-Time: Space pause, + / - rate. View: C cinematic camera, J replay the last decisive hit (Shift J: automatic replays on /
+Time: Space pause, [ / ] rate (x0.1 x0.2 x0.5 slow time, x1 ... x32). View: C cinematic camera, J replay the last decisive hit (Shift J: automatic replays on /
 off), F10 hide the UI, I inspect (Inspect system), V radar view (Sensors system), F1 every control (help; the list is
-`KEYBINDS` in data/settings.js: keep it true when a key changes). Sandbox: P palette, G fog, K enemy AI, M switch side,
+`KEYBINDS` in data/settings.js: keep it true when a key changes). Sandbox: P palette, Shift+G fog, K enemy AI, M switch side,
 N weather, Del delete.
 
 2D overlay: world tags and labels scale with the HUD (`ov.ui`: 1 at 1080p, never below .8); sizes given to
