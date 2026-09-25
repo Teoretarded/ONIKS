@@ -115,7 +115,8 @@ export function createOrders(game) {
     marks.push({ kind: 'move', at: [x, Math.max(0, T.heightAt(x, z)), z], ids: all, t0: game.realT, dur: 2.6 });
     return true;
   }
-  const domOf = u => u.def.domain === 'air' ? 'air' : u.def.domain === 'sea' ? 'sea' : 'land';
+  // the target's domain as the sim's attack order reads it: the track's (a submerged boat's is 'sub'; select.js does the same)
+  const domOf = u => { const c = sim.contact(game.side, u.id); return c && c.dom === 'sub' ? 'sub' : u.def.domain === 'air' ? 'air' : u.def.domain === 'sea' ? 'sea' : 'land'; };
   function attack(t, queue, sx, sy) {
     const dom = domOf(t);
     const us = own().filter(u => Object.values(u.def.weapons).some(w => !w.gun && w.vs.includes(dom) && !(w.auto && !w.salvo)));
