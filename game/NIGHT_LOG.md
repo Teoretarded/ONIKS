@@ -374,3 +374,10 @@ The dice are gone: every shot is resolved by geometry (gun bursts as flown round
 paths against part boxes), damage lands on the part actually struck, and a grazed missile spins out. The events a
 rigid-body break-up needs are documented in `src/sim/README.md`. A numbers-only balance pass is now re-tuning the
 new stat fields (burst radii, dispersion, toughness) back to fair win rates and the old intercept shares.
+
+## 13:25 · Cloud agents
+With the 5-hour window nearly used, the branch `game-v1` was pushed to GitHub (your OK) and two agents run in the
+cloud on their own branches: `cloud/units3` (the four new units' models, anatomy, rules and AI use, checked
+headlessly in Node) and `cloud/simperf` (a Node harness for tests / balance / bench, and a sim performance pass that
+must keep the state hashes identical). Their branches get merged back here and checked visually.
+The three local agents paused for the limit (new units, detail pass, world detail) resume after 13:50.
