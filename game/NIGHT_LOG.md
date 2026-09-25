@@ -216,3 +216,10 @@ labels (CHASSIS / HULL); the main menu is titles only (no subtext); R explains w
 Running: combat depth, storm fronts + white lightning, look pass 2 (hull dot saturation, mid-altitude sea, haze),
 the salvo board, and the debrief film (a Combat match is recorded and re-simulated exactly, then its best moments play
 as one continuous take ending in the Orbital map).
+
+## 09:45 · Storms done
+Storms are now dot thunderstorms: a flat dark base at ~1.3 km, towers to ~10 km with an anvil, lit from inside on
+every flash; white lightning (lime stays the player's scan) with a stepped leader and 2-4 return strokes, readable
+at 40 km, attracted to masts; rain as slanted streaks inside the cells only; the sea rougher under them. In Combat a
+squall line of 5-8 cells crosses the map every 8-12 game-minutes: inside a cell radars see less, strikes reveal both
+sides, and a player scan fired into a cell reaches up to x1.5 farther. Stills: `game/shots/storm/final_*.png`.
