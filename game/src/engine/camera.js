@@ -7,7 +7,7 @@
    the line of sight ~13 deg above the horizon, at dist <= lookUpNear, fading to none at lookUpFar). The lens then
    stays where the minPitch orbit puts it (never under the terrain) and tilts up about itself, so a climbing round can
    be watched from beside the TEL with the TEL still at the bottom of the frame.
-   Exact view (the cinematic camera, game/director.js): cam.view = { eye, look, near? } set before update() replaces the
+   Exact view (the cinematic camera, game/director.js): cam.view = { eye, look, near?, fov? } set before update() replaces the
    orbit's view for that one frame (any angle, up or down; consumed by update()). The orbit state should be kept close
    to it (the director writes both) so a hand on the camera takes over without a jump.
    M3 conventions: X east, Y up, Z north; yaw 0 looks north, pi/2 looks east; pitch > 0 looks down. */
@@ -258,11 +258,15 @@ export class RTSCamera {
     this.target[1] = dt > 0 && !(this.tight && this.followFn) ? this.target[1] + (gy - this.target[1]) * (1 - Math.exp(-8 * dt)) : gy;
     this._pose();
     if (this.view) { this._exact(this.view); this.view = null; }
+    else if (this.fov0 !== undefined) { this.fov = this.fov0; this.fov0 = undefined; this.fl = (this.H / 2) / Math.tan(this.fov / 2); }
     return this;
   }
   /* the exact view: eye, look point (no roll); near from the subject distance when given */
   _exact(v) {
     const e = v.eye, l = v.look;
+    // a lens of its own for the frame (v.fov, rad); the camera's own comes back with the first frame without one
+    if (v.fov) { if (this.fov0 === undefined) this.fov0 = this.fov; this.fov = v.fov; }
+    else if (this.fov0 !== undefined) { this.fov = this.fov0; this.fov0 = undefined; }
     let fx = l[0] - e[0], fy = l[1] - e[1], fz = l[2] - e[2];
     const D = Math.hypot(fx, fy, fz) || 1; fx /= D; fy /= D; fz /= D;
     let rx = fz, rz = -fx; const rl = Math.hypot(rx, rz);

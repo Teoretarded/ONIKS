@@ -231,10 +231,12 @@ export class GunStream {
   /* one tracer: a white-hot point and a lime streak a frame and a half of flight long behind it */
   head(C, x, y, z, vx, vy, vz, zc, al, k) {
     const dot = C.dot, V = C.V;
-    dot(x, y, z, zc < 1500 ? 2 : 1, 250, 255, 226, al);
-    if (zc < 1200) C.glow(x, y, z, 4, LIME[0], LIME[1], LIME[2], .07 * al);
+    // close to the lens (a camera by the mount) the rope reads thick and bright: bigger heads, a stronger glow
+    const sz = zc < 120 ? 4 : zc < 400 ? 3 : zc < 1500 ? 2 : 1;
+    dot(x, y, z, sz, 250, 255, 226, al);
+    if (zc < 1200) C.glow(x, y, z, Math.min(12, 4 + 500 / zc), LIME[0], LIME[1], LIME[2], (zc < 400 ? .13 : .07) * al);
     const nt = Math.max(2, Math.min(40, Math.round(Math.hypot(vx, vy, vz) * STREAK * V.fl / zc / 1.6 * k)));
-    for (let m = 1; m <= nt; m++) { const d = STREAK * k * m / nt; dot(x - vx * d, y - vy * d, z - vz * d, zc < 1500 ? 2 : 1, LIME[0], LIME[1], LIME[2], al * (1 - .85 * m / (nt + 1))); }
+    for (let m = 1; m <= nt; m++) { const d = STREAK * k * m / nt; dot(x - vx * d, y - vy * d, z - vz * d, sz, LIME[0], LIME[1], LIME[2], al * (1 - .85 * m / (nt + 1))); }
   }
   /* a missed round's end: a self-destruct sparkle, or a little splash in the sea */
   pop(C, i, s) {

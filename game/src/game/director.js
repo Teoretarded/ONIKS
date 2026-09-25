@@ -194,12 +194,13 @@ function makeDirector(game) {
   const recent = [];           // interesting events: { kind, pos, t, w, unit, proj, seen }
   let lastKill = null, lastHq = null, final = null;
   let pin = null;              // the player's own subject: { ids, i, lock (real t: a manual choice holds), bullet }
-  let autoNext = 0;            // real t: the next automatic slow-down may start
+  let autoNext = 0, uiWas = false, uiOurs = false;            // real t: the next automatic slow-down may start
   const eye = [0, 0, 0], look = [0, 0, 0], q3 = [0, 0, 0], c3 = [0, 0, 0], w3 = [0, 0, 0];
   const want = newPose(), cur = newPose();
   const KP = Array.from({ length: 32 }, () => [0, 0, 0]);
   const HC = Array.from({ length: 9 }, () => [0, 0, 0]);     // a hull's 8 corners (+ the round coming in)
-  let nKeys = 0, near = 0, subj = null;   // subj: the round the lens must keep in the frame (round shots)
+  // subj: the round the lens must keep in the frame (round shots); fovK: the shot's lens against the camera's own
+  let nKeys = 0, near = 0, subj = null, fovK = 1;
   const follow = () => cur.T;
   const addKey = p => { if (nKeys < KP.length) { const k = KP[nKeys++]; k[0] = p[0]; k[1] = p[1]; k[2] = p[2]; } };
   const PR = newPrediction(), PX = newPrediction();
@@ -253,6 +254,10 @@ function makeDirector(game) {
     // the screen edges do not pan while the director flies (a resting mouse would fight it)
     if (on) { edgeWas = game.replay && game.replay.state && game.replay.state.edge0 !== undefined ? game.replay.state.edge0 : cam.edge; cam.edge = false; }
     else { cam.edge = edgeWas; cam.view = null; if (!(game.replay && game.replay.active)) { cam.follow(null); cam.fly = null; } }
+    // the interface steps back while the director has the picture (as H / F10 would): the shot reads; only the rate
+    // and the mode stay on screen (draw2d). Not at the end of the match (the end screen is interface).
+    if (on) { uiWas = game.ui.hidden; if (!uiWas && !game.result) { game.setUiHidden(true); uiOurs = true; } }
+    else if (uiOurs) { uiOurs = false; if (game.ui.hidden && !uiWas) game.setUiHidden(false); }
     game.bus.emit('cinematic', { on });
   }
 
@@ -323,7 +328,7 @@ function makeDirector(game) {
       if (best) {
         if (curAlive) {
           // stay, unless another's moment comes clearly sooner and ours is not about to happen
-          if (t < pin.lock || curT < 3.5 || bt > curT - 2 || t - shot.t0 < 3 || t - (shot.evT || -99) < 4 || pace.holding) return;
+          if (t < pin.lock || curT < 3.5 || bt > curT - 2 || bt > 8 * rateRef() || t - shot.t0 < 8 || shot.wL > .05 || t - (shot.evT || -99) < 4 || pace.holding) return;
         }
         startRound(best);
         pin.i = Math.max(0, pin.ids.indexOf(best.id));
@@ -406,7 +411,7 @@ function makeDirector(game) {
   function startBreak(pos, vel, L, id) {
     const off = [rig.e[0] - pos[0], rig.e[1] - pos[1], rig.e[2] - pos[2]];
     const d = Math.hypot(off[0], off[1], off[2]) || 1;
-    const dd = clamp(d, L * 5, 160);
+    const dd = clamp(d, 30, 80);
     for (let k = 0; k < 3; k++) off[k] *= dd / d;
     if (off[1] < dd * .12) off[1] = dd * .12;
     const yaw0 = Math.atan2(-off[0], -off[2]);
@@ -481,7 +486,7 @@ function makeDirector(game) {
 
   function desired(dt) {
     const t = game.realT, age = t - shot.t0;
-    nKeys = 0; near = 0; subj = null;
+    nKeys = 0; near = 0; subj = null; fovK = 1;
     if (shot.kind === 'round') return roundShot(dt, age);
     if (shot.kind === 'break') return breakShot(dt, age);
     if (shot.kind === 'after') {
@@ -550,9 +555,9 @@ function makeDirector(game) {
     if (T && dist3(T, P) < 80000) { up3(LOS, T[0] - P[0], T[1] - P[1], T[2] - P[2]); norm3(LOS); }
     else { up3(LOS, F[0], F[1] * .5, F[2]); norm3(LOS); }
     mix3(BD, F, LOS, .35); norm3(BD);
-    const back = clamp(Lr * 5.8, 26, 90) * (1 + .08 * Math.sin(age * .21));
-    for (let i = 0; i < 3; i++) eA[i] = P[i] - BD[i] * back + SV[i] * back * (.2 + .04 * Math.sin(age * .13 + 1));
-    eA[1] += back * (.12 + .03 * Math.sin(age * .17 + 2));
+    const back = clamp(Lr * 2.8, 15, 60) * (1 + .08 * Math.sin(age * .21));
+    for (let i = 0; i < 3; i++) eA[i] = P[i] - BD[i] * back + SV[i] * back * (.26 + .04 * Math.sin(age * .13 + 1));
+    eA[1] += back * (.15 + .03 * Math.sin(age * .17 + 2));
     floorAt(eA, 3);
     for (let i = 0; i < 3; i++) dA[i] = P[i] + LOS[i] * back * 9 - eA[i];
     norm3(dA);
@@ -565,12 +570,12 @@ function makeDirector(game) {
       shot.wL = toward(shot.wL, wl, dt, 3, 1.2);
       if (shot.wL > .002) {
         const f0 = p.fromPos || P, lu = sim.units.get(p.from), Lu = lu ? lu.def.size[0] : 12, sea = game.ground(f0[0], f0[2]) < .5;
-        const dS = clamp(Lu * 1.5 + 30, 45, 300), sa = Math.sin(shot.aim), ca = Math.cos(shot.aim);
+        const dS = clamp(Lu * 4 + 40, 80, 400), sa = Math.sin(shot.aim), ca = Math.cos(shot.aim);
         eB[0] = f0[0] + ca * shot.side * dS - sa * dS * .35; eB[2] = f0[2] - sa * shot.side * dS - ca * dS * .35;
         const g = Math.max(0, game.ground(eB[0], eB[2]));
-        eB[1] = g + (sea ? 6 : 2.5) + Math.min(260, .38 * Math.max(0, P[1] - f0[1]));
+        eB[1] = g + (sea ? 6 : 2.5) + Math.min(260, .3 * Math.max(0, P[1] - f0[1]));
         up3(tmp, f0[0], f0[1] + (lu ? lu.def.size[2] * .5 : 3), f0[2]);
-        mix3(tmp, tmp, P, .45 + .5 * ss(0, 140, uf));
+        mix3(tmp, tmp, P, .25 + .5 * ss(40, 400, uf));   // the launcher low in the frame, the round rising out of it
         up3(dB, tmp[0] - eB[0], tmp[1] - eB[1], tmp[2] - eB[2]); norm3(dB);
         blendInto(shot.wL);
         Ls = Ls + (Math.max(dS, dist3(P, eB)) - Ls) * shot.wL;
@@ -593,7 +598,7 @@ function makeDirector(game) {
       const Qp = shot.eng.Q, dq = dist3(Qp, P);
       // how far out: set by the interceptor's distance, but changed only slowly (a closing interceptor must not pull
       // the camera in faster than the springs can follow)
-      const Dt = clamp(dq * .1, Lr * 7, 260);
+      const Dt = clamp(dq * .05, Lr * 4, 120);
       shot.engD = shot.engD ? toward(shot.engD, Dt, dt, .35, .6) : Dt;
       const D = shot.engD;
       for (let i = 0; i < 3; i++) eB[i] = P[i] - F[i] * D * .8 + SV[i] * D * .45;
@@ -656,23 +661,24 @@ function makeDirector(game) {
       const dx = P[0] - A[0], dz = P[2] - A[2], h = Math.hypot(dx, dz) || 1, ux = dx / h, uz = dz / h;
       const sx = uz * shot.gside, sz = -ux * shot.gside;
       // low beside and behind the mount, the mount big in the corner of the frame, the lens up the line of fire
-      const gb = (Lu * .75 + 7) * (1 + .05 * Math.sin(age * .3)), side = Lu * .3 + 4;
+      const gb = clamp(Lu * 1.1 + 16, 24, 60) * (1 + .05 * Math.sin(age * .3)), side = clamp(Lu * .35 + 6, 8, 30);
       eB[0] = A[0] - ux * gb + sx * side; eB[2] = A[2] - uz * gb + sz * side;
-      eB[1] = A[1] + Hu * .45 + 1.2;
+      eB[1] = A[1] + Hu * .8 + 2;
       floorAt(eB, 2.5);
       up3(tmp, A[0] - eB[0], A[1] + Hu * .6 - eB[1], A[2] - eB[2]); norm3(tmp);
       up3(dB, P[0] - eB[0], P[1] - eB[1], P[2] - eB[2]); norm3(dB);
-      mix3(dB, tmp, dB, .75); norm3(dB);
+      mix3(dB, tmp, dB, .7); norm3(dB);
       blendInto(shot.wG);
       Ls = Ls + (Math.max(60, dist3(eB, P) * .5) - Ls) * shot.wG;
       near = Math.max(.3, Math.min(gb * .2, 5));
+      fovK = 1 - .4 * shot.wG;            // a longer lens by the mount: the rope and the round read
     }
     // whatever the blend, the round stays in the frame: the lens turns toward it until it is within ~14 deg of the
     // centre (the launch climbing out of a low eye, a glide between two framings)
     up3(tmp, P[0] - eA[0], P[1] - eA[1], P[2] - eA[2]);
     if (Math.hypot(tmp[0], tmp[1], tmp[2]) > 1) {
       norm3(tmp);
-      const c = clamp(dA[0] * tmp[0] + dA[1] * tmp[1] + dA[2] * tmp[2], -1, 1), a = Math.acos(c), amax = 14 * DEG;
+      const c = clamp(dA[0] * tmp[0] + dA[1] * tmp[1] + dA[2] * tmp[2], -1, 1), a = Math.acos(c), amax = 14 * DEG * fovK;
       if (a > amax) { mix3(dA, dA, tmp, (a - amax) / a); norm3(dA); }
     }
     goal(eA, dA, Ls);
@@ -724,9 +730,9 @@ function makeDirector(game) {
     }
     const g = Math.max(0, game.ground(s.c[0], s.c[2]));
     if (s.c[1] < g + 2) s.c[1] = g + 2;
-    const d = clamp(Math.max(s.L * 4.5, ext * 2.3), 22, 260) * (1 + .15 * ss(2, 7, age));
+    const d = clamp(Math.max(s.L * 4, ext * 1.6), 30, 80) * (1 + .15 * ss(2, 7, age));
     s.d0 += (d - s.d0) * (dt > 0 ? 1 - Math.exp(-dt * 1.5) : 0);
-    const yaw = s.yaw0 + s.spin * age * .16, pitch = clamp(s.pitch0 + .05 * Math.sin(age * .4), 4 * DEG, 40 * DEG);
+    const yaw = s.yaw0 + s.spin * age * .16, pitch = clamp(s.pitch0 + .05 * Math.sin(age * .4), 4 * DEG, 16 * DEG);
     orbit(s.c, yaw, pitch, s.d0);
     floorAt(eye, 3);
     near = clamp(s.d0 * .15, .3, 10);
@@ -765,7 +771,7 @@ function makeDirector(game) {
   function apply(dt) {
     const age = game.realT - rig.t0, wS = OMEGA[shot.kind] || 1.6;
     // soft at the start of a move, then as tight as the shot wants
-    const w0 = shot.kind === 'break' ? 2.2 : 1.5, w = wS - (wS - w0) * Math.exp(-age * 1.8);
+    const w0 = shot.kind === 'break' ? 2.8 : 2.4, w = wS - (wS - w0) * Math.exp(-age * 1.8);
     // a long move lifts the eye on the way (the pull-back arc), fading as it arrives
     if (rig.init && age < 4) {
       const far = Math.hypot(rig.e[0] - eye[0], rig.e[2] - eye[2]);
@@ -780,7 +786,7 @@ function makeDirector(game) {
       up3(tmp2, subj[0] - rig.e[0], subj[1] - rig.e[1], subj[2] - rig.e[2]);
       if (Math.hypot(tmp2[0], tmp2[1], tmp2[2]) > 1) {
         norm3(tmp2);
-        const a = Math.acos(clamp(tmp[0] * tmp2[0] + tmp[1] * tmp2[1] + tmp[2] * tmp2[2], -1, 1)), amax = 17 * DEG;
+        const a = Math.acos(clamp(tmp[0] * tmp2[0] + tmp[1] * tmp2[1] + tmp[2] * tmp2[2], -1, 1)), amax = 17 * DEG * (rig.fk || 1);
         if (a > amax) {
           mix3(tmp, tmp, tmp2, (a - amax) / a); norm3(tmp);
           for (let k = 0; k < 3; k++) rig.l[k] = rig.e[k] + tmp[k] * L0;
@@ -797,7 +803,9 @@ function makeDirector(game) {
     cur.T[0] = want.T[0]; cur.T[1] = want.T[1]; cur.T[2] = want.T[2];
     cur.dist = want.dist; cur.pitch = want.pitch; cur.yaw = cur.yaw + wrapPi(want.yaw - cur.yaw);
     putCam(cam, cur, follow);
-    cam.view = { eye: rig.e.slice(), look: w3.slice(), near: near || undefined };
+    rig.fk = rig.fk === undefined ? fovK : toward(rig.fk, fovK, dt, 2.5, 2.5);
+    const f0 = cam.fov0 !== undefined ? cam.fov0 : cam.fov;
+    cam.view = { eye: rig.e.slice(), look: w3.slice(), near: near || undefined, fov: rig.fk < .999 ? f0 * rig.fk : undefined };
   }
 
   /* the watched round's moment is now: the rate holds, the shot stays on it a while */
@@ -943,9 +951,13 @@ function makeDirector(game) {
       paceFrame();
       pace.update(dt);
     },
+    always2d: true,
     draw2d(ov) {
-      if (!on || game.getSystem('hud') || (game.replay && game.replay.active)) return;
-      ov.text(ov.W - 24 * ov.ui, 30 * ov.ui, 'CINEMATIC · C', { size: 10.5, col: '#C6F432', align: 'right' });
+      if (!on || (game.replay && game.replay.active)) return;
+      if (!game.ui.hidden && game.getSystem('hud')) return;
+      // the interface is off: the rate itself is render.js's (always on screen); under it, the mode
+      const K = ov.ui || 1, bt = pace.active && game.timeRate < .99 ? 'BULLET TIME · ' : '';
+      ov.text(ov.W - 22 * K, 42 * K, bt + 'CINEMATIC · C', { size: 10, col: '#C6F432', a: .75, align: 'right' });
     },
   };
 }
