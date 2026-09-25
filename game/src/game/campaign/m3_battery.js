@@ -40,7 +40,26 @@ export function setup(S) {
   radarOn(sim, ddg, true); ddg.hold = false;
   // they know the battery (the picket's report): the command post and the TELs
   for (const u of [hq].concat(tels)) knows(sim, 'fleet', u, 150);
-  Object.assign(S.flags, { hq, tels, radar, sams, tlv, cv, ddg, threat, CARRIER, PICKET });
+  // the raids' way in: the bearing (within 80 degrees of the carrier's) whose last 8 km to the battery rises least
+  // (the SLAM-ER come in low and follow the ground; a fjord wall climbing toward the battery is where they crash)
+  const approach = clearApproach(sim, hq, threat);
+  Object.assign(S.flags, { hq, tels, radar, sams, tlv, cv, ddg, threat, CARRIER, PICKET, approach });
+}
+
+/* the bearing from `p` (within 80 degrees of `b0`, 5 degree steps) whose ground, flown in toward `p` over the last
+   8 km, climbs least steeply: the worst rise over any 600 m, and a little for straying from `b0` */
+function clearApproach(sim, p, b0) {
+  const map = sim.map, P = xz(p);
+  let best = b0, bs = 1e18;
+  for (let k = -16; k <= 16; k++) {
+    const b = b0 + k * 5 * DEG, H = [];
+    for (let d = 8000; d >= 200; d -= 200) H.push(Math.max(0, map.h(P[0] + Math.sin(b) * d, P[1] + Math.cos(b) * d)));
+    let rise = 0;
+    for (let i = 3; i < H.length; i++) rise = Math.max(rise, H[i] - H[i - 3]);
+    const s = rise + Math.abs(k) * 2;
+    if (s < bs) { bs = s; best = b; }
+  }
+  return best;
 }
 
 export function run(S) {
@@ -95,9 +114,10 @@ export function run(S) {
     }
     raid.jets = jets;
     for (const j of jets) j._fired = false;
-    const ip = offset(hq, threat, FIRE_AT - 2000);
+    const ip = offset(hq, F.approach, FIRE_AT - 2000);
+    raid.ip = ip;
     for (const j of jets) sim.order([j.id], { kind: 'move', x: ip[0], z: ip[1] });
-    S.say(`Raid ${raid.i + 1} · ${raid.n} F/A-18E off the carrier · ${String(deg(threat)).padStart(3, '0')}°`, { tone: 'coral' });
+    S.say(`Raid ${raid.i + 1} · ${raid.n} F/A-18E off the carrier · in from ${String(deg(F.approach)).padStart(3, '0')}°`, { tone: 'coral' });
     S.after(60, () => { if (radar.alive && emitting(radar)) S.say('Monolith-B is radiating · it will be the target', { tone: 'coral' }); });
     S.prog('raids', `${raid.i + 1}/${RAIDS.length} · inbound`);
   }
@@ -117,7 +137,8 @@ export function run(S) {
       if (raid.state !== 'out') continue;
       for (const j of raid.jets) {
         if (!j.alive || j.aboard || j._fired) continue;
-        if (dist(j, hq) < FIRE_AT) { j._fired = true; fire(raid, j); }
+        // they release at their point on the way in (or anywhere closer, if they got past it)
+        if (dist(j, raid.ip) < 4000 || dist(j, hq) < FIRE_AT - 8000) { j._fired = true; fire(raid, j); }
       }
       // fired = every jet has put its missiles in the air (its attack order is through) or is gone
       if (raid.jets.every(j => !j.alive || (j._fired && !(j.orders[0] && j.orders[0].kind === 'attack')))) raid.state = 'fired';

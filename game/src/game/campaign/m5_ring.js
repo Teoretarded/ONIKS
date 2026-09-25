@@ -22,6 +22,7 @@ const WAVES = [[90, 1], [230, 1], [380, 2], [520, 99]];
 const RAIDS = [{ at: 200, n: 2 }];
 const SEEN_DELAY = 50;                  // s from a launch seen to their scan of it
 const CP_HITS = 3;                      // Tomahawk hits the dug-in command post takes here
+const DEPOT_R = 2500;                   // the battery depot's reach (a spawn counts out to 2.5 km)
 
 export function setup(S) {
   const { sim, map } = S;
@@ -71,7 +72,10 @@ export function setup(S) {
   });
   // they know the command post
   knows(sim, 'fleet', hq, 200);
-  Object.assign(S.flags, { hq, tels, radar, sams, tlvs, cv, toSea, beats });
+  // the battery depot: Pantsirs refill inside it (50 s a missile, once they have not fired for a minute), transloaders
+  // too; the two forward Pantsirs start outside it, covering the TELs
+  const depot = fwd || [map.spawns.coast.x, map.spawns.coast.z];
+  Object.assign(S.flags, { hq, tels, radar, sams, tlvs, cv, toSea, beats, depot });
 }
 
 /* where the battery sets up when the spawn is too far from the sea: the nearest water deep enough for a destroyer
@@ -130,12 +134,21 @@ export function run(S) {
     S.say('The command post radiates · they know where it is');
     S.say('A destroyer with a 3M55 in it fires no more salvos', { tone: 'lime' });
     S.mark('cp', hq, { chip: 'CP', label: `K380R · dug in · ${CP_HITS} hits`, kind: 'coral', until: 8 });
-    // what to do first: a track on a destroyer, then fire
+    S.area('depot', F.depot, DEPOT_R, { kind: 'lime', label: 'Depot · refill' });
+    S.say('Pantsirs refill only inside the depot ring · 50 s a missile, between salvos');
+    // what to do first: a track on a destroyer, then fire; then the ring in close where it can refill
     S.every(1, () => {
-      if (game.result || S.flags.firstFire) { S.prompt(null); return false; }
-      const trk = ddgs.some(u => u.alive && S.tracked(u));
-      if (!trk) S.prompt('Scan a destroyer · the command post reaches 50 km', { key: 'X' });
-      else S.prompt('Fire · 1, then right-click a destroyer', { key: ['1', 'Right-click'] });
+      if (game.result) { S.prompt(null); return false; }
+      if (!F.firstFire) {
+        const trk = ddgs.some(u => u.alive && S.tracked(u));
+        if (!trk) S.prompt('Scan a destroyer · the command post reaches 50 km', { key: 'X' });
+        else S.prompt('Fire · 1, then right-click a destroyer', { key: ['1', 'Right-click'] });
+        return;
+      }
+      if (F.firstFireT === undefined) F.firstFireT = sim.t;
+      const out = sams.filter(u => u.alive && dist(u, F.depot) > DEPOT_R - 300);
+      if (out.length && sim.t - F.firstFireT < 150) S.prompt('Pull the Pantsirs into the depot ring · 3, then right-click inside it', { key: ['3', 'Right-click'] });
+      else { S.prompt(null); return false; }
     });
   }
 
