@@ -292,6 +292,11 @@ export function createGame(o) {
       }
     }
     bus.emit('frame', frame);
+    // drop the cached poses of units and rounds that are gone (every round fired would otherwise keep one)
+    if ((game.frameN & 255) === 0) {
+      for (const id of poses.keys()) if (!sim.units.has(id)) poses.delete(id);
+      for (const id of pposes.keys()) if (!sim.projectiles.has(id)) pposes.delete(id);
+    }
   };
   const reported = new Set();
   function report(s, where, e) {
