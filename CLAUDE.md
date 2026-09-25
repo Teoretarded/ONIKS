@@ -7,6 +7,12 @@ data (terrain, seed-1337 map, unit facts), not for code or UI.
 GitHub: `Teoretarded/ONIKS` (public). The GitHub CLI is at `C:\Program Files\GitHub CLI\gh.exe` (not on Git Bash's
 PATH; call it from PowerShell by full path).
 
+## Working rules (from the user)
+
+- Run agents (and yourself) at **medium effort** to save weekly limits (`.claude/agents/oniks-dev.md`, `oniks-research.md`).
+  Use high/xhigh only for genuinely crucial work.
+- Be brief: no narration; short updates only when something major finishes.
+
 ## Direction (from the user)
 
 - A real-time strategy game in exactly the visual language of `reference/films`, scaled up. Same graphics, same
