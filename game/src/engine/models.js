@@ -35,9 +35,58 @@ uniform vec4 uDen;        // dots per pixel: x least spacing of the kept dots on
                           // floor of the facing, z least kept share (the model's coarsest level), w cutaway (0..1: the
                           // highlights on a knee)
 uniform vec4 uFill;       // the view's fill light: xyz direction (toward it), w strength
+// scars (game/scars.js, d.scars): where hits struck this instance, world-aligned, relative to the eye
+uniform vec4 uScA[8];     // xyz: the hole's centre on the surface, w: hole radius (m)
+uniform vec4 uScB[8];     // xyz: the surface's outward normal there, w: seed
+uniform vec4 uScC[8];     // y: scorch reach (x the radius), z: petal depth (x the radius), w: heat of the rim (0..1)
+uniform int uScN;         // how many (0: none)
 out vec3 vCol;
 void main() {
   vec3 p = uR * aPos + uT;
+  uint hid = hash1(uint(gl_VertexID) * 747796405u + 2891336453u);
+  float hr = u01(hid);
+  // scars: the hole (dots gone, a few torn ones bent in), the petalled rim (bent in, torn in strips, glowing while
+  // hot), the scorch round it (charred: dimmer, sparser, grey; the stain taller above than below)
+  float burn = 0.0, hot = 0.0, edge = 0.0;
+  for (int i = 0; i < 8; i++) {
+    if (i >= uScN) break;
+    vec4 A = uScA[i];
+    vec3 d = p - A.xyz;
+    float r = A.w, reach = r * uScC[i].y;
+    if (r <= 0.0 || dot(d, d) > reach * reach * 4.0) continue;
+    vec3 nn = uScB[i].xyz;
+    float sd = uScB[i].w;
+    float h2 = u01(hash1(hid ^ 0x68bc21ebu)), h3 = u01(hash1(hid ^ 0x2f6b9a13u));
+    float al = dot(d, nn);
+    vec3 lat = d - nn * al;
+    vec3 ax = normalize(abs(nn.y) < 0.9 ? cross(nn, vec3(0.0, 1.0, 0.0)) : cross(nn, vec3(1.0, 0.0, 0.0)));
+    float ang = atan(dot(lat, cross(nn, ax)), dot(lat, ax));
+    float rag = 1.0 + 0.2 * sin(3.0 * ang + sd) + 0.12 * sin(5.0 * ang + sd * 1.7) + 0.07 * sin(9.0 * ang + sd * 2.9);
+    float rr = r * rag * (0.9 + 0.2 * h2);
+    float q = sqrt(dot(lat, lat) + al * al * 0.55) / rr;
+    if (q < 1.0) {
+      if (h3 > 0.05 + 0.12 * q) { ${CULL} return; }
+      p -= nn * (1.0 - q) * r * 0.85;
+      p.y -= (1.0 - q) * r * 0.3 * h2;
+      burn = 1.0; hot = max(hot, (0.5 + 0.5 * q) * uScC[i].w);
+    } else if (q < 1.55) {
+      float e = (1.55 - q) / 0.55;
+      float strip = 0.5 + 0.5 * sin(ang * (5.0 + mod(floor(sd), 4.0)) + sd * 3.1);
+      bool rim = q < 1.28 + 0.14 * strip;
+      if (!rim && h3 < 0.3 * e * e) { ${CULL} return; }
+      p -= nn * e * e * r * uScC[i].z * (0.35 + 0.65 * strip);
+      p.y -= e * e * r * 0.12 * strip * h2;
+      burn = max(burn, 0.6 + 0.4 * e);
+      // the torn edge itself: bright ragged steel round the black hole (it reads on a hull side in shadow too)
+      if (rim) edge = max(edge, 0.8 + 0.2 * strip);
+      hot = max(hot, e * e * uScC[i].w);
+    } else {
+      vec3 ds = d; if (ds.y > 0.0) ds.y *= 0.45;
+      float qs = (length(ds) - rr * 1.55) / max(1e-3, rr * (uScC[i].y - 1.55));
+      if (qs < 1.0) { float s = 1.0 - max(qs, 0.0); burn = max(burn, s * (0.45 + 0.45 * s) * (0.75 + 0.5 * h2)); }
+    }
+  }
+  if (burn > 0.0 && edge <= 0.0 && u01(hash1(hid ^ 0x1b873593u)) < burn * 0.5) { ${CULL} return; }
   float yw = p.y + uEyeW.y;
   float dist = length(p);
   vec3 v = p / max(1e-4, dist);
@@ -45,8 +94,6 @@ void main() {
   vec4 c = toClip(p);
   if (c.w < uCam.w) { ${CULL} return; }
   gl_Position = c;
-  uint hid = hash1(uint(gl_VertexID) * 747796405u + 2891336453u);
-  float hr = u01(hid);
   float xr = uP.y, dmg = uP.z;
   if (uQ.w > 0.0 && hr < uQ.w) { ${CULL} return; }
   if (dmg > 0.0 && hr > 1.0 - dmg * 0.22) { ${CULL} return; }
@@ -89,7 +136,7 @@ void main() {
   float pxs = uP.w * uCam.x / c.w;
   if (uDen.x > 0.0) {
     float keep = max(pxs * pxs * fk / (uDen.x * uDen.x * max(1.0, uG.y)), uDen.z);
-    if (keep < 1.0 && u01(hash1(hid ^ 0x5bd1e995u)) > keep) { ${CULL} return; }
+    if (keep < 1.0 && edge <= 0.0 && u01(hash1(hid ^ 0x5bd1e995u)) > keep) { ${CULL} return; }
   }
   if (xr > 0.0) {
     // the x-ray: the shell thins to a ghost so what is inside reads through it
@@ -103,14 +150,19 @@ void main() {
   if (uDen.w > 0.0 && b > 0.5) b = mix(b, 0.5 + 0.4 * (1.0 - exp((0.5 - b) / 0.4)), uDen.w);
   vec3 col = mix(WH, uTint.rgb, uTint.a * mix(uQ.y, 1.0, rim));
   if (dmg > 0.0) col = mix(col, CORAL, min(1.0, dmg * 1.1));
+  if (burn > 0.0) { col = mix(col, vec3(0.62, 0.6, 0.56), burn); b *= 1.0 - 0.88 * burn; }
+  if (edge > 0.0) { b = max(b, edge * (0.62 + 0.3 * hr)); col = mix(col, WH, edge); }
   vec2 sc = scanAt(p);
   vec3 rgb = col * b;
+  // the rim still hot: warm white at the tear, flickering
+  if (hot > 0.01) rgb = max(rgb, vec3(1.0, 0.8, 0.56) * hot * (0.7 + 0.3 * sin(uEyeW.w * 11.0 + hr * 40.0)));
   if (sc.x > 0.01) rgb = max(mix(rgb, uScanC[0].rgb * max(b, 0.95), sc.x), rgb);
   if (sc.y > 0.0) rgb = mix(rgb, rgb * 0.6 + uScanC[0].rgb * b * 0.5, 0.3 * sc.y);
   if (gk > 0.01) rgb = max(mix(rgb, LIME * max(b, 0.95), gk), rgb);
-  rgb += lightsAt(p, two ? vec3(0.0) : n) * (0.35 + 0.65 * lit) * uP.x;
+  // charred plating takes little of the light (the fire lights the hull round the hole, the hole stays black)
+  rgb += lightsAt(p, two ? vec3(0.0) : n) * (0.35 + 0.65 * lit) * uP.x * (1.0 - 0.8 * burn * (1.0 - edge));
   vCol = min(rgb, vec3(1.0));
-  gl_PointSize = dotPx(max(pxs, uDen.x) * (0.8 + 0.4 * hr));
+  gl_PointSize = dotPx(max(pxs, uDen.x) * (0.8 + 0.4 * hr) * (edge > 0.0 ? 1.6 : 1.0));
 }
 `;
 
@@ -282,6 +334,7 @@ export class ModelLib {
     this.stats = { parts: 0, points: 0, sampled: 0, gpuMB: 0 };
     this.pending = [];              // levels queued by warm(), sampled within the frames' budget (idle())
     this._m9 = new Float32Array(9);
+    this._scA = new Float32Array(32); this._scB = new Float32Array(32);   // scars, per instance (d.scars)
   }
   /* register a model factory: factory() -> {parts: [...]} in the GEO/HD part format.
      opts: { lods: [spacings], quant: {stateKey: step}, angles: [stateKeys], deps: {partName: [keys]} } */
@@ -519,6 +572,22 @@ export class ModelLib {
     // mode: default per part }, d.partGate = { part: mode } (0 off, 1 shell, 2 hidden, 3 part; see the shader)
     const G = d.gate || null;
     if (G) gl.uniform4f(u.uGP, G.n[0], G.n[1], G.n[2], G.d - (G.n[0] * eye[0] + G.n[1] * eye[1] + G.n[2] * eye[2]));
+    // scars (game/scars.js): model frame -> world-aligned, relative to the eye
+    const S = d.scars, ns = S && S.n ? Math.min(8, S.n) : 0;
+    if (ns) {
+      const L = S.L, A = this._scA, B = this._scB;
+      for (let i = 0; i < ns; i++) {
+        const x = L[i * 8], y = L[i * 8 + 1], z = L[i * 8 + 2], nx = L[i * 8 + 4], ny = L[i * 8 + 5], nz = L[i * 8 + 6];
+        A[i * 4] = R0[0] * x + R0[1] * y + R0[2] * z + T0[0] - eye[0];
+        A[i * 4 + 1] = R0[3] * x + R0[4] * y + R0[5] * z + T0[1] - eye[1];
+        A[i * 4 + 2] = R0[6] * x + R0[7] * y + R0[8] * z + T0[2] - eye[2];
+        A[i * 4 + 3] = L[i * 8 + 3];
+        B[i * 4] = R0[0] * nx + R0[1] * ny + R0[2] * nz; B[i * 4 + 1] = R0[3] * nx + R0[4] * ny + R0[5] * nz; B[i * 4 + 2] = R0[6] * nx + R0[7] * ny + R0[8] * nz;
+        B[i * 4 + 3] = L[i * 8 + 7];
+      }
+      gl.uniform4fv(u.uScA, A); gl.uniform4fv(u.uScB, B); gl.uniform4fv(u.uScC, S.C);
+    }
+    gl.uniform1i(u.uScN, ns);
     let drawn = 0;
     const ex = d.explode || 0;
     for (const Pt of e.parts) {
@@ -554,7 +623,8 @@ export class ModelLib {
       gl.uniformMatrix3fv(u.uR, false, m);
       gl.uniform3f(u.uT, Tp[0] - eye[0], Tp[1] - eye[1], Tp[2] - eye[2]);
       const xr = d.partXray && d.partXray[Pt.name] !== undefined ? d.partXray[Pt.name] : (d.xray || 0);
-      const dm = d.damage && d.damage[Pt.name] ? d.damage[Pt.name] : 0;
+      // the coral part tint only in a cutaway (Inspect, the hit replay: a cue there); in play the scars show the damage
+      const dm = cut && d.damage && d.damage[Pt.name] ? d.damage[Pt.name] : 0;
       gl.uniform4f(u.uP, pa, xr, dm, cl.sp);
       const gm = G ? (d.partGate && d.partGate[Pt.name] !== undefined ? d.partGate[Pt.name] : (G.mode || 0)) : 0;
       gl.uniform4f(u.uG, gm, 1 + (cl.layer - 1) * kCut, G ? G.w || 1 : 1, G ? G.g || 1 : 1);

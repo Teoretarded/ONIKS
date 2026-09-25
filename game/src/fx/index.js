@@ -304,8 +304,8 @@ class FxSystem {
             return;
           }
           this.add(new Blast({ t0: t + .3, pos: [pos[0], pos[1] + 6, pos[2]], sc: 1.4, sea: true, gy: 0, seed: seed + 5 }), 3);
-          const f = this.fires.get(ev.unit) || this.startFire(u, t, null, L > 200 ? 1.5 : 1, seed);
-          f.k = 1;
+          const f = this.fires.get(ev.unit) || (this.game && this.game.scars && this.game.scars.burning(ev.unit) ? null : this.startFire(u, t, null, L > 200 ? 1.5 : 1, seed));
+          if (f) f.k = 1;
           this.sinks.set(ev.unit, this.add(new Sinking({ t0: t, pos, hdg: u.hdg, L, B, seed, dur: u.def.dieTime }), 0));
         } else if (dom === 'air') {
           const v = u ? [Math.sin(u.hdg) * u.speed, 0, Math.cos(u.hdg) * u.speed] : [0, 0, 0];
@@ -400,18 +400,23 @@ class FxSystem {
       // the hull broken low amidships: fire and smoke from the damage once the water has come down
       const al = (hsh(seed, 3) - .5) * L * .25;
       this.hitAt.set(u.id, [al, Math.max(2, u.def.size[2] * .12), 0]);
+      if (this.scarred()) return;              // the hole at the waterline and its smoke: the scars system
       const heavy = T.H > 80, f = this.fires.get(u.id) || this.startFire(u, t + 3, null, (L > 200 ? 1.4 : L < 90 ? .6 : 1) * (heavy ? 1 : .75), seed);
       f.k = Math.min(1, (f.k || 0) + (heavy ? .7 : .45));
     }
   }
+  /* the scars system (game/scars.js) seats fires at the hit points of units it has marked */
+  scarred() { const g = this.game; return !!(g && g.scars); }
   onHit(ev, t, seed) {
-    const sim = this.sim, u = sim && sim.units.get(ev.target), pos = ev.pos, k = fk(ev.kind), sc = HIT_SC[k] || .3;
+    const sim = this.sim, u = sim && sim.units.get(ev.target), k = fk(ev.kind), sc = HIT_SC[k] || .3;
+    // where it struck the model's surface (the scars system carries the sim's hit point onto the dots)
+    const sp = this.game && this.game.scars && this.game.scars.surface(ev), pos = sp ? sp.slice() : ev.pos;
     if (ev.under || TORP[k]) return this.onTorpHit(ev, u, t, seed);
     const dom = u ? u.def.domain : (this.wet(pos[0], pos[2]) ? 'sea' : 'land');
     if (u) {
       // where it struck, in the unit's frame (the fire burns there as the ship turns)
       const s = Math.sin(u.hdg), c = Math.cos(u.hdg), dx = pos[0] - u.pos[0], dz = pos[2] - u.pos[2];
-      this.hitAt.set(u.id, [dx * s + dz * c, Math.max(2, pos[1] - u.pos[1]), dx * c - dz * s]);
+      this.hitAt.set(u.id, [dx * s + dz * c, Math.max(.5, pos[1] - u.pos[1]), dx * c - dz * s]);
     }
     if (dom === 'air') {
       const v = u ? [Math.sin(u.hdg) * u.speed, 0, Math.cos(u.hdg) * u.speed] : [0, 0, 0];
@@ -422,8 +427,8 @@ class FxSystem {
     const sea = dom === 'sea', gy = sea ? 0 : this.groundAt(pos[0], pos[2]);
     this.add(new Blast({ t0: t, pos, sc, sea, gy, seed }), 3);
     if (!sea && sc >= .15) this.add(new Dirt({ t0: t, pos: [pos[0], gy, pos[2]], size: 10 + 22 * sc, seed: seed + 1 }), 2);
-    // a missile or a shell sets it burning
-    if (u && sc >= .15) {
+    // a missile or a shell sets it burning (at the hole, by the scars system, when it runs)
+    if (u && sc >= .15 && !this.scarred()) {
       const big = sea ? (u.def.size[0] > 200 ? 1.4 : 1) : .3;
       const f = this.fires.get(u.id) || this.startFire(u, t, null, big * Math.min(1, .45 + sc), seed);
       f.k = Math.min(1, (f.k || 0) + .35 + sc * .5);
@@ -459,8 +464,7 @@ class FxSystem {
   /* a fire on a unit (or on the ground where a wreck fell) */
   startFire(u, t, at, size, seed) {
     const loc = u ? (this.hitAt.get(u.id) || [0, 3, 0]) : [0, 1, 0];
-    const deck = u ? u.def.size[2] * (u.def.domain === 'sea' ? .2 : .3) : 1;
-    const f = new Fire({ t0: t, seed: seed + 11, size, local: [loc[0], Math.max(deck, loc[1] * .6), loc[2] * .5],
+    const f = new Fire({ t0: t, seed: seed + 11, size, local: [loc[0], Math.max(.5, loc[1]), loc[2]],
       spread: u && u.def.domain === 'sea' ? [Math.min(u.def.size[0] * .17, 30) * size, 14 * size, Math.min(u.def.size[1] * .3, 8)] : [3.5, 3, 1.6],
       ceiling: u && u.def.domain === 'sea' ? 900 * size : 220 });
     f.k = .6; f.unit = u ? u.id : 0; f.land = !u || u.def.domain === 'land';
@@ -530,7 +534,7 @@ class FxSystem {
         else if (dom === 'sea') k = u.dying < .8 ? 1 : Math.max(0, 1 - (u.dying - .8) / .17);
         f.k = k; f.follow(t, u.pos, u.hdg, this.seeUnit(u) && !drown ? k : 0);
         if (dom === 'sea' && !u.alive && u.dying > .97) f.stop(t);
-      } else if (u.alive && u.hp < u.hpMax * .55 && dom !== 'air' && !drown && this.hitAt.has(u.id)) {
+      } else if (u.alive && u.hp < u.hpMax * .55 && dom !== 'air' && !drown && this.hitAt.has(u.id) && !this.scarred()) {
         this.startFire(u, t, null, dom === 'sea' ? (u.def.size[0] > 200 ? 1.2 : .8) : .25, u.id * 17);
       }
       const s = this.sinks.get(u.id); if (s) s.follow(u.pos, u.hdg, u.dying || 0);

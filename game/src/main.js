@@ -51,6 +51,7 @@ const OPTIONAL = [
   [['./game/editor.js'], 'createEditor', 'editor'],                 // the sandbox's map builder (F2)
   [['./game/debrief.js'], 'createDebrief', 'debrief'],
   [['./game/debris.js'], 'createDebris', 'debris'],
+  [['./game/scars.js'], 'createScars', 'scars'],                 // hits marked in the models' dots, fires at the holes
   [['./game/perfguard.js'], 'createPerfGuard', 'perfguard'],   // last: it wraps game.frame after the debrief's host
 ];
 

@@ -707,9 +707,12 @@ export async function createDebris(game) {
   }
 
   /* ---------------------------------------------------------------- ships, vehicles, sites */
-  function unitMods(u, e) {
+  /* sel (optional): { mods: [...] only these, all: true (no chance roll), push: [x, z] world direction they are thrown
+     (away from the hit), boost: velocity factor } */
+  function unitMods(u, e, sel) {
     const plan = UNIT_PLANS[u.def.model];
-    if (!plan || !plan.mods || !plan.mods.length || !R.models.has(u.def.model) || u.aboard) return;
+    const mods = sel && sel.mods ? sel.mods : plan && plan.mods;
+    if (!mods || !mods.length || !R.models.has(u.def.model) || u.aboard) return;
     if (!visUnit(u)) return;
     if (u.def.sub && (u.depth || 0) > u.def.draught + 2) return;
     const ent = R.models.get(u.def.model), key = u.def.model;
@@ -726,8 +729,9 @@ export async function createDebris(game) {
     if (by) away = Math.atan2(T0[0] - by.pos[0], T0[2] - by.pos[2]);
     const list = (u.roll || 0) >= 0 ? 1 : -1;
     let n = 0;
-    for (const md of plan.mods) {
-      if (md.p !== undefined && r.r() > md.p) continue;
+    const boost = sel && sel.boost || 1;
+    for (const md of mods) {
+      if (md.p !== undefined && !(sel && sel.all) && r.r() > md.p) continue;
       const names = md.parts.filter(nm => hasPart(ent, nm) && shown(ent, nm, st) && gone[nm] !== 0);
       if (!names.length) continue;
       const box = boxOf(ent, names, st);
@@ -759,9 +763,10 @@ export async function createDebris(game) {
       } else {
         // thrown up and off: outboard over the side for a ship, away from the blast for a vehicle
         let hx, hz;
-        if (sea) { const sx = box.c[0] > .5 ? 1 : box.c[0] < -.5 ? -1 : r.sign(); hx = M0[0] * sx + M0[2] * r.n() * .4; hz = M0[6] * sx + M0[8] * r.n() * .4; }
+        if (sel && sel.push) { hx = sel.push[0] + r.n() * .3; hz = sel.push[1] + r.n() * .3; }
+        else if (sea) { const sx = box.c[0] > .5 ? 1 : box.c[0] < -.5 ? -1 : r.sign(); hx = M0[0] * sx + M0[2] * r.n() * .4; hz = M0[6] * sx + M0[8] * r.n() * .4; }
         else { const a = away + r.n() * .8; hx = Math.sin(a); hz = Math.cos(a); }
-        const hl = Math.hypot(hx, hz) || 1, up = mix(md.up[0], md.up[1], r.r()), hs = sea ? (6 + 7 * r.r()) * Math.sqrt(8 / Math.max(2, Math.cbrt(m))) : 4 + 4 * r.r();
+        const hl = Math.hypot(hx, hz) || 1, up = mix(md.up[0], md.up[1], r.r()) * boost, hs = (sea ? (6 + 7 * r.r()) * Math.sqrt(8 / Math.max(2, Math.cbrt(m))) : 4 + 4 * r.r()) * boost;
         const v = [vb[0] + hx / hl * hs, up, vb[2] + hz / hl * hs];
         const ws = mix(md.spin[0], md.spin[1], r.r());
         const w = [r.n() * ws, r.n() * ws * .6, r.n() * ws];
@@ -774,6 +779,38 @@ export async function createDebris(game) {
       for (const nm of names) gone[nm] = 0;
     }
     if (n) { hid.set(u.id, gone); stats.breakups++; }
+  }
+
+  /* a part of a live unit destroyed (sim 'part'): the module at the hit is blown off (the plan's module holding that
+     part, or one whose box the hole reaches; a small model part of that name without a module goes on its own), thrown
+     away from the face that was hit. The scars system (game/scars.js) has the hit in the model frame */
+  function partOff(u, e) {
+    const plan = UNIT_PLANS[u.def.model];
+    if (!R.models.has(u.def.model) || u.aboard || u.def.domain === 'air') return;
+    const S = game.scars && game.scars.last(u.id);
+    if (!S || sim.t - (S.t0h || S.t0) > 1) return;
+    const ent = R.models.get(u.def.model), st = Object.assign({}, u.def.modelState ? u.def.modelState(u, game.t) : u.st || {});
+    const gone = hid.get(u.id);
+    const near = box => {
+      const dx = Math.max(box.mn[0] - S.x, 0, S.x - box.mx[0]), dy = Math.max(box.mn[1] - S.y, 0, S.y - box.mx[1]), dz = Math.max(box.mn[2] - S.z, 0, S.z - box.mx[2]);
+      return Math.hypot(dx, dy, dz) < S.r * 1.1 + .3;
+    };
+    const pick = [];
+    for (const md of (plan && plan.mods) || []) {
+      const names = md.parts.filter(nm => hasPart(ent, nm) && (!gone || gone[nm] !== 0));
+      if (!names.length) continue;
+      const box = boxOf(ent, names, st);
+      if (box && (md.parts.includes(e.part) ? near({ mn: [box.mn[0] - 2, box.mn[1] - 2, box.mn[2] - 2], mx: [box.mx[0] + 2, box.mx[1] + 2, box.mx[2] + 2] }) : near(box))) pick.push(md);
+    }
+    if (!pick.length && hasPart(ent, e.part) && (!gone || gone[e.part] !== 0)) {
+      const box = boxOf(ent, [e.part], st);
+      if (box && Math.max(box.ext[0], box.ext[1], box.ext[2]) < 4 && near(box)) pick.push({ parts: [e.part], how: 'toss', up: [4, 10], spin: [.8, 2.6], rho: 260 });
+    }
+    if (!pick.length) return;
+    const pose = game.unitPose(u), M0 = attitudeM(pose.hdg, pose.pitch, pose.roll, [0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    const nx = M0[0] * S.nx + M0[1] * S.ny + M0[2] * S.nz, nz = M0[6] * S.nx + M0[7] * S.ny + M0[8] * S.nz, nl = Math.hypot(nx, nz);
+    const hv = Math.min(1.8, .8 + Math.sqrt(S.W) / 20);
+    unitMods(u, e, { mods: pick, all: true, push: nl > .2 ? [nx / nl, nz / nl] : null, boost: hv });
   }
 
   /* ---------------------------------------------------------------- effects the physics causes */
@@ -1352,8 +1389,21 @@ export async function createDebris(game) {
         case 'destroyed': {
           const u = sim.units.get(e.unit);
           if (!u) return;
-          if (u.def.domain === 'air') planeDown(u, e);
-          else unitMods(u, e);
+          if (u.def.domain === 'air') { planeDown(u, e); return; }
+          // a warhead far too big for what it hit (game/scars.js heavy > 1): everything goes, harder, and the struck
+          // part shatters at the hole
+          const hv = game.scars ? game.scars.heavy(u.id) : 0, S = hv > 1 && game.scars.last(u.id);
+          if (S && u.def.domain !== 'sea') {
+            unitMods(u, e, { all: true, boost: Math.min(2.2, .9 + .4 * hv) });
+            const pose = game.unitPose(u), M0 = attitudeM(pose.hdg, pose.pitch, pose.roll, [0, 0, 0, 0, 0, 0, 0, 0, 0]);
+            const c = [pose.pos[0] + M0[0] * S.x + M0[1] * S.y + M0[2] * S.z, pose.pos[1] + M0[3] * S.x + M0[4] * S.y + M0[5] * S.z, pose.pos[2] + M0[6] * S.x + M0[7] * S.y + M0[8] * S.z];
+            if (distEye(c) < 12000) spawnShards(c, [0, 4, 0], Math.min(1.5, S.r * .5), Math.round(26 * quality()), e.t, u.id * 71 + 5, 0, Math.min(.8, .25 + .1 * hv));
+          } else unitMods(u, e);
+          return;
+        }
+        case 'part': {
+          const u = sim.units.get(e.unit);
+          if (u && u.alive && visUnit(u)) partOff(u, e);
           return;
         }
         case 'removed': { const S = planes.get(e.unit); if (S) planeEnd(S, null); hid.delete(e.unit); taken.delete(e.unit); return; }
