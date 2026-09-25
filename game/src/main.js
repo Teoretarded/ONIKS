@@ -8,7 +8,7 @@
      ?mode=museum[&from=sandbox|campaign&key=<model>]   the Anatomy walk alone (ui/inspect/museum.js)
    Debug: ?seed=, ?rate=, ?scale=<render scale>, ?cam=x,z,dist,yawDeg,pitchDeg, ?ui=0, ?fps=1, ?bench=1 (BENCH after 6 s),
    ?nosys=fx,audio (skip optional systems). Console: ONIKS.game / sim / R, ONIKS.benchSync(n), ONIKS.still(name),
-   ONIKS.advance(sec), ONIKS.shot(name). */
+   ONIKS.advance(sec), ONIKS.shot(name), ONIKS.perf(o) (the stress suite, src/perf.js; game/perf.html runs every map). */
 import { Renderer } from './engine/renderer.js';
 import { stubMap } from './engine/stubmap.js';
 import { createGame } from './game/game.js';
@@ -48,6 +48,8 @@ const OPTIONAL = [
   [['./ui/help/index.js'], 'createHelp', 'help'],
   [['./game/filmmaker.js'], 'createFilmmaker', 'filmmaker'],
   [['./game/debrief.js'], 'createDebrief', 'debrief'],
+  [['./game/debris.js'], 'createDebris', 'debris'],
+  [['./game/perfguard.js'], 'createPerfGuard', 'perfguard'],   // last: it wraps game.frame after the debrief's host
 ];
 
 async function getMap(id) {
@@ -204,8 +206,8 @@ async function boot() {
     const { dt, cpu } = step(now);
     fAcc += dt; fN++; cpuAcc += cpu;
     if (now - pTxt > 250 && perf.style.display !== 'none') {
-      const fps = fN / Math.max(1e-3, fAcc), st = R.terrain.stats;
-      perf.innerHTML = `<b>${fps.toFixed(0)}</b> FPS · <b>${(1000 * fAcc / Math.max(1, fN)).toFixed(1)}</b> MS · CPU <b>${(cpuAcc / Math.max(1, fN)).toFixed(1)}</b>\n` +
+      const fps = fN / Math.max(1e-3, fAcc), st = R.terrain.stats, aq = game.quality && game.quality.label;   // aq: the auto-quality step (game/perfguard.js)
+      perf.innerHTML = `<b>${fps.toFixed(0)}</b> FPS · <b>${(1000 * fAcc / Math.max(1, fN)).toFixed(1)}</b> MS · CPU <b>${(cpuAcc / Math.max(1, fN)).toFixed(1)}</b>${aq ? ` · <b>${aq}</b>` : ''}\n` +
         `${R.G.W}×${R.G.H} · ${(st.dots / 1e6).toFixed(2)} M GROUND · ${(R.stats.points / 1e6).toFixed(2)} M MODEL · SIM ${game.stepMs.toFixed(2)} MS × ${game.stepsLast}`;
       fAcc = 0; fN = 0; cpuAcc = 0; pTxt = now;
     }
@@ -248,6 +250,8 @@ async function boot() {
     /* run the sim alone for `sec` sim seconds (fast-forward, no rendering) */
     ff(sec) { const n = Math.round(sec / game.DT); for (let i = 0; i < n; i++) { sim.step(); if (sim.events.length > 2000) game.dispatchEvents(); } game.dispatchEvents(); return sim.t; },
     /* render one frame now and save it */
+    /* the stress suite (src/perf.js): await ONIKS.perf({ only: ['battle'] }) -> { env, rows }, a table in the console */
+    perf: o => import('./perf.js').then(m => m.run(window, o)),
     still: (name, dt, warm) => new Promise(done => {
       for (let i = 0; i < (warm === undefined ? 30 : warm); i++) step(performance.now(), 0);
       shots.push({ name, done }); step(performance.now(), dt === undefined ? 0 : dt);

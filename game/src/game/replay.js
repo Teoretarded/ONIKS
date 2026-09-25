@@ -17,6 +17,10 @@
    settings, or Shift + J here, which saves it).
 
    game.replay = { active, auto, last, play(), skip(), setAuto(on) }; bus 'replay' { on, id }.
+   bus 'replay-peak' (the end screen's kill stills, match.js): once per impact of a live or late replay (not J), PEAK s
+   after it, the X-ray open and the broken parts named: { n (the replay), id, type, side, own, dead, fin, kind, title,
+   short, track, tags: [{ id, label, v }], t, worth, box: the hull and its placards on screen (0..1, set as that frame's
+   overlay is drawn) }; the Esc chip is left off that frame (it is the still).
    Built from the Inspect pieces (ui/inspect/subject.js: the cutaway, its parts, anchors and boxes;
    ui/inspect/overlay.js: the films' tags), never the Inspect view itself. Outside a replay it costs one pass over the
    rounds in flight per frame. */
@@ -31,6 +35,7 @@ const RATE = .25;                          // the replay's time rate
 const RAMP_IN = .35, RAMP_OUT = .55;       // real s
 const LEAD = .3;                           // real s from the camera's arrival to the impact
 const COOL = 40, COOL_KILL = 12;           // real s between automatic replays (a kill waits less)
+const PEAK = 1.0;                          // real s from an impact to its still (the coral names have condensed)
 const RATES = [1, 2, 4, 8, 16, 32];
 const HEAVY = { oniks: 1, tlam: 1, slam: 1, uran: 1, kalibr: 1 };
 const LIME = O.LIME, CORAL = O.CORAL, FAINT = 'rgba(255,255,255,.36)', WHITE = '#FFFFFF';
@@ -49,7 +54,7 @@ export async function createReplay(game, ctx) {
   const flight = new Map();        // heavy round id -> { dir, spd, kind, side } its last flight
   let S = null;                    // the replay (running, or fading out)
   let last = null;                 // the last decisive hit, for J
-  let nextOk = 0, nextKill = 0, lastHull = 0;   // the hull of the last replay: her sinking never waits
+  let nextOk = 0, nextKill = 0, lastHull = 0, serial = 0;   // the hull of the last replay: her sinking never waits
   let auto = readAuto();
   const q3 = [0, 0, 0], w3 = [0, 0, 0], s3 = [0, 0, 0], e3 = [0, 0, 0], l3 = [0, 0, 0];
   const HC = Array.from({ length: 8 }, () => [0, 0, 0]);
@@ -190,6 +195,7 @@ export async function createReplay(game, ctx) {
       keep: u ? { id: u.id, type: u.type, def: u.def, parts: copyParts(u), hpMax: u.hpMax } : null,
     };
     if (!resolve(V)) { S = prev; return false; }
+    V.n = ++serial;
     // what the hull looked like before (the hit's damage shows at the impact)
     V.before = rec ? rec.before : u && o.mode === 'live' ? (partsSeen.get(u.id) || copyParts(u)) : o.before || {};
     V.after = rec ? rec.after : null;
@@ -447,6 +453,14 @@ export async function createReplay(game, ctx) {
       }
     }
     if (V.phase !== 'out' && t >= V.tEnd) finish(false);
+    // the peak of the moment, for the end screen's stills
+    if (V.mode !== 'again' && V.phase !== 'out' && V.hitAt !== undefined && V.peakOf !== V.hitAt && t - V.hitAt >= PEAK && (V.tags.length || V.dead)) {
+      V.peakOf = V.hitAt; V.shot = game.frameN;
+      const ty = u ? u.type : V.keep ? V.keep.type : null, df = u ? u.def : V.def;
+      bus.emit('replay-peak', V.peakInfo = { n: V.n, id: V.id, type: ty, side: V.side, own: V.side === game.side, dead: !!V.dead, fin: V.fin, kind: V.kind,
+        title: V.subj.title, short: V.subj.shortTitle, track: V.track, tags: V.tags.map(g => ({ id: g.id, label: g.label, v: g.v })), t: sim.t,
+        worth: df && df.hq ? 3000 : (df && df.cost) || 100 });
+    }
     // the sweep, the drift, the camera
     if (live) {
       front(V, dt);
@@ -704,10 +718,16 @@ export async function createReplay(game, ctx) {
     boxes.length = 0;
     tags(ctx, V, W, H, A, mb, readBottom, endUp);
     slice(ctx, V, W, H, A);
+    // the still's subject (match.js frames its thumbnail on it): the hull and its placards, as fractions of the screen
+    if (V.shot === game.frameN && V.peakInfo) {
+      let b = mb ? mb.slice() : null;
+      for (const q of boxes) b = b ? [Math.min(b[0], q[0]), Math.min(b[1], q[1]), Math.max(b[2], q[2]), Math.max(b[3], q[3])] : q.slice();
+      if (b) V.peakInfo.box = [b[0] / W, b[1] / H, b[2] / W, b[3] / H];
+    }
     const rate = game.timeRate, rs = Math.abs(rate - RATE) < .004 ? 'x0.25' : rate < 1 ? 'x' + rate.toFixed(2) : 'x' + (rate < 10 ? rate.toFixed(1) : Math.round(rate));
     // the rate, always on screen (top right while the end screen has the left of it)
     O.tag(ctx, endUp ? W - 30 : W / 2, 22, rs, V.mode === 'again' ? 'Replay' : 'Slow motion', 'T+' + (game.fmtTime ? game.fmtTime(sim.t) : Math.floor(sim.t)), { kind: 'lime', a: A, align: endUp ? 'right' : 'center', size: 11 });
-    if (!endUp) O.keys(ctx, W / 2, H - 50, [['Esc', 'Skip']], A * .9);
+    if (!endUp && V.shot !== game.frameN) O.keys(ctx, W / 2, H - 50, [['Esc', 'Skip']], A * .9);
   }
   function readout(ctx, V, A) {
     const x = 40; let y = 58;

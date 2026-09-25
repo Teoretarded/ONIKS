@@ -17,8 +17,11 @@
    metres (rounded), the tick, and for hits whether the player could see the target (the hit replay's rule).
 
    rec = { v, supported, why, setup: { mode, map, seed, side, ai, fog, win, timer, weather, h0, n0 }, ops: [...],
-           events: [...], tracks: { id: { kind, side, t0, pts: [x, y, z, ...], end } }, hashes: [[tick, hash]], end }
+           events: [...], tracks: { id: { kind, side, t0, pts: [x, y, z, ...], end } }, hashes: [[tick, hash]], end,
+           resumed?: [tick] }
    createRecorder(game) -> { rec, stop(), toJSON() }
+     A match continued from a save (save.js sets game.restored = { rec, tick } after playing the record to that tick)
+     keeps recording into the same record.
    applyOp(sim, op)                    one command, as it was given
    verify(rec, map, o) -> report       a second Sim from the setup, the commands at their ticks, every hash compared
    urlOf(rec, extra)                   play.html's query for the same match
@@ -41,7 +44,9 @@ const clone = o => JSON.parse(JSON.stringify(o));
 export function createRecorder(game) {
   const sim = game.sim, P = game.params || {};
   const mode = game.mode;
-  const rec = {
+  // a saved match continued (save.js re-simulated its record to the saved tick): the same record goes on from there
+  const cont = game.restored && game.restored.rec && game.restored.tick === sim.tick ? game.restored.rec : null;
+  const rec = cont ? adopt(cont, sim.tick) : {
     v: 1, supported: mode === 'combat' || mode === 'sandbox', why: '',
     setup: {
       mode, map: game.map.id, seed: sim.seed, side: game.side, ai: P.ai || 'normal', fog: !!sim.fog, win: P.win || 'hq',
@@ -49,8 +54,8 @@ export function createRecorder(game) {
     },
     ops: [], events: [], tracks: {}, hashes: [], end: null, dropped: 0,
   };
-  if (!rec.supported) rec.why = mode === 'campaign' ? 'campaign scripts change units directly' : 'mode ' + mode;
-  if (sim.tick !== 0) { rec.supported = false; rec.why = 'recorder started at tick ' + sim.tick; }
+  if (!rec.supported && !cont) rec.why = mode === 'campaign' ? 'campaign scripts change units directly' : 'mode ' + mode;
+  if (sim.tick !== 0 && !cont) { rec.supported = false; rec.why = 'recorder started at tick ' + sim.tick; }
   let on = rec.supported, inStep = 0, wantHash = false;
 
   /* ------------------------------------------------------------------ the sandbox's switches, watched */
@@ -221,6 +226,16 @@ export function createRecorder(game) {
   };
 }
 
+/* a saved record taken up again at `tick` (save.js has played it to there and checked the hashes): what it holds is
+   kept (the commands from tick 0, the timeline, the tracks, the hashes), so the Debrief and the next save cover the
+   whole match; `resumed` lists the ticks it was continued at */
+function adopt(r, tick) {
+  r.supported = true; r.why = ''; r.end = null;
+  r.ops = r.ops || []; r.events = r.events || []; r.tracks = r.tracks || {}; r.hashes = r.hashes || [];
+  r.resumed = (r.resumed || []).concat(tick);
+  return r;
+}
+
 /* ------------------------------------------------------------------ playing the commands back */
 export function applyOp(sim, op) {
   switch (op.k) {
@@ -263,6 +278,45 @@ export function cursor(rec) {
     get i() { return i; },
     opsTo(sim, tick) { let n = 0; while (i < ops.length && ops[i].tick <= tick) { applyOp(sim, ops[i++]); n++; } return n; },
     next() { return i < ops.length ? ops[i].tick : Infinity; },
+  };
+}
+
+/* A record played into a sim built from its setup, up to `tick` (save.js: Continue), in slices: run(ms) steps for about
+   that long and returns { done, tick, bad }; the setup's hash (h0) first, then every recorded hash (and the `extra`
+   marks, [[tick, hash]]) compared as its tick passes: bad = { tick, want, got } at the first that differs. The sim's
+   events are dropped (nothing has seen them). */
+export function playTo(rec, sim, tick, extra) {
+  const cur = cursor(rec);
+  const marks = rec.hashes.concat(extra || []).filter(m => m[0] <= tick).sort((a, b) => a[0] - b[0]);
+  let k = 0, bad = null, started = false;
+  function check() {
+    while (k < marks.length && marks[k][0] < sim.tick) k++;
+    while (k < marks.length && marks[k][0] === sim.tick) {
+      const h = sim.hash();
+      if (h !== marks[k][1]) { bad = { tick: sim.tick, want: marks[k][1], got: h }; return false; }
+      k++;
+    }
+    return true;
+  }
+  const out = () => ({ done: !!bad || sim.tick >= tick, tick: sim.tick, bad });
+  return {
+    get tick() { return sim.tick; },
+    run(ms) {
+      if (bad) return out();
+      const t0 = performance.now();
+      if (!started) {
+        started = true;
+        if (sim.tick === 0 && rec.setup.h0 && sim.hash() !== rec.setup.h0) { bad = { tick: 0, want: rec.setup.h0, got: sim.hash() }; return out(); }
+        cur.opsTo(sim, sim.tick);
+        if (!check()) return out();
+      }
+      for (let n = 1; sim.tick < tick; n++) {
+        sim.step(); sim.events.length = 0; cur.opsTo(sim, sim.tick);
+        if (!check()) break;
+        if ((n & 7) === 0 && performance.now() - t0 > ms) break;
+      }
+      return out();
+    },
   };
 }
 
