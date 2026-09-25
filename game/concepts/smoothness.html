@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>ONIKS · Smoothness</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="../styles/game.css">
+<style>
+  /* Concept page (not linked into the game): the model and ground dots loading in and densifying as the camera closes,
+     the engine as it is (NOW) against the fixes (NEW). Findings and the ranking: SMOOTHNESS.md next to this file. */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: #fff; font-family: var(--mono); user-select: none; }
+  #gl, #ov { position: fixed; left: 0; top: 0; width: 100%; height: 100%; display: block; }
+  #gl { image-rendering: pixelated; }
+  #ov { pointer-events: none; }
+  #panel { position: fixed; right: 16px; top: 16px; width: 316px; max-height: calc(100% - 32px); overflow: auto; padding: 14px 14px 12px;
+    background: var(--panel); border: 1px solid var(--hair); font: 400 10.5px/1.5 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); }
+  #panel h1 { font: 500 15px/1 var(--sans); letter-spacing: -.005em; text-transform: none; color: #fff; margin: 0 0 10px; }
+  #panel h4 { font: 400 10px/1 var(--mono); letter-spacing: .08em; color: var(--ghost); margin: 12px 0 6px; font-weight: 400; }
+  .row { display: flex; flex-wrap: wrap; gap: 5px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 7px 4px 5px; border: 1px solid var(--hair); color: var(--faint); cursor: pointer; white-space: nowrap; }
+  .chip i { width: 6px; height: 6px; background: rgba(255,255,255,.2); flex: none; }
+  .chip:hover { color: rgba(255,255,255,.8); }
+  .chip.on { color: #fff; border-color: rgba(198,244,50,.5); }
+  .chip.on i { background: var(--lime); }
+  .chip kbd { font: inherit; color: var(--ghost); }
+  .rd { display: grid; grid-template-columns: 1fr auto; gap: 1px 10px; font-variant-numeric: tabular-nums; }
+  .rd b { font-weight: 400; color: rgba(255,255,255,.85); text-align: right; }
+  .rd b.l { color: var(--lime); } .rd b.c { color: var(--coral); }
+  input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 14px; background: transparent; cursor: pointer; }
+  input[type=range]::-webkit-slider-runnable-track { height: 1px; background: rgba(255,255,255,.28); }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 8px; height: 8px; margin-top: -4px; background: var(--lime); border: 0; }
+  #chart { width: 100%; height: 92px; display: block; margin-top: 4px; border-top: 1px solid var(--hair); border-bottom: 1px solid var(--hair); }
+  #bench { white-space: pre; font-size: 10px; line-height: 1.55; color: var(--dim); text-transform: none; letter-spacing: .02em; margin-top: 6px; }
+  .tagl { position: fixed; top: 18px; font: 500 11px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; padding: 5px 8px 4px; background: rgba(11,12,10,.8); pointer-events: none; display: none; }
+  #tagNow { color: #fff; } #tagNew { color: var(--lime); }
+  body.split .tagl { display: block; }
+  #seam { position: fixed; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,.18); display: none; pointer-events: none; }
+  body.split #seam { display: block; }
+  body.noui #panel, body.noui .tagl, body.noui #seam { display: none !important; }
+  #msg { position: fixed; left: 16px; bottom: 14px; font: 400 10.5px/1.5 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); pointer-events: none; }
+</style></head>
+<body>
+<canvas id="gl"></canvas>
+<canvas id="ov"></canvas>
+<div id="seam"></div>
+<div class="tagl" id="tagNow">Now</div>
+<div class="tagl" id="tagNew">New</div>
+<div id="panel">
+  <h1>Smoothness</h1>
+  <h4>View</h4>
+  <div class="row" id="rView"></div>
+  <h4>New · models</h4>
+  <div class="row" id="rMode"></div>
+  <h4>New · fixes</h4>
+  <div class="row" id="rFix"></div>
+  <h4>Dolly · 20 km to 30 m and back</h4>
+  <div class="row" id="rDolly"></div>
+  <input type="range" id="dist" min="0" max="1000" value="0">
+  <h4>Frame</h4>
+  <div class="row" id="rFrame"></div>
+  <h4>Readout</h4>
+  <div class="rd" id="rd"></div>
+  <canvas id="chart" width="600" height="184"></canvas>
+  <div class="rd" style="margin-top:4px"><span>brightness of the subject · x log distance</span><span></span></div>
+  <h4>Bench</h4>
+  <div class="row" id="rBench"></div>
+  <div id="bench"></div>
+</div>
+<div id="msg"></div>
+<script src="../../reference/menus/common/m3.js"></script>
+<script src="../../reference/menus/common/geo.js"></script>
+<script src="../../reference/films/common/hd_land.js"></script>
+<script src="../../reference/films/common/hd_sea_air.js"></script>
+<script type="module" src="smoothness_page.js"></script>
+</body></html>
