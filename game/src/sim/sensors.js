@@ -131,6 +131,14 @@ export function roughContact(sim, side, e, err, gain, cap) {
 const SENSORS = [];
 export function senseTick(sim, dt) {
   const t = sim.t, map = sim.map, wx = sim.weather;
+  // fog off (sandbox): both pictures are ground truth, silently, so attacks work on anything in view
+  if (!sim.fog) for (const side of ['coast', 'fleet']) for (const e of sim.alive(ENEMY[side])) {
+    if (e.aboard) continue;
+    const c = getContact(sim, side, e);
+    c.pos[0] = e.pos[0]; c.pos[1] = e.pos[1]; c.pos[2] = e.pos[2]; c.vel[0] = c.vel[1] = c.vel[2] = 0;
+    c.err = 10; c.conf = .995; c.lastSeen = t; c.identified = true; c.fresh = false;
+    if (!c.cls) { c.cls = e.def.cls; c.type = e.type; c.name = e.def.name; }
+  }
   for (const side of ['coast', 'fleet']) {
     const all = sim.alive(side), foes = sim.alive(ENEMY[side]);
     // only units that carry a radar or a camera look

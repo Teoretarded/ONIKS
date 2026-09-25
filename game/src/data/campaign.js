@@ -44,7 +44,7 @@ export const MISSIONS = [
       'Bring the battery up, find the ship and sink it.',
     ],
     objectives: [
-      { kind: 'deploy', type: 'tel', text: 'Deploy the TEL', hint: 'Select the TEL, press D' },
+      { kind: 'deploy', type: 'tel', text: 'Deploy the TEL', hint: 'Select the TEL, press T' },
       { kind: 'radar', type: 'radar', text: 'Radar on', hint: 'Select the Monolith-B and switch it on' },
       { kind: 'scan', count: 1, text: 'Scan the contact', hint: 'Select the radar, press X on the contact' },
       { kind: 'inspect', text: 'Inspect a unit', hint: 'Press I, E to explode it' },

@@ -126,6 +126,8 @@ export class Sim {
   /* ---------- events ---------- */
   emit(type, e) {
     e = e || {};
+    // payloads that carry a unit type keep it as `utype`; `type` is always the event name
+    if (e.type !== undefined && e.utype === undefined) e.utype = e.type;
     e.type = type; e.t = this.t;
     this.counts[type] = (this.counts[type] || 0) + 1;
     if (this.events.length < 20000) this.events.push(e);
