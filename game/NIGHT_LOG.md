@@ -180,3 +180,10 @@ Review 2 started.
 World tags now scale with the HUD (1440p/4K look like 1080p, larger), sensor tags never run off screen, the Effects
 quality setting really changes the effect budget, a hit-replay setting, combat grades reflect play (a win with
 nothing destroyed is C at best), inspect labels no longer collide, sandbox side switch moved to M (J = replay).
+
+## 08:00 · Film maker done
+F9 opens a film panel in the films' style: K sets a camera key at the current view, Shift+K a key that follows the
+selected unit or the next round, rate ramps (x1 -> x0.25 -> x8) blend like the films' warps, captions ("Fig. 2 Over
+the sea"). Shift+F9 plays the take clean over the live match with the films' readout and timeline bar; F8 saves a
+full-res still, Shift+F8 a 30 fps PNG sequence. Built-in takes on any map: a dusk orbit of the battery, a chase of
+the next round off the rail, a climb from the sea to 60 km (it dissolves into the Orbital map on the way up).
