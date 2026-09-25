@@ -218,6 +218,11 @@ uniform vec4 uDot2;         // x: land dots 2 px nearer than (m), y: shading exa
 uniform float uWl2;         // the waterline's dots are 2 px nearer than this (m)
 uniform float uSeaGrp;      // swell-train brightness modulation (grows with the altitude)
 uniform vec2 uHz;           // x: horizon dip (rad), y: brightness of the sea at the horizon
+uniform vec4 uSea3;         // x: screen area per sea return seen from above (1080 px^2), y: haze distance (m, 0 none),
+                            // z: haze floor (what is left far off), w: swell rows from mid altitude (0..1)
+uniform vec4 uSea4;         // x: log2 of the range the steep sea's spacing is set at (m), y: how much the spacing follows
+                            // the range (1: constant density on screen, less: denser far off, the plane recedes),
+                            // z: brightness of the steep sea's (denser) returns
 uniform vec4 uSubA[${NSUB}];      // subjects (the units on screen): xyz centre (RTE), w: world halo radius (m)
 uniform vec4 uSubB[${NSUB}];      // x, y: screen centre (1080-px units from the centre), z: screen radius (1080 px), w: depth
 uniform vec4 uSubP;         // x: count, y: dimming at a subject, z: aspect (W / H), w: backdrop dimming (behind a subject on screen)
@@ -238,6 +243,9 @@ float subjDim(vec3 p, vec4 c) {
       float ds = length(sp - Bq.xy) / Bq.z;
       w = max(w * uSubP.y, (1.0 - smoothstep(0.5, 1.7, ds)) * uSubP.w);
     } else w *= uSubP.y;
+    // a unit that fills the frame (or with the lens inside its pool) needs no pool: the world round it stays as it is
+    // (else the near sea goes black under a hull seen close)
+    w *= (1.0 - smoothstep(260.0, 700.0, Bq.z)) * smoothstep(1.1, 2.4, length(A.xyz) / A.w);
     k = min(k, 1.0 - clamp(w, 0.0, 1.0));
   }
   return k;
@@ -377,8 +385,13 @@ void main() {
     // the kept spacing (world m) grows with the range; banded like the films' sea (each band keeps one lattice,
     // denser on screen toward its far edge, then thins into the next): rows of density receding to the horizon
     // (the films' Aegis sea: the wanted spacing follows the horizontal distance, so steep views are denser)
+    // seen low, the returns keep a constant horizontal spacing on screen (the rows compress toward the horizon and
+    // pile up into its band); seen steeply they keep a screen area each (the films' fine sea from a few km up: the
+    // sea reads as a surface, never as a sparse star field)
     float dh = length(p0.xz) + 0.6 * abs(p0.y);
-    float us = log2(uSeaP.y * (1.0 - 0.5 * sf * sf) * dh / uCam.x);
+    float usH = log2(uSeaP.y * (1.0 - 0.5 * sf * sf) * dh / uCam.x);
+    float usA = log2(sqrt(uSea3.x / max(fg, 0.02)) * (1.0 - 0.3 * sf * sf) / uCam.x) + mix(uSea4.x, log2(length(p0)), uSea4.y);
+    float us = min(usH, usA), kSteep = clamp((usH - usA) * 1.5, 0.0, 1.0);
     float ub = us * 0.5;
     us = mix(us, 2.0 * (floor(ub) + smoothstep(0.8, 1.0, fract(ub))) + 0.8, uDot2.w);
     kd = 2.0 * (us - log2(s));
@@ -414,9 +427,20 @@ void main() {
     vec2 wd = vec2(sin(uSeaP.z), cos(uSeaP.z)), wd2 = vec2(sin(uSeaP.z + 0.7), cos(uSeaP.z + 0.7));
     float gm = 0.5 + 0.3 * sin(dot(w, wd) * 0.00571 - uSurf.z * 0.236) + 0.2 * sin(dot(w, wd2) * 0.00898 - uSurf.z * 0.297 + 1.3);
     b *= mix(1.0, 0.3 + 1.1 * gm, uSeaGrp);
+    // from a few km up the swell prints as rows (the films' sea is a surface, never a star field): its crests keep
+    // their returns and brighten, the troughs thin; where the swell itself is too fine on screen, its trains do
+    float kR = uSea3.w;
+    if (kR > 0.0) {
+      float lamPx = 140.0 * uCam.x / length(p0);
+      float rowv = mix(gm, sw, smoothstep(8.0, 18.0, lamPx));
+      if (u01(hash1(hs ^ 0x2545f491u)) > mix(1.0, 0.25 + 0.75 * smoothstep(0.15, 0.75, rowv), kR)) { ${CULL} return; }
+      b *= mix(1.0, 0.55 + 0.9 * rowv, kR);
+    }
+    // seen steeply the returns are denser, so each is dimmer: a fine surface, not a scatter of bright points
+    b *= mix(1.0, uSea4.z, kSteep);
     // glints: now and then a facet flashes at the lens
     uint hg = hash1(hs ^ 0x7f4a7c15u);
-    if (u01(hg) < uSea2.z * (0.02 + 0.05 * face)) {
+    if (u01(hg) < uSea2.z * (0.02 + 0.05 * face) * (1.0 - kR)) {
       float gp = u01(hash1(hg)) * 6.2832 + uSurf.z * (1.3 + 2.6 * u01(hg ^ 0x5bd1u));
       glint = pow(max(0.0, sin(gp)), 14.0);
       b = max(b, glint * (0.55 + 0.25 * face));
@@ -450,6 +474,9 @@ void main() {
   if (eff > uDot.z) b *= mix(1.0, uDot.z / eff, 0.6);
   // the sea keeps its brightness out to the horizon (the films'), the land fades with the view
   b = max(b * (sea > 0.5 ? max(0.33, 1.0 - c.w / uDot2.z) : depthFade(c.w)), glowH) * vis * uFade.z;
+  // haze: the returns fade with the range (the near sea and ground as they are, the far field and the horizon's band
+  // going out toward a floor)
+  if (uSea3.y > 0.0) b *= mix(uSea3.z, 1.0, exp(-c.w / uSea3.y));
   b *= subjDim(p, c);
   vec2 sc = scanAt(p);
   vec2 sw2 = sweepAt(p);
@@ -594,10 +621,10 @@ void main() {
 
 /* the look per weather: sea brightness, spacing on screen, roughness, whitecaps, glints; sky stars and band */
 const WEATHER_LOOK = {
-  calm: { seaB: .82, seaPx: 1.12, stars: 1, band: 1, glintK: 1 },
-  haze: { seaB: .78, seaPx: 1.12, stars: .35, band: 1.25, glintK: .6 },
-  rain: { seaB: .9, seaPx: 1, stars: 0, band: .75, glintK: .3 },
-  storm: { seaB: .9, seaPx: 1, stars: 0, band: .55, glintK: .4 },
+  calm: { seaB: .82, seaPx: 1.12, stars: 1, band: 1, glintK: 1, hazeD: 0 },
+  haze: { seaB: .82, seaPx: 1.12, stars: .35, band: .8, glintK: .6, hazeD: 9000 },
+  rain: { seaB: .9, seaPx: 1, stars: 0, band: .75, glintK: .3, hazeD: 0 },
+  storm: { seaB: .9, seaPx: 1, stars: 0, band: .55, glintK: .4, hazeD: 0 },
 };
 const TIME_LOOK = {
   night: { stars: .9, band: 1.1, glowAz: 250, glow: .6 },
@@ -621,7 +648,16 @@ export class Terrain {
     this.landHigh = opts.landHigh !== undefined ? opts.landHigh : 1.15;     // land brighter from high up (x 1 + landHigh): the coast map reads
     this.seaHigh = opts.seaHigh || [.5, .45];  // from high up the sea's returns thin (x 1 + [0]) and dim (x 1 - [1]): the coast map reads
     this.grazing = opts.grazing !== undefined ? opts.grazing : .1;          // floor of the land budget's facing (packs the far field)
-    this.seaPx = opts.seaPx || 16;             // horizontal spacing of the sea returns on screen (1080 px; the films: Aegis 7, Engagement 15-45)
+    this.seaPx = opts.seaPx || 16;             // horizontal spacing of the sea returns on screen seen low (1080 px; the films: Aegis 7, Engagement 15-45)
+    this.seaArea = opts.seaArea || 12;         // screen area per sea return seen steeply (1080 px^2, before the bands and the swell rows thin it)
+    this.seaRows = opts.seaRows !== undefined ? opts.seaRows : 1;          // the swell's rows and trains from mid altitude (0 off)
+    this.seaRecede = opts.seaRecede !== undefined ? opts.seaRecede : .5;   // seen steeply: 1 an even density on screen, less denser far off
+    this.seaMidBright = opts.seaMidBright !== undefined ? opts.seaMidBright : .15;   // the sea's returns brighten from the lens to a few km up
+    this.seaSteepB = opts.seaSteepB !== undefined ? opts.seaSteepB : .65;   // brightness of the (denser) returns of the sea seen steeply
+    this.haze = opts.haze !== undefined ? opts.haze : null;                 // haze distance (m): null from the weather, 0 none
+    this.hazeFloor = opts.hazeFloor !== undefined ? opts.hazeFloor : .22;   // what haze leaves of the far field
+    this.hazeTop = opts.hazeTop || 1500;       // the haze layer's top (m): from above it the view down is clear (only the
+                                               // part of the ray inside the layer hazes)
     this.seaNear = opts.seaNear || 1200;       // sea returns are 2 px nearer than this (m; less from low down, more from high up)
     this.seaBands = opts.seaBands !== undefined ? opts.seaBands : .7;       // the films' banded sea (0 = even, 1 = Engagement)
     this.reliefHigh = opts.reliefHigh !== undefined ? opts.reliefHigh : 2;    // extra shading exaggeration from high up
@@ -760,9 +796,11 @@ export class Terrain {
 
     // sky
     const S = [], rs = mulberry(303);
-    for (let i = 0; i < 1500; i++) {              // stars: sparse, above the band
+    for (let i = 0; i < 1500; i++) {              // stars: sparse and dim above the band (the films' skies are nearly empty:
+      // the sky must never read like the sea's returns)
       const u = rs(), az = rs() * Math.PI * 2, el = Math.asin(.14 + .86 * Math.pow(u, 1.25)), mg = Math.pow(rs(), 3.4);
-      S.push(Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az), .07 + .5 * mg, rs() * 6.28);
+      if (i % 3 === 2) continue;
+      S.push(Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az), .05 + .36 * mg, rs() * 6.28);
     }
     for (let i = 0; i < 26000; i++) {             // the band of returns low over the horizon (the films' sky)
       const az = rs() * Math.PI * 2, el = Math.pow(rs(), 2.4) * 20 * DEG;
@@ -809,6 +847,7 @@ export class Terrain {
     this.glints = L.glintK * (1 - .5 * this.rough);
     this.seaLook = { bright: L.seaB * (.85 + .2 * this.rough), px: this.seaPx * L.seaPx * (1.1 - .15 * this.rough) };
     this.sky.stars = T.stars * L.stars; this.sky.band = T.band * L.band; this.sky.glowAz = T.glowAz * DEG; this.sky.glow = T.glow;
+    this.hazeD = this.haze !== null && this.haze !== undefined ? this.haze : L.hazeD;
   }
 
   /* ---------- JS mirrors (what is drawn) ---------- */
@@ -958,6 +997,9 @@ export class Terrain {
     this.seaAltK = ss(Math.log(6000), Math.log(60000), Math.log(Hc));   // the sea gives way to the coast map from high up
     this.seaMidK = ss(Math.log(400), Math.log(4000), Math.log(Hc));
     this.seaNearD = Math.max(this.seaNear, Math.min(this.seaNear * 2, 6 * Hc));
+    this.lookD = cam.dist || Hc;
+    // haze sits in a layer over the water: a ray down from above it runs only its last hazeTop / altitude inside it
+    this.hazeEff = this.hazeD > 0 ? this.hazeD * Math.max(1, Math.max(1, eye[1]) / this.hazeTop) : 0;
     this.seaFade = 1.5 * horizon + 8000;
     this.wl2 = Math.max(32000, 2.2 * Hc);
     this.reliefK = 1 + this.reliefHigh * this.altK;
@@ -1011,6 +1053,9 @@ export class Terrain {
     if (u.uWl2) gl.uniform1f(u.uWl2, this.wl2);
     if (u.uSeaGrp) gl.uniform1f(u.uSeaGrp, .3 + .5 * (this.altK || 0));
     if (u.uHz) gl.uniform2f(u.uHz, this.dip || 0, .6 * this.sky.band);
+    // (the screen-area rule takes over from a few hundred metres up: close to the water the films' spacing rule holds)
+    if (u.uSea3) gl.uniform4f(u.uSea3, this.seaArea * Math.pow(16, 1 - (this.seaMidK || 0)) * Math.pow(1 + this.seaHigh[0] * (this.seaAltK || 0), 2), this.hazeEff || 0, this.hazeFloor, this.seaRows * (this.seaMidK || 0));
+    if (u.uSea4) gl.uniform4f(u.uSea4, Math.log2(Math.max(50, this.lookD || 1000)), this.seaRecede, this.seaSteepB, 0);
     gl.bindVertexArray(this.vao);
   }
   /* depth-only occluder: pass 0 land envelope (with the seabed), pass 1 clamped up to the sea surface */
@@ -1032,7 +1077,7 @@ export class Terrain {
     o = o || {};
     const k = this.altK || 0;
     // the sea brightens from the lens out to a few km up (the films'), then gives way to the coast map
-    this._seaB = (o.seaBright || 1) * this.seaLook.bright * 1.1 * (1 + .7 * (this.seaMidK || 0)) * (1 - this.seaHigh[1] * (this.seaAltK || 0));
+    this._seaB = (o.seaBright || 1) * this.seaLook.bright * 1.1 * (1 + this.seaMidBright * (this.seaMidK || 0)) * (1 - this.seaHigh[1] * (this.seaAltK || 0));
     this._bindCommon(P);
     gl.uniform1ui(u.uSalt, 0);
     gl.uniform4f(u.uSea2, this.rough, this.whitecaps, this.glints, this.seaDot2);

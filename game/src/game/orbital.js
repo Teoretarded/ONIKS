@@ -19,7 +19,11 @@
    after the sensors' passes (a veil over their point clutter first), paints the selection's models yellow, and keeps
    the rounds' tracks at every height. The strategic layer on top works the same in both styles.
 
-   game.orbital = { k, from, to, map (the engine's OrbitalMap), yellow: 'salvo' | 'selection', veil, stats }
+   The map's own hairlines (coast, then contours and soundings, then the graticule) lead: they come in from mapFrom
+   (22 km) over the dots, so the band where the dots go and the glyphs come (36-60 km) always has the chart in it.
+
+   game.orbital = { k, kMap (the map hairlines' blend), from, to, mapFrom, map (the engine's OrbitalMap),
+                    yellow: 'salvo' | 'selection', veil, stats }
    Registered from main.js (OPTIONAL: ./game/orbital.js, createOrbital). Also returns a tiny helper system at
    priority 14 (just under the sensors) that keeps a copy of the overlay drawn before the sensors (UI panels) so
    the fade only takes the world tags. While k > .5 it mutes the selection system's lime marks (see wrapSelection). */
@@ -51,7 +55,9 @@ export function createOrbital(game) {
   const styleOf = s => { const q = new URLSearchParams(location.search).get('style'); return q === 'orbital' || q === 'pointcloud' ? q : (s && s.renderStyle) || 'pointcloud'; };
   R.style = styleOf(getSettings());
   onSettings(s => { const v = styleOf(s); if (v !== R.style) { R.style = v; console.log('ONIKS: render style ' + v); } });
-  const O = game.orbital = { k: 0, from: 36000, to: 60000, map: OM, yellow: 'selection', stats: { ms: 0, labels: 0 }, veil: 0, dissolve: .85 };
+  // mapFrom: the map's hairlines (coast first, then the contours) come in from here, over the dots, before the veil
+  // takes the dots: the band between the point picture and the strategic layer is never empty (the films' mixed layers)
+  const O = game.orbital = { k: 0, kMap: 0, from: 36000, to: 60000, mapFrom: 22000, map: OM, yellow: 'selection', stats: { ms: 0, labels: 0 }, veil: 0, dissolve: .85 };
   W.auto = false;                     // this system flushes the hairlines itself, after the veil (draw2d)
   addFonts();
 
@@ -230,8 +236,8 @@ export function createOrbital(game) {
       const look = R.orbitalLook || (R.orbitalLook = { sea: 1, map: 1, models: 1 });
       look.models = 1 - ss(.3, .9, k);
     }
+    if (!orbStyle && O.kMap > .001) OM.draw(O.kMap);
     if (k <= .001) { if (orbStyle) tracks(1); return; }
-    if (!orbStyle) OM.draw(k);
     beam(ss(.35, .9, k));
     const me = game.side, kA = ss(.35, .9, k), sel = game.selection;
     const yl = O.yellow === 'selection';
@@ -612,6 +618,7 @@ export function createOrbital(game) {
       if (want === 1 && sup > .998) sup = 1;
       K = ss(O.from, O.to, cam.dist) * sup;
       O.k = K;
+      O.kMap = Math.max(K, ss(Math.min(O.mapFrom, O.from), O.to, cam.dist) * sup);
       R.pcOff = K >= .999;
       // rounds in flight: always recorded (their tracks are there when you pull out)
       for (const pr of sim.projectiles.values()) if (pr.alive && sim.projVisible(game.side, pr)) record(pr);

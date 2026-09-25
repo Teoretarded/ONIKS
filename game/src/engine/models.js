@@ -4,7 +4,9 @@
    in the geometry) are sampled lazily at quantized states and kept in a bounded LRU per part and level. The
    dependencies of a dyn part on the state are found by calling it once through a Proxy.
    Shading is the films' (pc_anatomy_film.js runPts): low moon + facing + rim, back faces thinned to a third
-   at 0.09, two-sided panels at 0.45, depth fade, dot size from on-screen spacing. */
+   at 0.09, two-sided panels at 0.45, depth fade, dot size from on-screen spacing; plus a fill light fixed to the
+   view. Density is capped per pixel, not per metre (dotSpacing): big hulls seen close keep the films' dot structure
+   instead of saturating into a white slab, small units stay dense silhouettes (see README, Models). */
 import { HEAD, FRAME, COMMON, FS_POINT, CULL } from './shaders.js';
 import { program } from './gl.js';
 
@@ -26,6 +28,9 @@ uniform vec4 uQ;          // no back faces, tint on the faces (fraction), bright
 uniform vec4 uG;          // x-ray gate (Inspect): x mode (0 off, 1 shell: x-ray only behind the front, 2 hidden: drawn
                           // only behind it, 3 part: always drawn), z front band width (m), w afterglow (m)
 uniform vec4 uGP;         // gate plane: xyz unit normal (world), w: the front as n.p_rte
+uniform vec4 uDen;        // dots per pixel: x least spacing of the kept dots on screen (1080 px, 0: off), y grazing
+                          // floor of the facing, z least kept share (the model's coarsest level)
+uniform vec4 uFill;       // the view's fill light: xyz direction (toward it), w strength
 out vec3 vCol;
 void main() {
   vec3 p = uR * aPos + uT;
@@ -51,7 +56,7 @@ void main() {
     else if (gd >= gw) gk = exp(-(gd - gw) / max(1e-3, uG.w)) * 0.8;
   }
   vec3 n = uR * aNrm.xyz;
-  float b, rim = 0.0;
+  float b, rim = 0.0, fk = 1.0;
   bool two = dot(aNrm.xyz, aNrm.xyz) < 0.01;
   float lit = 0.45;
   if (two) { b = 0.45; }
@@ -63,12 +68,24 @@ void main() {
       if ((gl_VertexID % 3) != 0 && hr > xr * 0.5) { ${CULL} return; }
       b = 0.09; lit = 0.1;
     } else {
-      float fac = min(1.0, -dn), lam = dot(n, uSun.xyz), w = 1.0 - fac;
+      // the moon, and a fill fixed to the view (behind the lens, over its left shoulder): a hull side turned to the
+      // camera never goes black from the wrong heading (the films frame their hulls lit); the moon keeps the decks
+      float fac = min(1.0, -dn), lam = max(dot(n, uSun.xyz), uFill.w * dot(n, uFill.xyz)), w = 1.0 - fac;
+      fk = max(fac, uDen.y);
       b = 0.06 + 0.74 * max(lam, 0.0) + 0.14 * fac + 0.34 * w * w * w;
       b *= 0.55 + 0.45 * b;
       lit = b;
       rim = fac < 0.18 ? 1.0 - fac / 0.18 : 0.0; rim *= rim;
     }
+  }
+  // dots per pixel, not per metre (the films keep the dot structure on a hull at any framing): the kept dots never
+  // pack closer than uDen.x px on screen, faces seen edge-on counted by their facing (down to a floor, so the
+  // silhouettes still gather), never thinner than the model's coarsest level (far off a unit stays a solid little
+  // silhouette that pops, as in the films). The samples are a jittered grid: a hash keeps it free of moire
+  float pxs = uP.w * uCam.x / c.w;
+  if (uDen.x > 0.0) {
+    float keep = max(pxs * pxs * fk / (uDen.x * uDen.x), uDen.z);
+    if (keep < 1.0 && u01(hash1(hid ^ 0x5bd1e995u)) > keep) { ${CULL} return; }
   }
   if (xr > 0.0) {
     // the x-ray: the shell thins to a ghost so what is inside reads through it
@@ -86,7 +103,7 @@ void main() {
   if (gk > 0.01) rgb = max(mix(rgb, LIME * max(b, 0.95), gk), rgb);
   rgb += lightsAt(p, two ? vec3(0.0) : n) * (0.35 + 0.65 * lit) * uP.x;
   vCol = min(rgb, vec3(1.0));
-  gl_PointSize = dotPx(uP.w * uCam.x / c.w * (0.8 + 0.4 * hr));
+  gl_PointSize = dotPx(max(pxs, uDen.x) * (0.8 + 0.4 * hr));
 }
 `;
 
@@ -119,7 +136,11 @@ export class ModelLib {
     this.entries = new Map();
     this.budgetMs = 6;              // sampling time per frame
     this.spent = 0;
-    this.lodPx = 2.8;               // coarsest level whose spacing stays under this many 1080-px
+    this.lodPx = 2.8;               // coarsest level whose spacing stays under this many 1080-px (the films: 4.4)
+    this.dotSpacing = 1.8;          // dots per pixel: the kept dots never pack closer than this on screen (1080 px; 0 off)
+    this.grazing = .3;              // ... faces seen edge-on counted by their facing down to this floor (large parts)
+    this.fill = .6;                 // the view's fill light (behind the lens, over its left shoulder; 0 off)
+    this.fillAz = Math.PI - .6; this.fillEl = .44;   // its bearing off the view heading (rad) and elevation (rad)
     this.stats = { parts: 0, points: 0, sampled: 0, gpuMB: 0 };
     this._m9 = new Float32Array(9);
   }
@@ -286,6 +307,8 @@ export class ModelLib {
     const tint = d._rgb || [1, 1, 1];
     gl.uniform4f(u.uTint, tint[0], tint[1], tint[2], d._k || 0);
     gl.uniform4f(u.uQ, d.noBack ? 1 : 0, d._face || 0, d.bright === undefined ? 1 : d.bright, d.dissolve || 0);
+    { const f = cam.f, az = Math.atan2(f[0], f[2]) + this.fillAz, ce = Math.cos(this.fillEl);
+      gl.uniform4f(u.uFill, ce * Math.sin(az), Math.sin(this.fillEl), ce * Math.cos(az), this.fill); }
     // Inspect x-ray gate: d.gate = { n: world unit normal, d: n.p of the front (world), w: band (m), g: afterglow (m),
     // mode: default per part }, d.partGate = { part: mode } (0 off, 1 shell, 2 hidden, 3 part; see the shader)
     const G = d.gate || null;
@@ -327,6 +350,15 @@ export class ModelLib {
       gl.uniform4f(u.uP, pa, xr, dm, cl.sp);
       const gm = G ? (d.partGate && d.partGate[Pt.name] !== undefined ? d.partGate[Pt.name] : (G.mode || 0)) : 0;
       gl.uniform4f(u.uG, gm, 0, G ? G.w || 1 : 1, G ? G.g || 1 : 1);
+      // dots per pixel: thinned on screen, never below the density of the model's coarsest level. Faces seen edge-on
+      // are counted by their facing only on parts large on screen (a deck, a hull side: no slab); a small part keeps
+      // its silhouette's pile-up (a wing, a mast: the films' crisp edges)
+      const spMax = e.lods[e.lods.length - 1], dsp = d.dotSpacing !== undefined ? d.dotSpacing : this.dotSpacing;
+      // A part small on screen is not thinned at all: a unit seen from play range stays a dense bright silhouette that
+      // pops over the ground (the films' small ships); the cap comes in as the part grows past ~70-220 px
+      const spr = Pt.rad * flc / Math.max(.3, pd), kb = Math.max(0, Math.min(1, (spr - 140) / 460));
+      const ks = Math.max(0, Math.min(1, (spr - 70) / 150)), kSmall = 1 - ks * ks * (3 - 2 * ks);
+      gl.uniform4f(u.uDen, dsp, 1 - (1 - this.grazing) * kb * kb * (3 - 2 * kb), Math.max(kSmall, Math.min(1, (cl.sp / spMax) * (cl.sp / spMax))), 0);
       gl.bindVertexArray(cl.vao);
       gl.drawArrays(gl.POINTS, 0, cl.n);
       drawn += cl.n;
