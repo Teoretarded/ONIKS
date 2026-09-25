@@ -159,3 +159,11 @@ opening shot; every model pre-sampled at load (the 40 ms close-up stalls are gon
 the real bindings; quit/continue fade to black; the pause menu's Settings row opens live settings; a render-style
 setting (Point Cloud / Orbital) is in Settings. The dev server now answers on the IPv6 loopback too, so the game
 loads in ~3 s instead of ~14 s on Windows. Film maker agent started (compose camera takes over a live match).
+
+## 07:10 · Cinematic camera and hit replay done
+C: the camera always frames the action: launch from the side, chase from just behind the plume, a cross to the
+target's side 4.6 s before impact, holds on the hit, low orbits of the sinking. No cuts. **Hit replay**: when a
+heavy round is about to hit something you can see, time eases to x0.25, the camera glides in low, the lime X-ray
+front reaches the impact point at the moment of impact, damaged parts flash coral with their names
+("04 DECKHOUSE · AN/SPY-1D(V) ×4 · OUT"), a destroyed hull drifts apart along its explode offsets, then the camera
+pulls back to the sinking. J replays the last hit; Esc skips. Stills: `final_rep*.png`, `fin_*.png`.
