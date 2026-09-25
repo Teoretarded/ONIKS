@@ -56,8 +56,29 @@ Proxy; angle keys wrap, 96/48/24/12 steps per level), LRU of 64 states per part 
 
 Point clipmap centred under the eye: 640 x 640 dots per level, spacing doubling per level, world-snapped,
 hash-jittered, heights from a float texture of `map.heights`; transitions dissolve (no pops, no swimming).
-Density adapts to the lens height and thins where dots crowd at grazing angles. An invisible depth mesh
-(ground envelope, then the sea surface) hides what is behind hills and below the horizon.
+The films' LiDAR look comes from *which* lattice dots are drawn: ordered thinning keeps whole sub-lattices (every
+dot has a pattern rank from its absolute lattice index), so what survives is always an even jittered lattice,
+world-fixed and identical in every clipmap level, never random speckle.
+
+- **Land**: a dot budget per screen area of the surface with a grazing floor (faces turned to the lens keep their
+  returns: cliffs read as walls; grazing ground packs toward crests and the horizon). Hillshade from an
+  exaggerated normal taken at the scale the returns resolve (mip-filtered gradients), lit by a light fixed to the
+  view (behind the lens, to the left) so relief reads from any heading; crests bright and gullies dark;
+  prominence (hills brighter than the land round about) from high up; beaches; fields and marsh on flat low
+  ground; contours snapped into crisp dotted lines from high up (dissolving in with altitude and between
+  intervals). The coast is one crisp dotted line (returns snapped onto h = 0) with a surf band walking in.
+- **Sea**: the films' sea: a constant horizontal spacing on screen, banded like Engagement's (rows of density
+  receding to the horizon), brightness from the swell height and the faces turned to the lens, the films'
+  flicker, wind rows, swell trains from high up, glints, whitecaps in a rough sea, a glassy sparse sea in a calm;
+  the last returns pile up into a bright horizon line. Hull-down with the Earth's curvature as before.
+- **Sky**: dots at infinity: a band of returns riding the dipped horizon (glowing toward one azimuth) and sparse
+  stars, set by the weather and `map.time`.
+- **Units pop**: at play altitudes the ground and sea stay dimmer and sparser than the models, and every frame the
+  renderer hands the terrain the biggest instances on screen (up to 12, from the draw queue): the world dims in a
+  soft pool round each (a few model radii, never under ~34 px) and behind it on screen (the films keep the ground
+  dim round their models). Knobs `subjectDim` (.5) and `subjectBack` (.55); 0 turns them off.
+
+An invisible depth mesh (ground envelope, then the sea surface) hides what is behind hills and below the horizon.
 
 | | |
 |---|---|
@@ -66,8 +87,11 @@ Density adapts to the lens height and thins where dots crowd at grazing angles. 
 | `mapH(x, z)` | the map's bilinear height (open sea falls off beyond the map edge). |
 | `normalAt(x, z)` | drawn ground normal (pitch and roll vehicles to it). |
 | `seaAt(x, z, t)` | swell `{ y, gx, gz }` (ships heave, pitch and roll on it). |
-| `setWeather(w)` | `{ wind: [dx, dz], sea: 0..1 }` (the map's `weather` by default). |
-| options | `grid` (640), `densNear` / `densFar` (lens height / spacing, 140 / 380), `jitter` (.7), `areaNear`, `areaFar`, `seaKeep` (.4), `dotPx` ([2 px, 3 px, dim] thresholds). |
+| `setWeather(w)` | `{ kind: 'calm' \| 'haze' \| 'rain' \| 'storm', wind: [dx, dz], sea: 0..1 }` (the map's `weather` by default). `kind` sets the look (sea brightness and spacing, glints, stars, band); pass it (without it a sea >= .75 reads as a storm). `sea` sets the swell (longer, higher), roughness and whitecaps. Call it again after changing `seaPx`. |
+| `sky` | `{ stars, band, glowAz (rad), glow (0..1) }`, re-derived by `setWeather` from the kind and `time` ('night' \| 'dusk' \| 'day', from `map.time`); change freely between calls (e.g. SENSORS: `stars = 0` under the storm ceiling). `R.skyBright` scales it all. |
+| `stats` | `{ blocks, levels, s0, dots }` (dots = lattice slots walked, most are culled). |
+| `setSubjects(list)` | called by the renderer each frame (units on screen: `{ c (RTE), r, sx, sy, sr, z }`); not needed by callers. |
+| options (all live: set `R.terrain.x` at run time) | `grid` (640), `densNear` / `densFar` (lens height / finest spacing, 140 / 380), `jitter` (.75 of the pattern spacing), `rowK` (1: subtle scan rows 2^rowK apart; 0 an even lattice), `rowJitter` (.25, across the rows), `areaNear` / `areaFar` (land px^2 per dot near / high, 56 / 22), `grazing` (.1, floor of the land's facing), `landBright` (.8), `landHigh` (1.15, brighter from high up), `lightFollow` (1: the view's light, 0: `R.sun`), `lightAz` (-2 rad off the camera heading), `lightEl` (32 deg), `relief` (auto from the map's slopes), `reliefHigh` (2, extra exaggeration from high up), `prominence` (.22), `contours` (1), `fields` (1), `marsh` (1), `beach` (.6), `seaPx` (16, horizontal px between sea returns), `seaBands` (.7, 0 even .. 1 Engagement's bands), `seaHigh` ([.5, .45]: the sea thins and dims from high up), `seaNear` (1200 m, sea dots 2 px nearer), `seaDot2` (3.4), `coastPx` (.34 waterline dots per px), `dotPx` ([4.2, 15, 22]: land 2 px / 3 px / dim thresholds, on-screen spacing). `subjectDim` (.5), `subjectBack` (.55). `seaKeep` is ignored (kept for old callers). |
 
 ## Effects (`R.fx`, engine/fx.js) — call between `frame()` and `end()`
 

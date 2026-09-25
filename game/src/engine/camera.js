@@ -2,6 +2,9 @@
    (exponential zoom toward the cursor), pan with WASD / arrows / screen edges / middle-drag, rotate with
    right-drag and Q/E, smooth damping, follow, fly-to, frame a set of points. Picking: screen -> ground (with
    the Earth's curvature, as drawn), project() for overlays.
+   Looking up: close to the ground (dist < lookUpFar) the pitch may go below minPitch, down to -lookUp (25 deg above
+   the horizon at dist <= lookUpNear, fading to none at lookUpFar). The lens then stays where the minPitch orbit puts
+   it (never under the terrain) and tilts up about itself, so a climbing round can be watched from beside the TEL.
    M3 conventions: X east, Y up, Z north; yaw 0 looks north, pi/2 looks east; pitch > 0 looks down. */
 
 const DEG = Math.PI / 180;
@@ -17,6 +20,8 @@ export class RTSCamera {
     this.maxDist = opts.maxDist || 150000;
     this.minPitch = 3 * DEG;
     this.maxPitch = 89 * DEG;
+    this.lookUp = 28 * DEG;                          // how far below minPitch the view may tilt (up) when low
+    this.lookUpNear = 2500; this.lookUpFar = 9000;   // full tilt inside this distance, none beyond the far one
     this.ground = opts.ground || (() => 0);          // (x, z) -> surface height (sea = 0)
     this.bounds = opts.bounds || null;               // [x0, z0, x1, z1] the target stays inside
     this.target = (opts.target || [0, 0, 0]).slice();
@@ -71,7 +76,7 @@ export class RTSCamera {
       const dx = x - m.lx, dy = y - m.ly; m.lx = x; m.ly = y; m.drag += Math.abs(dx) + Math.abs(dy);
       if (m.btn === 2 && m.drag > 4) {
         this.goal.yaw += dx * .0055 * (this.invert ? -1 : 1);
-        this.goal.pitch = clamp(this.goal.pitch + dy * .0045, this.minPitch, this.maxPitch);
+        this.goal.pitch = clamp(this.goal.pitch + dy * .0045, this.pitchMin(this.goal.dist), this.maxPitch);
       } else if (m.btn === 1 && m.grab) this._dragPan(x, y);
     });
     el.addEventListener('mouseleave', () => { this.mouse.in = false; });
@@ -110,6 +115,14 @@ export class RTSCamera {
     const dx = m.grab[0] - px, dz = m.grab[2] - pz;
     this.target[0] += dx; this.target[2] += dz; this.goal.target[0] += dx; this.goal.target[2] += dz;
     this._pose();
+  }
+
+  /* the lowest pitch allowed at distance d: below minPitch (looking up) only close to the ground, and only when the
+     orbit floor is the normal one (Inspect lowers minPitch to orbit under a model: no tilt then) */
+  pitchMin(d) {
+    if (this.minPitch <= 0 || !(this.lookUp > 0)) return this.minPitch;
+    const k = clamp((this.lookUpFar - (d === undefined ? this.dist : d)) / (this.lookUpFar - this.lookUpNear), 0, 1);
+    return this.minPitch - this.lookUp * k * k * (3 - 2 * k);
   }
 
   /* ---------- commands ---------- */
@@ -190,9 +203,11 @@ export class RTSCamera {
       if (has('KeyE')) { g.yaw += 1.6 * dt * inv; this.fly = null; }
       if (has('Equal') || has('NumpadAdd')) this.zoomAt(undefined, undefined, Math.exp(-2.2 * dt));
       if (has('Minus') || has('NumpadSubtract')) this.zoomAt(undefined, undefined, Math.exp(2.2 * dt));
-      if (has('PageUp')) g.pitch = clamp(g.pitch - 1.1 * dt, this.minPitch, this.maxPitch);
-      if (has('PageDown')) g.pitch = clamp(g.pitch + 1.1 * dt, this.minPitch, this.maxPitch);
+      if (has('PageUp')) g.pitch = clamp(g.pitch - 1.1 * dt, this.pitchMin(g.dist), this.maxPitch);
+      if (has('PageDown')) g.pitch = clamp(g.pitch + 1.1 * dt, this.pitchMin(g.dist), this.maxPitch);
     }
+    // zoomed out past the look-up range: level the view back to the orbit
+    if (g.pitch < this.minPitch) { const pm = this.pitchMin(g.dist); if (g.pitch < pm) g.pitch = pm; }
     if (this.followFn) {
       const p = this.followFn();
       if (p) { g.target[0] = p[0] + this.followOff[0]; g.target[2] = p[2] + this.followOff[2]; g.target[1] = p[1]; g.followY = true; }
@@ -223,13 +238,22 @@ export class RTSCamera {
     return this;
   }
   _pose() {
-    const t = this.target, cp = Math.cos(this.pitch), sp = Math.sin(this.pitch), sy = Math.sin(this.yaw), cy = Math.cos(this.yaw);
+    // below minPitch (looking up) the lens keeps the minPitch orbit position and tilts about itself
+    const tilt = this.minPitch > 0 && this.pitch < this.minPitch ? this.minPitch - this.pitch : 0;
+    const po = this.pitch + tilt;
+    const t = this.target, cp = Math.cos(po), sp = Math.sin(po), sy = Math.sin(this.yaw), cy = Math.cos(this.yaw);
     let e = [t[0] - sy * cp * this.dist, t[1] + sp * this.dist, t[2] - cy * cp * this.dist];
     // keep the lens above the ground
     const g0 = this.ground(e[0], e[2]), ge = Math.max(0, g0) + Math.max(g0 > .5 ? 1.2 : 3, this.dist * .01);   // over the sea: above the swell
     if (e[1] < ge) e[1] = ge;
     this.eye = e;
     let f = [t[0] - e[0], t[1] - e[1], t[2] - e[2]]; const fl = Math.hypot(f[0], f[1], f[2]) || 1; f = [f[0] / fl, f[1] / fl, f[2] / fl];
+    if (tilt > 0) {
+      // raise the line of sight by the tilt, keeping its heading
+      const h = Math.hypot(f[0], f[2]) || 1, a = Math.atan2(-f[1], h) - tilt, ca = Math.cos(a);
+      f = [f[0] / h * ca, -Math.sin(a), f[2] / h * ca];
+    }
+    this.tilt = tilt;
     let r = [f[2], 0, -f[0]]; const rl = Math.hypot(r[0], r[2]) || 1; r = [r[0] / rl, 0, r[2] / rl];
     const u = [f[1] * r[2] - f[2] * r[1], f[2] * r[0] - f[0] * r[2], f[0] * r[1] - f[1] * r[0]];
     this.f = f; this.r = r; this.u = u;

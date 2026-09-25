@@ -11,6 +11,8 @@ export class Overlay {
     this.cv = canvas; this.ctx = canvas.getContext('2d');
     this.W = 0; this.H = 0; this.dpr = 1; this.scale = 1;
     this._w = new Map();
+    this.avoid = null;         // [[x0, y0, x1, y1], ...] screen rects a fitted tag keeps out of (the HUD panels: game.hudRects)
+    this.margin = 6;           // a fitted tag stays this far inside the view
   }
   resize(cssW, cssH, dpr) {
     const W = Math.round(cssW * dpr), H = Math.round(cssH * dpr);
@@ -26,8 +28,51 @@ export class Overlay {
     c.fillText(s, x, y);
   }
 
+  /* size [w, h] of a tag() without drawing it */
+  tagSize(id, label, value, o) {
+    const px = (o && o.size) || 11.5, sp = px * .05, U = s => (s || '').toString().toUpperCase();
+    this._font(px, 500);
+    const sId = U(id), sL = U(label), sV = U(value), pX = px * .61, pL = px * .7;
+    return [(sId ? this._meas(sId, px, sp) + pX * 2 : 0) + (sL ? this._meas(sL, px, sp) + pL * 2 : 0) + (sV ? this._meas(sV, px, sp) + pL * 2 : 0), Math.round(px + 9)];
+  }
+  /* a w x h box at (x, y) moved fully into the view (margin) and out of the avoid rects (default this.avoid) by the
+     smallest step that stays on screen -> [x, y] */
+  fitBox(x, y, w, h, avoid, margin) {
+    const m = margin === undefined ? this.margin : margin, W = this.W, H = this.H;
+    const cx = v => Math.max(m, Math.min(W - m - w, v)), cy = v => Math.max(m, Math.min(H - m - h, v));
+    x = cx(x); y = cy(y);
+    const av = avoid === undefined ? this.avoid : avoid;
+    if (!av || !av.length) return [x, y];
+    const inside = (px, py, r) => px < r[2] && px + w > r[0] && py < r[3] && py + h > r[1];
+    for (let pass = 0; pass < 4; pass++) {
+      let hit = null;
+      for (let i = 0; i < av.length; i++) if (inside(x, y, av[i])) { hit = av[i]; break; }
+      if (!hit) break;
+      let best = null, bd = 1e18;
+      for (const c of [[hit[0] - w - 2, y], [hit[2] + 2, y], [x, hit[1] - h - 2], [x, hit[3] + 2]]) {
+        const nx = cx(c[0]), ny = cy(c[1]);
+        if (inside(nx, ny, hit)) continue;
+        const dd = (nx - x) * (nx - x) + (ny - y) * (ny - y);
+        if (dd < bd) { bd = dd; best = [nx, ny]; }
+      }
+      if (!best) break;
+      x = best[0]; y = best[1];
+    }
+    return [x, y];
+  }
+  /* a screen box clipped to the view (inset by m), or null when nothing of it is left */
+  clampBox(b, m) {
+    if (!b) return null;
+    m = m === undefined ? 3 : m;
+    const x0 = Math.max(m, b[0]), y0 = Math.max(m, b[1]), x1 = Math.min(this.W - m, b[2]), y1 = Math.min(this.H - m, b[3]);
+    return x1 - x0 > 2 && y1 - y0 > 2 ? [x0, y0, x1, y1] : null;
+  }
+
   /* object tag: [ID][ label ][ value ] at (x, y) = its top-left (or anchored: o.align 'left' | 'right' | 'center').
-     o: { kind: 'white' | 'lime' | 'coral' | 'ghost', a, size (px, default 11.5), align, valCol } -> [x0, y0, x1, y1] */
+     o: { kind: 'white' | 'lime' | 'coral' | 'ghost', a, size (px, default 11.5), align, valCol,
+          fit: true (keep it inside the view and out of this.avoid) | [rects] (out of these instead),
+          anchor: [x, y] (the object: a dotted leader runs from it to the tag when the tag sits away from it) }
+     -> [x0, y0, x1, y1] */
   tag(x, y, id, label, value, o) {
     o = o || {};
     const c = this.ctx, px = o.size || 11.5, sp = px * .05, a = o.a === undefined ? 1 : o.a;
@@ -39,7 +84,18 @@ export class Overlay {
     const wId = sId ? this._meas(sId, px, sp) + pX * 2 : 0, wL = sL ? this._meas(sL, px, sp) + pL * 2 : 0, wV = sV ? this._meas(sV, px, sp) + pL * 2 : 0;
     const W = wId + wL + wV;
     if (o.align === 'right') x -= W; else if (o.align === 'center') x -= W / 2;
+    if (o.fit) { const f = this.fitBox(x, y, W, hB, Array.isArray(o.fit) ? o.fit : undefined); x = f[0]; y = f[1]; }
     x = Math.round(x); y = Math.round(y);
+    if (o.anchor) {
+      // leader from the object to the nearest point of the tag (only when the tag is not already at it)
+      const ax = o.anchor[0], ay = o.anchor[1], nx = Math.max(x, Math.min(x + W, ax)), ny = Math.max(y, Math.min(y + hB, ay));
+      if (Math.hypot(nx - ax, ny - ay) > (o.leadMin === undefined ? 10 : o.leadMin)) {
+        this.leader(ax, ay, nx, ny, o.kind === 'coral' ? 'rgba(255,106,61,.8)' : 'rgba(255,255,255,.7)', .8 * a);
+        this.ctx.fillStyle = o.kind === 'coral' ? COL.coral : o.kind === 'lime' ? COL.lime : '#fff'; this.ctx.globalAlpha = a;
+        this.ctx.fillRect(Math.round(ax) - 1, Math.round(ay) - 1, 3, 3); this.ctx.globalAlpha = 1;
+      }
+      this._font(px, 500);
+    }
     const kind = o.kind || 'white';
     const chip = kind === 'lime' ? COL.lime : kind === 'coral' ? COL.coral : '#FFFFFF';
     c.globalAlpha = a;

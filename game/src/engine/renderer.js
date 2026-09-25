@@ -196,6 +196,37 @@ export class Renderer {
     gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, this.ubo);
   }
 
+  /* the units on screen the world dims round (terrain.subjectDim): the biggest queued instances, up to 12 */
+  _subjects() {
+    const cam = this.camera, e = cam.eye, f = cam.f, r = cam.r, u = cam.u, fl = 540 / Math.tan(cam.fov / 2);
+    const list = this._subjList || (this._subjList = []), pool = this._subjPool || (this._subjPool = []);
+    list.length = 0;
+    if (this.terrain.subjectDim > 0 && this.worldBright > 0) for (const d of this.queue) {
+      if ((d.alpha !== undefined && d.alpha < .3) || !d.T) continue;
+      const m = this.models.has ? (this.models.has(d.key) ? this.models.get(d.key) : null) : this.models.get(d.key);
+      if (!m || !m.radius) continue;
+      const R = d.R, c0 = m.center || [0, 0, 0];
+      const cx = d.T[0] - e[0] + (R ? R[0] * c0[0] + R[1] * c0[1] + R[2] * c0[2] : c0[0]);
+      const cy = d.T[1] - e[1] + (R ? R[3] * c0[0] + R[4] * c0[1] + R[5] * c0[2] : c0[1]);
+      const cz = d.T[2] - e[2] + (R ? R[6] * c0[0] + R[7] * c0[1] + R[8] * c0[2] : c0[2]);
+      const cyd = cy - (cx * cx + cz * cz) / (2 * R_EARTH);
+      const zc = cx * f[0] + cyd * f[1] + cz * f[2];
+      if (zc < cam.near) continue;
+      const sr = fl * m.radius / zc;
+      if (sr < 2.5) continue;
+      const sx = fl * (cx * r[0] + cyd * r[1] + cz * r[2]) / zc, sy = fl * (cx * u[0] + cyd * u[1] + cz * u[2]) / zc;
+      if (Math.abs(sy) > 540 + 3 * sr || Math.abs(sx) > 540 * cam.W / Math.max(1, cam.H) + 3 * sr) continue;
+      const s = pool[list.length] || (pool[list.length] = { c: [0, 0, 0] });
+      s.c[0] = cx; s.c[1] = cy; s.c[2] = cz; s.sx = sx; s.sy = sy; s.sr = sr; s.z = zc;
+      // the pool round it: a few radii, and never under ~34 px on screen
+      s.r = Math.max(m.radius * 2.4, 34 * zc / fl);
+      list.push(s);
+      if (list.length >= 64) break;
+    }
+    list.sort((a, b) => b.sr - a.sr);
+    this.terrain.setSubjects(list);
+  }
+
   end() {
     const gl = this.gl, G = this.G, t0 = performance.now();
     this._ubo();
@@ -223,6 +254,7 @@ export class Renderer {
     gl.colorMask(true, true, true, true); gl.depthMask(false);
     gl.enable(gl.BLEND); gl.blendEquation(gl.MAX);
     this.terrain.drawSky(this.skyBright);
+    this._subjects();
     this.terrain.drawSurface();
     // models
     let pts = 0, draws = 0;
