@@ -287,7 +287,8 @@ export async function createStructure(game) {
     const hm = [0, sag ? S.H.deck(z) : -S.H.keel(z) * .95, z];
     const mu = A.m * B.m / (A.m + B.m), om = 1 / (4 * S.h);
     const hold = (1.8 + 3.5 * hsh(S.id, j + 11)) * Math.sqrt(S.H.L / 150);
-    S.hinges.push({ A, B, hm, k: mu * om * om, c: 2 * .9 * mu * om, t0: t, hold, tear: 1.5 + hsh(S.id, 5), gone: false, gap: 0, load: 0, sag });
+    const J = { A, B, hm, k: mu * om * om, c: 2 * .9 * mu * om, t0: t, hold, tear: 1.5 + hsh(S.id, 5), gone: false, gap: 0, load: 0, sag };
+    S.hinges.push(J);
     // a small push apart
     const Rm = P.R, pz = .25;
     A.v[0] -= Rm[2] * pz; A.v[1] -= Rm[5] * pz; A.v[2] -= Rm[8] * pz;
@@ -308,7 +309,7 @@ export async function createStructure(game) {
     addFx(new Splash({ t0: sim.t, pos: [wp[0], 0, wp[2]], size: Math.min(45, 10 + b * 1.4), seed: S.seed + j * 3, ring: .15 }), 2);
     const F = new Fire({ t0: sim.t, seed: S.seed * 5 + j, size: Math.min(1.1, .35 + H.L / 400), local: [0, 0, 0], spread: [b * .8, 6 + d * .5, 3], ceiling: 700, life: 180, flame: .55, embers: 1.2, lightR: 30, lightI: 1.2, lightRgb: [255, 170, 90], dense: 11 });
     F.k = 1; addFx(F, 0);
-    S.breaks.push({ cut, A, B, t0: t, F, wp: wp.slice(), slick: wp.slice(), seed: S.seed * 3 + j * 17, heat: 1 });
+    S.breaks.push({ cut, A, B, t0: t, F, wp: wp.slice(), slick: wp.slice(), seed: S.seed * 3 + j * 17, heat: 1, J, grind: 0 });
     stats.breaks++;
     announce(S, wp, t);
   }
@@ -395,7 +396,7 @@ export async function createStructure(game) {
   const heatOf = (c, t) => Math.exp(-Math.max(0, t - c.t0) / 9) * .9 + .1 * Math.exp(-Math.max(0, t - c.t0) / 60);
   function visible(S) {
     const u = S.u;
-    if (sim.units.get(S.id) === u) S.vis = u.side === game.side || !sim.fog || game.vis(u) === 'own' || game.vis(u) === 'track' || game.vis(u) === 'contact';
+    if (sim.units.get(S.id) === u) S.vis = u.side === game.side || !sim.fog || game.vis(u) === 'own' || game.vis(u) === 'track';
     return S.vis;
   }
   const Tm = [0, 0, 0], Rm = [1, 0, 0, 0, 1, 0, 0, 0, 1];
@@ -426,8 +427,17 @@ export async function createStructure(game) {
         if (P.sunk && t - P.sunkT > 3) continue;
         poseOf(P, a, Tm, Rm);
         const K = slabOf(S, P, t);
+        // the underwater hull only when some of it is out of the water (a bow or stern lifted, rolled over)
+        let bUp = false;
+        if (S.H.below) {
+          const z0 = S.L.zc[P.i0], z1 = S.L.zc[P.i1 + 1];
+          for (let q = 0; q <= 4 && !bUp; q++) {
+            const z = z0 + (z1 - z0) * q / 4, k = -S.H.keel(z) * .5;
+            for (const x of [-S.H.beam(z) * .7, 0, S.H.beam(z) * .7]) if (Tm[1] + Rm[3] * x + Rm[4] * k + Rm[5] * z > -1.5) { bUp = true; break; }
+          }
+        }
         for (const below of [false, true]) {
-          if (below && (!S.H.below || dbg.noBelow)) continue;
+          if (below && (!S.H.below || dbg.noBelow || !bUp)) continue;
           if (dbg.noDraw) continue;
           const d = instOf(S, P, below);
           for (let i = 0; i < 9; i++) d.R[i] = Rm[i];
@@ -446,8 +456,11 @@ export async function createStructure(game) {
         const dist = Math.hypot(Tm[0] - e[0], Tm[1] - e[1], Tm[2] - e[2]) - S.H.L * .5;
         for (const c of [P.cut0, P.cut1]) {
           if (!c || dbg.noFace) continue;
-          if (!c.face) c.face = faceOf(S.H, c.z, c.a, c.s, S.wave, Math.max(.3, S.H.L / 260));
-          dots += bfx.drawFace(c.face, Rm, Tm, heatOf(c, t), Math.max(1, dist), S.seed);
+          // (not while the whole face is under the water: the sea's occluder hides it)
+          const yk = Tm[1] + Rm[4] * -S.H.keel(c.z) + Rm[5] * c.z, yd = Tm[1] + Rm[4] * S.H.deck(c.z) + Rm[5] * c.z;
+          if (Math.max(yk, yd) < -1) continue;
+          if (!c.face) { c.sp = Math.max(.3, S.H.L / 260); c.face = faceOf(S.H, c.z, c.a, c.s, S.wave, c.sp); }
+          dots += bfx.drawFace(c.face, Rm, Tm, heatOf(c, t), Math.max(1, dist), S.seed, c.sp);
         }
       }
       // at each break: foam where the open ends meet the water, steam, the fire, the slick
@@ -517,6 +530,26 @@ export async function createStructure(game) {
     // steam off the hot steel going under
     C5[0] = w[0]; C5[1] = sea(w[0], w[2]); C5[2] = w[2];
     n += bfx.drawSteam(t, C5, S.H.beam(c.z) * 2, heat * Math.min(1, open * 2 + .1), B.seed + 5, WIND);
+    // the plating still holding them tearing through: sparks grinding out of the seam while the hinge carries its load
+    if (B.J && !B.J.gone && !B.A.sunk) {
+      const J = B.J, P = B.A, cam = R.camera;
+      poseOf(P, a, Tm, Rm);
+      const hy = Tm[1] + Rm[3] * 0 + Rm[4] * J.hm[1] + Rm[5] * c.z;
+      const dd = Math.hypot(Tm[0] + Rm[2] * c.z - cam.eye[0], hy - cam.eye[1], Tm[2] + Rm[8] * c.z - cam.eye[2]);
+      if (hy > sea(w[0], w[2]) - .5 && dd < 6000) {
+        B.grind += Math.max(0, game.dtSim || 0) * (60 + 140 * Math.min(1, J.load / (P.m * 2)));
+        const b = S.H.beam(c.z) * .95;
+        let k = 0;
+        while (B.grind >= 1 && k < 24) {
+          B.grind -= 1; k++;
+          const q = hsh(B.seed + k, Math.floor(t * 50)), x = (q * 2 - 1) * b, y = J.hm[1];
+          const px = Tm[0] + Rm[0] * x + Rm[1] * y + Rm[2] * c.z, py = Tm[1] + Rm[3] * x + Rm[4] * y + Rm[5] * c.z, pz = Tm[2] + Rm[6] * x + Rm[7] * y + Rm[8] * c.z;
+          const u1 = hsh(k * 7 + 1, Math.floor(t * 50) + B.seed), u2 = hsh(k * 11 + 3, Math.floor(t * 50) + B.seed), sp = 6 + 14 * u1;
+          bfx.spark(t, px, py, pz, (u2 - .5) * sp, sp * (.3 + .7 * u1), (hsh(k * 13, Math.floor(t * 50)) - .5) * sp);
+        }
+        if (B.grind > 1) B.grind = 0;
+      }
+    }
     // the slick, drifting from where she broke
     n += bfx.drawSlick(t, B.slick, B.t0, S.H.L, B.seed + 9, WIND, sea, 1 - sat((t - B.t0 - 420) / 120));
     // the fire in the break: above the water while the torn ends are up

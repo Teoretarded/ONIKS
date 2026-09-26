@@ -126,10 +126,11 @@ export function createBreakFx(game) {
 
   /* the torn face's inside: points F (model frame [x y z kind] x n) through a piece's model transform (Rm, Tm), heat
      0..1; only the dots above the water (the rest is under the sea's occluder anyway) */
-  function drawFace(F, Rm, Tm, heat, d, seed) {
+  function drawFace(F, Rm, Tm, heat, d, seed, sp) {
     const fx = R.fx, n = F.length / 4;
     if (!n || d > 8000) return 0;
-    const pxm = (cam.fl || 1000) / Math.max(1, d), step = pxm < .6 ? 4 : pxm < 1.4 ? 2 : 1;
+    // no closer than ~2.5 px on screen
+    const pxm = (cam.fl || 1000) / Math.max(1, d), step = Math.max(1, Math.min(12, Math.ceil(2.5 / Math.max(.01, (sp || .5) * pxm))));
     let m = 0;
     for (let i = 0; i < n; i += step) {
       const x = F[i * 4], y = F[i * 4 + 1], z = F[i * 4 + 2], kind = F[i * 4 + 3];
