@@ -89,6 +89,9 @@ PATH; call it from PowerShell by full path).
   second) with short, narrow briefs; hand agents cleaned excerpts (`_brief/sea_excerpts.js`) instead of
   combat-heavy files; show munitions as closed shells; after a stop, restart with a reworded, narrower brief that
   continues from the files on disk. Treat launch-arc fixes as visual smoothing by eye (`_brief/realism.txt`).
+- **Blast-physics research** (2026-09-26): Sonnet agents asked for contact-charge hole sizes, and even for lab
+  plate-deflection test data, were stopped (general_harms) twice. Game-tech/solver research (BeamNG, XPBD, GPU)
+  went through. Calibrate the blast test in-house against the Nurick–Martin fit instead of sending agents for data.
 - **Browser tab cap (~9)** with many parallel agents: one tab per agent, reused, closed at the end.
 - **Noisy benchmarks** while many agents run: compare against a reference film at the same moment under the same
   load, and re-bench on a quiet machine.

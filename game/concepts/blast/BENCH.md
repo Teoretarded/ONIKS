@@ -48,6 +48,21 @@ In a game frame the GPU issues ~100 steps in ~6 ms, so an outside hit resolves i
 ~2 s of frames, behind the fireball. Many hits can share one set of textures (one patch per hit), so several
 hits cost about the same as one.
 
+## Check against the Nurick–Martin fit (dishing, 10 mm HSLA, panel 2.5 × 0.75 m, GPU 0.125 m)
+
+| Charge @ standoff | Simulated set | Nurick–Martin | φ |
+|---|---|---|---|
+| 120 kg @ 8 m | 24 mm | 24 mm | 4.5 |
+| 120 kg @ 5 m | 48 mm | 35 mm | 6.8 |
+| 120 kg @ 3 m | 55 mm | 44 mm | 8.6 |
+| 30 kg @ 3 m | 17 mm | 24 mm | 4.4 |
+| 30 kg @ 2 m | 19 mm | 28 mm | 5.3 |
+| 10 kg @ 1.5 m | 8 mm | 20 mm | 3.6 |
+
+Within the fit's own scatter (~±30 %) for near-uniform loading; exact far out. Closer in, the fit (which assumes the
+centre impulse over the whole panel) over-predicts for small charges, as expected for localised loads; for big
+charges the frames yield in the simulation, so it deflects more than an isolated panel would.
+
 ## Still open
 
 - Hole sizes at contact are not yet calibrated against measured test data (a literature agent is collecting
