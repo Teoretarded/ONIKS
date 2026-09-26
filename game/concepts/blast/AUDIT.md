@@ -5,7 +5,7 @@ loading). Verification suite: `verify.html` + `verify.js` (runs the bench's own 
 refer to 1596bde. Ranked by how much each item biases the results the user questioned (steel looks brittle, the deck
 behind a contact hole doesn't respond, a very large charge leaves plating pristine).
 
-Status: DRAFT, being updated while the suite runs. Final suite results at the bottom.
+Status: baseline results at 1596bde below; re-run against the physics fixes as they land (see the end).
 
 ## What the numbers say, in short
 
@@ -21,8 +21,25 @@ Status: DRAFT, being updated while the suite runs. Final suite results at the bo
 - Plating tears out at a velocity, not a strain: 36.7 m/s for 10 mm HSLA. A near-uniformly loaded panel tears out at
   phi = 9.7 (delta/h ~ 4.9); the bench's own readout puts tearing at phi > 28, and clamped steel plates in tests dish
   to roughly 10-15 h before tearing. So plating is either gone or barely dented: the "brittle" look.
-- Solver numerics are fine: dt vs dt/2 identical (< 0.1 %), early-time mirror symmetry exact, reruns identical,
-  GPU matches CPU on outside hits without holes. The problems are in the model, not the integration.
+- Holes are cut out, not petalled: of the torn side plating 79 % (1200 kg contact) and 87 % (5000 kg) is thrown
+  loose as free pieces; the plating left attached at the rim moves at most 0.37-0.39 m around holes of 4.1 m and
+  7.6 m radius. The deck behind the 1200 kg hole is torn (438 of 441 nodes within 2.5 m) but 400 of them are thrown
+  loose: holed, not bent.
+- The dish shrinks as the grid is refined (120 kg at 5 m: 59 / 24 / 22 mm at 0.25 / 0.125 / 0.0625; 30 kg at 2 m:
+  25 / 10.5 / 6.6 mm): the bending term stiffens with 1/S^2 (finding 1).
+- Solver numerics are fine: dt vs dt/2 identical (< 1 %), early-time mirror symmetry exact (5e-6), reruns identical,
+  GPU matches CPU exactly when diffraction is off. The problems are in the model, not the integration.
+- Mass scaling is not harmless: the 120 kg inside case tears 67 m^2 unscaled vs 53 m^2 at x16 / x64 (side 13.8 vs
+  7.2 m^2); x16 and x64 agree with each other, not with x1.
+
+### Related, outside this bench (for whoever owns game/src/blast)
+
+`game/src/blast/spec.js:59` onward (ported from this bench): the in-game patch around a hit spans
+Rp = clamp(2.5 W^(1/3), 3, 10) m along the hull, 0.75 Rp up/down (clipped at the draught), at most 6 m inboard,
+three inner decks and one bulkhead, with a fixed boundary. For 1200 kg and 5000 kg charges Rp is capped at 10 m, so
+plating beyond the patch is never simulated and stays pristine by construction, and the clamped patch edge acts as
+a rigid support. That is a likely source of "a 5000 kg charge leaves nearby plating pristine" in the game, on top of
+findings 1-3 below (in this bench's 24 m box, nothing within 8.5 m of a 5000 kg contact charge stays pristine).
 
 ## Findings, ranked
 
@@ -151,7 +168,9 @@ Status: DRAFT, being updated while the suite runs. Final suite results at the bo
 - Float32 absolute positions on the GPU (`gpu.js:156`): coordinates up to 12 m have a 1 um step; per-step motion
   below ~0.1 m/s (dt = 11 us) is rounded, bond strain noise ~1e-5 (0.4-0.6 % of the yield strain at 0.125/0.0625).
   Store displacement from R0 instead.
-- Suite results: see `parity`.
+- Suite (0.25 m): 30 kg at 2 m and Hellfire contact identical; 120 kg contact: second deck torn 0.5 m^2 (GPU,
+  diffraction 0.5) vs 4.0 m^2 (CPU); with diffraction 1 the two are identical to the node; 120 kg inside: weather
+  deck 0 vs 9 m^2, 415 cells differ.
 
 ### 11. Line of sight (low-medium)
 `blast.js:402-405`, `471`. The CPU re-tests only every 8 steps, only while the pulse is on and before tLoad, and never
@@ -174,7 +193,10 @@ the outer edges are fixed.
 
 ### 14. Mass scaling x64 in the gas phase (low-medium)
 `blast.js:420`, `600`. Panel periods x8 (~10 ms -> ~80 ms), comparable with burn rises (60-120 ms) and venting, so the
-phase is not quasi-static; a shock arriving after tFast gives 1/64 of the velocity. Suite: `massscale`.
+phase is not quasi-static; a shock arriving after tFast gives 1/64 of the velocity. Suite `massscale` (120 kg
+inside, GPU 0.125): torn 66.9 m^2 unscaled, 53.5 at x16, 52.8 at x64; side 13.8 vs 7.2 m^2; x1 takes 4.0 s vs 0.8 s.
+BENCH.md's "within ~10 % of x16" is true, but x16 is itself 20 % off the unscaled run. If x64 stays, check it against
+x1 on every source type, or scale only once the structure is at rest under the gas load.
 
 ### 15. Fragments only in the render loop (low)
 `blast.js:283-294`, `880-895`. `strike()` changes velocities from `draw()`, keyed to frame time: headless runs
@@ -193,6 +215,61 @@ results depend on the frame rate.
 - Readouts: "max set" is the largest side displacement anywhere (grillage translation incl. elastic part at T1),
   not a dish; "side torn" includes crack-adjacent cells (9).
 
-## Suite results
+## The suite
 
-(pending: filled at the end of the run)
+Open http://127.0.0.1:8771/game/concepts/blast/verify.html (full run ~3 min, most of it CPU reference runs);
+`?quick=1` skips the slow ones, `?only=energy,mesh` runs a subset; results in `window.VERIFY.results`. It loads the
+bench's own blast.js/gpu.js (only the relative import of gpu.js is made absolute, and a read-only accessor is
+appended), stubs the render loop, frees each run's WebGL objects, and runs every case synchronously to T1.
+Everything scene-specific is found from the model (plates, frames from FRM, fixed edges, charge position), so the
+checks carry over to other scenes.
+
+| Check | What passes |
+|---|---|
+| energy | CPU explicit: work of the loads (taken at the step-mean velocity, as symplectic Euler gains it) = kinetic + element elastic energy + plastic work (force at yield x plastic increment, bonds / ties / bending) + fracture (energy held by a bond when it breaks) + dashpots + global velocity damping; unexplained < 3 % |
+| momentum | sum of internal forces and torques (total force minus loads minus ground ties, incl. the bond forces on fixed nodes) ~ 0 |
+| symmetry | x-mirror about a panel centre, before the wave reaches anything asymmetric: < 1 % (final state shown for information) |
+| dt | dt vs dt/2 on CPU and GPU: set and field within 10 %, torn area within 15 % |
+| mesh | GPU 0.25 / 0.125 / 0.0625: panel-centre set (standoff) or torn area (contact / inside) within 15 % between the two finest |
+| parity | GPU vs CPU at 0.25: set and field within 10 %, torn area within 20 % |
+| nurick | panel dish relative to its edges within +-30 % (or +-h) of Nurick-Martin, using the impulse actually applied over the panel |
+| tearonset | near-uniform load (8 m off): first tearing at phi >= 20 |
+| springback | panel centre keeps >= 60 % of its peak displacement |
+| mono | more charge / closer / thinner: torn area never falls; at equal tearing the max set never falls |
+| massscale | x1 vs x64 within 15 % |
+| user1200 | plating of other plates within 2.5 m behind the hole is torn or set > 50 mm (>= 50 %); the CPU reference shows the load reaching it |
+| user5000 | < 5 % of the plating within 0.5 W^(1/3) m of the charge (>= 1 m from fixed edges) has set < 2h; a dished band (> 5h) round the hole; petals: under half of the torn struck plate thrown loose and the rim moved > 1/4 of the hole radius |
+
+### Results at 1596bde (bench v22, defaults: GPU, 0.125 m, diffraction 0.5, x64)
+
+| Check | Result | Numbers |
+|---|---|---|
+| bench loads | PASS | 36 025 nodes, 143 160 bonds, dt 11.4 us |
+| tear-out threshold | FAIL | v_c 36.7 m/s = phi 9.5 for a uniform panel (readout says tearing at phi > 28) |
+| reruns (GPU, CPU) | PASS | identical |
+| energy 30 kg @ 2 m | FAIL | plate bonds 4.8 %, ties 56 %, bending dashpot 15 %, global damping 15 %, unexplained 5.8 % (bending operator 5.2 %); same at dt/2 |
+| energy Hellfire contact | FAIL | plate bonds 0.5 %, ties 40 %, bending dashpot 21 %, damping 10 % (+37 % on loose pieces), unexplained -10.9 % (bending operator -11.6 %) |
+| energy 120 kg @ 3 m | FAIL | plate bonds 8.4 %, ties 46 %, damping 23 %, bending dashpot 12 %, unexplained 5.3 % (bending 4.8 %) |
+| linear momentum | FAIL | net internal force 752 kN (2.9 % of the peak load), all from the bending operator |
+| angular momentum | FAIL | 4000 kN m, all from the bending operator |
+| symmetry, early (GPU / CPU) | PASS | 5e-6 / 0 |
+| symmetry, final | INFO | 1.6 % (non-tearing), 1.0 % (contact): the section is not mirror-symmetric |
+| dt vs dt/2 (5 cases) | PASS | < 1 % everywhere; inside case 0.8 % field, torn 52.8 / 53.0 m^2 |
+| mesh 120 kg @ 5 m | PASS (barely) | centre set 59 / 24 / 22 mm; 0.25 is 59 % off |
+| mesh 30 kg @ 2 m | FAIL | 25 / 10.5 / 6.6 mm |
+| mesh 120 kg contact | FAIL | torn 2.19 / 1.58 / 1.91 m^2 (18 % between the two finest) |
+| parity 30 kg @ 2 m, Hellfire | PASS | identical / 1.8 % |
+| parity 120 kg contact, diff 0.5 | FAIL | second deck 0.5 vs 4.0 m^2 (CPU has no diffraction) |
+| parity 120 kg contact, diff 1 | PASS | identical |
+| parity 120 kg inside | FAIL | weather deck 0 vs 9 m^2, max set 1.36 vs 1.06 m |
+| Nurick-Martin (6 cases) | FAIL | panel dish relative to its edges 0-1 mm vs 17-42 mm predicted; the whole grillage moves 7-26 mm |
+| tearing onset | FAIL | phi 9.7 (400 kg at 8 m); 300 kg at 8 m (phi 8.2) dishes 52 mm |
+| springback | FAIL | keeps 37 % (GPU 0.125) / 47 % (CPU 0.25); 91 % with the bending term off |
+| monotonic (charge, contact, standoff, thickness x2) | PASS | torn area and set rise with charge and fall with thickness |
+| 1200 kg: structure behind | PASS | 438 / 441 nodes torn, 400 thrown loose |
+| 1200 kg: load reaches it (CPU) | PASS | 104 / 104 nodes loaded; gas 0 kPa everywhere (finding 7) |
+| 5000 kg: nothing pristine in reach | PASS | 4 of 19 291 nodes under 20 mm |
+| dished band round the hole | PASS | 81-86 % of the 1 m ring > 50 mm |
+| petals, not cut-outs (1200, 5000) | FAIL | 79 % / 87 % of the torn side thrown loose; rim moved <= 0.37 / 0.39 m |
+| mass scaling | FAIL | 66.9 (x1) vs 52.8 m^2 (x64) |
+| Burke | INFO | scene not in the bench yet |

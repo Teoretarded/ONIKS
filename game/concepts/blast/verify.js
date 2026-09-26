@@ -525,16 +525,16 @@ check('mono', 'monotonic', false, async () => {
 
 // the user's two cases, stated generically: A = aim point on the struck plate, n = its outward normal
 function regionReport(R, filt, thrSet) {
-  let n = 0, torn = 0, pristine = 0, set = []; const byPl = {};
+  let n = 0, torn = 0, pristine = 0, loose = 0, set = []; const byPl = {};
   for (let i = 0; i < R.N; i++) {
     if (R.fix[i] || !filt(i)) continue; n++;
     const b = byPl[R.surf[i]] || (byPl[R.surf[i]] = { n: 0, torn: 0, pristine: 0, max: 0 }); b.n++;
-    if (R.nodeTorn[i]) { torn++; b.torn++; continue; }
+    if (R.nodeTorn[i]) { torn++; b.torn++; if (R.free[i]) loose++; continue; }
     const d = dmag(R, i); set.push(d); b.max = Math.max(b.max, d);
     if (d < thrSet) { pristine++; b.pristine++; }
   }
   set.sort((a, b) => a - b);
-  return { n, torn, pristine, med: set.length ? set[set.length >> 1] : 0, byPl };
+  return { n, torn, pristine, loose, med: set.length ? set[set.length >> 1] : 0, byPl };
 }
 check('user1200', 'user', false, async () => {
   const cfg = C_(1200, 'contact');
@@ -545,7 +545,7 @@ check('user1200', 'user', false, async () => {
   const rep = regionReport(R, behind, .05);
   const hit = (rep.torn + (rep.n - rep.torn - rep.pristine)) / Math.max(rep.n, 1);
   record('user', '1200 kg contact: structure behind', rep.n > 0 && hit >= .5,
-    `side torn ${R.hullM2} m² · plating within 2.5 m behind the hole (other plates): ${rep.n} nodes, torn ${rep.torn}, set > 50 mm ${rep.n - rep.torn - rep.pristine}, under 50 mm ${rep.pristine} (median set ${fmt(rep.med * 1000, 0)} mm) · by plate ${Object.entries(rep.byPl).map(([p, b]) => `#${p}: ${b.n} nodes, torn ${b.torn}, max set ${fmt(b.max * 1000, 0)} mm`).join('; ')} · torn per plate ${R.areas.map(x => fmt(x, 2)).join('/')} m²`);
+    `side torn ${R.hullM2} m² · plating within 2.5 m behind the hole (other plates): ${rep.n} nodes, torn ${rep.torn} (${rep.loose} thrown loose), set > 50 mm ${rep.n - rep.torn - rep.pristine}, under 50 mm ${rep.pristine} (median set ${fmt(rep.med * 1000, 0)} mm) · by plate ${Object.entries(rep.byPl).map(([p, b]) => `#${p}: ${b.n} nodes, torn ${b.torn}, max set ${fmt(b.max * 1000, 0)} mm`).join('; ')} · torn per plate ${R.areas.map(x => fmt(x, 2)).join('/')} m²`);
   // does the load get there? the CPU reference records the shock impulse each node received
   if (!QUICK) {
     const E = run({ ...cfg, solver: 'explicit', grid: .25 });
@@ -575,6 +575,20 @@ check('user5000', 'user', false, async () => {
     let band = 0, nb = 0; for (let i = 0; i < RR.N; i++) { if (RR.surf[i] !== hitPl || RR.nodeTorn[i] || RR.fix[i]) continue; const r = Math.hypot(RR.r0[3 * i] - Cc[0], RR.r0[3 * i + 1] - Cc[1]);
       if (r > rh && r < rh + 1) { nb++; if (dmag(RR, i) > 5 * H()) band++; } }
     record('user', `${nm} contact: dished band round the hole`, nb > 0 && band / nb > .5, `hole reaches ${fmt(rh, 2)} m from the charge axis; intact side plating in the 1 m ring outside it: ${nb} nodes, ${fmt(100 * band / Math.max(nb, 1), 0)}% set > 5h (${5 * st_h()} mm)`);
+    // petalling: ductile plate opens by tearing radially and folding the petals back, so most of the torn plating
+    // stays attached and its rim moves by a good fraction of the hole radius; a brittle cut-out throws it away
+    // (heuristic thresholds: under half loose, rim moved > 1/4 of the hole radius)
+    const rows = []; let okAll = true;
+    for (let p = 0; p < RR.PL.length; p++) {
+      let tot = 0, loose = 0, att = 0, rim = 0, rp = 0;
+      for (let i = 0; i < RR.N; i++) { if (RR.surf[i] !== p || RR.fix[i] || !RR.nodeTorn[i]) continue; tot++;
+        if (RR.free[i]) loose++; else { att++; rim = Math.max(rim, dmag(RR, i)); }
+        rp = Math.max(rp, Math.hypot(RR.r0[3 * i] - Cc[0], RR.r0[3 * i + 1] - Cc[1], RR.r0[3 * i + 2] - Cc[2])); }
+      if (tot < 20) continue;
+      if (p === hitPl && (loose / tot > .5 || rim < .25 * rh)) okAll = false;
+      rows.push(`plate #${p}: ${tot} torn nodes, ${fmt(100 * loose / tot, 0)}% thrown loose, attached rim moved ≤ ${fmt(rim, 2)} m`);
+    }
+    record('user', `${nm} contact: petals, not cut-outs`, okAll, `struck-plate hole radius ${fmt(rh, 2)} m · ` + rows.join(' · '));
   }
 });
 
