@@ -45,6 +45,9 @@
    Explicit central-difference time steps at the stable step. The GPU solver (gpu.js) runs the same model. */
 
 const { createGPU } = await import('./gpu.js?v=' + Date.now());
+// WebGPU compute backend (gpu_wgpu.js) when the browser has it; WebGL2 (gpu.js) otherwise and for blocking (headless) runs
+let WG = null, createWGPU = null;
+try { if (navigator.gpu) { const m = await import('./gpu_wgpu.js?v=' + Date.now()); WG = await m.initWebGPU(); createWGPU = m.createWGPU; } } catch (e) { console.warn('WebGPU unavailable', e); WG = null; }
 const cv = document.getElementById('c');
 const gl = cv.getContext('webgl2', { antialias: false, alpha: false });
 const $ = id => document.getElementById(id);
@@ -79,7 +82,7 @@ const SEC = {
   bhdStiff: { hw: .15, tw: .006, bf: .075, tf: .008 },
 };
 
-const st = { relaxAt: 0, patchL: 0, beamM: 0, fineR: 0, uniformGrid: false, plate: null, scene: 'box', grid: .125, solver: 'gpu', spd: 0, src: 'charge', round: 7, kg: 120, casing: 130, fuze: 'contact',
+const st = { backend: 'auto', wgBatch: 200, wgDepth: 3, relaxAt: 0, patchL: 0, beamM: 0, fineR: 0, uniformGrid: false, plate: null, scene: 'box', grid: .125, solver: 'gpu', spd: 0, src: 'charge', round: 7, kg: 120, casing: 130, fuze: 'contact',
   standoff: 3, mat: 'hsla', h: 10, view: 0, msc: 1, frags: true, aim: [0, 2.2, 0], aimN: [0, 0, 1] };
 
 /* ------------------------------------------------------------------ small helpers */
@@ -599,7 +602,7 @@ function build() {
   let added = 0, total = 0;
   for (let i = 0; i < N; i++) { total += M[i]; const need = kn[i] * dtT * dtT; if (M[i] > 0 && WINV[i] > 0 && need > M[i]) { added += need - M[i]; M[i] = need; WINV[i] = 1 / need; } }
   scene.massAdded = added / total;
-  dt = .75 * dtT; BETA = .033 * dt;
+  dt = (st.dtK || .75) * dtT; BETA = .033 * dt;
   // ---- contact candidates: planar pieces whose plane passes within 1.5 m of the node (not its own)
   NCC = new Int32Array(4 * N).fill(-1);
   const bucket = new Map(), BK = 3;
@@ -819,8 +822,16 @@ function detonate() {
   sim.frags = Mc > 0 && st.frags && fill > 0 ? makeFrags(C, fill, Mc) : null;
   EN = { ext: 0, kin: 0, el: 0, plM: 0, plH: 0, plT: 0, plA: 0, damp: 0, rad: 0, frac: 0, contact: 0, frag: 0, water: 0 };
   rebuildSources(0);
-  if (sim.solver === 'gpu') { if (!gpu) gpu = createGPU(gl, gpuModel()); gpu.upload(); gpu.setSources(sim.SRC); gpu.setGas(GP); }
+  if (sim.solver === 'gpu') sim.gpuInit = false;
 }
+// the GPU backend for this run: WebGPU unless asked for WebGL2, or the run reads back blocking (headless / sync)
+function initGPU() {
+  const s = sim, want = WG && (st.backend === 'webgpu' || (st.backend === 'auto' && !s.headless && !s.sync)) ? 'webgpu' : 'webgl';
+  if (gpu && (gpu.kind || 'webgl') !== want) { gpu.dispose(); gpu = null; }
+  if (!gpu) gpu = want === 'webgpu' ? createWGPU(WG, gpuModel(), { batch: st.wgBatch, depth: st.wgDepth }) : createGPU(gl, gpuModel());
+  gpu.upload(); gpu.setSources(s.SRC); gpu.setGas(GP); s.gpuInit = true; s.backend = want;
+}
+const isWG = () => gpu && gpu.kind === 'webgpu';
 
 // fragments: Gurney velocity (cylinder), fixed typical mass, deterministic even spray, traced through the rest geometry
 function makeFrags(C, fill, Mc) {
@@ -1187,7 +1198,7 @@ function memberAngles(k, P) {
   const a = TA[k], b = TB[k], tx = P[3 * b] - P[3 * a], ty = P[3 * b + 1] - P[3 * a + 1], tz = P[3 * b + 2] - P[3 * a + 2];
   let ex = ny * tz - nz * ty, ey = nz * tx - nx * tz, ez = nx * ty - ny * tx; const el = Math.hypot(ex, ey, ez) || 1e-30;
   MG.bad = el < .3 * Math.hypot(nx, ny, nz) * Math.hypot(tx, ty, tz); ex /= el; ey /= el; ez /= el;   // member turned off its plating's plane
-  MG.ex = ex; MG.ey = ey; MG.ez = ez;
+  MG.ex = ex; MG.ey = ey; MG.ez = ez; MG.nx = nx; MG.ny = ny; MG.nz = nz; MG.el = el; MG.q0 = q0; MG.q1 = q1; MG.q2 = q2; MG.q3 = q3;
   const ang = (ux, uy, uz, vx, vy, vz) => { let q = ux * ex + uy * ey + uz * ez; ux -= q * ex; uy -= q * ey; uz -= q * ez; q = vx * ex + vy * ey + vz * ez; vx -= q * ex; vy -= q * ey; vz -= q * ez;
     return Math.atan2((uy * vz - uz * vy) * ex + (uz * vx - ux * vz) * ey + (ux * vy - uy * vx) * ez, ux * vx + uy * vy + uz * vz); };
   let th = 0, ga = 0;
@@ -1221,6 +1232,12 @@ function trussPass(t, h) {
       const gr = (x, y, z) => { const q = x * ex + y * ey + z * ez; x -= q * ex; y -= q * ey; z -= q * ez; const l2 = x * x + y * y + z * z || 1e-30;
         return [(ey * z - ez * y) / l2, (ez * x - ex * z) / l2, (ex * y - ey * x) / l2]; };
       const vdot = (gv, i, j) => gv[0] * (V[3 * i] - V[3 * j]) + gv[1] * (V[3 * i + 1] - V[3 * j + 1]) + gv[2] * (V[3 * i + 2] - V[3 * j + 2]);
+      // the angles are measured about e = n x t (n the plating's normal): their dependence on e, through n (the cell's
+      // corners) and t (a, b), completes the gradient, so the forces carry no net moment
+      let Gx = 0, Gy = 0, Gz = 0;
+      const addGe = (Q, ux, uy, uz, vx, vy, vz) => { const cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
+        const s = ex * cx + ey * cy + ez * cz, ue = ux * ex + uy * ey + uz * ez, ve = vx * ex + vy * ey + vz * ez, c = ux * vx + uy * vy + uz * vz - ue * ve, dn = s * s + c * c || 1e-30;
+        Gx += Q * (c * cx + s * (ve * ux + ue * vx)) / dn; Gy += Q * (c * cy + s * (ve * uy + ue * vy)) / dn; Gz += Q * (c * cz + s * (ve * uz + ue * vz)) / dn; };
       if (TBA[k] >= 0) {
         const A = TBA[k], B = TBB[k];
         const g1 = gr(X[3 * a] - X[3 * A], X[3 * a + 1] - X[3 * A + 1], X[3 * a + 2] - X[3 * A + 2]), g2 = gr(X[3 * B] - X[3 * a], X[3 * B + 1] - X[3 * a + 1], X[3 * B + 2] - X[3 * a + 2]);
@@ -1234,6 +1251,7 @@ function trussPass(t, h) {
         eel += .5 * Q * Q / kb; ebend = .5 * Q * Q / kb;
         const Qd = BETA * kb * thd; if (EN) EN.damp += Qd * thd * h; Q += Qd;
         addF(B, -Q, g2[0], g2[1], g2[2]); addF(A, -Q, g1[0], g1[1], g1[2]); addF(a, Q, g1[0] + g2[0], g1[1] + g2[1], g1[2] + g2[2]);
+        addGe(Q, X[3 * a] - X[3 * A], X[3 * a + 1] - X[3 * A + 1], X[3 * a + 2] - X[3 * A + 2], X[3 * B] - X[3 * a], X[3 * B + 1] - X[3 * a + 1], X[3 * B + 2] - X[3 * a + 2]);
       }
       if (TSC[k] >= 0) {
         const C0 = TSC[k], C1 = TBB[k];
@@ -1248,6 +1266,20 @@ function trussPass(t, h) {
         eel += .5 * Q * Q / ks; ebend += .5 * Q * Q / ks;
         const Qd = BETA * ks * gd; if (EN) EN.damp += Qd * gd * h; Q += Qd;
         addF(b, -Q, gs[0], gs[1], gs[2]); addF(a, Q, gs[0], gs[1], gs[2]); addF(C1, Q, gc[0], gc[1], gc[2]); addF(C0, -Q, gc[0], gc[1], gc[2]);
+        addGe(Q, X[3 * C1] - X[3 * C0], X[3 * C1 + 1] - X[3 * C0 + 1], X[3 * C1 + 2] - X[3 * C0 + 2], dx, dy, dz);
+      }
+      { // dE/de -> dE/dm (m = n x t, e = m/|m|) -> dE/dn, dE/dt -> the cell's corners (n = D1 x D2) and a, b
+        const q = Gx * ex + Gy * ey + Gz * ez, mx = (Gx - q * ex) / MG.el, my = (Gy - q * ey) / MG.el, mz = (Gz - q * ez) / MG.el;
+        const nx = MG.nx, ny = MG.ny, nz = MG.nz;
+        const gnx = dy * mz - dz * my, gny = dz * mx - dx * mz, gnz = dx * my - dy * mx;          // t x g_m
+        const gtx = my * nz - mz * ny, gty = mz * nx - mx * nz, gtz = mx * ny - my * nx;          // g_m x n
+        addF(a, 1, gtx, gty, gtz); addF(b, -1, gtx, gty, gtz);
+        const q0 = MG.q0, q1 = MG.q1, q2 = MG.q2, q3 = MG.q3;
+        const d1x = X[3 * q2] - X[3 * q0], d1y = X[3 * q2 + 1] - X[3 * q0 + 1], d1z = X[3 * q2 + 2] - X[3 * q0 + 2];
+        const d2x = X[3 * q3] - X[3 * q1], d2y = X[3 * q3 + 1] - X[3 * q1 + 1], d2z = X[3 * q3 + 2] - X[3 * q1 + 2];
+        const g1x = d2y * gnz - d2z * gny, g1y = d2z * gnx - d2x * gnz, g1z = d2x * gny - d2y * gnx;   // D2 x g_n
+        const g2x = gny * d1z - gnz * d1y, g2y = gnz * d1x - gnx * d1z, g2z = gnx * d1y - gny * d1x;   // g_n x D1
+        addF(q2, -1, g1x, g1y, g1z); addF(q0, 1, g1x, g1y, g1z); addF(q3, -1, g2x, g2y, g2z); addF(q1, 1, g2x, g2y, g2z);
       }
       }
     }
@@ -1362,15 +1394,20 @@ function gpuModel() {
     OUT: () => scene.OUT, csf, nspace: () => GV.length, BETA: () => BETA, U_MAX, RHO_W, C_W, P0, G, K_SHEAR };
 }
 let gpuT = 0;
-function stepGPU() {
+function stepGPU() { gpuAdvance(); if (sim.n % SYNC === 0) gpuSync(); }
+function gpuAdvance() {
+  if (!sim.gpuInit) initGPU();
   const s = sim, t = s.t, h = dt;
   gpu.step(t, h, s.relax ? 250 : s.alpha);
   s.t += h; s.n++;
-  if (s.n % SYNC === 0) {
+}
+function gpuSync() {
+  const s = sim;
+  {
     const tq = performance.now();
-    // torn cells, for the gas vents and the hole sources. Interactive: asynchronous (the fence completes between
-    // frames). A synchronous run never returns to the browser, so it reads blocking, every 4th sync.
-    const cl = s.sync ? gpu.readCells() : s.headless ? ((s.n / SYNC) % 4 === 0 ? gpu.readCells() : null) : gpu.readCellsAsync();
+    // torn cells, for the gas vents, the hole sources and the fragments' paths. Interactive: asynchronous (the data
+    // is a sync or two old). A blocking (headless) run reads them at every sync, as the CPU reference sees them.
+    const cl = s.sync || s.headless ? gpu.readCells() : gpu.readCellsAsync();
     PROF.read += performance.now() - tq;
     let torn = false;
     if (cl) for (let c = 0; c < NC; c++) if (cl[4 * c] > .5 && !CER[c]) { CER[c] = 1; CTE[c] = cl[4 * c + 1]; openCell(c, CTE[c]); torn = true; }
@@ -1398,6 +1435,17 @@ function checkEnd() {
   s.vmax = vm;
 }
 
+// WebGPU end of run: wait for the queue, then everything settle() reads (it reads the backend's copies)
+// yield to the browser (a message, not a timer: not throttled in a hidden tab)
+const tick0 = (() => { const ch = new MessageChannel(), q = []; ch.port1.onmessage = () => q.shift()(); return () => new Promise(r => { q.push(r); ch.port2.postMessage(0); }); })();
+async function finishWG() { await gpu.readStateAsync({ CEP, CDM, TFL, HTP, HTH, HTPS, TBP }); gpu.readNodes(true, X, V, FREE); }
+// a GPU step whose sync reads see this very step (the WebGL2 path's sync mode), for WebGPU: waits at every sync
+async function stepExact() {
+  const s = sim;
+  if (s.solver !== 'gpu' || !isWG()) { step(); return; }
+  gpuAdvance(); if (s.n % SYNC === 0) { await gpu.flush(); gpuSync(); }
+  if (s.n % 200 === 0) checkEnd();
+}
 function settle() {
   const s = sim;
   if (s.solver === 'gpu') { gpu.readNodes(true, X, V, FREE); const cl = gpu.readCells(); for (let c = 0; c < NC; c++) if (cl[4 * c] > .5 && !CER[c]) { CER[c] = 1; CTE[c] = cl[4 * c + 1]; openCell(c, CTE[c]); }
@@ -1551,12 +1599,14 @@ function draw(now) {
   const rdt = Math.min(.05, (now - frameT) / 1000); frameT = now;
   if (sim && sim.external && sim.phase === 1) { requestAnimationFrame(draw); return; }   // a scripted run owns the solver
   const spd = SPEEDS[st.spd];
-  if (sim && sim.phase === 1 && !sim.external) {
+  if (sim && sim.phase === 1 && !sim.external && !sim.settling) {
     const t0 = performance.now(), ts = sim.t, goal = spd ? ts + rdt * spd : Infinity;
-    while (performance.now() - t0 < 12 && sim.t < sim.T1 && sim.t < goal) for (let k = 0; k < 10 && sim.t < sim.T1 && sim.t < goal; k++) step();
+    // WebGPU: no more than two command buffers queued (the GPU sets the pace, the page stays responsive)
+    while (performance.now() - t0 < 12 && sim.t < sim.T1 && sim.t < goal && !(isWG() && gpu.busy())) for (let k = 0; k < 10 && sim.t < sim.T1 && sim.t < goal; k++) step();
+    if (isWG()) gpu.submit();
     lastRate = rdt > 0 ? (sim.t - ts) / rdt : 0;
-    if (sim.solver === 'gpu' && sim.t < sim.T1) gpu.readNodes(false, X, V, FREE);
-    if (sim.t >= sim.T1) { sim.phase = 2; settle(); }
+    if (sim.solver === 'gpu' && sim.t < sim.T1 && gpu) gpu.readNodes(false, X, V, FREE);
+    if (sim.t >= sim.T1) { if (isWG()) { sim.settling = true; finishWG().then(() => { sim.phase = 2; settle(); }); } else { sim.phase = 2; settle(); } }
   } else if (sim && sim.phase === 2) {
     const r = spd ? Math.max(spd, .05) : 1, h = rdt * r; sim.post += h; ballistic(h); lastRate = r;
   }
@@ -1827,7 +1877,13 @@ async function runCaseAsync(cfg) {
   build(); detonate(); startRun(); sim.headless = false; sim.external = true;
   const ch = new MessageChannel(), tick = () => new Promise(r => { ch.port1.onmessage = r; ch.port2.postMessage(0); });
   const t0 = performance.now(); let steps = 0;
-  while (sim.t < sim.T1) { for (let k = 0; k < SYNC && sim.t < sim.T1; k++) { step(); steps++; } await tick(); }
+  while (sim.t < sim.T1) {
+    const nb = isWG() ? st.wgBatch : SYNC;
+    for (let k = 0; k < nb && sim.t < sim.T1; k++) { step(); steps++; }
+    if (isWG()) { gpu.submit(); await gpu.pace(); }
+    await tick();
+  }
+  if (isWG()) await finishWG();
   const ms = performance.now() - t0; sim.cpu = ms; sim.phase = 2; settle();
   const res = { ms: Math.round(ms), steps, simMs: +(sim.t * 1000).toFixed(1), setMm: Math.round(sim.maxDef * 1000),
     byPanel: PAN.map(P => { let a = 0, dmax = 0; for (let c = P.off; c < P.off + P.nu * P.nv; c++) { const cc = CMAP[c]; if (cc < 0) continue; if (CER[cc]) a += CAR[cc];
@@ -1841,11 +1897,12 @@ function compare(a, r) {
   let diff = 0, both = 0; for (let c = 0; c < a.cellsTorn.length; c++) { if (a.cellsTorn[c] !== r.cellsTorn[c]) diff++; else if (a.cellsTorn[c]) both++; }
   return { dispErrMm: +(s / n * 1000).toFixed(2), tornDiffCells: diff, tornBothCells: both };
 }
-window.BLAST = { ver: 32, PROF, st, runCase, runCaseAsync, compare, cam, build, detonate: () => { detonate(); startRun(); }, get sim() { return sim; }, energy, draw,
+window.BLAST = { ver: 33, get backend() { return gpu ? gpu.kind || 'webgl' : null; }, webgpu: () => !!WG, PROF, st, runCase, runCaseAsync, compare, cam, build, detonate: () => { detonate(); startRun(); }, get sim() { return sim; }, energy, draw,
   stepN(n) { sim.headless = true; for (let k = 0; k < n && sim.t < sim.T1; k++) step(); return sim.t; },
   model: () => ({ N, NC, NH, NT, S, dt, X, V, R0, M, FREE, CN, CPAN, CH, CMAT, CEF, CSP, CSN, CER, CTE, CDM, CEP, CUT, CFD, CAR, CRC, CNR,
     HN, HC, HKP, HMP, HKS, HMS, HT0, HTP, HTH, HDB, HLN, HTL0, HTPS, HTR, TBA, TBB, TSC, TCL, TKB, TQB, TB0, TKS, TQS, TS0, TBP, TSP, TMM, TFIB, TA, TB, TL0, TLP, TFL, TAR, AK, AF, AC, PAN, GP, GV, OPEN, scene, MATS, EN }),
   pulse, kinneyPs, kinneyIs1, reflect, U_MEAN, U_MAX, tee, SEC,
+  rawSteps(n) { const t0 = performance.now(); for (let k = 0; k < n; k++) gpu.step(sim.t, dt, 0); const t1 = performance.now(); gl.finish(); return [t1 - t0, performance.now() - t0]; },
   gpuProfile(n) { gpu.profile(true); for (let k = 0; k < n; k++) gpu.step(sim.t, dt, 0); gl.finish(); return new Promise(r => setTimeout(() => r(gpu.profile(false)), 300)); },
   snapshot() { if (sim && sim.solver === 'gpu') { gpu.readNodes(true, X, V, FREE); const cl = gpu.readCellsFull(); for (let c = 0; c < NC; c++) { CER[c] = cl[4 * c] > .5 ? 1 : 0; CTE[c] = cl[4 * c + 1]; CUT[c] = cl[4 * c + 3]; } gpu.readState({ CEP, CDM, TFL, HTP, HTH, HTPS, TBP }); } },
   // CPU vs GPU after the same number of steps: displacement field and eroded cells
@@ -1871,6 +1928,50 @@ window.BLAST = { ver: 32, PROF, st, runCase, runCaseAsync, compare, cam, build, 
     window.__par = res;
     return { states: res.states, relL2: Math.sqrt(s1 / s2), maxDispMm: mx * 1000, erodedBoth: both, erodedDiff: diff, cpuMs: Math.round(res.cpu.ms), gpuMs: Math.round(res.gpu.ms),
       byKind: Object.fromEntries(Object.entries(byKind).map(([k, e]) => [k, +Math.sqrt(e[0] / e[1]).toFixed(3)])), worst: { mm: wd * 1000, at: [R0[3 * wi], R0[3 * wi + 1], R0[3 * wi + 2]], cpu: [0, 1, 2].map(q => res.cpu.d[3 * wi + q] * 1000), gpu: [0, 1, 2].map(q => res.gpu.d[3 * wi + q] * 1000) } };
+  },
+  // the same, any pair of 'cpu', 'gpu' (WebGL2), 'webgpu'; sync reads at every sync on all of them
+  async parityA(cfg, steps) {
+    const keep = { ...st }, res = {}, pair = cfg.pair || ['cpu', 'webgpu'];
+    for (const [ix, sv] of pair.entries()) { const key = ix === 0 ? 'a' : 'b';
+      Object.assign(st, cfg, { solver: sv === 'cpu' ? 'cpu' : 'gpu', backend: sv === 'webgpu' ? 'webgpu' : 'webgl' }); build(); detonate(); startRun(); sim.sync = true; sim.headless = true; sim.external = true;
+      const t0 = performance.now(); for (let k = 0; k < steps; k++) { await stepExact(); if (k % 400 === 399) await tick0(); }
+      if (sv !== 'cpu') { if (isWG()) await finishWG(); gpu.readNodes(true, X, V, FREE); const cl = gpu.readCells(); for (let c = 0; c < NC; c++) CER[c] = cl[4 * c] > .5 ? 1 : 0; gpu.readState({ CEP, CDM, TFL, HTP, HTH, HTPS, TBP }); }
+      const d = new Float64Array(3 * N); for (let i = 0; i < 3 * N; i++) d[i] = X[i] - R0[i];
+      let ebS = 0, hpS = 0, cdS = 0, tf = 0; for (let k = 0; k < 4 * NC; k++) ebS += CEP[4 * k + 3]; for (let k = 0; k < NH; k++) hpS += Math.abs(HTP[k]); for (let c = 0; c < NC; c++) cdS += CDM[c]; for (let k = 0; k < NT; k++) tf += TFL[k];
+      res[key] = { sv, d, er: Uint8Array.from(CER, v => v ? 1 : 0), ms: performance.now() - t0, st: { ebS, hpS, cdS, tf } };
+    }
+    Object.assign(st, keep);
+    let s1 = 0, s2 = 0, mx = 0; for (let i = 0; i < 3 * N; i++) { const a = res.a.d[i], b = res.b.d[i]; s1 += (a - b) ** 2; s2 += a * a; mx = Math.max(mx, Math.abs(a)); }
+    let diff = 0, both = 0; for (let c = 0; c < NC; c++) { if (res.a.er[c] !== res.b.er[c]) diff++; else if (res.a.er[c]) both++; }
+    return { pair, relL2: Math.sqrt(s1 / s2), maxDispMm: mx * 1000, erodedBoth: both, erodedDiff: diff, ms: [Math.round(res.a.ms), Math.round(res.b.ms)], states: [res.a.st, res.b.st] };
+  },
+  // steps/s of a backend on the current model: n steps, timed to the end of the GPU work
+  async bench(n, backend) {
+    const keep = st.backend; st.backend = backend; build(); detonate(); startRun(); sim.headless = backend !== 'webgpu'; sim.external = true;
+    stepGPU(); if (isWG()) await gpu.flush(); else gl.finish();
+    const t0 = performance.now();
+    if (isWG()) { for (let k = 0; k < n; k++) { gpu.step(sim.t, dt, 0); if (gpu.busy()) await gpu.pace(); } await gpu.flush(); }
+    else { for (let k = 0; k < n; k++) gpu.step(sim.t, dt, 0); gpu.readNodes(false, X, V, FREE); }
+    const ms = performance.now() - t0; st.backend = keep; sim.external = false;
+    return { backend: gpu.kind || 'webgl', N, NC, steps: n, ms: Math.round(ms), stepsPerS: Math.round(n / ms * 1000), usPerStep: +(ms / n * 1000).toFixed(1), errors: gpu.errors || [] };
+  },
+  // a heavy WebGL scene rendering alongside (worker + OffscreenCanvas, 1920x1080, `iters` per pixel, ~60 Hz): the
+  // GPU process busy as when the game renders (`draws` small draw calls a frame load its command decoding); stress(0) stops it. Returns the worker's frame times.
+  stress(iters = 400, draws = 1) {
+    if (window.__stress) { window.__stress.terminate(); window.__stress = null; }
+    if (!iters) return;
+    const src = `let gl, n = 0, t0 = 0, ft = [];
+      onmessage = e => { const cv = e.data.cv, it = e.data.it, nd = e.data.nd; gl = cv.getContext('webgl2');
+        const sh = (t, s) => { const o = gl.createShader(t); gl.shaderSource(o, s); gl.compileShader(o); return o; }, p = gl.createProgram();
+        gl.attachShader(p, sh(gl.VERTEX_SHADER, '#version 300 es\\nvoid main(){ vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }'));
+        gl.attachShader(p, sh(gl.FRAGMENT_SHADER, '#version 300 es\\nprecision highp float; uniform float T; out vec4 o; void main(){ vec2 q = gl_FragCoord.xy * 0.001; float a = T; for (int i = 0; i < ' + it + '; i++) { a = sin(a + q.x * 1.3) * cos(a - q.y * 0.7) + 0.1 * a; } o = vec4(a, a * 0.5, 0.2, 1.0); }'));
+        gl.linkProgram(p); gl.useProgram(p); const u = gl.getUniformLocation(p, 'T');
+        const frame = () => { const t = performance.now(); gl.uniform1f(u, t * 1e-3); gl.drawArrays(gl.TRIANGLES, 0, 3);
+          for (let k = 1; k < nd; k++) { gl.viewport(k % 64, (k >> 6) % 64, 8, 8); gl.uniform1f(u, k); gl.drawArrays(gl.TRIANGLES, 0, 3); } gl.viewport(0, 0, 1920, 1080); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
+          ft.push(performance.now() - t); if (ft.length > 120) ft.shift(); postMessage(ft.reduce((a, b) => a + b, 0) / ft.length); setTimeout(frame, 16); };
+        frame(); };`;
+    const w = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' }))), cv = new OffscreenCanvas(1920, 1080);
+    w.postMessage({ cv, it: iters, nd: draws }, [cv]); w.onmessage = e => { w.ms = e.data; }; window.__stress = w; return w;
   },
   // finite-difference check of the element forces against their energies (debug)
   fdCheck(node, pass, eps = 1e-6) {

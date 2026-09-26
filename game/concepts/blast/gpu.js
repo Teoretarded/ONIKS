@@ -13,21 +13,22 @@
 const VS = `#version 300 es
 void main(){ vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }`;
 const HEAD = `#version 300 es
-precision highp float; precision highp int; precision highp sampler2D;
+precision highp float; precision highp int; precision highp sampler2D; precision highp sampler2DArray;
 const int W = 256;
 ivec2 AT(int i) { return ivec2(i % W, i / W); }
 ivec2 ATW(int i, int T, int t) { return ivec2((i % W) * T + t, i / W); }
-uniform sampler2D uPos, uVel, uNS;              // displacement + free flag, velocity, node static (winv, anchor; R0; contact panels)
-vec3 XR(int i) { return texelFetch(uNS, ATW(i, 5, 1), 0).xyz + texelFetch(uPos, AT(i), 0).xyz; }
-vec3 UU(int i) { return texelFetch(uPos, AT(i), 0).xyz; }
-vec3 VV(int i) { return texelFetch(uVel, AT(i), 0).xyz; }
+uniform sampler2DArray uNd, uCA; uniform sampler2D uNS;              // displacement + free flag, velocity, node static (winv, anchor; R0; contact panels)
+vec3 XR(int i) { return texelFetch(uNS, ATW(i, 5, 1), 0).xyz + texelFetch(uNd, ivec3(AT(i), 0), 0).xyz; }
+vec3 UU(int i) { return texelFetch(uNd, ivec3(AT(i), 0), 0).xyz; }
+vec3 VV(int i) { return texelFetch(uNd, ivec3(AT(i), 1), 0).xyz; }
+vec4 CST(ivec2 q) { return texelFetch(uCA, ivec3(q, 4), 0); }
 uniform vec4 uMatA[8], uMatB[8], uMatC[8];      // (E, nu, sy, H), (D, q, rho, -), (D, q at large strain, strain for them, -)
 float CSF(int mi, float ed, float ep) { vec4 b = uMatB[mi], c = uMatC[mi]; float f = min(1.0, ep / c.z); return 1.0 + pow(min(ed, 1e4) / mix(b.x, c.x, f), 1.0 / mix(b.y, c.y, f)); }
 uniform float uBeta, uT, uH;
 `;
 
 const HINGE_FS = HEAD + `
-uniform sampler2D uHS, uHSt, uCSt;
+uniform sampler2D uHS, uHSt;
 layout(location=0) out vec4 oSt; layout(location=1) out vec4 oF0; layout(location=2) out vec4 oF1; layout(location=3) out vec4 oF2;
 void main(){
   ivec2 p = ivec2(gl_FragCoord.xy); int k = p.y * W + p.x;
@@ -37,7 +38,7 @@ void main(){
   oSt = vec4(st.x, 0.0, 0.0, 0.0); oF0 = vec4(0.0); oF1 = vec4(0.0); oF2 = vec4(0.0);
   if (h0.x < 0.0) return;
   int c1 = int(h1.z), c2 = int(h1.w);
-  vec4 s1 = texelFetch(uCSt, AT(c1), 0), s2 = texelFetch(uCSt, AT(c2), 0);
+  vec4 s1 = CST(AT(c1)), s2 = CST(AT(c2));
   if (s1.x > 0.5 || s2.x > 0.5) return;
   int i3 = int(h0.x), i4 = int(h0.y), a1 = int(h0.z), b1 = int(h0.w), a2 = int(h1.x), b2 = int(h1.y);
   // current vectors from x3 = exact rest vectors + displacement differences (no float32 cancellation)
@@ -67,7 +68,7 @@ void main(){
 }`;
 
 const CELL_FS = HEAD + `
-uniform sampler2D uCS, uT0, uT1, uT2, uT3, uCSt, uHSt, uDmg, uAux;
+uniform sampler2D uCS, uHSt, uDmg, uAux;
 uniform vec4 uGP[32];
 uniform vec4 uS0[32], uS1[32], uS2[32], uS3[32], uS4[32], uS5[32]; uniform int uNS_;
 uniform int uOUT; uniform float uUmax, uRhoWC, uP0, uRhoWg, uKs, uS;
@@ -102,8 +103,8 @@ vec2 retMap(inout vec3 s, float eb, vec4 mA, float rf) {
 }
 void main(){
   ivec2 p = ivec2(gl_FragCoord.xy); int c = p.y * W + p.x;
-  vec4 T[4]; T[0] = texelFetch(uT0, p, 0); T[1] = texelFetch(uT1, p, 0); T[2] = texelFetch(uT2, p, 0); T[3] = texelFetch(uT3, p, 0);
-  vec4 cs = texelFetch(uCSt, p, 0);
+  vec4 T[4]; for (int k = 0; k < 4; k++) T[k] = texelFetch(uCA, ivec3(p, k), 0);
+  vec4 cs = CST(p);
   o0 = T[0]; o1 = T[1]; o2 = T[2]; o3 = T[3]; oC = cs; oF0 = vec4(0.0); oF1 = vec4(0.0); oF2 = vec4(0.0);
   vec4 c0 = texelFetch(uCS, ATW(c, 11, 0), 0);
   if (c0.x < 0.0 || cs.x > 0.5) return;
@@ -226,20 +227,25 @@ void main(){
 }`;
 
 const TRUSS_FS = HEAD + `
-uniform sampler2D uTS, uTSt, uTSt2, uCS, uCSt;
-layout(location=0) out vec4 oSt; layout(location=1) out vec4 oSt2;
-layout(location=2) out vec4 oF0; layout(location=3) out vec4 oF1; layout(location=4) out vec4 oF2; layout(location=5) out vec4 oF3;
+uniform sampler2D uTS, uCS; uniform sampler2DArray uMA;
+// state (Lp, negative once failed; shear set; accumulated strain; bending set); forces on 9 nodes: a, b, A (m back),
+// B (m ahead), C0 (chord start), and the plating cell's 4 corners (the angles are taken about an axis in the plating)
+layout(location=0) out vec4 oSt;
+layout(location=1) out vec4 oF0; layout(location=2) out vec4 oF1; layout(location=3) out vec4 oF2; layout(location=4) out vec4 oF3;
+layout(location=5) out vec4 oF4; layout(location=6) out vec4 oF5; layout(location=7) out vec4 oF6;
 vec3 EX;
 // angle from u to v about EX (both projected off EX)
 float ang(vec3 u, vec3 v) { u -= dot(u, EX) * EX; v -= dot(v, EX) * EX; return atan(dot(cross(u, v), EX), dot(u, v)); }
 vec3 gr(vec3 v) { v -= dot(v, EX) * EX; return cross(EX, v) / max(dot(v, v), 1e-30); }
+// d(angle from u to v)/d(axis)
+vec3 dAe(vec3 u, vec3 v) { vec3 cx = cross(u, v); float s = dot(EX, cx), ue = dot(u, EX), ve = dot(v, EX), c = dot(u, v) - ue * ve; return (c * cx + s * (ve * u + ue * v)) / max(s * s + c * c, 1e-30); }
 void main(){
   ivec2 p = ivec2(gl_FragCoord.xy); int k = p.y * W + p.x;
   vec4 t0 = texelFetch(uTS, ATW(k, 6, 0), 0), t1 = texelFetch(uTS, ATW(k, 6, 1), 0), t2 = texelFetch(uTS, ATW(k, 6, 2), 0), t3 = texelFetch(uTS, ATW(k, 6, 3), 0),
        t4 = texelFetch(uTS, ATW(k, 6, 4), 0), t5 = texelFetch(uTS, ATW(k, 6, 5), 0);
-  vec4 st = texelFetch(uTSt, p, 0), st2 = texelFetch(uTSt2, p, 0);
-  oSt = st; oSt2 = st2; oF0 = vec4(0.0); oF1 = vec4(0.0); oF2 = vec4(0.0); oF3 = vec4(0.0);
-  if (t0.x < 0.0 || st.y > 0.5) return;
+  vec4 st = texelFetch(uMA, ivec3(p, 0), 0);
+  oSt = st; oF0 = vec4(0.0); oF1 = vec4(0.0); oF2 = vec4(0.0); oF3 = vec4(0.0); oF4 = vec4(0.0); oF5 = vec4(0.0); oF6 = vec4(0.0);
+  if (t0.x < 0.0 || st.x < 0.0) return;
   int a = int(t0.x), b = int(t0.y); float L0 = t0.z, Ar = t0.w;
   vec3 d = t3.xyz + UU(b) - UU(a); float L = length(d); vec3 u = d / L;
   int mi = int(t1.x); vec4 mA = uMatA[mi];
@@ -249,15 +255,16 @@ void main(){
   if (fo > fy) { float np = L - fy / kk; eb += abs(np - Lp) / L0; Lp = np; fo = fy; }
   else if (fo < -fy) { float np = L + fy / kk; eb += abs(np - Lp) / L0; Lp = np; fo = -fy; }
   fo += uBeta * kk * vr;
-  // roles: 0 a, 1 b, 2 bending node A (m back), 3 node m ahead (bending and chord end), 4 chord start
-  vec3 F0 = fo * u, F1 = -fo * u, F2 = vec3(0.0), F3 = vec3(0.0), F4 = vec3(0.0);
-  float tbp = st.w, tsp = st2.x;
+  vec3 F[9]; for (int z = 0; z < 9; z++) F[z] = vec3(0.0);
+  F[0] = fo * u; F[1] = -fo * u;
+  float tbp = st.w, tsp = st.y;
   int cl = int(t1.w), A = int(t2.x), B = int(t2.y), C0 = int(t4.x);
-  if (cl >= 0 && texelFetch(uCSt, AT(cl), 0).x < 0.5 && (A >= 0 || C0 >= 0)) {
+  if (cl >= 0 && CST(AT(cl)).x < 0.5 && (A >= 0 || C0 >= 0)) {
     vec4 cc = texelFetch(uCS, ATW(cl, 11, 0), 0);
-    vec3 nC = cross(XR(int(cc.z)) - XR(int(cc.x)), XR(int(cc.w)) - XR(int(cc.y)));
+    int q0 = int(cc.x), q1 = int(cc.y), q2 = int(cc.z), q3 = int(cc.w);
+    vec3 D1 = XR(q2) - XR(q0), D2 = XR(q3) - XR(q1), nC = cross(D1, D2);
     EX = cross(nC, d); float exl = length(EX); bool ok = exl > 0.3 * length(nC) * L; EX /= max(exl, 1e-30);
-    vec3 xa = XR(a), xB = B >= 0 ? XR(B) : xa;
+    vec3 xa = XR(a), xB = B >= 0 ? XR(B) : xa, Ge = vec3(0.0);
     if (ok && A >= 0) {
       vec3 xA = XR(A), e1 = xa - xA, e2 = xB - xa, g1 = gr(e1), g2 = gr(e2);
       float thd = dot(g2, VV(B) - VV(a)) - dot(g1, VV(a) - VV(A));
@@ -266,7 +273,7 @@ void main(){
       float Q = kb * (dth - tbp);
       if (Q > cap) { tbp = dth - cap / kb; Q = cap; } else if (Q < -cap) { tbp = dth + cap / kb; Q = -cap; }
       Q += uBeta * kb * thd;
-      F3 -= Q * g2; F2 -= Q * g1; F0 += Q * (g1 + g2);
+      F[3] -= Q * g2; F[2] -= Q * g1; F[0] += Q * (g1 + g2); Ge += Q * dAe(e1, e2);
     }
     if (ok && C0 >= 0) {
       vec3 c = xB - XR(C0), gc = gr(c), gs = gr(d);
@@ -275,12 +282,17 @@ void main(){
       float cap = t4.w * rf, ks = t4.z, Q = ks * (dg - tsp);
       if (Q > cap) { tsp = dg - cap / ks; Q = cap; } else if (Q < -cap) { tsp = dg + cap / ks; Q = -cap; }
       Q += uBeta * ks * gd;
-      F1 -= Q * gs; F0 += Q * gs; F3 += Q * gc; F4 -= Q * gc;
+      F[1] -= Q * gs; F[0] += Q * gs; F[3] += Q * gc; F[4] -= Q * gc; Ge += Q * dAe(c, d);
+    }
+    if (ok) {                     // through the axis: EX = (n x d)/|n x d|, n = D1 x D2
+      vec3 gm = (Ge - dot(Ge, EX) * EX) / exl, gn = cross(d, gm), gt = cross(gm, nC), g1 = cross(D2, gn), g2 = cross(gn, D1);
+      F[0] += gt; F[1] -= gt; F[5] += g1; F[7] -= g1; F[6] += g2; F[8] -= g2;
     }
   }
   float failed = max(0.0, log(Lp / L0)) + abs(tbp) * t1.z >= t1.y ? 1.0 : 0.0;
-  oSt = vec4(Lp, failed, eb, tbp); oSt2 = vec4(tsp, 0.0, 0.0, 0.0);
-  oF0 = vec4(F0, F1.x); oF1 = vec4(F1.yz, F2.xy); oF2 = vec4(F2.z, F3); oF3 = vec4(F4, 0.0);
+  oSt = vec4(failed > 0.5 ? -Lp : Lp, tsp, eb, tbp);
+  oF0 = vec4(F[0], F[1].x); oF1 = vec4(F[1].yz, F[2].xy); oF2 = vec4(F[2].z, F[3]); oF3 = vec4(F[4], F[5].x);
+  oF4 = vec4(F[5].yz, F[6].xy); oF5 = vec4(F[6].z, F[7]); oF6 = vec4(F[8], 0.0);
 }`;
 
 // scatter: one point per (element, node); the fragment adds the force (and an element count in w)
@@ -308,7 +320,7 @@ void main(){
 
 // gather: each node sums the forces its elements computed for it (adjacency lists), and counts the intact ones
 const GATHER_FS = HEAD + `
-uniform sampler2D uAdj, uCF0, uCF1, uCF2, uHF0, uHF1, uHF2, uMF0, uMF1, uMF2, uMF3, uCSt, uTSt;
+uniform sampler2D uAdj; uniform sampler2DArray uCF, uHF, uMF, uMA;
 out vec4 o;
 int ADJ(int k) { return int(texelFetch(uAdj, AT(k >> 2), 0)[k & 3]); }
 void main(){
@@ -318,44 +330,40 @@ void main(){
   int o0 = int(g0.x), n0 = int(g0.y), o1 = int(g0.z), n1 = int(g0.w), o2 = int(g1.x), n2 = int(g1.y);
   for (int k = 0; k < 256; k++) { if (k >= n0) break;
     int e = ADJ(o0 + k), c = e / 4, r = e - 4 * c; ivec2 q = AT(c);
-    if (r == 0) F += texelFetch(uCF0, q, 0).xyz;
-    else if (r == 1) { F += vec3(texelFetch(uCF0, q, 0).w, texelFetch(uCF1, q, 0).xy); }
-    else if (r == 2) { F += vec3(texelFetch(uCF1, q, 0).zw, texelFetch(uCF2, q, 0).x); }
-    else F += texelFetch(uCF2, q, 0).yzw;
-    if (texelFetch(uCSt, q, 0).x < 0.5) cnt += 1.0; }
+    if (r == 0) F += texelFetch(uCF, ivec3(q, 0), 0).xyz;
+    else if (r == 1) { F += vec3(texelFetch(uCF, ivec3(q, 0), 0).w, texelFetch(uCF, ivec3(q, 1), 0).xy); }
+    else if (r == 2) { F += vec3(texelFetch(uCF, ivec3(q, 1), 0).zw, texelFetch(uCF, ivec3(q, 2), 0).x); }
+    else F += texelFetch(uCF, ivec3(q, 2), 0).yzw;
+    if (CST(q).x < 0.5) cnt += 1.0; }
   for (int k = 0; k < 512; k++) { if (k >= n1) break;
     int e = ADJ(o1 + k), h = e / 8, r = e - 8 * h; ivec2 q = AT(h);
-    if (r == 0) F += texelFetch(uHF0, q, 0).xyz;
-    else if (r == 1) F += vec3(texelFetch(uHF0, q, 0).w, texelFetch(uHF1, q, 0).xy);
-    else if (r < 4) F += 0.5 * vec3(texelFetch(uHF1, q, 0).zw, texelFetch(uHF2, q, 0).x);
-    else F += 0.5 * texelFetch(uHF2, q, 0).yzw; }
-  for (int k = 0; k < 128; k++) { if (k >= n2) break;
-    int e = ADJ(o2 + k), t = e / 8, r = e - 8 * t; ivec2 q = AT(t);
-    if (r == 0) F += texelFetch(uMF0, q, 0).xyz;
-    else if (r == 1) F += vec3(texelFetch(uMF0, q, 0).w, texelFetch(uMF1, q, 0).xy);
-    else if (r == 2) F += vec3(texelFetch(uMF1, q, 0).zw, texelFetch(uMF2, q, 0).x);
-    else if (r == 3) F += texelFetch(uMF2, q, 0).yzw;
-    else F += texelFetch(uMF3, q, 0).xyz;
-    if (r < 2 && texelFetch(uTSt, q, 0).y < 0.5) cnt += 1.0; }
+    if (r == 0) F += texelFetch(uHF, ivec3(q, 0), 0).xyz;
+    else if (r == 1) F += vec3(texelFetch(uHF, ivec3(q, 0), 0).w, texelFetch(uHF, ivec3(q, 1), 0).xy);
+    else if (r < 4) F += 0.5 * vec3(texelFetch(uHF, ivec3(q, 1), 0).zw, texelFetch(uHF, ivec3(q, 2), 0).x);
+    else F += 0.5 * texelFetch(uHF, ivec3(q, 2), 0).yzw; }
+  for (int k = 0; k < 256; k++) { if (k >= n2) break;
+    int e = ADJ(o2 + k), t = e / 16, r = e - 16 * t; ivec2 q = AT(t);
+    int f = 3 * r; F += vec3(texelFetch(uMF, ivec3(q, f >> 2), 0)[f & 3], texelFetch(uMF, ivec3(q, (f + 1) >> 2), 0)[(f + 1) & 3], texelFetch(uMF, ivec3(q, (f + 2) >> 2), 0)[(f + 2) & 3]);
+    if (r < 2 && texelFetch(uMA, ivec3(q, 0), 0).x > 0.0) cnt += 1.0; }
   o = vec4(F, cnt);
 }`;
 
 // torn cells packed to bytes for a fast read back: flag in alpha, erosion time (0 .. 1.67 s, 0.1 us steps) in rgb
 const PACK_FS = `#version 300 es
-precision highp float; precision highp int; precision highp sampler2D;
-uniform sampler2D uCSt; out vec4 o;
-void main(){ vec4 c = texelFetch(uCSt, ivec2(gl_FragCoord.xy), 0);
+precision highp float; precision highp int; precision highp sampler2DArray;
+uniform sampler2DArray uCA; out vec4 o;
+void main(){ vec4 c = texelFetch(uCA, ivec3(ivec2(gl_FragCoord.xy), 4), 0);
   if (c.x < 0.5) { o = vec4(0.0); return; }
   int q = int(clamp(c.y, 0.0, 1.67) * 1e7);
   o = vec4(float(q & 255), float((q >> 8) & 255), float((q >> 16) & 255), 255.0) / 255.0; }`;
 
 const NODE_FS = HEAD + `
-uniform sampler2D uAnc, uFrc, uImp, uCSt, uCS, uPan, uCMap;
+uniform sampler2D uFrc, uImp, uCS, uPan, uCMap;
 uniform float uAlpha, uG; uniform int uUseImp;
 layout(location=0) out vec4 oPos; layout(location=1) out vec4 oVel; layout(location=2) out vec4 oAnc; layout(location=3) out vec4 oCon;
 void main(){
   ivec2 p = ivec2(gl_FragCoord.xy); int i = p.y * W + p.x;
-  vec4 pos = texelFetch(uPos, p, 0), vel = texelFetch(uVel, p, 0), anc = texelFetch(uAnc, p, 0);
+  vec4 pos = texelFetch(uNd, ivec3(p, 0), 0), vel = texelFetch(uNd, ivec3(p, 1), 0), anc = texelFetch(uNd, ivec3(p, 2), 0);
   vec4 n0 = texelFetch(uNS, ATW(i, 5, 0), 0), n1 = texelFetch(uNS, ATW(i, 5, 1), 0), n2 = texelFetch(uNS, ATW(i, 5, 2), 0);
   oPos = pos; oVel = vel; oAnc = anc; oCon = vec4(-1.0, 0.0, 0.0, 0.0);
   if (n0.x <= 0.0) return;
@@ -385,7 +393,7 @@ void main(){
     int ci = int(floor(dot(dx, U) / a1.w * float(nu))), cj = int(floor(dot(dx, Vv) / a2.w * float(nv)));
     if (ci < 0 || cj < 0 || ci >= nu || cj >= nv) continue;
     int c = int(texelFetch(uCMap, AT(off + cj * nu + ci), 0).x);
-    if (c < 0 || texelFetch(uCSt, AT(c), 0).x > 0.5) continue;
+    if (c < 0 || CST(AT(c)).x > 0.5) continue;
     vec4 cc = texelFetch(uCS, ATW(c, 11, 0), 0);
     float pl = 0.0, vc = 0.0;
     for (int q = 0; q < 4; q++) { int j = int(cc[q]); pl += dot(XR(j) - o, n); vc += dot(VV(j), n); }
@@ -403,43 +411,65 @@ export function createGPU(gl, M) {
   if (!gl.getExtension('EXT_color_buffer_float')) throw new Error('EXT_color_buffer_float missing');
   if (!gl.getExtension('EXT_float_blend')) throw new Error('EXT_float_blend missing');
   const objs = [];
+  // every texture sits on its own unit for the whole run and every program's samplers point at fixed units (the
+  // ping-pong halves have an even and an odd program), so a step is only useProgram / bindFramebuffer / draw
+  const U = { ns: 0, cs: 1, hs: 2, ts: 3, aux: 4, dmg: 5, imp: 6, pan: 7, cmap: 8, adj: 9, nd: 10, con: 12, frc: 13, ca: 14, cf: 16, hst: 17, hf: 19, ma: 20, mf: 22 };
+  const SCR = Math.min(31, gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS) - 1);
+  if (SCR < 23) throw new Error('too few texture units');
+  gl.activeTexture(gl.TEXTURE0 + SCR);
   const sh = (t, s) => { const o = gl.createShader(t); gl.shaderSource(o, s); gl.compileShader(o); if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o) + '\n' + s.split('\n').map((l, i) => (i + 1) + ': ' + l).join('\n')); return o; };
-  const prog = (vs, fs) => { const p = gl.createProgram(), a = sh(gl.VERTEX_SHADER, vs), b = sh(gl.FRAGMENT_SHADER, fs); gl.attachShader(p, a); gl.attachShader(p, b); gl.linkProgram(p);
+  const prog = (vs, fs, units) => { const p = gl.createProgram(), a = sh(gl.VERTEX_SHADER, vs), b = sh(gl.FRAGMENT_SHADER, fs); gl.attachShader(p, a); gl.attachShader(p, b); gl.linkProgram(p);
     if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p)); gl.deleteShader(a); gl.deleteShader(b); objs.push(['deleteProgram', p]);
-    p.u = {}; const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS); for (let i = 0; i < n; i++) { const u = gl.getActiveUniform(p, i); p.u[u.name.replace('[0]', '')] = gl.getUniformLocation(p, u.name); } return p; };
-  const pH = prog(VS, HINGE_FS), pC = prog(VS, CELL_FS), pT = prog(VS, TRUSS_FS), pN = prog(VS, NODE_FS);
-  const pG = prog(VS, GATHER_FS), sK = prog(SC_CONTACT, SCAT_FS), pP = prog(VS, PACK_FS);
+    p.u = {}; const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS); for (let i = 0; i < n; i++) { const u = gl.getActiveUniform(p, i); p.u[u.name.replace('[0]', '')] = gl.getUniformLocation(p, u.name); }
+    gl.useProgram(p);
+    for (const k in units) if (p.u[k]) gl.uniform1i(p.u[k], units[k]);
+    return p; };
+  const stat = { uNS: U.ns, uCS: U.cs, uHS: U.hs, uTS: U.ts, uAux: U.aux, uDmg: U.dmg, uImp: U.imp, uPan: U.pan, uCMap: U.cmap, uAdj: U.adj, uCon: U.con, uFrc: U.frc, uCF: U.cf, uHF: U.hf, uMF: U.mf };
+  const V2 = f => [f(0, 1), f(1, 0)];                                   // (current half, next half)
+  const pH = V2((v, w) => prog(VS, HINGE_FS, { ...stat, uNd: U.nd + v, uCA: U.ca + v, uHSt: U.hst + v }));
+  const pC = V2((v, w) => prog(VS, CELL_FS, { ...stat, uNd: U.nd + v, uCA: U.ca + v, uHSt: U.hst + w }));
+  const pT = V2((v, w) => prog(VS, TRUSS_FS, { ...stat, uNd: U.nd + v, uCA: U.ca + w, uMA: U.ma + v }));
+  const pG = V2((v, w) => prog(VS, GATHER_FS, { ...stat, uNd: U.nd + v, uCA: U.ca + w, uMA: U.ma + w }));
+  const pN = V2((v, w) => prog(VS, NODE_FS, { ...stat, uNd: U.nd + v, uCA: U.ca + w }));
+  const pP = V2(v => prog(VS, PACK_FS, { uCA: U.ca + v }));
+  const sK = prog(SC_CONTACT, SCAT_FS, stat);
   const vao = gl.createVertexArray(); objs.push(['deleteVertexArray', vao]);
-  const tex = (w, h, data) => { const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const par = tg => { gl.texParameteri(tg, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(tg, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(tg, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(tg, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE); };
+  const tex = (w, h, data) => { const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t); par(gl.TEXTURE_2D);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, w, h, 0, gl.RGBA, gl.FLOAT, data); t.w = w; t.h = h; objs.push(['deleteTexture', t]); return t; };
-  const fbo = texs => { const f = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, f);
-    texs.forEach((t, i) => gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, t, 0));
-    gl.drawBuffers(texs.map((_, i) => gl.COLOR_ATTACHMENT0 + i));
+  const texA = (w, h, n) => { const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D_ARRAY, t); par(gl.TEXTURE_2D_ARRAY);
+    gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA32F, w, h, n); t.w = w; t.h = h; t.arr = true; objs.push(['deleteTexture', t]); return t; };
+  // an FBO from (texture, layer) pairs
+  const fbo = list => { const f = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+    list.forEach(([t, l], i) => t.arr ? gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, t, 0, l) : gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, t, 0));
+    gl.drawBuffers(list.map((_, i) => gl.COLOR_ATTACHMENT0 + i));
     if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) throw new Error('fbo incomplete');
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null); f.w = texs[0].w; f.h = texs[0].h; objs.push(['deleteFramebuffer', f]); return f; };
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null); f.w = list[0][0].w; f.h = list[0][0].h; objs.push(['deleteFramebuffer', f]); return f; };
+  const Ly = (t, n) => Array.from({ length: n }, (_, k) => [t, k]);
   const Wd = 256, rows = n => Math.max(1, Math.ceil(n / Wd));
   const { N, NC, NH, NT } = M;
   const NHr = rows(N), CHr = rows(NC), HHr = rows(NH), THr = rows(NT);
   // local origin: the middle of the model (keeps float32 coordinates small)
   const O = [0, 0, 0]; { const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9]; for (let i = 0; i < N; i++) for (let q = 0; q < 3; q++) { const v = M.R0[3 * i + q]; if (!Number.isFinite(v)) continue; lo[q] = Math.min(lo[q], v); hi[q] = Math.max(hi[q], v); } for (let q = 0; q < 3; q++) O[q] = (lo[q] + hi[q]) / 2; }
-  const wide = (n, T, f) => { const a = new Float32Array(Wd * T * rows(n) * 4).fill(-1); const o = (i, t) => (((i / Wd | 0) * Wd * T) + (i % Wd) * T + t) * 4;
-    for (let i = 0; i < n; i++) f(i, (t, v) => a.set(v, o(i, t))); return tex(Wd * T, rows(n), a); };
+  const wideA = (n, T, f) => { const a = new Float32Array(Wd * T * rows(n) * 4).fill(-1); const o = (i, t) => (((i / Wd | 0) * Wd * T) + (i % Wd) * T + t) * 4;
+    for (let i = 0; i < n; i++) f(i, (t, v) => a.set(v, o(i, t))); return a; };
+  const wide = (n, T, f) => tex(Wd * T, rows(n), wideA(n, T, f));
   const R = (i, q) => M.R0[3 * i + q] - O[q];
   const T = {};
-  // adjacency (CSR): for every node, its (cell, corner), (hinge, role) and (member, end) entries
+  // adjacency (CSR): for every node, its (cell, corner), (hinge, role) and (member, role) entries
   const adjL = [Array.from({ length: N }, () => []), Array.from({ length: N }, () => []), Array.from({ length: N }, () => [])];
   for (let c = 0; c < NC; c++) for (let k = 0; k < 4; k++) adjL[0][M.CN[4 * c + k]].push(c * 4 + k);
   for (let h = 0; h < NH; h++) for (let k = 0; k < 6; k++) adjL[1][M.HN[6 * h + k]].push(h * 8 + k);
-  for (let t = 0; t < NT; t++) { adjL[2][M.TA[t]].push(t * 8); adjL[2][M.TB[t]].push(t * 8 + 1);
-    if (M.TBA[t] >= 0) adjL[2][M.TBA[t]].push(t * 8 + 2); if (M.TBB[t] >= 0) adjL[2][M.TBB[t]].push(t * 8 + 3); if (M.TSC[t] >= 0) adjL[2][M.TSC[t]].push(t * 8 + 4); }
+  for (let t = 0; t < NT; t++) { adjL[2][M.TA[t]].push(t * 16); adjL[2][M.TB[t]].push(t * 16 + 1);
+    if (M.TBA[t] >= 0) adjL[2][M.TBA[t]].push(t * 16 + 2); if (M.TBB[t] >= 0) adjL[2][M.TBB[t]].push(t * 16 + 3); if (M.TSC[t] >= 0) adjL[2][M.TSC[t]].push(t * 16 + 4);
+    if (M.TCL[t] >= 0 && (M.TBA[t] >= 0 || M.TSC[t] >= 0)) for (let z = 0; z < 4; z++) adjL[2][M.CN[4 * M.TCL[t] + z]].push(t * 16 + 5 + z); }
   const adjOff = [new Int32Array(N), new Int32Array(N), new Int32Array(N)], flat = [];
   for (let q = 0; q < 3; q++) for (let i = 0; i < N; i++) { adjOff[q][i] = flat.length; for (const e of adjL[q][i]) flat.push(e); }
   { const nt = Math.ceil(flat.length / 4), a = new Float32Array(Wd * rows(nt) * 4); a.set(flat); T.adj = tex(Wd, rows(nt), a); }
   T.ns = wide(N, 5, (i, put) => { put(0, [M.WINV[i], M.AK[i], M.AF[i], M.AC[i]]); put(1, [R(i, 0), R(i, 1), R(i, 2), 0]); put(2, [0, 1, 2, 3].map(k => M.NCC[4 * i + k]));
     put(3, [adjOff[0][i], adjL[0][i].length, adjOff[1][i], adjL[1][i].length]); put(4, [adjOff[2][i], adjL[2][i].length, 0, 0]); });
-  const mkCS = () => wide(NC, 11, (c, put) => {
+  const csData = () => wideA(NC, 11, (c, put) => {
     const q = [0, 1, 2, 3].map(k => M.CN[4 * c + k]), rv = k => [0, 1, 2].map(z => M.R0[3 * q[k] + z] - M.R0[3 * q[0] + z]);
     put(0, q); put(1, [...rv(1), M.CH[c]]); put(2, [...rv(2), M.CMAT[c]]); put(3, [...rv(3), M.CEF[c]]);
     const ex = [M.CSP[c], M.CSN[c], M.CWET[c], M.CAR[c]];
@@ -447,7 +477,7 @@ export function createGPU(gl, M) {
     put(8, [0, 1, 2, 3].map(k => M.CHG[4 * c + k])); put(9, [M.CRC[3 * c] - O[0], M.CRC[3 * c + 1] - O[1], M.CRC[3 * c + 2] - O[2], M.CDB[c]]);
     put(10, [M.CVIS()[c], 0, 0, 0]);
   });
-  T.cs = mkCS();
+  T.cs = tex(Wd * 11, CHr, csData());
   T.hs = wide(NH, 9, (k, put) => { const rv = z => [0, 1, 2].map(q => M.R0[3 * M.HN[6 * k + z] + q] - M.R0[3 * M.HN[6 * k] + q]);
     const mid = (a, b) => [0, 1, 2].map(q => .5 * (rv(a)[q] + rv(b)[q])), E = rv(1), f1 = mid(2, 3), f2 = mid(4, 5);
     put(5, [E[0], E[1], E[2], f1[0]]); put(6, [f1[1], f1[2], f2[0], f2[1]]); put(7, [f2[2], 0, 0, 0]); put(0, [0, 1, 2, 3].map(z => M.HN[6 * k + z])); put(1, [M.HN[6 * k + 4], M.HN[6 * k + 5], M.HC[2 * k], M.HC[2 * k + 1]]);
@@ -462,110 +492,102 @@ export function createGPU(gl, M) {
   { const n = M.CMAP.length, a = new Float32Array(Wd * rows(n) * 4).fill(-1); for (let k = 0; k < n; k++) a[4 * k] = M.CMAP[k]; T.cmap = tex(Wd, rows(n), a); }
   const aux = new Float32Array(2048 * 4); for (let k = 0; k < 2048; k++) aux[4 * k] = M.TA1[k]; T.aux = tex(2048, 1, aux);
   T.dmg = tex(Wd, CHr, null); T.imp = tex(Wd, NHr, null);
-  // dynamic, ping-pong
-  const nodeS = [0, 1].map(() => ({ pos: tex(Wd, NHr, null), vel: tex(Wd, NHr, null), anc: tex(Wd, NHr, null) }));
-  const con = tex(Wd, NHr, null), frc = tex(Wd, NHr, null);
-  const cellS = [0, 1].map(() => ({ t: [0, 1, 2, 3].map(() => tex(Wd, CHr, null)), s: tex(Wd, CHr, null) }));
-  const cF = [0, 1, 2].map(() => tex(Wd, CHr, null));
-  const hS = [tex(Wd, HHr, null), tex(Wd, HHr, null)], hF = [0, 1, 2].map(() => tex(Wd, HHr, null));
-  const tS = [tex(Wd, THr, null), tex(Wd, THr, null)], tS2 = [tex(Wd, THr, null), tex(Wd, THr, null)], mF = [0, 1, 2, 3].map(() => tex(Wd, THr, null));
-  const fNode = nodeS.map(s => fbo([s.pos, s.vel, s.anc, con])), fFrc = fbo([frc]);
-  const fCell = cellS.map(s => fbo([...s.t, s.s, ...cF])), fHinge = hS.map(s => fbo([s, ...hF])), fTruss = tS.map((s, i) => fbo([s, tS2[i], ...mF]));
+  // dynamic, ping-pong halves: nodes (u, v, anchor), cells (4 triangles' plastic state, cell state), hinges, members (2)
+  const nodeA = [texA(Wd, NHr, 3), texA(Wd, NHr, 3)], con = tex(Wd, NHr, null), frc = tex(Wd, NHr, null);
+  const cellA = [texA(Wd, CHr, 5), texA(Wd, CHr, 5)], cF = texA(Wd, CHr, 3);
+  const hS = [tex(Wd, HHr, null), tex(Wd, HHr, null)], hF = texA(Wd, HHr, 3);
+  const memA = [texA(Wd, THr, 1), texA(Wd, THr, 1)], mF = texA(Wd, THr, 7);
+  const fNode = nodeA.map(a => fbo([...Ly(a, 3), [con, 0]])), fFrc = fbo([[frc, 0]]);
+  const fCell = cellA.map(a => fbo([...Ly(a, 5), ...Ly(cF, 3)])), fHinge = hS.map(s => fbo([[s, 0], ...Ly(hF, 3)])), fTruss = memA.map(a => fbo([[a, 0], ...Ly(mF, 7)]));
+  const UNITS = [[U.ns, T.ns], [U.cs, T.cs], [U.hs, T.hs], [U.ts, T.ts], [U.aux, T.aux], [U.dmg, T.dmg], [U.imp, T.imp], [U.pan, T.pan], [U.cmap, T.cmap], [U.adj, T.adj],
+    [U.nd, nodeA[0]], [U.nd + 1, nodeA[1]], [U.con, con], [U.frc, frc], [U.ca, cellA[0]], [U.ca + 1, cellA[1]], [U.cf, cF], [U.hst, hS[0]], [U.hst + 1, hS[1]], [U.hf, hF],
+    [U.ma, memA[0]], [U.ma + 1, memA[1]], [U.mf, mF]];
+  function bindAll() { for (const [u, t] of UNITS) { gl.activeTexture(gl.TEXTURE0 + u); gl.bindTexture(t.arr ? gl.TEXTURE_2D_ARRAY : gl.TEXTURE_2D, t); } gl.activeTexture(gl.TEXTURE0 + SCR); }
+  bindAll();
   let cur = 0, useImp = 0;
   const TQ = gl.getExtension('EXT_disjoint_timer_query_webgl2'); let prof = null; const pending = [];
   const tq = name => { if (!prof || !TQ) return; if (prof.q) gl.endQuery(TQ.TIME_ELAPSED_EXT); const q = gl.createQuery(); gl.beginQuery(TQ.TIME_ELAPSED_EXT, q); prof.q = q; pending.push([name, q]); };
   const tqEnd = () => { if (prof && prof.q) { gl.endQuery(TQ.TIME_ELAPSED_EXT); prof.q = null; } };
   const matA = new Float32Array(32), matB = new Float32Array(32), matC = new Float32Array(32);
   M.MATS.forEach((m, i) => { matA.set([m.E, m.nu, m.sy, m.H], 4 * i); matB.set([m.D, m.q, m.rho, 0], 4 * i); matC.set([m.Du, m.qu, m.eu, 0], 4 * i); });
-  const S0 = new Float32Array(128), S1 = new Float32Array(128), S2 = new Float32Array(128), S3 = new Float32Array(128), S4 = new Float32Array(128), S5 = new Float32Array(128);
+  const SRC = [0, 1, 2, 3, 4, 5].map(() => new Float32Array(128)), SRCn = [0, 1, 2, 3, 4, 5].map(() => new Float32Array(128));
   let nsrc = 0; const gpu4 = new Float32Array(128);
-  // sampler units are set once per program; material constants once; loads only when they change
-  const units = new Array(16).fill(null);
-  const bind = (p, name, t, unit) => { if (units[unit] !== t) { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, t); units[unit] = t; }
-    const key = '_s' + name; if (p[key] !== unit) { gl.uniform1i(p.u[name], unit); p[key] = unit; } };
-  const unbindAll = () => units.fill(null);
+  const dirty = [true, true];                          // the cell programs' load uniforms (sources, gas) need an upload
+  // material constants once per program; time and step only when they change
   const common = (p, t, h) => {
     if (!p._const) { if (p.u.uMatA) gl.uniform4fv(p.u.uMatA, matA); if (p.u.uMatB) gl.uniform4fv(p.u.uMatB, matB); if (p.u.uMatC) gl.uniform4fv(p.u.uMatC, matC);
       if (p.u.uBeta) gl.uniform1f(p.u.uBeta, M.BETA()); p._const = true; }
     if (p.u.uT && p._t !== t) { gl.uniform1f(p.u.uT, t); p._t = t; } if (p.u.uH && p._h !== h) { gl.uniform1f(p.u.uH, h); p._h = h; } };
-  let loadsDirty = true;
 
-  function upload() { unbindAll();
-    const s = nodeS[cur];
+  const sub2 = (t, w, h, a) => { gl.bindTexture(gl.TEXTURE_2D, t); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.FLOAT, a); };
+  const subA = (t, l, h, a) => { gl.bindTexture(gl.TEXTURE_2D_ARRAY, t); gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, l, Wd, h, 1, gl.RGBA, gl.FLOAT, a); };
+  function upload() { bindAll();
     const z = n => new Float32Array(Wd * rows(n) * 4);
-    for (const t of [s.pos, s.vel, s.anc, con]) { gl.bindTexture(gl.TEXTURE_2D, t); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, Wd, NHr, gl.RGBA, gl.FLOAT, z(N)); }
-    { const c = z(N); for (let i = 0; i < N; i++) c[4 * i] = -1; gl.bindTexture(gl.TEXTURE_2D, con); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, Wd, NHr, gl.RGBA, gl.FLOAT, c); }
-    for (const t of [...cellS[cur].t, cellS[cur].s, T.dmg]) { gl.bindTexture(gl.TEXTURE_2D, t); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, Wd, CHr, gl.RGBA, gl.FLOAT, z(NC)); }
-    { const c = z(NC); for (let k = 0; k < NC; k++) c[4 * k + 1] = -1; gl.bindTexture(gl.TEXTURE_2D, cellS[cur].s); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, Wd, CHr, gl.RGBA, gl.FLOAT, c); }
-    gl.bindTexture(gl.TEXTURE_2D, hS[cur]); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, Wd, HHr, gl.RGBA, gl.FLOAT, z(NH));
-    { const c = z(NT); for (let k = 0; k < NT; k++) c[4 * k] = M.TL0[k]; gl.bindTexture(gl.TEXTURE_2D, tS[cur]); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, Wd, THr, gl.RGBA, gl.FLOAT, c);
-      gl.bindTexture(gl.TEXTURE_2D, tS2[cur]); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, Wd, THr, gl.RGBA, gl.FLOAT, z(NT)); }
+    const zN = z(N); for (let l = 0; l < 3; l++) subA(nodeA[cur], l, NHr, zN);
+    { const c = z(N); for (let i = 0; i < N; i++) c[4 * i] = -1; sub2(con, Wd, NHr, c); }
+    const zC = z(NC); for (let l = 0; l < 4; l++) subA(cellA[cur], l, CHr, zC); sub2(T.dmg, Wd, CHr, zC);
+    { const c = z(NC); for (let k = 0; k < NC; k++) c[4 * k + 1] = -1; subA(cellA[cur], 4, CHr, c); }
+    sub2(hS[cur], Wd, HHr, z(NH));
+    { const c = z(NT); for (let k = 0; k < NT; k++) c[4 * k] = M.TL0[k]; subA(memA[cur], 0, THr, c); }
     // line-of-sight bits are known now (detonation): refresh the cell statics
-    gl.deleteTexture(T.cs); T.cs = mkCS();
+    sub2(T.cs, Wd * 11, CHr, csData());
+    dirty[0] = dirty[1] = true;
   }
   function setSources(list) {
-    loadsDirty = true; nsrc = Math.min(32, list.length); S0.fill(0); S1.fill(0); S2.fill(0); S3.fill(0); S4.fill(0); S5.fill(0);
-    for (let k = 0; k < nsrc; k++) { const s = list[k];
+    const n = Math.min(32, list.length); for (const a of SRCn) a.fill(0);
+    const [S0, S1, S2, S3, S4, S5] = SRCn;
+    for (let k = 0; k < n; k++) { const s = list[k];
       S0.set([s.pos[0] - O[0], s.pos[1] - O[1], s.pos[2] - O[2], s.W], 4 * k); S1.set([s.Pm, s.t0, s.space, s.kind], 4 * k);
       S2.set([...(s.ax || [0, 0, 0]), s.gain], 4 * k); S3.set([s.rc, s.vis, s.plane ? 1 : 0, 0], 4 * k); S5.set([s.Wf || 0, s.Pmf || 0, s.Df || 0, 0], 4 * k);
       if (s.plane) S4.set([s.plane[0], s.plane[1], s.plane[2], s.plane[3] - (s.plane[0] * O[0] + s.plane[1] * O[1] + s.plane[2] * O[2])], 4 * k); }
+    let same = n === nsrc; for (let q = 0; q < 6 && same; q++) for (let k = 0; k < 4 * n; k++) if (SRC[q][k] !== SRCn[q][k]) { same = false; break; }
+    if (same) return;
+    nsrc = n; for (let q = 0; q < 6; q++) SRC[q].set(SRCn[q]); dirty[0] = dirty[1] = true;
   }
-  function setGas(GP) { loadsDirty = true; gpu4.fill(0); for (let k = 0; k < Math.min(128, GP.length); k++) gpu4[k] = GP[k]; }
-  function setImpulses(list) { unbindAll();
+  function setGas(GP) { let ch = false; for (let k = 0; k < Math.min(128, GP.length); k++) if (gpu4[k] !== Math.fround(GP[k])) { gpu4[k] = GP[k]; ch = true; } if (ch) dirty[0] = dirty[1] = true; }
+  function setImpulses(list) {
     const a = new Float32Array(Wd * NHr * 4);
     for (let k = 0; k < list.length; k += 4) { const i = list[k]; a[4 * i] += list[k + 1]; a[4 * i + 1] += list[k + 2]; a[4 * i + 2] += list[k + 3]; }
-    gl.bindTexture(gl.TEXTURE_2D, T.imp); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, Wd, NHr, gl.RGBA, gl.FLOAT, a); useImp = 1;
+    sub2(T.imp, Wd, NHr, a); useImp = 1;
   }
-  function setDamage(CFD) { unbindAll(); const a = new Float32Array(Wd * CHr * 4); for (let c = 0; c < NC; c++) a[4 * c] = CFD[c];
-    gl.bindTexture(gl.TEXTURE_2D, T.dmg); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, Wd, CHr, gl.RGBA, gl.FLOAT, a); }
+  function setDamage(CFD) { const a = new Float32Array(Wd * CHr * 4); for (let c = 0; c < NC; c++) a[4 * c] = CFD[c]; sub2(T.dmg, Wd, CHr, a); }
 
-  function step(t, h, alpha) {
-    gl.bindVertexArray(vao); gl.disable(gl.DEPTH_TEST); gl.disable(gl.BLEND);
-    const nx = 1 - cur, s = nodeS[cur], d = nodeS[nx];
-    // 1. hinges
-    tq('hinges');
-    gl.useProgram(pH); gl.bindFramebuffer(gl.FRAMEBUFFER, fHinge[nx]); gl.viewport(0, 0, Wd, HHr); common(pH, t, h);
-    bind(pH, 'uPos', s.pos, 0); bind(pH, 'uVel', s.vel, 1); bind(pH, 'uNS', T.ns, 2); bind(pH, 'uHS', T.hs, 3); bind(pH, 'uHSt', hS[cur], 4);
-    bind(pH, 'uCSt', cellS[cur].s, 5);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-    // 2. cells
-    tq('cells');
-    gl.useProgram(pC); gl.bindFramebuffer(gl.FRAMEBUFFER, fCell[nx]); gl.viewport(0, 0, Wd, CHr); common(pC, t, h);
-    bind(pC, 'uPos', s.pos, 0); bind(pC, 'uVel', s.vel, 1); bind(pC, 'uNS', T.ns, 2); bind(pC, 'uCS', T.cs, 3);
-    for (let k = 0; k < 4; k++) bind(pC, 'uT' + k, cellS[cur].t[k], 4 + k);
-    bind(pC, 'uCSt', cellS[cur].s, 8); bind(pC, 'uHSt', hS[nx], 9); bind(pC, 'uDmg', T.dmg, 10); bind(pC, 'uAux', T.aux, 11);
-    if (loadsDirty) { gl.uniform4fv(pC.u.uGP, gpu4); gl.uniform4fv(pC.u.uS0, S0); gl.uniform4fv(pC.u.uS1, S1); gl.uniform4fv(pC.u.uS2, S2); gl.uniform4fv(pC.u.uS3, S3); gl.uniform4fv(pC.u.uS4, S4); gl.uniform4fv(pC.u.uS5, S5);
-      gl.uniform1i(pC.u.uNS_, nsrc); loadsDirty = false; }
-    if (!pC._c2) { gl.uniform1i(pC.u.uOUT, M.OUT()); gl.uniform1f(pC.u.uUmax, M.U_MAX); gl.uniform1f(pC.u.uRhoWC, M.RHO_W * M.C_W);
-      gl.uniform1f(pC.u.uP0, M.P0); gl.uniform1f(pC.u.uRhoWg, M.RHO_W * M.G); if (pC.u.uKs) gl.uniform1f(pC.u.uKs, M.K_SHEAR); gl.uniform1f(pC.u.uS, M.S); pC._c2 = true; }
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-    // 3. trusses
-    tq('members');
-    if (NT) { gl.useProgram(pT); gl.bindFramebuffer(gl.FRAMEBUFFER, fTruss[nx]); gl.viewport(0, 0, Wd, THr); common(pT, t, h);
-      bind(pT, 'uPos', s.pos, 0); bind(pT, 'uVel', s.vel, 1); bind(pT, 'uNS', T.ns, 2); bind(pT, 'uTS', T.ts, 3); bind(pT, 'uTSt', tS[cur], 4); bind(pT, 'uTSt2', tS2[cur], 5); bind(pT, 'uCS', T.cs, 6); bind(pT, 'uCSt', cellS[nx].s, 7);
-      gl.drawArrays(gl.TRIANGLES, 0, 3); }
-    // 4. gather the element forces at the nodes; add last step's contact push-back
-    tq('gather');
-    gl.useProgram(pG); gl.bindFramebuffer(gl.FRAMEBUFFER, fFrc); gl.viewport(0, 0, Wd, NHr);
-    bind(pG, 'uNS', T.ns, 0); bind(pG, 'uAdj', T.adj, 1); bind(pG, 'uCF0', cF[0], 2); bind(pG, 'uCF1', cF[1], 3); bind(pG, 'uCF2', cF[2], 4);
-    for (let z = 0; z < 3; z++) bind(pG, 'uHF' + z, hF[z], 5 + z); for (let z = 0; z < 4; z++) bind(pG, 'uMF' + z, mF[z], 8 + z); bind(pG, 'uCSt', cellS[nx].s, 12); bind(pG, 'uTSt', tS[nx], 13);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-    tq('contact');
-    gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
-    gl.useProgram(sK); bind(sK, 'uCon', con, 0); bind(sK, 'uCS', T.cs, 1); if (!sK._c) { gl.uniform1i(sK.u.uN, N); gl.uniform1i(sK.u.uNH, NHr); sK._c = true; } if (sK._h !== h) { gl.uniform1f(sK.u.uH, h); sK._h = h; }
-    gl.drawArrays(gl.POINTS, 0, 4 * N);
-    gl.disable(gl.BLEND);
-    // 5. nodes
-    tq('nodes');
-    gl.useProgram(pN); gl.bindFramebuffer(gl.FRAMEBUFFER, fNode[nx]); gl.viewport(0, 0, Wd, NHr); common(pN, t, h);
-    bind(pN, 'uPos', s.pos, 0); bind(pN, 'uVel', s.vel, 1); bind(pN, 'uNS', T.ns, 2); bind(pN, 'uAnc', s.anc, 3); bind(pN, 'uFrc', frc, 4);
-    bind(pN, 'uImp', T.imp, 5); bind(pN, 'uCSt', cellS[nx].s, 6); bind(pN, 'uCS', T.cs, 7); bind(pN, 'uPan', T.pan, 8); bind(pN, 'uCMap', T.cmap, 9);
-    if (pN._a !== alpha) { gl.uniform1f(pN.u.uAlpha, alpha); pN._a = alpha; } if (!pN._g) { gl.uniform1f(pN.u.uG, M.G); pN._g = true; } if (pN._i !== useImp) { gl.uniform1i(pN.u.uUseImp, useImp); pN._i = useImp; }
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-    useImp = 0; tqEnd();
+  let vpH = -1;
+  const pass = (p, f) => { gl.useProgram(p); gl.bindFramebuffer(gl.FRAMEBUFFER, f); if (vpH !== f.h) { gl.viewport(0, 0, Wd, f.h); vpH = f.h; } };
+  // n steps of h from t; the GL state other code may have changed is set once per call
+  function steps(n, t, h, alpha) {
+    gl.bindVertexArray(vao); gl.disable(gl.DEPTH_TEST); gl.disable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE); vpH = -1;
+    for (let s = 0; s < n; s++, t += h) {
+      const v = cur, w = 1 - cur;
+      // 1. hinges
+      tq('hinges'); let p = pH[v]; pass(p, fHinge[w]); common(p, t, h); gl.drawArrays(gl.TRIANGLES, 0, 3);
+      // 2. cells
+      tq('cells'); p = pC[v]; pass(p, fCell[w]); common(p, t, h);
+      if (dirty[v]) { const u = p.u; gl.uniform4fv(u.uGP, gpu4); gl.uniform4fv(u.uS0, SRC[0]); gl.uniform4fv(u.uS1, SRC[1]); gl.uniform4fv(u.uS2, SRC[2]); gl.uniform4fv(u.uS3, SRC[3]);
+        gl.uniform4fv(u.uS4, SRC[4]); gl.uniform4fv(u.uS5, SRC[5]); gl.uniform1i(u.uNS_, nsrc); dirty[v] = false; }
+      if (!p._c2) { gl.uniform1i(p.u.uOUT, M.OUT()); gl.uniform1f(p.u.uUmax, M.U_MAX); gl.uniform1f(p.u.uRhoWC, M.RHO_W * M.C_W);
+        gl.uniform1f(p.u.uP0, M.P0); gl.uniform1f(p.u.uRhoWg, M.RHO_W * M.G); if (p.u.uKs) gl.uniform1f(p.u.uKs, M.K_SHEAR); gl.uniform1f(p.u.uS, M.S); p._c2 = true; }
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      // 3. members
+      tq('members');
+      if (NT) { p = pT[v]; pass(p, fTruss[w]); common(p, t, h); gl.drawArrays(gl.TRIANGLES, 0, 3); }
+      // 4. gather the element forces at the nodes; add last step's contact push-back
+      tq('gather'); pass(pG[v], fFrc); gl.drawArrays(gl.TRIANGLES, 0, 3);
+      tq('contact');
+      gl.enable(gl.BLEND); gl.useProgram(sK);
+      if (!sK._c) { gl.uniform1i(sK.u.uN, N); gl.uniform1i(sK.u.uNH, NHr); sK._c = true; } if (sK._h !== h) { gl.uniform1f(sK.u.uH, h); sK._h = h; }
+      gl.drawArrays(gl.POINTS, 0, 4 * N);
+      gl.disable(gl.BLEND);
+      // 5. nodes
+      tq('nodes'); p = pN[v]; pass(p, fNode[w]); common(p, t, h);
+      if (p._a !== alpha) { gl.uniform1f(p.u.uAlpha, alpha); p._a = alpha; } if (!p._g) { gl.uniform1f(p.u.uG, M.G); p._g = true; } if (p._i !== useImp) { gl.uniform1i(p.u.uUseImp, useImp); p._i = useImp; }
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      useImp = 0; tqEnd();
+      cur = w;
+    }
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    cur = nx;
   }
+  const step = (t, h, alpha) => steps(1, t, h, alpha);
   function profile(on) { if (on) { prof = { q: null }; pending.length = 0; return; }
     const out = {}; for (const [n, q] of pending) { if (gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE)) out[n] = (out[n] || 0) + gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6; gl.deleteQuery(q); }
     pending.length = 0; prof = null; return out; }
@@ -581,15 +603,15 @@ export function createGPU(gl, M) {
   const t8 = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t8); gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, Wd, CHr); objs.push(['deleteTexture', t8]);
   const f8 = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, f8); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t8, 0); gl.bindFramebuffer(gl.FRAMEBUFFER, null); objs.push(['deleteFramebuffer', f8]);
   const rb8 = new Uint8Array(Wd * CHr * 4);
-  function readCells() { unbindAll();                    // -> rbC as (torn, time) per cell, like the float state
-    gl.bindVertexArray(vao); gl.disable(gl.BLEND); gl.useProgram(pP); gl.bindFramebuffer(gl.FRAMEBUFFER, f8); gl.viewport(0, 0, Wd, CHr);
-    bind(pP, 'uCSt', cellS[cur].s, 0); gl.drawArrays(gl.TRIANGLES, 0, 3);
-    gl.readPixels(0, 0, Wd, CHr, gl.RGBA, gl.UNSIGNED_BYTE, rb8); gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    for (let c = 0; c < NC; c++) { const o = 4 * c; if (rb8[o + 3]) { rbC[o] = 1; rbC[o + 1] = (rb8[o] | (rb8[o + 1] << 8) | (rb8[o + 2] << 16)) * 1e-7; } else { rbC[o] = 0; rbC[o + 1] = -1; } }
-    return rbC;
+  const pack = () => { gl.bindVertexArray(vao); gl.disable(gl.BLEND); gl.useProgram(pP[cur]); gl.bindFramebuffer(gl.FRAMEBUFFER, f8); gl.viewport(0, 0, Wd, CHr); gl.drawArrays(gl.TRIANGLES, 0, 3); };
+  const unpack = () => { for (let c = 0; c < NC; c++) { const o = 4 * c; if (rb8[o + 3]) { rbC[o] = 1; rbC[o + 1] = (rb8[o] | (rb8[o + 1] << 8) | (rb8[o + 2] << 16)) * 1e-7; } else { rbC[o] = 0; rbC[o + 1] = -1; } } return rbC; };
+  function readCells() {                                  // -> rbC as (torn, time) per cell, like the float state
+    pack(); gl.readPixels(0, 0, Wd, CHr, gl.RGBA, gl.UNSIGNED_BYTE, rb8); gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return unpack();
   }
   function readCellsFull() { return read(fCell[cur], 4, Wd, CHr, rbC); }
-  const pbo = gl.createBuffer(); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo); gl.bufferData(gl.PIXEL_PACK_BUFFER, Wd * CHr * 16, gl.STREAM_READ); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+  // the same bytes through a pixel buffer and a fence (never stalls; the data is one request old)
+  const pbo = gl.createBuffer(); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo); gl.bufferData(gl.PIXEL_PACK_BUFFER, Wd * CHr * 4, gl.STREAM_READ); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
   objs.push(['deleteBuffer', pbo]);
   let fence = null;
   function readCellsAsync() {
@@ -598,10 +620,9 @@ export function createGPU(gl, M) {
       const r = gl.clientWaitSync(fence, 0, 0);
       if (r === gl.TIMEOUT_EXPIRED) return null;
       gl.deleteSync(fence); fence = null;
-      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo); gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, rbC); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null); out = rbC;
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo); gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, rb8); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null); out = unpack();
     }
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fCell[cur]); gl.readBuffer(gl.COLOR_ATTACHMENT4);
-    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo); gl.readPixels(0, 0, Wd, CHr, gl.RGBA, gl.FLOAT, 0); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+    pack(); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo); gl.readPixels(0, 0, Wd, CHr, gl.RGBA, gl.UNSIGNED_BYTE, 0); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0); gl.flush();
     return out;
@@ -615,7 +636,7 @@ export function createGPU(gl, M) {
     if (fenceN) {
       if (gl.clientWaitSync(fenceN, 0, 0) === gl.TIMEOUT_EXPIRED) return false;
       gl.deleteSync(fenceN); fenceN = null;
-      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pboN); gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, rb); 
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pboN); gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, rb);
       for (let i = 0; i < N; i++) { X[3 * i] = M.R0[3 * i] + rb[4 * i]; X[3 * i + 1] = M.R0[3 * i + 1] + rb[4 * i + 1]; X[3 * i + 2] = M.R0[3 * i + 2] + rb[4 * i + 2]; FREE[i] = rb[4 * i + 3] > .5 ? 1 : 0; }
       gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, Wd * NHr * 16, rb);
       for (let i = 0; i < N; i++) { V[3 * i] = rb[4 * i]; V[3 * i + 1] = rb[4 * i + 1]; V[3 * i + 2] = rb[4 * i + 2]; }
@@ -628,13 +649,13 @@ export function createGPU(gl, M) {
     fenceN = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0); gl.flush();
     return got;
   }
-  function readState(o) { unbindAll();                   // end of run: plastic strain, damage, member failures, hinge sets
+  function readState(o) {                                 // end of run: plastic strain, damage, member failures, hinge sets
     const tmp = new Float32Array(Wd * CHr * 4);
     for (let k = 0; k < 4; k++) { read(fCell[cur], k, Wd, CHr, tmp); for (let c = 0; c < NC; c++) for (let z = 0; z < 4; z++) o.CEP[16 * c + 4 * k + z] = tmp[4 * c + z]; }
     read(fCell[cur], 4, Wd, CHr, tmp); for (let c = 0; c < NC; c++) o.CDM[c] = tmp[4 * c + 2];
-    if (NT) { const a = new Float32Array(Wd * THr * 4); read(fTruss[cur], 0, Wd, THr, a); for (let k = 0; k < NT; k++) { o.TFL[k] = a[4 * k + 1] > .5 ? 1 : 0; if (o.TBP) o.TBP[k] = a[4 * k + 3]; } }
+    if (NT) { const a = new Float32Array(Wd * THr * 4); read(fTruss[cur], 0, Wd, THr, a); for (let k = 0; k < NT; k++) { o.TFL[k] = a[4 * k] < 0 ? 1 : 0; if (o.TBP) o.TBP[k] = a[4 * k + 3]; } }
     if (NH) { const a = new Float32Array(Wd * HHr * 4); read(fHinge[cur], 0, Wd, HHr, a); for (let k = 0; k < NH; k++) { o.HTP[k] = a[4 * k]; if (o.HTH) o.HTH[k] = a[4 * k + 1]; if (o.HTPS) o.HTPS[k] = a[4 * k + 2]; } }
   }
   function dispose() { if (fence) gl.deleteSync(fence); if (fenceN) gl.deleteSync(fenceN); for (const [f, o] of objs) try { gl[f](o); } catch (e) {} objs.length = 0; }
-  return { step, profile, readCellsFull, readNodesAsync, upload, setSources, setGas, setImpulses, setDamage, readNodes, readCells, readCellsAsync, readState, dispose, O };
+  return { step, steps, profile, readCellsFull, readNodesAsync, upload, setSources, setGas, setImpulses, setDamage, readNodes, readCells, readCellsAsync, readState, dispose, O };
 }
