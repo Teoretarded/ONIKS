@@ -93,6 +93,7 @@ export async function createBlast(game) {
     if (!(W > .02)) return null;
     const spec = hitSpec({ u, H, a: o.a, n: o.n, din: o.din, zone: o.zone, tmm: o.tmm, fz: o.fz, standoff: o.standoff, W: o.fz === 'frag' ? W * .8 : W, deckY: o.deckY, halfB: o.halfB });
     if (!spec) return null;
+    if (o.band > 0) spec.band = o.band;
     return start(u, spec, o.S, { kind: o.kind, W, fz: o.fz });
   }
   /* a cook-off: the module's contents ({ he, prop, det, fuel, vapour }) -> patch or null */
@@ -234,7 +235,7 @@ export async function createBlast(game) {
       P.F[o] = F.O[0]; P.F[o + 1] = F.O[1]; P.F[o + 2] = F.O[2]; P.F[o + 3] = B.depth;
       P.F[o + 4] = F.X[0]; P.F[o + 5] = F.X[1]; P.F[o + 6] = F.X[2]; P.F[o + 7] = 0;
       P.F[o + 8] = F.Y[0]; P.F[o + 9] = F.Y[1]; P.F[o + 10] = F.Y[2]; P.F[o + 11] = S_GRID;
-      P.F[o + 12] = F.Z[0]; P.F[o + 13] = F.Z[1]; P.F[o + 14] = F.Z[2]; P.F[o + 15] = Math.min(1.6, Math.max(.8, .6 + .08 * (B.spec.Rp || 5)));
+      P.F[o + 12] = F.Z[0]; P.F[o + 13] = F.Z[1]; P.F[o + 14] = F.Z[2]; P.F[o + 15] = Math.max(Math.min(1.6, Math.max(.8, .6 + .08 * (B.spec.Rp || 5))), Math.min(3.5, (B.spec.band || 0) + .35));
       let k = 0;
       for (const r of B.rects) {
         if (!r.ready || k > 1) continue;

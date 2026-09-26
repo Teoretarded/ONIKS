@@ -305,7 +305,8 @@ export function createScars(game) {
       let B = null;
       // the deck over a hit in the side at that station (the forecastle stands higher than the main deck amidships)
       const dk = ny > .7 ? S.y : deckAbove(ent, st, S.x, S.y, S.z, nx, nz, deckY);
-      try { B = game.blast.hit(u, { a: [S.x, S.y, S.z], n: [nx, ny, nz], din, zone, tmm: t, fz, standoff, kind, whKg: Wk, deckY: dk, halfB: halfBFn(u, G), S }); }
+      const band = skinBand(ent, st, S.x, S.y, S.z, nx, ny, nz, Math.max(3, Math.min(10, 2.5 * Math.cbrt(Math.max(1, Wk * .5)))));
+      try { B = game.blast.hit(u, { a: [S.x, S.y, S.z], n: [nx, ny, nz], din, zone, tmm: t, fz, standoff, kind, whKg: Wk, deckY: dk, band, halfB: halfBFn(u, G), S }); }
       catch (err) { console.error('scars: blast', err); }
       if (!B) { S.bl = false; S.blast = null; build(u, S, ent, st); if (holeLike(S.kind)) ejecta(u, ent, st, S, M, pose); }
     }
@@ -382,6 +383,20 @@ export function createScars(game) {
   }
 
   /* the hull's half-beam at station z, height y (model frame), from its own dots (the envelope gridOf keeps) */
+  /* how far the hull strays from a flat patch at a hit (m): the model's own dots facing the patch's way within R of it,
+     off its plane (side: vertical, normal horizontal; deck: horizontal), the 90th percentile; a flared or curved hull
+     needs a wider skin band for its dots to follow the solved plating */
+  function skinBand(ent, st, x, y, z, nx, ny, nz, R) {
+    const deck = ny > .7, l = Math.hypot(nx, nz) || 1, Z = deck ? [0, 1, 0] : [nx / l, 0, nz / l], off = [];
+    eachDot(ent, st, (px, py, pz, qx, qy, qz) => {
+      if (qx * Z[0] + qy * Z[1] + qz * Z[2] < .5) return;
+      const dx = px - x, dy = py - y, dz = pz - z, al = dx * Z[0] + dy * Z[1] + dz * Z[2];
+      if (Math.abs(al) < 4) off.push(Math.abs(al));
+    }, x, y, z, R);
+    if (off.length < 20) return 0;
+    off.sort((p, q) => p - q);
+    return off[Math.floor(off.length * .9)];
+  }
   /* the lowest deck (dots facing up) over a point of the side, a little inboard, within 12 m; else the main deck */
   function deckAbove(ent, st, x, y, z, nx, nz, main) {
     const l = Math.hypot(nx, nz) || 1, ix = x - nx / l * 1.2, iz = z - nz / l * 1.2;

@@ -27,7 +27,7 @@ export function createRunner(gl, o = {}) {
   const pats = new Map();              // id -> R { id, P, H, spec, state, target, lastSnap, lastSnapT, t0 }
   const queue = [];
   const stats = { steps: 0, pumps: 0, gpuSteps: 0, built: 0, done: 0, buildMs: 0, snapMs: 0, pumpMs: 0 };
-  let nstep = 0;
+  let nstep = 0, asyncSet = null;
   const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
   function submit(id, spec) {
@@ -115,8 +115,11 @@ export function createRunner(gl, o = {}) {
       // (checks: deterministic, a blocking read every 2nd sync as the bench does)
       if ((s.n / SYNC) % 2 === 0) tearCells(P, pool.readCells(R.H), t);
     } else if (s.srcs.length) {
+      // (the result is the previous request's: only for the patches that were in the pool when it was made)
+      const was = asyncSet;
       const cl = pool.readCellsAsync();
-      if (cl) for (const Q of pats.values()) if (Q.H && Q.state === 'run' && Q.P.sim.srcs.length) {
+      asyncSet = cl || !was ? new Set([...pats.values()].filter(Q => Q.H).map(Q => Q.H)) : was;
+      if (cl && was) for (const Q of pats.values()) if (Q.H && was.has(Q.H) && Q.state === 'run' && Q.P.sim.srcs.length) {
         const c0 = Q.H.cb0, b = new Uint8Array(Q.P.NC); for (let c = 0; c < Q.P.NC; c++) b[c] = cl[4 * (c0 + c)] > .5 ? 1 : 0;
         tearCells(Q.P, b, Q.P.sim.t);
       }
