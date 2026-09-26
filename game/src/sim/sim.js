@@ -129,7 +129,7 @@ export class Sim {
       pos: [x, y, z], prev: [x, y, z], hdg, prevHdg: hdg, pitch: 0, roll: 0, speed: 0,
       hp: def.hp, hpMax: def.hp, alive: true, dying: 0,
       st: {}, orders: [], ammo: {}, cooldowns: { scan: 0 }, radarOn: !!(def.sensors.radar), deployed: !!def.static,
-      parts: {}, off: {},
+      parts: {}, off: {}, mods: {}, slowK: 1, fire: 0, fireRate: 0, cook: null,   // modules and cook-offs (damage.js)
       hold: !!o.hold, path: null, wi: 0, goal: null, orbitR: 0, altT: def.altDef || 0, spdCap: 0, blocked: 0,
       dep: 0, depT: 0, elev: 0, elevT: 0, mast: 0, mastT: 0, caps: [0, 0],
       antA: 0, antW: 0, antT: 0, tYaw: 0, tPitch: 0, aimB: null, aimP: 0,
@@ -153,6 +153,7 @@ export class Sim {
     };
     for (const w in def.weapons) { u.ammo[w] = def.weapons[w].ammo; u.cooldowns[w] = 0; u.refillP[w] = 0; }
     for (const p of def.partNames) u.parts[p] = 0;
+    for (const m of def.modules) u.mods[m.id] = 0;
     if (def.mast && o.deployed) { u.mast = u.mastT = 1; u.deployed = true; }
     if (def.deploy && o.deployed) { const el = def.deploy.elev || TEL_ELEV; u.dep = u.depT = 1; u.elev = u.elevT = u.wantElev = el; u.deployed = true; }
     // boats start deep (o.dive: 0 surfaced, 1 periscope depth, 2 deep); the model's origin is the surfaced waterline

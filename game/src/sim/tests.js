@@ -10,7 +10,8 @@ import { physicsTests } from './tests_physics.js';
 import { carried } from './amphib.js';
 import { PROJ } from '../data/units.js';
 import { launch, fireGun, spinout } from './weapons.js';
-import { segUnit, HIT, bodyOf } from './bodies.js';
+import { segUnit, HIT, bodyOf, toWorld } from './bodies.js';
+import { applyDamage } from './damage.js';
 
 const Q = new URLSearchParams(location.search);
 const out = document.getElementById('out');
@@ -949,6 +950,64 @@ async function main() {
     ok(vmax > 40 * 0.5144, `top speed ${fmt(vmax / 0.5144)} kn`);
     ok(u.def.air && u.def.air.types.includes('helo'), 'no helicopter deck');
     return `${fmt(vmax / 0.5144)} kn after 150 s`;
+  });
+
+  await test('damage modules: where a hit lands matters; cook-offs are seeded, kill small units, burn big ships', async () => {
+    const at = (u, x, y, z) => toWorld(u, x, y, z, [0, 0, 0]);
+    const evs = sim => sim.drainEvents();
+    // an Oniks-sized charge on the aft VLS takes out the launcher and its rounds; on the bow it does not reach it
+    const s1 = new Sim(map(), { seed: 3, fog: false });
+    const a = s1.spawn('ddg', 'fleet', -50000, 0, { hdg: .7 }), b = s1.spawn('ddg', 'fleet', -50000, 8000, { hdg: .7 });
+    const sm0 = a.ammo.sm6;
+    applyDamage(s1, a, 60, null, { part: 'vlsA', pos: at(a, 0, 6.2, -29) });
+    applyDamage(s1, b, 60, null, { part: 'hull', pos: at(b, 0, 8, 62) });
+    const A = a.def.modules.find(m => m.id === 'vlsA');
+    ok(a.mods.vlsA >= A.hp, `aft VLS took ${fmt(a.mods.vlsA)} of ${A.hp} hp`);
+    ok(!a.alive || a.ammo.sm6 < sm0, `SM-6 ${a.ammo.sm6} of ${sm0} after losing the aft cells`);
+    ok(b.mods.vlsA === 0 && b.mods.gun > 0, `bow hit: aft VLS ${fmt(b.mods.vlsA)}, gun ${fmt(b.mods.gun)}`);
+    // cook-offs on a TEL's loaded canister: some seeds, never all; each one destroys it (cookoff, then destroyed)
+    let n = 0, order = true;
+    const sig = [];
+    for (let seed = 1; seed <= 60; seed++) {
+      const s = new Sim(map(), { seed, fog: false });
+      const t = s.spawn('tel', 'coast', 2000, 0, { hdg: 0 });
+      evs(s);
+      applyDamage(s, t, 14, null, { part: 'launcher', pos: at(t, -.65, 2.2, -2) });
+      const E = evs(s), ic = E.findIndex(e => e.type === 'cookoff'), id = E.findIndex(e => e.type === 'destroyed');
+      if (ic >= 0) { n++; if (!(id > ic) || t.alive || !(E[ic].size > 0) || E[ic].out !== 'kill') order = false; }
+      sig.push(ic >= 0 ? 1 : 0);
+    }
+    ok(n > 3 && n < 57, `${n} of 60 seeds cooked off`);
+    ok(order, 'a cook-off without the unit destroyed after it (or a wrong event)');
+    const s2 = new Sim(map(), { seed: 5, fog: false }), t2 = s2.spawn('tel', 'coast', 2000, 0, { hdg: 0 });
+    applyDamage(s2, t2, 14, null, { part: 'launcher', pos: at(t2, -.65, 2.2, -2) });
+    ok(!t2.alive === !!sig[4], 'not deterministic: seed 5 differs on a rerun');
+    // an empty canister does not go up
+    let empty = 0;
+    for (let seed = 1; seed <= 40; seed++) {
+      const s = new Sim(map(), { seed, fog: false }), t = s.spawn('tel', 'coast', 2000, 0, { hdg: 0 });
+      t.ammo.oniks = 0; evs(s);
+      applyDamage(s, t, 14, null, { part: 'launcher', pos: at(t, -.65, 2.2, -2) });
+      if (evs(s).some(e => e.type === 'cookoff' && e.module.startsWith('can'))) empty++;
+    }
+    ok(empty === 0, `${empty} empty canisters cooked off`);
+    // a carrier's magazine going up: heavy structural damage and a fire, not the end of her
+    const mg = UNITS.carrier.modules.find(m => m.id === 'magA'), p0 = mg.cook.p;
+    mg.cook.p = 1;
+    let heavyEv = null, cv;
+    try {
+      const s3 = new Sim(map(), { seed: 9, fog: false });
+      cv = s3.spawn('carrier', 'fleet', -60000, 0, { hdg: 0 });
+      evs(s3);
+      applyDamage(s3, cv, 250, null, { part: 'hull', pos: at(cv, 0, 0, -70) });
+      heavyEv = evs(s3).find(e => e.type === 'cookoff' && e.module === 'magA');
+      const hp1 = cv.hp;
+      await run(s3, 20 * 30);
+      ok(cv.alive && cv.hp < hp1, `burning: hp ${fmt(hp1)} -> ${fmt(cv.hp)}`);
+    } finally { mg.cook.p = p0; }
+    ok(heavyEv && heavyEv.out === 'heavy' && heavyEv.fire > 0 && heavyEv.pos.length === 3, 'no heavy cook-off event from the aft magazine');
+    ok(cv.hp < cv.hpMax - 250 - mg.cook.dmg + 1, `carrier hp ${fmt(cv.hp)} after the hit and the magazine`);
+    return `aft VLS out (SM-6 ${a.ammo.sm6}/${sm0}), bow hit left it whole · TEL canister: ${n}/60 seeds cooked off, empty ones never · carrier magazine: heavy, hp ${fmt(cv.hp)} / ${cv.hpMax}, fire ${fmt(cv.fire)} s left`;
   });
 
   const battleLevels = Q.get('long') ? ['easy', 'normal', 'hard'] : ['normal'];

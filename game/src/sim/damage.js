@@ -1,24 +1,35 @@
-/* Damage: HP plus per-part damage (0..1). A destroyed part switches off what it carries (radar, a weapon, movement,
-   aircraft ops...). A destroyed unit plays a death animation (dying 0 -> 1: ships list and settle over ~60 s,
-   vehicles burn ~20 s, aircraft fall) and is then removed. */
+/* Damage: hull hp plus modules. A hit takes hull hp (u.hp), marks the model part it struck (u.parts 0..1: the visual
+   damage and the 'part' event) and is resolved against the unit's modules (UNITS[type].modules, data/modules.js:
+   boxes in the model frame, each with hp, what it switches off when destroyed and its cook-off risk). A destroyed
+   unit plays a death animation (dying 0 -> 1: ships list and settle over ~60 s, vehicles burn ~20 s, aircraft fall)
+   and is then removed. The rules: sim/README.md, "Damage: modules and cook-off". */
 import { ENEMY } from '../data/units.js';
+import { COOK } from '../data/modules.js';
 import { DT } from './consts.js';
 import { ground, clamp } from './util.js';
+import { bodyOf, pointUnit, toWorld } from './bodies.js';
 
-/* hit (weapons.js): { part, part2, pos } where it struck: the part whose box the round entered (sim/bodies.js) and the
-   nearest other part (the spill-over). Without it (scripts, old callers) the part is drawn by weight. */
+/* hit (weapons.js): { part, part2, pos } where it struck: the part whose box the round entered (sim/bodies.js), the
+   nearest other part (the spill-over) and the struck point (world). Optional: reach (m, the charge's reach; default
+   from dmg, see reachOf). Without it (scripts, old callers) the part is drawn by weight and the charge bursts at the
+   centre of its box. */
 export function applyDamage(sim, u, dmg, src, hit) {
   if (!u.alive) return;
   const d = u.def, r = sim.rng.dmg;
   u.hp -= dmg;
   if (d.domain === 'sea') floodHit(sim, u, dmg, src);
-  // the hit lands on one part; some of it spreads to a second part
+  // the hit lands on one part; some of it spreads to a second part (the visual damage)
   const hitPart = hit && hit.part && d.parts[hit.part] ? hit.part : pickPart(d, r);
   hurtPart(sim, u, hitPart, dmg / u.hpMax * 2.2);
   if (d.partNames.length > 1) {
     let p2 = hit && hit.part2 && d.parts[hit.part2] ? hit.part2 : null;
     if (!p2) { p2 = pickPart(d, r); if (p2 === hitPart) p2 = pickPart(d, r); }
     if (p2 !== hitPart) hurtPart(sim, u, p2, dmg / u.hpMax * .8);
+  }
+  // the charge: the modules it reaches
+  if (d.modules.length) {
+    if (hit && hit.pos) burstAt(sim, u, dmg, hit.pos, hit.reach, src);
+    else { partCentre(d, hitPart, MP); burstIn(sim, u, dmg, MP[0], MP[1], MP[2], hit && hit.reach, src, 0, 0); }
   }
   sim.emit('damage', { unit: u.id, side: u.side, part: hitPart, hp: Math.max(0, u.hp), dmg, pos: u.pos.slice() });
   if (u.hp <= 0) kill(sim, u, src);
@@ -50,20 +61,148 @@ function pickPart(d, r) {
   return d.partNames[d.partNames.length - 1];
 }
 
+/* the visual damage of a model part (u.parts 0..1); at 1 the 'part' event (the log's "out"; debris blows it off).
+   What a hit switches off is the modules' (below). */
 function hurtPart(sim, u, p, amount) {
   const before = u.parts[p];
   u.parts[p] = Math.min(1, before + amount);
   if (before < 1 && u.parts[p] >= 1) {
-    const P = u.def.parts[p];
-    if (P.disables) for (const k of P.disables) u.off[k] = true;
-    if (P.lose) for (const k in P.lose) {
-      if (k === 'cargo') u.cargo = Math.max(0, u.cargo - P.lose[k]);
-      else if (u.ammo[k] !== undefined) u.ammo[k] = Math.floor(u.ammo[k] * (1 - P.lose[k]));
-    }
-    if (u.off.radar && u.radarOn) sim.setRadar(u, false, true);
-    sim.emit('part', { unit: u.id, side: u.side, part: p, label: P.label, disables: P.disables || [], pos: u.pos.slice() });
-    if (P.fatal) u.hp = Math.min(u.hp, 0);
+    const ds = modsIn(u, p);
+    sim.emit('part', { unit: u.id, side: u.side, part: p, label: u.def.parts[p].label, disables: ds, pos: u.pos.slice() });
   }
+}
+/* what the destroyed modules of a part have switched off (for the 'part' event's list) */
+function modsIn(u, p) {
+  const M = u.def.modules;
+  let out = null;
+  for (let i = 0; i < M.length; i++) if (M[i].part === p && M[i].disables && u.mods[M[i].id] >= M[i].hp) (out || (out = [])).push(...M[i].disables);
+  return out || [];
+}
+
+/* ---------------------------------------------------------------- modules */
+const MP = new Float64Array(3), MQ = new Float64Array(3);
+/* the centre of a part's first body box (model frame), else the body's aim point */
+function partCentre(def, p, out) {
+  const b = bodyOf(def);
+  for (let i = 0; i < b.n; i++) if (b.part[i] === p) {
+    const k = i * 6;
+    out[0] = (b.bx[k] + b.bx[k + 3]) / 2; out[1] = (b.bx[k + 1] + b.bx[k + 4]) / 2; out[2] = (b.bx[k + 2] + b.bx[k + 5]) / 2;
+    return out;
+  }
+  out[0] = b.aim[0]; out[1] = b.aim[1]; out[2] = b.aim[2];
+  return out;
+}
+/* a world point -> the unit's model frame (sim/bodies.js' frame: the heading; an aircraft's pitch too) */
+function toModel(u, wx, wy, wz, out) {
+  const dx = wx - u.pos[0], dy = wy - u.pos[1], dz = wz - u.pos[2], c = Math.cos(u.hdg), s = Math.sin(u.hdg);
+  const x = dx * c - dz * s, z = dx * s + dz * c;
+  if (u.def.domain === 'air' && u.pitch) { const cp = Math.cos(u.pitch), sp = Math.sin(u.pitch); out[0] = x; out[1] = dy * cp - z * sp; out[2] = dy * sp + z * cp; }
+  else { out[0] = x; out[1] = dy; out[2] = z; }
+  return out;
+}
+/* how far a charge of dmg hp reaches inside a unit (m) */
+export function reachOf(dmg) { return clamp(COOK.reach * Math.sqrt(Math.max(0, dmg)), COOK.reachMin, COOK.reachMax); }
+
+/* a charge bursting at a world point. A round that struck goes on a little way inside first (COOK.pen m along its path,
+   from the 'hit' event just emitted); a burst outside the body (a proximity fuze, a shell's fragments on the ground)
+   reaches in from the skin: its reach counts from the nearest point of the body. */
+function burstAt(sim, u, dmg, pos, reach, src) {
+  const R = reach || reachOf(dmg), ev = sim.events[sim.events.length - 1];
+  let px = pos[0], py = pos[1], pz = pos[2];
+  const skin = pointUnit(u, px - u.pos[0], py - u.pos[1], pz - u.pos[2]);
+  if (skin < .3 && ev && ev.type === 'hit' && ev.target === u.id && ev.vel && !ev.burst && !ev.blast) {
+    const v = ev.vel, l = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    if (l > 1e-6) { const k = Math.min(COOK.pen, R * .3) / l; px += v[0] * k; py += v[1] * k; pz += v[2] * k; }
+  }
+  toModel(u, px, py, pz, MQ);
+  burstIn(sim, u, dmg, MQ[0], MQ[1], MQ[2], R, src, 0, skin);
+}
+
+/* the charge at a model-frame point: every module within its reach R takes dmg x (1 - d/R)^2 x (1 - armor), d = the
+   distance from the point to the module's box less the skin distance (inside the box: all of it) */
+function burstIn(sim, u, dmg, x, y, z, reach, src, depth, skin) {
+  const M = u.def.modules, R = reach || reachOf(dmg), s0 = skin > 0 ? skin : 0;
+  for (let i = 0; i < M.length && u.alive; i++) {
+    const m = M[i], b = m.box;
+    let dd = 0, v;
+    v = b[0] - x; if (v > 0) dd += v * v; else { v = x - b[3]; if (v > 0) dd += v * v; }
+    v = b[1] - y; if (v > 0) dd += v * v; else { v = y - b[4]; if (v > 0) dd += v * v; }
+    v = b[2] - z; if (v > 0) dd += v * v; else { v = z - b[5]; if (v > 0) dd += v * v; }
+    const dist = Math.sqrt(dd) - s0;
+    if (dist >= R) continue;
+    const f = dist <= 0 ? 1 : (1 - dist / R) * (1 - dist / R);
+    hurtModule(sim, u, m, dmg * f * (1 - (m.armor || 0)), src, depth);
+  }
+}
+
+function hurtModule(sim, u, m, add, src, depth) {
+  if (add <= 0) return;
+  const before = u.mods[m.id], after = before + add;
+  const armed = m.cook && !(u.cook && u.cook[m.id]) && loaded(u, m.cook.ammo);   // before the module's loss empties it
+  u.mods[m.id] = after;
+  if (before < m.hp && after >= m.hp) moduleOut(sim, u, m);
+  // cook-off: a chance on every hit that damages it, rising with its damage (f^2) and with the size of this hit
+  if (armed && u.alive) {
+    const f = Math.min(1, after / m.hp), p = m.cook.p * f * f * Math.min(1, COOK.bite * add / m.hp);
+    if (p > 0 && sim.rng.dmg() < p) cookoff(sim, u, m, src, depth);
+  }
+}
+
+/* is there anything in it to go up (cook.ammo: a weapon name or several, 'cargo'; none: always) */
+function loaded(u, a) {
+  if (!a) return true;
+  if (typeof a === 'string') return (a === 'cargo' ? u.cargo : u.ammo[a]) > 0;
+  for (let i = 0; i < a.length; i++) if ((a[i] === 'cargo' ? u.cargo : u.ammo[a[i]]) > 0) return true;
+  return false;
+}
+
+/* a module destroyed: what it carried is off (a group's once every module of the group is destroyed) */
+function moduleOut(sim, u, m) {
+  let all = true;
+  if (m.group) for (const g of u.def.modules) if (g.group === m.group && u.mods[g.id] < g.hp) { all = false; break; }
+  if (m.disables && all) for (const k of m.disables) u.off[k] = true;
+  if (m.lose) for (const k in m.lose) {
+    if (k === 'cargo') u.cargo = Math.max(0, u.cargo - m.lose[k]);
+    else if (u.ammo[k] !== undefined) u.ammo[k] = Math.floor(u.ammo[k] * (1 - m.lose[k]));
+  }
+  if (m.slow) u.slowK *= m.slow;
+  if (u.off.radar && u.radarOn) sim.setRadar(u, false, true);
+  sim.emit('module', { unit: u.id, side: u.side, module: m.id, label: m.label, part: m.part, disables: all && m.disables || [], pos: modPos(u, m) });
+  if (m.fatal) u.hp = Math.min(u.hp, 0);
+}
+function modPos(u, m) { const b = m.box; return toWorld(u, (b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2, [0, 0, 0]); }
+
+/* Cook-off: what the module holds goes up. out 'kill': the unit is destroyed outright (a ship sinks at once and hard,
+   a vehicle burns out, an aircraft comes apart). out 'heavy' (the big ships): cook.dmg hp of structural damage
+   bursting at the module (reach cook.size x COOK.chainR: the modules round it take it and may go up in turn, COOK.depth
+   deep) and a fire burning cook.burn hp/s for cook.fire s. The 'cookoff' event comes first, then 'destroyed' if she
+   is lost. */
+function cookoff(sim, u, m, src, depth) {
+  if (!u.cook) u.cook = {};
+  u.cook[m.id] = true;
+  if (u.mods[m.id] < m.hp) { u.mods[m.id] = m.hp; moduleOut(sim, u, m); }
+  const C = m.cook, b = m.box, cx = (b[0] + b[3]) / 2, cy = (b[1] + b[4]) / 2, cz = (b[2] + b[5]) / 2;
+  const out = C.out === 'heavy' ? 'heavy' : 'kill';
+  sim.emit('cookoff', { unit: u.id, type: u.type, side: u.side, module: m.id, label: m.label, part: m.part, pos: toWorld(u, cx, cy, cz, [0, 0, 0]),
+    at: [cx, cy, cz], size: C.size, out, fire: out === 'heavy' ? C.fire || 0 : 0, depth });
+  if (out === 'kill') {
+    u.hp = Math.min(u.hp, -u.hpMax * COOK.over);                  // overkill: a ship goes down fast (sinkPlan)
+    kill(sim, u, src);
+    return;
+  }
+  u.hp -= C.dmg || 0;
+  if (u.def.domain === 'sea') u.flood = Math.min(.5, (u.flood || 0) + (C.dmg || 0) / u.hpMax * .3);
+  if (C.fire) { u.fire = Math.max(u.fire, C.fire); u.fireRate = Math.max(u.fireRate, C.burn || 0); }
+  if (depth < COOK.depth && C.dmg) burstIn(sim, u, C.dmg, cx, cy, cz, C.size * COOK.chainR, src, depth + 1, 0);
+  if (u.hp <= 0) kill(sim, u, src);
+}
+
+/* the fire after a heavy cook-off burns on (hull hp) until the damage control has it out ('fireout') */
+function burn(sim, u) {
+  u.fire -= DT;
+  u.hp -= u.fireRate * DT;
+  if (u.fire <= 0) { u.fire = 0; u.fireRate = 0; sim.emit('fireout', { unit: u.id, side: u.side }); }
+  if (u.hp <= 0) kill(sim, u, null);
 }
 
 export function kill(sim, u, src) {
@@ -93,7 +232,7 @@ export function stepDying(sim) {
   let removed = false;
   for (let i = 0; i < list.length; i++) {
     const u = list[i];
-    if (u.alive) continue;
+    if (u.alive) { if (u.fire > 0) burn(sim, u); continue; }
     if (u.recovered) { sim.units.delete(u.id); removed = true; continue; }
     const d = u.def;
     u.dying = Math.min(1, u.dying + DT / d.dieTime);

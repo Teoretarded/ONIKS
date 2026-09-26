@@ -269,9 +269,7 @@ export function flyAir(sim, u) {
   const R = u.orbitR, N = NAV;
   // a strike profile (sim/airstrike.js) sets the height and speed while its attack order lasts
   if (u.strk) { const o0 = u.orders[0]; if (!o0 || (o0.kind !== 'attack' && o0.kind !== 'strike')) endStrike(u); }
-  let vT = u.vAir > 0 ? u.vAir : d.speed;
-  const sl = d._slowP || (d._slowP = d.partNames.filter(p => d.parts[p].slow));
-  for (let i = 0; i < sl.length; i++) if (u.parts[sl[i]] >= 1) vT *= d.parts[sl[i]].slow;
+  let vT = (u.vAir > 0 ? u.vAir : d.speed) * u.slowK;            // destroyed engines, control surfaces (damage.js)
   N.hold = false; N.vyFF = 0; N.down = false; N.low = false;
   if (R > 0 && dist < R * 1.6) {
     // orbit clockwise around the goal

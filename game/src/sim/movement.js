@@ -50,7 +50,7 @@ function speedCap(sim, u, dom) {
   // a hovercraft: slower over land, and only on cushion; a ship with its well deck open keeps to a few knots
   if (d.hover) { if (sim.map.h(u.pos[0], u.pos[2]) > 0) v = Math.min(v, d.landSpeed || v); v *= Math.max(0, Math.min(1, ((u.cushion || 0) - .5) * 2)); }
   if (d.well && (u.well > 0 || u.wellT > 0)) v = Math.min(v, d.well.slow);
-  for (const p in u.parts) if (u.parts[p] >= 1 && d.parts[p].slow) v *= d.parts[p].slow;
+  v *= u.slowK;                                                   // destroyed engine rooms, wheels, propellers (damage.js)
   if (u.hp < u.hpMax * .35) v *= .7;
   if (u.spdCap > 0 && u.spdCap < v) v = u.spdCap;
   return v;

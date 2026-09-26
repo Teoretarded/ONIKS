@@ -48,8 +48,12 @@ Unit = { id, type, side, def /* UNITS[type] */, pos, prev, hdg, prevHdg, pitch (
   crane cargo wheel` (pose the crane with `TRANSLOADER.reloadPose(st.reload, { slot: st.slot })` from data/models.js
   while `st.reload > 0`). Projectiles: `p.st` = `booster wing fin cover inlet`; `PROJ[kind].model` / `.boosterModel`
   name the model keys (aliases in data/models.js).
-- Damage per part: `unit.parts[name]` 0..1; a part at 1 is destroyed and switches off `UNITS[type].parts[name].disables`
-  (tokens in `unit.off`: 'move', 'radar', 'camera', 'scan', 'deploy', 'air', 'reload', 'launch', weapon names).
+- Damage: hull `unit.hp`; per model part `unit.parts[name]` 0..1 (the visual damage: tints, the 'part' event, debris);
+  per module `unit.mods[id]` (hp taken; destroyed at the module's hp). What a hit switches off is the modules'
+  (`UNITS[type].modules`, data/modules.js): tokens in `unit.off` ('move', 'radar', 'camera', 'scan', 'deploy', 'air',
+  'reload', 'launch', 'sonar', 'well', weapon names), `unit.slowK` (speed factor), `unit.fire` / `unit.fireRate` (s
+  left, hp/s: a fire after a heavy cook-off), `unit.cook` (null or { module id: true }: what has gone up). See
+  "Damage: modules and cook-off".
 - Dying: ships flood and sink over 60 s, vehicles burn 20 s, aircraft fall; then the unit is removed ('removed').
 
 ## Motion (dynamics.js, sea.js, the sinking in damage.js)
@@ -260,6 +264,42 @@ Positions and vectors are fresh arrays. `gunhit` carries only the fields in its 
 | `splash`, why `'spinout'` | a tumbling round comes down on the ground or the sea | water, air: false |
 | `gunhit` | gun rounds struck a round this tick (sparks) | unit, weapon, target, tk: 'proj', `n` (real rounds), burst |
 
+## Damage: modules and cook-off (damage.js, data/modules.js)
+
+Every unit type has modules: boxes in its model frame (the frame of sim/bodies.js), placed on what the model shows (the
+cutaway models' interior parts: magazines, VLS blocks, engine rooms, fuel, canisters, radar faces, the cockpit...).
+Each: `hp`, `disables` (with `group`: only once every module of the group is out, e.g. both SPY faces, both wheel runs),
+`slow`, `lose` (ammunition), `fatal`, `armor` (0..1), `cook` (explosion risk). The table and its field list are in
+data/modules.js; the numbers of the rules are `COOK` there.
+
+- **A hit** (`applyDamage(sim, u, dmg, src, { part, part2, pos, reach })`) takes `dmg` off the hull hp, marks the
+  model part (visual), then bursts as a charge. Where: the struck point (world `pos` into the model frame); a round
+  that struck goes on `COOK.pen` (2 m, at most 0.3 x its reach) along its path (the `hit` event's `vel`) before it
+  bursts; a burst outside the body (a proximity fuze, a shell's fragments) reaches in from the skin; a hit without a
+  point bursts at the centre of the part drawn by weight. How far: `reach` = `COOK.reach` x sqrt(dmg) m (0.5-14 m: an
+  Oniks 10.7 m, a Tomahawk 8 m, a Kh-35U 7 m, a Hellfire 6 m, a 5" shell 3 m, a few 30 mm rounds 0.5-1 m); the
+  munition's stats are its PROJ `dmg` only. Every module within reach takes `dmg x (1 - d / reach)^2 x (1 - armor)`
+  (d = distance from the burst to its box; inside the box, all of it). So where a hit lands matters: an Oniks on a
+  Burke's aft VLS takes out the 64 cells (and may set them off), one on her bow reaches the gun and its magazine.
+- **Destroyed** (hp taken >= its hp): its `disables` (a group's: when the whole group is out), `lose` (fractions of
+  the named ammunition; 'cargo': TLCs aboard), `slow` (multiplies `u.slowK`), `fatal` (the unit is lost). Event
+  `module`.
+- **Cook-off.** A module with `cook` and something in it (`cook.ammo`: that weapon's ammunition > 0, 'cargo', or
+  always when unset) may go up on any hit that damages it: chance `cook.p x f^2 x min(1, COOK.bite x add / hp)`, f =
+  its damage 0..1 after the hit, add = what this hit dealt (a hit that destroys it outright: `cook.p`; small hits on a
+  fresh module: next to nothing). One draw of `sim.rng.dmg` per roll (deterministic). A module goes up once.
+  - `out: 'kill'` (vehicles, aircraft, subs, the destroyers' and cruisers' VLS and gun magazines): the unit is
+    destroyed outright, hull hp to -0.5 x hpMax (a ship goes down fast and hard: sinkPlan).
+  - `out: 'heavy'` (the carrier's and the LHD's magazines, JP-5, hangar; the destroyers' JP-5; the HQ's generator):
+    `cook.dmg` hp of structural damage (and flooding) bursting from the module's centre with reach `cook.size x
+    COOK.chainR` (its neighbours take it and may go up in turn, `COOK.depth` = 2 deep), and a fire: `cook.burn` hp/s
+    for `cook.fire` s (`u.fire`, `u.fireRate`; `fireout` when it is out). She may still be lost to it.
+- Events (in this order): `module` (unit, side, module, label, part, disables, pos: its box centre, world), then
+  `cookoff` { unit, type, side, module, label, part, pos (world, the module's centre), at (model frame), size (m: the
+  fireball / blast radius to draw), out ('kill' | 'heavy'), fire (s, heavy only), depth (0 = set off by the hit, 1+ =
+  by another cook-off) }, then `destroyed` if the unit is lost. The visuals (explosions, break-up) listen for
+  `cookoff`.
+
 ## Economy
 
 `sim.buy(side, type)` → true if paid; arrives at the side's spawn after `UNITS[type].buildTime` (aircraft on the
@@ -283,6 +323,8 @@ units a planner put on one spot (game/setup.js runs it on the starting forces).
 | `gunfire` | unit, side, weapon, pos (muzzle), to, aim (where the burst is pointed), tof (s), dur, n (real rounds), hit (always false: rounds resolve in flight, see `gunhit` / `hit`), target, tk, mount, burst (id in `sim.bursts`) |
 | `gunhit` | unit, side, weapon, target (a round), tk, pos, n, part, vel, burst |
 | `damage` / `part` | unit, part, hp / label, disables |
+| `module` | unit, side, module, label, part, disables (what went off with it; [] until its group is all out), pos |
+| `cookoff` / `fireout` | see "Damage: modules and cook-off" / unit, side (a heavy cook-off's fire is out) |
 | `destroyed` / `removed` | unit, type, side, pos, by |
 | `detect` / `classify` / `lost` | side, unit (or proj), track, pos, how ('radar'|'camera'|'esm'|'scan'|'lightning'), cls, name |
 | `scan` | phase 'start' (from, pos, r, delay, by, side) then 'hit' (pos, r, hits: unit ids) |
