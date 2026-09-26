@@ -934,6 +934,16 @@ function detonate() {
   sim = { t: 0, n: 0, phase: 1, W, fill, Mc, Wgas, src, C, cc, rc, inside, prim, SRC: [], holes: [], srcs, WIN: new Float64Array(GV.length),
     T1: srcs.length ? .4 : .25, tMin: .01 + .006 * W3, relax: false, post: 0, maxDef: 0, frags: null, solver: st.solver,
     alpha: 0, cellsTorn: 0, hullTorn: 0, lastSrc: 0, sync: false };
+  // line of sight from an inside charge to the walls of its compartment (machinery flats, enclosure walls, other
+  // decks' edges shadow what lies behind them): rays on the rest geometry, bit 3
+  if (cc !== scene.OUT && W > 0 && st.insideLOS !== false) {
+    for (let c = 0; c < NC; c++) {
+      if (CSP[c] !== cc && CSN[c] !== cc) continue;
+      const xc = [CRC[3 * c], CRC[3 * c + 1], CRC[3 * c + 2]], d = sub(xc, C), L = len(d);
+      if (L < 1e-6 || !firstHit(C, mul(d, 1 / L), L - 1e-3, false, c)) CVIS[c] |= 8;
+    }
+    prim.vis = 3;
+  }
   // line of sight from outside sources (the hull is not convex everywhere): rays on the rest geometry
   if (cc === scene.OUT && W > 0) {
     const Cimg = [C[0], 2 * scene.waterline - C[1], C[2]];
@@ -1026,7 +1036,7 @@ function rebuildSources(t) {
       for (const q of gen) {
         let far;
         if (CSN[c] === q.space) far = CSP[c]; else if (CSP[c] === q.space) far = CSN[c]; else continue;
-        if (q.vis >= 0 && !(CVIS[c] & 1)) continue;
+        if (q.vis >= 0 && !(CVIS[c] & (1 << q.vis))) continue;
         if (q.kind === 1 && q.hole && q.hole.has(c)) continue;
         const p = pulse(q, xc, nn); if (!p) continue;
         const d = sub(xc, q.pos), R = Math.max(len(d), q.rc || .05), ca = Math.abs(dot(d, nn)) / len(d);
