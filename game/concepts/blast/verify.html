@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blast Verify</title>
+<style>
+  :root { --bg: #0B0C0A; --ink: #E9E9E2; --dim: #85867F; --lime: #C6F432; --coral: #FF6A3D; --line: rgba(233,233,226,.13); }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font: 12px/1.55 ui-monospace, 'Geist Mono', monospace; }
+  main { padding: 18px 20px 60px; max-width: 1100px; }
+  h1 { font-size: 13px; font-weight: 500; letter-spacing: .08em; margin: 0 0 4px; }
+  .sub { color: var(--dim); margin-bottom: 14px; }
+  #log div { white-space: pre-wrap; border-top: 1px solid var(--line); padding: 3px 0; }
+  .PASS b { color: var(--lime); font-weight: 500; }
+  .FAIL b { color: var(--coral); font-weight: 500; }
+  .INFO b { color: var(--dim); font-weight: 500; }
+  .sec { color: var(--ink); margin-top: 14px; border-top: 0 !important; letter-spacing: .06em; }
+  #sum { margin: 10px 0; }
+  /* the bench page's own DOM (canvas + controls) lives off screen: blast.js needs it to load */
+  #bench { position: absolute; left: -10000px; top: 0; width: 64px; height: 64px; overflow: hidden; }
+</style>
+</head>
+<body>
+<main>
+  <h1>BLAST BENCH · VERIFICATION</h1>
+  <div class="sub">Runs the bench's own code (blast.js + gpu.js, loaded unmodified plus a read-only accessor). ?only=a,b runs a subset; ?quick=1 skips the slow checks. Results: window.VERIFY.</div>
+  <div id="sum"></div>
+  <div id="log"></div>
+</main>
+<div id="bench"></div>
+<script type="module" src="./verify.js"></script>
+</body>
+</html>
