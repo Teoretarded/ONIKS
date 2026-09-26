@@ -274,13 +274,15 @@ data/modules.js; the numbers of the rules are `COOK` there.
 
 - **A hit** (`applyDamage(sim, u, dmg, src, { part, part2, pos, reach })`) takes `dmg` off the hull hp, marks the
   model part (visual), then bursts as a charge. Where: the struck point (world `pos` into the model frame); a round
-  that struck goes on `COOK.pen` (2 m, at most 0.3 x its reach) along its path (the `hit` event's `vel`) before it
-  bursts; a burst outside the body (a proximity fuze, a shell's fragments) reaches in from the skin; a hit without a
+  that struck goes on `COOK.pen` (2 m, at most 0.3 x its reach) along its path (the velocity of the `hit` event
+  weapons.js emitted just before `applyDamage`) before it bursts; a burst outside the body (a proximity fuze, a shell's fragments) reaches in from the skin; a hit without a
   point bursts at the centre of the part drawn by weight. How far: `reach` = `COOK.reach` x sqrt(dmg) m (0.5-14 m: an
   Oniks 10.7 m, a Tomahawk 8 m, a Kh-35U 7 m, a Hellfire 6 m, a 5" shell 3 m, a few 30 mm rounds 0.5-1 m); the
   munition's stats are its PROJ `dmg` only. Every module within reach takes `dmg x (1 - d / reach)^2 x (1 - armor)`
   (d = distance from the burst to its box; inside the box, all of it). So where a hit lands matters: an Oniks on a
   Burke's aft VLS takes out the 64 cells (and may set them off), one on her bow reaches the gun and its magazine.
+- **The hull** has no box: a ship whose hull part is wrecked (`u.parts.hull` at 1, ~45 % of her hp in hits on it) keeps
+  to `HULL_SLOW[type]` of her speed for good (multiplies `u.slowK`; data/modules.js). Her machinery's losses are modules.
 - **Destroyed** (hp taken >= its hp): its `disables` (a group's: when the whole group is out), `lose` (fractions of
   the named ammunition; 'cargo': TLCs aboard), `slow` (multiplies `u.slowK`), `fatal` (the unit is lost). Event
   `module`.

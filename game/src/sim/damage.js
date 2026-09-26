@@ -4,7 +4,7 @@
    unit plays a death animation (dying 0 -> 1: ships list and settle over ~60 s, vehicles burn ~20 s, aircraft fall)
    and is then removed. The rules: sim/README.md, "Damage: modules and cook-off". */
 import { ENEMY } from '../data/units.js';
-import { COOK } from '../data/modules.js';
+import { COOK, HULL_SLOW } from '../data/modules.js';
 import { DT } from './consts.js';
 import { ground, clamp } from './util.js';
 import { bodyOf, pointUnit, toWorld } from './bodies.js';
@@ -16,6 +16,9 @@ import { bodyOf, pointUnit, toWorld } from './bodies.js';
 export function applyDamage(sim, u, dmg, src, hit) {
   if (!u.alive) return;
   const d = u.def, r = sim.rng.dmg;
+  // a round that struck her (the 'hit' event weapons.js has just emitted, read before this hit emits its own events)
+  const ev = sim.events[sim.events.length - 1];
+  const vel = ev && ev.type === 'hit' && ev.target === u.id && ev.vel && !ev.burst && !ev.blast ? ev.vel : null;
   u.hp -= dmg;
   if (d.domain === 'sea') floodHit(sim, u, dmg, src);
   // the hit lands on one part; some of it spreads to a second part (the visual damage)
@@ -28,7 +31,7 @@ export function applyDamage(sim, u, dmg, src, hit) {
   }
   // the charge: the modules it reaches
   if (d.modules.length) {
-    if (hit && hit.pos) burstAt(sim, u, dmg, hit.pos, hit.reach, src);
+    if (hit && hit.pos) burstAt(sim, u, dmg, hit.pos, hit.reach, src, vel);
     else { partCentre(d, hitPart, MP); burstIn(sim, u, dmg, MP[0], MP[1], MP[2], hit && hit.reach, src, 0, 0); }
   }
   sim.emit('damage', { unit: u.id, side: u.side, part: hitPart, hp: Math.max(0, u.hp), dmg, pos: u.pos.slice() });
@@ -62,11 +65,13 @@ function pickPart(d, r) {
 }
 
 /* the visual damage of a model part (u.parts 0..1); at 1 the 'part' event (the log's "out"; debris blows it off).
-   What a hit switches off is the modules' (below). */
+   What a hit switches off is the modules' (below). One part effect stays: a ship's hull wrecked (holed along her length)
+   keeps her to HULL_SLOW of her speed (data/modules.js; the hull has no box of its own). */
 function hurtPart(sim, u, p, amount) {
   const before = u.parts[p];
   u.parts[p] = Math.min(1, before + amount);
   if (before < 1 && u.parts[p] >= 1) {
+    if (p === 'hull' && HULL_SLOW[u.type]) u.slowK *= HULL_SLOW[u.type];
     const ds = modsIn(u, p);
     sim.emit('part', { unit: u.id, side: u.side, part: p, label: u.def.parts[p].label, disables: ds, pos: u.pos.slice() });
   }
@@ -103,17 +108,16 @@ function toModel(u, wx, wy, wz, out) {
 /* how far a charge of dmg hp reaches inside a unit (m) */
 export function reachOf(dmg) { return clamp(COOK.reach * Math.sqrt(Math.max(0, dmg)), COOK.reachMin, COOK.reachMax); }
 
-/* a charge bursting at a world point. A round that struck goes on a little way inside first (COOK.pen m along its path,
-   from the 'hit' event just emitted); a burst outside the body (a proximity fuze, a shell's fragments on the ground)
-   reaches in from the skin: its reach counts from the nearest point of the body. */
-function burstAt(sim, u, dmg, pos, reach, src) {
-  const R = reach || reachOf(dmg), ev = sim.events[sim.events.length - 1];
-  let px = pos[0], py = pos[1], pz = pos[2];
-  const skin = pointUnit(u, px - u.pos[0], py - u.pos[1], pz - u.pos[2]);
-  if (skin < .3 && ev && ev.type === 'hit' && ev.target === u.id && ev.vel && !ev.burst && !ev.blast) {
-    const v = ev.vel, l = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
-    if (l > 1e-6) { const k = Math.min(COOK.pen, R * .3) / l; px += v[0] * k; py += v[1] * k; pz += v[2] * k; }
-  }
+/* a charge bursting at a world point. A round that struck (vel: its velocity, from the 'hit' event) goes on a little
+   way inside first (COOK.pen m along its path); a burst outside the body (a proximity fuze, a shell's fragments on the
+   ground) reaches in from the skin: its reach counts from the nearest point of the body. */
+function burstAt(sim, u, dmg, pos, reach, src, vel) {
+  const R = reach || reachOf(dmg);
+  let px = pos[0], py = pos[1], pz = pos[2], skin = 0;
+  if (vel) {
+    const l = Math.sqrt(vel[0] * vel[0] + vel[1] * vel[1] + vel[2] * vel[2]);
+    if (l > 1e-6) { const k = Math.min(COOK.pen, R * .3) / l; px += vel[0] * k; py += vel[1] * k; pz += vel[2] * k; }
+  } else skin = pointUnit(u, px - u.pos[0], py - u.pos[1], pz - u.pos[2]);
   toModel(u, px, py, pz, MQ);
   burstIn(sim, u, dmg, MQ[0], MQ[1], MQ[2], R, src, 0, skin);
 }

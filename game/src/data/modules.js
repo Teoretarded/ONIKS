@@ -38,6 +38,11 @@ export const COOK = {
   depth: 2,          // how many cook-offs one can set off in a chain
 };
 
+/* the hull itself (it has no box): a ship whose hull part is wrecked (u.parts.hull at 1, about 45 % of her hp in hits
+   on it: holed along her length, compartments open to the sea) keeps to this fraction of her speed for good
+   (multiplies u.slowK, sim/damage.js). Her machinery's losses are the modules' (engine rooms, shafts). */
+export const HULL_SLOW = { carrier: .7, lhd: .7, ddg: .7, cg: .7, lcs: .6, ssn: .7, ssk: .7, lcac: .7 };
+
 const M = (id, label, part, box, hp, more) => Object.assign({ id, label, part, box, hp }, more || {});
 const kill = (p, size, ammo) => ({ p, size, out: 'kill', ammo });
 const heavy = (p, size, dmg, fire, burn, ammo) => ({ p, size, out: 'heavy', dmg, fire, burn, ammo });
