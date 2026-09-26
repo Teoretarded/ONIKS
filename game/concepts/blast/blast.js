@@ -586,7 +586,7 @@ function build() {
     for (const q of bucket.get(Math.floor(p[0] / BK) + ',' + Math.floor(p[1] / BK) + ',' + Math.floor(p[2] / BK)) || []) {
       if (k >= 4) break;
       const P = PAN[q], d = sub(p, P.o), dn = dot(d, P.n);
-      if (Math.abs(dn) < .02 || Math.abs(dn) > 1.5) continue;
+      if (Math.abs(dn) < .05 || Math.abs(dn) > 1.5) continue;           // closer than 5 cm at rest: a junction, not a contact
       const u = dot(d, P.U), v = dot(d, P.V);
       if (u < -1 || v < -1 || u > P.Lu + 1 || v > P.Lv + 1) continue;
       NCC[4 * i + k++] = q;
