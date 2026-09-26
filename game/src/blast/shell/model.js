@@ -1,14 +1,16 @@
-/* The blast bench's shell model (game/concepts/blast/blast.js at commit ca26a00), ported for the game: the same
+/* The blast bench's shell model (game/concepts/blast/blast.js at commit e00312c), ported for the game: the same
    physics, from a scene built out of a patch spec (blast/spec.js) instead of the bench's test box. No DOM, no GL.
 
    Structure: every quad cell is 4 crossed CST membranes (corotational, plane-stress J2 + linear hardening + Cowper-
    Symonds with strain-dependent constants), dihedral hinges on every shared edge (plate bending, elastic-plastic,
-   membrane interaction), stiffeners as axial members with their bending as a line-angle term on their own nodes, GL
-   mesh-regularised ductile erosion, elastic-plastic anchors with Lysmer-Kuhlemeyer dashpots where the ship continues,
+   membrane interaction), stiffeners as shear-limited (Timoshenko-type) beams on their own line (bending over chords m
+   cells either side, segment shear), web-end ties where a member runs into a perpendicular plate, GL mesh-regularised
+   ductile erosion, elastic-plastic anchors with Lysmer-Kuhlemeyer dashpots where the ship continues,
    water backing below the waterline; nodal stable step with bounded selective mass scaling. Loads: air shock (Kinney-
    Graham, reflection, cos^2, arrival), near-field products impulse, hole and image secondary sources (openings cannot
-   focus: capped by the feeding source), compartment gas with venting, products let in through outside openings,
-   casing fragments. See the bench's header and BENCH.md for the references.
+   focus: capped by the feeding source), water shock of a burst at the waterline (Cole) on the wet plating, compartment
+   gas with venting, products let in through outside openings, casing fragments; the end of a run looks only at what is
+   still joined to the ship (debris does not hold it open). See the bench's header and BENCH.md for the references.
 
    Differences from the bench: the scene comes from the spec (plates -> rectangular pieces, gas spaces, open edges on
    the fixed faces of the patch box, stiffener lines at the ship's frame phase); "up" is an axis of the local frame (side
@@ -218,7 +220,7 @@ export function buildShell(scene, S) {
     for (const ln of pc.lines) {
       const nn = ln.along === 'u' ? pc.nu : pc.nv, sec = tee(ln.sec, ln.spacing, pc.h), heavy = sec.d > .25 ? 2 : 1, line = lineRec.length;
       let run = [], trs = [];
-      const flush = () => { if (trs.length) lineRec.push({ nodes: run, trusses: trs, sec, mat: m, h: pc.h, spacing: ln.spacing, n: pc.n }); run = []; trs = []; };
+      const flush = () => { if (trs.length) lineRec.push({ nodes: run, trusses: trs, sec, mat: m, h: pc.h, spacing: ln.spacing, n: pc.n, pi }); run = []; trs = []; };
       for (let k = 0; k < nn; k++) {
         const [i1, j1, i2, j2] = ln.along === 'u' ? [k, ln.g, k + 1, ln.g] : [ln.g, k, ln.g, k + 1];
         const a = nid(ids[j1 * (pc.nu + 1) + i1]), b = nid(ids[j2 * (pc.nu + 1) + i2]);
@@ -234,6 +236,40 @@ export function buildShell(scene, S) {
       flush();
     }
   });
+  // web ends (bench, AUDIT A1b): where a member runs into a perpendicular plate its web end carries the end reaction
+  // into that plate over the web's depth: a chain of in-plane ties (area A_w) from the seam node into the plate
+  {
+    const ncell = Array.from({ length: N0 }, () => []); for (let c = 0; c < cpan.length; c++) for (let z = 0; z < 4; z++) ncell[cn[4 * c + z]].push(c);
+    const cnorm = c => { const q = [0, 1, 2, 3].map(z => cn[4 * c + z]), P = k => [pos[3 * q[k]], pos[3 * q[k] + 1], pos[3 * q[k] + 2]];
+      return nrm(cross(sub(P(2), P(0)), sub(P(3), P(1)))); };
+    const ccen = c => { const o = [0, 0, 0]; for (let z = 0; z < 4; z++) for (let q = 0; q < 3; q++) o[q] += pos[3 * cn[4 * c + z] + q] / 4; return o; };
+    const P3 = i => [pos[3 * i], pos[3 * i + 1], pos[3 * i + 2]], wkey = new Set();
+    for (const lr of lineRec) {
+      const nd = lr.nodes, sec = lr.sec, m = lr.mat; if (nd.length < 2) continue;
+      for (let j = 0; j < nd.length; j++) {
+        const J = nd[j], own = ncell[J].filter(c => cpan[c] === lr.pi);
+        if (!own.length) continue;
+        const n1 = cnorm(own[0]), t = nrm(sub(P3(nd[Math.min(j + 1, nd.length - 1)]), P3(nd[Math.max(j - 1, 0)])));
+        const other = ncell[J].filter(c => !own.includes(c) && Math.abs(dot(cnorm(c), n1)) < .3 && Math.abs(dot(cnorm(c), t)) > .7);
+        if (!other.length) continue;
+        const pc2 = cpan[other[0]], n2 = cnorm(other[0]); let dv = nrm(cross(n2, nrm(cross(n1, n2))));
+        if (dot(sub(ccen(other[0]), P3(J)), dv) < 0) dv = [-dv[0], -dv[1], -dv[2]];
+        let cur = J, dist = 0;
+        for (let it = 0; it < 12 && dist < sec.d - 1e-3; it++) {
+          let best = -1, bs = -1;
+          for (const c of ncell[cur]) { if (cpan[c] !== pc2) continue;
+            for (let z = 0; z < 4; z++) { const q = cn[4 * c + z]; if (q === cur) continue; const e = sub(P3(q), P3(cur)), el = len(e), al = dot(e, dv) / (el || 1);
+              if (al > .95 && el > 1e-3 && al * el > bs) { bs = al * el; best = q; } } }
+          if (best < 0) break;
+          const key = EK(cur, best);
+          if (!wkey.has(key)) { wkey.add(key); const L = len(sub(P3(best), P3(cur))), A = sec.Aw;
+            ta.push(cur); tb.push(best); tar.push(A); tmat.push(pieces[lr.pi].mat); tsec.push([sec, L]); tkind.push(1); tline.push(-1); tpan.push(pc2);
+            mass[cur] += m.rho * A * L / 2; mass[best] += m.rho * A * L / 2; }
+          dist += bs; cur = best;
+        }
+      }
+    }
+  }
   const onOpen = new Uint8Array(N0); for (const [q] of anchors) onOpen[q] = 1;
   for (const lr of lineRec) for (const [end, t] of [[lr.nodes[0], lr.trusses[0]], [lr.nodes[lr.nodes.length - 1], lr.trusses[lr.trusses.length - 1]]]) {
     if (!onOpen[end]) continue; const m = lr.mat, A = tar[t], cL = Math.sqrt(m.E / m.rho);
@@ -302,38 +338,36 @@ export function buildShell(scene, S) {
     const [sec, L] = tsec[t], m = MATS[TMAT[t]];
     TEF[t] = glf(m, sec.tw, L); TFIB[t] = sec.c / Math.max(L, sec.d);
   }
-  const nodeEdges = new Map();
-  for (const ek of hOfEdge.keys()) { const a = Math.floor(ek / 4194304), b = ek % 4194304; for (const q of [a, b]) { let l = nodeEdges.get(q); if (!l) nodeEdges.set(q, l = []); l.push(ek); } }
-  const tH = new Map();
+  // stiffener bending as a shear-limited (Timoshenko-type) beam on the member's own line (bench a6baec4 / e00312c):
+  // bending as the angle between the chords to the nodes m cells either side (base ~1.5 x depth), transverse shear of
+  // each segment against the chord around it (G A_w); mirror-symmetric axes across the member in its plating
+  const TBA = M.TBA = new Int32Array(NT).fill(-1), TBB = M.TBB = new Int32Array(NT).fill(-1), TSC = M.TSC = new Int32Array(NT).fill(-1), TCL = M.TCL = new Int32Array(NT).fill(-1);
+  const TCL2 = M.TCL2 = new Int32Array(NT).fill(-1), TQN = M.TQN = new Int32Array(4 * NT).fill(-1), TPRV = M.TPRV = new Int32Array(NT).fill(-1), TNXT = M.TNXT = new Int32Array(NT).fill(-1);
+  const TKB = M.TKB = new Float64Array(NT), TQB = M.TQB = new Float64Array(NT), TB0 = M.TB0 = new Float64Array(NT), TKS = M.TKS = new Float64Array(NT), TQS = M.TQS = new Float64Array(NT), TS0 = M.TS0 = new Float64Array(NT);
+  M.TBP = new Float64Array(NT); M.TSP = new Float64Array(NT); const TMM = M.TMM = new Uint8Array(NT).fill(1);
   for (const lr of lineRec) {
-    const { sec, mat: m, h, spacing } = lr;
-    const D = m.E * h ** 3 / (12 * (1 - m.nu * m.nu));
+    const { sec, mat: m, h, spacing } = lr, L = lr.trusses.length, nd = lr.nodes;
+    const D = m.E * h ** 3 / (12 * (1 - m.nu * m.nu)), Gm = m.E / (2 * (1 + m.nu));
     const EIs = Math.max(0, m.E * sec.I - D * spacing), Mps = Math.max(0, m.sy * sec.Zp - m.sy * h * h / 4 * spacing);
-    for (let k = 1; k + 1 < lr.nodes.length; k++) {
-      const p = lr.nodes[k], a = lr.nodes[k - 1], b = lr.nodes[k + 1];
-      const t = nrm([R0[3 * b] - R0[3 * a], R0[3 * b + 1] - R0[3 * a + 1], R0[3 * b + 2] - R0[3 * a + 2]]);
-      const hs = [];
-      for (const ek of nodeEdges.get(p) || []) {
-        const e0 = Math.floor(ek / 4194304), e1 = ek % 4194304, q = e0 === p ? e1 : e0;
-        const ed = nrm([R0[3 * q] - R0[3 * p], R0[3 * q + 1] - R0[3 * p + 1], R0[3 * q + 2] - R0[3 * p + 2]]);
-        if (Math.abs(dot(ed, t)) > .3) continue;
-        for (const hi of hOfEdge.get(ek)) { const c1 = HC[2 * hi], c2 = HC[2 * hi + 1];
-          if (Math.abs(HT0[hi]) < .35 && Math.abs(dot([CNR[3 * c1], CNR[3 * c1 + 1], CNR[3 * c1 + 2]], lr.n)) > .9 && Math.abs(dot([CNR[3 * c2], CNR[3 * c2 + 1], CNR[3 * c2 + 2]], lr.n)) > .9) hs.push(hi); }
-      }
-      for (const hi of hs) {
-        const share = 1 / hs.length;
-        const nodes = [0, 1, 2, 3, 4, 5].map(z => HN[6 * hi + z]), rp = nodes.indexOf(p), ra = nodes.indexOf(a), rb = nodes.indexOf(b);
-        if (rp < 0 || ra < 0 || rb < 0 || HLN[hi] >= 0) continue;
-        HKS[hi] = share * EIs / (.5 * (TL0[lr.trusses[k - 1]] + TL0[lr.trusses[k]])); HMS[hi] = share * Mps;
-        HTR[2 * hi] = lr.trusses[k - 1]; HTR[2 * hi + 1] = lr.trusses[k]; HLN[hi] = rp + 6 * ra + 36 * rb;
-        { const E = sub([R0[3 * HN[6 * hi + 1]], R0[3 * HN[6 * hi + 1] + 1], R0[3 * HN[6 * hi + 1] + 2]], [R0[3 * HN[6 * hi]], R0[3 * HN[6 * hi] + 1], R0[3 * HN[6 * hi] + 2]]), eh = nrm(E);
-          const P = z => [R0[3 * z], R0[3 * z + 1], R0[3 * z + 2]], pr = v => sub(v, mul(eh, dot(v, eh)));
-          const e1 = pr(sub(P(p), P(a))), e2 = pr(sub(P(b), P(p))); HTL0[hi] = Math.atan2(dot(cross(e1, e2), eh), dot(e1, e2)); }
-        for (const tt of [lr.trusses[k - 1], lr.trusses[k]]) { let l = tH.get(tt); if (!l) tH.set(tt, l = []); if (!l.includes(hi)) l.push(hi); }
-      }
+    let Sb = 0; for (const t of lr.trusses) Sb += TL0[t]; Sb /= L;
+    const mm = Math.max(1, Math.min(Math.round(.75 * sec.d / Sb), Math.floor(L / 2)));
+    for (let j = 0; j < L; j++) {
+      const t = lr.trusses[j]; TMM[t] = mm; TPRV[t] = j > 0 ? lr.trusses[j - 1] : -1; TNXT[t] = j + 1 < L ? lr.trusses[j + 1] : -1; TFIB[t] = sec.c / (mm * Sb);
+      const l = emap.get(EK(nd[j], nd[j + 1])) || [];
+      const cs = l.map(([c]) => c).filter(c => Math.abs(dot([CNR[3 * c], CNR[3 * c + 1], CNR[3 * c + 2]], lr.n)) > .9);
+      if (!cs.length && l.length) cs.push(l[0][0]);
+      if (!cs.length) continue;
+      const outer = c => { const o = []; for (let z = 0; z < 4; z++) { const q = CN[4 * c + z]; if (q !== nd[j] && q !== nd[j + 1]) o.push(q); } if (o.length !== 2) return null;
+        const da = q => Math.hypot(R0[3 * q] - R0[3 * nd[j]], R0[3 * q + 1] - R0[3 * nd[j] + 1], R0[3 * q + 2] - R0[3 * nd[j] + 2]); return da(o[0]) <= da(o[1]) ? o : [o[1], o[0]]; };
+      const o1 = outer(cs[0]), o2 = cs.length > 1 ? outer(cs[1]) : null;
+      if (!o1) continue;
+      TCL[t] = cs[0]; TCL2[t] = o2 ? cs[1] : -1;
+      TQN.set([o1[0], o1[1], o2 ? o2[0] : nd[j], o2 ? o2[1] : nd[j + 1]], 4 * t);
+      if (j - mm >= 0 && j + mm <= L && EIs > 0) { TBA[t] = nd[j - mm]; TBB[t] = nd[j + mm]; TKB[t] = EIs / (mm * mm * Sb); TQB[t] = Mps / mm; }
+      if (mm >= 2 && j + 1 - mm >= 0 && j + mm <= L) { TSC[t] = nd[j + 1 - mm]; TBB[t] = nd[j + mm]; TKS[t] = Gm * sec.Aw * Sb; TQS[t] = Sb * m.sy / Math.sqrt(3) * sec.Aw; }
+      const g = memberAngles(M, t, R0); TB0[t] = g[0]; TS0[t] = g[1];
     }
   }
-  for (const [t, l] of tH) for (let k = 0; k < Math.min(4, l.length); k++) THG[4 * t + k] = l[k];
   // ---- stable step, node by node (Gershgorin bound); the few far stiffer nodes get extra mass (bounded selective
   // mass scaling: the added share is reported)
   const kn = new Float64Array(N), Mm = M.M;
@@ -342,9 +376,10 @@ export function buildShell(scene, S) {
       const amin = 2 * A / Math.max(L12, Math.hypot(px, py), Math.hypot(px - L12, py)), k = Ep * CH[c] / 2 * A / (amin * amin);
       for (const z of TRI[t]) kn[CN[4 * c + z]] += k; } }
   for (let t = 0; t < NT; t++) { const k = MATS[TMAT[t]].E * TAR[t] / TL0[t]; kn[TA[t]] += k; kn[TB[t]] += k; }
-  for (let k = 0; k < NH; k++) { const kk = HKP[k] / (HDB[k] * HDB[k]); for (let z = 0; z < 6; z++) kn[HN[6 * k + z]] += z < 2 ? kk : kk / 4;
-    if (HLN[k] >= 0) { const L = TL0[HTR[2 * k]], ks = HKS[k] / (L * L), nodes = [0, 1, 2, 3, 4, 5].map(z => HN[6 * k + z]);
-      kn[nodes[HLN[k] % 6]] += 4 * ks; kn[nodes[Math.floor(HLN[k] / 6) % 6]] += ks; kn[nodes[Math.floor(HLN[k] / 36)]] += ks; } }
+  for (let k = 0; k < NH; k++) { const kk = HKP[k] / (HDB[k] * HDB[k]); for (let z = 0; z < 6; z++) kn[HN[6 * k + z]] += z < 2 ? kk : kk / 4; }
+  for (let t = 0; t < NT; t++) { const Lm = TMM[t] * TL0[t];
+    if (TBA[t] >= 0) { const kb = TKB[t] / (Lm * Lm); kn[TA[t]] += 4 * kb; kn[TBA[t]] += kb; kn[TBB[t]] += kb; }
+    if (TSC[t] >= 0) { const ks = TKS[t] / (TL0[t] * TL0[t]), kc = TKS[t] / ((2 * TMM[t] - 1) * TL0[t]) ** 2; kn[TA[t]] += ks; kn[TB[t]] += ks; kn[TSC[t]] += kc; kn[TBB[t]] += kc; } }
   for (let i = 0; i < N; i++) kn[i] += M.AK[i];
   const dti = []; for (let i = 0; i < N; i++) if (kn[i] > 0 && Mm[i] > 0 && WINV[i] > 0) dti.push(Math.sqrt(Mm[i] / kn[i]));
   dti.sort((a, b) => a - b);
@@ -385,6 +420,33 @@ function hingeGeom(P, x3, x4, f1a, f1b, f2a, f2b) {
   const l1 = len(N1), l2 = len(N2); if (l1 < 1e-12 || l2 < 1e-12) return null;
   const n1 = mul(N1, 1 / l1), n2 = mul(N2, 1 / l2), Eh = mul(E, 1 / lE);
   return { th: Math.atan2(dot(cross(n2, n1), Eh), dot(n1, n2)), lE, h1: l1 / lE, h2: l2 / lE };
+}
+
+/* the member's bending angle (chords to the nodes m either side, about the in-plate axis across the member) and the
+   shear angle of its segment against the chord around it (bench memberAngles; rest values subtracted by the GPU) */
+const MB = { e: [0, 0, 0], D: [0, 0, 0], t: [0, 0, 0], pl: 0, dd: 0, Dd: 0, bad: true }, MSx = { e: [0, 0, 0], D: [0, 0, 0], t: [0, 0, 0], pl: 0, dd: 0, Dd: 0, bad: true };
+function setAxis(o, Dx, Dy, Dz, tx, ty, tz) {
+  const dd = tx * tx + ty * ty + tz * tz, Dd = Dx * tx + Dy * ty + Dz * tz, px = Dx - tx * Dd / dd, py = Dy - ty * Dd / dd, pz = Dz - tz * Dd / dd;
+  const pl = Math.hypot(px, py, pz) || 1e-30;
+  o.bad = pl < .3 * Math.hypot(Dx, Dy, Dz);
+  o.e[0] = -px / pl; o.e[1] = -py / pl; o.e[2] = -pz / pl; o.pl = pl; o.dd = dd; o.Dd = Dd;
+  o.D[0] = Dx; o.D[1] = Dy; o.D[2] = Dz; o.t[0] = tx; o.t[1] = ty; o.t[2] = tz;
+}
+function angAbout(e, ux, uy, uz, vx, vy, vz) { const ex = e[0], ey = e[1], ez = e[2];
+  let q = ux * ex + uy * ey + uz * ez; ux -= q * ex; uy -= q * ey; uz -= q * ez; q = vx * ex + vy * ey + vz * ez; vx -= q * ex; vy -= q * ey; vz -= q * ez;
+  return Math.atan2((uy * vz - uz * vy) * ex + (uz * vx - ux * vz) * ey + (ux * vy - uy * vx) * ez, ux * vx + uy * vy + uz * vz); }
+function memberAngles(M, k, P) {
+  const { TA, TB, TQN, TBA, TBB, TSC } = M;
+  const a = TA[k], b = TB[k], r1 = TQN[4 * k], r2 = TQN[4 * k + 1], l1 = TQN[4 * k + 2], l2 = TQN[4 * k + 3];
+  const tx = P[3 * b] - P[3 * a], ty = P[3 * b + 1] - P[3 * a + 1], tz = P[3 * b + 2] - P[3 * a + 2];
+  let th = 0, ga = 0; MB.bad = MSx.bad = true;
+  if (TBA[k] >= 0) { const A = TBA[k], B = TBB[k];
+    setAxis(MB, P[3 * r1] - P[3 * l1], P[3 * r1 + 1] - P[3 * l1 + 1], P[3 * r1 + 2] - P[3 * l1 + 2], P[3 * B] - P[3 * A], P[3 * B + 1] - P[3 * A + 1], P[3 * B + 2] - P[3 * A + 2]);
+    th = angAbout(MB.e, P[3 * a] - P[3 * A], P[3 * a + 1] - P[3 * A + 1], P[3 * a + 2] - P[3 * A + 2], P[3 * B] - P[3 * a], P[3 * B + 1] - P[3 * a + 1], P[3 * B + 2] - P[3 * a + 2]); }
+  if (TSC[k] >= 0) { const C0 = TSC[k], C1 = TBB[k];
+    setAxis(MSx, .5 * (P[3 * r1] + P[3 * r2] - P[3 * l1] - P[3 * l2]), .5 * (P[3 * r1 + 1] + P[3 * r2 + 1] - P[3 * l1 + 1] - P[3 * l2 + 1]), .5 * (P[3 * r1 + 2] + P[3 * r2 + 2] - P[3 * l1 + 2] - P[3 * l2 + 2]), tx, ty, tz);
+    ga = angAbout(MSx.e, P[3 * C1] - P[3 * C0], P[3 * C1 + 1] - P[3 * C0 + 1], P[3 * C1 + 2] - P[3 * C0 + 2], tx, ty, tz); }
+  return [th, ga];
 }
 
 /* ------------------------------------------------------------ ray grid (rest geometry) */
@@ -458,11 +520,23 @@ export const TA1 = new Float32Array(2048);
 (() => { let t = 0; for (let k = 1; k < 2048; k++) { const Z = k * .02; t += .02 / (340 * Math.sqrt(1 + 6 * kinneyPs(Math.max(Z, .053)) / (7 * P0))); TA1[k] = t; } })();
 const arrival1 = Z => { const k = Math.min(2046, Z / .02), i = Math.floor(k); return TA1[i] + (TA1[i + 1] - TA1[i]) * (k - i); };
 const qsp = (W, Vv) => W > 0 ? 2.25e6 * Math.pow(W / Vv, .72) : 0;
-const PUL = { P: 0, I: 0, TD: 0, TA: 0, Ix: 0, tf: 0, t0: 0, g: 1 };
-function pulse(s, xc, n) {
+const PUL = { P: 0, I: 0, TD: 0, TA: 0, Ix: 0, tf: 0, t0: 0, g: 1, tc: 0 };
+/* water shock of a burst at the waterline (kind 3, wet plating only, depth dc): Cole's similitude, cut off when the
+   free surface's relief arrives (bench waterPulse; the GPU applies it) */
+const C_WS = 1500;
+function waterPulse(s, R, ca, dc) {
+  R = Math.max(R, s.rc); const W3 = Math.cbrt(s.W), X = W3 / R;
+  PUL.P = (1 + ca) * 52.4e6 * Math.pow(X, 1.13); PUL.TD = .084e-3 * W3 * Math.pow(X, -.23);
+  PUL.TA = s.t0 + R / C_WS; PUL.tc = Math.min((Math.sqrt(R * R + 4 * s.ax[0] * Math.max(dc, 0)) - R) / C_WS, 10 * PUL.TD);
+  PUL.I = PUL.P * PUL.TD * (1 - Math.exp(-PUL.tc / PUL.TD)); PUL.Ix = 0; PUL.g = s.gain; PUL.t0 = s.t0;
+  return PUL;
+}
+function pulse(s, xc, n, dc = -1) {
   const dx = xc[0] - s.pos[0], dy = xc[1] - s.pos[1], dz = xc[2] - s.pos[2];
   let R = Math.hypot(dx, dy, dz); if (R < 1e-6) R = 1e-6;
   const ca = Math.abs(dx * n[0] + dy * n[1] + dz * n[2]) / R, c2 = ca * ca;
+  PUL.tc = 0;
+  if (s.kind === 3) return dc >= 0 ? waterPulse(s, R, ca, dc) : null;
   let co = 1;
   if (s.kind === 1) { co = (dx * s.ax[0] + dy * s.ax[1] + dz * s.ax[2]) / R; if (co < 0) return null; co = Math.max(co, .02); }
   R = Math.max(R, s.rc);
@@ -534,6 +608,23 @@ export function loadShell(M, ch) {
       }
     }
   }
+  // a burst at the waterline also drives a shock into the water: the charge's share below (or within 2 charge radii
+  // above) the surface, as an equivalent charge just under it; it loads the wet plating it sees through the water
+  s.water = null;
+  if (cc === sc.OUT && W > 0 && sc.waterline > -1e8) {
+    const hgt = C[up] - sc.waterline, f = Math.min(1, Math.max(0, .5 - .5 * hgt / (2 * rc)));
+    if (f > .01) {
+      const Ww = W * f, rw = Math.cbrt(3 * Ww / (4 * Math.PI * RHO_TNT)), ds = Math.max(0, -hgt) + rw, Cw = C.slice(); Cw[up] = sc.waterline - ds;
+      for (let c = 0; c < NC; c++) {
+        if (CWET[c] < 0 || (CSP[c] !== sc.OUT && CSN[c] !== sc.OUT)) continue;
+        const xc = [CRC[3 * c], CRC[3 * c + 1], CRC[3 * c + 2]], nn = [CNR[3 * c], CNR[3 * c + 1], CNR[3 * c + 2]];
+        const outN = CSP[c] === sc.OUT ? nn : mul(nn, -1);
+        if (dot(sub(Cw, xc), outN) <= 0) continue;
+        const d = sub(xc, Cw), L = len(d); if (!firstHit(M, Cw, mul(d, 1 / L), L - 1e-3, false, c)) M.CVIS[c] |= 4;
+      }
+      s.water = { pos: Cw, W: Ww, Wsrc: Ww, Pm: 0, t0: 0, space: sc.OUT, kind: 3, ax: [ds, 0, 0], gain: 1, rc: rw, vis: 2, plane: null, gen: 0, key: 'W', frac: f };
+    }
+  }
   s.frags = Mc > 0 && ch.frags !== false && fill > 0 ? makeFrags(M, C, fill, Mc, ch.mf || .03) : null;
   // the scorch the game draws: the fire's reach from the charge, lit where it sees (as the lattice's soot)
   M.SOOT = new Float32Array(M.N);
@@ -566,6 +657,7 @@ export function rebuildSources(M, t) {
   const s = M.sim, sc = M.scene, up = sc.up, list = [];
   const { NC, CER, CSP, CSN, CRC, CNR, CAR, CTE, CVIS, GV, GP } = M;
   if (s.W > 0) list.push(s.prim);
+  if (s.water) list.push(s.water);
   const holes = new Map();
   let gen = [s.prim].filter(q => q.W > 0);
   const win = new Float64Array(GV.length);
@@ -579,7 +671,7 @@ export function rebuildSources(M, t) {
         if (CSN[c] === q.space) far = CSP[c]; else if (CSP[c] === q.space) far = CSN[c]; else continue;
         if (q.vis >= 0 && !(CVIS[c] & 1)) continue;
         if (q.kind === 1 && q.hole && q.hole.has(c)) continue;
-        const p = pulse(q, xc, nn); if (!p) continue;
+        const p = pulse(q, xc, nn, M.CWET[c]); if (!p) continue;
         const d = sub(xc, q.pos), R = Math.max(len(d), q.rc || .05), ca = Math.abs(dot(d, nn)) / len(d);
         const Om = CAR[c] * ca / (R * R);
         const fE = q.kind === 1 ? Math.max(0, dot(d, q.ax) / len(d)) * Om / Math.PI : Om / (4 * Math.PI);
@@ -701,11 +793,25 @@ export function commonSync(M, t, torn, hs) {
   gasStep(M, hs);
   return fragStep(M, t);
 }
+/* nodes still joined (through intact cells and members) to the fixed structure; flying debris is not. The end-of-run
+   test and the "quiet" clock look at these only (bench attachedNodes) */
+export function attachedNodes(M) {
+  const N = M.N, par = new Int32Array(N); for (let i = 0; i < N; i++) par[i] = i;
+  const fd = i => { while (par[i] !== i) { par[i] = par[par[i]]; i = par[i]; } return i; }, un = (a, b) => { a = fd(a); b = fd(b); if (a !== b) par[a] = b; };
+  for (let c = 0; c < M.NC; c++) if (!M.CER[c]) { const a = M.CN[4 * c]; for (let k = 1; k < 4; k++) un(a, M.CN[4 * c + k]); }
+  for (let k = 0; k < M.NT; k++) if (!M.TFL[k]) un(M.TA[k], M.TB[k]);
+  const root = new Uint8Array(N); for (let i = 0; i < N; i++) if (M.AK[i] > 0 || M.WINV[i] === 0) root[fd(i)] = 1;
+  const a = new Uint8Array(N); for (let i = 0; i < N; i++) a[i] = root[fd(i)];
+  return a;
+}
+export const attachedCell = (M, c) => { const A = M.ATT; return !A || A[M.CN[4 * c]] || A[M.CN[4 * c + 1]] || A[M.CN[4 * c + 2]] || A[M.CN[4 * c + 3]]; };
 /* the loads over and the structure's kinetic energy down to 5 % of its peak: settle the remaining elastic ringing with
    strong damping (dynamic relaxation) to read the permanent set (bench checkEnd; X, V read back by the caller) */
 export function checkEnd(M) {
   const s = M.sim;
-  let v2 = 0, ke = 0; for (let i = 0; i < M.N; i++) { if (M.FREE[i]) continue; const q = M.V[3 * i] ** 2 + M.V[3 * i + 1] ** 2 + M.V[3 * i + 2] ** 2; ke += .5 * M.M[i] * q; if (q > v2) v2 = q; }
+  if (!M.ATT || s.n - (M.attN || 0) >= 1000) { M.ATT = attachedNodes(M); M.attN = s.n; }
+  const ATT = M.ATT;
+  let v2 = 0, ke = 0; for (let i = 0; i < M.N; i++) { if (M.FREE[i] || !ATT[i]) continue; const q = M.V[3 * i] ** 2 + M.V[3 * i + 1] ** 2 + M.V[3 * i + 2] ** 2; ke += .5 * M.M[i] * q; if (q > v2) v2 = q; }
   let gas = 0; for (let k = 0; k < M.GV.length; k++) if (M.GV[k] < Infinity) gas = Math.max(gas, Math.abs(M.GP[k]));
   const quiet = s.srcs.every(q => q.F > .98) && s.t - s.lastSrc > .005;
   s.kepeak = Math.max(s.kepeak || 0, ke);
@@ -728,7 +834,8 @@ export function markDebris(M) {
 export function gpuModel(M) {
   return { N: M.N, NC: M.NC, NH: M.NH, NT: M.NT, R0: M.R0, M: M.M, WINV: M.WINV, AK: M.AK, AF: M.AF, AC: M.AC, CN: M.CN, CH: M.CH, CMAT: M.CMAT, CEF: M.CEF,
     CSP: M.CSP, CSN: M.CSN, CWET: M.CWET, CAR: M.CAR, CTR: M.CTR, CHG: M.CHG, CDB: M.CDB, CRC: M.CRC, CVIS: () => M.CVIS,
-    HN: M.HN, HC: M.HC, HKP: M.HKP, HMP: M.HMP, HKS: M.HKS, HMS: M.HMS, HT0: M.HT0, HDB: M.HDB, HTR: M.HTR, HHP: M.HHP, HMAT: M.HMAT, HLN: M.HLN, HTL0: M.HTL0,
+    HN: M.HN, HC: M.HC, HKP: M.HKP, HMP: M.HMP, HKS: M.HKS, HMS: M.HMS, HT0: M.HT0, HDB: M.HDB, HTR: M.HTR, HHP: M.HHP, HMAT: M.HMAT, HLN: M.HLN, HTL0: M.HTL0, TBA: M.TBA, TBB: M.TBB, TSC: M.TSC, TCL: M.TCL, TCL2: M.TCL2, TQN: M.TQN, TPRV: M.TPRV, TNXT: M.TNXT,
+    TKB: M.TKB, TQB: M.TQB, TB0: M.TB0, TKS: M.TKS, TQS: M.TQS, TS0: M.TS0, TMM: M.TMM,
     TA: M.TA, TB: M.TB, TL0: M.TL0, TAR: M.TAR, TMAT: M.TMAT, TEF: M.TEF, TFIB: M.TFIB, THG: M.THG, NCC: M.NCC, PAN: M.PAN, CMAP: M.CMAP, MATS, TA1, S: M.S,
     OUT: () => M.scene.OUT, csf, nspace: () => M.GV.length, BETA: () => M.BETA, U_MAX, RHO_W, C_W, P0, G, K_SHEAR, UP: M.up };
 }

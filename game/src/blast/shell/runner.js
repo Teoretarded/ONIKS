@@ -1,21 +1,23 @@
-/* The shell solver's runner (bench ca26a00: shell/model.js, shell/gpu.js): the same interface as the lattice runner
-   (blast/runner.js), so the worker and the game system take either. One GPU instance per patch (the bench's own passes),
-   two patches solved at a time (textures sized to each patch, freed when it settles), the rest queued. Grid 0.25 m
-   (spec.shellS): the bench's cost figures are at that grid.
+/* The shell solver's runner (bench e00312c: shell/model.js; shell/gpu_wgpu.js WebGPU, shell/gpu.js WebGL2): the same
+   interface as the lattice runner (blast/runner.js), so the worker and the game system take either. One GPU instance
+   per patch, two patches solved at a time (buffers sized to each patch, freed when it settles), the rest queued. Grid
+   0.25 m (spec.shellS): the bench's cost figures are at that grid.
 
-   As the bench's interactive runs: torn cells read back asynchronously every sync (the fence passes between frames),
-   the end check on an asynchronous node read every 200 steps; a check run (spec.syncReads) reads blocking, the torn
-   cells every 4th sync, as the bench's headless runCase. The snapshots and results are the same shape as the lattice
-   runner's (skins in each plate's grid order, through the cell map). */
-import { sceneOf, buildShell, loadShell, commonSync, checkEnd, markDebris, openCell, gpuModel, MATS } from './model.js';
+   Backends: WebGPU where the context has a device (o.wg): many steps a command buffer, read backs by mapAsync that
+   never stall (the bench's interactive path); else WebGL2, whose torn-cell and node reads are asynchronous once a pump
+   (a fence polled or a buffer read is a round trip to Chrome's GPU process, busy with the game's frames). A check run
+   (spec.syncReads, WebGL2) reads blocking every sync, as the bench's headless runCase. The snapshots and results are the
+   same shape as the lattice runner's (skins in each plate's grid order, through the cell map). */
+import { sceneOf, buildShell, loadShell, commonSync, checkEnd, markDebris, openCell, gpuModel, attachedCell, MATS } from './model.js';
 import { createGPU } from './gpu.js';
+import { createWGPU } from './gpu_wgpu.js';
 
 const SYNC = 25;
 const SNAP_DT = .0004, SNAP_MS = 60, MAXIN = 9000, RUNNING = 2;
 
 export function createShellRunner(gl, o = {}) {
   const pats = new Map(), queue = [];
-  const stats = { readMs: 0, nodeMs: 0, stepMs: 0, steps: 0, pumps: 0, gpuSteps: 0, built: 0, done: 0, buildMs: 0, snapMs: 0, pumpMs: 0 };
+  const stats = { readMs: 0, nodeMs: 0, stepMs: 0, steps: 0, pumps: 0, gpuSteps: 0, built: 0, done: 0, buildMs: 0, snapMs: 0, pumpMs: 0, backend: o.wg ? 'webgpu' : 'webgl2', skipped: 0 };
   const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
   function submit(id, spec) {
@@ -27,40 +29,43 @@ export function createShellRunner(gl, o = {}) {
     stats.buildMs = R.buildMs; stats.built++;
     pats.set(id, R); queue.push(R);
     admit();
-    return { N: M.N, NS: M.NH + M.NT, NC: M.NC, K: 0, dt: M.dt, T1: M.sim.T1, buildMs: R.buildMs, solver: 'shell', S, massAdded: M.massAdded };
+    return { N: M.N, NS: M.NH + M.NT, NC: M.NC, K: 0, dt: M.dt, T1: M.sim.T1, buildMs: R.buildMs, solver: 'shell', backend: stats.backend, S, massAdded: M.massAdded };
   }
   function admit() {
-    let running = 0; for (const R of pats.values()) if (R.state === 'run') running++;
+    let running = 0; for (const R of pats.values()) if (R.state === 'run' || R.state === 'finishing') running++;
     while (queue.length && running < RUNNING) {
       const R = queue.shift();
       if (R.state !== 'queued') continue;
       try {
-        R.gpu = createGPU(gl, gpuModel(R.M)); R.gpu.upload(); R.gpu.setSources(R.M.sim.SRC); R.gpu.setGas(R.M.GP);
+        const wg = o.wg && !R.spec.syncReads;
+        R.gpu = wg ? createWGPU(o.wg, gpuModel(R.M), { batch: o.batch || 200, depth: o.depth || 2 }) : createGPU(gl, gpuModel(R.M));
+        R.wg = !!wg; R.gpu.upload(); R.gpu.setSources(R.M.sim.SRC); R.gpu.setGas(R.M.GP);
         R.state = 'run'; running++;
       } catch (e) { R.state = 'failed'; R.err = String(e && e.message || e); if (R.gpu) { try { R.gpu.dispose(); } catch (e2) { /* */ } R.gpu = null; } }
     }
   }
   function target(id, t, watch) { const R = pats.get(id); if (R) { R.target = Math.max(R.target, t); if (watch !== undefined) R.watch = !!watch; } }
   function drop(id) { const R = pats.get(id); if (!R) return; if (R.gpu) R.gpu.dispose(); R.gpu = null; R.state = 'dropped'; pats.delete(id); admit(); }
+  const tornFrom = (M, cl) => { let torn = false; if (cl) for (let c = 0; c < M.NC; c++) if (cl[4 * c] > .5 && !M.CER[c]) { M.CER[c] = 1; M.CTE[c] = cl[4 * c + 1]; openCell(M, c, M.CTE[c]); if (attachedCell(M, c)) torn = true; } return torn; };
 
   function pump(stepsMax = 24) {
     stats.pumps++;
     const out = [];
     for (const R of pats.values()) if (R.state === 'failed' && !R.sentFail) { R.sentFail = true; out.push({ type: 'fail', id: R.id, err: R.err }); }
+    for (const R of pats.values()) if (R.state === 'final') { out.push(R.finalMsg); pats.delete(R.id); }
     const run = [...pats.values()].filter(R => R.state === 'run');
-    if (!run.length) return out;
+    if (!run.length) { admit(); return out; }
     const t0 = now();
     let did = 0;
     // the steps go round the running patches, each its share
     const each = Math.max(1, Math.round(stepsMax / run.length));
     for (const R of run) {
       const M = R.M, s = M.sim, g = R.gpu, sync = R.spec.syncReads;
-      // (interactive, as the bench's: the read backs are asynchronous. Here once a pump: a fence polled or a buffer read
-      // is a round trip to the GPU process, which is busy with the game's frames; per sync it cost ~17 ms a call)
+      if (R.wg && g.busy()) { stats.skipped++; continue; }          // WebGPU: its queue is full, the GPU is behind
+      // the latest read back (asynchronous: a pump or so behind the solve)
       let torn = false;
       if (!sync) {
-        const tq = now(), cl = g.readCellsAsync(); stats.readMs += now() - tq;
-        if (cl) for (let c = 0; c < M.NC; c++) if (cl[4 * c] > .5 && !M.CER[c]) { M.CER[c] = 1; M.CTE[c] = cl[4 * c + 1]; openCell(M, c, M.CTE[c]); torn = true; }
+        const tq = now(); torn = tornFrom(M, g.readCellsAsync()); stats.readMs += now() - tq;
         const tn = now();
         if (g.readNodesAsync(M.X, M.V, M.FREE)) { R.fresh = true; if (s.n - (R.endN || 0) >= 200) { R.endN = s.n; checkEnd(M); } }
         stats.nodeMs += now() - tn;
@@ -70,10 +75,7 @@ export function createShellRunner(gl, o = {}) {
         const tq0 = now(); g.step(s.t, M.dt, s.relax ? 250 : s.alpha); stats.stepMs += now() - tq0;
         s.t += M.dt; s.n++; R.steps++; did++;
         if (s.n % SYNC === 0) {
-          if (sync) {
-            const cl = (s.n / SYNC) % 4 === 0 ? g.readCells() : null;
-            if (cl) for (let c = 0; c < M.NC; c++) if (cl[4 * c] > .5 && !M.CER[c]) { M.CER[c] = 1; M.CTE[c] = cl[4 * c + 1]; openCell(M, c, M.CTE[c]); torn = true; }
-          }
+          if (sync && tornFrom(M, g.readCells())) torn = true;
           const dmg = commonSync(M, s.t, torn, SYNC * M.dt); torn = false;
           g.setSources(s.SRC); g.setGas(M.GP);
           if (s.IMPN.length) { g.setImpulses(s.IMPN); s.IMPN.length = 0; }
@@ -82,13 +84,17 @@ export function createShellRunner(gl, o = {}) {
         if (sync && s.n % 200 === 0) { g.readNodes(true, M.X, M.V, M.FREE); checkEnd(M); }
         if (s.t >= s.T1) break;
       }
+      if (R.wg) g.submit();
       if (s.t >= s.T1) R.state = 'finish';
     }
     stats.steps = did; stats.gpuSteps += did;
     const dtMs = now() - t0; stats.pumpMs = dtMs;
     for (const R of run) R.runMs += dtMs / run.length;
     for (const R of run) {
-      if (R.state === 'finish') { out.push(finish(R)); pats.delete(R.id); continue; }
+      if (R.state === 'finish') {
+        if (R.wg) { R.state = 'finishing'; finishWG(R); continue; }
+        out.push(finish(R)); pats.delete(R.id); continue;
+      }
       const s = R.M.sim;
       if (R.watch && s.t - R.lastSnapT >= SNAP_DT && now() - R.lastSnapMs >= SNAP_MS) {
         // (the positions and torn cells of the last asynchronous read back: a frame or so behind the solve)
@@ -99,13 +105,28 @@ export function createShellRunner(gl, o = {}) {
     admit();
     return out;
   }
+  // WebGPU end of run: wait for the queue, then everything the settle reads (bench finishWG); the final goes out on the
+  // next pump
+  async function finishWG(R) {
+    const M = R.M, g = R.gpu;
+    try {
+      await g.readStateAsync({ CEP: M.CEP, CDM: M.CDM, TFL: M.TFL, HTP: M.HTP, HTH: M.HTH, HTPS: M.HTPS, TBP: M.TBP });
+      if (R.state !== 'finishing') return;
+      g.readNodes(true, M.X, M.V, M.FREE);
+      tornFrom(M, g.readCells());
+      R.finalMsg = finalize(R); R.state = 'final';
+    } catch (e) { R.state = 'failed'; R.err = String(e && e.message || e); }
+  }
   function finish(R) {
     const M = R.M, g = R.gpu;
     g.readNodes(true, M.X, M.V, M.FREE);
-    const cl = g.readCells();
-    for (let c = 0; c < M.NC; c++) if (cl[4 * c] > .5 && !M.CER[c]) { M.CER[c] = 1; M.CTE[c] = cl[4 * c + 1]; openCell(M, c, M.CTE[c]); }
-    g.readState({ CEP: M.CEP, CDM: M.CDM, TFL: M.TFL, HTP: M.HTP, HTPS: M.HTPS });
-    g.dispose(); R.gpu = null;
+    tornFrom(M, g.readCells());
+    g.readState({ CEP: M.CEP, CDM: M.CDM, TFL: M.TFL, HTP: M.HTP, HTPS: M.HTPS, TBP: M.TBP });
+    return finalize(R);
+  }
+  function finalize(R) {
+    const M = R.M;
+    R.gpu.dispose(); R.gpu = null;
     R.debris = markDebris(M);
     R.state = 'done'; stats.done++;
     const m = snapshot(R, true);
@@ -278,5 +299,5 @@ export function createShellRunner(gl, o = {}) {
       hole: hole ? { c: loc(hole.x, hole.y, 0), A: hole.A, floor: floor ? loc(hole.x, floor.y + .1, -Math.min(2, R.spec.depth || 2) * .5) : null } : null };
   }
 
-  return { submit, target, drop, pump, stats, pats, queue, get busy() { for (const R of pats.values()) if (R.state === 'run' || R.state === 'queued') return true; return false; } };
+  return { submit, target, drop, pump, stats, pats, queue, get busy() { for (const R of pats.values()) if (R.state === 'run' || R.state === 'queued' || R.state === 'finishing' || R.state === 'final') return true; return false; } };
 }

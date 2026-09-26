@@ -26,7 +26,7 @@ export async function createClient(o = {}) {
           mode: 'worker', w,
           submit(id, spec) { w.postMessage({ type: 'hit', id, spec }); },
           targets(t) { w.postMessage({ type: 'targets', t }); },
-          tick(ms) { w.postMessage({ type: 'tick', ms }); },
+          tick(ms, msShell) { w.postMessage({ type: 'tick', ms, msShell }); },
           drop(id) { w.postMessage({ type: 'drop', id }); },
           cfg(c) { w.postMessage({ type: 'cfg', cfg: c }); },
           stats() { return new Promise(r => { statsRes = r; w.postMessage({ type: 'stats' }); setTimeout(() => r(null), 1000); }); },

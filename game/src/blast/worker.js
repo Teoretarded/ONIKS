@@ -14,13 +14,22 @@ import { createRunner } from './runner.js';
 
 let runner = null, gl = null, fence = null, shell = null, shellP = null;
 const owner = new Map();                // patch id -> the runner solving it
-/* the shell solver (bench ca26a00), loaded when a patch asks for it */
+/* the shell solver (bench e00312c), loaded when a patch asks for it: on WebGPU where the worker has it (its own queue,
+   many steps a command buffer, read backs that never stall), else on this WebGL2 context */
 async function shellRunner() {
   if (shell) return shell;
-  if (!shellP) shellP = import('./shell/runner.js').then(m => (shell = m.createShellRunner(gl)));
+  if (!shellP) shellP = (async () => {
+    let wg = null;
+    if (cfg.webgpu !== false && self.navigator && navigator.gpu) {
+      try { const w = await import('./shell/gpu_wgpu.js'); wg = await w.initWebGPU(); } catch (e) { wg = null; perf.wgErr = String(e && e.message || e); }
+    }
+    const m = await import('./shell/runner.js');
+    shell = m.createShellRunner(gl, { wg, batch: 200, depth: cfg.wgDepth || 1 });
+    return shell;
+  })();
   return shellP;
 }
-const cfg = { us0: 8, usNode: .00125, minSteps: 8, maxSteps: 400, calibrate: false, fixedSteps: 0, shUs0: 50, shUsNode: .002, shMax: 400 };
+const cfg = { us0: 8, usNode: .00125, minSteps: 8, maxSteps: 400, calibrate: false, fixedSteps: 0, shUs0: 50, shUsNode: .002, shMax: 400, wgUs0: 10, wgUsNode: .003, wgMax: 1200 };
 const perf = { slices: 0, skipped: 0, steps: 0, lastMs: 0 };
 function post(m) { const tr = m.transfer || []; delete m.transfer; self.postMessage(m, tr); }
 
@@ -47,7 +56,16 @@ function watchFence() {
   perf.gpuMs = ms; perf.kcal = kcal;
   sent.done = true;
 }
-function slice(ms) {
+function slice(ms, msShell) {
+  // the shell solver on WebGPU: its own queue, paced by what it has in flight (one command buffer: a slice a frame); a
+  // step ~10 us + 3 ns a node of GPU (the bench's timer queries: 97 us on its 31k-cell patch, GPU-bound)
+  if (shell && shell.busy && shell.stats.backend === 'webgpu') {
+    let nodes = 0; for (const R of shell.pats.values()) if (R.state === 'run') nodes += R.M.N;
+    const st = Math.max(8, Math.min(cfg.wgMax, Math.round((msShell || ms) * 1000 / (cfg.wgUs0 + cfg.wgUsNode * nodes))));
+    const t0 = performance.now();
+    try { for (const m of shell.pump(st)) post(m); } catch (e) { post({ type: 'error', err: String(e && e.stack || e) }); }
+    perf.shSteps = shell.stats.steps; perf.shMs = performance.now() - t0; perf.shBudget = msShell || ms;
+  }
   if (fence) {
     if (gl.clientWaitSync(fence, 0, 0) === gl.TIMEOUT_EXPIRED) { perf.skipped++; if (cfg.calibrate) kcal = Math.min(12, kcal * 1.05); return; }
     gl.deleteSync(fence); fence = null;
@@ -55,9 +73,9 @@ function slice(ms) {
   // the shell solver takes its share of the frame first. A step at 0.25 m: ~0.05 ms of GPU for 20k nodes (the bench's
   // timer queries) plus ~0.07 ms of WebGL calls, which Chrome's GPU process runs beside the game's frame: ~50 us + 2 ns
   // a node keeps the game's frame whole (more steps a slice stalled it: p50 5 -> 49 ms at 400 steps)
-  if (shell && shell.busy) {
+  if (shell && shell.busy && shell.stats.backend !== 'webgpu') {
     let nodes = 0; for (const R of shell.pats.values()) if (R.state === 'run') nodes += R.M.N;
-    const share = runner.busy ? ms * .5 : ms, st = Math.max(4, Math.min(cfg.shMax, Math.round(share * 1000 / (cfg.shUs0 + cfg.shUsNode * nodes))));
+    const share = runner.busy ? ms * .5 : (msShell || ms), st = Math.max(4, Math.min(cfg.shMax, Math.round(share * 1000 / (cfg.shUs0 + cfg.shUsNode * nodes))));
     const t0 = performance.now();
     try { for (const m of shell.pump(st)) post(m); } catch (e) { post({ type: 'error', err: String(e && e.stack || e) }); }
     perf.shSteps = shell.stats.steps; perf.shMs = performance.now() - t0;
@@ -87,14 +105,14 @@ self.onmessage = ev => {
   if (!runner) return;
   try {
     switch (m.type) {
-      case 'tick': slice(m.ms || 3); break;
+      case 'tick': slice(m.ms || 3, m.msShell); break;
       case 'hit':
         if (m.spec.solver === 'shell') { shellRunner().then(R => { try { const info = R.submit(m.id, m.spec); owner.set(m.id, R); post({ type: 'built', id: m.id, info }); } catch (e) { post({ type: 'fail', id: m.id, err: String(e && e.stack || e) }); } }); break; }
         { const info = runner.submit(m.id, m.spec); owner.set(m.id, runner); post({ type: 'built', id: m.id, info }); break; }
       case 'targets': for (const k in m.t) { const v = m.t[k], R = owner.get(+k) || runner; if (Array.isArray(v)) R.target(+k, v[0], v[1]); else R.target(+k, v); } break;
       case 'drop': { const R = owner.get(m.id) || runner; R.drop(m.id); owner.delete(m.id); break; }
       case 'cfg': Object.assign(cfg, m.cfg || {}); break;
-      case 'stats': post({ type: 'stats', cfg, perf, stats: runner.stats, shell: shell && shell.stats,
+      case 'stats': post({ type: 'stats', cfg, perf, stats: runner.stats, shell: shell && shell.stats, backend: shell && shell.stats.backend,
         pats: [...runner.pats.values()].map(R => ({ id: R.id, state: R.state, t: R.P.sim.t, T1: R.P.sim.T1, N: R.P.N, steps: R.steps, runMs: R.runMs }))
           .concat(shell ? [...shell.pats.values()].map(R => ({ id: R.id, solver: 'shell', state: R.state, t: R.M.sim.t, T1: R.M.sim.T1, N: R.M.N, steps: R.steps, runMs: R.runMs, watch: R.watch, target: R.target, snapT: R.lastSnapT })) : []) }); break;
     }

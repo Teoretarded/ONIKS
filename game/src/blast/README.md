@@ -7,18 +7,20 @@ like and feeds game/structure's flooding and girder.
 
 | Solver | Bench commit | Model | Cost (RX 9070 XT) | In game |
 |---|---|---|---|---|
-| `lattice` (`patch.js`, `gpu.js`, `runner.js`) | 1596bde | elastic-plastic lattice, velocity tear-out, running cracks, x64 mass scaling once only gas acts | ~52 us a step for 36k nodes; Oniks contact 3.6k steps, inside 8.2k | **default**: an outside hit settles in 0.2-1 s, an inside one in 2-4 s at 3 ms of GPU a frame |
-| `shell` (`shell/`) | ca26a00 | shell FE (CST membranes, J2 + strain-dependent Cowper-Symonds, hinges, stiffener members with their bending on their own nodes, GL mesh-scaled erosion, absorbing edges, water backing, products inflow through openings, hole/image sources that cannot focus, contact, fragments), 0.25 m, no mass scaling (dt ~12 us; 9 us on a carrier's thick plating) | bench box: P-800 contact 13.2k steps 0.86 s, inside 32.6k steps 2.3 s of full GPU (quiet). A step costs ~0.05 ms of GPU plus ~0.07 ms of WebGL calls whatever the patch's size, and the calls run in Chrome's GPU process beside the game's frame | `?blast=shell` (or `ONIKS.game.blast.cfg.solver = 'shell'`). Game patches: outside hits 11-13k steps, inside 20-33k, a carrier 44k; at the lattice's share (3 ms a frame) an inside Oniks took 10-17 s (the lattice 3.4 s, same run); 400 steps a slice brought it to ~4 s but stalled the game's frame (p50 5 -> 49 ms). Not the default until a step costs less |
+| `shell` (`shell/`) | e00312c | shell FE (CST membranes, J2 + strain-dependent Cowper-Symonds, hinges; stiffeners as shear-limited beams on their own line with web-end ties into the plates they meet; GL mesh-scaled erosion, absorbing edges, water backing and a waterline burst's water shock, products inflow through openings, hole/image sources that cannot focus, contact, fragments), 0.25 m, dt ~12 us (9 us on a carrier's plating), no mass scaling | WebGPU (`gpu_wgpu.js`, in the worker: 200 steps a command buffer, mapAsync read backs) or WebGL2 (`gpu.js`, ~30 calls a step). Bench box: P-800 contact 13.6k steps 1.1 s, inside 32.6k steps 1.9 s of full GPU | **default** where the browser has WebGPU: a 6 ms slice a frame (`cfg.gpuMsShell`, 8 in slow motion), ~80-150 steps a frame. In play (60 Hz frames, the GPU shared with another game tab): 5-inch 0.9 s, SM-6 1.4-2.4 s, Kh-35 / Oniks side inside 3.8-4.2 s, waterline 4.9 s, LCS 3.3 s, a carrier 4.6 s, a deck hit 3.3-6.8 s (10.8 under heavy load), a VLS cook-off 6.4 s; the synced frame p50 +5-6 ms, p95 16-21 ms while a hit solves |
+| `lattice` (`patch.js`, `gpu.js`, `runner.js`) | 1596bde | elastic-plastic lattice, velocity tear-out, running cracks, x64 mass scaling once only gas acts | ~52 us a step for 36k nodes; Oniks contact 3.6k steps, inside 8.2k | without WebGPU, the main-thread fallback, `?blast=lattice`: an outside hit settles in 0.2-1 s, an inside one in 2-4 s at 3 ms of GPU a frame |
 
-The shell port matches the bench (ca26a00) on its own test box at 0.25 m (`shell/check.js`, the bench's `runCaseAsync`
-beside it in the same page): P-800 contact side 2.75 m² / second deck 0.19 (bench 2.75 / 0.19, 13.2k steps each, dt
-12.27 us both); SM-6 contact 0.75 (0.75); 5-inch 0 (0), set 51 mm (51); P-800 inside decks 38 / 56 m², bulkheads 35 / 36
-(bench 46-51 / 56-58, 33-37 / 41: its own spread run to run, the torn-cell reads being asynchronous). It carries the
-bench's fixes after 446c6a3: hinges yield on the GPU (5916518: a material uniform was left unset), torn cells reach the
-hole sources, venting and products inflow in synchronous runs (64558bf). Its read backs are asynchronous once a pump
-(every sync, as the bench does, cost ~17 ms a call in the worker: a round trip to the GPU process busy with the game).
-The physics agent keeps optimising the bench (a beam element for 0.125 m, overhead): re-port `shell/model.js` and copy
-`shell/gpu.js` from the next commit (the one change there: gravity along the patch's up axis).
+The shell port matches the bench (e00312c) on its own test box at 0.25 m (`shell/check.js` beside the bench's
+`runCaseAsync` in the same page, WebGPU both): P-800 contact side 3.31 m² / second deck 0.31 (bench 3.31 / 0.25; WebGL2
+3.31 / 0.25), 13.4k steps (13.6k); P-800 inside weather deck 9.75, decks 57.6 / 57.5, bulkheads 48.2 / 33.9 (bench 9.63,
+55.3 / 62.9, 50.9 / 36.1; its torn-cell reads are asynchronous, so runs differ by a few %). The runner feeds both backends
+the same way: loads, gas and impulses set every 25 steps, torn cells and nodes read back asynchronously (once a pump on
+WebGL2: a fence polled or a buffer read there is a round trip to Chrome's GPU process, busy with the game). The bench
+moves on; re-port `shell/model.js` and copy `shell/gpu.js`, `shell/gpu_wgpu.js` from its next commit (the one change in
+each: gravity on free pieces along the patch's up axis).
+
+Known: a hit whose damage reaches the patch's edge (a deck burst, a cook-off: the whole 20 m section torn) shows the
+patch's rectangle as the hole's outline; the plating beyond the patch is not modelled.
 
 | File | What |
 |---|---|
@@ -30,7 +32,7 @@ The physics agent keeps optimising the bench (a beam element for 0.125 m, overhe
 | `worker.js` | the solver in a Web Worker on an OffscreenCanvas WebGL2 context, one slice of steps per game frame (the game's tick carries the GPU time it can spare) |
 | `client.js` | the game's side: the worker, else the runner on the main thread with its own offscreen context, else nothing (the analytic marks stand) |
 | `system.js` | `createBlast(game)`: the game system `blast` (main.js optional list) |
-| `shell/model.js`, `shell/gpu.js`, `shell/runner.js` | the shell solver: the bench's build / loads / sources / gas / fragments from a spec (`sceneOf`: plates -> panels, open edges on the patch's fixed faces, the up axis), its GPU passes (copied; gravity along the up axis), a runner with the lattice runner's interface (grid 0.25 m) |
+| `shell/model.js`, `shell/gpu.js`, `shell/gpu_wgpu.js`, `shell/runner.js` | the shell solver: the bench's build / loads / sources / gas / fragments from a spec (`sceneOf`: plates -> pieces, open edges on the patch's fixed faces, the up axis), its GPU passes on WebGL2 and WebGPU (copied; gravity along the up axis), a runner with the lattice runner's interface (grid 0.25 m) |
 | `lab.js`, `check.js`, `shell/check.js` | dev: staged hits with stills; each bench's test section through this module's runners |
 
 ## In the game

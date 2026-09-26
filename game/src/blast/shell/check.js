@@ -1,10 +1,13 @@
-/* Dev check: the shell bench's test box (game/concepts/blast/blast.js sceneBox at ca26a00: 30 m of a destroyer's side,
+/* Dev check: the shell bench's test box (game/concepts/blast/blast.js sceneBox at e00312c: 30 m of a destroyer's side,
    weather / second / platform decks, two bulkheads, nine spaces) as a patch spec, solved by this module's shell runner
    on the main thread, to compare with the bench's runCase.
      const C = await import('/game/src/blast/shell/check.js'); C.start({ kg: 120, casing: 130, fuze: 'contact', grid: .25 }); ...
-   (async reads between yields, as the bench's runCaseAsync; { sync: true } reads blocking, as its runCase)
+   (async reads between yields, as the bench's runCaseAsync; { webgpu: true } on WebGPU, as its runCaseAsync where it has
+   WebGPU; { sync: true } reads blocking, as its runCase). start() is async (the WebGPU device).
      C.result   (null until done: { areas: [side, weather deck, decks, bulkheads] m^2, setMm, simMs, steps, ms }) */
 import { createShellRunner } from './runner.js';
+import { initWebGPU } from './gpu_wgpu.js';
+let dev = null;
 
 export function boxSpec(o = {}) {
   const XA = -15, XZ = 15, YB = -2, YI = 3.5, YD = 7, ZC = -10, XB = [-10, 5], ZF = -20;
@@ -28,15 +31,16 @@ export function boxSpec(o = {}) {
 }
 export let result = null, runner = null, t0 = 0, last = null;
 export function progress() { const R = runner && [...runner.pats.values()][0]; return R ? { t: R.M.sim.t, steps: R.steps, relax: R.M.sim.relax, T1: R.M.sim.T1, ms: Math.round(performance.now() - t0), state: R.state } : result; }
-export function start(o = {}) {
+export async function start(o = {}) {
   result = null;
   const cv = new OffscreenCanvas(1, 1), gl = cv.getContext('webgl2');
-  const Rn = runner = createShellRunner(gl); t0 = performance.now();
+  if (o.webgpu && !dev) dev = await initWebGPU();
+  const Rn = runner = createShellRunner(gl, { wg: o.webgpu ? dev : null, batch: 200, depth: 3 }); t0 = performance.now();
   const info = Rn.submit(1, boxSpec(o)); Rn.target(1, 10, false);
   const ch = new MessageChannel();
   const tick = () => {
     for (const R of Rn.pats.values()) last = R;
-    for (const m of Rn.pump(o.chunk || 50)) if (m.final) {
+    for (const m of Rn.pump(o.chunk || (o.webgpu ? 200 : 50))) if (m.final) {
       const areas = [0, 0, 0, 0], R = m;
       const spec = boxSpec(o), kinds = spec.plates.map(p => p.kind);
       R.byPlate.forEach((a, p) => { areas[kinds[p]] += a; });

@@ -41,12 +41,13 @@ export async function createBlast(game) {
   let nextId = 1, client = null, mode = 'boot', err = null;
   const pending = [];                    // specs before the client is up
   const upQ = [];                        // atlas uploads to do in the frame
-  // solver: 'lattice' (the bench at 1596bde: the default, a hit in 0.2-4 s) or 'shell' (the audited bench, ca26a00: shell
-  // FE at 0.25 m, dt ~12 us without mass scaling: 12-45k steps a hit, ~7x the lattice's GPU time on the game's patches, so
-  // 5-20 s a hit at the same share; ?blast=shell or ONIKS.game.blast.cfg.solver = 'shell'; ?blast=lattice)
-  const DEFAULT_SOLVER = 'lattice';
+  // solver: 'shell' (the audited bench, e00312c: shell FE at 0.25 m on WebGPU in the worker; the default where the
+  // browser has WebGPU: an outside hit settles in ~1-2.5 s of play, an inside one in ~3-5 s at a 6 ms slice a frame) or
+  // 'lattice' (the bench at 1596bde: without WebGPU, and the main-thread fallback). ?blast=shell / ?blast=lattice, or
+  // ONIKS.game.blast.cfg.solver
+  const DEFAULT_SOLVER = typeof navigator !== 'undefined' && navigator.gpu ? 'shell' : 'lattice';
   const q0 = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('blast') : null;
-  const cfg = { watchDist: 4000, upTexels: 6000, maxDots: 7000, on: q0 !== 'off', gpuMs: 3, gpuMsSlow: 5, shellS: .25,
+  const cfg = { watchDist: 4000, upTexels: 6000, maxDots: 7000, on: q0 !== 'off', gpuMs: 3, gpuMsSlow: 5, gpuMsShell: 6, gpuMsShellSlow: 8, shellS: .25,
     solver: q0 === 'shell' || q0 === 'lattice' ? q0 : DEFAULT_SOLVER };
 
   /* ------------------------------------------------------------ the atlas */
@@ -273,7 +274,10 @@ export async function createBlast(game) {
       const q = game.quality, mx = game.timeRate < .9 || game.paused ? cfg.gpuMsSlow : cfg.gpuMs;
       const other = q && q.gpuMs > 0 ? Math.max(0, q.gpuMs - stats.budget * .8) : 8;
       stats.budget = Math.max(1.5, Math.min(mx, 13.5 - other));
-      client.tick(stats.budget);
+      // (the shell solver's hits take more steps: its share while one is solving, within the same headroom)
+      const mxS = game.timeRate < .9 || game.paused ? cfg.gpuMsShellSlow : cfg.gpuMsShell;
+      stats.budgetShell = stats.shellRunning ? Math.max(1.5, Math.min(mxS, 13.5 - other)) : 0;
+      client.tick(stats.budget, stats.budgetShell || stats.budget);
     }
     // uploads (in the frame: the renderer's GL state stays as it expects)
     if (upQ.length) {
@@ -297,7 +301,7 @@ export async function createBlast(game) {
       stats.upMs = performance.now() - tu;
     }
     // what the game shows now: each running patch's physical time since the hit, and whether it is watched
-    let any = false, run = 0;
+    let any = false, run = 0, runS = 0;
     const eye = R.camera.eye;
     for (const [uid, L] of byUnit) {
       const u = sim.units.get(uid);
@@ -308,7 +312,7 @@ export async function createBlast(game) {
       } else if (rec && L.some(B => B.rects.some(r => r.ready))) packUnit(uid);
       for (const B of L) {
         if (B.state !== 'run' && B.state !== 'wait') continue;
-        run++;
+        run++; if (B.spec.solver === 'shell') runS++;
         const tp = Math.max(0, game.t - B.t0);
         let watch = false;
         if (u && game.drawn && game.drawn.has(uid)) {
@@ -318,7 +322,7 @@ export async function createBlast(game) {
         if (Math.abs(tp - (B.tShow || 0)) > 1e-4 || watch !== B.watch) { TG[B.id] = [tp, watch]; B.tShow = tp; B.watch = watch; any = true; }
       }
     }
-    stats.running = run;
+    stats.running = run; stats.shellRunning = runS;
     for (const uid of gone) if (!(game.structure && game.structure.draws && game.structure.draws(uid))) { gone.delete(uid); dropUnit(uid); }
     if (any && client && client.mode) { client.targets(TG); for (const k in TG) delete TG[k]; lastSent = game.realT; }
     stats.updMs = performance.now() - t0;
