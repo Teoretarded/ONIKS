@@ -39,7 +39,7 @@ const ROUNDS = [
   ['Kh-35', 65], ['Harpoon', 100], ['P-800 Oniks', 120], ['Kalibr · Tomahawk', 200], ['Mk 84 bomb', 500],
 ];
 
-const st = { src: 'charge', round: 7, kg: 120, fuze: 'contact', standoff: 3, mat: 'hsla', h: 10, view: 0, post: 1,
+const st = { solver: 'explicit', hs: 100, iters: 1, patch: false, spd: 0, src: 'charge', round: 7, kg: 120, fuze: 'contact', standoff: 3, mat: 'hsla', h: 10, view: 0, post: 1,
   aim: [0, 2.2, 0], aimN: [0, 0, 1] };
 
 /* ------------------------------------------------------------------ small rng */
@@ -270,6 +270,8 @@ function detonate() {
   for (let i = 0; i < N; i++) if (!LOSF[i] && !(cc < 4 && (NSP[i] === cc || NSN[i] === cc))) SOOT[i] *= .15;
   let tl = 0; for (let i = 0; i < N; i++) if (LOSF[i]) tl = Math.max(tl, TA[i] + TD[i]);
   sim.tLoad = Math.max(sim.tLoad, Math.min(tl, .02 + .004 * W3));
+  sim.solver = st.solver; sim.hs = st.hs * 1e-6; sim.iters = st.iters;
+  prepareActive();
 }
 
 const fireR = W => .5 * 3.86 * Math.pow(Math.max(W, .01), .32);   // fireball radius, m
@@ -363,104 +365,221 @@ function gasStep(h) {
     GP[hi] -= dP; if (lo < 4) GP[lo] += dP * GV[hi] / GV[lo];
   }
 }
-function step() {
-  const s = sim, t = s.t;
-  if (s.slow && s.msc === 1 && t > s.tFast) s.msc = 16;               // quasi-static phase: mass scaling, 4x the step
-  const h = dt * Math.sqrt(s.msc), mi = 1 / s.msc;
-  F.fill(0);
-  for (let q = 0; q < NS; q++) {
-    if (SBRK[q]) continue;
-    const a = SA[q], b = SB[q];
-    const dx = X[3 * b] - X[3 * a], dy = X[3 * b + 1] - X[3 * a + 1], dz = X[3 * b + 2] - X[3 * a + 2];
-    const L = Math.sqrt(dx * dx + dy * dy + dz * dz), L0 = SL0[q];
-    if (L - L0 > SEF[q] * L0) { breakBond(q, t); continue; }   // fracture
-    const k = SK[q], fy = SFY[q];
-    let f = k * (L - SLP[q]);
-    if (f > fy) { SLP[q] = L - fy / k; f = fy; }
-    else if (f < -.12 * fy) { SLP[q] = L + .12 * fy / k; f = -.12 * fy; }      // thin plate buckles early in compression
-    f += SC[q] * ((V[3 * b] - V[3 * a]) * dx + (V[3 * b + 1] - V[3 * a + 1]) * dy + (V[3 * b + 2] - V[3 * a + 2]) * dz) / L;
-    const inv = f / L;
-    F[3 * a] += dx * inv; F[3 * a + 1] += dy * inv; F[3 * a + 2] += dz * inv;
-    F[3 * b] -= dx * inv; F[3 * b + 1] -= dy * inv; F[3 * b + 2] -= dz * inv;
-  }
-  // frames and longitudinals: elastic-plastic ties to the rest of the ship
-  for (let i = 0; i < N; i++) {
-    const k = TK[i]; if (!k || FREE[i]) continue;
-    const dx = X[3 * i] - TAN[3 * i], dy = X[3 * i + 1] - TAN[3 * i + 1], dz = X[3 * i + 2] - TAN[3 * i + 2];
-    const d = Math.sqrt(dx * dx + dy * dy + dz * dz); if (d < 1e-9) continue;
-    let f = k * d; const fy = TFY[i];
-    if (f > fy) { const back = fy / k / d; TAN[3 * i] = X[3 * i] - dx * back; TAN[3 * i + 1] = X[3 * i + 1] - dy * back; TAN[3 * i + 2] = X[3 * i + 2] - dz * back; f = fy; }
-    const inv = f / d;
-    F[3 * i] -= dx * inv; F[3 * i + 1] -= dy * inv; F[3 * i + 2] -= dz * inv;
-  }
-  // bending
-  for (let i = 0; i < N; i++) {
-    const kb = KB[i]; if (!kb || FREE[i]) continue;
-    let mx = 0, my = 0, mz = 0, vx = 0, vy = 0, vz = 0, n = 0;
-    for (let k = UNB[i]; k < UNB[i + 1]; k++) { const q = UN[k]; if (SBRK[q]) continue; const j = SA[q] === i ? SB[q] : SA[q];
-      mx += X[3 * j]; my += X[3 * j + 1]; mz += X[3 * j + 2]; vx += V[3 * j]; vy += V[3 * j + 1]; vz += V[3 * j + 2]; n++; }
-    if (n < UNB[i + 1] - UNB[i]) continue;          // an edge of a tear bends freely
-    const ex = mx / n - X[3 * i] - UB[3 * i], ey = my / n - X[3 * i + 1] - UB[3 * i + 1], ez = mz / n - X[3 * i + 2] - UB[3 * i + 2];
-    const e = Math.sqrt(ex * ex + ey * ey + ez * ez); let f = kb * e;
-    if (f > KBY[i]) { const back = (f - KBY[i]) / kb / e; UB[3 * i] += ex * back; UB[3 * i + 1] += ey * back; UB[3 * i + 2] += ez * back; f = KBY[i]; }
-    const g = e > 1e-12 ? f / e : 0, c = KBC[i];
-    F[3 * i] += ex * g + c * (vx / n - V[3 * i]); F[3 * i + 1] += ey * g + c * (vy / n - V[3 * i + 1]); F[3 * i + 2] += ez * g + c * (vz / n - V[3 * i + 2]);
-  }
-  // sources, then the gas moves through whatever has torn open
+// the parts of the model a solver works on: nodes that can move and bonds with at least one of them
+let ANODES = new Int32Array(0), ASPR = new Int32Array(0), WINV = null, XP = null;
+function prepareActive() {
+  const s = sim; WINV = new Float64Array(N); XP = new Float64Array(3 * N);
+  const act = new Uint8Array(N);
+  if (st.patch && !s.srcs.length && s.W > 0) {
+    // local patch: every node the shock moves faster than 2 m/s, plus a 1.5 m margin; the rest stays put
+    let rp = 0;
+    for (let i = 0; i < N; i++) if (LOSF[i] && s.PR[i] * s.TD[i] / 2 / RH[i] > 2) rp = Math.max(rp, Math.hypot(X[3 * i] - s.C[0], X[3 * i + 1] - s.C[1], X[3 * i + 2] - s.C[2]));
+    rp += 1.5; s.patchR = rp;
+    for (let i = 0; i < N; i++) if (Math.hypot(X[3 * i] - s.C[0], X[3 * i + 1] - s.C[1], X[3 * i + 2] - s.C[2]) < rp) act[i] = 1;
+  } else { act.fill(1); s.patchR = 0; }
+  const an = [];
+  for (let i = 0; i < N; i++) if (act[i] && !FIX[i]) { an.push(i); WINV[i] = 1 / M[i]; }
+  const as = [];
+  for (let q = 0; q < NS; q++) if (WINV[SA[q]] + WINV[SB[q]] > 0) as.push(q);
+  ANODES = Int32Array.from(an); ASPR = Int32Array.from(as);
+}
+
+// shared: sources and gas flow, the shock coming into view through new holes
+function sourcesAndGas(t, h) {
+  const s = sim;
   for (const q of s.srcs) {
     const Fn = q.kind === 'det' ? Math.min(1, t / q.tau) : 1 - Math.exp(-t / q.tau);
     GP[q.c] += q.Pq * (Fn - q.F); q.F = Fn;
   }
   gasStep(h);
-  // holes open: more plating comes into the charge's view while the shock is still passing
   if ((s.n & 7) === 0 && s.W > 0 && t < s.tLoad) {
-    for (let i = 0; i < N; i++) if (!LOSF[i] && !FIX[i] && t > s.TA[i] - 5e-4 && t < s.TA[i] + s.TD[i] && visible(i, s.C)) LOSF[i] = 1;
+    for (let k = 0; k < ANODES.length; k++) { const i = ANODES[k];
+      if (!LOSF[i] && t > s.TA[i] - 5e-4 && t < s.TA[i] + s.TD[i] && visible(i, s.C)) LOSF[i] = 1; }
   }
-  // loads: gas on both faces of every plate; the shock only where the charge can see
-  for (let i = 0; i < N; i++) {
-    if (FIX[i]) continue;
-    const dp = GP[NSN[i]] - GP[NSP[i]];
-    let fx = 0, fy = 0, fz = 0;
-    if (dp !== 0 && !FREE[i]) { const f = dp * AREA[i]; fx = NRM[3 * i] * f; fy = NRM[3 * i + 1] * f; fz = NRM[3 * i + 2] * f; }
-    if (LOSF[i]) {
-      const tl = t - s.TA[i];
-      if (tl > 0 && tl < s.TD[i]) {
-        const p = s.PR[i] * (1 - tl / s.TD[i]), f = p * AREA[i];
-        fx += s.DIR[3 * i] * f; fy += s.DIR[3 * i + 1] * f; fz += s.DIR[3 * i + 2] * f;
-        if (!DISC[i] && (IMP[i] += p * h) / RH[i] > VC[i]) disc(i, t);
+}
+// the shock's impulse per unit area on node i between t0 and t1 (triangular pulse, exact integral)
+function shockImp(i, t0, t1) {
+  const s = sim, TD = s.TD[i]; let a = t0 - s.TA[i], b = t1 - s.TA[i];
+  if (b <= 0 || a >= TD) return 0;
+  if (a < 0) a = 0; if (b > TD) b = TD;
+  return s.PR[i] * ((b - b * b / (2 * TD)) - (a - a * a / (2 * TD)));
+}
+
+/* ---- solver 1: explicit mass-spring (reference). Forces from elastic-plastic bonds, symplectic Euler at the
+   stable step of the stiffest bond (~23 us). Mass-scaled x16 once only the slow gas load is left. */
+const PROF = { bonds: 0, nodes: 0, loads: 0, integ: 0, coll: 0, n: 0 };
+function stepExplicit() {
+  const s = sim, t = s.t; let T0 = performance.now(), T1;
+  if (s.slow && s.msc === 1 && t > s.tFast) s.msc = 16;
+  const h = dt * Math.sqrt(s.msc), mi = 1 / s.msc;
+  for (let k = 0; k < ANODES.length; k++) { const i = ANODES[k]; F[3 * i] = F[3 * i + 1] = F[3 * i + 2] = 0; }
+  for (let k2 = 0; k2 < ASPR.length; k2++) {
+    const q = ASPR[k2]; if (SBRK[q]) continue;
+    const a = SA[q], b = SB[q];
+    const dx = X[3 * b] - X[3 * a], dy = X[3 * b + 1] - X[3 * a + 1], dz = X[3 * b + 2] - X[3 * a + 2];
+    const L = Math.sqrt(dx * dx + dy * dy + dz * dz), L0 = SL0[q];
+    if (L - L0 > SEF[q] * L0) { breakBond(q, t); continue; }
+    const k = SK[q], fy = SFY[q];
+    let f = k * (L - SLP[q]);
+    if (f > fy) { SLP[q] = L - fy / k; f = fy; }
+    else if (f < -.12 * fy) { SLP[q] = L + .12 * fy / k; f = -.12 * fy; }
+    f += SC[q] * ((V[3 * b] - V[3 * a]) * dx + (V[3 * b + 1] - V[3 * a + 1]) * dy + (V[3 * b + 2] - V[3 * a + 2]) * dz) / L;
+    const inv = f / L;
+    F[3 * a] += dx * inv; F[3 * a + 1] += dy * inv; F[3 * a + 2] += dz * inv;
+    F[3 * b] -= dx * inv; F[3 * b + 1] -= dy * inv; F[3 * b + 2] -= dz * inv;
+  }
+  T1 = performance.now(); PROF.bonds += T1 - T0; T0 = T1;
+  for (let k2 = 0; k2 < ANODES.length; k2++) {
+    const i = ANODES[k2];
+    const k = TK[i];
+    if (k && !FREE[i]) {                             // frames and longitudinals: elastic-plastic ties
+      const dx = X[3 * i] - TAN[3 * i], dy = X[3 * i + 1] - TAN[3 * i + 1], dz = X[3 * i + 2] - TAN[3 * i + 2];
+      const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (d > 1e-9) {
+        let f = k * d; const fy = TFY[i];
+        if (f > fy) { const back = fy / k / d; TAN[3 * i] = X[3 * i] - dx * back; TAN[3 * i + 1] = X[3 * i + 1] - dy * back; TAN[3 * i + 2] = X[3 * i + 2] - dz * back; f = fy; }
+        const inv = f / d; F[3 * i] -= dx * inv; F[3 * i + 1] -= dy * inv; F[3 * i + 2] -= dz * inv;
       }
     }
-    F[3 * i] += fx; F[3 * i + 1] += fy; F[3 * i + 2] += fz;
+    const kb = KB[i];
+    if (kb && !FREE[i]) {                            // plastic bending
+      let mx = 0, my = 0, mz = 0, vx = 0, vy = 0, vz = 0, n = 0;
+      for (let kk = UNB[i]; kk < UNB[i + 1]; kk++) { const q = UN[kk]; if (SBRK[q]) continue; const j = SA[q] === i ? SB[q] : SA[q];
+        mx += X[3 * j]; my += X[3 * j + 1]; mz += X[3 * j + 2]; vx += V[3 * j]; vy += V[3 * j + 1]; vz += V[3 * j + 2]; n++; }
+      if (n === UNB[i + 1] - UNB[i]) {
+        const ex = mx / n - X[3 * i] - UB[3 * i], ey = my / n - X[3 * i + 1] - UB[3 * i + 1], ez = mz / n - X[3 * i + 2] - UB[3 * i + 2];
+        const e = Math.sqrt(ex * ex + ey * ey + ez * ez); let f = kb * e;
+        if (f > KBY[i]) { const back = (f - KBY[i]) / kb / e; UB[3 * i] += ex * back; UB[3 * i + 1] += ey * back; UB[3 * i + 2] += ez * back; f = KBY[i]; }
+        const g = e > 1e-12 ? f / e : 0, c = KBC[i];
+        F[3 * i] += ex * g + c * (vx / n - V[3 * i]); F[3 * i + 1] += ey * g + c * (vy / n - V[3 * i + 1]); F[3 * i + 2] += ez * g + c * (vz / n - V[3 * i + 2]);
+      }
+    }
+  }
+  T1 = performance.now(); PROF.nodes += T1 - T0; T0 = T1;
+  sourcesAndGas(t, h);
+  for (let k = 0; k < ANODES.length; k++) {
+    const i = ANODES[k];
+    const dp = GP[NSN[i]] - GP[NSP[i]];
+    if (dp !== 0 && !FREE[i]) { const f = dp * AREA[i]; F[3 * i] += NRM[3 * i] * f; F[3 * i + 1] += NRM[3 * i + 1] * f; F[3 * i + 2] += NRM[3 * i + 2] * f; }
+    if (LOSF[i]) {
+      const I = shockImp(i, t, t + h);
+      if (I > 0) { const f = I / h * AREA[i]; F[3 * i] += s.DIR[3 * i] * f; F[3 * i + 1] += s.DIR[3 * i + 1] * f; F[3 * i + 2] += s.DIR[3 * i + 2] * f;
+        if (!DISC[i] && (IMP[i] += I) / RH[i] > VC[i]) disc(i, t); }
+    }
   }
   if ((s.n & 3) === 0) runCracks(t);
-  // integrate
+  T1 = performance.now(); PROF.loads += T1 - T0; T0 = T1;
   const damp = 1 - (t > s.tLoad && !s.slow ? 250 : 30) * h;
-  for (let i = 0; i < N; i++) {
-    if (FIX[i]) continue;
-    const im = h / M[i] * mi;
-    let vx = (V[3 * i] + F[3 * i] * im) * damp, vy = (V[3 * i + 1] + (F[3 * i + 1] * im) - (FREE[i] ? G * h : 0)) * damp, vz = (V[3 * i + 2] + F[3 * i + 2] * im) * damp;
+  for (let k = 0; k < ANODES.length; k++) {
+    const i = ANODES[k], im = h / M[i] * mi;
+    const vx = (V[3 * i] + F[3 * i] * im) * damp, vy = (V[3 * i + 1] + F[3 * i + 1] * im - (FREE[i] ? G * h : 0)) * damp, vz = (V[3 * i + 2] + F[3 * i + 2] * im) * damp;
     V[3 * i] = vx; V[3 * i + 1] = vy; V[3 * i + 2] = vz;
     X[3 * i] += vx * h; X[3 * i + 1] += vy * h; X[3 * i + 2] += vz * h;
   }
-  collide();
-  s.t += h;
-  if (++s.n % 200 === 0 && s.t > s.tLoad && s.srcs.every(q => q.F > .98) && GP[0] + GP[1] + GP[2] + GP[3] < 2e4) {
-    let v2 = 0; for (let i = 0; i < N; i++) if (!FREE[i] && !FIX[i]) { const q = V[3 * i] * V[3 * i] + V[3 * i + 1] * V[3 * i + 1] + V[3 * i + 2] * V[3 * i + 2]; if (q > v2) v2 = q; }
+  T1 = performance.now(); PROF.integ += T1 - T0; T0 = T1;
+  collide(false);
+  PROF.coll += performance.now() - T0; PROF.n++;
+  s.t += h; s.n++;
+}
+
+/* ---- solver 2: XPBD with small steps (Macklin et al. 2016/2019). Loads as impulses over each substep, then one
+   pass of compliant constraints: bonds with compliance 1/k whose elastic stretch can't pass yield (the rest length
+   flows) and whose correction can't carry more than the yield force over the substep; ties the same; bending as a
+   capped soft pull; contacts as positions. Velocities from positions. Stable at any step; the step sets accuracy. */
+function stepXPBD() {
+  const s = sim, t = s.t;
+  const h = s.hs * (s.slow && t > s.tFast ? 4 : 1);
+  sourcesAndGas(t, h);
+  for (let k = 0; k < ANODES.length; k++) {
+    const i = ANODES[k], w = WINV[i];
+    let jx = 0, jy = 0, jz = 0;
+    const dp = GP[NSN[i]] - GP[NSP[i]];
+    if (dp !== 0 && !FREE[i]) { const f = dp * AREA[i] * h; jx += NRM[3 * i] * f; jy += NRM[3 * i + 1] * f; jz += NRM[3 * i + 2] * f; }
+    if (LOSF[i]) {
+      const I = shockImp(i, t, t + h);
+      if (I > 0) { const f = I * AREA[i]; jx += s.DIR[3 * i] * f; jy += s.DIR[3 * i + 1] * f; jz += s.DIR[3 * i + 2] * f;
+        if (!DISC[i] && (IMP[i] += I) / RH[i] > VC[i]) disc(i, t); }
+    }
+    V[3 * i] += jx * w; V[3 * i + 1] += jy * w - (FREE[i] ? G * h : 0); V[3 * i + 2] += jz * w;
+    XP[3 * i] = X[3 * i]; XP[3 * i + 1] = X[3 * i + 1]; XP[3 * i + 2] = X[3 * i + 2];
+    X[3 * i] += V[3 * i] * h; X[3 * i + 1] += V[3 * i + 1] * h; X[3 * i + 2] += V[3 * i + 2] * h;
+  }
+  const h2 = h * h;
+  for (let it = 0; it < s.iters; it++) {
+    for (let k2 = 0; k2 < ASPR.length; k2++) {
+      const q = ASPR[k2]; if (SBRK[q]) continue;
+      const a = SA[q], b = SB[q], wa = WINV[a], wb = WINV[b];
+      const dx = X[3 * b] - X[3 * a], dy = X[3 * b + 1] - X[3 * a + 1], dz = X[3 * b + 2] - X[3 * a + 2];
+      const L = Math.sqrt(dx * dx + dy * dy + dz * dz), L0 = SL0[q];
+      if (L - L0 > SEF[q] * L0) { breakBond(q, t); continue; }
+      const k = SK[q], fy = SFY[q], ey = fy / k, ec = .12 * ey;
+      let C = L - SLP[q];
+      if (C > ey) { SLP[q] = L - ey; C = ey; } else if (C < -ec) { SLP[q] = L + ec; C = -ec; }
+      let dl = -C / (wa + wb + 1 / (k * h2));
+      const cap = fy * h2; if (dl < -cap) dl = -cap; else if (dl > .12 * cap) dl = .12 * cap;
+      const g = dl / L;
+      X[3 * a] -= wa * g * dx; X[3 * a + 1] -= wa * g * dy; X[3 * a + 2] -= wa * g * dz;
+      X[3 * b] += wb * g * dx; X[3 * b + 1] += wb * g * dy; X[3 * b + 2] += wb * g * dz;
+    }
+  }
+  for (let k2 = 0; k2 < ANODES.length; k2++) {
+    const i = ANODES[k2], w = WINV[i];
+    const k = TK[i];
+    if (k && !FREE[i]) {
+      const dx = X[3 * i] - TAN[3 * i], dy = X[3 * i + 1] - TAN[3 * i + 1], dz = X[3 * i + 2] - TAN[3 * i + 2];
+      let d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (d > 1e-9) {
+        const ey = TFY[i] / k;
+        if (d > ey) { const back = ey / d; TAN[3 * i] = X[3 * i] - dx * back; TAN[3 * i + 1] = X[3 * i + 1] - dy * back; TAN[3 * i + 2] = X[3 * i + 2] - dz * back; }
+        const C = Math.min(d, ey); let dl = -C / (w + 1 / (k * h2)); const cap = TFY[i] * h2; if (dl < -cap) dl = -cap;
+        const g = dl / d * w; X[3 * i] += dx * g; X[3 * i + 1] += dy * g; X[3 * i + 2] += dz * g;
+      }
+    }
+    const kb = KB[i];
+    if (kb && !FREE[i]) {
+      let mx = 0, my = 0, mz = 0, n = 0;
+      for (let kk = UNB[i]; kk < UNB[i + 1]; kk++) { const q = UN[kk]; if (SBRK[q]) continue; const j = SA[q] === i ? SB[q] : SA[q];
+        mx += X[3 * j]; my += X[3 * j + 1]; mz += X[3 * j + 2]; n++; }
+      if (n === UNB[i + 1] - UNB[i]) {
+        let ex = mx / n - X[3 * i] - UB[3 * i], ey = my / n - X[3 * i + 1] - UB[3 * i + 1], ez = mz / n - X[3 * i + 2] - UB[3 * i + 2];
+        const e = Math.sqrt(ex * ex + ey * ey + ez * ez), f = kb * e;
+        if (f > KBY[i]) { const r = 1 - KBY[i] / f; UB[3 * i] += ex * r; UB[3 * i + 1] += ey * r; UB[3 * i + 2] += ez * r; ex *= 1 - r; ey *= 1 - r; ez *= 1 - r; }
+        const c = kb * h2 * w, sfac = c / (1 + c);
+        X[3 * i] += ex * sfac; X[3 * i + 1] += ey * sfac; X[3 * i + 2] += ez * sfac;
+      }
+    }
+  }
+  collide(true);
+  if ((s.n & 3) === 0) runCracks(t);
+  const damp = Math.max(0, 1 - (t > s.tLoad && !s.slow ? 250 : 30) * h), ih = 1 / h;
+  for (let k = 0; k < ANODES.length; k++) {
+    const i = ANODES[k];
+    V[3 * i] = (X[3 * i] - XP[3 * i]) * ih * damp; V[3 * i + 1] = (X[3 * i + 1] - XP[3 * i + 1]) * ih * damp; V[3 * i + 2] = (X[3 * i + 2] - XP[3 * i + 2]) * ih * damp;
+  }
+  s.t += h; s.n++;
+}
+
+function step() {
+  const s = sim;
+  if (s.solver === 'xpbd') stepXPBD(); else stepExplicit();
+  if (s.n % 200 === 0 && s.t > s.tLoad && s.srcs.every(q => q.F > .98) && GP[0] + GP[1] + GP[2] + GP[3] < 2e4) {
+    let v2 = 0; for (let k = 0; k < ANODES.length; k++) { const i = ANODES[k]; if (FREE[i]) continue;
+      const q = V[3 * i] * V[3 * i] + V[3 * i + 1] * V[3 * i + 1] + V[3 * i + 2] * V[3 * i + 2]; if (q > v2) v2 = q; }
     if (v2 < 1) s.T1 = s.t;                       // settled early
   }
 }
+
 // plates can't pass through each other: a node that crosses another plate's intact cell is put back on its side
-// and shares its momentum with that cell (inelastic contact)
-function collide() {
-  for (let i = 0; i < N; i++) {
-    if (FIX[i]) continue;
-    const own = SURF[i];
+// (and, in the explicit solver, shares its momentum with that cell: an inelastic contact)
+function collide(posOnly) {
+  for (let k = 0; k < ANODES.length; k++) {
+    const i = ANODES[k], own = SURF[i];
     for (let p = 0; p < 4; p++) {
       if (p === own) continue;
       const P = PL[p], ax = P.ax, rest = R0[3 * i + ax] - P.val;
-      if (rest > -1e-3 && rest < 1e-3) continue;                    // a seam node lies on this plate
+      if (rest > -1e-3 && rest < 1e-3) continue;
       const cur = X[3 * i + ax] - P.val;
-      if (cur * rest > 0 && (cur > 1.5 || cur < -1.5)) continue;     // far from it
+      if (cur * rest > 0 && (cur > 1.5 || cur < -1.5)) continue;
       const ci = Math.floor((X[3 * i + P.ua] - P.u0) / S), cj = Math.floor((X[3 * i + P.va] - P.v0) / S);
       if (ci < 0 || cj < 0 || ci >= P.nu || cj >= P.nv) continue;
       const c = P.off + cj * P.nu + ci; if (CTORN[c]) continue;
@@ -468,14 +587,22 @@ function collide() {
       const plane = (X[3 * a + ax] + X[3 * b + ax] + X[3 * cc + ax] + X[3 * d + ax]) / 4;
       const sd = rest > 0 ? 1 : -1, gap = (X[3 * i + ax] - plane) * sd;
       if (gap > .015) continue;
+      if (posOnly) {                                 // split the overlap by inverse mass
+        const w4 = (WINV[a] + WINV[b] + WINV[cc] + WINV[d]) / 4, wi = WINV[i], pen = .015 - gap, tot = wi + w4 || 1;
+        X[3 * i + ax] += sd * pen * wi / tot;
+        const m = -sd * pen * w4 / tot / (w4 || 1);
+        if (WINV[a]) X[3 * a + ax] += m * WINV[a]; if (WINV[b]) X[3 * b + ax] += m * WINV[b];
+        if (WINV[cc]) X[3 * cc + ax] += m * WINV[cc]; if (WINV[d]) X[3 * d + ax] += m * WINV[d];
+        continue;
+      }
       X[3 * i + ax] = plane + .015 * sd;
       const vc = (V[3 * a + ax] + V[3 * b + ax] + V[3 * cc + ax] + V[3 * d + ax]) / 4, rel = (V[3 * i + ax] - vc) * sd;
       if (rel < 0) {
         const J = rel * sd * M[i];
         V[3 * i + ax] -= rel * sd;
         const m4 = M[a] + M[b] + M[cc] + M[d];
-        if (!FIX[a]) V[3 * a + ax] += J / m4; if (!FIX[b]) V[3 * b + ax] += J / m4;
-        if (!FIX[cc]) V[3 * cc + ax] += J / m4; if (!FIX[d]) V[3 * d + ax] += J / m4;
+        if (WINV[a]) V[3 * a + ax] += J / m4; if (WINV[b]) V[3 * b + ax] += J / m4;
+        if (WINV[cc]) V[3 * cc + ax] += J / m4; if (WINV[d]) V[3 * d + ax] += J / m4;
       }
     }
   }
@@ -593,16 +720,19 @@ function fireball(tv) {
 }
 
 let frameT = performance.now(), lastRate = 0;
+const SPEEDS = [0, 1, .1, .01, .001], SPEED_NAMES = ['max', '×1', '×0.1', '×0.01', '×0.001'];
 function draw(now) {
   const rdt = Math.min(.05, (now - frameT) / 1000); frameT = now;
   // --- advance
+  // speed: 0 = as fast as the solver goes (budget 12 ms a frame), else a fixed time rate (x1 ... x0.001)
+  const spd = SPEEDS[st.spd];
   if (sim && sim.phase === 1) {
-    const t0 = performance.now(), ts = sim.t;
-    while (performance.now() - t0 < 12 && sim.t < sim.T1) for (let k = 0; k < 25 && sim.t < sim.T1; k++) step();
+    const t0 = performance.now(), ts = sim.t, goal = spd ? ts + rdt * spd : Infinity;
+    while (performance.now() - t0 < 12 && sim.t < sim.T1 && sim.t < goal) for (let k = 0; k < 10 && sim.t < sim.T1 && sim.t < goal; k++) step();
     lastRate = rdt > 0 ? (sim.t - ts) / rdt : 0;
     if (sim.t >= sim.T1) { sim.phase = 2; settle(); }
   } else if (sim && sim.phase === 2) {
-    const h = rdt * st.post; sim.post += h; ballistic(h); lastRate = st.post;
+    const r = spd ? Math.max(spd, .05) : 1, h = rdt * r; sim.post += h; ballistic(h); lastRate = r;
   }
   const tv = sim ? (sim.phase === 1 ? sim.t : sim.T1 + sim.post) : 0;
   // --- geometry
@@ -765,13 +895,14 @@ function readout(tv) {
     if (sim.phase === 2) L1.push(`<div>Max set, side <b>${(sim.maxDef * 1000).toFixed(0)}</b> mm</div>`);
   }
   L1.push(`<div style="margin-top:8px">${N} nodes · ${NS} bonds · dt ${(dt * 1e6).toFixed(1)} µs</div>`);
+  if (sim) L1.push(`<div>${sim.solver === 'xpbd' ? 'XPBD ' + (sim.hs * 1e6).toFixed(0) + ' µs' : 'explicit'} · ${ANODES.length} live nodes${sim.patchR ? ' · patch ' + sim.patchR.toFixed(1) + ' m' : ''} · ${sim.cpu ? sim.cpu.toFixed(0) + ' ms cpu' : ''}</div>`);
   $('rd').innerHTML = L1.join('');
 }
 
 /* ------------------------------------------------------------------ input */
 const sel = $('round');
 ROUNDS.forEach(([n, kg], i) => { const o = document.createElement('option'); o.value = i; o.textContent = `${n} · ${kg} kg`; sel.appendChild(o); });
-const sync = () => { $('src').value = st.src; sel.value = st.round; $('kg').value = st.kg; $('fuze').value = st.fuze; $('standoff').value = st.standoff; $('mat').value = st.mat; $('h').value = st.h; };
+const sync = () => { $('solver').value = st.solver; $('hs').value = st.hs; $('hsv').textContent = st.hs + ' µs'; $('patch').checked = st.patch; $('slow').innerHTML = `<b>S</b>${SPEED_NAMES[st.spd]}`; $('src').value = st.src; sel.value = st.round; $('kg').value = st.kg; $('fuze').value = st.fuze; $('standoff').value = st.standoff; $('mat').value = st.mat; $('h').value = st.h; };
 sel.onchange = () => { st.round = +sel.value; st.kg = ROUNDS[st.round][1]; sync(); };
 $('kg').onchange = () => { st.kg = Math.max(.01, +$('kg').value || .01); };
 $('fuze').onchange = () => { st.fuze = $('fuze').value; };
@@ -782,7 +913,10 @@ $('h').oninput = () => { st.h = +$('h').value; build(); };
 $('go').onclick = () => detonate();
 $('reset').onclick = () => build();
 $('view').onclick = () => { st.view ^= 1; };
-$('slow').onclick = () => { st.post = st.post === 1 ? .25 : st.post === .25 ? .1 : 1; $('slow').innerHTML = `<b>S</b>×${st.post}`; };
+$('slow').onclick = () => { st.spd = (st.spd + 1) % SPEEDS.length; $('slow').innerHTML = `<b>S</b>${SPEED_NAMES[st.spd]}`; };
+$('solver').onchange = () => { st.solver = $('solver').value; };
+$('hs').oninput = () => { st.hs = +$('hs').value; $('hsv').textContent = st.hs + ' µs'; };
+$('patch').onchange = () => { st.patch = $('patch').checked; };
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
   if (e.code === 'Space') { e.preventDefault(); detonate(); }
@@ -817,7 +951,27 @@ function pick(mx, my) {
 
 sync(); build();
 requestAnimationFrame(draw);
-window.BLAST = { ver: 10, cam, stepN(n) { for (let k = 0; k < n; k++) step(); return sim.t; }, st, detonate, build, draw, dbg: () => ({ FREE, SURF, SBRK, SA, SB, SL0, X, R0, N, NS, FIX, GP, OPEN, CTORN, CSURF }), tune(k, e) { TEAR_K = k; EF_MESH = e; }, get sim() { return sim; },
+// bench: run one case to the end and measure it; shape = every node's final displacement, to compare solvers
+function runCase(cfg) {
+  Object.assign(st, cfg); build(); detonate();
+  const t0 = performance.now(); let steps = 0;
+  while (sim.t < sim.T1) { step(); steps++; }
+  const cpu = performance.now() - t0; sim.cpu = cpu; sim.phase = 2; settle();
+  const by = [0, 0, 0, 0]; for (let q = 0; q < NS; q++) if (SBRK[q]) by[SURF[SA[q]]]++;
+  let free = 0; for (let i = 0; i < N; i++) free += FREE[i];
+  const shape = new Float32Array(N);
+  for (let i = 0; i < N; i++) shape[i] = FREE[i] ? NaN : Math.hypot(X[3 * i] - R0[3 * i], X[3 * i + 1] - R0[3 * i + 1], X[3 * i + 2] - R0[3 * i + 2]);
+  return { cpu: Math.round(cpu), steps, simMs: +(sim.t * 1000).toFixed(1), hullM2: +(sim.hullTorn * S * S).toFixed(2), torn: by, free,
+    setMm: Math.round(sim.maxDef * 1000), live: ANODES.length, shape, cellsTorn: Uint8Array.from(CTORN) };
+}
+// compare a result with a reference: mean |difference| of the displacement field (mm) over nodes both kept,
+// and how many cells are torn in one but not the other
+function compare(a, r) {
+  let s = 0, n = 0; for (let i = 0; i < a.shape.length; i++) { const x = a.shape[i], y = r.shape[i]; if (x === x && y === y) { s += Math.abs(x - y); n++; } }
+  let diff = 0, both = 0; for (let c = 0; c < a.cellsTorn.length; c++) { if (a.cellsTorn[c] !== r.cellsTorn[c]) diff++; else if (a.cellsTorn[c]) both++; }
+  return { dispErrMm: +(s / n * 1000).toFixed(1), tornDiffCells: diff, tornBothCells: both };
+}
+window.BLAST = { PROF, ver: 12, runCase, compare, cam, stepN(n) { for (let k = 0; k < n; k++) step(); return sim.t; }, st, detonate, build, draw, dbg: () => ({ FREE, SURF, SBRK, SA, SB, SL0, X, R0, N, NS, FIX, GP, OPEN, CTORN, CSURF }), tune(k, e) { TEAR_K = k; EF_MESH = e; }, get sim() { return sim; },
   // headless check: run the whole structural response now and report
   run() { const t0 = performance.now(); while (sim.t < sim.T1) step(); sim.phase = 2; settle();
     let free = 0; for (let i = 0; i < N; i++) free += FREE[i];
