@@ -98,6 +98,18 @@ const glf = (m, t, le) => m.eg + m.ee * Math.min(.2, t / le);          // GL fai
 // Calibrated on the side-push case (120 kg at 5 m on the section: the deck edge folds at the side seam, which
 // needs cells ~ fold length / 10 to resolve): the knock-down that makes each grid give the 0.0156 m grid's side and
 // seam displacements, tabled against S / H, H = 0.9 (b^2 t)^(1/3) the fold length (b = 1 m); band 0.6 m from a seam.
+// Failure is judged on the damage averaged over a square round the cell (area-weighted over the cells it overlaps,
+// same piece), side LREG = 0.2 m or two cells, whichever is longer, with the GL failure strain for that length: no cell
+// fails on its own peak, so the tear front stops depending on how many cells cross it (st.lReg; 0: each cell on its
+// own). 120 kg contact, reduced section, torn at 30 ms: 2.56 / 2.13 / 2.51 / 2.47 m² at 0.25 / 0.125 / 0.0625 /
+// 0.031 m (each cell on its own: 4.4 / 2.2 / 2.5 / 2.5)
+const LREG = () => st.lReg === undefined || st.lReg === null ? .2 : st.lReg;
+const lrOf = lc => LREG() > 0 ? Math.max(LREG(), 2 * lc) : 0;
+// Cells that reached failure can be made to erode only every Nth step (st.erodeEvery; default 1: at once). A window
+// of 5-25 steps lets mirror cells at failure within round-off go together, but the batched release worsens the
+// contact momentum balance (|r x F| 6.6 / 7.3 / 10.3 kN m at 1 / 2 / 5 steps, limit 7.4; mirror asymmetry 7.3 / 6.1 / 6.2 %, 2.8 % at 25), so it is off by default.
+let ERODE = true;
+const erodeNow = n => { const e = st.erodeEvery || 1; return e <= 1 || n % e === 0; };
 const JMIN = () => st.jmin === undefined ? .25 : st.jmin;            // a cell squashed to this area ratio erodes
 const KC_EPS = () => st.kEps === undefined || st.kEps === null ? .004 : st.kEps;
 const KC_TAB = [[.093, 1], [.186, .4], [.372, .15], [.744, .12], [1.49, .03]];
@@ -342,7 +354,7 @@ let NC = 0, CN, CPAN, CH, CMAT, CEF, CSP, CSN, CWET, CAR, CTR, CHG, CDB, CVIS, C
 // hinges: 6 nodes, 2 cells, plate stiffness/moment, stiffener stiffness/moment, rest angle, lever, trusses, state
 let NH = 0, HEL, HLN, HTL0, HTPS, HN, HC, HKP, HMP, HKS, HMS, HT0, HDB, HTR, HHP, HMAT, HTP, HTH, HSAME;
 // trusses (stiffener axial members)
-let CKC = null, CSD = null, TKC = null, seamDist = () => Infinity, NT = 0, TA, TB, TL0, TAR, TMAT, TEF, TFIB, THG, TLP, TFL, TEB, TKIND, TBA, TBB, TSC, TCL, TCL2, TQN, TPRV, TNXT, TKB, TQB, TB0, TKS, TQS, TS0, TBP, TSP, TMM, emapRef = null;
+let CKC = null, CSD = null, NLH = null, NLE = null, CRAT = null, CRATP = null, CERS = null, TKC = null, seamDist = () => Infinity, NT = 0, TA, TB, TL0, TAR, TMAT, TEF, TFIB, THG, TLP, TFL, TEB, TKIND, TBA, TBB, TSC, TCL, TCL2, TQN, TPRV, TNXT, TKB, TQB, TB0, TKS, TQS, TS0, TBP, TSP, TMM, emapRef = null;
 // pieces (contact maps)
 let PAN = [];
 const TRI = [[0, 1, 2], [0, 2, 3], [0, 1, 3], [1, 2, 3]];
@@ -575,9 +587,34 @@ function build() {
     const av = mul(cross(sub(P[2], P[0]), sub(P[3], P[1])), .5);
     CAR[c] = len(av); CNR.set(nrm(av), 3 * c);
     CRC.set(mul(add(add(P[0], P[1]), add(P[2], P[3])), .25), 3 * c);
-    CEF[c] = glf(MATS[CMAT[c]], CH[c], Math.sqrt(CAR[c])) * (st.efScale || 1);
+    CEF[c] = glf(MATS[CMAT[c]], CH[c], Math.max(Math.sqrt(CAR[c]), lrOf(Math.sqrt(CAR[c])))) * (st.efScale || 1);
     CDB[c] = Math.sqrt(CAR[c]);
     for (const i of q) NCON[i]++;
+  }
+  // non-local failure: each cell's neighbours (same piece) inside the square of side lrOf(cell) round it, with the area
+  // of their overlap as weight (the cell's own weight in NLH[4c+2])
+  {
+    let reach = .25; for (let c = 0; c < NC; c++) { const lc = Math.sqrt(CAR[c]); reach = Math.max(reach, lrOf(lc) / 2 + lc); }
+    const hb = new Map(), HB = reach, key = (x, y, z) => Math.floor(x / HB) + ',' + Math.floor(y / HB) + ',' + Math.floor(z / HB);
+    for (let c = 0; c < NC; c++) { const k = key(CRC[3 * c], CRC[3 * c + 1], CRC[3 * c + 2]); (hb.get(k) || hb.set(k, []).get(k)).push(c); }
+    NLH = new Float32Array(4 * NC); const ids = [], ws = [];
+    for (let c = 0; c < NC; c++) {
+      const lc = Math.sqrt(CAR[c]), Lr = lrOf(lc); NLH[4 * c] = ids.length; NLH[4 * c + 2] = Lr > 0 ? Math.min(lc, Lr) ** 2 : lc * lc;
+      if (!(Lr > lc)) continue;
+      const q0 = CN[4 * c], q1 = CN[4 * c + 1], ex = nrm(sub([R0[3 * q1], R0[3 * q1 + 1], R0[3 * q1 + 2]], [R0[3 * q0], R0[3 * q0 + 1], R0[3 * q0 + 2]])),
+        nn = [CNR[3 * c], CNR[3 * c + 1], CNR[3 * c + 2]], ey = cross(nn, ex), x0 = CRC[3 * c], y0 = CRC[3 * c + 1], z0 = CRC[3 * c + 2];
+      for (let a1 = -1; a1 <= 1; a1++) for (let b1 = -1; b1 <= 1; b1++) for (let e1 = -1; e1 <= 1; e1++) {
+        const l = hb.get((Math.floor(x0 / HB) + a1) + ',' + (Math.floor(y0 / HB) + b1) + ',' + (Math.floor(z0 / HB) + e1)); if (!l) continue;
+        for (const j of l) { if (j === c || CPAN[j] !== CPAN[c]) continue;
+          const d = [CRC[3 * j] - x0, CRC[3 * j + 1] - y0, CRC[3 * j + 2] - z0], lj = Math.sqrt(CAR[j]);
+          if (Math.abs(dot(d, nn)) > lc) continue;
+          const x = dot(d, ex), y = dot(d, ey);
+          const ox = Math.min(x + lj / 2, Lr / 2) - Math.max(x - lj / 2, -Lr / 2), oy = Math.min(y + lj / 2, Lr / 2) - Math.max(y - lj / 2, -Lr / 2);
+          if (ox > 1e-6 && oy > 1e-6) { ids.push(j); ws.push(ox * oy); } } }
+      NLH[4 * c + 1] = ids.length - NLH[4 * c];
+    }
+    NLE = new Float32Array(2 * ids.length); for (let k = 0; k < ids.length; k++) { NLE[2 * k] = ids[k]; NLE[2 * k + 1] = ws[k]; }
+    CRAT = new Float64Array(NC); CRATP = new Float64Array(NC); CERS = new Uint8Array(NC);
   }
   // seam band: cells within the fold length of a junction with a plate at an angle (where in-plane load enters a
   // plate and a compressed plate folds first); their compressive yield is knocked down on grids too coarse to fold
@@ -1254,6 +1291,7 @@ function returnMap(s, eb, m, rf) {
 const SIG = [0, 0, 0];
 function cellPass(t, h) {
   let eel = 0;
+  CRATP.set(CRAT); CERS.set(CER);                    // neighbours' failure ratios and erosion as the step began
   const OUT = scene.OUT, SRC = sim.SRC, nsrc = SRC.length;
   for (let c = 0; c < NC; c++) {
     if (CER[c]) continue;
@@ -1362,7 +1400,10 @@ function cellPass(t, h) {
     // fracture: ductile (GL: non-compressive plastic strain + plastic bending strain of the outer fibre)
     let eb = 0; const hs = [CHG[4 * c], CHG[4 * c + 1], CHG[4 * c + 2], CHG[4 * c + 3]];
     for (const k of hs) if (k >= 0) eb = Math.max(eb, Math.abs(HTP[k]) * CH[c] / (2 * HDB[k]));
-    if (CDM[c] + eb >= CEF[c] || CFD[c] >= 1 || jmin < JMIN()) { CER[c] = 1; CTE[c] = t; if (EN) EN.frac += eel - eel0; }
+    const rat = (CDM[c] + eb) / CEF[c]; CRAT[c] = rat;
+    let ws = NLH[4 * c + 2], acc = ws * rat;
+    for (let k = NLH[4 * c], e = k + NLH[4 * c + 1]; k < e; k++) { const j = NLE[2 * k]; if (!CERS[j]) { acc += NLE[2 * k + 1] * CRATP[j]; ws += NLE[2 * k + 1]; } }
+    if (ERODE && (acc >= ws || CFD[c] >= 1 || jmin < JMIN())) { CER[c] = 1; CTE[c] = t; if (EN) EN.frac += eel - eel0; }
   }
   return eel;
 }
@@ -1547,6 +1588,7 @@ function contact(i, h) {
 function stepCPU() {
   const s = sim, t = s.t, h = dt;
   F.fill(0); FL.fill(0);
+  ERODE = erodeNow(s.n + 1);
   const e1 = hingePass(t, h), e2 = cellPass(t, h), e3 = trussPass(t, h);
   markFree();                                          // free pieces: nodes no intact element holds
   const [e4, ek] = nodePass(t, h);
@@ -1618,7 +1660,7 @@ function commonSync(t, torn) {
 
 /* ------------------------------------------------------------------ GPU solver glue */
 function gpuModel() {
-  return { N, NC, NH, NT, R0, M, WINV, AK, AF, AC, CN, CH, CMAT, CEF, CKC, KCE: KC_EPS(), JMN: JMIN(), CSP, CSN, CWET, CAR, CTR, CHG, CDB, CRC, CVIS: () => CVIS,
+  return { N, NC, NH, NT, R0, M, WINV, AK, AF, AC, CN, CH, CMAT, CEF, CKC, KCE: KC_EPS(), JMN: JMIN(), NLH, NLE, CSP, CSN, CWET, CAR, CTR, CHG, CDB, CRC, CVIS: () => CVIS,
     HN, HC, HKP, HMP, HKS, HMS, HT0, HDB, HTR, HHP, HMAT, HLN, HTL0, TBA, TBB, TSC, TCL, TCL2, TQN, TPRV, TNXT, TKC, TKB, TQB, TB0, TKS, TQS, TS0, TMM, TA, TB, TL0, TAR, TMAT, TEF, TFIB, THG, NCC, PAN, CMAP, MATS: st.noRate ? MATS.map(m => ({ ...m, D: 1e30, Du: 1e30 })) : MATS, TA1, S,
     OUT: () => scene.OUT, csf, nspace: () => GV.length, BETA: () => BETA, U_MAX, RHO_W, C_W, P0, G, K_SHEAR };
 }
@@ -1627,7 +1669,7 @@ function stepGPU() { gpuAdvance(); if (sim.n % SYNC === 0) syncStep(); }
 function gpuAdvance() {
   if (!sim.gpuInit) initGPU();
   const s = sim, t = s.t, h = dt;
-  gpu.step(t, h, s.relax ? 250 : s.alpha);
+  gpu.step(t, h, s.relax ? 250 : s.alpha, erodeNow(s.n + 1));
   s.t += h; s.n++;
 }
 const PROF = { read: 0, sync: 0, src: 0, frag: 0 };
@@ -2121,7 +2163,7 @@ window.BLAST = { ver: 33, get backend() { return gpu ? gpu.kind || 'webgl' : nul
   pulse, kinneyPs, kinneyIs1, reflect, U_MEAN, U_MAX, tee, SEC,
   rawSteps(n) { const t0 = performance.now(); for (let k = 0; k < n; k++) gpu.step(sim.t, dt, 0); const t1 = performance.now(); gl.finish(); return [t1 - t0, performance.now() - t0]; },
   gpuProfile(n) { gpu.profile(true); for (let k = 0; k < n; k++) gpu.step(sim.t, dt, 0); gl.finish(); return new Promise(r => setTimeout(() => r(gpu.profile(false)), 300)); },
-  snapshot() { if (sim && sim.solver === 'gpu') { gpu.readNodes(true, X, V, FREE); const cl = gpu.readCellsFull(); for (let c = 0; c < NC; c++) { CER[c] = cl[4 * c] > .5 ? 1 : 0; CTE[c] = cl[4 * c + 1]; CUT[c] = cl[4 * c + 3]; } gpu.readState({ CEP, CDM, TFL, HTP, HTH, HTPS, TBP }); } },
+  snapshot() { if (sim && sim.solver === 'gpu') { gpu.readNodes(true, X, V, FREE); const cl = gpu.readCellsFull(); for (let c = 0; c < NC; c++) { CER[c] = cl[4 * c] > .5 ? 1 : 0; CTE[c] = cl[4 * c] > .5 ? cl[4 * c + 1] : -1; CUT[c] = cl[4 * c + 3]; } gpu.readState({ CEP, CDM, TFL, HTP, HTH, HTPS, TBP }); } },
   // CPU vs GPU after the same number of steps: displacement field and eroded cells
   parity(cfg, steps) {
     const keep = { ...st }, res = {};
