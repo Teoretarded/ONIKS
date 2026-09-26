@@ -215,6 +215,22 @@ results depend on the frame rate.
 - Readouts: "max set" is the largest side displacement anywhere (grillage translation incl. elastic part at T1),
   not a dish; "side torn" includes crack-adjacent cells (9).
 
+## Hazards for the move to the whole ship (Burke)
+
+- Four plates and five spaces are hard-coded: `blast.js:54` (GP[5], OPEN[25]), `202`, `269` (cracks[4]), `285`, `348`,
+  `363`, `592`, `642`; `gpu.js:22` (uCr[4], uCrA/uCrL[32]), `59` (uGP[5]), `60` (uPl[4]...), `73`, `107`, `137`.
+- Line of sight and contact loop over every plate for every node every step (`gpu.js:73`, `137`; CPU `firstHit`,
+  `collide`): with the Burke's ~2000 panels that is the cost, and uniform arrays don't hold it. Needs a spatial
+  structure (per-cell occupancy grid / BVH texture) or a per-hit shortlist of nearby plates.
+- Rays and contact use each plate's rest plane and axis-aligned (u, v) cell lookup; the Burke shell is curved
+  (ruled strips) and the deckhouse sides are inclined.
+- The bending neighbour encoding `j * 32 + k` in a float (`gpu.js:109`, `219`) is exact only below 2^24 / 32 =
+  524 288 nodes; a whole Burke at 0.125 m is well above that. Node textures are 128 wide, so N / 128 rows must stay
+  under the GPU's texture height (8192-16384).
+- Compartments: `comp()` and GV are the box's (`blast.js:56-57`); the Burke data has 85 spaces and `compAt`.
+- The ties (finding 2) anchor frames to the world: on a whole ship there is no "world" to anchor to; the frames have
+  to become members.
+
 ## The suite
 
 Open http://127.0.0.1:8771/game/concepts/blast/verify.html (full run ~3 min, most of it CPU reference runs);
@@ -272,4 +288,4 @@ checks carry over to other scenes.
 | dished band round the hole | PASS | 81-86 % of the 1 m ring > 50 mm |
 | petals, not cut-outs (1200, 5000) | FAIL | 79 % / 87 % of the torn side thrown loose; rim moved <= 0.37 / 0.39 m |
 | mass scaling | FAIL | 66.9 (x1) vs 52.8 m^2 (x64) |
-| Burke | INFO | scene not in the bench yet |
+| Burke (4 cases from burke_structure.js) | INFO | the bench has no scene switch yet; cases wired: 1200 kg contact amidships at the waterline, 120 kg on the deckhouse, 120 kg inside MER 1 (every plate bounding the space must tear or set > 2h), 5000 kg contact (nothing pristine within 8.5 m) |

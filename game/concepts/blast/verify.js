@@ -599,11 +599,52 @@ check('massscale', 'convergence', true, async () => {
     `torn total x1 ${fmt(tot(a), 2)} · x16 ${fmt(tot(b), 2)} · x64 ${fmt(tot(c), 2)} m² · per plate x1 ${a.areas.map(x => fmt(x, 2)).join('/')} vs x64 ${c.areas.map(x => fmt(x, 2)).join('/')} · max set ${fmt(a.maxDef * 1000, 0)} / ${fmt(b.maxDef * 1000, 0)} / ${fmt(c.maxDef * 1000, 0)} mm · GPU ${fmt(a.ms, 0)} / ${fmt(c.ms, 0)} ms`);
 });
 
-// Burke scene (when the bench exposes one): generic cases by geometry, same pass criteria as above
+// Burke scene (when the bench exposes one). Aim points come from the ship's own data (burke_structure.js); the pass
+// criteria are the same generic ones as above.
+function burkeSwitch() {
+  const v = V(), st = v.st;
+  // a scene selector in the page, a scene key in st, or a SCENES table in the module
+  const sel = document.querySelector('#bench select#scene');
+  const opt = sel && [...sel.options].find(o => /burke|ddg/i.test(o.value + ' ' + o.textContent));
+  if (opt) return { scene: isNaN(+opt.value) ? opt.value : +opt.value };
+  if (DEF && 'scene' in DEF) return { scene: 'burke' };
+  if (v.SCENES) { const k = Object.keys(v.SCENES).find(k => /burke|ddg/i.test(k)); if (k) return { scene: k }; }
+  return null;
+}
 check('burke', 'burke', false, async () => {
-  const v = V(), sc = v.SCENES || (v.st && v.st.scene !== undefined ? v.st.scene : undefined);
-  if (!sc) { record('burke', 'Burke scene', null, 'not available in this bench build (no SCENES / st.scene): skipped'); return; }
-  record('burke', 'Burke scene', null, 'scene switch found: ' + JSON.stringify(Object.keys(v.SCENES || {})) + ' (cases to be wired to its API)');
+  const sw = burkeSwitch();
+  if (!sw) { record('burke', 'Burke scene', null, 'the bench has no scene switch yet (no #scene select, st.scene or SCENES): skipped'); return; }
+  let mod; try { mod = await import(BASE + 'burke_structure.js?v=' + Date.now()); } catch (e) { record('burke', 'Burke data', false, 'burke_structure.js did not load: ' + e); return; }
+  const B = mod.default;
+  const zWL = mod.halfBreadth(0, 0), fh = { x: 18, y: (mod.deckY(18) + 10.3) / 2 };
+  // the deckhouse side at fh: the outermost 'house' panel point there
+  let zH = 8.1; for (const pn of B.PANELS) if (pn.kind === 'house' && pn.n && Math.abs(pn.n[2]) > .9 && pn.poly && Math.abs(pn.c[0] - fh.x) < 12) zH = Math.max(zH, Math.abs(pn.c[2]));
+  const cases = [
+    { nm: 'contact 1200 kg amidships, waterline', cfg: { kg: 1200, fuze: 'contact', aim: [0, 0, zWL], aimN: [0, 0, 1] }, test: 'behind' },
+    { nm: 'contact 120 kg on the deckhouse', cfg: { kg: 120, fuze: 'contact', aim: [fh.x, fh.y, zH], aimN: [0, 0, 1] }, test: 'behind' },
+    { nm: 'inside 120 kg, main engine room', cfg: { kg: 120, fuze: 'inside', aim: [0, -.6, zWL], aimN: [0, 0, 1] }, test: 'bounds' },
+    { nm: 'contact 5000 kg amidships, waterline', cfg: { kg: 5000, fuze: 'contact', aim: [0, 0, zWL], aimN: [0, 0, 1] }, test: 'reach' },
+  ];
+  for (const c of cases) {
+    let R; try { R = run({ ...sw, src: 'charge', ...c.cfg }); } catch (e) { record('burke', c.nm, false, 'threw: ' + (e && e.stack || e)); continue; }
+    const A = c.cfg.aim, n = c.cfg.aimN;
+    if (c.test === 'behind') {
+      const behind = i => { const dx = R.r0[3 * i] - A[0], dy = R.r0[3 * i + 1] - A[1], dz = R.r0[3 * i + 2] - A[2]; return dx * n[0] + dy * n[1] + dz * n[2] < -.3 && Math.hypot(dx, dy, dz) < 3; };
+      const rep = regionReport(R, behind, .05), hit = (rep.n - rep.pristine) / Math.max(rep.n, 1);
+      record('burke', c.nm, rep.n > 0 && hit >= .5, `plating 0.3-3 m behind the hit: ${rep.n} nodes, torn ${rep.torn} (${rep.loose} loose), set > 50 mm ${rep.n - rep.torn - rep.pristine}, under 50 mm ${rep.pristine} · torn total ${fmt(R.areas.reduce((a, b) => a + b, 0), 2)} m² · ${fmt(R.ms, 0)} ms`);
+    } else if (c.test === 'bounds') {
+      const cc = V().sim && V().sim.cc, v = V(); const by = {};
+      for (let i = 0; i < R.N; i++) { if (R.fix[i] || !(v.NSP[i] === cc || v.NSN[i] === cc)) continue; const p = R.surf[i], b = by[p] || (by[p] = { n: 0, torn: 0, max: 0, h: R.rh ? R.rh[i] / 7850 : .01 }); b.n++;
+        if (R.nodeTorn[i]) b.torn++; else b.max = Math.max(b.max, dmag(R, i)); }
+      const plates = Object.entries(by).filter(([, b]) => b.n >= 20), quiet = plates.filter(([, b]) => !b.torn && b.max < 2 * b.h);
+      record('burke', c.nm, plates.length > 0 && quiet.length === 0, `compartment ${cc}: ${plates.length} bounding plates; ${quiet.length} of them neither torn nor set > 2h · ${plates.map(([p, b]) => `#${p}: ${b.n} nodes, torn ${b.torn}, max set ${fmt(b.max * 1000, 0)} mm`).join('; ')}`);
+    } else {
+      const W = c.cfg.kg, reach = .5 * Math.cbrt(W), hops = hopsFromFix(V(), Math.ceil(1 / R.S)), C = R.C;
+      const rep = regionReport(R, i => hops[i] >= Math.ceil(1 / R.S) && Math.hypot(R.r0[3 * i] - C[0], R.r0[3 * i + 1] - C[1], R.r0[3 * i + 2] - C[2]) < reach, .02);
+      record('burke', c.nm, rep.n > 0 && rep.pristine / rep.n < .05, `within ${fmt(reach, 1)} m: ${rep.n} nodes, torn ${rep.torn} (${rep.loose} loose), set < 20 mm ${rep.pristine} (${fmt(100 * rep.pristine / Math.max(rep.n, 1), 1)}%)`);
+    }
+    await tick();
+  }
 });
 
 /* ------------------------------------------------------------------ main */
