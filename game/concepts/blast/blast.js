@@ -877,6 +877,25 @@ const CONTENTS = {
   fuel: { label: 'Aviation fuel tank · JP-5', fuel: 15000, vapour: 15 },
 };
 let sim = null, gpu = null, EN = null;
+const SHUT = [], VLOG = [];
+// shut openings between compartments (boxes sharing a face): a hatch between decks (1 m^2, 50 kPa) or a watertight
+// door in a bulkhead (1.3 m^2, 100 kPa); to the outside a ventilation trunk (up to 1.2 m^2, 30 kPa) and, from a
+// space under the weather deck, a weather door (1.5 m^2, 70 kPa). Public damage-control figures, coarse.
+function shutVents(sc) {
+  const V = [], S = sc.spaces, ov = (a0, a1, b0, b1) => Math.min(a1, b1) - Math.max(a0, b0);
+  const ok = s => s.box && s.V < Infinity; let top = -Infinity; for (const s of S) if (ok(s)) top = Math.max(top, s.box[4]);
+  for (let i = 0; i < S.length; i++) for (let j = i + 1; j < S.length; j++) { if (!ok(S[i]) || !ok(S[j])) continue; const a = S[i].box, b = S[j].box;
+    for (let k = 0; k < 3; k++) {
+      if (!(Math.abs(a[k + 3] - b[k]) < .05 || Math.abs(b[k + 3] - a[k]) < .05)) continue;
+      const o1 = (k + 1) % 3, o2 = (k + 2) % 3;
+      if (ov(a[o1], a[o1 + 3], b[o1], b[o1 + 3]) < .5 || ov(a[o2], a[o2 + 3], b[o2], b[o2 + 3]) < .5) continue;
+      V.push(k === 1 ? [i, j, 1.0, 50e3] : [i, j, 1.3, 100e3]);
+    } }
+  for (let i = 0; i < S.length; i++) { if (!ok(S[i])) continue;
+    V.push([i, sc.OUT, Math.max(.1, Math.min(1.2, S[i].V / 400)), 30e3]);
+    if (Math.abs(S[i].box[4] - top) < .3) V.push([i, sc.OUT, 1.5, 70e3]); }
+  return V;
+}
 const GP = [], OPEN = new Map();
 let GV = [];
 
@@ -894,14 +913,19 @@ function detonate() {
   const Wgas = src && src.prop ? src.cells * src.prop * .25 : 0;
   const rc = Math.cbrt(3 * Math.max(fill, .01) / (4 * Math.PI * RHO_TNT));
   let C;
-  if (inside) C = [a[0] - n[0] * 1.6, a[1] - n[1] * 1.6, a[2] - n[2] * 1.6];
+  const dIn = st.inDepth || 1.6;                                        // inside: this far in from the aim point
+  if (inside) C = [a[0] - n[0] * dIn, a[1] - n[1] * dIn, a[2] - n[2] * dIn];
   else { const d = st.fuze === 'contact' ? rc : Math.max(st.standoff, rc); C = [a[0] + n[0] * d, a[1] + n[1] * d, a[2] + n[2] * d]; }
   const cc = scene.spaceAt(C);
   GV = scene.spaces.map(s => s.V); GP.length = 0; for (let k = 0; k < GV.length; k++) GP.push(0); OPEN.clear();
-  for (const [a, b, A] of scene.vents || []) if (a !== b) { const k = (Math.min(a, b) << 8) | Math.max(a, b); OPEN.set(k, (OPEN.get(k) || 0) + A); }
+  // openings: the scene's own are open; hatches, doors and ventilation closures are shut until the pressure across
+  // them reaches their failure pressure (condition Zebra; as the game: game/src/blast/spec.js ventsOf)
+  SHUT.length = 0; VLOG.length = 0;
+  for (const [a, b, A, pf] of [...(scene.vents || []), ...(st.shutVents === false ? [] : shutVents(scene))]) if (a !== b) {
+    if (pf > 0) SHUT.push([a, b, A, pf]); else { const k = (Math.min(a, b) << 8) | Math.max(a, b); OPEN.set(k, (OPEN.get(k) || 0) + A); } }
   const prim = { pos: C, W, Pm: W * U_MEAN, t0: 0, space: cc, kind: 0, ax: [0, 0, 0], gain: 1, rc, vis: cc === scene.OUT ? 0 : -1, plane: null, gen: 0, Wsrc: W, key: 'P' };
   const srcs = [];
-  if (cc < scene.OUT) {
+  if (cc !== scene.OUT && GV[cc] < Infinity) {                           // a closed compartment (the Burke has OUT = 0)
     if (W > 0) srcs.push({ c: cc, Pq: qsp(W, GV[cc]), kind: 'det', tau: .002, F: 0 });
     if (Wgas > 0) srcs.push({ c: cc, Pq: qsp(Wgas, GV[cc]), kind: 'burn', tau: .12, F: 0 });
     if (src && src.fuel) srcs.push({ c: cc, Pq: .8e6 * Math.min(1, src.vapour / (GV[cc] * 1.2 / 15)), kind: 'burn', tau: .06, F: 0 });
@@ -1075,6 +1099,8 @@ const WALLS = new Map();
 
 /* ------------------------------------------------------------------ gas */
 function gasStep(h) {
+  for (let i = SHUT.length - 1; i >= 0; i--) { const [a, b, A, pf] = SHUT[i];
+    if (Math.abs(GP[a] - GP[b]) >= pf) { const k = (Math.min(a, b) << 8) | Math.max(a, b); OPEN.set(k, (OPEN.get(k) || 0) + A); SHUT.splice(i, 1); VLOG.push([a, b, A, +(sim.t * 1e3).toFixed(2)]); } }
   for (const [k, A] of OPEN) {
     const a = k >> 8, b = k & 255;
     const dp = GP[a] - GP[b]; if (dp > -1 && dp < 1) continue;
@@ -2011,6 +2037,8 @@ sync(); build();
 requestAnimationFrame(draw);
 
 /* ------------------------------------------------------------------ bench API */
+// put the settings back as they were before a scripted run (keys the run added are removed)
+function restoreSt(keep, extra = {}) { for (const k of Object.keys(st)) if (!(k in keep)) delete st[k]; Object.assign(st, keep, extra); }
 function runCase(cfg) {
   const keep = { ...st };
   Object.assign(st, cfg);
@@ -2027,7 +2055,7 @@ function runCase(cfg) {
       for (let q = 0; q < 4; q++) { const i = CN[4 * c + q]; if (shape[i] === shape[i] && shape[i] > dmax) dmax = shape[i]; } }
       return { name: P.name, torn: +a.toFixed(2), maxDisp: +dmax.toFixed(3) }; }),
     ms: Math.round(cpu), steps, simMs: +(sim.t * 1000).toFixed(1), setMm: Math.round(sim.maxDef * 1000), free, shape, cellsTorn: Uint8Array.from(CER, v => v ? 1 : 0),
-    energy: EN && sim.solver === 'cpu' ? energy() : null, gas: GV.map((v, k) => v < Infinity ? Math.round(GP[k]) : 0), sources: sim.SRC.length, holes: sim.holes.length };
+    energy: EN && sim.solver === 'cpu' ? energy() : null, ventLog: VLOG.slice(), gas: GV.map((v, k) => v < Infinity ? Math.round(GP[k]) : 0), sources: sim.SRC.length, holes: sim.holes.length };
   if (scene.name === 'plate') {                      // Nurick-Martin: delta/h = 0.480 phi + 0.277, phi = I / (2 h^2 sqrt(B L rho sy))
     const [a, b] = scene.dims, m = MATS[MATI[st.mat]], h = st.h / 1000; let I = 0;
     for (let c = 0; c < NC; c++) { const x = CRC[3 * c], y = CRC[3 * c + 1]; if (Math.abs(x) > a / 2 || Math.abs(y) > b / 2) continue;
@@ -2036,7 +2064,7 @@ function runCase(cfg) {
     for (let i = 0; i < N; i++) { const d = Math.hypot(R0[3 * i], R0[3 * i + 1]); if (d < bd) { bd = d; ci = i; } }
     res.nm = { I: Math.round(I), phi: +phi.toFixed(2), dNM: +(1000 * h * (.48 * phi + .277)).toFixed(1), dSim: +(1000 * Math.abs(X[3 * ci + 2] - R0[3 * ci + 2])).toFixed(1) };
   }
-  Object.assign(st, keep, { grid: cfg.grid ?? keep.grid });
+  restoreSt(keep, { grid: cfg.grid ?? keep.grid });
   return res;
 }
 // the same run, yielding to the browser between syncs so the GPU read backs never stall (the fast way to run a case)
@@ -2055,11 +2083,11 @@ async function runCaseAsync(cfg) {
   }
   if (isWG()) await finishWG();
   const ms = performance.now() - t0; sim.cpu = ms; sim.phase = 2; settle();
-  const res = { ms: Math.round(ms), steps, simMs: +(sim.t * 1000).toFixed(1), setMm: Math.round(sim.maxDef * 1000),
+  const res = { ms: Math.round(ms), steps, simMs: +(sim.t * 1000).toFixed(1), setMm: Math.round(sim.maxDef * 1000), ventLog: VLOG.slice(), gas: GV.map((v, k) => v < Infinity ? Math.round(GP[k]) : 0),
     byPanel: PAN.map(P => { let a = 0, dmax = 0; for (let c = P.off; c < P.off + P.nu * P.nv; c++) { const cc = CMAP[c]; if (cc < 0) continue; if (CER[cc]) a += CAR[cc];
       for (let q = 0; q < 4; q++) { const i = CN[4 * cc + q]; if (!FREE[i]) dmax = Math.max(dmax, Math.hypot(X[3 * i] - R0[3 * i], X[3 * i + 1] - R0[3 * i + 1], X[3 * i + 2] - R0[3 * i + 2])); } }
       return { name: P.name, torn: +a.toFixed(2), maxDisp: +dmax.toFixed(3) }; }) };
-  Object.assign(st, keep, { grid: cfg.grid ?? keep.grid });
+  restoreSt(keep, { grid: cfg.grid ?? keep.grid });
   return res;
 }
 function compare(a, r) {
@@ -2090,7 +2118,7 @@ window.BLAST = { ver: 33, get backend() { return gpu ? gpu.kind || 'webgl' : nul
       (res.states || (res.states = {}))[sv] = { ebS, hpS, hthS, cdS };
       res[sv] = { d, er: Uint8Array.from(CER, v => v ? 1 : 0), ms: performance.now() - t0 };
     }
-    Object.assign(st, keep);
+    restoreSt(keep);
     let s1 = 0, s2 = 0, mx = 0; for (let i = 0; i < 3 * N; i++) { const a = res.cpu.d[i], b = res.gpu.d[i]; s1 += (a - b) ** 2; s2 += a * a; mx = Math.max(mx, Math.abs(a)); }
     let diff = 0, both = 0; for (let c = 0; c < NC; c++) { if (res.cpu.er[c] !== res.gpu.er[c]) diff++; else if (res.cpu.er[c]) both++; }
     const byKind = {}; for (let i = 0; i < N; i++) { const k = NKIND[i]; const e = byKind[k] || (byKind[k] = [0, 0]); for (let q = 0; q < 3; q++) { e[0] += (res.cpu.d[3 * i + q] - res.gpu.d[3 * i + q]) ** 2; e[1] += res.cpu.d[3 * i + q] ** 2; } }
@@ -2110,7 +2138,7 @@ window.BLAST = { ver: 33, get backend() { return gpu ? gpu.kind || 'webgl' : nul
       let ebS = 0, hpS = 0, cdS = 0, tf = 0; for (let k = 0; k < 4 * NC; k++) ebS += CEP[4 * k + 3]; for (let k = 0; k < NH; k++) hpS += Math.abs(HTP[k]); for (let c = 0; c < NC; c++) cdS += CDM[c]; for (let k = 0; k < NT; k++) tf += TFL[k];
       res[key] = { sv, d, er: Uint8Array.from(CER, v => v ? 1 : 0), ms: performance.now() - t0, st: { ebS, hpS, cdS, tf } };
     }
-    Object.assign(st, keep);
+    restoreSt(keep);
     let s1 = 0, s2 = 0, mx = 0; for (let i = 0; i < 3 * N; i++) { const a = res.a.d[i], b = res.b.d[i]; s1 += (a - b) ** 2; s2 += a * a; mx = Math.max(mx, Math.abs(a)); }
     let diff = 0, both = 0; for (let c = 0; c < NC; c++) { if (res.a.er[c] !== res.b.er[c]) diff++; else if (res.a.er[c]) both++; }
     return { pair, relL2: Math.sqrt(s1 / s2), maxDispMm: mx * 1000, erodedBoth: both, erodedDiff: diff, ms: [Math.round(res.a.ms), Math.round(res.b.ms)], states: [res.a.st, res.b.st] };
@@ -2143,7 +2171,7 @@ window.BLAST = { ver: 33, get backend() { return gpu ? gpu.kind || 'webgl' : nul
     s.phase = 2; settle();
     let tf = 0; for (let k = 0; k < NT; k++) tf += TFL[k]; let torn = 0; for (let c = 0; c < NC; c++) if (CER[c]) torn += CAR[c];
     const res = { grid: st.grid, NC, dt: +(dt * 1e6).toFixed(2), rec, membersFailed: tf, tornM2: +torn.toFixed(2), ms: Math.round(performance.now() - t0) };
-    Object.assign(st, keep); return res;
+    restoreSt(keep); return res;
   },
   // a heavy WebGL scene rendering alongside (worker + OffscreenCanvas, 1920x1080, `iters` per pixel, ~60 Hz): the
   // GPU process busy as when the game renders (`draws` small draw calls a frame load its command decoding); stress(0) stops it. Returns the worker's frame times.
