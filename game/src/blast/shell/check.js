@@ -1,4 +1,4 @@
-/* Dev check: the shell bench's test box (game/concepts/blast/blast.js sceneBox at e00312c: 30 m of a destroyer's side,
+/* Dev check: the shell bench's test box (game/concepts/blast/blast.js sceneBox at 200fe28: 30 m of a destroyer's side,
    weather / second / platform decks, two bulkheads, nine spaces) as a patch spec, solved by this module's shell runner
    on the main thread, to compare with the bench's runCase.
      const C = await import('/game/src/blast/shell/check.js'); C.start({ kg: 120, casing: 130, fuze: 'contact', grid: .25 }); ...
@@ -7,6 +7,7 @@
      C.result   (null until done: { areas: [side, weather deck, decks, bulkheads] m^2, setMm, simMs, steps, ms }) */
 import { createShellRunner } from './runner.js';
 import { initWebGPU } from './gpu_wgpu.js';
+import { ventsOf } from '../spec.js';
 let dev = null;
 
 export function boxSpec(o = {}) {
@@ -26,7 +27,8 @@ export function boxSpec(o = {}) {
   }
   const fill = o.kg !== undefined ? o.kg : 120, rc = Math.cbrt(3 * Math.max(fill, .01) / (4 * Math.PI * 1600)), a = o.aim || [0, 2.2, 0];
   const C = o.C || (o.fuze === 'inside' ? [a[0], a[1], a[2] - 1.6] : [a[0], a[1], a[2] + (o.fuze === 'standoff' ? Math.max(o.standoff || 3, rc) : rc)]);
-  return { S: o.grid || .25, shellS: o.grid || .25, plates, box: [XA, YB, ZC, XZ, YD, 0], comps, depth: 10, kind: 'side', frame: { O: [0, 0, 0], X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1] },
+  // (the bench's shut openings on its spaces: the game's ventsOf; frame brackets come with a side patch, sceneOf)
+  return { latMs: o.latMs || 1, vents: o.vents === false ? [] : ventsOf(comps, 1, YD), S: o.grid || .25, shellS: o.grid || .25, plates, box: [XA, YB, ZC, XZ, YD, 0], comps, depth: 10, kind: 'side', frame: { O: [0, 0, 0], X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1] },
     charge: { C, fill, Mc: o.casing !== undefined ? o.casing : 130, mf: o.mf || .03, Wgas: o.Wgas || 0, vapour: o.vapour || 0 }, wl: -1e9, wlLocal: 0, watch: false, solver: 'shell', syncReads: !!o.sync };
 }
 export let result = null, runner = null, t0 = 0, last = null;

@@ -24,7 +24,7 @@ async function shellRunner() {
       try { const w = await import('./shell/gpu_wgpu.js'); wg = await w.initWebGPU(); } catch (e) { wg = null; perf.wgErr = String(e && e.message || e); }
     }
     const m = await import('./shell/runner.js');
-    shell = m.createShellRunner(gl, { wg, batch: 200, depth: cfg.wgDepth || 1 });
+    shell = m.createShellRunner(gl, { wg, batch: 200, depth: cfg.wgDepth || 8 });
     return shell;
   })();
   return shellP;

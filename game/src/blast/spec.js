@@ -194,7 +194,7 @@ export function hitSpec(o) {
    pressures: ventilation closures and ducting ~30 kPa, hatches and scuttles between decks ~50 kPa, weather doors ~70 kPa,
    watertight doors in the transverse bulkheads ~100 kPa (public damage-control figures, coarse). Non-watertight
    partitions inside a space are not modelled: a space is the whole slice between its watertight bulkheads and decks. */
-function ventsOf(cs, up, top) {
+export function ventsOf(cs, up, top) {
   const V = [], ov = (a0, a1, b0, b1) => Math.min(a1, b1) - Math.max(a0, b0);
   for (let i = 0; i < cs.length; i++) for (let j = i + 1; j < cs.length; j++) {
     const a = cs[i].b, b = cs[j].b;

@@ -1,4 +1,4 @@
-/* The blast bench's shell model on the GPU, WebGL2 (game/concepts/blast/gpu.js at commit e00312c, copied; the one change:
+/* The blast bench's shell model on the GPU, WebGL2 (game/concepts/blast/gpu.js at commit 200fe28, copied; the one change:
    gravity on free pieces along the patch's up axis, uUp). RGBA32F, the same physics as the bench's CPU reference, pass
    for pass:
      0. clear the node force accumulator; scatter last step's contact push-back into it
@@ -142,7 +142,9 @@ void main(){
     float i11 = 1.0 / F11, i12 = -F12 / (F11 * F22), i22 = 1.0 / F22;
     float D11 = Fd11 * i11, D22 = Fd21 * i12 + Fd22 * i22, D12 = 0.5 * ((Fd11 * i12 + Fd12 * i22) + Fd21 * i11);
     float edot = sqrt(2.0 / 3.0 * (D11 * D11 + D22 * D22 + (D11 + D22) * (D11 + D22) + 2.0 * D12 * D12));
-    float rf = CSF(mi, edot, ep.w);
+    float vt = sqrt(s.x * s.x + s.y * s.y - s.x * s.y + 3.0 * s.z * s.z), wc = vt > 0.0 ? clamp(-(s.x + s.y) / vt, 0.0, 1.0) : 0.0;
+    float rmp = c10.z > 0.0 ? min(1.0, ep.w / c10.z) : 1.0;
+    float rf = CSF(mi, edot, ep.w) * (1.0 - (1.0 - c10.y) * wc * rmp);
     vec2 rm = retMap(s, ep.w, mA, rf);
     if (rm.x >= 0.0) {
       float g = rm.x; vec3 de = vec3(g * (2.0 * s.x - s.y) / 3.0, g * (2.0 * s.y - s.x) / 3.0, g * s.z);
@@ -180,6 +182,7 @@ void main(){
   for (int k = 0; k < 32; k++) {
     if (k >= uNS_) break;
     vec4 S0 = uS0[k], S1 = uS1[k], S2 = uS2[k], S3 = uS3[k];
+    bool cu = S3.w > 0.0 && S3.w >= uT && S3.w < uT + uH;     // new source: its first step delivers what it owed
     int sp = int(S1.z); float sg;
     if (sN == sp) sg = 1.0; else if (sP == sp) sg = -1.0; else continue;
     int vb = int(S3.y);
@@ -193,7 +196,7 @@ void main(){
       float Rw = max(R, S3.x), W3 = pow(S0.w, 1.0 / 3.0), Xw = W3 / Rw;
       float Pw = (1.0 + ca) * 52.4e6 * pow(Xw, 1.13), th = 0.084e-3 * W3 * pow(Xw, -0.23), TAw = S1.y + Rw / 1500.0;
       float tc = min((sqrt(Rw * Rw + 4.0 * S2.x * tr[2].w) - Rw) / 1500.0, 10.0 * th);
-      float a = clamp(uT - TAw, 0.0, tc), b = clamp(uT + uH - TAw, 0.0, tc);
+      float a = cu ? 0.0 : clamp(uT - TAw, 0.0, tc), b = clamp(uT + uH - TAw, 0.0, tc);
       float Iw = Pw * th * (exp(-a / th) - exp(-b / th)) * S2.w;
       if (Iw > 0.0) L += (Iw / uH * A * sg) * nn;
       continue;
@@ -206,7 +209,7 @@ void main(){
       float W3 = pow(Weq, 1.0 / 3.0), Z = max(R / W3, 0.053);
       float Ps = kPs(Z), Pr = refl(Ps), is = kIs(Z) * W3, ir = is * pow(Pr / Ps, 0.75);
       Pk = Ps + (Pr - Ps) * c2; Iair = is + (ir - is) * c2; float TD = 2.0 * Iair / Pk; TA = S1.y + W3 * arr1(Z);
-      float a = uT - TA, b = a + uH;
+      float a = cu ? -1e9 : uT - TA, b = uT - TA + uH;
       if (b > 0.0 && a < TD) { a = max(a, 0.0); b = min(b, TD); I += Pk * ((b - b * b / (2.0 * TD)) - (a - a * a / (2.0 * TD))); }
     }
     vec4 S5 = uS5[k]; float Rd = S5.z + R;
@@ -214,14 +217,14 @@ void main(){
       float W3 = pow(S5.x, 1.0 / 3.0), Z = max(Rd / W3, 0.053), Ps = kPs(Z), Pr = refl(Ps), is = kIs(Z) * W3, ir = is * pow(Pr / Ps, 0.75);
       float Pd = Ps + (Pr - Ps) * c2, Id = is + (ir - is) * c2;
       if (Id < Iair || Pd < Pk) { I = 0.0; Iair = min(Iair, Id); Pk = min(Pk, Pd); float TD = 2.0 * Iair / Pk;
-        float a = uT - TA, b = a + uH;
+        float a = cu ? -1e9 : uT - TA, b = uT - TA + uH;
         if (b > 0.0 && a < TD) { a = max(a, 0.0); b = min(b, TD); I += Pk * ((b - b * b / (2.0 * TD)) - (a - a * a / (2.0 * TD))); } }
     }
     if (S1.x > 0.0) {
       float ip = S1.x * (kind == 1 ? co / 3.14159265 : 1.0 / 12.5663706) * c2 / (R * R);
       if (S5.x > 0.0) ip = min(ip, S5.y * c2 / (12.5663706 * Rd * Rd));
       float Ix = max(0.0, ip - Iair), tf = R / uUmax;
-      if (Ix > 0.0) I += Ix * (Fp(uT + uH - S1.y, tf) - Fp(uT - S1.y, tf));
+      if (Ix > 0.0) I += Ix * (Fp(uT + uH - S1.y, tf) - (cu ? 0.0 : Fp(uT - S1.y, tf)));
     }
     I *= S2.w;
     if (I > 0.0) L += (I / uH * A * sg) * nn;
@@ -233,7 +236,7 @@ void main(){
   float eb = 0.0; int H[4]; H[0] = int(hg.x); H[1] = int(hg.y); H[2] = int(hg.z); H[3] = int(hg.w);
   vec4 hs[4];
   for (int k = 0; k < 4; k++) { hs[k] = H[k] >= 0 ? texelFetch(uHSt, AT(H[k]), 0) : vec4(0.0); if (H[k] >= 0) eb = max(eb, abs(hs[k].x) * r1.w / (2.0 * c9.w)); }
-  float torn = (Dd + eb >= r3.w || fd <= 0.0 || jmin < 0.25) ? 1.0 : 0.0;
+  float torn = (Dd + eb >= r3.w || fd <= 0.0 || jmin < c10.w) ? 1.0 : 0.0;
   oC = vec4(torn, torn > 0.5 ? uT : -1.0, Dd, min(1.0, util));
 }`;
 
@@ -264,7 +267,7 @@ void main(){
   float kk = mA.x * Ar / L0, fy = (mA.z + mA.w * st.z) * rf * Ar;
   float Lp = st.x, eb = st.z, fo = kk * (L - Lp);
   if (fo > fy) { float np = L - fy / kk; eb += abs(np - Lp) / L0; Lp = np; fo = fy; }
-  else if (fo < -fy) { float np = L + fy / kk; eb += abs(np - Lp) / L0; Lp = np; fo = -fy; }
+  else if (fo < -fy * t5.w) { float fc = fy * t5.w, np = L + fc / kk; eb += abs(np - Lp) / L0; Lp = np; fo = -fc; }
   fo += uBeta * kk * vr;
   vec3 F[9]; for (int z = 0; z < 9; z++) F[z] = vec3(0.0);
   F[0] = fo * u; F[1] = -fo * u;
@@ -500,7 +503,7 @@ export function createGPU(gl, M) {
     const ex = [M.CSP[c], M.CSN[c], M.CWET[c], M.CAR[c]];
     for (let t = 0; t < 4; t++) put(4 + t, [M.CTR[12 * c + 3 * t], M.CTR[12 * c + 3 * t + 1], M.CTR[12 * c + 3 * t + 2], ex[t]]);
     put(8, [0, 1, 2, 3].map(k => M.CHG[4 * c + k])); put(9, [M.CRC[3 * c] - O[0], M.CRC[3 * c + 1] - O[1], M.CRC[3 * c + 2] - O[2], M.CDB[c]]);
-    put(10, [M.CVIS()[c], 0, 0, 0]);
+    put(10, [M.CVIS()[c], M.CKC ? M.CKC[c] : 1, M.KCE || 0, M.JMN === undefined ? .25 : M.JMN]);
   });
   T.cs = tex(Wd * 11, CHr, csData());
   T.hs = wide(NH, 9, (k, put) => { const rv = z => [0, 1, 2].map(q => M.R0[3 * M.HN[6 * k + z] + q] - M.R0[3 * M.HN[6 * k] + q]);
@@ -510,7 +513,7 @@ export function createGPU(gl, M) {
     put(8, [M.HTL0[k], M.HTR[2 * k] >= 0 ? M.TFIB[M.HTR[2 * k]] : 0, 0, 0]); });
   T.ts = wide(NT, 7, (k, put) => { const a = M.TA[k], b = M.TB[k]; put(0, [a, b, M.TL0[k], M.TAR[k]]); put(1, [M.TMAT[k], M.TEF[k], M.TFIB[k], M.TCL[k]]);
     put(2, [M.TBA[k], M.TBB[k], M.TKB[k], M.TQB[k]]); put(3, [...[0, 1, 2].map(z => M.R0[3 * b + z] - M.R0[3 * a + z]), M.TB0[k]]);
-    put(4, [M.TSC[k], M.TPRV[k], M.TKS[k], M.TQS[k]]); put(5, [M.TS0[k], M.TCL2[k], M.TNXT[k], 0]); put(6, [0, 1, 2, 3].map(z => M.TQN[4 * k + z])); });
+    put(4, [M.TSC[k], M.TPRV[k], M.TKS[k], M.TQS[k]]); put(5, [M.TS0[k], M.TCL2[k], M.TNXT[k], M.TKC ? M.TKC[k] : 1]); put(6, [0, 1, 2, 3].map(z => M.TQN[4 * k + z])); });
   const pan = new Float32Array(5 * Math.max(1, M.PAN.length) * 4);
   M.PAN.forEach((P, q) => pan.set([P.o[0] - O[0], P.o[1] - O[1], P.o[2] - O[2], P.nu, ...P.U, P.Lu, ...P.V, P.Lv, ...P.n, P.off, P.nv, 0, 0, 0], 20 * q));
   T.pan = tex(5 * Math.max(1, M.PAN.length), 1, pan);
@@ -563,7 +566,7 @@ export function createGPU(gl, M) {
     const [S0, S1, S2, S3, S4, S5] = SRCn;
     for (let k = 0; k < n; k++) { const s = list[k];
       S0.set([s.pos[0] - O[0], s.pos[1] - O[1], s.pos[2] - O[2], s.W], 4 * k); S1.set([s.Pm, s.t0, s.space, s.kind], 4 * k);
-      S2.set([...(s.ax || [0, 0, 0]), s.gain], 4 * k); S3.set([s.rc, s.vis, s.plane ? 1 : 0, 0], 4 * k); S5.set([s.Wf || 0, s.Pmf || 0, s.Df || 0, 0], 4 * k);
+      S2.set([...(s.ax || [0, 0, 0]), s.gain], 4 * k); S3.set([s.rc, s.vis, s.plane ? 1 : 0, s.tAdd || 0], 4 * k); S5.set([s.Wf || 0, s.Pmf || 0, s.Df || 0, 0], 4 * k);
       if (s.plane) S4.set([s.plane[0], s.plane[1], s.plane[2], s.plane[3] - (s.plane[0] * O[0] + s.plane[1] * O[1] + s.plane[2] * O[2])], 4 * k); }
     let same = n === nsrc; for (let q = 0; q < 6 && same; q++) for (let k = 0; k < 4 * n; k++) if (SRC[q][k] !== SRCn[q][k]) { same = false; break; }
     if (same) return;
@@ -674,6 +677,28 @@ export function createGPU(gl, M) {
     fenceN = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0); gl.flush();
     return got;
   }
+  // tagged read-backs: a copy of this step's torn cells / node motion into a pixel buffer now, read when asked for
+  // (blocking if the GPU hasn't got there yet), so the run uses them at a fixed step whatever the timing
+  const tagged = new Map();
+  function requestCells(tag) {
+    pack(); const b = gl.createBuffer(); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, b); gl.bufferData(gl.PIXEL_PACK_BUFFER, Wd * CHr * 4, gl.STREAM_READ);
+    gl.readPixels(0, 0, Wd, CHr, gl.RGBA, gl.UNSIGNED_BYTE, 0); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null); gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    tagged.set('c' + tag, { b, f: gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0) }); gl.flush();
+  }
+  function cellsOf(tag) { const e = tagged.get('c' + tag); if (!e) return null; tagged.delete('c' + tag);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, e.b); gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, rb8); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null); gl.deleteBuffer(e.b); gl.deleteSync(e.f);
+    return unpack(); }
+  function requestNodes(tag) {
+    const b = gl.createBuffer(); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, b); gl.bufferData(gl.PIXEL_PACK_BUFFER, Wd * NHr * 32, gl.STREAM_READ);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fNode[cur]); gl.readBuffer(gl.COLOR_ATTACHMENT0); gl.readPixels(0, 0, Wd, NHr, gl.RGBA, gl.FLOAT, 0);
+    gl.readBuffer(gl.COLOR_ATTACHMENT1); gl.readPixels(0, 0, Wd, NHr, gl.RGBA, gl.FLOAT, Wd * NHr * 16);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null); gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    tagged.set('n' + tag, { b, f: gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0) }); gl.flush();
+  }
+  function nodesOf(tag, V, FREE) { const e = tagged.get('n' + tag); if (!e) return false; tagged.delete('n' + tag);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, e.b); gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, rb); for (let i = 0; i < N; i++) FREE[i] = rb[4 * i + 3] > .5 ? 1 : 0;
+    gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, Wd * NHr * 16, rb); for (let i = 0; i < N; i++) { V[3 * i] = rb[4 * i]; V[3 * i + 1] = rb[4 * i + 1]; V[3 * i + 2] = rb[4 * i + 2]; }
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null); gl.deleteBuffer(e.b); gl.deleteSync(e.f); return true; }
   function readState(o) {                                 // end of run: plastic strain, damage, member failures, hinge sets
     const tmp = new Float32Array(Wd * CHr * 4);
     for (let k = 0; k < 4; k++) { read(fCell[cur], k, Wd, CHr, tmp); for (let c = 0; c < NC; c++) for (let z = 0; z < 4; z++) o.CEP[16 * c + 4 * k + z] = tmp[4 * c + z]; }
@@ -681,6 +706,6 @@ export function createGPU(gl, M) {
     if (NT) { const a = new Float32Array(Wd * THr * 4); read(fTruss[cur], 0, Wd, THr, a); for (let k = 0; k < NT; k++) { o.TFL[k] = a[4 * k] < 0 ? 1 : 0; if (o.TBP) o.TBP[k] = a[4 * k + 3]; } }
     if (NH) { const a = new Float32Array(Wd * HHr * 4); read(fHinge[cur], 0, Wd, HHr, a); for (let k = 0; k < NH; k++) { o.HTP[k] = a[4 * k]; if (o.HTH) o.HTH[k] = a[4 * k + 1]; if (o.HTPS) o.HTPS[k] = a[4 * k + 2]; } }
   }
-  function dispose() { if (fence) gl.deleteSync(fence); if (fenceN) gl.deleteSync(fenceN); for (const [f, o] of objs) try { gl[f](o); } catch (e) {} objs.length = 0; }
-  return { step, steps, profile, readCellsFull, readNodesAsync, upload, setSources, setGas, setImpulses, setDamage, readNodes, readCells, readCellsAsync, readState, dispose, O };
+  function dispose() { for (const e of tagged.values()) { try { gl.deleteBuffer(e.b); gl.deleteSync(e.f); } catch (x) {} } tagged.clear(); if (fence) gl.deleteSync(fence); if (fenceN) gl.deleteSync(fenceN); for (const [f, o] of objs) try { gl[f](o); } catch (e) {} objs.length = 0; }
+  return { step, steps, requestCells, cellsOf, requestNodes, nodesOf, has: () => true, waitFor: () => Promise.resolve(), profile, readCellsFull, readNodesAsync, upload, setSources, setGas, setImpulses, setDamage, readNodes, readCells, readCellsAsync, readState, dispose, O };
 }

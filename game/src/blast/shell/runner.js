@@ -1,4 +1,4 @@
-/* The shell solver's runner (bench e00312c: shell/model.js; shell/gpu_wgpu.js WebGPU, shell/gpu.js WebGL2): the same
+/* The shell solver's runner (bench 200fe28: shell/model.js; shell/gpu_wgpu.js WebGPU, shell/gpu.js WebGL2): the same
    interface as the lattice runner (blast/runner.js), so the worker and the game system take either. One GPU instance
    per patch, two patches solved at a time (buffers sized to each patch, freed when it settles), the rest queued. Grid
    0.25 m (spec.shellS): the bench's cost figures are at that grid.
@@ -12,12 +12,12 @@ import { sceneOf, buildShell, loadShell, commonSync, checkEnd, markDebris, openC
 import { createGPU } from './gpu.js';
 import { createWGPU } from './gpu_wgpu.js';
 
-const SYNC = 25, BLK = 125;
+const SYNC = 25;
 const SNAP_DT = .0004, SNAP_MS = 60, MAXIN = 24000, RUNNING = 2;
 
 export function createShellRunner(gl, o = {}) {
   const pats = new Map(), queue = [];
-  const stats = { readMs: 0, nodeMs: 0, stepMs: 0, steps: 0, pumps: 0, gpuSteps: 0, built: 0, done: 0, buildMs: 0, snapMs: 0, pumpMs: 0, backend: o.wg ? 'webgpu' : 'webgl2', skipped: 0 };
+  const stats = { waits: 0, readMs: 0, nodeMs: 0, stepMs: 0, steps: 0, pumps: 0, gpuSteps: 0, built: 0, done: 0, buildMs: 0, snapMs: 0, pumpMs: 0, backend: o.wg ? 'webgpu' : 'webgl2', skipped: 0 };
   const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
   function submit(id, spec) {
@@ -38,7 +38,8 @@ export function createShellRunner(gl, o = {}) {
       if (R.state !== 'queued') continue;
       try {
         const wg = o.wg && !R.spec.syncReads;
-        R.gpu = wg ? createWGPU(o.wg, gpuModel(R.M), { batch: 1e6, depth: 2, manualReads: true }) : createGPU(gl, gpuModel(R.M));
+        R.LAT = SYNC * Math.max(2, Math.round((R.spec.latMs || o.latMs || 1) * 1e-3 / (SYNC * R.M.dt)));
+        R.gpu = wg ? createWGPU(o.wg, gpuModel(R.M), { batch: Math.min(200, Math.max(SYNC, R.LAT / 2)), depth: o.depth || 2 }) : createGPU(gl, gpuModel(R.M));
         R.wg = !!wg; R.gpu.upload(); R.gpu.setSources(R.M.sim.SRC); R.gpu.setGas(R.M.GP);
         R.state = 'run'; running++;
       } catch (e) { R.state = 'failed'; R.err = String(e && e.message || e); if (R.gpu) { try { R.gpu.dispose(); } catch (e2) { /* */ } R.gpu = null; } }
@@ -46,7 +47,36 @@ export function createShellRunner(gl, o = {}) {
   }
   function target(id, t, watch) { const R = pats.get(id); if (R) { R.target = Math.max(R.target, t); if (watch !== undefined) R.watch = !!watch; } }
   function drop(id) { const R = pats.get(id); if (!R) return; if (R.gpu) R.gpu.dispose(); R.gpu = null; R.state = 'dropped'; pats.delete(id); admit(); }
-  const tornFrom = (M, cl) => { let torn = false; if (cl) for (let c = 0; c < M.NC; c++) if (cl[4 * c] > .5 && !M.CER[c]) { M.CER[c] = 1; M.CTE[c] = cl[4 * c + 1]; openCell(M, c, M.CTE[c]); if (attachedCell(M, c)) torn = true; } return torn; };
+  const tornFrom = (M, cl) => { let torn = false; if (cl) for (let c = 0; c < M.NC; c++) if (cl[4 * c] > .5 && M.CKN[c] !== 1) { M.CER[c] = M.CER[c] || 1; M.CTE[c] = cl[4 * c + 1]; openCell(M, c, M.CTE[c]); if (attachedCell(M, c)) torn = true; } return torn; };
+
+  /* the bench's step (200fe28, AUDIT A6): read-backs tagged with their step and used a fixed LAT steps later (a whole
+     number of syncs, ~R.latMs): torn cells for vents, hole sources and fragments at every sync, the node motion for the
+     end-of-run test every 200 steps. WebGPU, WebGL2 (async or blocking) all end on the same step with the same result.
+     A read not in yet (WebGPU's mapping): the pump stops there and goes on at the next tick. */
+  function needWait(R) {
+    const s = R.M.sim, n = s.n + 1, m = n - R.LAT, g = R.gpu;
+    return (n % SYNC === 0 && m > 0 && m % SYNC === 0 && !g.has('c', m)) || (m > 0 && m % 200 === 0 && !g.has('n', m));
+  }
+  function syncStep(R) {
+    const M = R.M, s = M.sim, g = R.gpu, n = s.n, m = n - R.LAT;
+    g.requestCells(n);
+    let torn = false;
+    if (m > 0 && m % SYNC === 0) { const tq = now(); torn = tornFrom(M, g.cellsOf(m)); stats.readMs += now() - tq; }
+    const dmg = commonSync(M, s.t, torn, SYNC * M.dt);
+    g.setSources(s.SRC); g.setGas(M.GP);
+    if (s.IMPN.length) { g.setImpulses(s.IMPN); s.IMPN.length = 0; }
+    if (dmg) g.setDamage(M.CFD);
+  }
+  function endCheck(R) {
+    const M = R.M, s = M.sim, g = R.gpu, m = s.n - R.LAT;
+    if (s.n % 200 === 0) g.requestNodes(s.n);
+    if (m > 0 && m % 200 === 0) {
+      const VE = R.VE || (R.VE = { V: new Float64Array(3 * M.N), FREE: new Uint8Array(M.N) });
+      const tn = now();
+      if (g.nodesOf(m, VE.V, VE.FREE)) { const V0 = M.V, F0 = M.FREE; M.V = VE.V; M.FREE = VE.FREE; checkEnd(M); M.V = V0; M.FREE = F0; }
+      stats.nodeMs += now() - tn;
+    }
+  }
 
   function pump(stepsMax = 24) {
     stats.pumps++;
@@ -60,52 +90,20 @@ export function createShellRunner(gl, o = {}) {
     // the steps go round the running patches, each its share
     const each = Math.max(1, Math.round(stepsMax / run.length));
     for (const R of run) {
-      const M = R.M, s = M.sim, g = R.gpu, sync = R.spec.syncReads;
-      let torn = false;
-      if (R.wg) {
-        // WebGPU, deterministic: blocks of BLK steps; each block's end state is read back (mapAsync) and applied at the
-        // start of the next block, which waits for it (a tick or so); only whole blocks, so the same hit runs the same
-        const cl = g.readCellsAsync();
-        if (R.pend && !cl) { stats.skipped++; continue; }
-        R.pend = false;
-        torn = tornFrom(M, cl);
-        if (g.readNodesAsync(M.X, M.V, M.FREE)) { R.fresh = true; if (s.n - (R.endN || 0) >= 200) { R.endN = s.n; checkEnd(M); } }
-        if (s.t < s.T1 && s.t + BLK * M.dt > R.target + M.dt && s.t + BLK * M.dt < s.T1) continue;    // (whole blocks only)
-        for (let k = 0; k < BLK; k++) {
-          if (!(s.t < s.T1)) break;
-          g.step(s.t, M.dt, s.relax ? 250 : s.alpha);
-          s.t += M.dt; s.n++; R.steps++; did++;
-          if (s.n % SYNC === 0) {
-            const dmg = commonSync(M, s.t, torn, SYNC * M.dt); torn = false;
-            g.setSources(s.SRC); g.setGas(M.GP);
-            if (s.IMPN.length) { g.setImpulses(s.IMPN); s.IMPN.length = 0; }
-            if (dmg) g.setDamage(M.CFD);
-          }
-        }
-        g.submit(true); R.pend = true;
-        if (s.t >= s.T1) R.state = 'finish';
-        continue;
-      }
-      if (!sync) {
-        const tq = now(); torn = tornFrom(M, g.readCellsAsync()); stats.readMs += now() - tq;
-        const tn = now();
-        if (g.readNodesAsync(M.X, M.V, M.FREE)) { R.fresh = true; if (s.n - (R.endN || 0) >= 200) { R.endN = s.n; checkEnd(M); } }
-        stats.nodeMs += now() - tn;
-      }
+      const M = R.M, s = M.sim, g = R.gpu;
+      // (the latest positions for the drawing: an untagged read, not used by the solve)
+      if (!R.spec.syncReads && g.readNodesAsync(M.X, M.Vd || (M.Vd = new Float64Array(3 * M.N)), M.FREE)) R.fresh = true;
+      if (R.wg && g.busy()) { stats.skipped++; continue; }
       for (let k = 0; k < each; k++) {
         if (!(s.t < s.T1 && s.t < R.target + M.dt)) break;
+        if (needWait(R)) { if (R.wg) { g.submit(); stats.waits++; break; } }
         const tq0 = now(); g.step(s.t, M.dt, s.relax ? 250 : s.alpha); stats.stepMs += now() - tq0;
         s.t += M.dt; s.n++; R.steps++; did++;
-        if (s.n % SYNC === 0) {
-          if (sync && tornFrom(M, g.readCells())) torn = true;
-          const dmg = commonSync(M, s.t, torn, SYNC * M.dt); torn = false;
-          g.setSources(s.SRC); g.setGas(M.GP);
-          if (s.IMPN.length) { g.setImpulses(s.IMPN); s.IMPN.length = 0; }
-          if (dmg) g.setDamage(M.CFD);
-        }
-        if (sync && s.n % 200 === 0) { g.readNodes(true, M.X, M.V, M.FREE); checkEnd(M); }
+        if (s.n % SYNC === 0) syncStep(R);
+        endCheck(R);
         if (s.t >= s.T1) break;
       }
+      if (R.wg) g.submit();
       if (s.t >= s.T1) R.state = 'finish';
     }
     stats.steps = did; stats.gpuSteps += did;
@@ -118,7 +116,6 @@ export function createShellRunner(gl, o = {}) {
       }
       const s = R.M.sim;
       if (R.watch && s.t - R.lastSnapT >= SNAP_DT && now() - R.lastSnapMs >= SNAP_MS) {
-        // (the positions and torn cells of the last asynchronous read back: a frame or so behind the solve)
         if (R.spec.syncReads) { R.gpu.readNodes(false, R.M.X, R.M.V, R.M.FREE); R.fresh = true; }
         if (R.fresh) { R.fresh = false; out.push(snapshot(R, false)); }
       }
@@ -132,6 +129,7 @@ export function createShellRunner(gl, o = {}) {
     const M = R.M, g = R.gpu;
     try {
       await g.readStateAsync({ CEP: M.CEP, CDM: M.CDM, TFL: M.TFL, HTP: M.HTP, HTH: M.HTH, HTPS: M.HTPS, TBP: M.TBP });
+      if (g.flush) await g.flush();
       if (R.state !== 'finishing') return;
       g.readNodes(true, M.X, M.V, M.FREE);
       tornFrom(M, g.readCells());
