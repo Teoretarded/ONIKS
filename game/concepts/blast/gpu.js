@@ -181,6 +181,7 @@ void main(){
   for (int k = 0; k < 32; k++) {
     if (k >= uNS_) break;
     vec4 S0 = uS0[k], S1 = uS1[k], S2 = uS2[k], S3 = uS3[k];
+    bool cu = S3.w > 0.0 && S3.w >= uT && S3.w < uT + uH;     // new source: its first step delivers what it owed
     int sp = int(S1.z); float sg;
     if (sN == sp) sg = 1.0; else if (sP == sp) sg = -1.0; else continue;
     int vb = int(S3.y);
@@ -194,7 +195,7 @@ void main(){
       float Rw = max(R, S3.x), W3 = pow(S0.w, 1.0 / 3.0), Xw = W3 / Rw;
       float Pw = (1.0 + ca) * 52.4e6 * pow(Xw, 1.13), th = 0.084e-3 * W3 * pow(Xw, -0.23), TAw = S1.y + Rw / 1500.0;
       float tc = min((sqrt(Rw * Rw + 4.0 * S2.x * tr[2].w) - Rw) / 1500.0, 10.0 * th);
-      float a = clamp(uT - TAw, 0.0, tc), b = clamp(uT + uH - TAw, 0.0, tc);
+      float a = cu ? 0.0 : clamp(uT - TAw, 0.0, tc), b = clamp(uT + uH - TAw, 0.0, tc);
       float Iw = Pw * th * (exp(-a / th) - exp(-b / th)) * S2.w;
       if (Iw > 0.0) L += (Iw / uH * A * sg) * nn;
       continue;
@@ -207,7 +208,7 @@ void main(){
       float W3 = pow(Weq, 1.0 / 3.0), Z = max(R / W3, 0.053);
       float Ps = kPs(Z), Pr = refl(Ps), is = kIs(Z) * W3, ir = is * pow(Pr / Ps, 0.75);
       Pk = Ps + (Pr - Ps) * c2; Iair = is + (ir - is) * c2; float TD = 2.0 * Iair / Pk; TA = S1.y + W3 * arr1(Z);
-      float a = uT - TA, b = a + uH;
+      float a = cu ? -1e9 : uT - TA, b = uT - TA + uH;
       if (b > 0.0 && a < TD) { a = max(a, 0.0); b = min(b, TD); I += Pk * ((b - b * b / (2.0 * TD)) - (a - a * a / (2.0 * TD))); }
     }
     vec4 S5 = uS5[k]; float Rd = S5.z + R;
@@ -215,14 +216,14 @@ void main(){
       float W3 = pow(S5.x, 1.0 / 3.0), Z = max(Rd / W3, 0.053), Ps = kPs(Z), Pr = refl(Ps), is = kIs(Z) * W3, ir = is * pow(Pr / Ps, 0.75);
       float Pd = Ps + (Pr - Ps) * c2, Id = is + (ir - is) * c2;
       if (Id < Iair || Pd < Pk) { I = 0.0; Iair = min(Iair, Id); Pk = min(Pk, Pd); float TD = 2.0 * Iair / Pk;
-        float a = uT - TA, b = a + uH;
+        float a = cu ? -1e9 : uT - TA, b = uT - TA + uH;
         if (b > 0.0 && a < TD) { a = max(a, 0.0); b = min(b, TD); I += Pk * ((b - b * b / (2.0 * TD)) - (a - a * a / (2.0 * TD))); } }
     }
     if (S1.x > 0.0) {
       float ip = S1.x * (kind == 1 ? co / 3.14159265 : 1.0 / 12.5663706) * c2 / (R * R);
       if (S5.x > 0.0) ip = min(ip, S5.y * c2 / (12.5663706 * Rd * Rd));
       float Ix = max(0.0, ip - Iair), tf = R / uUmax;
-      if (Ix > 0.0) I += Ix * (Fp(uT + uH - S1.y, tf) - Fp(uT - S1.y, tf));
+      if (Ix > 0.0) I += Ix * (Fp(uT + uH - S1.y, tf) - (cu ? 0.0 : Fp(uT - S1.y, tf)));
     }
     I *= S2.w;
     if (I > 0.0) L += (I / uH * A * sg) * nn;
@@ -564,7 +565,7 @@ export function createGPU(gl, M) {
     const [S0, S1, S2, S3, S4, S5] = SRCn;
     for (let k = 0; k < n; k++) { const s = list[k];
       S0.set([s.pos[0] - O[0], s.pos[1] - O[1], s.pos[2] - O[2], s.W], 4 * k); S1.set([s.Pm, s.t0, s.space, s.kind], 4 * k);
-      S2.set([...(s.ax || [0, 0, 0]), s.gain], 4 * k); S3.set([s.rc, s.vis, s.plane ? 1 : 0, 0], 4 * k); S5.set([s.Wf || 0, s.Pmf || 0, s.Df || 0, 0], 4 * k);
+      S2.set([...(s.ax || [0, 0, 0]), s.gain], 4 * k); S3.set([s.rc, s.vis, s.plane ? 1 : 0, s.tAdd || 0], 4 * k); S5.set([s.Wf || 0, s.Pmf || 0, s.Df || 0, 0], 4 * k);
       if (s.plane) S4.set([s.plane[0], s.plane[1], s.plane[2], s.plane[3] - (s.plane[0] * O[0] + s.plane[1] * O[1] + s.plane[2] * O[2])], 4 * k); }
     let same = n === nsrc; for (let q = 0; q < 6 && same; q++) for (let k = 0; k < 4 * n; k++) if (SRC[q][k] !== SRCn[q][k]) { same = false; break; }
     if (same) return;
@@ -675,6 +676,28 @@ export function createGPU(gl, M) {
     fenceN = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0); gl.flush();
     return got;
   }
+  // tagged read-backs: a copy of this step's torn cells / node motion into a pixel buffer now, read when asked for
+  // (blocking if the GPU hasn't got there yet), so the run uses them at a fixed step whatever the timing
+  const tagged = new Map();
+  function requestCells(tag) {
+    pack(); const b = gl.createBuffer(); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, b); gl.bufferData(gl.PIXEL_PACK_BUFFER, Wd * CHr * 4, gl.STREAM_READ);
+    gl.readPixels(0, 0, Wd, CHr, gl.RGBA, gl.UNSIGNED_BYTE, 0); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null); gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    tagged.set('c' + tag, { b, f: gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0) }); gl.flush();
+  }
+  function cellsOf(tag) { const e = tagged.get('c' + tag); if (!e) return null; tagged.delete('c' + tag);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, e.b); gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, rb8); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null); gl.deleteBuffer(e.b); gl.deleteSync(e.f);
+    return unpack(); }
+  function requestNodes(tag) {
+    const b = gl.createBuffer(); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, b); gl.bufferData(gl.PIXEL_PACK_BUFFER, Wd * NHr * 32, gl.STREAM_READ);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fNode[cur]); gl.readBuffer(gl.COLOR_ATTACHMENT0); gl.readPixels(0, 0, Wd, NHr, gl.RGBA, gl.FLOAT, 0);
+    gl.readBuffer(gl.COLOR_ATTACHMENT1); gl.readPixels(0, 0, Wd, NHr, gl.RGBA, gl.FLOAT, Wd * NHr * 16);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null); gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    tagged.set('n' + tag, { b, f: gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0) }); gl.flush();
+  }
+  function nodesOf(tag, V, FREE) { const e = tagged.get('n' + tag); if (!e) return false; tagged.delete('n' + tag);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, e.b); gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, rb); for (let i = 0; i < N; i++) FREE[i] = rb[4 * i + 3] > .5 ? 1 : 0;
+    gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, Wd * NHr * 16, rb); for (let i = 0; i < N; i++) { V[3 * i] = rb[4 * i]; V[3 * i + 1] = rb[4 * i + 1]; V[3 * i + 2] = rb[4 * i + 2]; }
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null); gl.deleteBuffer(e.b); gl.deleteSync(e.f); return true; }
   function readState(o) {                                 // end of run: plastic strain, damage, member failures, hinge sets
     const tmp = new Float32Array(Wd * CHr * 4);
     for (let k = 0; k < 4; k++) { read(fCell[cur], k, Wd, CHr, tmp); for (let c = 0; c < NC; c++) for (let z = 0; z < 4; z++) o.CEP[16 * c + 4 * k + z] = tmp[4 * c + z]; }
@@ -682,6 +705,6 @@ export function createGPU(gl, M) {
     if (NT) { const a = new Float32Array(Wd * THr * 4); read(fTruss[cur], 0, Wd, THr, a); for (let k = 0; k < NT; k++) { o.TFL[k] = a[4 * k] < 0 ? 1 : 0; if (o.TBP) o.TBP[k] = a[4 * k + 3]; } }
     if (NH) { const a = new Float32Array(Wd * HHr * 4); read(fHinge[cur], 0, Wd, HHr, a); for (let k = 0; k < NH; k++) { o.HTP[k] = a[4 * k]; if (o.HTH) o.HTH[k] = a[4 * k + 1]; if (o.HTPS) o.HTPS[k] = a[4 * k + 2]; } }
   }
-  function dispose() { if (fence) gl.deleteSync(fence); if (fenceN) gl.deleteSync(fenceN); for (const [f, o] of objs) try { gl[f](o); } catch (e) {} objs.length = 0; }
-  return { step, steps, profile, readCellsFull, readNodesAsync, upload, setSources, setGas, setImpulses, setDamage, readNodes, readCells, readCellsAsync, readState, dispose, O };
+  function dispose() { for (const e of tagged.values()) { try { gl.deleteBuffer(e.b); gl.deleteSync(e.f); } catch (x) {} } tagged.clear(); if (fence) gl.deleteSync(fence); if (fenceN) gl.deleteSync(fenceN); for (const [f, o] of objs) try { gl[f](o); } catch (e) {} objs.length = 0; }
+  return { step, steps, requestCells, cellsOf, requestNodes, nodesOf, has: () => true, waitFor: () => Promise.resolve(), profile, readCellsFull, readNodesAsync, upload, setSources, setGas, setImpulses, setDamage, readNodes, readCells, readCellsAsync, readState, dispose, O };
 }

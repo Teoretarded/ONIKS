@@ -202,6 +202,7 @@ fn retMap(sp: ptr<function, vec3f>, eb: f32, mA: vec4f, rf: f32) -> vec2f {
     for (var k = 0; k < 32; k++) {
       if (k >= LL.ns.x) { break; }
       let S0 = LL.s0[k]; let S1 = LL.s1[k]; let S2 = LL.s2[k]; let S3 = LL.s3[k];
+      let cu = S3.w > 0.0 && S3.w >= uT && S3.w < uT + uH;
       let sp = i32(S1.z); var sg = 0.0;
       if (sN == sp) { sg = 1.0; } else if (sP == sp) { sg = -1.0; } else { continue; }
       let vb = i32(S3.y);
@@ -215,7 +216,7 @@ fn retMap(sp: ptr<function, vec3f>, eb: f32, mA: vec4f, rf: f32) -> vec2f {
         let Rw = max(R, S3.x); let W3 = pow(S0.w, 1.0 / 3.0); let Xw = W3 / Rw;
         let Pw = (1.0 + ca) * 52.4e6 * pow(Xw, 1.13); let th = 0.084e-3 * W3 * pow(Xw, -0.23); let TAw = S1.y + Rw / 1500.0;
         let tc = min((sqrt(Rw * Rw + 4.0 * S2.x * tr[2].w) - Rw) / 1500.0, 10.0 * th);
-        let a = clamp(uT - TAw, 0.0, tc); let b = clamp(uT + uH - TAw, 0.0, tc);
+        let a = select(clamp(uT - TAw, 0.0, tc), 0.0, cu); let b = clamp(uT + uH - TAw, 0.0, tc);
         let Iw = Pw * th * (exp(-a / th) - exp(-b / th)) * S2.w;
         if (Iw > 0.0) { L += (Iw / uH * A * sg) * nn; }
         continue;
@@ -228,7 +229,7 @@ fn retMap(sp: ptr<function, vec3f>, eb: f32, mA: vec4f, rf: f32) -> vec2f {
         let W3 = pow(Weq, 1.0 / 3.0); let Z = max(R / W3, 0.053);
         let Ps = kPs(Z); let Pr = refl(Ps); let is_ = kIs(Z) * W3; let ir = is_ * pow(Pr / Ps, 0.75);
         Pk = Ps + (Pr - Ps) * c2; Iair = is_ + (ir - is_) * c2; let TD = 2.0 * Iair / Pk; TA = S1.y + W3 * arr1(Z);
-        var a = uT - TA; var b = a + uH;
+        var a = select(uT - TA, -1e9, cu); var b = uT - TA + uH;
         if (b > 0.0 && a < TD) { a = max(a, 0.0); b = min(b, TD); I += Pk * ((b - b * b / (2.0 * TD)) - (a - a * a / (2.0 * TD))); }
       }
       let S5 = LL.s5[k]; let Rd = S5.z + R;
@@ -236,14 +237,14 @@ fn retMap(sp: ptr<function, vec3f>, eb: f32, mA: vec4f, rf: f32) -> vec2f {
         let W3 = pow(S5.x, 1.0 / 3.0); let Z = max(Rd / W3, 0.053); let Ps = kPs(Z); let Pr = refl(Ps); let is_ = kIs(Z) * W3; let ir = is_ * pow(Pr / Ps, 0.75);
         let Pd = Ps + (Pr - Ps) * c2; let Id = is_ + (ir - is_) * c2;
         if (Id < Iair || Pd < Pk) { I = 0.0; Iair = min(Iair, Id); Pk = min(Pk, Pd); let TD = 2.0 * Iair / Pk;
-          var a = uT - TA; var b = a + uH;
+          var a = select(uT - TA, -1e9, cu); var b = uT - TA + uH;
           if (b > 0.0 && a < TD) { a = max(a, 0.0); b = min(b, TD); I += Pk * ((b - b * b / (2.0 * TD)) - (a - a * a / (2.0 * TD))); } }
       }
       if (S1.x > 0.0) {
         var ip = S1.x * select(1.0 / 12.5663706, co / 3.14159265, kind == 1) * c2 / (R * R);
         if (S5.x > 0.0) { ip = min(ip, S5.y * c2 / (12.5663706 * Rd * Rd)); }
         let Ix = max(0.0, ip - Iair); let tf = R / KC.s0.y;
-        if (Ix > 0.0) { I += Ix * (Fp(uT + uH - S1.y, tf) - Fp(uT - S1.y, tf)); }
+        if (Ix > 0.0) { I += Ix * (Fp(uT + uH - S1.y, tf) - select(Fp(uT - S1.y, tf), 0.0, cu)); }
       }
       I *= S2.w;
       if (I > 0.0) { L += (I / uH * A * sg) * nn; }
@@ -607,7 +608,7 @@ export function createWGPU(dev, M, opt = {}) {
     if (wantRead) addRead();
     endPass();
     if (nsteps || wantRead) dev.queue.writeBuffer(bP, 0, par, 0, PSTRIDE * (nsteps + 1));
-    dev.queue.submit([enc.finish()]); enc = null; pass = null;
+    dev.queue.submit([enc.finish()]); enc = null; pass = null; mapTagged();
     inflight++; dev.queue.onSubmittedWorkDone().then(() => { inflight--; while (waiters.length && inflight < depth) waiters.shift()(); });
     if (wantRead) {
       reading = true; const seq = ++readSeq;
@@ -650,6 +651,27 @@ export function createWGPU(dev, M, opt = {}) {
     stateCache = o;
   }
   let stateCache = null;
+  // tagged read-backs: copies of this step's torn cells / node motion, taken at this point of the command stream and
+  // mapped after the submit; the run asks for them a fixed number of steps later (waiting if they aren't mapped yet)
+  const tagged = new Map();
+  const tagEntry = (key, buf, kind) => { const e = { buf, kind, submitted: false, ready: false, data: null }; e.promise = new Promise(r => { e.resolve = r; }); tagged.set(key, e); };
+  function requestCells(tag) {
+    begin(); endPass(); const o = nsteps * PSTRIDE / 4; parU[o + 4] = cur;
+    pass = enc.beginComputePass(); pass.setBindGroup(0, bg, [nsteps * PSTRIDE]); pass.setPipeline(pP); pass.dispatchWorkgroups(wg(NC)); endPass();
+    const b = dev.createBuffer({ size: Math.ceil(pkBytes / 16) * 16, usage: U.MAP_READ | U.COPY_DST });
+    enc.copyBufferToBuffer(bSC, 16 * L.O_PK, b, 0, pkBytes); tagEntry('c' + tag, b, 'c');
+  }
+  function requestNodes(tag) {
+    begin(); endPass(); const b = dev.createBuffer({ size: Math.ceil(nodeBytes / 16) * 16, usage: U.MAP_READ | U.COPY_DST });
+    enc.copyBufferToBuffer(bDY, 16 * (L.O_ND + cur * 3 * N), b, 0, nodeBytes); tagEntry('n' + tag, b, 'n');
+  }
+  function mapTagged() { for (const e of tagged.values()) if (!e.submitted) { e.submitted = true;
+    e.buf.mapAsync(GPUMapMode.READ).then(() => { const r = e.buf.getMappedRange(); e.data = e.kind === 'c' ? new Uint32Array(r.slice(0, 4 * NC)) : new Float32Array(r.slice(0, nodeBytes)); e.buf.unmap(); e.buf.destroy(); e.ready = true; e.resolve(); }); } }
+  const has = (kind, tag) => { const e = tagged.get(kind + tag); return !e || e.ready; };
+  const waitFor = (kind, tag) => { const e = tagged.get(kind + tag); if (!e) return Promise.resolve(); if (!e.submitted) submit(); return e.promise; };
+  function cellsOf(tag) { const e = tagged.get('c' + tag); if (!e || !e.ready) return null; tagged.delete('c' + tag); lastPK.set(e.data); return decode(); }
+  function nodesOf(tag, V, FREE) { const e = tagged.get('n' + tag); if (!e || !e.ready) return false; tagged.delete('n' + tag); const d = e.data, b = 4 * N;
+    for (let i = 0; i < N; i++) { FREE[i] = d[4 * i + 3] > .5 ? 1 : 0; V[3 * i] = d[b + 4 * i]; V[3 * i + 1] = d[b + 4 * i + 1]; V[3 * i + 2] = d[b + 4 * i + 2]; } return true; }
   function readState(o) { if (stateCache && stateCache !== o) for (const k in o) if (stateCache[k] && o[k] && o[k] !== stateCache[k]) o[k].set(stateCache[k]); }
   function readCellsFull() { const a = decode(); return a; }
   // ---- initial state (detonation), loads, impulses, damage
@@ -671,7 +693,7 @@ export function createWGPU(dev, M, opt = {}) {
     const n = Math.min(32, list.length), b = new Float32Array(6 * 128);
     for (let k = 0; k < n; k++) { const s = list[k], o = 4 * k;
       b.set([s.pos[0] - O[0], s.pos[1] - O[1], s.pos[2] - O[2], s.W], o); b.set([s.Pm, s.t0, s.space, s.kind], 128 + o);
-      b.set([...(s.ax || [0, 0, 0]), s.gain], 256 + o); b.set([s.rc, s.vis, s.plane ? 1 : 0, 0], 384 + o); b.set([s.Wf || 0, s.Pmf || 0, s.Df || 0, 0], 640 + o);
+      b.set([...(s.ax || [0, 0, 0]), s.gain], 256 + o); b.set([s.rc, s.vis, s.plane ? 1 : 0, s.tAdd || 0], 384 + o); b.set([s.Wf || 0, s.Pmf || 0, s.Df || 0, 0], 640 + o);
       if (s.plane) b.set([s.plane[0], s.plane[1], s.plane[2], s.plane[3] - (s.plane[0] * O[0] + s.plane[1] * O[1] + s.plane[2] * O[2])], 512 + o); }
     let same = loadsI[896] === n; for (let k = 0; k < 768 && same; k++) if (loads[128 + k] !== b[k]) same = false;
     if (same) return; loads.set(b, 128); loadsI[896] = n; loadsDirty = true;
@@ -684,7 +706,7 @@ export function createWGPU(dev, M, opt = {}) {
     if (n) { upload(a, bSC, 16 * L.O_IMP); nimp = n; }
   }
   function setDamage(CFD) { const a = new Float32Array(4 * NC); for (let c = 0; c < NC; c++) a[4 * c] = CFD[c]; upload(a, bSC, 16 * L.O_DMG); }
-  function dispose() { if (enc) { endPass(); enc = null; } for (const b of bufs) try { b.destroy(); } catch (e) {} bufs.length = 0; }
-  return { kind: 'webgpu', step, steps, submit, flush, pace, busy, upload: upload0, setSources, setGas, setImpulses, setDamage, readNodes, readNodesAsync, readCells, readCellsAsync,
+  function dispose() { for (const e of tagged.values()) { try { e.buf.destroy(); } catch (x) {} } tagged.clear(); if (enc) { endPass(); enc = null; } for (const b of bufs) try { b.destroy(); } catch (e) {} bufs.length = 0; }
+  return { kind: 'webgpu', step, steps, requestCells, cellsOf, requestNodes, nodesOf, has, waitFor, submit, flush, pace, busy, upload: upload0, setSources, setGas, setImpulses, setDamage, readNodes, readNodesAsync, readCells, readCellsAsync,
     readCellsFull, readState, readStateAsync, dispose, profile: () => ({}), errors: errs, O, batch, setDepth: d => { depth = d; } };
 }

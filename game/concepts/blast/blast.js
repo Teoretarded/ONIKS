@@ -562,7 +562,7 @@ function build() {
   NC = cpan.length; CN = new Int32Array(cn); CPAN = new Int32Array(cpan); CH = new Float64Array(ch); CMAT = new Uint8Array(cmat);
   CSP = new Int32Array(csp); CSN = new Int32Array(csn); CWET = new Float64Array(cwet);
   CAR = new Float64Array(NC); CEF = new Float64Array(NC); CTR = new Float64Array(12 * NC); CHG = new Int32Array(4 * NC).fill(-1); CDB = new Float64Array(NC);
-  CVIS = new Uint32Array(NC); CKC = new Float64Array(NC).fill(1); CEP = new Float64Array(16 * NC); CER = new Uint8Array(NC); CTE = new Float64Array(NC).fill(-1);
+  CVIS = new Uint32Array(NC); CKC = new Float64Array(NC).fill(1); CEP = new Float64Array(16 * NC); CER = new Uint8Array(NC); CKN = new Uint8Array(NC); CTE = new Float64Array(NC).fill(-1);
   CDM = new Float64Array(NC); CUT = new Float64Array(NC); CFD = new Float64Array(NC); CRC = new Float64Array(3 * NC); CNR = new Float64Array(3 * NC);
   for (let c = 0; c < NC; c++) {
     const q = [0, 1, 2, 3].map(k => CN[4 * c + k]), P = q.map(i => [R0[3 * i], R0[3 * i + 1], R0[3 * i + 2]]);
@@ -786,7 +786,7 @@ function firstHit(o, d, tmax, skipEroded, skipCell = -1, skipFn = null) {
     const v = (ix[2] * g.dim[1] + ix[1]) * g.dim[0] + ix[0];
     for (let k = g.cnt[v]; k < g.cnt[v + 1]; k++) {
       const c = g.list[k]; if (g.mark[c] === stamp) continue; g.mark[c] = stamp;
-      if (c === skipCell || (skipEroded && CER[c]) || (skipFn && skipFn(c))) continue;
+      if (c === skipCell || (skipEroded && CKN[c] === 1) || (skipFn && skipFn(c))) continue;
       const t = rayCell(c, o, d); if (t > 1e-5 && t < best && t <= tmax) { best = t; bc = c; }
     }
     const q = tMax[0] < tMax[1] ? (tMax[0] < tMax[2] ? 0 : 2) : (tMax[1] < tMax[2] ? 1 : 2);
@@ -853,12 +853,12 @@ function pulse(s, xc, n, dc = -1) {
   return PUL;
 }
 // impulse per unit area between t and t + h
-function pulseImp(p, t, h) {
+function pulseImp(p, t, h, cu = false) {           // cu: the source is new this step: everything it owed so far
   let I = 0;
-  if (p.tc > 0) { const a = Math.min(Math.max(t - p.TA, 0), p.tc), b = Math.min(Math.max(t + h - p.TA, 0), p.tc); return p.P * p.TD * (Math.exp(-a / p.TD) - Math.exp(-b / p.TD)) * p.g; }
-  if (p.P > 0) { let a = t - p.TA, b = a + h; const TD = p.TD;
+  if (p.tc > 0) { const a = cu ? 0 : Math.min(Math.max(t - p.TA, 0), p.tc), b = Math.min(Math.max(t + h - p.TA, 0), p.tc); return p.P * p.TD * (Math.exp(-a / p.TD) - Math.exp(-b / p.TD)) * p.g; }
+  if (p.P > 0) { let a = cu ? -1e9 : t - p.TA, b = t - p.TA + h; const TD = p.TD;
     if (b > 0 && a < TD) { if (a < 0) a = 0; if (b > TD) b = TD; I += p.P * ((b - b * b / (2 * TD)) - (a - a * a / (2 * TD))); } }
-  if (p.Ix > 0) { const F = x => x <= p.tf ? 0 : 1 - Math.pow(p.tf / x, 4); I += p.Ix * (F(t + h - p.t0) - F(t - p.t0)); }
+  if (p.Ix > 0) { const F = x => x <= p.tf ? 0 : 1 - Math.pow(p.tf / x, 4); I += p.Ix * (F(t + h - p.t0) - (cu ? 0 : F(t - p.t0))); }
   return I * p.g;
 }
 // share of the air and products impulse that arrives after time te
@@ -949,6 +949,8 @@ function detonate() {
   rebuildSources(0);
   // the GPU backend is made here (scripts and harnesses read it right after): WebGPU for runs that read back
   // asynchronously (interactive, runCaseAsync: asyncRun), WebGL2 for blocking ones and without WebGPU
+  LAT = SYNC * Math.max(2, Math.round((st.latMs || 1) * 1e-3 / (SYNC * dt)));
+  PENDC.clear(); PENDN.clear();
   if (sim.solver === 'gpu') { sim.gpuInit = false; sim.headless = !asyncRun; initGPU(); sim.headless = false; }
 }
 let asyncRun = false;
@@ -956,8 +958,8 @@ let asyncRun = false;
 function initGPU() {
   const s = sim, want = WG && (st.backend === 'webgpu' || (st.backend === 'auto' && !s.headless && !s.sync)) ? 'webgpu' : 'webgl';
   if (s.gpuInit && gpu && (gpu.kind || 'webgl') === want) return;
-  if (gpu && (gpu.kind || 'webgl') !== want) { gpu.dispose(); gpu = null; }
-  if (!gpu) gpu = want === 'webgpu' ? createWGPU(WG, gpuModel(), { batch: st.wgBatch, depth: st.wgDepth }) : createGPU(gl, gpuModel());
+  if (gpu && ((gpu.kind || 'webgl') !== want || (want === 'webgpu' && gpu.batch !== Math.min(st.wgBatch, Math.max(SYNC, LAT / 2))))) { gpu.dispose(); gpu = null; }
+  if (!gpu) gpu = want === 'webgpu' ? createWGPU(WG, gpuModel(), { batch: Math.min(st.wgBatch, Math.max(SYNC, LAT / 2)), depth: st.wgDepth }) : createGPU(gl, gpuModel());
   gpu.upload(); gpu.setSources(s.SRC); gpu.setGas(GP); s.gpuInit = true; s.backend = want;
 }
 const isWG = () => gpu && gpu.kind === 'webgpu';
@@ -995,7 +997,7 @@ function rebuildSources(t) {
   for (let g = 1; g <= 2 && gen.length; g++) {
     const next = [];
     for (let c = 0; c < NC; c++) {
-      if (!CER[c]) continue;
+      if (CKN[c] !== 1) continue;
       const xc = [CRC[3 * c], CRC[3 * c + 1], CRC[3 * c + 2]], nn = [CNR[3 * c], CNR[3 * c + 1], CNR[3 * c + 2]];
       for (const q of gen) {
         let far;
@@ -1052,6 +1054,9 @@ function rebuildSources(t) {
   }
   imgs.sort((x, y) => y.W * y.gain - x.W * x.gain);
   for (const q of imgs) if (list.length < 32) list.push(q);
+  // sources that are new (not in the last list) remember when they came: their first step delivers what they owed
+  const seen = s.srcSeen || (s.srcSeen = new Set());
+  for (const q of list) { if (!seen.has(q.key)) { q.tAdd = t; seen.add(q.key); } else q.tAdd = 0; }
   s.SRC = list; s.holes = [...holes.values()];
 }
 // the torn share of a compartment wall (cells of that compartment lying on the plane)
@@ -1063,7 +1068,7 @@ function wallTorn(sp, ax, pv) {
     const b = scene.spaces[sp].box, o1 = (ax + 1) % 3, o2 = (ax + 2) % 3;
     w = { cells, area: (b[o1 + 3] - b[o1]) * (b[o2 + 3] - b[o2]) }; WALLS.set(k, w);
   }
-  let torn = 0; for (const c of w.cells) if (CER[c]) torn += CAR[c];
+  let torn = 0; for (const c of w.cells) if (CKN[c] === 1) torn += CAR[c];
   return Math.min(1, torn / w.area);
 }
 const WALLS = new Map();
@@ -1084,7 +1089,7 @@ function gasStep(h) {
   }
 }
 function openCell(c, t) {
-  if (CER[c] === 2) return; CER[c] = 2;                    // 2: counted
+  if (CKN[c] === 1) return; CKN[c] = 1; if (!CER[c]) CER[c] = 2;   // known (1)
   if (CTE[c] < 0) CTE[c] = t;
   const a = Math.min(CSP[c], CSN[c]), b = Math.max(CSP[c], CSN[c]), k = (a << 8) | b;
   if (a !== b) OPEN.set(k, (OPEN.get(k) || 0) + CAR[c]);
@@ -1107,7 +1112,7 @@ function fragStep(t) {
       if (ta > t) break;
       const v = v0 * Math.exp(-f.kd * ds);
       f.tk[k] = ta; f.dk[k] = dist; f.next[k]++; f.v[k] = v;
-      if (CER[c]) continue;                                           // through an opening
+      if (CKN[c] === 1) continue;                                     // through an opening
       // impact: perforation by plugging (Recht & Ipson 1963), dynamic shear strength taken as 2x static
       const d = [f.D[3 * k], f.D[3 * k + 1], f.D[3 * k + 2]], nn = [CNR[3 * c], CNR[3 * c + 1], CNR[3 * c + 2]];
       const cob = Math.max(.1, Math.abs(dot(d, nn))), h = CH[c] / cob, m = MATS[CMAT[c]];
@@ -1303,7 +1308,7 @@ function cellPass(t, h) {
         if (s.vis >= 0 && !(CVIS[c] & (1 << s.vis))) continue;
         if (s.plane && Math.abs(CRC[3 * c] * s.plane[0] + CRC[3 * c + 1] * s.plane[1] + CRC[3 * c + 2] * s.plane[2] - s.plane[3]) < .3 * S + .02) continue;
         const p = pulse(s, xc, nn, CWET[c]); if (!p) continue;
-        const I = pulseImp(p, t, h); if (I <= 0) continue;
+        const I = pulseImp(p, t, h, s.tAdd > 0 && s.tAdd >= t && s.tAdd < t + h); if (I <= 0) continue;
         const f = I / h * A * sg; Lx += f * nx; Ly += f * ny; Lz += f * nz;
       }
     }
@@ -1502,7 +1507,7 @@ function stepCPU() {
   const [e4, ek] = nodePass(t, h);
   if (EN) { EN.el = e1 + e2 + e3 + e4; EN.kin = ek; }
   s.t += h; s.n++;
-  if (s.n % SYNC === 0) syncCPU();
+  if (s.n % SYNC === 0) syncStep();
 }
 let CNT = null;
 function markFree() {
@@ -1515,21 +1520,46 @@ function markFree() {
 // nodes still joined (through intact cells and members) to the fixed structure; flying debris is not. The end-of-run
 // test and the "quiet" clock look at these only (debris that keeps eroding or tumbling does not hold the run open)
 let ATT = null;
+// Read-backs are used a fixed LAT steps after the step they describe (torn cells at every sync, the structure's
+// motion every 200 steps), on the CPU, on WebGL2 (blocking or not) and on WebGPU alike: a run's course and its end
+// don't depend on when a GPU copy happens to complete (deterministic). CKN: torn cells the loads/vents/fragments know.
+let CKN = null, LAT = 50; const PENDC = new Map(), PENDN = new Map();
 function attachedNodes() {
   const par = new Int32Array(N); for (let i = 0; i < N; i++) par[i] = i;
   const fd = i => { while (par[i] !== i) { par[i] = par[par[i]]; i = par[i]; } return i; }, un = (a, b) => { a = fd(a); b = fd(b); if (a !== b) par[a] = b; };
-  for (let c = 0; c < NC; c++) if (!CER[c]) { const a = CN[4 * c]; for (let k = 1; k < 4; k++) un(a, CN[4 * c + k]); }
+  for (let c = 0; c < NC; c++) if (CKN[c] !== 1) { const a = CN[4 * c]; for (let k = 1; k < 4; k++) un(a, CN[4 * c + k]); }
   for (let k = 0; k < NT; k++) if (!TFL[k]) un(TA[k], TB[k]);
   const root = new Uint8Array(N); for (let i = 0; i < N; i++) if (AK[i] > 0 || WINV[i] === 0) root[fd(i)] = 1;
   const a = new Uint8Array(N); for (let i = 0; i < N; i++) a[i] = root[fd(i)];
   return a;
 }
 const attachedCell = c => !ATT || ATT[CN[4 * c]] || ATT[CN[4 * c + 1]] || ATT[CN[4 * c + 2]] || ATT[CN[4 * c + 3]];
-function syncCPU() {
-  const s = sim, t = s.t;
+// every sync: note this step's torn cells, act on those noted LAT steps ago
+function syncStep() {
+  const s = sim, n = s.n, m = n - LAT, gpuRun = s.solver === 'gpu';
+  if (gpuRun) gpu.requestCells(n);
+  else { const l = []; for (let c = 0; c < NC; c++) if (CER[c] && !CKN[c]) { CKN[c] = 2; l.push(c); } PENDC.set(n, l); }
   let torn = false;
-  for (let c = 0; c < NC; c++) if (CER[c] === 1) { openCell(c, CTE[c]); if (attachedCell(c)) torn = true; }
-  commonSync(t, torn);
+  if (m > 0 && m % SYNC === 0) {
+    const tq = performance.now();
+    if (gpuRun) { const cl = gpu.cellsOf(m);
+      if (cl) for (let c = 0; c < NC; c++) if (cl[4 * c] > .5 && CKN[c] !== 1) { CTE[c] = cl[4 * c + 1]; openCell(c, CTE[c]); if (attachedCell(c)) torn = true; } }
+    else { for (const c of PENDC.get(m) || []) { openCell(c, CTE[c]); if (attachedCell(c)) torn = true; } PENDC.delete(m); }
+    PROF.read += performance.now() - tq;
+  }
+  const t2 = performance.now(); commonSync(s.t, torn); PROF.sync += performance.now() - t2;
+}
+// the structure's motion for the end-of-run test: noted every 200 steps, used LAT steps later
+function noteNodes() {
+  const s = sim; if (s.solver === 'gpu') gpu.requestNodes(s.n); else PENDN.set(s.n, { V: V.slice(), FREE: FREE.slice() });
+}
+// a GPU run that reads back asynchronously (WebGPU) waits here before a step that needs a copy not yet mapped
+function gpuWait() {
+  if (!sim || sim.solver !== 'gpu' || !isWG()) return null;
+  const n = sim.n + 1, m = n - LAT, need = [];
+  if (n % SYNC === 0 && m > 0 && m % SYNC === 0 && !gpu.has('c', m)) need.push(gpu.waitFor('c', m));
+  if (m > 0 && m % 200 === 0 && !gpu.has('n', m)) need.push(gpu.waitFor('n', m));
+  return need.length ? Promise.all(need) : null;
 }
 // shared by both solvers: gas sources, venting, hole sources, fragments, end of run
 function commonSync(t, torn) {
@@ -1548,38 +1578,28 @@ function gpuModel() {
     OUT: () => scene.OUT, csf, nspace: () => GV.length, BETA: () => BETA, U_MAX, RHO_W, C_W, P0, G, K_SHEAR };
 }
 let gpuT = 0;
-function stepGPU() { gpuAdvance(); if (sim.n % SYNC === 0) gpuSync(); }
+function stepGPU() { gpuAdvance(); if (sim.n % SYNC === 0) syncStep(); }
 function gpuAdvance() {
   if (!sim.gpuInit) initGPU();
   const s = sim, t = s.t, h = dt;
   gpu.step(t, h, s.relax ? 250 : s.alpha);
   s.t += h; s.n++;
 }
-function gpuSync() {
-  const s = sim;
-  {
-    const tq = performance.now();
-    // torn cells, for the gas vents, the hole sources and the fragments' paths. Interactive: asynchronous (the data
-    // is a sync or two old). A blocking (headless) run reads them at every sync, as the CPU reference sees them.
-    const cl = s.sync || s.headless ? gpu.readCells() : gpu.readCellsAsync();
-    PROF.read += performance.now() - tq;
-    let torn = false;
-    if (cl) for (let c = 0; c < NC; c++) if (cl[4 * c] > .5 && !CER[c]) { CER[c] = 1; CTE[c] = cl[4 * c + 1]; openCell(c, CTE[c]); if (attachedCell(c)) torn = true; }
-    const t2 = performance.now(); commonSync(s.t, torn); PROF.sync += performance.now() - t2;
-  }
-}
 const PROF = { read: 0, sync: 0, src: 0, frag: 0 };
 
 function step() {
   const s = sim;
   if (s.solver === 'gpu') stepGPU(); else stepCPU();
-  if (s.n % 200 === 0) checkEnd();
+  if (s.n % 200 === 0) noteNodes();
+  const m = s.n - LAT; if (m > 0 && m % 200 === 0) checkEnd(m);
 }
-function checkEnd() {
-  const s = sim;
-  if (s.solver === 'gpu') { if (s.headless) gpu.readNodes(true, X, V, FREE); else if (!gpu.readNodesAsync(X, V, FREE)) return; }
-  if (!ATT || s.n % 1000 === 0) ATT = attachedNodes();
-  let v2 = 0, ke = 0; for (let i = 0; i < N; i++) { if (FREE[i] || !ATT[i]) continue; const q = V[3 * i] ** 2 + V[3 * i + 1] ** 2 + V[3 * i + 2] ** 2; ke += .5 * M[i] * q; if (q > v2) v2 = q; }
+const VEND = { V: null, FREE: null };
+function checkEnd(m) {
+  const s = sim; let Vd, Fd;
+  if (s.solver === 'gpu') { if (!VEND.V || VEND.V.length !== 3 * N) { VEND.V = new Float64Array(3 * N); VEND.FREE = new Uint8Array(N); } gpu.nodesOf(m, VEND.V, VEND.FREE); Vd = VEND.V; Fd = VEND.FREE; }
+  else { const d = PENDN.get(m); PENDN.delete(m); if (!d) return; Vd = d.V; Fd = d.FREE; }
+  if (!ATT || m % 1000 === 0) ATT = attachedNodes();
+  let v2 = 0, ke = 0; for (let i = 0; i < N; i++) { if (Fd[i] || !ATT[i]) continue; const q = Vd[3 * i] ** 2 + Vd[3 * i + 1] ** 2 + Vd[3 * i + 2] ** 2; ke += .5 * M[i] * q; if (q > v2) v2 = q; }
   let gas = 0; for (let k = 0; k < GV.length; k++) if (GV[k] < Infinity) gas = Math.max(gas, Math.abs(GP[k]));
   const quiet = s.srcs.every(q => q.F > .98) && s.t - s.lastSrc > .005, vm = Math.sqrt(v2);
   s.kepeak = Math.max(s.kepeak || 0, ke);
@@ -1595,12 +1615,7 @@ function checkEnd() {
 const tick0 = (() => { const ch = new MessageChannel(), q = []; ch.port1.onmessage = () => q.shift()(); return () => new Promise(r => { q.push(r); ch.port2.postMessage(0); }); })();
 async function finishWG() { await gpu.readStateAsync({ CEP, CDM, TFL, HTP, HTH, HTPS, TBP }); gpu.readNodes(true, X, V, FREE); }
 // a GPU step whose sync reads see this very step (the WebGL2 path's sync mode), for WebGPU: waits at every sync
-async function stepExact() {
-  const s = sim;
-  if (s.solver !== 'gpu' || !isWG()) { step(); return; }
-  gpuAdvance(); if (s.n % SYNC === 0) { await gpu.flush(); gpuSync(); }
-  if (s.n % 200 === 0) checkEnd();
-}
+async function stepExact() { const w = gpuWait(); if (w) { gpu.submit(); await w; } step(); }
 function settle() {
   const s = sim;
   if (s.solver === 'gpu') { gpu.readNodes(true, X, V, FREE); const cl = gpu.readCells(); for (let c = 0; c < NC; c++) if (cl[4 * c] > .5 && !CER[c]) { CER[c] = 1; CTE[c] = cl[4 * c + 1]; openCell(c, CTE[c]); }
@@ -1627,7 +1642,7 @@ function ballistic(h) {
     if (X[3 * i + 1] < scene.waterline - .2 && scene.spaceAt([X[3 * i], X[3 * i + 1] + .3, X[3 * i + 2]]) === scene.OUT) { V[3 * i] = V[3 * i + 1] = V[3 * i + 2] = 0; X[3 * i + 1] = -60; }
   }
 }
-function startRun() { ATT = null; F = new Float64Array(3 * N); FL = new Float64Array(3 * N); XO = new Float64Array(3 * N); VO = new Float64Array(3 * N); CPB.length = 0; IMPN.length = 0; }
+function startRun() { ATT = null; PENDC.clear(); PENDN.clear(); VEND.V = null; F = new Float64Array(3 * N); FL = new Float64Array(3 * N); XO = new Float64Array(3 * N); VO = new Float64Array(3 * N); CPB.length = 0; IMPN.length = 0; }
 
 /* ------------------------------------------------------------------ the whole ship (Burke): picking and context */
 let SHIP = null;
@@ -1757,7 +1772,7 @@ function draw(now) {
   if (sim && sim.phase === 1 && !sim.external && !sim.settling) {
     const t0 = performance.now(), ts = sim.t, goal = spd ? ts + rdt * spd : Infinity;
     // WebGPU: no more than two command buffers queued (the GPU sets the pace, the page stays responsive)
-    while (performance.now() - t0 < 12 && sim.t < sim.T1 && sim.t < goal && !(isWG() && gpu.busy())) for (let k = 0; k < 10 && sim.t < sim.T1 && sim.t < goal; k++) step();
+    while (performance.now() - t0 < 12 && sim.t < sim.T1 && sim.t < goal && !(isWG() && gpu.busy())) for (let k = 0; k < 10 && sim.t < sim.T1 && sim.t < goal; k++) { if (gpuWait()) { gpu.submit(); break; } step(); }
     if (isWG()) gpu.submit();
     lastRate = rdt > 0 ? (sim.t - ts) / rdt : 0;
     if (sim.solver === 'gpu' && sim.t < sim.T1 && gpu) gpu.readNodes(false, X, V, FREE);
@@ -2034,7 +2049,7 @@ async function runCaseAsync(cfg) {
   const t0 = performance.now(); let steps = 0;
   while (sim.t < sim.T1) {
     const nb = isWG() ? st.wgBatch : SYNC;
-    for (let k = 0; k < nb && sim.t < sim.T1; k++) { step(); steps++; }
+    for (let k = 0; k < nb && sim.t < sim.T1; k++) { const w = gpuWait(); if (w) { gpu.submit(); await w; } step(); steps++; }
     if (isWG()) { gpu.submit(); await gpu.pace(); }
     await tick();
   }
@@ -2121,7 +2136,7 @@ window.BLAST = { ver: 33, get backend() { return gpu ? gpu.kind || 'webgl' : nul
     const read = async lab => { if (s.solver === 'gpu') { if (wg) await gpu.flush(); gpu.readNodes(false, X, V, FREE); } rec.push([lab, ...ids.map(i => +(-((X[3 * i] - R0[3 * i]) * n[0] + (X[3 * i + 1] - R0[3 * i + 1]) * n[1] + (X[3 * i + 2] - R0[3 * i + 2]) * n[2]) * 1000).toFixed(1))]); };
     const t0 = performance.now();
     for (const T of [...times, stopAt]) {
-      while (s.t < Math.min(T, s.T1)) { for (let k = 0; k < 100 && s.t < Math.min(T, s.T1); k++) step(); if (wg) { gpu.submit(); await gpu.pace(); } await tick0(); }
+      while (s.t < Math.min(T, s.T1)) { for (let k = 0; k < 100 && s.t < Math.min(T, s.T1); k++) { const w = gpuWait(); if (w) { gpu.submit(); await w; } step(); } if (wg) { gpu.submit(); await gpu.pace(); } await tick0(); }
       await read(T === Infinity ? 'end ' + (s.t * 1e3).toFixed(0) : +(s.t * 1e3).toFixed(1));
     }
     if (wg) await finishWG();
