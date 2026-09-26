@@ -17,13 +17,15 @@
            BOUNCE s, the wait to try it again doubles (up to a minute and a half) and the bar to try it drops: it never
            oscillates
    The ladder (each step keeps the ones before it): the effects budget (smoke, debris, sparks, dynamic lights; the
-   trails keep that share of their older puffs) at .6, .35; the dot density (the ground's lattice) at .8, .65; the
-   render scale at .85, .75, .67, .5 (of the scale set in Settings; never under 50 % of the screen). The dot density
-   and render scale steps are taken only while the GPU is a real share of the frame: a frame bound by the main thread
-   gains nothing from fewer pixels, so there the guard stops after the effects. The settings the player chose are never written: the guard only scales
-   the live values (fx budget, terrain density, R.renderScale) and puts them back when it steps up or is switched off.
+   trails keep that share of their older puffs) at .6, .35; then the dots: the ground's lattice at .8, .65, .5 and the
+   models' close-up sub-dots spaced x1.25, x1.5, x2 (engine/models.js subScale); the render scale only last, and only in
+   an integer ratio (.5: each rendered pixel exactly 2 x 2 screen pixels; never a fractional scale, whose nearest-neighbour
+   upscale makes 1 px dots pulse between 1 and 2 px as they move). The dot and render scale steps are taken only while the
+   GPU is a real share of the frame: a frame bound by the main thread gains nothing from fewer pixels, so there the guard
+   stops after the effects. The settings the player chose are never written: the guard only scales the live values (fx
+   budget, terrain density, models' subScale, R.renderScale) and puts them back when it steps up or is switched off.
 
-   game.quality = { level, label ('AUTO · .85'), fx / dots / scale (the factors in force: 1 at full quality; an effects
+   game.quality = { level, label ('AUTO · .50'), fx / dots / sub / scale (the factors in force: 1 at full quality; an effects
    system of its own may scale its work by fx), hold, on, frameMs, renderMs, gpuMs, simMs, steps, log } for the FPS
    readout and the console. hold = true (the perf suite, game/src/perf.js): full quality, nothing measured. */
 import { FX_LEVELS } from '../fx/index.js';
@@ -41,17 +43,16 @@ const BOUNCE = 12;          // s: a step up that comes back down within this is 
 const WARMUP = 3;           // s after start (shaders, first samples) before anything is judged
 const TAU = .3;             // s: smoothing of the cost
 
-/* the ladder: fx (effects budget share), dots (terrain density), scale (render scale) */
+/* the ladder: fx (effects budget share), dots (terrain density), sub (the models' sub-dot spacing, x), scale (render
+   scale: 1, or .5 as a last resort: integer ratios only) */
 export const LADDER = [
-  { fx: 1, dots: 1, scale: 1 },
-  { fx: .6, dots: 1, scale: 1 },
-  { fx: .35, dots: 1, scale: 1 },
-  { fx: .35, dots: .8, scale: 1 },
-  { fx: .35, dots: .65, scale: 1 },
-  { fx: .35, dots: .65, scale: .85 },
-  { fx: .35, dots: .65, scale: .75 },
-  { fx: .35, dots: .65, scale: .67 },
-  { fx: .35, dots: .65, scale: .5 },
+  { fx: 1, dots: 1, sub: 1, scale: 1 },
+  { fx: .6, dots: 1, sub: 1, scale: 1 },
+  { fx: .35, dots: 1, sub: 1, scale: 1 },
+  { fx: .35, dots: .8, sub: 1.25, scale: 1 },
+  { fx: .35, dots: .65, sub: 1.5, scale: 1 },
+  { fx: .35, dots: .5, sub: 2, scale: 1 },
+  { fx: .35, dots: .5, sub: 2, scale: .5 },
 ];
 const f2 = v => (v >= 1 ? '1.0' : v.toFixed(2).replace(/^0/, ''));
 function labelOf(L) {
@@ -67,7 +68,7 @@ export function createPerfGuard(game) {
   const Qp = new URLSearchParams(location.search);
   const qScale = +Qp.get('scale') || 1;
   const Q = game.quality = {
-    level: 0, label: '', hold: false, on: true, pin: null, fx: 1, dots: 1, scale: 1,
+    level: 0, label: '', hold: false, on: true, pin: null, fx: 1, dots: 1, sub: 1, scale: 1,
     frameMs: 0, renderMs: 0, gpuMs: 0, simMs: 0,
     steps: 0, log: [],                 // [{ t (s of play), from, to, ms }]
   };
@@ -109,7 +110,7 @@ export function createPerfGuard(game) {
   /* ---------- the knobs: the live values from the player's settings, scaled by the level ---------- */
   function apply(L) {
     const s = game.settings || getSettings();
-    Q.fx = L.fx; Q.dots = L.dots; Q.scale = L.scale;      // (other effect systems may scale their own work by Q.fx)
+    Q.fx = L.fx; Q.dots = L.dots; Q.sub = L.sub; Q.scale = L.scale;      // (other effect systems may scale their own work by Q.fx)
     // effects: the fx system's dot budget, its thinning ceiling and the dynamic lights (FX_LEVELS of the setting)
     if (!fxSys) fxSys = game.getSystem('fx');
     if (fxSys && fxSys.baseBudget) {
@@ -127,6 +128,8 @@ export function createPerfGuard(game) {
     // dot density: the ground's lattice (as the Dot density setting does)
     const d = (DOT_DENSITY[s.dotDensity] || 1) * L.dots, T = R.terrain;
     if (T && (Math.abs(T.densNear - 140 * d) > 1e-6 || Math.abs(T.densFar - 380 * d) > 1e-6)) { T.densNear = 140 * d; T.densFar = 380 * d; }
+    // the models' close-up sub-dots: spaced wider
+    if (R.models && R.models.subScale !== L.sub) R.models.subScale = L.sub;
     // render scale: of the player's, never under half the screen
     const base = qScale * (s.renderScale || 1), rs = Math.max(Math.min(base, .5), base * L.scale);
     if (Math.abs(R.renderScale - rs) > 1e-6) R.renderScale = rs;

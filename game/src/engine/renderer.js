@@ -37,7 +37,7 @@ void main() {
 
 export class Renderer {
   constructor(o) {
-    this.G = createGL(o.canvas, { renderScale: o.renderScale || 1, maxDpr: o.maxDpr || 2 });
+    this.G = createGL(o.canvas, { renderScale: o.renderScale || 1, maxDpr: o.maxDpr || 4 });
     const gl = this.gl = this.G.gl;
     this.map = o.map;
     this.terrain = new Terrain(this.G, o.map, o.terrain);
@@ -99,7 +99,7 @@ export class Renderer {
       [-u[0] + f[0] * ty, -u[1] + f[1] * ty, -u[2] + f[2] * ty, 0],
     ];
     this.frameInfo = {
-      fl1080,
+      fl1080, near: cam.near,
       /* dv: centre relative to the eye; the curvature drop is applied to the test */
       sphereVisible(dv, rad) {
         const dy = dv[1] - (dv[0] * dv[0] + dv[2] * dv[2]) / (2 * R_EARTH);
@@ -288,6 +288,11 @@ export class Renderer {
     // occluder: the sea surface
     gl.depthMask(true); gl.colorMask(false, false, false, false); gl.disable(gl.BLEND);
     if (this.seaOcclude !== false) this.terrain.drawDepth(1);     // false: the Inspect x-ray sees below the waterline
+    // the models, planned (culls, levels, transforms), then their occlusion splats: the gaps between a hull's dots
+    // hide the sea, the sky and the far side behind them (models.drawDepth)
+    const cam = this.camera, M = this.models;
+    for (const d of this.queue) M.prepare(d, cam, this.frameInfo);
+    if (M.occlude) for (const d of this.queue) M.drawDepth(d, cam, this.frameInfo);
     gl.colorMask(true, true, true, true); gl.depthMask(false);
     gl.enable(gl.BLEND); gl.blendEquation(gl.MAX);
     this.terrain.drawSky(this.skyBright);
@@ -295,9 +300,8 @@ export class Renderer {
     this.terrain.drawSurface();
     // models
     let pts = 0, draws = 0;
-    const cam = this.camera;
     for (const d of this.queue) {
-      const n = this.models.draw(d, cam, this.frameInfo);
+      const n = M.drawColor(d, cam, this.frameInfo);
       pts += n; if (n) draws++;
       if (d.speck) {
         // too small to resolve: one return, tinted

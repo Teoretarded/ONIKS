@@ -30,7 +30,7 @@ it applies it too).
 | `setSweep(s)` | radar beam painting sea and land: `{ origin: [x, z], bearing (rad, clockwise from north), amp, afterglow (rad), range (m), edge (rad) }` or `null` Fixed faces (SPY-1): `faces: true, bearing` = hull heading, `dwells` a sector crossing, `dwell` = dwells elapsed, `afterglow` = decay per crossing. |
 | `screenBox(d)` | tight screen box `[x0, y0, x1, y1]` (CSS px) of an instance, from its points (boxes fit the object). |
 | `pick(sx, sy)` | the queued instance (with an `id`) under a screen point, or null. |
-| `renderScale` | get/set (0.5 .. 2); dot sizes follow canvas height / 1080. |
+| `renderScale` | get/set (0.5 .. 2) of the screen's own pixels (CSS size x devicePixelRatio, up to 4: native by default); dot sizes follow canvas height / 1080. The canvas upscales crisp (`pixelated`) only in an integer ratio, filtered otherwise (engine/gl.js). |
 | `worldBright`, `modelBright`, `skyBright`, `fadeScale`, `vignette`, `bg`, `sun` | look knobs (dim the world for an inspect view: `worldBright = .35`). |
 | `stats` | `{ ms, draws, points }` of the last frame; `terrain.stats` `{ blocks, levels, s0, dots }`. |
 | `models`, `terrain`, `camera`, `fx`, `overlay` | the parts below. |
@@ -58,6 +58,30 @@ are never thinned: a unit at play range stays the dense bright silhouette that p
 fixed to the view (behind the lens, over its left shoulder; the moon stays the key) keeps the faces the camera sees
 from going black from the wrong heading, as the films frame their hulls lit.
 
+**Close up: sub-dots.** Every sample carries its cell on its surface (12 bytes: the cell's two axes and sizes, and where
+the jittered sample sits in it; hex faces, panels, lathes and their caps, the hull and lines are sampled by the engine
+itself for this; blades go through `GEO.sample` and have none). When a level's spacing on screen exceeds `subPx`
+(3.6 px at 1080p), the shader fills each cell with a stratified sub-lattice: instanced draws, instance k the k-th rank of
+a 16 x 16 Bayer order (every prefix is even), each sub-dot fading in as the range asks for it (no pops), up to 256 a
+cell. Every cell gets the same factor, so a finer cell keeps its relative density (a painted stripe on the Nimitz deck
+stays denser than the non-skid round it), but never closer than `subCap` (2.5 px). Dots never grow past 2 px at 1080p
+(`dotCap`): close up the picture gets denser, never blobby. A big static cloud is sorted into bricks (cubes of 24 x its
+model's finest spacing, 1.5-12 m) with bounding spheres: each brick is frustum-culled and gets its own sub-dot count
+from its own distance, so the cost follows what is on screen (the Nimitz deck at 35 m: ~2.6 M sub-dots, +1.2 ms GPU).
+
+**Occlusion.** Before the sea and sky dots, `drawDepth` splats every front-facing sample's cell into the depth buffer
+(depth only: a point sprite as large as the cell's parallelogram on screen, the fragments outside it discarded, pushed
+back along the line of sight by `occBias` of a cell plus the cell's own depth span when seen edge-on). The gaps between
+a hull's dots then hide the sea, the sky, the far side and whatever is behind, and show the dark background instead;
+fx drawn after are hidden behind hulls. Not for cutaways, x-rays, faded (`alpha` < .95), dissolving or exploded
+instances, parts x-rayed or gated, instances under `occPx` (16 px) of radius, or `d.noOcc`; no splats round a scar's
+hole (it shows into the hull). Sub-dots on back faces are not drawn (hidden anyway) unless x-rayed.
+
+**Level changes** keep a state per instance (`d.id`, else its key and place): hysteresis (a level holds until the range
+is `hyst` x past its threshold), a per-dot cross-dissolve over `xfT` (.35 s) whenever the drawn cloud changes (a level
+switch or a late level arriving; both drawn meanwhile), and the next finer level prefetched (sampled within the budget)
+before the range asks for it. `dyn` parts keep the hysteresis (no cross-fade: they are sampled per state).
+
 **Cutaways** (a draw with `d.gate`, `d.partXray` or `d.xray`: Inspect, the museum, the hit replay, the scan's x-ray)
 are drawn like the Anatomy films once the model fills the frame (~110-260 px of radius): every part but the smallest
 is capped, the parts that are not x-rayed shells (the interior, the named assemblies) at `dotSpacingCut` (2.2 px),
@@ -74,6 +98,10 @@ flash (`fx.lift`) lights the returns (mostly multiplicative) instead of greying 
 | `warm(key, lods)` | pre-sample the given levels now; without `lods`: the coarsest level now, the next one queued (sampled within the following frames' budget, `idle()`, which the renderer calls after the models). |
 | `partWorld(d, name)` | world `{R, T}` of a part of an instance (muzzles, tubes, hubs). |
 | `lodPx`, `budgetMs` | level choice (coarsest whose spacing is under this many px at 1080p, 2.8) and sampling budget (5 ms a frame). |
+| `subPx`, `subCap`, `subScale`, `subJitter`, `dotCap` | sub-dots: the spacing they fill to (3.6 px at 1080p; 0 off), the least spacing of a finer cell's (2.5), a factor on both (the auto-quality guard: 1 .. 2), their jitter (.2 of their lattice spacing), the largest dot as a spacing (7.4: 2 px). `d.noSub` opts an instance out. |
+| `occlude`, `occPx`, `occBias` | the occlusion splats (on; instances over 16 px of radius; pushed back .2 cell). |
+| `hyst`, `xfT`, `prefetch` | level hysteresis (1.12), cross-dissolve (.35 s; 0 off), prefetch (on). |
+| `prepare(d)`, `drawDepth(d)`, `drawColor(d)` | the renderer's passes (`draw(d)` = prepare + drawColor). `stats` adds `sub` (sub-dots drawn), `occ` (samples splatted), `culled` (models and parts outside the frustum), `bricks` (bricks culled), `brickMs`. |
 | `dotSpacing`, `grazing`, `dotSpacingCut` | dots per pixel: least on-screen spacing of the kept dots (1.8 px at 1080p; 0 off), the facing floor for large parts (.3), and the spacing of a cutaway's interior (2.2). |
 | `fill`, `fillAz`, `fillEl` | the view's fill light on the models: strength (.6; 0 off), bearing off the view heading (pi - .6 rad: behind, left), elevation (.44 rad). |
 

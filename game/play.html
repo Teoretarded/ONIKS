@@ -9,6 +9,7 @@
   html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: #fff; font-family: var(--sans); -webkit-font-smoothing: antialiased; user-select: none; }
   #view { position: fixed; inset: 0; }
   #gl, #ov { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: block; }
+  /* #gl: crisp (pixelated) upscaling only in an integer ratio; engine/gl.js sets it with the backing store's size */
   #gl { image-rendering: pixelated; }
   #ov { pointer-events: none; }
   /* #ui: DOM layer for the systems (HUD, menus, palettes); children opt in to pointer events */

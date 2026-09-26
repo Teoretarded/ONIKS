@@ -1,5 +1,9 @@
 /* WebGL2 foundation: context, resize with a render scale, shader and buffer helpers.
-   No antialiasing (the dots are crisp squares), opaque canvas, a depth buffer for the terrain occluder. */
+   No antialiasing (the dots are crisp squares), opaque canvas, a depth buffer for the terrain occluder.
+   The backing store is the screen's own pixels (CSS size x devicePixelRatio, up to maxDpr, default 4) x renderScale.
+   Upscaling: nearest-neighbour (crisp) only in an integer ratio (1, 2, 3 screen pixels a rendered pixel); a fractional
+   ratio is filtered, since a nearest-neighbour upscale by 1.33 draws each 1 px dot 1 or 2 px wide by where it lands
+   and moving dots pulse. */
 
 export function createGL(canvas, opts) {
   opts = opts || {};
@@ -19,12 +23,14 @@ export function createGL(canvas, opts) {
     pointMax: gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE)[1],
     /* match the backing store to the CSS size x devicePixelRatio x renderScale; true when it changed */
     resize() {
-      const dpr = Math.min(window.devicePixelRatio || 1, opts.maxDpr || 2);
+      const dpr = Math.min(window.devicePixelRatio || 1, opts.maxDpr || 4);
       const cw = canvas.clientWidth || window.innerWidth, ch = canvas.clientHeight || window.innerHeight;
       const W = Math.max(1, Math.round(cw * dpr * G.renderScale)), H = Math.max(1, Math.round(ch * dpr * G.renderScale));
       G.cssW = cw; G.cssH = ch; G.dpr = dpr;
       if (W === G.W && H === G.H) return false;
       canvas.width = W; canvas.height = H; G.W = W; G.H = H;
+      const k = cw * (window.devicePixelRatio || 1) / W, ir = Math.abs(k - Math.round(k)) < .02 ? 'pixelated' : 'auto';
+      if (canvas.style.imageRendering !== ir) canvas.style.imageRendering = ir;
       return true;
     },
   };

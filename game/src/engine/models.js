@@ -18,10 +18,15 @@ const ANGLE_KEYS = new Set(['wheel', 'fan', 'rotor', 'trotor', 'prop', 'ant', 's
 const ANGLE_STEPS = [72, 48, 24, 12];
 const LIN_STEP = 1 / 40;
 const LRU_MAX = 64;
+const CELL_K = 48;          // cell size code: (c + 128) / CELL_K of the level spacing (0 .. 5.3 x)
+const JIT_K = 254;          // jitter code: c / JIT_K cells
 
 export const VS = HEAD + FRAME + COMMON + `
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec4 aNrm;
+layout(location = 2) in vec4 aCU;         // the sample's cell: U axis (x 127), w: its size code
+layout(location = 3) in vec4 aCV;         // V axis (x 127), w: its size code
+layout(location = 4) in vec4 aCJ;         // xy: where the sample sits in its cell (the jitter, x JIT_K)
 uniform mat3 uR;          // part -> world rotation
 uniform vec3 uT;          // part origin, relative to the eye
 uniform vec4 uTint;       // rgb, strength at the silhouette
@@ -40,11 +45,61 @@ uniform vec4 uScA[8];     // xyz: the hole's centre on the surface, w: hole radi
 uniform vec4 uScB[8];     // xyz: the surface's outward normal there, w: seed
 uniform vec4 uScC[8];     // y: scorch reach (x the radius), z: petal depth (x the radius), w: heat of the rim (0..1)
 uniform int uScN;         // how many (0: none)
+uniform vec4 uSub;        // sub-dots: x on-screen spacing of the level they fill to (1080 px; 0 off), y their jitter (of
+                          // their lattice's spacing), z largest dot (as an on-screen spacing, 1080 px), w least spacing of
+                          // the sub-dots of a finer cell (a stripe, a detail: the per-pixel cap close up)
+uniform vec4 uX;          // level cross-fade: x dissolve 0..1, y +1 coming in / -1 going out / 0 none
 out vec3 vCol;
+/* the sub-lattice: rank r (0..255) of a 16 x 16 Bayer order (every prefix is stratified), rank 0 at the centre */
+vec2 subAt(int r) {
+  int x = 0, y = 0;
+  for (int k = 0; k < 4; k++) { int d = (r >> (2 * k)) & 3; x |= ((d == 1 || d == 2) ? 1 : 0) << (3 - k); y |= (d & 1) << (3 - k); }
+  return (vec2(float((x + 8) & 15), float((y + 8) & 15)) + 0.5) / 16.0 - 0.5;
+}
+float subAt1(int r) {
+  int x = 0;
+  for (int k = 0; k < 8; k++) x |= ((r >> k) & 1) << (7 - k);
+  return (float((x + 128) & 255) + 0.5) / 256.0 - 0.5;
+}
 void main() {
   vec3 p = uR * aPos + uT;
-  uint hid = hash1(uint(gl_VertexID) * 747796405u + 2891336453u);
+  int inst = gl_InstanceID;
+  uint hid = hash1(uint(gl_VertexID) * 747796405u + uint(inst) * 2654435761u + 2891336453u);
   float hr = u01(hid);
+  // sub-dots close up: the sample's cell filled with a stratified sub-lattice (instances 1.. in rank order, each
+  // fading in as the range asks for it: no pops), so the dot spacing on screen stays fine at any range. A plate's
+  // cells keep their relative size (a painted stripe stays denser than the deck round it); never denser than the
+  // per-pixel cap. Instance 0 is the sample itself
+  float su = (aCU.w + 128.0) * (1.0 / ${CELL_K.toFixed(1)}) * uP.w, sv = (aCV.w + 128.0) * (1.0 / ${CELL_K.toFixed(1)}) * uP.w;
+  float need = 1.0, sub = 1.0;
+  bool two0 = dot(aNrm.xyz, aNrm.xyz) < 0.01;
+  if (uSub.x > 0.0 && su > 0.0) {
+    float cw = dot(uCamF.xyz, p);
+    if (cw > uCam.w) {
+      float k = uCam.x / cw, pxl = uP.w * k / uSub.x;
+      float fk0 = two0 ? 1.0 : max(abs(dot(uR * aNrm.xyz, p)) / max(1e-4, length(p)), uDen.y);
+      float cs = max(uDen.x, uSub.w), cap = uDen.x > 0.0 ? cs * cs * max(1.0, uG.y) : 0.0;
+      if (sv > 0.0) { need = pxl * pxl; if (cap > 0.0) need = min(need, su * sv * k * k * fk0 / cap); }
+      else { need = pxl; if (cap > 0.0) need = min(need, su * k / sqrt(cap)); }
+      need = min(need, sv > 0.0 ? 256.0 : 256.0);
+    }
+  }
+  if (inst > 0) {
+    if (float(inst) >= need) { ${CULL} return; }
+    // what a back face would add is hidden (the depth pass) unless it is an x-ray
+    if (!two0 && uP.y <= 0.0 && dot(uR * aNrm.xyz, p) > 0.0) { ${CULL} return; }
+    sub = clamp(need - float(inst), 0.0, 1.0);
+    vec2 j = aCJ.xy * (1.0 / ${JIT_K.toFixed(1)}), o;
+    vec2 h2 = vec2(u01(hash1(hid ^ 0x9e3779b9u)), u01(hash1(hid ^ 0x7f4a7c15u))) - 0.5;
+    if (sv > 0.0) o = subAt(inst) + h2 * uSub.y * exp2(-floor(log2(float(inst)) * 0.5) - 1.0);
+    else o = vec2(subAt1(inst) + h2.x * uSub.y * exp2(-floor(log2(float(inst))) - 1.0), j.y);
+    p += (uR * (aCU.xyz * (1.0 / 127.0))) * (su * (o.x - j.x)) + (uR * (aCV.xyz * (1.0 / 127.0))) * (sv * (o.y - j.y));
+  }
+  // level cross-fade: the outgoing level's dots go out, the incoming one's come in, one by one
+  if (uX.y != 0.0) {
+    float hh = u01(hash1(hid ^ 0x27d4eb2fu));
+    if (uX.y > 0.0 ? hh > uX.x : hh < uX.x) { ${CULL} return; }
+  }
   // scars: the hole (dots gone, a few torn ones bent in), the petalled rim (bent in, torn in strips, glowing while
   // hot), the scorch round it (charred: dimmer, sparser, grey; the stain taller above than below)
   float burn = 0.0, hot = 0.0, edge = 0.0, heatN = 0.0, inner = 0.0;
@@ -132,7 +187,7 @@ void main() {
     if (dn > 0.0) {
       // back face: a third of them at 0.09 (more under the x-ray: the far wall shows through)
       if (uQ.x > 0.5 && xr <= 0.0) { ${CULL} return; }
-      if ((gl_VertexID % 3) != 0 && hr > xr * 0.5) { ${CULL} return; }
+      if ((hid % 3u) != 0u && hr > xr * 0.5) { ${CULL} return; }
       b = 0.09; lit = 0.1;
     } else {
       // the moon, and a fill fixed to the view (behind the lens, over its left shoulder): a hull side turned to the
@@ -152,7 +207,7 @@ void main() {
   float pxs = uP.w * uCam.x / c.w;
   if (uDen.x > 0.0) {
     float keep = max(pxs * pxs * fk / (uDen.x * uDen.x * max(1.0, uG.y)), uDen.z);
-    if (keep < 1.0 && edge <= 0.0 && u01(hash1(hid ^ 0x5bd1e995u)) > keep) { ${CULL} return; }
+    if (inst == 0 && keep < 1.0 && edge <= 0.0 && u01(hash1(hid ^ 0x5bd1e995u)) > keep) { ${CULL} return; }
   }
   if (xr > 0.0) {
     // the x-ray: the shell thins to a ghost so what is inside reads through it
@@ -179,8 +234,85 @@ void main() {
   if (gk > 0.01) rgb = max(mix(rgb, LIME * max(b, 0.95), gk), rgb);
   // charred plating takes little of the light (the fire lights the hull round the hole, the hole stays black)
   rgb += lightsAt(p, two ? vec3(0.0) : n) * (0.35 + 0.65 * lit) * uP.x * (1.0 - 0.8 * burn * (1.0 - edge));
-  vCol = min(rgb, vec3(1.0));
-  gl_PointSize = dotPx(max(pxs, uDen.x) * (0.8 + 0.4 * hr) * (edge > 0.0 ? 1.6 : 1.0));
+  vCol = min(rgb * sub, vec3(1.0));
+  // the dot's size from the spacing it keeps on screen (the sub-dots' own), capped (never a blob close up)
+  float pe = pxs / (sv > 0.0 ? sqrt(max(need, 1.0)) : max(need, 1.0));
+  gl_PointSize = dotPx(min(max(pe, uDen.x) * (0.8 + 0.4 * hr), uSub.z) * (edge > 0.0 ? 1.6 : 1.0));
+}
+`;
+
+/* the occlusion pass: depth only. A front-facing sample splats its whole cell (the parallelogram it stands for on screen,
+   exact: the fragment shader drops what lies outside it), pushed back along the line of sight by a share of the cell
+   (more for a face seen edge-on), so the model's own dots stay in front and the sea, the sky and the far side behind
+   its gaps are hidden */
+export const VS_DEPTH = HEAD + FRAME + COMMON + `
+layout(location = 0) in vec3 aPos;
+layout(location = 1) in vec4 aNrm;
+layout(location = 2) in vec4 aCU;
+layout(location = 3) in vec4 aCV;
+layout(location = 4) in vec4 aCJ;
+uniform mat3 uR;
+uniform vec3 uT;
+uniform vec4 uP;          // y: push back (cells), w: level spacing (m)
+uniform vec4 uVp;         // xy: half the viewport (px), z: largest splat (px), w: least cell splatted (px)
+uniform vec4 uScA[8];     // scars: xyz centre (RTE), w hole radius: no splats in a hole
+uniform vec4 uScB[8];     // xyz the surface's outward normal there
+uniform int uScN;
+out vec4 vAx;             // the cell's axes on screen (px): U xy, V zw
+out float vSz;
+void main() {
+  float su = (aCU.w + 128.0) * (1.0 / ${CELL_K.toFixed(1)}) * uP.w, sv = (aCV.w + 128.0) * (1.0 / ${CELL_K.toFixed(1)}) * uP.w;
+  if (su <= 0.0 || sv <= 0.0) { ${CULL} return; }
+  vec3 U = uR * (aCU.xyz * (1.0 / 127.0)), V = uR * (aCV.xyz * (1.0 / 127.0));
+  vec2 j = aCJ.xy * (1.0 / ${JIT_K.toFixed(1)});
+  vec3 p = uR * aPos + uT - U * (su * j.x) - V * (sv * j.y);
+  for (int i = 0; i < 8; i++) {
+    if (i >= uScN) break;
+    // the hole (its ragged edge reaches ~1.4 radii), through the plating: the rim, the scorch round it and what is
+    // seen inside still hide what is behind them
+    vec3 dd = p - uScA[i].xyz;
+    float r = uScA[i].w, al = dot(dd, uScB[i].xyz);
+    if (r > 0.0 && abs(al) < r * 1.2 && dot(dd, dd) - al * al < r * r * 2.1) { ${CULL} return; }
+  }
+  float dist = length(p);
+  vec3 v = p / max(dist, 1e-4);
+  float fac;
+  if (dot(aNrm.xyz, aNrm.xyz) < 0.01) { vec3 n2 = cross(U, V); fac = abs(dot(n2, v)) / max(1e-4, length(n2)); }
+  else { float dn = dot(uR * aNrm.xyz, v); if (dn > -0.02) { ${CULL} return; } fac = -dn; }
+  if (fac < 0.03) { ${CULL} return; }
+  vec3 pc = p; pc.y -= curveDrop(pc);
+  vec4 c = uVP * vec4(pc, 1.0);
+  if (c.w < uCam.w * 1.5) { ${CULL} return; }
+  vec4 du = uVP * vec4(U * su, 0.0), dw = uVP * vec4(V * sv, 0.0);
+  float iw = 1.0 / (c.w * c.w);
+  vec2 a = (du.xy * c.w - c.xy * du.w) * iw * uVp.xy, b = (dw.xy * c.w - c.xy * dw.w) * iw * uVp.xy;
+  // cells under ~1 px need no splat (their dots already touch); a splat larger than its cell would hide the bright
+  // edges and decks next to it, which the max blend shows from afar (the films' bright small ships)
+  float sz = max(abs(a.x) + abs(b.x), abs(a.y) + abs(b.y));
+  if (sz < uVp.w) { ${CULL} return; }
+  if (sz > 2.5) sz += 0.5;
+  vAx = vec4(a, b); vSz = sz;
+  // pushed back: the cell's own depth range (a face seen edge-on spans more) and a little more
+  float bias = (uP.y + 0.55 * sqrt(max(0.0, 1.0 - fac * fac)) / max(fac, 0.25)) * max(su, sv);
+  p *= 1.0 + bias / dist;
+  p.y -= curveDrop(p);
+  gl_Position = toClip(p);
+  gl_PointSize = min(sz, uVp.z);
+}
+`;
+export const FS_DEPTH = HEAD + `
+in vec4 vAx;
+in float vSz;
+out vec4 o;
+void main() {
+  if (vSz > 2.5) {
+    vec2 q = vec2(gl_PointCoord.x - 0.5, 0.5 - gl_PointCoord.y) * vSz;
+    float det = vAx.x * vAx.w - vAx.z * vAx.y;
+    if (abs(det) < 1e-4) discard;
+    float s = (q.x * vAx.w - vAx.z * q.y) / det, t = (vAx.x * q.y - q.x * vAx.y) / det;
+    if (abs(s) > 0.54 || abs(t) > 0.54) discard;
+  }
+  o = vec4(0.0);
 }
 `;
 
@@ -198,21 +330,24 @@ export function mul3(A, B) {
 }
 const ap3 = (M, v) => [M[0] * v[0] + M[1] * v[1] + M[2] * v[2], M[3] * v[0] + M[4] * v[1] + M[5] * v[2], M[6] * v[0] + M[7] * v[1] + M[8] * v[2]];
 
-/* ---------- sampling straight into the GPU layout (16 bytes a point: xyz float, normal int8 x 3) ----------
-   The commonest primitive (hex: boxes, walls, houses, decks) is sampled here as GEO does it (a jittered grid on each
-   face, +-0.3 of a cell), with no garbage; the others go through GEO.sample one primitive at a time. */
+/* ---------- sampling straight into the GPU layout ----------
+   16 bytes a point (xyz float, normal int8 x 3), plus 12 bytes of cell (the sample's jittered-grid cell on its
+   surface: U axis int8 x 3 + its size code, V axis int8 x 3 + its size code, the jitter ju, jv in cells): the
+   shader fills a cell with a stratified sub-lattice close up (sub-dots) and the depth pass splats it exactly.
+   Every primitive but lines and blades is sampled here as GEO does it (a jittered grid, +-0.3 of a cell), with no
+   garbage; lines and blades go through GEO.sample (no cell: never subdivided, never splatted). */
 class PtBuf {
   constructor(cap) { this.n = 0; this._alloc(Math.max(64, cap | 0)); }
   _alloc(cap) {
-    const buf = new ArrayBuffer(cap * 16), f = new Float32Array(buf), b = new Int8Array(buf);
-    if (this.f) new Uint8Array(buf).set(new Uint8Array(this.f.buffer, 0, this.n * 16));
-    this.f = f; this.b = b; this.cap = cap;
+    const buf = new ArrayBuffer(cap * 16), f = new Float32Array(buf), b = new Int8Array(buf), t = new Int8Array(cap * 12);
+    if (this.f) { new Uint8Array(buf).set(new Uint8Array(this.f.buffer, 0, this.n * 16)); t.set(this.t.subarray(0, this.n * 12)); }
+    this.f = f; this.b = b; this.t = t; this.cap = cap;
   }
   need(k) { if (this.n + k > this.cap) this._alloc(Math.max(this.n + k, this.cap * 2)); }
-  /* GEO points (stride 6: xyz, normal; zero normal = two-sided) */
+  /* GEO points (stride 6: xyz, normal; zero normal = two-sided); no cell */
   addGeo(pts) {
     const k = pts.length / 6; this.need(k);
-    const f = this.f, b = this.b;
+    const f = this.f, b = this.b, t = this.t;
     for (let i = 0, o = this.n; i < k; i++, o++) {
       const j = i * 6;
       f[o * 4] = pts[j]; f[o * 4 + 1] = pts[j + 1]; f[o * 4 + 2] = pts[j + 2];
@@ -220,11 +355,27 @@ class PtBuf {
       const l = Math.sqrt(nx * nx + ny * ny + nz * nz);
       if (l > 1e-6) { nx /= l; ny /= l; nz /= l; }
       b[o * 16 + 12] = Math.round(nx * 127); b[o * 16 + 13] = Math.round(ny * 127); b[o * 16 + 14] = Math.round(nz * 127); b[o * 16 + 15] = 0;
+      t.fill(0, o * 12, o * 12 + 12); t[o * 12 + 3] = -128; t[o * 12 + 7] = -128;
     }
     this.n += k;
   }
+  /* one point: position, normal (unit or 0), cell axes U, V (unit), sizes su, sv (m), jitter ju, jv (cells); sp: the
+     level's spacing (the size codes are relative to it) */
+  put(x, y, z, nx, ny, nz, ux, uy, uz, su, vx, vy, vz, sv, ju, jv, sp) {
+    const o = this.n++, f = this.f, b = this.b, t = this.t;
+    f[o * 4] = x; f[o * 4 + 1] = y; f[o * 4 + 2] = z;
+    b[o * 16 + 12] = Math.round(nx * 127); b[o * 16 + 13] = Math.round(ny * 127); b[o * 16 + 14] = Math.round(nz * 127); b[o * 16 + 15] = 0;
+    const q = o * 12;
+    t[q] = Math.round(ux * 127); t[q + 1] = Math.round(uy * 127); t[q + 2] = Math.round(uz * 127);
+    t[q + 3] = Math.max(-128, Math.min(127, Math.round(su / sp * CELL_K) - 128));
+    t[q + 4] = Math.round(vx * 127); t[q + 5] = Math.round(vy * 127); t[q + 6] = Math.round(vz * 127);
+    t[q + 7] = Math.max(-128, Math.min(127, Math.round(sv / sp * CELL_K) - 128));
+    t[q + 8] = Math.max(-127, Math.min(127, Math.round(ju * JIT_K))); t[q + 9] = Math.max(-127, Math.min(127, Math.round(jv * JIT_K)));
+    t[q + 10] = 0; t[q + 11] = 0;
+  }
   /* the packed bytes: the buffer itself when it is nearly full (no copy, no garbage), else trimmed */
   bytes() { return this.n * 16 * 1.25 >= this.f.buffer.byteLength ? new Uint8Array(this.f.buffer, 0, this.n * 16) : this.f.buffer.slice(0, this.n * 16); }
+  cells() { return this.n * 12 * 1.25 >= this.t.byteLength ? new Int8Array(this.t.buffer, 0, this.n * 12) : this.t.slice(0, this.n * 12); }
 }
 const HEX_FACES = [[0, 1, 2, 3], [4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]];
 const _hn = new Float32Array(18);
@@ -249,33 +400,170 @@ function hexNormals(P) {
   }
 }
 const dist3 = (a, b) => Math.sqrt((b[0] - a[0]) * (b[0] - a[0]) + (b[1] - a[1]) * (b[1] - a[1]) + (b[2] - a[2]) * (b[2] - a[2]));
+/* a quad a b c d (GEO's quad) at spacing s into W with its cells; normal n (0: two-sided); sp the level spacing */
+function sampleQuad(a, b, c, d, nx, ny, nz, s, rnd, W, sp) {
+  const lu = dist3(a, b), lv = dist3(a, d);
+  const nu = Math.max(1, Math.round(lu / s)), nv = Math.max(1, Math.round(lv / s));
+  W.need(nu * nv);
+  // the cell: U along a->b, V along a->d (a skewed face: the local parallelogram, near enough)
+  const ux = (b[0] - a[0]) / (lu || 1), uy = (b[1] - a[1]) / (lu || 1), uz = (b[2] - a[2]) / (lu || 1);
+  const vx = (d[0] - a[0]) / (lv || 1), vy = (d[1] - a[1]) / (lv || 1), vz = (d[2] - a[2]) / (lv || 1);
+  const su = lu / nu, sv = lv / nv;
+  for (let i = 0; i < nu; i++) for (let j = 0; j < nv; j++) {
+    const ju = (rnd() - .5) * .6, jv = (rnd() - .5) * .6;
+    const u = (i + .5 + ju) / nu, v = (j + .5 + jv) / nv, iu = 1 - u, iv = 1 - v;
+    W.put((a[0] * iu + b[0] * u) * iv + (d[0] * iu + c[0] * u) * v, (a[1] * iu + b[1] * u) * iv + (d[1] * iu + c[1] * u) * v, (a[2] * iu + b[2] * u) * iv + (d[2] * iu + c[2] * u) * v,
+      nx, ny, nz, ux, uy, uz, su, vx, vy, vz, sv, ju, jv, sp);
+  }
+}
 /* one hex at spacing s into W; rnd() in 0..1 */
-function sampleHex(pr, s, rnd, W) {
+function sampleHex(pr, s, rnd, W, sp) {
   const P = pr.p;
   hexNormals(P);
   for (let k = 0; k < 6; k++) {
     if (k === 0 && pr.bottom !== true) continue;
     if (pr.skip && pr.skip.includes(k)) continue;
-    const F = HEX_FACES[k], a = P[F[0]], b = P[F[1]], c = P[F[2]], d = P[F[3]];
-    const nu = Math.max(1, Math.round(dist3(a, b) / s)), nv = Math.max(1, Math.round(dist3(a, d) / s));
-    W.need(nu * nv);
-    const f = W.f, bb = W.b, n0 = Math.round(_hn[k * 3] * 127), n1 = Math.round(_hn[k * 3 + 1] * 127), n2 = Math.round(_hn[k * 3 + 2] * 127);
-    let o = W.n;
-    for (let i = 0; i < nu; i++) for (let j = 0; j < nv; j++) {
-      const u = (i + .5 + (rnd() - .5) * .6) / nu, v = (j + .5 + (rnd() - .5) * .6) / nv, iu = 1 - u, iv = 1 - v;
-      f[o * 4] = (a[0] * iu + b[0] * u) * iv + (d[0] * iu + c[0] * u) * v;
-      f[o * 4 + 1] = (a[1] * iu + b[1] * u) * iv + (d[1] * iu + c[1] * u) * v;
-      f[o * 4 + 2] = (a[2] * iu + b[2] * u) * iv + (d[2] * iu + c[2] * u) * v;
-      bb[o * 16 + 12] = n0; bb[o * 16 + 13] = n1; bb[o * 16 + 14] = n2; bb[o * 16 + 15] = 0;
-      o++;
-    }
-    W.n = o;
+    const F = HEX_FACES[k];
+    sampleQuad(P[F[0]], P[F[1]], P[F[2]], P[F[3]], _hn[k * 3], _hn[k * 3 + 1], _hn[k * 3 + 2], s, rnd, W, sp);
   }
+}
+/* GEO's perp(d): two unit vectors across the axis d */
+function perp(d) {
+  const a = Math.abs(d[1]) < .9 ? [0, 1, 0] : [1, 0, 0];
+  let ux = a[1] * d[2] - a[2] * d[1], uy = a[2] * d[0] - a[0] * d[2], uz = a[0] * d[1] - a[1] * d[0];
+  const l = Math.hypot(ux, uy, uz) || 1; ux /= l; uy /= l; uz /= l;
+  return [[ux, uy, uz], [d[1] * uz - d[2] * uy, d[2] * ux - d[0] * uz, d[0] * uy - d[1] * ux]];
+}
+/* a surface of revolution (GEO's lathe, with its caps) into W with its cells */
+function sampleLathe(pr, s, rnd, W, sp) {
+  const dl = Math.hypot(pr.d[0], pr.d[1], pr.d[2]) || 1, d = [pr.d[0] / dl, pr.d[1] / dl, pr.d[2] / dl], A = pr.a, st = pr.st, [U, Vv] = perp(d);
+  for (let i = 0; i < st.length - 1; i++) {
+    const s0 = st[i][0], r0 = st[i][1], s1 = st[i + 1][0], r1 = st[i + 1][1];
+    const L = Math.hypot(s1 - s0, r1 - r0), na = Math.max(1, Math.round(L / s)), rm = Math.max(r0, r1);
+    const nt = Math.max(6, Math.round(2 * Math.PI * rm / s));
+    W.need(na * nt);
+    const gl = L || 1, ga = (s1 - s0) / gl, gr = (r1 - r0) / gl;         // the generator's direction (axial, radial)
+    for (let a = 0; a < na; a++) for (let t = 0; t < nt; t++) {
+      const ja = (rnd() - .5) * .6, jt = (rnd() - .5) * .6;
+      const u = (a + .5 + ja) / na, th = (t + .5 + jt) / nt * Math.PI * 2;
+      const sr = s0 + (s1 - s0) * u, rr = r0 + (r1 - r0) * u, c = Math.cos(th), sn = Math.sin(th);
+      const nx = U[0] * c + Vv[0] * sn, ny = U[1] * c + Vv[1] * sn, nz = U[2] * c + Vv[2] * sn;
+      // cells: along the generator, and round the circumference (its local size at this radius)
+      W.put(A[0] + d[0] * sr + nx * rr, A[1] + d[1] * sr + ny * rr, A[2] + d[2] * sr + nz * rr, nx, ny, nz,
+        d[0] * ga + nx * gr, d[1] * ga + ny * gr, d[2] * ga + nz * gr, L / na,
+        -U[0] * sn + Vv[0] * c, -U[1] * sn + Vv[1] * c, -U[2] * sn + Vv[2] * c, 2 * Math.PI * rr / nt, ja, jt, sp);
+    }
+  }
+  if (pr.caps) for (const i of [0, st.length - 1]) {
+    const sc = st[i][0], rc = st[i][1]; if (rc < .01) continue;
+    const nr = Math.max(1, Math.round(rc / s)), cx = A[0] + d[0] * sc, cy = A[1] + d[1] * sc, cz = A[2] + d[2] * sc, sg = i ? 1 : -1;
+    for (let k = 0; k < nr; k++) {
+      const rr = (k + .5) / nr * rc, nt = Math.max(5, Math.round(2 * Math.PI * rr / s));
+      W.need(nt);
+      for (let t = 0; t < nt; t++) {
+        const jt = (rnd() - .5) * .6, th = (t + .5 + jt) / nt * Math.PI * 2, c = Math.cos(th), sn = Math.sin(th);
+        const rx = U[0] * c + Vv[0] * sn, ry = U[1] * c + Vv[1] * sn, rz = U[2] * c + Vv[2] * sn;
+        W.put(cx + rx * rr, cy + ry * rr, cz + rz * rr, d[0] * sg, d[1] * sg, d[2] * sg, rx, ry, rz, rc / nr,
+          -U[0] * sn + Vv[0] * c, -U[1] * sn + Vv[1] * c, -U[2] * sn + Vv[2] * c, 2 * Math.PI * rr / nt, 0, jt, sp);
+      }
+    }
+  }
+}
+/* an open polyline (GEO's line: rails, wires, whips) into W, its cells one-dimensional (along the line) */
+function sampleLine(pr, s, rnd, W, sp) {
+  const P = pr.closed ? pr.p.concat([pr.p[0]]) : pr.p;
+  for (let i = 0; i < P.length - 1; i++) {
+    const a = P[i], b = P[i + 1], L = dist3(a, b), n = Math.max(1, Math.round(L / s)), l = L || 1;
+    const ux = (b[0] - a[0]) / l, uy = (b[1] - a[1]) / l, uz = (b[2] - a[2]) / l;
+    W.need(n);
+    for (let k = 0; k < n; k++) {
+      const j = (rnd() - .5) * .6, t = (k + .5 + j) / n;
+      W.put(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t, 0, 0, 0, ux, uy, uz, L / n, 0, 0, 0, 0, j, 0, sp);
+    }
+  }
+}
+/* GEO's destroyer-like hull (hullB, hullD, sampleHull) into W with its cells */
+function hullB(pr, s) {
+  const B = pr.B / 2;
+  if (s > .3) return B * Math.max(0, 1 - Math.pow((s - .3) / .7, 1.75));
+  if (s < -.82) return B * (.84 + .16 * (1 - (-.82 - s) / .18));
+  return B;
+}
+const hullD = (pr, s) => pr.D + 3.6 * Math.pow(Math.max(0, (s - .25) / .75), 2);
+function sampleHull(pr, s, rnd, W, sp) {
+  const L = pr.L, ns = Math.round(L / s), su = L / ns;
+  for (let i = 0; i < ns; i++) {
+    const ji = (rnd() - .5) * .6, sx = -1 + 2 * (i + .5 + ji) / ns, d = hullD(pr, sx), bD = hullB(pr, sx);
+    const nh = Math.max(1, Math.round(d / s)), nz = sx > .3 ? sx - .3 : 0, nl = Math.hypot(1, nz);
+    W.need(nh * 2 + Math.max(1, Math.round(2 * bD / s)));
+    for (const side of [-1, 1]) for (let j = 0; j < nh; j++) {
+      const jj = (rnd() - .5) * .6, y = (j + .5 + jj) / nh * d, b = bD * (.9 + .1 * y / d);
+      W.put(side * b, y, sx * L / 2, side / nl, 0, nz / nl, 0, 0, 1, su, 0, 1, 0, d / nh, ji, jj, sp);
+    }
+    const nb = Math.max(1, Math.round(2 * bD / s));
+    for (let j = 0; j < nb; j++) { const jj = (rnd() - .5) * .6; W.put((-1 + 2 * (j + .5 + jj) / nb) * bD, d, sx * L / 2, 0, 1, 0, 0, 0, 1, su, 1, 0, 0, 2 * bD / nb, ji, jj, sp); }
+  }
+}
+/* sort a cloud's points (16 B) and cells (12 B) into bricks of bs m: { f (Float32Array of the sorted points), t
+   (Int8Array of the sorted cells), bricks: { n, s: Float32Array [cx cy cz r] x n, r: Int32Array [first count] x n } };
+   null when it would be one brick */
+const BRICK_MIN = 1500;
+function brickSort(f, t, n, bs) {
+  const inv = 1 / bs, key = new Int32Array(n);
+  let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+  for (let i = 0; i < n; i++) {
+    const x = f[i * 4], y = f[i * 4 + 1], z = f[i * 4 + 2];
+    if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; if (z < z0) z0 = z; if (z > z1) z1 = z;
+  }
+  if (!(x1 >= x0)) return null;
+  const gx = Math.floor((x1 - x0) * inv) + 1, gy = Math.floor((y1 - y0) * inv) + 1, gz = Math.floor((z1 - z0) * inv) + 1;
+  let nb = 0;
+  if (gx * gy * gz <= 1 << 22) {
+    // a grid of brick slots over the cloud's bounds (no hashing)
+    const slot = new Int32Array(gx * gy * gz).fill(-1);
+    for (let i = 0; i < n; i++) {
+      const k = Math.floor((f[i * 4] - x0) * inv) + gx * (Math.floor((f[i * 4 + 1] - y0) * inv) + gy * Math.floor((f[i * 4 + 2] - z0) * inv));
+      let b = slot[k]; if (b < 0) { b = slot[k] = nb++; }
+      key[i] = b;
+    }
+  } else {
+    const map = new Map();
+    for (let i = 0; i < n; i++) {
+      const k = Math.floor((f[i * 4] - x0) * inv) + gx * (Math.floor((f[i * 4 + 1] - y0) * inv) + gy * Math.floor((f[i * 4 + 2] - z0) * inv));
+      let b = map.get(k); if (b === undefined) { b = nb++; map.set(k, b); }
+      key[i] = b;
+    }
+  }
+  if (nb < 2) return null;
+  const cnt = new Int32Array(nb + 1);
+  for (let i = 0; i < n; i++) cnt[key[i] + 1]++;
+  for (let b = 0; b < nb; b++) cnt[b + 1] += cnt[b];
+  const first = cnt.slice(0, nb), pos = cnt.slice(0, nb);
+  const src = new Uint32Array(f.buffer, f.byteOffset, n * 4), out = new ArrayBuffer(n * 16), dst = new Uint32Array(out);
+  const t2 = new Int8Array(n * 12), ts = new Uint32Array(t.buffer, t.byteOffset, n * 3), td = new Uint32Array(t2.buffer);
+  for (let i = 0; i < n; i++) {
+    const o = pos[key[i]]++;
+    dst[o * 4] = src[i * 4]; dst[o * 4 + 1] = src[i * 4 + 1]; dst[o * 4 + 2] = src[i * 4 + 2]; dst[o * 4 + 3] = src[i * 4 + 3];
+    td[o * 3] = ts[i * 3]; td[o * 3 + 1] = ts[i * 3 + 1]; td[o * 3 + 2] = ts[i * 3 + 2];
+  }
+  const g = new Float32Array(out), S = new Float32Array(nb * 4), R = new Int32Array(nb * 2);
+  for (let b = 0; b < nb; b++) {
+    const a = first[b], m = cnt[b + 1] - a;
+    let cx = 0, cy = 0, cz = 0;
+    for (let i = a; i < a + m; i++) { cx += g[i * 4]; cy += g[i * 4 + 1]; cz += g[i * 4 + 2]; }
+    cx /= m; cy /= m; cz /= m;
+    let r = 0;
+    for (let i = a; i < a + m; i++) { const dx = g[i * 4] - cx, dy = g[i * 4 + 1] - cy, dz = g[i * 4 + 2] - cz, q = dx * dx + dy * dy + dz * dz; if (q > r) r = q; }
+    S[b * 4] = cx; S[b * 4 + 1] = cy; S[b * 4 + 2] = cz; S[b * 4 + 3] = Math.sqrt(r) + bs * .1;
+    R[b * 2] = a; R[b * 2 + 1] = m;
+  }
+  return { f: g, t: t2, bricks: { n: nb, s: S, r: R } };
 }
 function mulberry(seed) {
   let a = seed >>> 0;
   return () => { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 }
+const WH1 = [1, 1, 1];
 const _one = { name: '', prims: [null] }, _oneM = { parts: [_one] };
 const sat01 = v => v < 0 ? 0 : v > 1 ? 1 : v;
 const sstep = v => { v = sat01(v); return v * v * (3 - 2 * v); };
@@ -320,7 +608,11 @@ function samplePrims(prims, i0, sp, rnd, skipFine, W, tEnd, seed) {
     const pr = prims[i];
     if (!pr || pr.pts === false || (skipFine && pr.fine)) continue;
     const s = (pr.ds || 1) * sp;
-    if (pr.t === 'hex' && pr.p && pr.p.length === 8) sampleHex(pr, s, rnd, W);
+    if (pr.t === 'hex' && pr.p && pr.p.length === 8) sampleHex(pr, s, rnd, W, sp);
+    else if (pr.t === 'lathe' && pr.st && pr.st.length > 1) sampleLathe(pr, s, rnd, W, sp);
+    else if (pr.t === 'panel' && pr.p && pr.p.length === 4) sampleQuad(pr.p[0], pr.p[1], pr.p[2], pr.p[3], 0, 0, 0, s, rnd, W, sp);
+    else if (pr.t === 'hull') sampleHull(pr, s, rnd, W, sp);
+    else if (pr.t === 'line' && pr.p && pr.p.length > 1) sampleLine(pr, s, rnd, W, sp);
     else { _one.prims[0] = pr; W.addGeo(GEO.sample(_oneM, sp, seed + i * 7919, {}, skipFine ? { fine: false } : undefined)[0].pts); }
     if (performance.now() > tEnd) return i + 1;
   }
@@ -337,6 +629,7 @@ export class ModelLib {
   constructor(G) {
     this.G = G; this.gl = G.gl;
     this.P = program(this.gl, VS, FS_POINT, 'models');
+    this.PD = program(this.gl, VS_DEPTH, FS_DEPTH, 'models.depth');
     this.factories = new Map(Object.entries(BUILTIN));
     this.opts = new Map();
     this.entries = new Map();
@@ -349,7 +642,18 @@ export class ModelLib {
                                     // not x-rayed shells (dotted volumes, as the Anatomy films' interiors)
     this.fill = .6;                 // the view's fill light (behind the lens, over its left shoulder; 0 off)
     this.fillAz = Math.PI - .6; this.fillEl = .44;   // its bearing off the view heading (rad) and elevation (rad)
-    this.stats = { parts: 0, points: 0, sampled: 0, gpuMB: 0 };
+    this.stats = { parts: 0, points: 0, sampled: 0, gpuMB: 0, sub: 0, bricks: 0, occ: 0, culled: 0, brickMs: 0 };
+    // close up: sub-dots fill each sample's cell with a stratified sub-lattice so the dots stay this far apart on
+    // screen (1080 px; 0 off), a finer cell's (a stripe: ds < 1) never closer than subCap. subScale (>= 1, the auto-quality
+    // guard) widens both; subJitter: their jitter (of their lattice's spacing); dotCap: the largest dot, as the
+    // on-screen spacing it would stand for (7.4: 2 px at 1080)
+    this.subPx = 3.6; this.subCap = 2.5; this.subScale = 1; this.subJitter = .2; this.dotCap = 7.4;
+    // occlusion: the depth splats of instances over occPx of radius on screen (1080 px), of cells over occMinPx on
+    // screen; occBias: push back (cells)
+    this.occlude = true; this.occPx = 40; this.occBias = .2; this.occMinPx = 1;
+    // level changes: hysteresis (x the threshold), a per-dot cross-dissolve over xfT s, the next finer level prefetched
+    this.hyst = 1.12; this.xfT = .35; this.prefetch = true;
+    this.xs = new Map(); this._recs = []; this._np = 0; this._dv = [0, 0, 0]; this.now = 0;
     this.pending = [];              // levels queued by warm(), sampled within the frames' budget (idle())
     this._m9 = new Float32Array(9);
     this._scA = new Float32Array(32); this._scB = new Float32Array(32);   // scars, per instance (d.scars)
@@ -394,7 +698,7 @@ export class ModelLib {
     const L = Math.max(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]);
     const sp0 = o.lods ? o.lods[0] : Math.max(.02, L / (L > 100 ? 1000 : 380));
     const lods = o.lods || [sp0, sp0 * 2.4, sp0 * 6, sp0 * 15];
-    e = { key, model, parts, lods, L, center: [(mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2, (mn[2] + mx[2]) / 2], radius: Math.hypot(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]) / 2, o, anchors: model };
+    e = { key, model, parts, lods, L, bs: Math.max(1.5, Math.min(12, lods[0] * 24)), center: [(mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2, (mn[2] + mx[2]) / 2], radius: Math.hypot(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]) / 2, o, anchors: model };
     for (const P of parts) { P.clouds = lods.map(() => null); if (P.dyn) P.lru = lods.map(() => new Map()); }
     this.entries.set(key, e);
     return e;
@@ -436,10 +740,10 @@ export class ModelLib {
     if (prims) {
       const W = new PtBuf(256);
       samplePrims(prims, 0, sp, mulberry(seed), lod >= 2, W, Infinity, seed);
-      cl = this._uploadPacked(W.bytes(), W.n, sp);
+      cl = this._uploadPacked(W.bytes(), W.n, sp, W.cells(), P.dyn ? 0 : e.bs);
     } else {
       const pts = GEO.sample({ parts: [P.part] }, sp, seed, st || {}, lod >= 2 ? { fine: false } : undefined)[0].pts;
-      cl = this._upload(pts, pts.length / 6, sp);
+      cl = this._upload(pts, pts.length / 6, sp, P.dyn ? 0 : e.bs);
     }
     this.spent += performance.now() - t0;
     this.stats.sampled++;
@@ -466,22 +770,30 @@ export class ModelLib {
     let cl = null;
     if (J.i >= J.prims.length) {
       jobs[lod] = null;
-      cl = P.clouds[lod] = this._uploadPacked(J.W.bytes(), J.W.n, J.sp);
+      cl = P.clouds[lod] = this._uploadPacked(J.W.bytes(), J.W.n, J.sp, J.W.cells(), e.bs);
       this.stats.sampled++;
     }
     this.spent += performance.now() - t0;
     return cl;
   }
   /* GEO points (stride 6: xyz, normal) -> the GPU */
-  _upload(pts, n, sp) {
+  _upload(pts, n, sp, bs) {
     if (!n) return { n: 0, sp };
     const W = new PtBuf(n); W.addGeo(pts);
-    return this._uploadPacked(W.bytes(), W.n, sp);
+    return this._uploadPacked(W.bytes(), W.n, sp, W.cells(), bs);
   }
-  _uploadPacked(buf, n, sp) {
+  /* points (16 B) and their cells (12 B) -> the GPU. A big cloud is sorted into bricks (bs m cubes, each with its
+     bounding sphere): culled one by one, and each gets its own sub-dot count from its own distance */
+  _uploadPacked(buf, n, sp, cells, bs) {
     const gl = this.gl;
     if (!n) return { n: 0, sp };
-    const f = buf instanceof ArrayBuffer ? new Float32Array(buf) : new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength >> 2);
+    let f = buf instanceof ArrayBuffer ? new Float32Array(buf) : new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength >> 2);
+    let bricks = null;
+    if (bs > 0 && n >= BRICK_MIN) {
+      const t0 = performance.now(), S = brickSort(f, cells, n, bs);
+      if (S) { f = S.f; buf = S.f; cells = S.t; bricks = S.bricks; }
+      const dt = performance.now() - t0; if (dt > this.stats.brickMs) this.stats.brickMs = dt;
+    }
     const vao = gl.createVertexArray();
     gl.bindVertexArray(vao);
     const vb = gl.createBuffer();
@@ -489,11 +801,15 @@ export class ModelLib {
     gl.bufferData(gl.ARRAY_BUFFER, buf, gl.STATIC_DRAW);
     gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 16, 0);
     gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 4, gl.BYTE, true, 16, 12);
+    const vc = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vc);
+    gl.bufferData(gl.ARRAY_BUFFER, cells, gl.STATIC_DRAW);
+    for (let k = 0; k < 3; k++) { gl.enableVertexAttribArray(2 + k); gl.vertexAttribPointer(2 + k, 4, gl.BYTE, false, 12, k * 4); }
     gl.bindVertexArray(null);
-    this.stats.points += n; this.stats.gpuMB += n * 16 / 1048576;
-    return { vao, vb, n, sp, pts: f };
+    this.stats.points += n; this.stats.gpuMB += n * 28 / 1048576;
+    return { vao, vb, vc, n, sp, pts: f, bricks };
   }
-  _freeCloud(c) { if (c && c.vao) { this.gl.deleteVertexArray(c.vao); this.gl.deleteBuffer(c.vb); this.stats.points -= c.n; this.stats.gpuMB -= c.n * 16 / 1048576; } }
+  _freeCloud(c) { if (c && c.vao) { this.gl.deleteVertexArray(c.vao); this.gl.deleteBuffer(c.vb); if (c.vc) this.gl.deleteBuffer(c.vc); this.stats.points -= c.n; this.stats.gpuMB -= c.n * 28 / 1048576; } }
   _free(e) { for (const P of e.parts) { P.clouds.forEach(c => this._freeCloud(c)); if (P.lru) P.lru.forEach(m => m.forEach(c => this._freeCloud(c))); } }
 
   /* the cloud of part P at level lod for state st: cached, or sampled within the frame's budget, or the
@@ -560,56 +876,60 @@ export class ModelLib {
     }
   }
 
-  /* ---------- drawing ---------- */
-  begin() { this.spent = 0; }
-  /* draw one instance. d = {key, R (row-major 3x3 world rotation), T (world position), st, tint [r,g,b] 0..1,
-     tintK, alpha, xray, damage {part: 0..1}, partAlpha {part: a}, partXray {part: x}, partX {part: X}, explode,
-     noBack, bright, dissolve}. Returns the number of points drawn. */
-  draw(d, cam, frame) {
-    const e = this.get(d.key), gl = this.gl, P = this.P, u = P.u, eye = cam.eye, st = d.st || {};
+  /* ---------- drawing ----------
+     Per frame: prepare(d) every queued instance (cull, levels, transforms), drawDepth(d) (the occlusion splats, before
+     the sea and sky dots), drawColor(d) (the dots). draw(d) = prepare + drawColor. */
+  begin() {
+    this.spent = 0;
+    this.now = this.clock ? this.clock() : performance.now() / 1000;
+    this._np = 0;
+    this.stats.sub = 0; this.stats.bricks = 0; this.stats.occ = 0; this.stats.culled = 0;
+    // forget the cross-fade state of instances not seen for a while
+    if (this.now - (this._pruned || 0) > 2) { this._pruned = this.now; for (const [k, S] of this.xs) if (this.now - S.seen > 5) this.xs.delete(k); }
+  }
+  _rec() {
+    const i = this._np++;
+    let r = this._recs[i];
+    if (!r) r = this._recs[i] = { m: new Float32Array(9), t: [0, 0, 0], cl: null, cl2: null, k: 1, pa: 1, xr: 0, dm: 0, gm: 0, gy: 1, den: [0, 0, 0, 0], pd: 0, rad: 0, spr: 0, dyn: false };
+    return r;
+  }
+  draw(d, cam, frame) { this.prepare(d, cam, frame); return this.drawColor(d, cam, frame); }
+  /* plan one instance for this frame (d as draw() takes it): the whole-model and per-part culls, each part's level
+     (hysteresis, a cross-dissolve when the drawn level changes, the next finer level prefetched), its transform and
+     uniforms. Sets d.speck (too small: the renderer draws one return), d._occ (writes occlusion). Returns the points
+     it will draw (before sub-dots). */
+  prepare(d, cam, frame) {
+    d._p0 = d._p1 = this._np; d.speck = false; d._occ = false;
+    const e = this.get(d.key), eye = cam.eye, st = d.st || {};
     const flc = frame.fl1080, R0 = d.R, T0 = d.T;
     // whole-model cull
-    const cw = [R0[0] * e.center[0] + R0[1] * e.center[1] + R0[2] * e.center[2] + T0[0], R0[3] * e.center[0] + R0[4] * e.center[1] + R0[5] * e.center[2] + T0[1], R0[6] * e.center[0] + R0[7] * e.center[1] + R0[8] * e.center[2] + T0[2]];
-    const dv = [cw[0] - eye[0], cw[1] - eye[1], cw[2] - eye[2]];
-    const dist = Math.hypot(dv[0], dv[1], dv[2]);
-    const rad = e.radius * (1 + (d.explode || 0) * 1.5);
-    if (!frame.sphereVisible(dv, rad)) return 0;
+    const c0 = e.center, cw0 = R0[0] * c0[0] + R0[1] * c0[1] + R0[2] * c0[2] + T0[0] - eye[0], cw1 = R0[3] * c0[0] + R0[4] * c0[1] + R0[5] * c0[2] + T0[1] - eye[1], cw2 = R0[6] * c0[0] + R0[7] * c0[1] + R0[8] * c0[2] + T0[2] - eye[2];
+    const dv = this._dv; dv[0] = cw0; dv[1] = cw1; dv[2] = cw2;
+    const dist = Math.hypot(cw0, cw1, cw2);
+    const ex = d.explode || 0, rad = e.radius * (1 + ex * 1.5);
+    if (!frame.sphereVisible(dv, rad)) { this.stats.culled++; return 0; }
     const mr = e.radius * flc / Math.max(1, dist);
     if (mr < .7) { d.speck = true; return 0; }
-    d.speck = false;
     // a cutaway (Inspect, the hit replay, the museum, an x-ray): the Anatomy films' look once it fills the frame (kCut:
     // model radius ~110-260 px); its highlights go on a knee (parts brightened over 1 keep their shading)
     const cut = d.gate || d.xray > 0 || d.partXray ? 1 : 0, kCut = cut ? sstep((mr - 110) / 150) : 0;
-    gl.useProgram(P.p);
-    const tint = d._rgb || [1, 1, 1];
-    gl.uniform4f(u.uTint, tint[0], tint[1], tint[2], d._k || 0);
-    gl.uniform4f(u.uQ, d.noBack ? 1 : 0, d._face || 0, d.bright === undefined ? 1 : d.bright, d.dissolve || 0);
-    { const f = cam.f, az = Math.atan2(f[0], f[2]) + this.fillAz, ce = Math.cos(this.fillEl);
-      gl.uniform4f(u.uFill, ce * Math.sin(az), Math.sin(this.fillEl), ce * Math.cos(az), this.fill); }
-    // Inspect x-ray gate: d.gate = { n: world unit normal, d: n.p of the front (world), w: band (m), g: afterglow (m),
-    // mode: default per part }, d.partGate = { part: mode } (0 off, 1 shell, 2 hidden, 3 part; see the shader)
+    d._cut = cut;
+    // occlusion (the depth splats): a solid instance large enough on screen for its gaps to matter
+    d._occ = this.occlude && !cut && !(d.alpha < .95) && !(d.dissolve > 0) && !(ex > 0) && !d.noOcc && mr > this.occPx;
     const G = d.gate || null;
-    if (G) gl.uniform4f(u.uGP, G.n[0], G.n[1], G.n[2], G.d - (G.n[0] * eye[0] + G.n[1] * eye[1] + G.n[2] * eye[2]));
-    // scars (game/scars.js): model frame -> world-aligned, relative to the eye
-    const S = d.scars, ns = S && S.n ? Math.min(8, S.n) : 0;
-    if (ns) {
-      const L = S.L, A = this._scA, B = this._scB;
-      for (let i = 0; i < ns; i++) {
-        const x = L[i * 8], y = L[i * 8 + 1], z = L[i * 8 + 2], nx = L[i * 8 + 4], ny = L[i * 8 + 5], nz = L[i * 8 + 6];
-        A[i * 4] = R0[0] * x + R0[1] * y + R0[2] * z + T0[0] - eye[0];
-        A[i * 4 + 1] = R0[3] * x + R0[4] * y + R0[5] * z + T0[1] - eye[1];
-        A[i * 4 + 2] = R0[6] * x + R0[7] * y + R0[8] * z + T0[2] - eye[2];
-        A[i * 4 + 3] = L[i * 8 + 3];
-        B[i * 4] = R0[0] * nx + R0[1] * ny + R0[2] * nz; B[i * 4 + 1] = R0[3] * nx + R0[4] * ny + R0[5] * nz; B[i * 4 + 2] = R0[6] * nx + R0[7] * ny + R0[8] * nz;
-        B[i * 4 + 3] = L[i * 8 + 7];
-      }
-      gl.uniform4fv(u.uScA, A); gl.uniform4fv(u.uScB, B); gl.uniform4fv(u.uScC, S.C);
+    // the cross-fade state (per instance: its id, else its key and place)
+    let S = null;
+    if (this.xfT > 0) {
+      const xk = d.id !== undefined ? d.id : d.key + '@' + Math.round(T0[0]) + ',' + Math.round(T0[1]) + ',' + Math.round(T0[2]);
+      S = this.xs.get(xk);
+      const np = e.parts.length;
+      if (!S || S.e !== e) { S = { e, L: new Int8Array(np).fill(-1), cur: new Array(np).fill(null), prev: new Array(np).fill(null), t0: new Float64Array(np).fill(-1e9) }; this.xs.set(xk, S); }
+      S.seen = this.now;
     }
-    gl.uniform1i(u.uScN, ns);
-    let drawn = 0;
-    const ex = d.explode || 0;
-    for (const Pt of e.parts) {
-      const part = Pt.part;
+    const nl = e.lods.length, dsp0 = d.dotSpacing !== undefined ? d.dotSpacing : this.dotSpacing;
+    let est = 0;
+    for (let pi = 0; pi < e.parts.length; pi++) {
+      const Pt = e.parts[pi], part = Pt.part;
       if (part.show && !part.show(st)) continue;
       const pa = (d.partAlpha && d.partAlpha[Pt.name] !== undefined ? d.partAlpha[Pt.name] : 1) * (d.alpha === undefined ? 1 : d.alpha);
       if (pa <= .004) continue;
@@ -627,45 +947,198 @@ export class ModelLib {
       const pc = ap3(Rp, Pt.center);
       const px = Tp[0] + pc[0] - eye[0], py = Tp[1] + pc[1] - eye[1], pz = Tp[2] + pc[2] - eye[2];
       const pd = Math.hypot(px, py, pz);
-      if (!frame.sphereVisible([px, py, pz], Pt.rad)) continue;
+      dv[0] = px; dv[1] = py; dv[2] = pz;
+      if (!frame.sphereVisible(dv, Pt.rad)) { this.stats.culled++; continue; }
       const dd = Math.max(.3, pd - Pt.rad * .6);
-      let lod = e.lods.length - 1;
-      while (lod > 0 && e.lods[lod] * flc / dd > this.lodPx) lod--;
-      if (d.lodBias) lod = Math.max(0, Math.min(e.lods.length - 1, lod + d.lodBias));
-      const cl = this.cloud(e, Pt, lod, st);
+      let L = nl - 1;
+      while (L > 0 && e.lods[L] * flc / dd > this.lodPx) L--;
+      let cl, cl2 = null, k = 1;
+      if (S && Pt.dyn) {
+        // a dyn part (sampled per state: no cross-fade) keeps the hysteresis
+        let c = S.L[pi];
+        if (c < 0) c = L;
+        else {
+          while (c > 0 && e.lods[c] * flc / dd > this.lodPx * this.hyst) c--;
+          while (c < nl - 1 && e.lods[c + 1] * flc / dd < this.lodPx / this.hyst) c++;
+        }
+        S.L[pi] = c;
+        cl = this.cloud(e, Pt, d.lodBias ? Math.max(0, Math.min(nl - 1, c + d.lodBias)) : c, st);
+      } else if (S) {
+        // hysteresis: the level held until the range is well past its threshold (no flicker at the threshold)
+        let c = S.L[pi];
+        if (c < 0) c = L;
+        else {
+          while (c > 0 && e.lods[c] * flc / dd > this.lodPx * this.hyst) c--;
+          while (c < nl - 1 && e.lods[c + 1] * flc / dd < this.lodPx / this.hyst) c++;
+        }
+        S.L[pi] = c;
+        const lod = d.lodBias ? Math.max(0, Math.min(nl - 1, c + d.lodBias)) : c;
+        // the next finer level sampled before the range asks for it (within the frame's budget)
+        if (this.prefetch && lod > 0 && !Pt.clouds[lod - 1] && e.lods[lod] * flc / dd > this.lodPx * .55) this.cloud(e, Pt, lod - 1, st);
+        cl = this.cloud(e, Pt, lod, st);
+        // whatever the drawn cloud changes to (a level switch, a late level arriving) dissolves in over xfT
+        if (cl && cl !== S.cur[pi]) {
+          if (S.cur[pi] && S.cur[pi].n) { S.prev[pi] = S.cur[pi]; S.t0[pi] = this.now; }
+          S.cur[pi] = cl;
+        }
+        k = sat01((this.now - S.t0[pi]) / this.xfT);
+        if (k < 1 && S.prev[pi] && S.prev[pi] !== cl) cl2 = S.prev[pi]; else { S.prev[pi] = null; k = 1; }
+      } else {
+        const lod = d.lodBias ? Math.max(0, Math.min(nl - 1, L + d.lodBias)) : L;
+        cl = this.cloud(e, Pt, lod, st);
+      }
       if (!cl || !cl.n) continue;
       // the cloud's shape, once: a thin plate (a wing, a fin) and its layering (walls stacked along a line of sight)
       if (cl.flat === undefined) { cl.flat = flatness(cl) > .72; cl.layer = layering(Pt, cl); }
-      const m = this._m9;
+      if (cl2 && cl2.flat === undefined) { cl2.flat = flatness(cl2) > .72; cl2.layer = layering(Pt, cl2); }
+      const r = this._rec(), m = r.m;
       m[0] = Rp[0]; m[1] = Rp[3]; m[2] = Rp[6]; m[3] = Rp[1]; m[4] = Rp[4]; m[5] = Rp[7]; m[6] = Rp[2]; m[7] = Rp[5]; m[8] = Rp[8];
-      gl.uniformMatrix3fv(u.uR, false, m);
-      gl.uniform3f(u.uT, Tp[0] - eye[0], Tp[1] - eye[1], Tp[2] - eye[2]);
-      const xr = d.partXray && d.partXray[Pt.name] !== undefined ? d.partXray[Pt.name] : (d.xray || 0);
+      r.t[0] = Tp[0] - eye[0]; r.t[1] = Tp[1] - eye[1]; r.t[2] = Tp[2] - eye[2];
+      r.cl = cl; r.cl2 = cl2; r.k = k; r.pa = pa; r.pd = pd; r.rad = Pt.rad; r.dyn = Pt.dyn;
+      r.xr = d.partXray && d.partXray[Pt.name] !== undefined ? d.partXray[Pt.name] : (d.xray || 0);
       // the coral part tint only in a cutaway (Inspect, the hit replay: a cue there); in play the scars show the damage
-      const dm = cut && d.damage && d.damage[Pt.name] ? d.damage[Pt.name] : 0;
-      gl.uniform4f(u.uP, pa, xr, dm, cl.sp);
-      const gm = G ? (d.partGate && d.partGate[Pt.name] !== undefined ? d.partGate[Pt.name] : (G.mode || 0)) : 0;
-      gl.uniform4f(u.uG, gm, 1 + (cl.layer - 1) * kCut, G ? G.w || 1 : 1, G ? G.g || 1 : 1);
+      r.dm = cut && d.damage && d.damage[Pt.name] ? d.damage[Pt.name] : 0;
+      r.gm = G ? (d.partGate && d.partGate[Pt.name] !== undefined ? d.partGate[Pt.name] : (G.mode || 0)) : 0;
+      r.gy = 1 + (cl.layer - 1) * kCut;
       // dots per pixel: thinned on screen, never below the density of the model's coarsest level. Faces seen edge-on
       // are counted by their facing only on parts large on screen (a deck, a hull side: no slab); a small part keeps
-      // its silhouette's pile-up (a wing, a mast: the films' crisp edges)
-      const spMax = e.lods[e.lods.length - 1], dsp0 = d.dotSpacing !== undefined ? d.dotSpacing : this.dotSpacing;
-      // A part small on screen is not thinned at all: a unit seen from play range stays a dense bright silhouette that
-      // pops over the ground (the films' small ships); the cap comes in as the part grows past ~70-220 px. A thin plate
-      // (a wing, a fin, a deck: its face is large for its radius) comes in sooner, from ~30-110 px
+      // its silhouette's pile-up (a wing, a mast: the films' crisp edges). A part small on screen is not thinned at all:
+      // a unit seen from play range stays a dense bright silhouette that pops over the ground (the films' small ships);
+      // the cap comes in as the part grows past ~70-220 px. A thin plate (a wing, a fin, a deck: its face is large for
+      // its radius) comes in sooner, from ~30-110 px
       const spr = Pt.rad * flc / Math.max(.3, pd), kb = sat01((spr - 140) / 460);
+      r.spr = spr;
       const s0 = cl.flat ? 30 : 70, s1 = cl.flat ? 110 : 220;
       let kSmall = 1 - sstep((spr - s0) / (s1 - s0)), dsp = dsp0;
       if (kCut > 0) {
         // a cutaway that fills the frame: every part but the smallest capped, the parts that are not x-rayed shells
         // (the interior, the named assemblies) sparser, so they read as dotted volumes with visible structure
         kSmall += (Math.min(kSmall, 1 - sstep((spr - 8) / 28)) - kSmall) * kCut;
-        if (xr <= 0 && dsp0 > 0) dsp = dsp0 + (Math.max(dsp0, this.dotSpacingCut) - dsp0) * kCut;
+        if (r.xr <= 0 && dsp0 > 0) dsp = dsp0 + (Math.max(dsp0, this.dotSpacingCut) - dsp0) * kCut;
       }
-      gl.uniform4f(u.uDen, dsp, 1 - (1 - this.grazing) * kb * kb * (3 - 2 * kb), Math.max(kSmall, Math.min(1, (cl.sp / spMax) * (cl.sp / spMax))), cut);
-      gl.bindVertexArray(cl.vao);
-      gl.drawArrays(gl.POINTS, 0, cl.n);
-      drawn += cl.n;
+      r.den[0] = dsp; r.den[1] = 1 - (1 - this.grazing) * kb * kb * (3 - 2 * kb); r.den[2] = kSmall; r.den[3] = cut;
+      est += cl.n + (cl2 ? cl2.n : 0);
+    }
+    d._p1 = this._np;
+    return est;
+  }
+  /* scars (game/scars.js): model frame -> world-aligned, relative to the eye, into _scA / _scB; returns how many */
+  _scars(d, eye) {
+    const S = d.scars, ns = S && S.n ? Math.min(8, S.n) : 0, R0 = d.R, T0 = d.T;
+    if (!ns) return 0;
+    const L = S.L, A = this._scA, B = this._scB;
+    for (let i = 0; i < ns; i++) {
+      const x = L[i * 8], y = L[i * 8 + 1], z = L[i * 8 + 2], nx = L[i * 8 + 4], ny = L[i * 8 + 5], nz = L[i * 8 + 6];
+      A[i * 4] = R0[0] * x + R0[1] * y + R0[2] * z + T0[0] - eye[0];
+      A[i * 4 + 1] = R0[3] * x + R0[4] * y + R0[5] * z + T0[1] - eye[1];
+      A[i * 4 + 2] = R0[6] * x + R0[7] * y + R0[8] * z + T0[2] - eye[2];
+      A[i * 4 + 3] = L[i * 8 + 3];
+      B[i * 4] = R0[0] * nx + R0[1] * ny + R0[2] * nz; B[i * 4 + 1] = R0[3] * nx + R0[4] * ny + R0[5] * nz; B[i * 4 + 2] = R0[6] * nx + R0[7] * ny + R0[8] * nz;
+      B[i * 4 + 3] = L[i * 8 + 7];
+    }
+    return ns;
+  }
+  /* sub-dot instances a cloud needs at distance dn (m): its level's spacing on screen over the sub-dot spacing,
+     squared (1..256) */
+  _inst(cl, dn, flc) {
+    if (!(this.subPx > 0)) return 1;
+    const q = cl.sp * flc / Math.max(.05, dn) / (this.subPx * this.subScale), n = q * q;
+    return n <= 1 ? 1 : Math.min(256, Math.ceil(n));
+  }
+  /* one cloud of a part: per brick (culled, each with its own sub-dot count) when it has bricks and is close or large
+     on screen, else in one draw. depth: the occlusion pass (no sub-dots) */
+  _drawCloud(cl, r, frame, depth) {
+    const gl = this.gl, flc = frame.fl1080, near = frame.near || .1;
+    gl.bindVertexArray(cl.vao);
+    const B = cl.bricks, instP = depth || this._ns ? 1 : this._inst(cl, Math.max(near, r.pd - r.rad), flc);
+    if (!B || (instP <= 1 && r.spr < 300)) {
+      if (instP > 1) { gl.drawArraysInstanced(gl.POINTS, 0, cl.n, instP); this.stats.sub += cl.n * (instP - 1); }
+      else gl.drawArrays(gl.POINTS, 0, cl.n);
+      return cl.n;
+    }
+    const m = r.m, t = r.t, S = B.s, Rr = B.r, dv = this._dv;
+    let f0 = -1, cnt = 0, ci = 1, drawn = 0;
+    const flush = () => {
+      if (cnt > 0) { if (ci > 1) { gl.drawArraysInstanced(gl.POINTS, f0, cnt, ci); this.stats.sub += cnt * (ci - 1); } else gl.drawArrays(gl.POINTS, f0, cnt); drawn += cnt; }
+      cnt = 0; f0 = -1;
+    };
+    for (let b = 0; b < B.n; b++) {
+      const x = S[b * 4], y = S[b * 4 + 1], z = S[b * 4 + 2], br = S[b * 4 + 3];
+      // (m is column-major: world = m * p + t)
+      dv[0] = m[0] * x + m[3] * y + m[6] * z + t[0]; dv[1] = m[1] * x + m[4] * y + m[7] * z + t[1]; dv[2] = m[2] * x + m[5] * y + m[8] * z + t[2];
+      if (!frame.sphereVisible(dv, br)) { flush(); this.stats.bricks++; continue; }
+      const inst = depth || this._ns ? 1 : this._inst(cl, Math.max(near, Math.hypot(dv[0], dv[1], dv[2]) - br), flc);
+      const a = Rr[b * 2], n = Rr[b * 2 + 1];
+      if (cnt > 0 && (inst !== ci || a !== f0 + cnt)) flush();
+      if (cnt === 0) { f0 = a; ci = inst; }
+      cnt += n;
+    }
+    flush();
+    return drawn;
+  }
+  /* the occlusion pass (depth only, before the sea and sky dots): each front-facing sample splats its own cell
+     (exactly the parallelogram it stands for on screen), pushed back a little along the line of sight, so the gaps
+     between a hull's dots hide the sea and the far side instead of showing them. Not for cutaways, x-rays, faded or
+     exploded instances; not round a scar's hole (it shows into the hull) */
+  drawDepth(d, cam, frame) {
+    if (!d._occ || d._p1 <= d._p0) return 0;
+    const gl = this.gl, P = this.PD, u = P.u, G = this.G;
+    gl.useProgram(P.p);
+    gl.uniform4f(u.uVp, G.W / 2, G.H / 2, Math.min(G.pointMax || 256, 511), this.occMinPx * G.H / 1080);
+    const ns = this._scars(d, cam.eye);
+    if (ns) { gl.uniform4fv(u.uScA, this._scA); gl.uniform4fv(u.uScB, this._scB); }
+    gl.uniform1i(u.uScN, ns);
+    let n = 0;
+    for (let i = d._p0; i < d._p1; i++) {
+      const r = this._recs[i];
+      if (r.pa < .95 || r.xr > 0 || r.gm) continue;
+      // the finer of the two levels during a cross-fade
+      const cl = r.cl2 && r.cl2.sp < r.cl.sp ? r.cl2 : r.cl;
+      gl.uniformMatrix3fv(u.uR, false, r.m);
+      gl.uniform3f(u.uT, r.t[0], r.t[1], r.t[2]);
+      gl.uniform4f(u.uP, 0, this.occBias, 0, cl.sp);
+      n += this._drawCloud(cl, r, frame, true);
+    }
+    this.stats.occ += n;
+    return n;
+  }
+  /* the dots of a prepared instance. Returns the number of samples drawn (their sub-dots: stats.sub) */
+  drawColor(d, cam, frame) {
+    if (d._p1 <= d._p0) return 0;
+    const gl = this.gl, P = this.P, u = P.u, eye = cam.eye, e = this.get(d.key);
+    gl.useProgram(P.p);
+    const tint = d._rgb || WH1;
+    gl.uniform4f(u.uTint, tint[0], tint[1], tint[2], d._k || 0);
+    gl.uniform4f(u.uQ, d.noBack ? 1 : 0, d._face || 0, d.bright === undefined ? 1 : d.bright, d.dissolve || 0);
+    { const f = cam.f, az = Math.atan2(f[0], f[2]) + this.fillAz, ce = Math.cos(this.fillEl);
+      gl.uniform4f(u.uFill, ce * Math.sin(az), Math.sin(this.fillEl), ce * Math.cos(az), this.fill); }
+    const sub = this.subPx > 0 && !d.noSub;
+    gl.uniform4f(u.uSub, sub ? this.subPx * this.subScale : 0, this.subJitter, this.dotCap, this.subCap * this.subScale);
+    // Inspect x-ray gate: d.gate = { n: world unit normal, d: n.p of the front (world), w: band (m), g: afterglow (m),
+    // mode: default per part }, d.partGate = { part: mode } (0 off, 1 shell, 2 hidden, 3 part; see the shader)
+    const G = d.gate || null;
+    if (G) gl.uniform4f(u.uGP, G.n[0], G.n[1], G.n[2], G.d - (G.n[0] * eye[0] + G.n[1] * eye[1] + G.n[2] * eye[2]));
+    const ns = this._scars(d, eye);
+    if (ns) { gl.uniform4fv(u.uScA, this._scA); gl.uniform4fv(u.uScB, this._scB); gl.uniform4fv(u.uScC, d.scars.C); }
+    gl.uniform1i(u.uScN, ns);
+    const spMax = e.lods[e.lods.length - 1];
+    let drawn = 0;
+    for (let i = d._p0; i < d._p1; i++) {
+      const r = this._recs[i];
+      gl.uniformMatrix3fv(u.uR, false, r.m);
+      gl.uniform3f(u.uT, r.t[0], r.t[1], r.t[2]);
+      gl.uniform4f(u.uG, r.gm, r.gy, G ? G.w || 1 : 1, G ? G.g || 1 : 1);
+      for (let c = 0; c < 2; c++) {
+        const cl = c ? r.cl2 : r.cl;
+        if (!cl) continue;
+        const fl = Math.min(1, (cl.sp / spMax) * (cl.sp / spMax));
+        gl.uniform4f(u.uP, r.pa, r.xr, r.dm, cl.sp);
+        gl.uniform4f(u.uDen, r.den[0], r.den[1], Math.max(r.den[2], fl), r.den[3]);
+        gl.uniform4f(u.uX, r.k, r.k < 1 ? (c ? -1 : 1) : 0, 0, 0);
+        this._ns = !sub;
+        drawn += this._drawCloud(cl, r, frame, false);
+        this._ns = false;
+      }
     }
     return drawn;
   }
