@@ -57,6 +57,7 @@ const RHO_TNT = 1600, K_SHEAR = 1.0, LC_BOUND = 2.0;
 // materials: E, yield, linear hardening H, Cowper-Symonds D (1/s) and q, GL failure-strain constants
 const MATS = [
   { key: 'hsla', name: 'HSLA-80', rho: 7850, E: 207e9, nu: .3, sy: 550e6, H: 1.0e9, D: 3200, q: 5, eg: .056, ee: .54 },
+  { key: 'hts', name: 'HTS', rho: 7850, E: 204e9, nu: .3, sy: 324e6, H: .9e9, D: 400, q: 5, eg: .056, ee: .54 },
   { key: 'mild', name: 'mild steel', rho: 7850, E: 200e9, nu: .3, sy: 235e6, H: .9e9, D: 40.4, q: 5, eg: .056, ee: .54 },
   { key: 'alu', name: 'Al 5456', rho: 2660, E: 70e9, nu: .33, sy: 228e6, H: .5e9, D: 6500, q: 4, eg: .034, ee: .32 },
 ];
@@ -105,8 +106,25 @@ function tee(s, be, tp) {
 }
 
 /* ------------------------------------------------------------------ scenes */
-// A scene: panels (bilinear quads p00, p10, p01, p11 with thickness, material, stiffeners, open edges where the ship
-// continues), spaces (compartments: volume, box for image reflections), spaceAt(point), waterline.
+// A scene gives pieces: structured grids of cells cut from its plating (a rectangle, a curved shell strip, a polygon
+// on a grid), each with thickness, material, stiffener lines (grid rows/columns), open edges (where the ship continues
+// past the model), and the compartments on each side. build() joins them into one mesh.
+function rectPiece(P) {
+  const Lu = len(sub(P.p10, P.p00)), Lv = len(sub(P.p01, P.p00));
+  const nu = Math.max(1, Math.round(Lu / S)), nv = Math.max(1, Math.round(Lv / S));
+  const G = new Float64Array(3 * (nu + 1) * (nv + 1));
+  for (let j = 0; j <= nv; j++) for (let i = 0; i <= nu; i++) {
+    const u = i / nu, v = j / nv, o = 3 * (j * (nu + 1) + i);
+    for (let q = 0; q < 3; q++) G[o + q] = P.p00[q] * (1 - u) * (1 - v) + P.p10[q] * u * (1 - v) + P.p01[q] * (1 - u) * v + P.p11[q] * u * v;
+  }
+  const lines = [];
+  for (const s of P.stiff || []) {
+    const Lx = s.along === 'u' ? Lv : Lu, nn = s.along === 'u' ? nv : nu;
+    for (let q = 1; q * s.every < Lx - 1e-6; q++) { const g = Math.round(q * s.every / Lx * nn); if (g > 0 && g < nn) lines.push({ along: s.along, g, sec: s.sec, spacing: s.every }); }
+  }
+  return { name: P.name, kind: P.kind, nu, nv, G, mask: null, h: P.h, mat: P.mat, n: nrm(cross(sub(P.p10, P.p00), sub(P.p01, P.p00))), sides: null, wet: null,
+    lines, open: P.open || [0, 0, 0, 0], planar: true };
+}
 function sceneBox() {
   const XA = -15, XZ = 15, YB = -2, YI = 3.5, YD = 7, ZC = -10, XB = [-10, 5], ZF = -20;
   const P = (name, kind, o, U, V, h, mat, stiff, open) => ({ name, kind, p00: o, p10: add(o, U), p01: add(o, V), p11: add(add(o, U), V), h, mat, stiff, open });
@@ -136,125 +154,305 @@ function sceneBox() {
     const ix = p[0] < XB[0] ? 0 : p[0] < XB[1] ? 1 : 2, iy = p[1] < YB ? 0 : p[1] < YI ? 1 : 2;
     return iy * 3 + ix;
   };
-  return { name: 'box', panels, spaces, OUT, spaceAt, waterline: 0, aimDefault: [0, 2.2, 0], cam: { tgt: [0, 2.5, -.5], dist: 26 },
-    aimOK: (p, n) => p[1] > .3 };
+  return { name: 'box', pieces: panels.map(rectPiece), spaces, OUT, spaceAt, waterline: 0, aimDefault: [0, 2.2, 0], aimNDefault: [0, 0, 1],
+    cam: { tgt: [0, 2.5, -.5], dist: 26 }, aimOK: p => p[1] > .3, snap: false, vents: [], isCut: null };
+}
+
+/* ---- a single clamped plate (2.5 x 0.75 m, the panel between frames and longitudinals) for the Nurick-Martin check */
+function scenePlate() {
+  const a = 2.5, b = .75, w = 2 * S;
+  const pc = rectPiece({ name: 'plate', kind: 0, p00: [-a / 2 - w, -b / 2 - w, 0], p10: [a / 2 + w, -b / 2 - w, 0], p01: [-a / 2 - w, b / 2 + w, 0], p11: [a / 2 + w, b / 2 + w, 0],
+    h: st.h / 1000, mat: MATI[st.mat], stiff: [], open: [0, 0, 0, 0] });
+  pc.sides = [0, 1]; pc.wet = false;
+  return { name: 'plate', pieces: [pc], spaces: [{ name: 'front', box: null, V: Infinity }, { name: 'back', box: null, V: Infinity }], OUT: 0,
+    spaceAt: p => p[2] > 0 ? 0 : 1, waterline: -100, snap: false, vents: [], isCut: null, dims: [a, b],
+    fixed: p => Math.abs(p[0]) > a / 2 - 1e-6 || Math.abs(p[1]) > b / 2 - 1e-6,          // clamped: the edge and a rigid border
+    aimDefault: [0, 0, 0], aimNDefault: [0, 0, 1], cam: { tgt: [0, 0, 0], dist: 5 }, aimOK: () => true };
+}
+
+/* ---- the Arleigh Burke (burke_structure.js): a patch of the whole ship around the aim point */
+let BURKE = null;
+async function loadBurke() { if (!BURKE) BURKE = await import('./burke_structure.js'); }
+const BMAT = { hsla: 'hsla', hts: 'hts', mild: 'mild' };
+function burkeSec(name) {
+  const q = BURKE.SECS[name]; if (!q) return null;
+  return q.type === 'FB' ? { hw: q.h / 1000, tw: q.tw / 1000, bf: 0, tf: 0 } : { hw: (q.h - q.tf) / 1000, tw: q.tw / 1000, bf: q.bf / 1000, tf: q.tf / 1000 };
+}
+function sceneBurke() {
+  const B = BURKE.default, C = B.COMPS, frameAt = BURKE.frameAt;
+  const AIR = C.findIndex(c => c.id === 'AIR');
+  const outside = k => C[k].kind === 'outside' || C[k].kind === 'flooded';
+  const spc = k => outside(k) ? AIR : k, wetK = k => C[k].id === 'SEA' || C[k].kind === 'flooded';
+  const spaces = C.map(c => ({ name: c.name, box: c.box ? [c.box.x[0], c.box.y[0], c.box.z[0], c.box.x[1], c.box.y[1], c.box.z[1]] : null,
+    V: c.kind === 'outside' || c.kind === 'flooded' ? Infinity : c.vol }));
+  // the patch: along the ship around the aim, out to the next watertight bulkhead if it is close
+  const fill = CONTENTS[st.src] ? 400 : st.kg, L = Math.min(25, Math.max(6, 4 + 2 * Math.cbrt(fill)));
+  const ST = B.STATIONS, ax = st.aim[0];
+  let x0 = ST.filter(x => x <= ax - L).pop() ?? ST[0], x1 = ST.find(x => x >= ax + L) ?? ST[ST.length - 1];
+  for (const b of B.BULKHEADS) { if (b.x < x0 && b.x > x0 - 6) x0 = b.x; if (b.x > x1 && b.x < x1 + 6) x1 = b.x; }
+  x0 = ST.reduce((a, x) => Math.abs(x - x0) < Math.abs(a - x0) ? x : a, ST[0]); x1 = ST.reduce((a, x) => Math.abs(x - x1) < Math.abs(a - x1) ? x : a, ST[0]);
+  // x lines: every bay between stations subdivided evenly (so all pieces share them)
+  const xLines = (a, b) => { const br = [a, ...ST.filter(x => x > a + 1e-6 && x < b - 1e-6), b], out = [a];
+    for (let k = 0; k + 1 < br.length; k++) { const n = Math.max(1, Math.round((br[k + 1] - br[k]) / S)); for (let q = 1; q <= n; q++) out.push(br[k] + (br[k + 1] - br[k]) * q / n); }
+    return out; };
+  const isFrame = x => Math.abs(frameAt(x) - Math.round(frameAt(x))) < .01;
+  const pieces = [], vents = [];
+  const kindOf = pn => pn.kind === 'shell' || pn.kind === 'appendage' || pn.kind === 'dome' ? 0 : pn.kind === 'deck' ? (/Main deck/.test(pn.part) ? 1 : 2) : pn.kind === 'house' ? 4 : 3;
+  const clipX = poly => { let P = poly;
+    for (const [lim, sg] of [[x0, 1], [x1, -1]]) { const out = [];
+      for (let k = 0; k < P.length; k++) { const a = P[k], b = P[(k + 1) % P.length], ia = (a[0] - lim) * sg >= -1e-9, ib = (b[0] - lim) * sg >= -1e-9;
+        if (ia) out.push(a); if (ia !== ib) { const t = (lim - a[0]) / (b[0] - a[0]); out.push([lim, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]); } }
+      P = out; if (P.length < 3) return null; }
+    return P; };
+  for (const pn of B.PANELS) {
+    const mm = B.MATS[pn.mat], key = mm && BMAT[mm.bench];
+    const xs = pn.strip ? [pn.strip[0][0][0], pn.strip[1][0][0]] : pn.poly.map(p => p[0]);
+    const xmin = Math.min(...xs), xmax = Math.max(...xs);
+    if (xmax < x0 + 1e-6 || xmin > x1 - 1e-6) continue;
+    if (pn.open) { const f = Math.max(0, Math.min(x1, xmax) - Math.max(x0, xmin)) / Math.max(1e-6, xmax - xmin); vents.push([spc(pn.sides[0]), spc(pn.sides[1]), pn.area * f]); continue; }
+    if (!key) continue;
+    const base = { name: pn.part, kind: kindOf(pn), h: pn.t / 1000, mat: MATI[key], n: pn.n, sides: [spc(pn.sides[0]), spc(pn.sides[1])],
+      wet: wetK(pn.sides[0]) || wetK(pn.sides[1]), lines: [], open: [0, 0, 0, 0] };
+    const secS = pn.stiff ? burkeSec(pn.stiff.sec) : null, secF = pn.frame ? burkeSec(pn.frame.sec) : null;
+    if (pn.strip) {
+      let [A, Bp] = pn.strip; if (A[0][0] > Bp[0][0]) [A, Bp] = [Bp, A];
+      const xa = A[0][0], xb = Bp[0][0], xl = xLines(xa, xb), nu = xl.length - 1;
+      const seg = [];
+      for (let k = 0; k + 1 < A.length; k++) { const la = len(sub(A[k + 1], A[k])), lb = len(sub(Bp[k + 1], Bp[k])); seg.push(Math.max(1, Math.round(Math.max(la, lb) / S))); }
+      const nv = seg.reduce((a, b) => a + b, 0);
+      const G = new Float64Array(3 * (nu + 1) * (nv + 1)), gir = new Float64Array(nv + 1);
+      let j = 0, prev = null;
+      for (let k = 0; k < seg.length; k++) for (let q = (k === 0 ? 0 : 1); q <= seg[k]; q++, j++) {
+        const f = q / seg[k], pa = add(mul(A[k], 1 - f), mul(A[k + 1], f)), pb = add(mul(Bp[k], 1 - f), mul(Bp[k + 1], f));
+        const mid = mul(add(pa, pb), .5); if (prev) gir[j] = gir[j - 1] + len(sub(mid, prev)); prev = mid;
+        for (let i = 0; i <= nu; i++) { const u = (xl[i] - xa) / (xb - xa); G.set(add(mul(pa, 1 - u), mul(pb, u)), 3 * (j * (nu + 1) + i)); }
+      }
+      const pc = { ...base, nu, nv, G, mask: null, planar: false };
+      if (secS && Math.abs(pn.stiff.dir[0]) > .7) for (let q = 1; q * pn.stiff.s < gir[nv] - pn.stiff.s * .3; q++) {
+        let best = -1, bd = 1e9; for (let jj = 1; jj < nv; jj++) { const d = Math.abs(gir[jj] - q * pn.stiff.s); if (d < bd) { bd = d; best = jj; } }
+        if (best > 0 && !pc.lines.some(l => l.along === 'u' && l.g === best)) pc.lines.push({ along: 'u', g: best, sec: secS, spacing: pn.stiff.s });
+      }
+      if (secF && isFrame(xa)) pc.lines.push({ along: 'v', g: 0, sec: secF, spacing: pn.frame.s });
+      pieces.push(pc);
+      continue;
+    }
+    // planar polygon on a grid
+    const poly = clipX(pn.poly); if (!poly) continue;
+    const n = pn.n, trans = Math.abs(n[0]) >= .7;
+    const uh = trans ? nrm(sub([0, 0, 1], mul(n, n[2]))) : nrm(sub([1, 0, 0], mul(n, n[0]))), vh = nrm(cross(n, uh));
+    const P0 = poly[0];
+    const pv = poly.map(p => dot(p, vh)), pu = poly.map(p => trans ? dot(p, uh) : p[0]);
+    const umin = Math.min(...pu), umax = Math.max(...pu), vmin = Math.min(...pv), vmax = Math.max(...pv);
+    if (umax - umin < S * .5 || vmax - vmin < S * .5) continue;
+    const ul = trans ? (() => { const a = []; for (let k = Math.floor(umin / S); k * S <= umax + S; k++) a.push(k * S); return a; })() : xLines(Math.max(x0, umin), Math.min(x1, umax));
+    const vl = []; for (let k = Math.floor(vmin / S); k * S <= vmax + S; k++) vl.push(k * S);
+    const nu = ul.length - 1, nv = vl.length - 1;
+    if (nu < 1 || nv < 1) continue;
+    const G = new Float64Array(3 * (nu + 1) * (nv + 1));
+    for (let j = 0; j <= nv; j++) for (let i = 0; i <= nu; i++) {
+      const beta = vl[j] - dot(P0, vh);
+      let p;
+      if (trans) p = add(add(P0, mul(uh, ul[i] - dot(P0, uh))), mul(vh, beta));
+      else { const alpha = (ul[i] - P0[0] - beta * vh[0]) / uh[0]; p = add(add(P0, mul(uh, alpha)), mul(vh, beta)); }
+      G.set(p, 3 * (j * (nu + 1) + i));
+    }
+    const mask = new Uint8Array(nu * nv); let cnt = 0;
+    const inside = (x, y) => { let c = false; for (let k = 0, m = pu.length - 1; k < pu.length; m = k++) { if ((pv[k] > y) !== (pv[m] > y) && x < (pu[m] - pu[k]) * (y - pv[k]) / (pv[m] - pv[k]) + pu[k]) c = !c; } return c; };
+    for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) if (inside((ul[i] + ul[i + 1]) / 2, (vl[j] + vl[j + 1]) / 2)) { mask[j * nu + i] = 1; cnt++; }
+    if (!cnt) continue;
+    const pc = { ...base, nu, nv, G, mask, planar: true };
+    for (const [spec, sec] of [[pn.stiff, secS], [pn.frame, secF]]) {
+      if (!spec || !sec) continue;
+      const alongU = Math.abs(dot(spec.dir, uh)) >= Math.abs(dot(spec.dir, vh));
+      if (alongU) { for (let k = Math.ceil(vmin / spec.s); k * spec.s < vmax; k++) { const g = Math.round((k * spec.s - vl[0]) / S); if (g > 0 && g < nv) pc.lines.push({ along: 'u', g, sec, spacing: spec.s }); } }
+      else if (!trans && Math.abs(spec.s - B.FRAMES.spacing) < .1) { for (let i = 0; i < nu; i++) if (isFrame(ul[i])) pc.lines.push({ along: 'v', g: i, sec, spacing: spec.s }); }
+      else { for (let k = Math.ceil(umin / spec.s); k * spec.s < umax; k++) { const g = trans ? Math.round((k * spec.s - ul[0]) / S) : ul.findIndex(x => x >= k * spec.s - S / 2);
+        if (g > 0 && g < nu) pc.lines.push({ along: 'v', g, sec, spacing: spec.s }); } }
+    }
+    pieces.push(pc);
+  }
+  const spaceAt = p => spc(BURKE.compAt(p[0], p[1], p[2]));
+  return { name: 'burke', pieces, spaces, OUT: AIR, spaceAt, waterline: 0, snap: true, vents, patch: [x0, x1],
+    isCut: p => Math.abs(p[0] - x0) < 1e-3 || Math.abs(p[0] - x1) < 1e-3,
+    aimDefault: [0, 2.5, BURKE.halfBreadth(0, 2.5)], aimNDefault: [0, 0, 1], cam: { tgt: [st.aim[0], 3, 0], dist: 45 }, aimOK: p => p[1] > .3 };
 }
 
 /* ------------------------------------------------------------------ the model (arrays) */
 let S = .125, scene = null, dt = 1e-5, BETA = 1e-6;
 // nodes
 let N = 0, X, V, R0, M, WINV, FREE, ANC, AK, AF, AC, NKIND, NFRM, NCON, TBRK, NCC;
-// cells: nodes, panel, thickness, material, failure strain, spaces, wet depth, rest triangle frames, state
-let NC = 0, CN, CPAN, CH, CMAT, CEF, CSP, CSN, CWET, CAR, CTR, CHG, CDB, CVIS, CEP, CER, CTE, CDM, CUT, CFD, CRC, CNR;
+// cells: nodes, piece, thickness, material, failure strain, spaces, wet depth, rest triangle frames, state
+let NC = 0, CN, CPAN, CH, CMAT, CEF, CSP, CSN, CWET, CAR, CTR, CHG, CDB, CVIS, CEP, CER, CTE, CDM, CUT, CFD, CRC, CNR, CMAP;
 // hinges: 6 nodes, 2 cells, plate stiffness/moment, stiffener stiffness/moment, rest angle, lever, trusses, state
 let NH = 0, HEL, HN, HC, HKP, HMP, HKS, HMS, HT0, HDB, HTR, HHP, HMAT, HTP, HTH, HSAME;
 // trusses (stiffener axial members)
 let NT = 0, TA, TB, TL0, TAR, TMAT, TEF, TFIB, THG, TLP, TFL, TEB, TKIND;
-// panels (contact maps)
+// pieces (contact maps)
 let PAN = [];
 const TRI = [[0, 1, 2], [0, 2, 3], [0, 1, 3], [1, 2, 3]];
+const EK = (a, b) => a < b ? a * 4194304 + b : b * 4194304 + a;
 
 function build() {
   if (gpu) { gpu.dispose(); gpu = null; }
-  scene = st.scene === 'burke' && window.BURKE_SCENE ? window.BURKE_SCENE(st, S) : sceneBox();
   S = st.grid;
-  const pos = [], rest = [], mass = [], kind = [], frm = [], key = new Map();
-  const node = (p, kd) => {
-    const k = Math.round(p[0] * 1000) + ',' + Math.round(p[1] * 1000) + ',' + Math.round(p[2] * 1000);
-    let i = key.get(k);
-    if (i === undefined) { i = mass.length; key.set(k, i); pos.push(p[0], p[1], p[2]); rest.push(p[0], p[1], p[2]); mass.push(0); kind.push(kd); frm.push(0); }
-    return i;
-  };
-  const cn = [], cpan = [], ch = [], cmat = [], csp = [], csn = [], cwet = [];
-  const ta = [], tb = [], tar = [], tmat = [], tsec = [], tkind = [];
-  const anchors = [];                                         // [node, k, f, c]
-  const lineHinges = [];                                      // stiffener bending to add to hinges later
-  PAN = [];
-  scene.panels.forEach((P, pi) => {
-    const Lu = len(sub(P.p10, P.p00)), Lv = len(sub(P.p01, P.p00));
-    const nu = Math.max(1, Math.round(Lu / S)), nv = Math.max(1, Math.round(Lv / S));
-    const at = (u, v) => { const a = add(mul(P.p00, (1 - u) * (1 - v)), mul(P.p10, u * (1 - v))), b = add(mul(P.p01, (1 - u) * v), mul(P.p11, u * v)); return add(a, b); };
-    const n = nrm(cross(sub(P.p10, P.p00), sub(P.p01, P.p00)));
-    const m = MATS[P.mat];
-    // stiffener lines (grid indices strictly inside the panel)
-    const linesU = [], linesV = [];                           // along u: at row j; along v: at column i
-    for (const s of P.stiff || []) {
-      const Lx = s.along === 'u' ? Lv : Lu, nn = s.along === 'u' ? nv : nu;
-      for (let q = 1; q * s.every < Lx - 1e-6; q++) { const g = Math.round(q * s.every / Lx * nn); if (g > 0 && g < nn) (s.along === 'u' ? linesU : linesV).push([g, s]); }
+  scene = st.scene === 'burke' && BURKE ? sceneBurke() : st.scene === 'plate' ? scenePlate() : sceneBox();
+  const pieces = scene.pieces;
+  // ---- 1. grid nodes, merged where they coincide
+  let pos = []; const key = new Map(), npc = [];
+  const gid = pieces.map(pc => {
+    const ids = new Int32Array((pc.nu + 1) * (pc.nv + 1)).fill(-1);
+    const used = (i, j) => { if (!pc.mask) return true; for (const [a, b] of [[i - 1, j - 1], [i, j - 1], [i - 1, j], [i, j]]) if (a >= 0 && b >= 0 && a < pc.nu && b < pc.nv && pc.mask[b * pc.nu + a]) return true; return false; };
+    for (let j = 0; j <= pc.nv; j++) for (let i = 0; i <= pc.nu; i++) {
+      if (!used(i, j)) continue;
+      const o = 3 * (j * (pc.nu + 1) + i), x = pc.G[o], y = pc.G[o + 1], z = pc.G[o + 2];
+      const k = Math.round(x * 1000) + ',' + Math.round(y * 1000) + ',' + Math.round(z * 1000);
+      let id = key.get(k); if (id === undefined) { id = pos.length / 3; key.set(k, id); pos.push(x, y, z); npc.push([]); }
+      ids[j * (pc.nu + 1) + i] = id;
     }
-    // imperfection between stiffeners (hungry horse): w0 = min(0.1 beta^2 t, b/200) (Smith et al. 1988 "average")
-    const cu = [0, ...linesV.map(l => l[0]), nu].sort((a, b) => a - b), cvv = [0, ...linesU.map(l => l[0]), nv].sort((a, b) => a - b);
-    const brk = (arr, x) => { for (let k = 1; k < arr.length; k++) if (x <= arr[k]) return [arr[k - 1], arr[k]]; return [arr[0], arr[1]]; };
-    const I = new Int32Array((nu + 1) * (nv + 1));
-    for (let j = 0; j <= nv; j++) for (let i = 0; i <= nu; i++) {
-      const p = at(i / nu, j / nv), before = mass.length, id = node(p, P.kind);
-      I[j * (nu + 1) + i] = id;
-      if (id === before && P.imperfect !== false) {
-        const [ua, ub] = brk(cu, i), [va, vb] = brk(cvv, j);
-        const bu = (ub - ua) * Lu / nu, bv = (vb - va) * Lv / nv, b = Math.min(bu, bv), beta = b / P.h * Math.sqrt(m.sy / m.E);
-        const w0 = Math.min(.1 * beta * beta * P.h, b / 200);
-        const w = -w0 * Math.sin(Math.PI * (i - ua) / Math.max(1, ub - ua)) * Math.sin(Math.PI * (j - va) / Math.max(1, vb - va));
-        for (let q = 0; q < 3; q++) { pos[3 * id + q] += n[q] * w; rest[3 * id + q] += n[q] * w; }
-      }
-    }
-    const II = (i, j) => I[j * (nu + 1) + i];
-    const off = cpan.length;
-    for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) {
-      const a = II(i, j), b = II(i + 1, j), c = II(i + 1, j + 1), d = II(i, j + 1);
-      cn.push(a, b, c, d); cpan.push(pi); ch.push(P.h); cmat.push(P.mat);
-      const ctr = at((i + .5) / nu, (j + .5) / nv);
-      csp.push(P.spaceP !== undefined ? P.spaceP : scene.spaceAt(add(ctr, mul(n, .05))));
-      csn.push(P.spaceN !== undefined ? P.spaceN : scene.spaceAt(sub(ctr, mul(n, .05))));
-      const out = csp[csp.length - 1] === scene.OUT || csn[csn.length - 1] === scene.OUT;
-      cwet.push(out && ctr[1] < scene.waterline ? scene.waterline - ctr[1] : -1);
-      const A = len(sub(P.p10, P.p00)) / nu * len(sub(P.p01, P.p00)) / nv;
-      for (const q of [a, b, c, d]) mass[q] += m.rho * P.h * A / 4;
-    }
-    // open edges (the ship continues past them): anchors
-    const openEdge = (list, bl) => { for (let k = 0; k + 1 < list.length; k++) {
-      const a = list[k], b = list[k + 1], L = Math.hypot(pos[3 * a] - pos[3 * b], pos[3 * a + 1] - pos[3 * b + 1], pos[3 * a + 2] - pos[3 * b + 2]);
-      const cL = Math.sqrt(m.E / (m.rho * (1 - m.nu * m.nu)));
-      for (const q of [a, b]) anchors.push([q, m.E * P.h * (L / 2) / LC_BOUND, m.sy * P.h * L / 2, m.rho * cL * P.h * L / 2]); } };
-    const op = P.open || [0, 0, 0, 0];
-    if (op[0]) openEdge(Array.from({ length: nv + 1 }, (_, j) => II(0, j)));
-    if (op[1]) openEdge(Array.from({ length: nv + 1 }, (_, j) => II(nu, j)));
-    if (op[2]) openEdge(Array.from({ length: nu + 1 }, (_, i) => II(i, 0)));
-    if (op[3]) openEdge(Array.from({ length: nu + 1 }, (_, i) => II(i, nv)));
-    // stiffeners: trusses along the line, bending onto the hinges the line crosses
-    const addLine = (along, g, s) => {
-      const nn = along === 'u' ? nu : nv, spacing = s.every;
-      const sec = tee(s.sec, spacing, P.h), ids = [];
-      for (let k = 0; k < nn; k++) {
-        const a = along === 'u' ? II(k, g) : II(g, k), b = along === 'u' ? II(k + 1, g) : II(g, k + 1);
-        const L = Math.hypot(pos[3 * a] - pos[3 * b], pos[3 * a + 1] - pos[3 * b + 1], pos[3 * a + 2] - pos[3 * b + 2]);
-        ids.push(ta.length); ta.push(a); tb.push(b); tar.push(sec.A); tmat.push(P.mat); tsec.push([sec, L, P.h]); tkind.push(s.sec === SEC.sideFrame || s.sec === SEC.deckBeam || s.sec === SEC.d2Beam ? 2 : 1);
-        mass[a] += m.rho * sec.A * L / 2; mass[b] += m.rho * sec.A * L / 2; frm[a] = frm[b] = Math.max(frm[a], tkind[tkind.length - 1]);
-      }
-      // ends on open edges: the member continues there
-      const cL = Math.sqrt(m.E / m.rho);
-      if ((along === 'u' && op[0]) || (along === 'v' && op[2])) anchors.push([ta[ids[0]], m.E * sec.A / LC_BOUND, m.sy * sec.A, m.rho * cL * sec.A]);
-      if ((along === 'u' && op[1]) || (along === 'v' && op[3])) anchors.push([tb[ids[ids.length - 1]], m.E * sec.A / LC_BOUND, m.sy * sec.A, m.rho * cL * sec.A]);
-      // bending: at each interior node k of the line, the two cell pairs across the perpendicular edges
-      for (let k = 1; k < nn; k++) {
-        const cellAt = (i, j) => (i < 0 || j < 0 || i >= nu || j >= nv) ? -1 : off + j * nu + i;
-        const pairs = along === 'u' ? [[cellAt(k - 1, g), cellAt(k, g)], [cellAt(k - 1, g - 1), cellAt(k, g - 1)]]
-          : [[cellAt(g, k - 1), cellAt(g, k)], [cellAt(g - 1, k - 1), cellAt(g - 1, k)]];
-        const ok = pairs.filter(p => p[0] >= 0 && p[1] >= 0);
-        lineHinges.push({ pairs: ok, sec, mat: m, h: P.h, spacing, trusses: [ids[k - 1], ids[k]] });
-      }
-    };
-    for (const [g, s] of linesU) addLine('u', g, s);
-    for (const [g, s] of linesV) addLine('v', g, s);
-    const Uv = sub(P.p10, P.p00), Vv = sub(P.p01, P.p00);
-    PAN.push({ o: P.p00, U: nrm(Uv), V: nrm(Vv), Lu: len(Uv), Lv: len(Vv), n, nu, nv, off, kind: P.kind, name: P.name, planar: true });
+    return ids;
   });
+  pieces.forEach((pc, pi) => { for (const id of gid[pi]) if (id >= 0 && !npc[id].includes(pi)) npc[id].push(pi); });
+  // ---- 2. snap the free edges of each piece onto the nearest node of another piece (within 0.55 S): joins the
+  // plating where separately gridded pieces meet (deck to shell, bulkhead to deck)
+  const nn0 = pos.length / 3, rep = new Int32Array(nn0); for (let i = 0; i < nn0; i++) rep[i] = i;
+  const fr = i => { while (rep[i] !== i) { rep[i] = rep[rep[i]]; i = rep[i]; } return i; };
+  let snapped = 0, unsnapped = 0;
+  if (scene.snap) {
+    const H = new Map(), hk = (a, b, c) => a + ',' + b + ',' + c;
+    for (let i = 0; i < nn0; i++) { const k = hk(Math.floor(pos[3 * i] / S), Math.floor(pos[3 * i + 1] / S), Math.floor(pos[3 * i + 2] / S)); let l = H.get(k); if (!l) H.set(k, l = []); l.push(i); }
+    const cls = new Map();
+    const setOf = r => { let q = cls.get(r); if (!q) cls.set(r, q = new Set(npc[r])); return q; };
+    pieces.forEach((pc, pi) => {
+      const ids = gid[pi], cc = (i, j) => (i < 0 || j < 0 || i >= pc.nu || j >= pc.nv) ? 0 : pc.mask ? pc.mask[j * pc.nu + i] : 1;
+      for (let j = 0; j <= pc.nv; j++) for (let i = 0; i <= pc.nu; i++) {
+        const a = ids[j * (pc.nu + 1) + i]; if (a < 0) continue;
+        if (cc(i - 1, j - 1) + cc(i, j - 1) + cc(i - 1, j) + cc(i, j) === 4) continue;      // interior of its piece
+        if (npc[a].length > 1) continue;                                                   // already joined
+        if (scene.isCut && scene.isCut([pos[3 * a], pos[3 * a + 1], pos[3 * a + 2]])) continue;
+        const gx = Math.floor(pos[3 * a] / S), gy = Math.floor(pos[3 * a + 1] / S), gz = Math.floor(pos[3 * a + 2] / S);
+        let best = -1, bd = .55 * S;
+        for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) for (const b of H.get(hk(gx + dx, gy + dy, gz + dz)) || []) {
+          if (npc[b].includes(pi)) continue;
+          const d = Math.hypot(pos[3 * a] - pos[3 * b], pos[3 * a + 1] - pos[3 * b + 1], pos[3 * a + 2] - pos[3 * b + 2]); if (d < bd) { bd = d; best = b; }
+        }
+        if (best < 0) { unsnapped++; continue; }
+        const ra = fr(a), rb = fr(best); if (ra === rb) continue;
+        const sa = setOf(ra), sb = setOf(rb); let clash = false; for (const q of sa) if (sb.has(q)) { clash = true; break; }
+        if (clash) { unsnapped++; continue; }
+        rep[ra] = rb; for (const q of sa) sb.add(q); snapped++;
+      }
+    });
+  }
+  // compact the node numbering
+  const newId = new Int32Array(nn0).fill(-1); let N0 = 0;
+  for (let i = 0; i < nn0; i++) if (fr(i) === i) newId[i] = N0++;
+  const nid = i => i < 0 ? -1 : newId[fr(i)];
+  const P2 = new Float64Array(3 * N0), npc2 = Array.from({ length: N0 }, () => []);
+  for (let i = 0; i < nn0; i++) { const k = nid(i); if (fr(i) === i) { P2[3 * k] = pos[3 * i]; P2[3 * k + 1] = pos[3 * i + 1]; P2[3 * k + 2] = pos[3 * i + 2]; } for (const q of npc[i]) if (!npc2[k].includes(q)) npc2[k].push(q); }
+  pos = P2;
+  const mass = new Float64Array(N0), kind = new Uint8Array(N0).fill(255), frm = new Uint8Array(N0);
+  // ---- 3. imperfection between stiffeners (hungry horse) on nodes that belong to one piece only:
+  // w0 = min(0.1 beta^2 t, b / 200) (Smith et al. 1988 "average" level)
+  pieces.forEach((pc, pi) => {
+    const m = MATS[pc.mat], rows = [0, pc.nv, ...pc.lines.filter(l => l.along === 'u').map(l => l.g)].sort((a, b) => a - b), cols = [0, pc.nu, ...pc.lines.filter(l => l.along === 'v').map(l => l.g)].sort((a, b) => a - b);
+    const brk = (arr, x) => { for (let k = 1; k < arr.length; k++) if (x <= arr[k]) return [arr[k - 1], arr[k]]; return [arr[0], arr[1]]; };
+    const g3 = k => [pc.G[3 * k], pc.G[3 * k + 1], pc.G[3 * k + 2]];
+    const du = len(sub(g3(pc.nu), g3(0))) / pc.nu, dv = len(sub(g3(pc.nv * (pc.nu + 1)), g3(0))) / pc.nv;
+    for (let j = 0; j <= pc.nv; j++) for (let i = 0; i <= pc.nu; i++) {
+      const k = nid(gid[pi][j * (pc.nu + 1) + i]); if (k < 0 || npc2[k].length !== 1) continue;
+      const [ua, ub] = brk(cols, i), [va, vb] = brk(rows, j);
+      const b = Math.max(S, Math.min((ub - ua) * du, (vb - va) * dv)), beta = b / pc.h * Math.sqrt(m.sy / m.E), w0 = Math.min(.1 * beta * beta * pc.h, b / 200);
+      const w = -w0 * Math.sin(Math.PI * (i - ua) / Math.max(1, ub - ua)) * Math.sin(Math.PI * (j - va) / Math.max(1, vb - va));
+      for (let q = 0; q < 3; q++) pos[3 * k + q] += pc.n[q] * w;
+    }
+  });
+  // ---- 4. cells
+  const cn = [], cpan = [], ch = [], cmat = [], csp = [], csn = [], cwet = [], cmap = [];
+  PAN = [];
+  pieces.forEach((pc, pi) => {
+    const m = MATS[pc.mat], off = cmap.length, ids = gid[pi];
+    for (let k = 0; k < pc.nu * pc.nv; k++) cmap.push(-1);
+    for (let j = 0; j < pc.nv; j++) for (let i = 0; i < pc.nu; i++) {
+      if (pc.mask && !pc.mask[j * pc.nu + i]) continue;
+      const I = (a, b) => nid(ids[b * (pc.nu + 1) + a]);
+      let q = [I(i, j), I(i + 1, j), I(i + 1, j + 1), I(i, j + 1)];
+      if (q.includes(-1) || new Set(q).size < 4) continue;
+      const P = q.map(k => [pos[3 * k], pos[3 * k + 1], pos[3 * k + 2]]);
+      const av = cross(sub(P[2], P[0]), sub(P[3], P[1])); if (len(av) < 1e-6) continue;
+      if (dot(av, pc.n) < 0) q = [q[0], q[3], q[2], q[1]];
+      const c = cpan.length; cmap[off + j * pc.nu + i] = c;
+      cn.push(...q); cpan.push(pi); ch.push(pc.h); cmat.push(pc.mat);
+      const ctr = mul(add(add(P[0], P[1]), add(P[2], P[3])), .25);
+      const sP = pc.sides ? pc.sides[0] : scene.spaceAt(add(ctr, mul(pc.n, .05))), sN = pc.sides ? pc.sides[1] : scene.spaceAt(sub(ctr, mul(pc.n, .05)));
+      csp.push(sP); csn.push(sN);
+      const wet = pc.wet !== null ? pc.wet : (sP === scene.OUT || sN === scene.OUT);
+      cwet.push(wet && ctr[1] < scene.waterline ? scene.waterline - ctr[1] : -1);
+      const A = .5 * len(av);
+      for (const k of q) { mass[k] += m.rho * pc.h * A / 4; if (kind[k] === 255) kind[k] = pc.kind; }
+    }
+    const g3 = k => [pc.G[3 * k], pc.G[3 * k + 1], pc.G[3 * k + 2]], o = g3(0), Ue = sub(g3(pc.nu), o), Ve = sub(g3(pc.nv * (pc.nu + 1)), o);
+    PAN.push({ o, U: nrm(Ue), V: nrm(Ve), Lu: len(Ue), Lv: len(Ve), n: pc.n, nu: pc.nu, nv: pc.nv, off, kind: pc.kind, name: pc.name, planar: pc.planar });
+  });
+  CMAP = Int32Array.from(cmap);
+  // ---- 5. anchors on open edges (flagged sides of a piece, or the scene's cut planes)
+  const anchors = [];
+  const openEdge = (a, b, c) => {
+    const L = Math.hypot(pos[3 * a] - pos[3 * b], pos[3 * a + 1] - pos[3 * b + 1], pos[3 * a + 2] - pos[3 * b + 2]), m = MATS[cmat[c]], h = ch[c];
+    const cL = Math.sqrt(m.E / (m.rho * (1 - m.nu * m.nu)));
+    for (const q of [a, b]) anchors.push([q, m.E * h * (L / 2) / LC_BOUND, m.sy * h * L / 2, m.rho * cL * h * L / 2]);
+  };
+  const emap = new Map();
+  for (let c = 0; c < cpan.length; c++) for (let e = 0; e < 4; e++) {
+    const k = EK(cn[4 * c + e], cn[4 * c + (e + 1) % 4]);
+    let l = emap.get(k); if (!l) emap.set(k, l = []); l.push([c, e]);
+  }
+  pieces.forEach((pc, pi) => { const op = pc.open, ids = gid[pi];
+    const edge = (i1, j1, i2, j2) => { const a = nid(ids[j1 * (pc.nu + 1) + i1]), b = nid(ids[j2 * (pc.nu + 1) + i2]); if (a < 0 || b < 0) return;
+      const l = emap.get(EK(a, b)); if (l) openEdge(a, b, l[0][0]); };
+    if (op[0]) for (let j = 0; j < pc.nv; j++) edge(0, j, 0, j + 1);
+    if (op[1]) for (let j = 0; j < pc.nv; j++) edge(pc.nu, j, pc.nu, j + 1);
+    if (op[2]) for (let i = 0; i < pc.nu; i++) edge(i, 0, i + 1, 0);
+    if (op[3]) for (let i = 0; i < pc.nu; i++) edge(i, pc.nv, i + 1, pc.nv); });
+  if (scene.isCut) for (const [k, l] of emap) if (l.length === 1) { const a = Math.floor(k / 4194304), b = k % 4194304;
+    if (scene.isCut([pos[3 * a], pos[3 * a + 1], pos[3 * a + 2]]) && scene.isCut([pos[3 * b], pos[3 * b + 1], pos[3 * b + 2]])) openEdge(a, b, l[0][0]); }
+  // ---- 6. stiffener lines: members (axial) along the grid line
+  const ta = [], tb = [], tar = [], tmat = [], tsec = [], tkind = [], lineRec = [], tkey = new Set();
+  pieces.forEach((pc, pi) => {
+    const ids = gid[pi], m = MATS[pc.mat];
+    for (const ln of pc.lines) {
+      const nn = ln.along === 'u' ? pc.nu : pc.nv, sec = tee(ln.sec, ln.spacing, pc.h), heavy = sec.d > .25 ? 2 : 1;
+      let run = [], trs = [];
+      const flush = () => { if (trs.length) lineRec.push({ nodes: run, trusses: trs, sec, mat: m, h: pc.h, spacing: ln.spacing }); run = []; trs = []; };
+      for (let k = 0; k < nn; k++) {
+        const [i1, j1, i2, j2] = ln.along === 'u' ? [k, ln.g, k + 1, ln.g] : [ln.g, k, ln.g, k + 1];
+        const a = nid(ids[j1 * (pc.nu + 1) + i1]), b = nid(ids[j2 * (pc.nu + 1) + i2]);
+        if (a < 0 || b < 0 || a === b) { flush(); continue; }
+        const ek = EK(a, b);
+        if (!emap.has(ek) || tkey.has(ek)) { flush(); continue; }
+        tkey.add(ek);
+        const L = Math.hypot(pos[3 * a] - pos[3 * b], pos[3 * a + 1] - pos[3 * b + 1], pos[3 * a + 2] - pos[3 * b + 2]);
+        if (!run.length) run.push(a); run.push(b); trs.push(ta.length);
+        ta.push(a); tb.push(b); tar.push(sec.A); tmat.push(pc.mat); tsec.push([sec, L]); tkind.push(heavy);
+        mass[a] += m.rho * sec.A * L / 2; mass[b] += m.rho * sec.A * L / 2; frm[a] = Math.max(frm[a], heavy); frm[b] = Math.max(frm[b], heavy);
+      }
+      flush();
+    }
+  });
+  // members crossing an open edge continue there
+  const onOpen = new Uint8Array(N0); for (const [q] of anchors) onOpen[q] = 1;
+  for (const lr of lineRec) for (const [end, t] of [[lr.nodes[0], lr.trusses[0]], [lr.nodes[lr.nodes.length - 1], lr.trusses[lr.trusses.length - 1]]]) {
+    if (!onOpen[end]) continue; const m = lr.mat, A = tar[t], cL = Math.sqrt(m.E / m.rho);
+    anchors.push([end, m.E * A / LC_BOUND, m.sy * A, m.rho * cL * A]);
+  }
 
   // ---- arrays
-  N = mass.length; X = new Float64Array(pos); R0 = new Float64Array(rest); V = new Float64Array(3 * N); M = new Float64Array(mass);
-  WINV = new Float64Array(N); for (let i = 0; i < N; i++) WINV[i] = 1 / M[i];
-  FREE = new Uint8Array(N); ANC = new Float64Array(rest); AK = new Float64Array(N); AF = new Float64Array(N); AC = new Float64Array(N);
+  N = N0; X = new Float64Array(pos); R0 = new Float64Array(pos); V = new Float64Array(3 * N); M = mass;
+  WINV = new Float64Array(N); for (let i = 0; i < N; i++) WINV[i] = M[i] > 0 ? 1 / M[i] : 0;
+  if (scene.fixed) for (let i = 0; i < N; i++) if (scene.fixed([pos[3 * i], pos[3 * i + 1], pos[3 * i + 2]])) WINV[i] = 0;
+  FREE = new Uint8Array(N); ANC = new Float64Array(pos); AK = new Float64Array(N); AF = new Float64Array(N); AC = new Float64Array(N);
   for (const [q, k, f, c] of anchors) { AK[q] += k; AF[q] += f; AC[q] += c; }
-  NKIND = new Uint8Array(kind); NFRM = new Uint8Array(frm); NCON = new Int32Array(N); TBRK = new Float32Array(N).fill(-1);
+  for (let i = 0; i < N0; i++) if (kind[i] === 255) kind[i] = 0;
+  NKIND = kind; NFRM = frm; NCON = new Int32Array(N); TBRK = new Float32Array(N).fill(-1);
   NC = cpan.length; CN = new Int32Array(cn); CPAN = new Int32Array(cpan); CH = new Float64Array(ch); CMAT = new Uint8Array(cmat);
   CSP = new Int32Array(csp); CSN = new Int32Array(csn); CWET = new Float64Array(cwet);
   CAR = new Float64Array(NC); CEF = new Float64Array(NC); CTR = new Float64Array(12 * NC); CHG = new Int32Array(4 * NC).fill(-1); CDB = new Float64Array(NC);
@@ -265,24 +463,19 @@ function build() {
     for (let t = 0; t < 4; t++) {
       const [p1, p2, p3] = TRI[t].map(k => P[k]), e = sub(p2, p1), L12 = len(e), e1 = mul(e, 1 / L12);
       const nn = nrm(cross(e, sub(p3, p1))), e2 = cross(nn, e1), d3 = sub(p3, p1);
-      CTR[12 * c + 3 * t] = L12; CTR[12 * c + 3 * t + 1] = dot(d3, e1); CTR[12 * c + 3 * t + 2] = dot(d3, e2);
+      CTR[12 * c + 3 * t] = L12; CTR[12 * c + 3 * t + 1] = dot(d3, e1); CTR[12 * c + 3 * t + 2] = Math.max(1e-4, dot(d3, e2));
     }
     const av = mul(cross(sub(P[2], P[0]), sub(P[3], P[1])), .5);
-    CAR[c] = len(av); const nn = nrm(av); CNR.set(nn, 3 * c);
-    const ctr = mul(add(add(P[0], P[1]), add(P[2], P[3])), .25); CRC.set(ctr, 3 * c);
+    CAR[c] = len(av); CNR.set(nrm(av), 3 * c);
+    CRC.set(mul(add(add(P[0], P[1]), add(P[2], P[3])), .25), 3 * c);
     CEF[c] = glf(MATS[CMAT[c]], CH[c], Math.sqrt(CAR[c]));
     CDB[c] = Math.sqrt(CAR[c]);
     for (const i of q) NCON[i]++;
   }
-  // ---- hinges: every edge shared by two or more cells, one hinge per pair of cells
-  const emap = new Map();
-  for (let c = 0; c < NC; c++) for (let e = 0; e < 4; e++) {
-    const a = CN[4 * c + e], b = CN[4 * c + (e + 1) % 4], k = a < b ? a + '_' + b : b + '_' + a;
-    let l = emap.get(k); if (!l) emap.set(k, l = []); l.push([c, e]);
-  }
-  const hn = [], hc = [], hkp = [], hmp = [], ht0 = [], hdb = [], hhp = [], hmat = [], hsame = [], pairKey = new Map();
+  // ---- 7. hinges: every edge shared by two or more cells, one hinge per pair of cells
+  const hn = [], hc = [], hkp = [], hmp = [], ht0 = [], hdb = [], hhp = [], hmat = [], hsame = [], hOfEdge = new Map();
   const Dp = c => { const m = MATS[CMAT[c]]; return m.E * CH[c] ** 3 / (12 * (1 - m.nu * m.nu)); };
-  for (const l of emap.values()) for (let x = 0; x < l.length; x++) for (let y = x + 1; y < l.length; y++) {
+  for (const [ek, l] of emap) for (let x = 0; x < l.length; x++) for (let y = x + 1; y < l.length; y++) {
     const [c1, e1] = l[x], [c2, e2] = l[y];
     const x3 = CN[4 * c1 + e1], x4 = CN[4 * c1 + (e1 + 1) % 4];
     const f1a = CN[4 * c1 + (e1 + 2) % 4], f1b = CN[4 * c1 + (e1 + 3) % 4], f2a = CN[4 * c2 + (e2 + 2) % 4], f2b = CN[4 * c2 + (e2 + 3) % 4];
@@ -295,7 +488,7 @@ function build() {
     const mp1 = m1.sy * CH[c1] ** 2 / 4, mp2 = m2.sy * CH[c2] ** 2 / 4, w = mp1 <= mp2 ? c1 : c2;
     hmp.push(Math.min(mp1, mp2) * g.lE); hmat.push(CMAT[w]); hhp.push(CH[w]);
     ht0.push(g.th); hdb.push((g.h1 + g.h2) / 2); hsame.push(CPAN[c1] === CPAN[c2] ? 1 : 0);
-    pairKey.set(Math.min(c1, c2) + '_' + Math.max(c1, c2), h);
+    let lh = hOfEdge.get(ek); if (!lh) hOfEdge.set(ek, lh = []); lh.push(h);
     if (CPAN[c1] === CPAN[c2]) { CHG[4 * c1 + e1] = h; CHG[4 * c2 + e2] = h; }
   }
   NH = hc.length / 2;
@@ -303,7 +496,7 @@ function build() {
   HDB = new Float64Array(hdb); HHP = new Float64Array(hhp); HMAT = new Uint8Array(hmat); HSAME = new Uint8Array(hsame);
   HKS = new Float64Array(NH); HMS = new Float64Array(NH); HTR = new Int32Array(2 * NH).fill(-1);
   HTP = new Float64Array(NH); HTH = new Float64Array(NH); HEL = new Float64Array(NH);
-  // ---- trusses and the stiffeners' bending on the hinges
+  // ---- 8. members, and the stiffeners' bending added to the hinges their line crosses
   NT = ta.length; TA = new Int32Array(ta); TB = new Int32Array(tb); TAR = new Float64Array(tar); TMAT = new Uint8Array(tmat); TKIND = new Uint8Array(tkind);
   TL0 = new Float64Array(NT); TEF = new Float64Array(NT); TFIB = new Float64Array(NT); THG = new Int32Array(4 * NT).fill(-1);
   TLP = new Float64Array(NT); TFL = new Uint8Array(NT); TEB = new Float64Array(NT);
@@ -312,37 +505,63 @@ function build() {
     const [sec, L] = tsec[t], m = MATS[TMAT[t]];
     TEF[t] = glf(m, sec.tw, L); TFIB[t] = sec.c / Math.max(L, sec.d);
   }
+  const nodeEdges = new Map();
+  for (const ek of hOfEdge.keys()) { const a = Math.floor(ek / 4194304), b = ek % 4194304; for (const q of [a, b]) { let l = nodeEdges.get(q); if (!l) nodeEdges.set(q, l = []); l.push(ek); } }
   const tH = new Map();
-  for (const lh of lineHinges) {
-    const { sec, mat: m, h, spacing } = lh;
+  for (const lr of lineRec) {
+    const { sec, mat: m, h, spacing } = lr;
     const D = m.E * h ** 3 / (12 * (1 - m.nu * m.nu));
     // the stiffener's own share: composite tee minus the attached plating's bending (already in the plate hinges)
     const EIs = Math.max(0, m.E * sec.I - D * spacing), Mps = Math.max(0, m.sy * sec.Zp - m.sy * h * h / 4 * spacing);
-    for (const [c1, c2] of lh.pairs) {
-      const hi = pairKey.get(Math.min(c1, c2) + '_' + Math.max(c1, c2)); if (hi === undefined) continue;
-      const share = 1 / lh.pairs.length, db = HDB[hi];
-      HKS[hi] += share * EIs / db; HMS[hi] += share * Mps;
-      HTR[2 * hi] = lh.trusses[0]; HTR[2 * hi + 1] = lh.trusses[1];
-      for (const t of lh.trusses) { let l = tH.get(t); if (!l) tH.set(t, l = []); if (!l.includes(hi)) l.push(hi); }
+    for (let k = 1; k + 1 < lr.nodes.length; k++) {
+      const p = lr.nodes[k], a = lr.nodes[k - 1], b = lr.nodes[k + 1];
+      const t = nrm([R0[3 * b] - R0[3 * a], R0[3 * b + 1] - R0[3 * a + 1], R0[3 * b + 2] - R0[3 * a + 2]]);
+      const hs = [];
+      for (const ek of nodeEdges.get(p) || []) {
+        const e0 = Math.floor(ek / 4194304), e1 = ek % 4194304, q = e0 === p ? e1 : e0;
+        const ed = nrm([R0[3 * q] - R0[3 * p], R0[3 * q + 1] - R0[3 * p + 1], R0[3 * q + 2] - R0[3 * p + 2]]);
+        if (Math.abs(dot(ed, t)) > .3) continue;                        // an edge across the member: its hinges bend it
+        for (const hi of hOfEdge.get(ek)) if (Math.abs(HT0[hi]) < .35) hs.push(hi);
+      }
+      for (const hi of hs) {
+        const share = 1 / hs.length;
+        HKS[hi] += share * EIs / HDB[hi]; HMS[hi] += share * Mps;
+        HTR[2 * hi] = lr.trusses[k - 1]; HTR[2 * hi + 1] = lr.trusses[k];
+        for (const tt of [lr.trusses[k - 1], lr.trusses[k]]) { let l = tH.get(tt); if (!l) tH.set(tt, l = []); if (!l.includes(hi)) l.push(hi); }
+      }
     }
   }
   for (const [t, l] of tH) for (let k = 0; k < Math.min(4, l.length); k++) THG[4 * t + k] = l[k];
   for (let h = 0; h < NH; h++) HTP[h] = 0;
   // ---- stable step: dilatational wave across the smallest triangle altitude; stiffness-proportional damping
-  let cmax = 0; for (const m of MATS) cmax = Math.max(cmax, Math.sqrt(m.E / (m.rho * (1 - m.nu * m.nu))));
-  let smin = Infinity; for (let c = 0; c < NC; c++) smin = Math.min(smin, CTR[12 * c + 2], CTR[12 * c + 5], CTR[12 * c + 8], CTR[12 * c + 11], CTR[12 * c]);
-  let tmin = Infinity; for (let t = 0; t < NT; t++) { const m = MATS[TMAT[t]], k = m.E * TAR[t] / TL0[t]; tmin = Math.min(tmin, 2 / Math.sqrt(2 * k * (WINV[TA[t]] + WINV[TB[t]]))); }
-  // hinges: a flap node (distance d from the hinge line) sees k / d^2 per unit rotation
-  let hmin = Infinity;
-  for (let k = 0; k < NH; k++) { const kk = HKP[k] + HKS[k], d = HDB[k], mm = Math.min(M[HN[6 * k + 2]], M[HN[6 * k + 3]], M[HN[6 * k + 4]], M[HN[6 * k + 5]], M[HN[6 * k]]);
-    hmin = Math.min(hmin, 2 / Math.sqrt(8 * kk / (d * d) / mm)); }
-  const dtc = smin / cmax;
-  dt = Math.min(.45 * dtc, .8 * tmin, .8 * hmin); BETA = .015 * dtc;
-  // ---- contact candidates: panels whose plane passes within 1.5 m of the node (and not its own)
+  // stable step, node by node (Gershgorin bound): the stiffness a node sees over its mass, dt_i = 1 / sqrt(k_i / m_i).
+  // The few nodes far stiffer than the rest (short cells where pieces were joined, tiny trims) get extra mass so they
+  // don't set the step for the whole model (selective mass scaling; the added mass is reported).
+  const kn = new Float64Array(N);
+  for (let c = 0; c < NC; c++) { const m = MATS[CMAT[c]], Ep = m.E / (1 - m.nu * m.nu);
+    for (let t = 0; t < 4; t++) { const L12 = CTR[12 * c + 3 * t], px = CTR[12 * c + 3 * t + 1], py = CTR[12 * c + 3 * t + 2], A = .5 * L12 * py;
+      const amin = 2 * A / Math.max(L12, Math.hypot(px, py), Math.hypot(px - L12, py)), k = Ep * CH[c] / 2 * A / (amin * amin);
+      for (const z of TRI[t]) kn[CN[4 * c + z]] += k; } }
+  for (let t = 0; t < NT; t++) { const k = MATS[TMAT[t]].E * TAR[t] / TL0[t]; kn[TA[t]] += k; kn[TB[t]] += k; }
+  for (let k = 0; k < NH; k++) { const kk = (HKP[k] + HKS[k]) / (HDB[k] * HDB[k]); for (let z = 0; z < 6; z++) kn[HN[6 * k + z]] += z < 2 ? kk : kk / 4; }   // |du/dx|: 1/d on the hinge line, 1/(2d) at a flap node
+  for (let i = 0; i < N; i++) kn[i] += AK[i];
+  const dti = []; for (let i = 0; i < N; i++) if (kn[i] > 0 && M[i] > 0 && WINV[i] > 0) dti.push(Math.sqrt(M[i] / kn[i]));
+  dti.sort((a, b) => a - b);
+  const dtT = dti[Math.min(dti.length - 1, Math.floor(dti.length * .002))];
+  let added = 0, total = 0;
+  for (let i = 0; i < N; i++) { total += M[i]; const need = kn[i] * dtT * dtT; if (M[i] > 0 && WINV[i] > 0 && need > M[i]) { added += need - M[i]; M[i] = need; WINV[i] = 1 / need; } }
+  scene.massAdded = added / total;
+  dt = .75 * dtT; BETA = .033 * dt;
+  // ---- contact candidates: planar pieces whose plane passes within 1.5 m of the node (not its own)
   NCC = new Int32Array(4 * N).fill(-1);
+  const bucket = new Map(), BK = 3;
+  PAN.forEach((P, q) => { if (!P.planar) return; const c = [P.o, add(P.o, mul(P.U, P.Lu)), add(P.o, mul(P.V, P.Lv)), add(add(P.o, mul(P.U, P.Lu)), mul(P.V, P.Lv))];
+    const lo = [0, 1, 2].map(k => Math.floor((Math.min(...c.map(p => p[k])) - 1.5) / BK)), hi = [0, 1, 2].map(k => Math.floor((Math.max(...c.map(p => p[k])) + 1.5) / BK));
+    for (let x = lo[0]; x <= hi[0]; x++) for (let y = lo[1]; y <= hi[1]; y++) for (let z = lo[2]; z <= hi[2]; z++) { const k = x + ',' + y + ',' + z; let l = bucket.get(k); if (!l) bucket.set(k, l = []); l.push(q); } });
   for (let i = 0; i < N; i++) {
     let k = 0; const p = [R0[3 * i], R0[3 * i + 1], R0[3 * i + 2]];
-    for (let q = 0; q < PAN.length && k < 4; q++) {
+    for (const q of bucket.get(Math.floor(p[0] / BK) + ',' + Math.floor(p[1] / BK) + ',' + Math.floor(p[2] / BK)) || []) {
+      if (k >= 4) break;
       const P = PAN[q], d = sub(p, P.o), dn = dot(d, P.n);
       if (Math.abs(dn) < .02 || Math.abs(dn) > 1.5) continue;
       const u = dot(d, P.U), v = dot(d, P.V);
@@ -350,10 +569,10 @@ function build() {
       NCC[4 * i + k++] = q;
     }
   }
+  scene.snapped = snapped; scene.unsnapped = unsnapped; scene.aimX = st.aim[0]; scene.fill = CONTENTS[st.src] ? 400 : st.kg;
   buildGrid();
-  DOTS_PER = [18, 10, 8, 8].map(d => Math.max(2, Math.round(d * (S / .25) ** 2)));
-  sim = null; gpu = null; EN = null;
-  if (st.aim === null) st.aim = scene.aimDefault;
+  DOTS_PER = [18, 10, 8, 8, 8].map(d => Math.max(2, Math.round(d * (S / .25) ** 2)));
+  sim = null; gpu = null; EN = null; CU = null;
 }
 
 // dihedral angle geometry of a hinge (edge x3-x4, flaps = midpoints of the far edges)
@@ -494,7 +713,8 @@ const GP = [], OPEN = new Map();
 let GV = [];
 
 function detonate() {
-  if (sim) build();
+  const fillNow = CONTENTS[st.src] ? 400 : st.kg;
+  if (sim || (scene.name === 'burke' && (Math.abs(st.aim[0] - scene.aimX) > 1 || scene.fill !== fillNow))) { build(); scene.aimX = st.aim[0]; scene.fill = fillNow; }
   const src = CONTENTS[st.src];
   const inside = st.fuze === 'inside' || !!src;
   const a = st.aim, n = st.aimN;
@@ -509,6 +729,7 @@ function detonate() {
   else { const d = st.fuze === 'contact' ? rc : Math.max(st.standoff, rc); C = [a[0] + n[0] * d, a[1] + n[1] * d, a[2] + n[2] * d]; }
   const cc = scene.spaceAt(C);
   GV = scene.spaces.map(s => s.V); GP.length = 0; for (let k = 0; k < GV.length; k++) GP.push(0); OPEN.clear();
+  for (const [a, b, A] of scene.vents || []) if (a !== b) { const k = (Math.min(a, b) << 8) | Math.max(a, b); OPEN.set(k, (OPEN.get(k) || 0) + A); }
   const prim = { pos: C, W, Pm: W * U_MEAN, t0: 0, space: cc, kind: 0, ax: [0, 0, 0], gain: 1, rc, vis: cc === scene.OUT ? 0 : -1, plane: null, gen: 0, Wsrc: W, key: 'P' };
   const srcs = [];
   if (cc < scene.OUT) {
@@ -966,7 +1187,7 @@ function contact(i, h) {
     const u = dx * P.U[0] + dy * P.U[1] + dz * P.U[2], v = dx * P.V[0] + dy * P.V[1] + dz * P.V[2];
     const ci = Math.floor(u / P.Lu * P.nu), cj = Math.floor(v / P.Lv * P.nv);
     if (ci < 0 || cj < 0 || ci >= P.nu || cj >= P.nv) continue;
-    const c = P.off + cj * P.nu + ci; if (CER[c]) continue;
+    const c = CMAP[P.off + cj * P.nu + ci]; if (c < 0 || CER[c]) continue;
     let pl = 0, vc = 0;
     for (let q = 0; q < 4; q++) { const j = CN[4 * c + q];
       pl += (XO[3 * j] - P.o[0]) * P.n[0] + (XO[3 * j + 1] - P.o[1]) * P.n[1] + (XO[3 * j + 2] - P.o[2]) * P.n[2];
@@ -1012,7 +1233,7 @@ function syncCPU() {
 function commonSync(t, torn) {
   const s = sim;
   for (const q of s.srcs) { const Fn = q.kind === 'det' ? Math.min(1, t / q.tau) : 1 - Math.exp(-t / q.tau); GP[q.c] += q.Pq * (Fn - q.F); q.F = Fn; }
-  if (torn && s.W > 0) { rebuildSources(t); s.lastSrc = t; }
+  if (torn && s.W > 0) { const t3 = performance.now(); rebuildSources(t); s.lastSrc = t; PROF.src += performance.now() - t3; }
   gasStep(SYNC * dt);
   const dmg = fragStep(t);
   if (s.solver === 'gpu') { gpu.setSources(s.SRC); gpu.setGas(GP); if (IMPN.length) { gpu.setImpulses(IMPN); IMPN.length = 0; } if (dmg) gpu.setDamage(CFD); }
@@ -1021,7 +1242,7 @@ function commonSync(t, torn) {
 /* ------------------------------------------------------------------ GPU solver glue */
 function gpuModel() {
   return { N, NC, NH, NT, R0, M, WINV, AK, AF, AC, CN, CH, CMAT, CEF, CSP, CSN, CWET, CAR, CTR, CHG, CDB, CRC, CVIS: () => CVIS,
-    HN, HC, HKP, HMP, HKS, HMS, HT0, HDB, HTR, HHP, HMAT, TA, TB, TL0, TAR, TMAT, TEF, TFIB, THG, NCC, PAN, MATS, TA1, S,
+    HN, HC, HKP, HMP, HKS, HMS, HT0, HDB, HTR, HHP, HMAT, TA, TB, TL0, TAR, TMAT, TEF, TFIB, THG, NCC, PAN, CMAP, MATS, TA1, S,
     OUT: () => scene.OUT, nspace: () => GV.length, BETA: () => BETA, U_MAX, RHO_W, C_W, P0, G, K_SHEAR };
 }
 let gpuT = 0;
@@ -1030,12 +1251,15 @@ function stepGPU() {
   gpu.step(t, h, s.relax ? 250 : s.alpha);
   s.t += h; s.n++;
   if (s.n % SYNC === 0) {
+    const tq = performance.now();
     const cl = s.sync ? gpu.readCells() : gpu.readCellsAsync();
+    PROF.read += performance.now() - tq;
     let torn = false;
     if (cl) for (let c = 0; c < NC; c++) if (cl[4 * c] > .5 && !CER[c]) { CER[c] = 1; CTE[c] = cl[4 * c + 1]; openCell(c, CTE[c]); torn = true; }
-    commonSync(s.t, torn);
+    const t2 = performance.now(); commonSync(s.t, torn); PROF.sync += performance.now() - t2;
   }
 }
+const PROF = { read: 0, sync: 0, src: 0, frag: 0 };
 
 function step() {
   const s = sim;
@@ -1082,6 +1306,34 @@ function ballistic(h) {
   }
 }
 function startRun() { F = new Float64Array(3 * N); FL = new Float64Array(3 * N); XO = new Float64Array(3 * N); VO = new Float64Array(3 * N); CPB.length = 0; IMPN.length = 0; }
+
+/* ------------------------------------------------------------------ the whole ship (Burke): picking and context */
+let SHIP = null;
+function shipGeometry() {
+  if (SHIP) return;
+  const tris = [], nrms = [], dots = [];
+  seed = 5;
+  for (const pn of BURKE.default.PANELS) {
+    const quads = pn.strip ? pn.strip[0].slice(0, -1).map((_, k) => [pn.strip[0][k], pn.strip[0][k + 1], pn.strip[1][k + 1], pn.strip[1][k]]) : [pn.poly];
+    for (const Q of quads) for (let k = 1; k + 1 < Q.length; k++) {
+      const a = Q[0], b = Q[k], c = Q[k + 1]; tris.push(...a, ...b, ...c); nrms.push(...pn.n);
+      const A = .5 * len(cross(sub(b, a), sub(c, a))), n = Math.round(A / .35) + (rnd() < (A / .35) % 1 ? 1 : 0);
+      for (let q = 0; q < n; q++) { let u = rnd(), v = rnd(); if (u + v > 1) { u = 1 - u; v = 1 - v; } dots.push(a[0] + (b[0] - a[0]) * u + (c[0] - a[0]) * v, a[1] + (b[1] - a[1]) * u + (c[1] - a[1]) * v, a[2] + (b[2] - a[2]) * u + (c[2] - a[2]) * v); }
+    }
+  }
+  SHIP = { tris: Float32Array.from(tris), nrms: Float32Array.from(nrms), dots: Float32Array.from(dots) };
+}
+function shipHit(o, d) {
+  const T = SHIP.tris; let best = Infinity, bn = null;
+  for (let k = 0; k < T.length; k += 9) {
+    const e1 = [T[k + 3] - T[k], T[k + 4] - T[k + 1], T[k + 5] - T[k + 2]], e2 = [T[k + 6] - T[k], T[k + 7] - T[k + 1], T[k + 8] - T[k + 2]];
+    const p = cross(d, e2), det = dot(e1, p); if (Math.abs(det) < 1e-12) continue;
+    const s0 = [o[0] - T[k], o[1] - T[k + 1], o[2] - T[k + 2]], u = dot(s0, p) / det; if (u < 0 || u > 1) continue;
+    const q = cross(s0, e1), v = dot(d, q) / det; if (v < 0 || u + v > 1) continue;
+    const t = dot(e2, q) / det; if (t > 0 && t < best) { best = t; bn = [SHIP.nrms[k / 3], SHIP.nrms[k / 3 + 1], SHIP.nrms[k / 3 + 2]]; }
+  }
+  return bn ? [best, bn] : null;
+}
 
 /* ------------------------------------------------------------------ renderer */
 const VS = `#version 300 es
@@ -1194,7 +1446,7 @@ function draw(now) {
   mats();
   if (!CU || CU.nc !== NC) { let nd = 0; for (let c = 0; c < NC; c++) nd += DOTS_PER[Math.min(3, PAN[CPAN[c]].kind)]; CU = new Float32Array(nd); CV2 = new Float32Array(nd); CU.nc = NC; CU.nd = nd;
     seed = 7; for (let k = 0; k < nd; k++) { CU[k] = rnd(); CV2[k] = rnd(); } }
-  ensure(CU.nd + NFB + NSH + 4000 * 5 + SEA_W * SEA_D + 400);
+  ensure(CU.nd + NFB + NSH + 4000 * 5 + SEA_W * SEA_D + 400 + (SHIP && scene.name === 'burke' ? SHIP.dots.length / 3 : 0));
   nodeColours(tv);
   let o = 0;
   const put = (x, y, z, r, g, b, s) => { PB[3 * o] = x; PB[3 * o + 1] = y; PB[3 * o + 2] = z; CB[4 * o] = r; CB[4 * o + 1] = g; CB[4 * o + 2] = b; CB[4 * o + 3] = s; o++; };
@@ -1225,6 +1477,10 @@ function draw(now) {
       const cb = nodeCol[3 * a + 2] * w0 + nodeCol[3 * b + 2] * w1 + nodeCol[3 * cc + 2] * w2 + nodeCol[3 * d + 2] * w3;
       put(x, y, z, cr, cg, cb, sz);
     }
+  }
+  if (scene.name === 'burke' && SHIP) {
+    const D = SHIP.dots, [x0, x1] = scene.patch;
+    for (let k = 0; k < D.length; k += 3) { const x = D[k]; if (x > x0 && x < x1) continue; put(x, D[k + 1], D[k + 2], .3, .3, .29, .035); }
   }
   const T = now / 1000, wl = scene.waterline;
   for (let j = 0; j < SEA_D; j++) for (let i = 0; i < SEA_W; i++) {
@@ -1362,7 +1618,12 @@ $('standoff').oninput = () => { st.standoff = +$('standoff').value; };
 $('mat').onchange = () => { st.mat = $('mat').value; build(); };
 $('h').oninput = () => { st.h = +$('h').value; build(); };
 $('frags').onchange = () => { st.frags = $('frags').checked; };
-$('scene').onchange = () => { st.scene = $('scene').value; build(); };
+$('scene').onchange = async () => {
+  st.scene = $('scene').value;
+  if (st.scene === 'burke') { await loadBurke(); shipGeometry(); st.aim = [0, 2.5, BURKE.halfBreadth(0, 2.5)]; st.aimN = [0, 0, 1]; }
+  else { st.aim = [0, 2.2, 0]; st.aimN = [0, 0, 1]; }
+  build(); Object.assign(cam, { tgt: [...scene.cam.tgt], dist: scene.cam.dist });
+};
 $('go').onclick = () => { detonate(); startRun(); };
 $('reset').onclick = () => build();
 $('view').onclick = () => { st.view ^= 1; };
@@ -1391,6 +1652,14 @@ function pick(mx, my) {
   const b = mats(), dpr = cv.width / innerWidth;
   const nx = (mx * dpr / cv.width) * 2 - 1, ny = 1 - (my * dpr / cv.height) * 2;
   const d = nrm([0, 1, 2].map(q => b.fwd[q] + b.right[q] * nx / (b.f * b.a) + b.up[q] * ny / b.f));
+  if (scene.name === 'burke' && SHIP) {
+    const r = shipHit(eye, d); if (!r) return;
+    const p = add(eye, mul(d, r[0])); let n = r[1]; if (dot(n, d) > 0) n = mul(n, -1);
+    if (!scene.aimOK(p, n)) return;
+    st.aim = p; st.aimN = n;
+    if (p[0] < scene.patch[0] + 3 || p[0] > scene.patch[1] - 3) build();
+    return;
+  }
   const h = firstHit(eye, d, 1000, false); if (!h) return;
   const c = h[1], p = add(eye, mul(d, h[0])); let n = [CNR[3 * c], CNR[3 * c + 1], CNR[3 * c + 2]];
   if (dot(n, d) > 0) n = mul(n, -1);                                   // the side the camera sees
@@ -1425,26 +1694,36 @@ function compare(a, r) {
   let diff = 0, both = 0; for (let c = 0; c < a.cellsTorn.length; c++) { if (a.cellsTorn[c] !== r.cellsTorn[c]) diff++; else if (a.cellsTorn[c]) both++; }
   return { dispErrMm: +(s / n * 1000).toFixed(2), tornDiffCells: diff, tornBothCells: both };
 }
-window.BLAST = { ver: 30, st, runCase, compare, cam, build, detonate: () => { detonate(); startRun(); }, get sim() { return sim; }, energy, draw,
+window.BLAST = { ver: 31, PROF, st, runCase, compare, cam, build, detonate: () => { detonate(); startRun(); }, get sim() { return sim; }, energy, draw,
   stepN(n) { for (let k = 0; k < n && sim.t < sim.T1; k++) step(); return sim.t; },
   model: () => ({ N, NC, NH, NT, S, dt, X, V, R0, M, FREE, CN, CPAN, CH, CMAT, CEF, CSP, CSN, CER, CTE, CDM, CEP, CUT, CFD, CAR, CRC, CNR,
     HN, HC, HKP, HMP, HKS, HMS, HT0, HTP, HTH, HDB, TA, TB, TL0, TLP, TFL, TAR, AK, AF, AC, PAN, GP, GV, OPEN, scene, MATS, EN }),
   pulse, kinneyPs, kinneyIs1, reflect, U_MEAN, U_MAX, tee, SEC,
+  gpuProfile(n) { gpu.profile(true); for (let k = 0; k < n; k++) gpu.step(sim.t, dt, 0); gl.finish(); return new Promise(r => setTimeout(() => r(gpu.profile(false)), 300)); },
   snapshot() { if (sim && sim.solver === 'gpu') { gpu.readNodes(true, X, V, FREE); const cl = gpu.readCells(); for (let c = 0; c < NC; c++) { CER[c] = cl[4 * c] > .5 ? 1 : 0; CTE[c] = cl[4 * c + 1]; CUT[c] = cl[4 * c + 3]; } gpu.readState({ CEP, CDM, TFL, HTP, HTH }); } },
   // CPU vs GPU after the same number of steps: displacement field and eroded cells
   parity(cfg, steps) {
     const keep = { ...st }, res = {};
-    for (const sv of ['cpu', 'gpu']) {
-      Object.assign(st, cfg, { solver: sv }); build(); detonate(); startRun(); sim.sync = true;
+    const pair = cfg.pair || ['cpu', 'gpu'];
+    for (const [ix, sv0] of pair.entries()) { const sv = ix === 0 ? 'cpu' : 'gpu', solver = sv0.replace('+', '');
+      Object.assign(st, cfg, { solver }); build(); detonate(); startRun(); sim.sync = true;
+      if (sv0.endsWith('+')) { for (let i = 0; i < N; i++) X[3 * i + 2] += 1e-7 * Math.sin(i); }
       const t0 = performance.now(); for (let k = 0; k < steps; k++) step();
-      if (sv === 'gpu') { gpu.readNodes(true, X, V, FREE); const cl = gpu.readCells(); for (let c = 0; c < NC; c++) CER[c] = cl[4 * c] > .5 ? 1 : 0; }
+      if (solver === 'gpu') { gpu.readNodes(true, X, V, FREE); const cl = gpu.readCells(); for (let c = 0; c < NC; c++) CER[c] = cl[4 * c] > .5 ? 1 : 0; }
+      if (solver === 'gpu') gpu.readState({ CEP, CDM, TFL, HTP, HTH });
       const d = new Float64Array(3 * N); for (let i = 0; i < 3 * N; i++) d[i] = X[i] - R0[i];
+      let ebS = 0, hpS = 0, hthS = 0, cdS = 0; for (let k = 0; k < 4 * NC; k++) ebS += CEP[4 * k + 3]; for (let k = 0; k < NH; k++) { hpS += Math.abs(HTP[k]); hthS += Math.abs(HTH[k]); } for (let c = 0; c < NC; c++) cdS += CDM[c];
+      (res.states || (res.states = {}))[sv] = { ebS, hpS, hthS, cdS };
       res[sv] = { d, er: Uint8Array.from(CER, v => v ? 1 : 0), ms: performance.now() - t0 };
     }
     Object.assign(st, keep);
     let s1 = 0, s2 = 0, mx = 0; for (let i = 0; i < 3 * N; i++) { const a = res.cpu.d[i], b = res.gpu.d[i]; s1 += (a - b) ** 2; s2 += a * a; mx = Math.max(mx, Math.abs(a)); }
     let diff = 0, both = 0; for (let c = 0; c < NC; c++) { if (res.cpu.er[c] !== res.gpu.er[c]) diff++; else if (res.cpu.er[c]) both++; }
-    return { relL2: Math.sqrt(s1 / s2), maxDispMm: mx * 1000, erodedBoth: both, erodedDiff: diff, cpuMs: Math.round(res.cpu.ms), gpuMs: Math.round(res.gpu.ms) };
+    const byKind = {}; for (let i = 0; i < N; i++) { const k = NKIND[i]; const e = byKind[k] || (byKind[k] = [0, 0]); for (let q = 0; q < 3; q++) { e[0] += (res.cpu.d[3 * i + q] - res.gpu.d[3 * i + q]) ** 2; e[1] += res.cpu.d[3 * i + q] ** 2; } }
+    let wi = 0, wd = 0; for (let i = 0; i < N; i++) { const d = Math.hypot(res.cpu.d[3 * i] - res.gpu.d[3 * i], res.cpu.d[3 * i + 1] - res.gpu.d[3 * i + 1], res.cpu.d[3 * i + 2] - res.gpu.d[3 * i + 2]); if (d > wd) { wd = d; wi = i; } }
+    window.__par = res;
+    return { states: res.states, relL2: Math.sqrt(s1 / s2), maxDispMm: mx * 1000, erodedBoth: both, erodedDiff: diff, cpuMs: Math.round(res.cpu.ms), gpuMs: Math.round(res.gpu.ms),
+      byKind: Object.fromEntries(Object.entries(byKind).map(([k, e]) => [k, +Math.sqrt(e[0] / e[1]).toFixed(3)])), worst: { mm: wd * 1000, at: [R0[3 * wi], R0[3 * wi + 1], R0[3 * wi + 2]], cpu: [0, 1, 2].map(q => res.cpu.d[3 * wi + q] * 1000), gpu: [0, 1, 2].map(q => res.gpu.d[3 * wi + q] * 1000) } };
   },
   // finite-difference check of the element forces against their energies (debug)
   fdCheck(node, pass, eps = 1e-6) {
