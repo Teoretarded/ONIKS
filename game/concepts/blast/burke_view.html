@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Burke Structure</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #0B0C0A; --ink: #E9E9E2; --dim: #85867F; --lime: #C6F432; --coral: #FF6A3D; --line: rgba(233,233,226,.13); }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); overflow: hidden;
+    font: 11px/1.5 'Geist Mono', ui-monospace, monospace; letter-spacing: .02em; }
+  canvas { display: block; position: fixed; inset: 0; width: 100vw; height: 100vh; }
+  #c { cursor: grab; } #c:active { cursor: grabbing; }
+  #ov { pointer-events: none; }
+  #ui { position: fixed; left: 20px; top: 18px; width: 240px; user-select: none; }
+  #ui h1 { font: 500 13px 'Geist Mono', monospace; margin: 0 0 12px; letter-spacing: .08em; }
+  #ui h1 i { display: inline-block; width: 7px; height: 7px; background: var(--lime); margin-right: 8px; }
+  .row { display: flex; justify-content: space-between; align-items: center; margin: 5px 0; gap: 8px; }
+  .row label { color: var(--dim); text-transform: uppercase; }
+  select { background: transparent; color: var(--ink); border: 1px solid var(--line); font: inherit; padding: 2px 4px; width: 132px; }
+  select option { background: #111210; }
+  input[type=range] { width: 132px; accent-color: var(--lime); }
+  .btns { display: flex; gap: 6px; margin: 10px 0 6px; flex-wrap: wrap; }
+  button { background: transparent; color: var(--ink); border: 1px solid var(--line); font: inherit;
+    padding: 3px 7px; cursor: pointer; text-transform: uppercase; }
+  button:hover { border-color: var(--lime); }
+  button.on { border-color: var(--lime); color: var(--lime); }
+  #rd { position: fixed; right: 20px; top: 18px; width: 300px; text-align: right; }
+  #rd div { margin: 2px 0; color: var(--dim); }
+  #rd b { color: var(--ink); font-weight: 400; }
+  #rd .lime b { color: var(--lime); }
+  #list { position: fixed; right: 20px; top: 250px; bottom: 44px; width: 300px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #333 transparent; }
+  #list div { display: flex; justify-content: space-between; gap: 8px; padding: 1px 0; color: var(--dim); cursor: pointer; white-space: nowrap; }
+  #list div span:first-child { overflow: hidden; text-overflow: ellipsis; }
+  #list div:hover { color: var(--ink); }
+  #list div.sel { color: var(--lime); }
+  #hint { position: fixed; left: 20px; bottom: 16px; color: var(--dim); }
+  hr { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
+  #legend div { display: flex; align-items: center; gap: 8px; color: var(--dim); margin: 2px 0; }
+  #legend i { display: inline-block; width: 18px; height: 2px; }
+  body.clean #ui, body.clean #rd, body.clean #list, body.clean #hint { display: none; }
+  @media (max-width: 800px) { #rd, #list { display: none; } #ui { width: calc(100vw - 32px); left: 16px; } }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<canvas id="ov"></canvas>
+<div id="ui">
+  <h1><i></i>DDG-51 · STRUCTURE</h1>
+  <div class="row"><label>Colour</label><select id="mode">
+    <option value="struct">Structure</option>
+    <option value="thick">Thickness</option>
+    <option value="mat">Steel grade</option>
+    <option value="comp">Compartment</option></select></div>
+  <div class="row"><label>Cut at x</label><input id="cut" type="range" min="-78" max="78" step=".61" value="78"></div>
+  <div class="btns" id="views">
+    <button data-v="iso">Iso</button><button data-v="profile">Profile</button><button data-v="plan">Plan</button><button data-v="section">Section</button>
+  </div>
+  <div class="btns" id="groups">
+    <button data-g="shell" class="on">Shell</button><button data-g="deck" class="on">Decks</button><button data-g="bhd" class="on">Bulkheads</button><button data-g="house" class="on">Deckhouse</button><button data-g="wire" class="on">Wire</button>
+  </div>
+  <hr>
+  <div id="legend"></div>
+  <hr>
+  <div class="btns"><button id="still">Still</button></div>
+</div>
+<div id="rd"></div>
+<div id="list"></div>
+<div id="hint">drag orbit · shift-drag pan · wheel zoom · 1-4 views · [ ] cut ±1 frame · H hide UI</div>
+<script type="module" src="./burke_view.js"></script>
+</body>
+</html>
