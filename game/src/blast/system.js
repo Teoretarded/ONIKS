@@ -40,7 +40,7 @@ export async function createBlast(game) {
   let nextId = 1, client = null, mode = 'boot', err = null;
   const pending = [];                    // specs before the client is up
   const upQ = [];                        // atlas uploads to do in the frame
-  const cfg = { watchDist: 4000, maxPerFrameUp: 6, on: true, gpuMs: 3, gpuMsSlow: 5 };
+  const cfg = { watchDist: 4000, upTexels: 6000, maxDots: 7000, on: true, gpuMs: 3, gpuMsSlow: 5 };
 
   /* ------------------------------------------------------------ the atlas */
   let tex = null;
@@ -151,7 +151,12 @@ export async function createBlast(game) {
         B.rects.push(r);
         upQ.push({ r, clear: true });
       }
-      upQ.push({ r, k });
+      // in row strips (a frame uploads a few thousand texels at most: no hitch when a big plate arrives)
+      const rows = Math.max(1, Math.floor(cfg.upTexels / Math.max(1, k.w)));
+      for (let j = 0; j < k.h; j += rows) {
+        const h = Math.min(rows, k.h - j);
+        upQ.push({ r, k: { i0: k.i0, j0: k.j0 + j, w: k.w, h, data: k.data.subarray(4 * j * k.w, 4 * (j + h) * k.w) } });
+      }
     }
     if (m.inner) { B.inner = m.inner; B.nIn = m.nIn; }
     B.tSolve = m.t; B.torn = m.tornSkin; B.below = m.tornBelow; B.setMax = m.setMax; B.byPlate = m.byPlate; B.runMs = m.runMs; B.wallMs = m.wallMs; B.steps = m.steps;
@@ -257,15 +262,17 @@ export async function createBlast(game) {
       const tu = performance.now();
       gl.activeTexture(gl.TEXTURE7); gl.bindTexture(gl.TEXTURE_2D, tex);
       const touched = new Set();
-      let n = 0;
-      while (upQ.length && n < cfg.maxPerFrameUp) {
+      let tex2 = 0;
+      while (upQ.length && tex2 < cfg.upTexels * 1.5) {
         const q = upQ.shift(), r = q.r;
-        if (q.clear) { for (let y = 0; y <= r.nv; y += 8) { const h = Math.min(8, r.nv + 1 - y); gl.texSubImage2D(gl.TEXTURE_2D, 0, r.x, r.y + y, r.nu + 1, h, gl.RGBA, gl.FLOAT, zero, 0); } continue; }
+        if (q.clear) { for (let y = 0; y <= r.nv; y += 8) { const h = Math.min(8, r.nv + 1 - y); gl.texSubImage2D(gl.TEXTURE_2D, 0, r.x, r.y + y, r.nu + 1, h, gl.RGBA, gl.FLOAT, zero, 0); } tex2 += (r.nu + 1) * (r.nv + 1) * .25; continue; }
         const k = q.k;
         gl.texSubImage2D(gl.TEXTURE_2D, 0, r.x + k.i0, r.y + k.j0, k.w, k.h, gl.RGBA, gl.FLOAT, k.data);
-        if (!r.ready) { r.ready = true; }
+        tex2 += k.w * k.h;
+        // (shown once its last strip of this snapshot is in: never half a plate)
+        if (!upQ.some(o => o.r === r)) r.ready = true;
         for (const B of patches.values()) if (B.rects.includes(r)) touched.add(B.uid);
-        n++; stats.uploads++;
+        stats.uploads++;
       }
       gl.activeTexture(gl.TEXTURE0);
       for (const uid of touched) packUnit(uid);
@@ -306,6 +313,9 @@ export async function createBlast(game) {
     const cam = sink.cam, eye = cam.eye, f = cam.f, fl = cam.fl || 1300, tr = frame.realT || game.realT || 0;
     let drawn = 0;
     const M = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+    // (a share of cfg.maxDots a frame for each patch drawn: several holes on screen thin out together)
+    let nShow = 0; for (const L of byUnit.values()) for (const B of L) if (B.nIn) nShow++;
+    const capEach = cfg.maxDots / Math.max(1, nShow);
     for (const [uid, L] of byUnit) {
       const u = sim.units.get(uid), hull = game.structure && game.structure.draws && game.structure.draws(uid);
       if (!hull && (!u || !game.drawn.has(uid))) continue;
@@ -329,7 +339,7 @@ export async function createBlast(game) {
         // seen from the hole's own side only
         const Z = Fr.Z, nwx = M[0] * Z[0] + M[1] * Z[1] + M[2] * Z[2], nwy = M[3] * Z[0] + M[4] * Z[1] + M[5] * Z[2], nwz = M[6] * Z[0] + M[7] * Z[1] + M[8] * Z[2];
         if ((eye[0] - cx) * nwx + (eye[1] - cy) * nwy + (eye[2] - cz) * nwz < -2) continue;
-        const px = S_GRID * 1.4 * pxm, stride = px >= 1.6 ? 1 : Math.min(40, Math.ceil((1.6 / px) ** 2));
+        const px = S_GRID * 1.4 * pxm, stride = Math.max(px >= 1.6 ? 1 : Math.min(40, Math.ceil((1.6 / px) ** 2)), Math.ceil(B.nIn / capEach));
         const size = px > 9 ? 3 : px > 4 ? 2 : 1;
         const fk = B.S && B.S.fire ? B.S.fire.k : 0, heat = heatOf(B, game.t), I = B.inner;
         for (let i = 0; i < B.nIn; i += stride) {
