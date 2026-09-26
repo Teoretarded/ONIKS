@@ -80,7 +80,7 @@ export function massOf(P) {
 }
 
 /* scratch */
-const F = [0, 0, 0], TQ = [0, 0, 0], VB = [0, 0, 0], T3 = [0, 0, 0], A3 = [0, 0, 0], AL = [0, 0, 0];
+const A3 = [0, 0, 0], AL = [0, 0, 0];      // the piece's linear and angular acceleration this step
 
 /* one step of every piece of ship S over h (sim s); sea(x, z) -> the water's height there */
 export function stepShip(S, h, sea, t, bed) {
@@ -117,8 +117,7 @@ export function stepShip(S, h, sea, t, bed) {
   for (const P of S.pieces) {
     if (P.sunk) continue;
     const R = P.R, cm = P.cm;
-    const ex = R[0], ey = R[3], ez = R[6];             // model +X in the world (across)
-    const lx = R[2], ly = R[5], lz = R[8];             // model +Z (along)
+    const lx = R[2], ly = R[5], lz = R[8];             // model +Z (along) in the world
     let sub = 0, colN = 0, low = 1e9, top = -1e9, vmax = 0;
     for (let i = P.i0; i <= P.i1; i++) {
       const s = sec[i];
@@ -137,7 +136,7 @@ export function stepShip(S, h, sea, t, bed) {
         const yb = P.p[1] + bY, yt = P.p[1] + tY;
         vmax += C.A * (C.yt - C.yb) * (1 - S.flood[i * 2 + C.side]);
         if (yb < low) low = yb; if (yt < low) low = yt; if (yb > top) top = yb; if (yt > top) top = yt;
-        let fr, fx0, fy0, fz0;                           // fraction under water, the wet end
+        let fr;                                          // the share of the column under the water
         if (yb <= yw && yt <= yw) { fr = 1; }
         else if (yb > yw && yt > yw) { fr = 0; }
         else fr = yb < yt ? (yw - yb) / (yt - yb) : (yw - yt) / (yb - yt);
@@ -161,7 +160,7 @@ export function stepShip(S, h, sea, t, bed) {
         msx += cy * dz - cz * fy; msy += cz * dx - cx * dz; msz += cx * fy - cy * dx;
       }
       // gravity at the section's centre of mass
-      const gx = R[1] * (s.m ? 0 : 0) + R[2] * zc + R[1] * 0, gy = R[5] * zc, gz = R[8] * zc;   // (its y is the piece's: cm y)
+      const gx = R[2] * zc, gz = R[8] * zc;              // (the section's centre of mass is at the piece's height)
       const wgt = -s.m * G;
       fsy += wgt; msx += -gz * wgt; msz += gx * wgt;
       FS[i * 3] = fsx; FS[i * 3 + 1] = fsy; FS[i * 3 + 2] = fsz;
