@@ -91,7 +91,7 @@ void main(){
 const CELL_FS = HEAD + `
 uniform sampler2D uCS, uT0, uT1, uT2, uT3, uCSt, uHSt, uDmg, uAux;
 uniform vec4 uGP[32];
-uniform vec4 uS0[32], uS1[32], uS2[32], uS3[32], uS4[32]; uniform int uNS_;
+uniform vec4 uS0[32], uS1[32], uS2[32], uS3[32], uS4[32], uS5[32]; uniform int uNS_;
 uniform int uOUT; uniform float uUmax, uRhoWC, uP0, uRhoWg, uKs, uS;
 layout(location=0) out vec4 o0; layout(location=1) out vec4 o1; layout(location=2) out vec4 o2; layout(location=3) out vec4 o3;
 layout(location=4) out vec4 oC; layout(location=5) out vec4 oF0; layout(location=6) out vec4 oF1; layout(location=7) out vec4 oF2;
@@ -211,16 +211,26 @@ void main(){
     if (kind == 1) { co = dot(d, S2.xyz) / R; if (co < 0.0) continue; co = max(co, 0.02); }
     R = max(R, S3.x);
     float Weq = kind == 1 ? 4.0 * S0.w * co : S0.w;
-    float I = 0.0, Iair = 0.0;
+    float I = 0.0, Iair = 0.0, Pk = 0.0, TA = 0.0;
     if (Weq > 1e-6) {
       float W3 = pow(Weq, 1.0 / 3.0), Z = max(R / W3, 0.053);
       float Ps = kPs(Z), Pr = refl(Ps), is = kIs(Z) * W3, ir = is * pow(Pr / Ps, 0.75);
-      float Pk = Ps + (Pr - Ps) * c2; Iair = is + (ir - is) * c2; float TD = 2.0 * Iair / Pk, TA = S1.y + W3 * arr1(Z);
+      Pk = Ps + (Pr - Ps) * c2; Iair = is + (ir - is) * c2; float TD = 2.0 * Iair / Pk; TA = S1.y + W3 * arr1(Z);
       float a = uT - TA, b = a + uH;
       if (b > 0.0 && a < TD) { a = max(a, 0.0); b = min(b, TD); I += Pk * ((b - b * b / (2.0 * TD)) - (a - a * a / (2.0 * TD))); }
     }
+    vec4 S5 = uS5[k]; float Rd = S5.z + R;
+    if (S5.x > 0.0 && Iair > 0.0) {       // capped by the feeding source over the full path (an opening cannot focus)
+      float W3 = pow(S5.x, 1.0 / 3.0), Z = max(Rd / W3, 0.053), Ps = kPs(Z), Pr = refl(Ps), is = kIs(Z) * W3, ir = is * pow(Pr / Ps, 0.75);
+      float Pd = Ps + (Pr - Ps) * c2, Id = is + (ir - is) * c2;
+      if (Id < Iair || Pd < Pk) { I = 0.0; Iair = min(Iair, Id); Pk = min(Pk, Pd); float TD = 2.0 * Iair / Pk;
+        float a = uT - TA, b = a + uH;
+        if (b > 0.0 && a < TD) { a = max(a, 0.0); b = min(b, TD); I += Pk * ((b - b * b / (2.0 * TD)) - (a - a * a / (2.0 * TD))); } }
+    }
     if (S1.x > 0.0) {
-      float ip = S1.x * (kind == 1 ? co / 3.14159265 : 1.0 / 12.5663706) * c2 / (R * R), Ix = max(0.0, ip - Iair), tf = R / uUmax;
+      float ip = S1.x * (kind == 1 ? co / 3.14159265 : 1.0 / 12.5663706) * c2 / (R * R);
+      if (S5.x > 0.0) ip = min(ip, S5.y * c2 / (12.5663706 * Rd * Rd));
+      float Ix = max(0.0, ip - Iair), tf = R / uUmax;
       if (Ix > 0.0) I += Ix * (Fp(uT + uH - S1.y, tf) - Fp(uT - S1.y, tf));
     }
     I *= S2.w;
@@ -394,7 +404,7 @@ export function createGPU(gl, M) {
   const { N, NC, NH, NT } = M;
   const NHr = rows(N), CHr = rows(NC), HHr = rows(NH), THr = rows(NT);
   // local origin: the middle of the model (keeps float32 coordinates small)
-  const O = [0, 0, 0]; { const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9]; for (let i = 0; i < N; i++) for (let q = 0; q < 3; q++) { lo[q] = Math.min(lo[q], M.R0[3 * i + q]); hi[q] = Math.max(hi[q], M.R0[3 * i + q]); } for (let q = 0; q < 3; q++) O[q] = (lo[q] + hi[q]) / 2; }
+  const O = [0, 0, 0]; { const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9]; for (let i = 0; i < N; i++) for (let q = 0; q < 3; q++) { const v = M.R0[3 * i + q]; if (!Number.isFinite(v)) continue; lo[q] = Math.min(lo[q], v); hi[q] = Math.max(hi[q], v); } for (let q = 0; q < 3; q++) O[q] = (lo[q] + hi[q]) / 2; }
   const wide = (n, T, f) => { const a = new Float32Array(Wd * T * rows(n) * 4).fill(-1); const o = (i, t) => (((i / Wd | 0) * Wd * T) + (i % Wd) * T + t) * 4;
     for (let i = 0; i < n; i++) f(i, (t, v) => a.set(v, o(i, t))); return tex(Wd * T, rows(n), a); };
   const R = (i, q) => M.R0[3 * i + q] - O[q];
@@ -446,7 +456,7 @@ export function createGPU(gl, M) {
   const tqEnd = () => { if (prof && prof.q) { gl.endQuery(TQ.TIME_ELAPSED_EXT); prof.q = null; } };
   const matA = new Float32Array(32), matB = new Float32Array(32), matC = new Float32Array(32);
   M.MATS.forEach((m, i) => { matA.set([m.E, m.nu, m.sy, m.H], 4 * i); matB.set([m.D, m.q, m.rho, 0], 4 * i); matC.set([m.Du, m.qu, m.eu, 0], 4 * i); });
-  const S0 = new Float32Array(128), S1 = new Float32Array(128), S2 = new Float32Array(128), S3 = new Float32Array(128), S4 = new Float32Array(128);
+  const S0 = new Float32Array(128), S1 = new Float32Array(128), S2 = new Float32Array(128), S3 = new Float32Array(128), S4 = new Float32Array(128), S5 = new Float32Array(128);
   let nsrc = 0; const gpu4 = new Float32Array(128);
   // sampler units are set once per program; material constants once; loads only when they change
   const units = new Array(16).fill(null);
@@ -472,10 +482,10 @@ export function createGPU(gl, M) {
     gl.deleteTexture(T.cs); T.cs = mkCS();
   }
   function setSources(list) {
-    loadsDirty = true; nsrc = Math.min(32, list.length); S0.fill(0); S1.fill(0); S2.fill(0); S3.fill(0); S4.fill(0);
+    loadsDirty = true; nsrc = Math.min(32, list.length); S0.fill(0); S1.fill(0); S2.fill(0); S3.fill(0); S4.fill(0); S5.fill(0);
     for (let k = 0; k < nsrc; k++) { const s = list[k];
       S0.set([s.pos[0] - O[0], s.pos[1] - O[1], s.pos[2] - O[2], s.W], 4 * k); S1.set([s.Pm, s.t0, s.space, s.kind], 4 * k);
-      S2.set([...(s.ax || [0, 0, 0]), s.gain], 4 * k); S3.set([s.rc, s.vis, s.plane ? 1 : 0, 0], 4 * k);
+      S2.set([...(s.ax || [0, 0, 0]), s.gain], 4 * k); S3.set([s.rc, s.vis, s.plane ? 1 : 0, 0], 4 * k); S5.set([s.Wf || 0, s.Pmf || 0, s.Df || 0, 0], 4 * k);
       if (s.plane) S4.set([s.plane[0], s.plane[1], s.plane[2], s.plane[3] - (s.plane[0] * O[0] + s.plane[1] * O[1] + s.plane[2] * O[2])], 4 * k); }
   }
   function setGas(GP) { loadsDirty = true; gpu4.fill(0); for (let k = 0; k < Math.min(128, GP.length); k++) gpu4[k] = GP[k]; }
@@ -502,7 +512,7 @@ export function createGPU(gl, M) {
     bind(pC, 'uPos', s.pos, 0); bind(pC, 'uVel', s.vel, 1); bind(pC, 'uNS', T.ns, 2); bind(pC, 'uCS', T.cs, 3);
     for (let k = 0; k < 4; k++) bind(pC, 'uT' + k, cellS[cur].t[k], 4 + k);
     bind(pC, 'uCSt', cellS[cur].s, 8); bind(pC, 'uHSt', hS[nx], 9); bind(pC, 'uDmg', T.dmg, 10); bind(pC, 'uAux', T.aux, 11);
-    if (loadsDirty) { gl.uniform4fv(pC.u.uGP, gpu4); gl.uniform4fv(pC.u.uS0, S0); gl.uniform4fv(pC.u.uS1, S1); gl.uniform4fv(pC.u.uS2, S2); gl.uniform4fv(pC.u.uS3, S3); gl.uniform4fv(pC.u.uS4, S4);
+    if (loadsDirty) { gl.uniform4fv(pC.u.uGP, gpu4); gl.uniform4fv(pC.u.uS0, S0); gl.uniform4fv(pC.u.uS1, S1); gl.uniform4fv(pC.u.uS2, S2); gl.uniform4fv(pC.u.uS3, S3); gl.uniform4fv(pC.u.uS4, S4); gl.uniform4fv(pC.u.uS5, S5);
       gl.uniform1i(pC.u.uNS_, nsrc); loadsDirty = false; }
     if (!pC._c2) { gl.uniform1i(pC.u.uOUT, M.OUT()); gl.uniform1f(pC.u.uUmax, M.U_MAX); gl.uniform1f(pC.u.uRhoWC, M.RHO_W * M.C_W);
       gl.uniform1f(pC.u.uP0, M.P0); gl.uniform1f(pC.u.uRhoWg, M.RHO_W * M.G); if (pC.u.uKs) gl.uniform1f(pC.u.uKs, M.K_SHEAR); gl.uniform1f(pC.u.uS, M.S); pC._c2 = true; }

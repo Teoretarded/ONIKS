@@ -219,7 +219,8 @@ function sceneBurke() {
     const secS = pn.stiff ? burkeSec(pn.stiff.sec) : null, secF = pn.frame ? burkeSec(pn.frame.sec) : null;
     if (pn.strip) {
       let [A, Bp] = pn.strip; if (A[0][0] > Bp[0][0]) [A, Bp] = [Bp, A];
-      const xa = A[0][0], xb = Bp[0][0], xl = xLines(xa, xb), nu = xl.length - 1;
+      const xa = A[0][0], xb = Bp[0][0]; if (xb - xa < .02) continue;
+      const xl = xLines(xa, xb), nu = xl.length - 1;
       const seg = [];
       for (let k = 0; k + 1 < A.length; k++) { const la = len(sub(A[k + 1], A[k])), lb = len(sub(Bp[k + 1], Bp[k])); seg.push(Math.max(1, Math.round(Math.max(la, lb) / S))); }
       const nv = seg.reduce((a, b) => a + b, 0);
@@ -308,6 +309,7 @@ function build() {
     for (let j = 0; j <= pc.nv; j++) for (let i = 0; i <= pc.nu; i++) {
       if (!used(i, j)) continue;
       const o = 3 * (j * (pc.nu + 1) + i), x = pc.G[o], y = pc.G[o + 1], z = pc.G[o + 2];
+      if (!Number.isFinite(x + y + z)) continue;
       const k = Math.round(x * 1000) + ',' + Math.round(y * 1000) + ',' + Math.round(z * 1000);
       let id = key.get(k); if (id === undefined) { id = pos.length / 3; key.set(k, id); pos.push(x, y, z); npc.push([]); }
       ids[j * (pc.nu + 1) + i] = id;
@@ -370,7 +372,7 @@ function build() {
     }
   });
   // ---- 4. cells
-  const cn = [], cpan = [], ch = [], cmat = [], csp = [], csn = [], cwet = [], cmap = [];
+  const cn = [], cpan = [], ch = [], cmat = [], csp = [], csn = [], cwet = [], cmap = []; let dropped = 0;
   PAN = [];
   pieces.forEach((pc, pi) => {
     const m = MATS[pc.mat], off = cmap.length, ids = gid[pi];
@@ -381,7 +383,10 @@ function build() {
       let q = [I(i, j), I(i + 1, j), I(i + 1, j + 1), I(i, j + 1)];
       if (q.includes(-1) || new Set(q).size < 4) continue;
       const P = q.map(k => [pos[3 * k], pos[3 * k + 1], pos[3 * k + 2]]);
-      const av = cross(sub(P[2], P[0]), sub(P[3], P[1])); if (len(av) < 1e-6) continue;
+      const av = cross(sub(P[2], P[0]), sub(P[3], P[1]));
+      // degenerate after joining (a corner pulled onto another edge): drop it, it would carry no sensible strain
+      let emin = Infinity; for (let z = 0; z < 4; z++) emin = Math.min(emin, len(sub(P[(z + 1) % 4], P[z])));
+      if (len(av) < .2 * S * S || emin < .2 * S || len(sub(P[2], P[0])) < .3 * S || len(sub(P[3], P[1])) < .3 * S) { dropped++; continue; }
       if (dot(av, pc.n) < 0) q = [q[0], q[3], q[2], q[1]];
       const c = cpan.length; cmap[off + j * pc.nu + i] = c;
       cn.push(...q); cpan.push(pi); ch.push(pc.h); cmat.push(pc.mat);
@@ -586,7 +591,7 @@ function build() {
       NCC[4 * i + k++] = q;
     }
   }
-  scene.snapped = snapped; scene.unsnapped = unsnapped; scene.aimX = st.aim[0]; scene.fill = CONTENTS[st.src] ? 400 : st.kg;
+  scene.snapped = snapped; scene.unsnapped = unsnapped; scene.dropped = dropped; scene.aimX = st.aim[0]; scene.fill = CONTENTS[st.src] ? 400 : st.kg;
   buildGrid();
   DOTS_PER = [18, 10, 8, 8, 8].map(d => Math.max(2, Math.round(d * (S / .25) ** 2)));
   sim = null; gpu = null; EN = null; CU = null;
@@ -696,8 +701,17 @@ function pulse(s, xc, n) {
     const Ps = kinneyPs(Z), Pr = reflect(Ps), is = kinneyIs1(Z) * W3, ir = is * Math.pow(Pr / Ps, .75);
     PUL.P = Ps + (Pr - Ps) * c2; PUL.I = is + (ir - is) * c2; PUL.TD = 2 * PUL.I / PUL.P; PUL.TA = s.t0 + W3 * arrival1(Z);
   }
+  // a wave that came through an opening is never stronger than the unobstructed wave of the source that fed it at the
+  // same path length (the aperture re-radiates, it cannot focus): cap by the feeding source over Df + R
+  const capped = s.Wf > 0, Rd = capped ? s.Df + R : 0;
+  if (capped && PUL.P > 0) {
+    const W3 = Math.cbrt(s.Wf), Z = Math.max(Rd / W3, .053), Ps = kinneyPs(Z), Pr = reflect(Ps), is = kinneyIs1(Z) * W3, ir = is * Math.pow(Pr / Ps, .75);
+    const Pd = Ps + (Pr - Ps) * c2, Id = is + (ir - is) * c2;
+    if (Id < PUL.I) PUL.I = Id; if (Pd < PUL.P) PUL.P = Pd; PUL.TD = 2 * PUL.I / PUL.P;
+  }
   if (s.Pm > 0) {
-    const ip = s.Pm * (s.kind === 1 ? co / Math.PI : 1 / (4 * Math.PI)) * c2 / (R * R);
+    let ip = s.Pm * (s.kind === 1 ? co / Math.PI : 1 / (4 * Math.PI)) * c2 / (R * R);
+    if (capped) ip = Math.min(ip, s.Pmf * c2 / (4 * Math.PI * Rd * Rd));
     PUL.Ix = Math.max(0, ip - PUL.I); PUL.tf = R / U_MAX;
   }
   return PUL;
@@ -831,6 +845,7 @@ function rebuildSources(t) {
         for (const [k, hh] of holes) if (k.startsWith(kbase + '#') && len(sub(mul(hh.cw, 1 / hh.w), xc)) < 3) { hk = k; break; }
         if (!hk) { hk = kbase + '#' + holes.size; holes.set(hk, { space: far, from: q, W: 0, Pm: 0, cw: [0, 0, 0], w: 0, ax: [0, 0, 0], tw: 0, cells: new Set(), gen: g }); }
         const H = holes.get(hk), wt = fE * (fa + fp + 1e-9);
+        H.dw = (H.dw || 0) + wt * R; H.Wf = q.kind === 1 ? 4 * q.W : q.W; H.Pmf = q.kind === 1 ? 4 * q.Pm : q.Pm; H.Df0 = q.Df || 0;
         H.W += q.Wsrc * fE * fa; H.Pm += q.Pm * fE * fp; H.w += wt; H.cw = add(H.cw, mul(xc, wt));
         H.ax = add(H.ax, mul(CSN[c] === q.space ? nn : mul(nn, -1), wt)); H.tw += wt * Math.max(CTE[c], p.TA || 0); H.cells.add(c);
         if (q.kind === 0 && q.space === scene.OUT && far !== scene.OUT) win[far] += q.W * fE * fp;
@@ -838,6 +853,7 @@ function rebuildSources(t) {
     }
     for (const [k, H] of holes) if (H.gen === g && H.w > 0) {
       const src = { pos: mul(H.cw, 1 / H.w), W: H.W, Wsrc: H.W, Pm: H.Pm, t0: H.tw / H.w, space: H.space, kind: 1, ax: nrm(H.ax), gain: 1, rc: .05,
+        Wf: H.Wf, Pmf: H.Pmf, Df: H.dw / H.w,
         vis: -1, plane: null, gen: g, key: k, hole: H.cells };
       if (src.W > 1e-4 || src.Pm > 1) next.push(src);
     }
