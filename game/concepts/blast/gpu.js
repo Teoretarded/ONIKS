@@ -57,25 +57,29 @@ const NODE_FS = HEAD + `
 uniform sampler2D uPos, uVel, uAnc, uUB, uSF, uSS, uInfo, uInfo2, uR0, uLoad, uTie, uUmb, uBend, uCell, uPMap;
 uniform int uK, uNW, uCW; uniform float uT, uH, uMsc, uDamp, uG, uS;
 uniform float uGP[5];
-uniform vec4 uPl[4], uPl2[4]; uniform int uPlRow[4], uPlCell[4]; uniform vec3 uC;
+uniform vec4 uPl[4], uPl2[4]; uniform int uPlRow[4], uPlCell[4]; uniform vec3 uC; uniform float uDiff;
 layout(location=0) out vec4 oPos; layout(location=1) out vec4 oVel; layout(location=2) out vec4 oAnc; layout(location=3) out vec4 oUB;
 ivec2 NT(int j) { return ivec2(j % uNW, j / uNW); }
-bool intact(int q, float u, float v) {
+// 1 = intact cell, 0 = torn cell, -1 = outside the plate
+float cellAt(int q, float u, float v) {
   vec4 pl2 = uPl2[q]; int ci = int(floor((u - pl2.x) / uS)), cj = int(floor((v - pl2.y) / uS)), nu = int(pl2.z), nv = int(pl2.w);
-  if (ci < 0 || cj < 0 || ci >= nu || cj >= nv) return false;
-  int c = uPlCell[q] + cj * nu + ci; return texelFetch(uCell, ivec2(c % uCW, c / uCW), 0).x < 0.5;
+  if (ci < 0 || cj < 0 || ci >= nu || cj >= nv) return -1.0;
+  int c = uPlCell[q] + cj * nu + ci; return texelFetch(uCell, ivec2(c % uCW, c / uCW), 0).x < 0.5 ? 1.0 : 0.0;
 }
-// can the charge see this node? a ray stops at the first intact cell of any other plate (holes let it through)
-bool seen(vec3 x, int own) {
-  vec3 d = x - uC; float R = length(d); if (R < 1e-6) return true; vec3 D = d / R; float len = R - 0.03;
+// how much of the shock reaches this node: 0 behind intact plating; through each hole it passes, the wave
+// diffracts and loses about half its strength
+float seen(vec3 x, int own) {
+  vec3 d = x - uC; float R = length(d); if (R < 1e-6) return 1.0; vec3 D = d / R; float len = R - 0.03, f = 1.0;
   for (int q = 0; q < 4; q++) {
     if (q == own) continue;
     vec4 pl = uPl[q]; int ax = int(pl.x), ua = int(pl.y), va = int(pl.z);
     float dd = D[ax]; if (abs(dd) < 1e-9) continue;
     float t = -(uC[ax] - pl.w) / dd; if (t <= 1e-4 || t >= len) continue;
-    if (intact(q, uC[ua] + D[ua] * t, uC[va] + D[va] * t)) return false;
+    float c = cellAt(q, uC[ua] + D[ua] * t, uC[va] + D[va] * t);
+    if (c > 0.5) return 0.0;
+    if (c > -0.5) f *= uDiff;
   }
-  return true;
+  return f;
 }
 vec3 axisVec(float code) { float a = abs(code); vec3 n = a < 1.5 ? vec3(1,0,0) : a < 2.5 ? vec3(0,1,0) : vec3(0,0,1); return code < 0.0 ? -n : n; }
 void main(){
@@ -118,9 +122,10 @@ void main(){
   vec4 ld = texelFetch(uLoad, p, 0);
   if (ld.w > 0.5) {
     float a = uT - ld.y, b = a + uH, TD = ld.z;
-    if (b > 0.0 && a < TD && seen(pos.xyz, int(info.z))) {
+    float sf = (b > 0.0 && a < TD) ? seen(pos.xyz, int(info.z)) : 0.0;
+    if (sf > 0.0) {
       a = max(a, 0.0); b = min(b, TD);
-      float I = ld.x * ((b - b * b / (2.0 * TD)) - (a - a * a / (2.0 * TD)));
+      float I = sf * ld.x * ((b - b * b / (2.0 * TD)) - (a - a * a / (2.0 * TD)));
       F += nrm * info.w * (I / uH * info.y); vel.w += I;
       if (pos.w < 0.5 && vel.w / i2.z > i2.w) pos.w = 1.0;
     }
@@ -230,7 +235,7 @@ export function createGPU(gl, M) {
   const statics = () => {
     gl.useProgram(pSlot); gl.uniform1i(pSlot.u.uK, K); gl.uniform1i(pSlot.u.uNW, NW); gl.uniform1f(pSlot.u.uS, M.S); gl.uniform1f(pSlot.u.uVc, M.V_CRACK);
     gl.useProgram(pNode); gl.uniform1i(pNode.u.uK, K); gl.uniform1i(pNode.u.uNW, NW); gl.uniform1i(pNode.u.uCW, CW); gl.uniform1f(pNode.u.uG, 9.81); gl.uniform1f(pNode.u.uS, M.S);
-    gl.uniform3fv(pNode.u.uC, M.C()); gl.uniform4fv(pNode.u.uPl, plU); gl.uniform4fv(pNode.u.uPl2, pl2U); gl.uniform1iv(pNode.u.uPlRow, plRow); gl.uniform1iv(pNode.u.uPlCell, plCell);
+    gl.uniform3fv(pNode.u.uC, M.C()); gl.uniform1f(pNode.u.uDiff, M.diff()); gl.uniform4fv(pNode.u.uPl, plU); gl.uniform4fv(pNode.u.uPl2, pl2U); gl.uniform1iv(pNode.u.uPlRow, plRow); gl.uniform1iv(pNode.u.uPlCell, plCell);
     gpv.fill(NaN); crDirty = true; };
 
   function upload() {                       // the CPU state -> GPU (at detonation)

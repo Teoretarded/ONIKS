@@ -53,5 +53,6 @@ hits cost about the same as one.
 - Hole sizes at contact are not yet calibrated against measured test data (a literature agent is collecting
   plate deflection/mode data from structural-impact papers; the tear threshold `TEAR_K` and fracture strain
   `EF_MESH` get fitted to it).
-- The shock passes through a hole at full strength (no diffraction loss), which over-tears plating behind small holes.
+- Diffraction: a shock passing through a hole now keeps half its strength per hole (`st.diff`, default .5). With it the
+  Oniks contact hit no longer shreds the decks behind its 1.5 m² hole (3.3 → 0.06 m² of second deck).
 - Collision on the GPU corrects position and velocity but doesn't push back on the struck plate.

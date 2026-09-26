@@ -40,7 +40,7 @@ const ROUNDS = [
   ['Kh-35', 65], ['Harpoon', 100], ['P-800 Oniks', 120], ['Kalibr · Tomahawk', 200], ['Mk 84 bomb', 500],
 ];
 
-const st = { msc: 64, grid: .125, solver: 'gpu', hs: 100, iters: 1, patch: false, spd: 0, src: 'charge', round: 7, kg: 120, fuze: 'contact', standoff: 3, mat: 'hsla', h: 10, view: 0, post: 1,
+const st = { diff: .5, msc: 64, grid: .125, solver: 'gpu', hs: 100, iters: 1, patch: false, spd: 0, src: 'charge', round: 7, kg: 120, fuze: 'contact', standoff: 3, mat: 'hsla', h: 10, view: 0, post: 1,
   aim: [0, 2.2, 0], aimN: [0, 0, 1] };
 
 /* ------------------------------------------------------------------ small rng */
@@ -572,7 +572,7 @@ function gpuModel() {
   return { N, NS, NC, SA, SB, NADJ, SL0, SK, SFY, SEF, SC, AREA, SURF, NSP, NSN, RH, VC, R0, NRM, TK, TFY, KB, KBY, KBC, UNB, UN, PL,
     X, V, DISC, IMP, TAN, FREE, UB, SLP, SBRK, CTORN, LOSF, GP, S, V_CRACK,
     winv: i => WINV[i], dirSign: i => { const s = sim; return s.DIR[3 * i] * NRM[3 * i] + s.DIR[3 * i + 1] * NRM[3 * i + 1] + s.DIR[3 * i + 2] * NRM[3 * i + 2] < 0 ? -1 : 1; },
-    PR: i => sim.PR[i], TA: i => sim.TA[i], TD: i => sim.TD[i], C: () => sim.C,
+    PR: i => sim.PR[i], TA: i => sim.TA[i], TD: i => sim.TD[i], C: () => sim.C, diff: () => st.diff,
     crackPlate: q => { const a = SA[q], b = SB[q], p = SURF[a]; if (SURF[b] !== p) return -1; const P = PL[p];
       return Math.abs(R0[3 * a + P.ax] - P.val) < 1e-3 && Math.abs(R0[3 * b + P.ax] - P.val) < 1e-3 ? p : -1; },
     slotMid: q => { const a = SA[q], b = SB[q], P = PL[SURF[a]]; return [(R0[3 * a + P.ua] + R0[3 * b + P.ua]) / 2, (R0[3 * a + P.va] + R0[3 * b + P.va]) / 2]; },
@@ -1041,7 +1041,7 @@ function compare(a, r) {
   let diff = 0, both = 0; for (let c = 0; c < a.cellsTorn.length; c++) { if (a.cellsTorn[c] !== r.cellsTorn[c]) diff++; else if (a.cellsTorn[c]) both++; }
   return { dispErrMm: +(s / n * 1000).toFixed(1), tornDiffCells: diff, tornBothCells: both };
 }
-window.BLAST = { PROF, ver: 21, runCase, compare, cam, stepN(n) { for (let k = 0; k < n; k++) step(); return sim.t; }, st, detonate, build, draw, dbg: () => ({ FREE, SURF, SBRK, SA, SB, SL0, X, R0, N, NS, FIX, GP, OPEN, CTORN, CSURF }), tune(k, e) { TEAR_K = k; EF_MESH = e; }, get sim() { return sim; },
+window.BLAST = { PROF, ver: 22, runCase, compare, cam, stepN(n) { for (let k = 0; k < n; k++) step(); return sim.t; }, st, detonate, build, draw, dbg: () => ({ FREE, SURF, SBRK, SA, SB, SL0, X, R0, N, NS, FIX, GP, OPEN, CTORN, CSURF }), tune(k, e) { TEAR_K = k; EF_MESH = e; }, get sim() { return sim; },
   // headless check: run the whole structural response now and report
   run() { const t0 = performance.now(); while (sim.t < sim.T1) step(); sim.phase = 2; settle();
     let free = 0; for (let i = 0; i < N; i++) free += FREE[i];
