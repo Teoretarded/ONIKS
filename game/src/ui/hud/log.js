@@ -6,6 +6,8 @@ import { clock, esc, unitRef, trackRef, PNAME, WNAME, km, brg } from './fmt.js';
 const ROWS = 6;
 const HEAD = { coast: 'K300P Bastion-P', fleet: 'CSG · CVN-68' };
 const DEF_KINDS = new Set(['sam', 'sm6', 'pdms', 'aam', 'sam48', 'ram']);
+/* a module's label for a log line: its first two fields ('Mk 41 VLS · aft · 64 cells' -> 'Mk 41 VLS · aft') */
+const short = s => String(s).split(' · ').slice(0, 2).join(' · ');
 
 export function createLog(game, hud, parent) {
   const { sim } = game;
@@ -119,10 +121,28 @@ export function createLog(game, hud, parent) {
         }
         break;
       }
-      case 'part': {
+      // a module destroyed (sim/damage.js): the ones one hit takes out merge into one line
+      case 'module': {
         if (e.side !== side) break;
         const u = sim.units.get(e.unit);
-        add('Dmg', `${u ? unitRef(u) : ''} · ${e.label || e.part} out`, 'c');
+        if (!u) break;
+        const key = 'M' + u.id, r = merge(key, 1.5), nm = short(e.label || e.module);
+        if (r) { if (!r.mods.includes(nm)) r.mods.push(nm); r.text = `${unitRef(u)} · ${r.mods.join(', ')} out`; r.t = sim.t; dirty = true; }
+        else add('Dmg', `${unitRef(u)} · ${nm} out`, 'c', key).mods = [nm];
+        break;
+      }
+      // what a module held went up: the unit is lost ('kill') or burning ('heavy')
+      case 'cookoff': {
+        const u = sim.units.get(e.unit);
+        if (!u) break;
+        if (e.side === side) add('Blast', `${unitRef(u)} · ${short(e.label || e.module)} ${e.out === 'heavy' ? 'exploded · fire' : 'exploded'}`, 'c');
+        else if (!sim.fog || game.vis(u)) add('Blast', `${trackRef(game, u, true)} · secondary explosion`, 'l');
+        break;
+      }
+      case 'fireout': {
+        if (e.side !== side) break;
+        const u = sim.units.get(e.unit);
+        if (u && u.alive) add('Fire', `${unitRef(u)} · fire out`, '');
         break;
       }
       case 'destroyed': {
