@@ -41,10 +41,13 @@ export async function createBlast(game) {
   let nextId = 1, client = null, mode = 'boot', err = null;
   const pending = [];                    // specs before the client is up
   const upQ = [];                        // atlas uploads to do in the frame
-  // solver: 'lattice' (the bench at 1596bde: the default, a hit in 0.2-4 s) or 'shell' (the bench's rewrite, 446c6a3:
-  // shell FE, ~100x the steps; ?blast=shell or ONIKS.game.blast.cfg.solver = 'shell')
+  // solver: 'lattice' (the bench at 1596bde: the default, a hit in 0.2-4 s) or 'shell' (the audited bench, ca26a00: shell
+  // FE at 0.25 m, dt ~12 us without mass scaling: 12-45k steps a hit, ~7x the lattice's GPU time on the game's patches, so
+  // 5-20 s a hit at the same share; ?blast=shell or ONIKS.game.blast.cfg.solver = 'shell'; ?blast=lattice)
+  const DEFAULT_SOLVER = 'lattice';
   const q0 = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('blast') : null;
-  const cfg = { watchDist: 4000, upTexels: 6000, maxDots: 7000, on: q0 !== 'off', gpuMs: 3, gpuMsSlow: 5, solver: q0 === 'shell' ? 'shell' : 'lattice' };
+  const cfg = { watchDist: 4000, upTexels: 6000, maxDots: 7000, on: q0 !== 'off', gpuMs: 3, gpuMsSlow: 5, shellS: .25,
+    solver: q0 === 'shell' || q0 === 'lattice' ? q0 : DEFAULT_SOLVER };
 
   /* ------------------------------------------------------------ the atlas */
   let tex = null;
@@ -117,6 +120,7 @@ export async function createBlast(game) {
     const id = nextId++;
     spec.watch = true;
     spec.solver = client && client.mode === 'main' ? 'lattice' : cfg.solver;
+    spec.gridS = spec.solver === 'shell' ? (spec.shellS = cfg.shellS) : S_GRID;
     const B = { id, uid: u.id, S, spec, meta, t0: sim.t, state: 'wait', rects: [], inner: null, nIn: 0, tShow: 0, tSolve: 0, tearT: -1, final: null, res: null,
       depth: spec.depth || 4, heat: 0, lastT: -1, lastW: null, seed: (u.id * 131 + id * 7) % 997, info: null, ej: false };
     patches.set(id, B);
@@ -242,7 +246,7 @@ export async function createBlast(game) {
       const F = B.spec.frame, o = i * 16;
       P.F[o] = F.O[0]; P.F[o + 1] = F.O[1]; P.F[o + 2] = F.O[2]; P.F[o + 3] = B.depth;
       P.F[o + 4] = F.X[0]; P.F[o + 5] = F.X[1]; P.F[o + 6] = F.X[2]; P.F[o + 7] = 0;
-      P.F[o + 8] = F.Y[0]; P.F[o + 9] = F.Y[1]; P.F[o + 10] = F.Y[2]; P.F[o + 11] = S_GRID;
+      P.F[o + 8] = F.Y[0]; P.F[o + 9] = F.Y[1]; P.F[o + 10] = F.Y[2]; P.F[o + 11] = B.spec.gridS || S_GRID;
       P.F[o + 12] = F.Z[0]; P.F[o + 13] = F.Z[1]; P.F[o + 14] = F.Z[2]; P.F[o + 15] = Math.max(Math.min(1.6, Math.max(.8, .6 + .08 * (B.spec.Rp || 5))), Math.min(3.5, (B.spec.band || 0) + .35));
       let k = 0;
       for (const r of B.rects) {
@@ -353,7 +357,7 @@ export async function createBlast(game) {
         // seen from the hole's own side only
         const Z = Fr.Z, nwx = M[0] * Z[0] + M[1] * Z[1] + M[2] * Z[2], nwy = M[3] * Z[0] + M[4] * Z[1] + M[5] * Z[2], nwz = M[6] * Z[0] + M[7] * Z[1] + M[8] * Z[2];
         if ((eye[0] - cx) * nwx + (eye[1] - cy) * nwy + (eye[2] - cz) * nwz < -2) continue;
-        const px = S_GRID * 1.4 * pxm, stride = Math.max(px >= 1.6 ? 1 : Math.min(40, Math.ceil((1.6 / px) ** 2)), Math.ceil(B.nIn / capEach));
+        const px = (B.spec.gridS || S_GRID) * 1.4 * pxm, stride = Math.max(px >= 1.6 ? 1 : Math.min(40, Math.ceil((1.6 / px) ** 2)), Math.ceil(B.nIn / capEach));
         const size = px > 9 ? 3 : px > 4 ? 2 : 1;
         const fk = B.S && B.S.fire ? B.S.fire.k : 0, heat = heatOf(B, game.t), I = B.inner;
         for (let i = 0; i < B.nIn; i += stride) {

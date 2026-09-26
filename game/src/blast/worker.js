@@ -14,13 +14,13 @@ import { createRunner } from './runner.js';
 
 let runner = null, gl = null, fence = null, shell = null, shellP = null;
 const owner = new Map();                // patch id -> the runner solving it
-/* the shell solver (bench 446c6a3), loaded when a patch asks for it */
+/* the shell solver (bench ca26a00), loaded when a patch asks for it */
 async function shellRunner() {
   if (shell) return shell;
   if (!shellP) shellP = import('./shell/runner.js').then(m => (shell = m.createShellRunner(gl)));
   return shellP;
 }
-const cfg = { us0: 8, usNode: .00125, minSteps: 8, maxSteps: 400, calibrate: false, fixedSteps: 0 };
+const cfg = { us0: 8, usNode: .00125, minSteps: 8, maxSteps: 400, calibrate: false, fixedSteps: 0, shUs0: 50, shUsNode: .002, shMax: 400 };
 const perf = { slices: 0, skipped: 0, steps: 0, lastMs: 0 };
 function post(m) { const tr = m.transfer || []; delete m.transfer; self.postMessage(m, tr); }
 
@@ -48,17 +48,21 @@ function watchFence() {
   sent.done = true;
 }
 function slice(ms) {
-  // the shell solver takes its share of the frame first (its steps cost more; ~60 us + 5 ns a node)
-  if (shell && shell.busy) {
-    let nodes = 0; for (const R of shell.pats.values()) if (R.state === 'run') nodes += R.M.N;
-    const share = runner.busy ? ms * .5 : ms, st = Math.max(2, Math.min(200, Math.round(share * 1000 / (60 + .005 * nodes))));
-    try { for (const m of shell.pump(st)) post(m); } catch (e) { post({ type: 'error', err: String(e && e.stack || e) }); }
-    if (!runner.busy) { if (fence) { gl.deleteSync(fence); } fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0); gl.flush(); return; }
-    ms *= .5;
-  }
   if (fence) {
     if (gl.clientWaitSync(fence, 0, 0) === gl.TIMEOUT_EXPIRED) { perf.skipped++; if (cfg.calibrate) kcal = Math.min(12, kcal * 1.05); return; }
     gl.deleteSync(fence); fence = null;
+  }
+  // the shell solver takes its share of the frame first. A step at 0.25 m: ~0.05 ms of GPU for 20k nodes (the bench's
+  // timer queries) plus ~0.07 ms of WebGL calls, which Chrome's GPU process runs beside the game's frame: ~50 us + 2 ns
+  // a node keeps the game's frame whole (more steps a slice stalled it: p50 5 -> 49 ms at 400 steps)
+  if (shell && shell.busy) {
+    let nodes = 0; for (const R of shell.pats.values()) if (R.state === 'run') nodes += R.M.N;
+    const share = runner.busy ? ms * .5 : ms, st = Math.max(4, Math.min(cfg.shMax, Math.round(share * 1000 / (cfg.shUs0 + cfg.shUsNode * nodes))));
+    const t0 = performance.now();
+    try { for (const m of shell.pump(st)) post(m); } catch (e) { post({ type: 'error', err: String(e && e.stack || e) }); }
+    perf.shSteps = shell.stats.steps; perf.shMs = performance.now() - t0;
+    if (!runner.busy) { fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0); gl.flush(); return; }
+    ms *= .5;
   }
   if (!runner.busy) return;
   let nodes = 0; for (const R of runner.pats.values()) if (R.state === 'run') nodes += R.P.N;
@@ -92,7 +96,7 @@ self.onmessage = ev => {
       case 'cfg': Object.assign(cfg, m.cfg || {}); break;
       case 'stats': post({ type: 'stats', cfg, perf, stats: runner.stats, shell: shell && shell.stats,
         pats: [...runner.pats.values()].map(R => ({ id: R.id, state: R.state, t: R.P.sim.t, T1: R.P.sim.T1, N: R.P.N, steps: R.steps, runMs: R.runMs }))
-          .concat(shell ? [...shell.pats.values()].map(R => ({ id: R.id, solver: 'shell', state: R.state, t: R.M.sim.t, T1: R.M.sim.T1, N: R.M.N, steps: R.steps, runMs: R.runMs })) : []) }); break;
+          .concat(shell ? [...shell.pats.values()].map(R => ({ id: R.id, solver: 'shell', state: R.state, t: R.M.sim.t, T1: R.M.sim.T1, N: R.M.N, steps: R.steps, runMs: R.runMs, watch: R.watch, target: R.target, snapT: R.lastSnapT })) : []) }); break;
     }
   } catch (e) { post({ type: 'fail', id: m.id, err: String(e && e.stack || e) }); }
 };

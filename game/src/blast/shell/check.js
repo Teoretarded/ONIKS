@@ -1,7 +1,8 @@
-/* Dev check: the shell bench's test box (game/concepts/blast/blast.js sceneBox at 446c6a3: 30 m of a destroyer's side,
+/* Dev check: the shell bench's test box (game/concepts/blast/blast.js sceneBox at ca26a00: 30 m of a destroyer's side,
    weather / second / platform decks, two bulkheads, nine spaces) as a patch spec, solved by this module's shell runner
    on the main thread, to compare with the bench's runCase.
-     const C = await import('/game/src/blast/shell/check.js'); C.start({ kg: 120, casing: 130, fuze: 'contact' }); ...
+     const C = await import('/game/src/blast/shell/check.js'); C.start({ kg: 120, casing: 130, fuze: 'contact', grid: .25 }); ...
+   (async reads between yields, as the bench's runCaseAsync; { sync: true } reads blocking, as its runCase)
      C.result   (null until done: { areas: [side, weather deck, decks, bulkheads] m^2, setMm, simMs, steps, ms }) */
 import { createShellRunner } from './runner.js';
 
@@ -22,26 +23,30 @@ export function boxSpec(o = {}) {
   }
   const fill = o.kg !== undefined ? o.kg : 120, rc = Math.cbrt(3 * Math.max(fill, .01) / (4 * Math.PI * 1600)), a = o.aim || [0, 2.2, 0];
   const C = o.C || (o.fuze === 'inside' ? [a[0], a[1], a[2] - 1.6] : [a[0], a[1], a[2] + (o.fuze === 'standoff' ? Math.max(o.standoff || 3, rc) : rc)]);
-  return { S: o.grid || .125, plates, box: [XA, YB, ZC, XZ, YD, 0], comps, depth: 10, kind: 'side', frame: { O: [0, 0, 0], X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1] },
-    charge: { C, fill, Mc: o.casing !== undefined ? o.casing : 130, mf: o.mf || .03, Wgas: o.Wgas || 0, vapour: o.vapour || 0 }, wl: -1e9, wlLocal: 0, watch: false, solver: 'shell', syncReads: true };
+  return { S: o.grid || .25, shellS: o.grid || .25, plates, box: [XA, YB, ZC, XZ, YD, 0], comps, depth: 10, kind: 'side', frame: { O: [0, 0, 0], X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1] },
+    charge: { C, fill, Mc: o.casing !== undefined ? o.casing : 130, mf: o.mf || .03, Wgas: o.Wgas || 0, vapour: o.vapour || 0 }, wl: -1e9, wlLocal: 0, watch: false, solver: 'shell', syncReads: !!o.sync };
 }
-export let result = null, runner = null, t0 = 0;
+export let result = null, runner = null, t0 = 0, last = null;
 export function progress() { const R = runner && [...runner.pats.values()][0]; return R ? { t: R.M.sim.t, steps: R.steps, relax: R.M.sim.relax, T1: R.M.sim.T1, ms: Math.round(performance.now() - t0), state: R.state } : result; }
 export function start(o = {}) {
   result = null;
   const cv = new OffscreenCanvas(1, 1), gl = cv.getContext('webgl2');
   const Rn = runner = createShellRunner(gl); t0 = performance.now();
   const info = Rn.submit(1, boxSpec(o)); Rn.target(1, 10, false);
+  const ch = new MessageChannel();
   const tick = () => {
-    for (const m of Rn.pump(400)) if (m.final) {
+    for (const R of Rn.pats.values()) last = R;
+    for (const m of Rn.pump(o.chunk || 50)) if (m.final) {
       const areas = [0, 0, 0, 0], R = m;
       const spec = boxSpec(o), kinds = spec.plates.map(p => p.kind);
       R.byPlate.forEach((a, p) => { areas[kinds[p]] += a; });
-      result = { areas: areas.map(a => +a.toFixed(2)), byPlate: R.byPlate.map(a => +a.toFixed(2)), setMm: Math.round(R.setMax * 1000), simMs: +(R.t * 1000).toFixed(1), steps: R.steps, ms: Math.round(performance.now() - t0), N: info.N, dt: info.dt };
+      // torn (eroded) cells by plate, as the bench's byPanel; byPlate also counts the cells of pieces cut loose (debris)
+      const Mm = last.M, er = spec.plates.map(() => 0); for (let c = 0; c < Mm.NC; c++) if (Mm.CER[c]) er[Mm.CPAN[c]] += Mm.CAR[c];
+      result = { torn: er.map(a => +a.toFixed(2)), areas: areas.map(a => +a.toFixed(2)), byPlate: R.byPlate.map(a => +a.toFixed(2)), setMm: Math.round(R.setMax * 1000), simMs: +(R.t * 1000).toFixed(1), steps: R.steps, ms: Math.round(performance.now() - t0), N: info.N, dt: info.dt };
       return;
     }
-    setTimeout(tick, 0);
+    ch.port2.postMessage(0);
   };
-  tick();
+  ch.port1.onmessage = tick; tick();
   return info;
 }

@@ -1,10 +1,12 @@
-/* The shell solver's runner (bench 446c6a3: shell/model.js, shell/gpu.js): the same interface as the lattice runner
+/* The shell solver's runner (bench ca26a00: shell/model.js, shell/gpu.js): the same interface as the lattice runner
    (blast/runner.js), so the worker and the game system take either. One GPU instance per patch (the bench's own passes),
-   two patches solved at a time (textures sized to each patch, freed when it settles), the rest queued.
+   two patches solved at a time (textures sized to each patch, freed when it settles), the rest queued. Grid 0.25 m
+   (spec.shellS): the bench's cost figures are at that grid.
 
-   Differences from the lattice: no mass scaling, a step of ~4-7 us (the membranes' wave speed across the smallest
-   triangle), dynamic relaxation once the loads are over; so a hit costs far more steps (the report in
-   game/src/blast/README.md). The snapshots and results are the same shape as the lattice runner's. */
+   As the bench's interactive runs: torn cells read back asynchronously every sync (the fence passes between frames),
+   the end check on an asynchronous node read every 200 steps; a check run (spec.syncReads) reads blocking, the torn
+   cells every 4th sync, as the bench's headless runCase. The snapshots and results are the same shape as the lattice
+   runner's (skins in each plate's grid order, through the cell map). */
 import { sceneOf, buildShell, loadShell, commonSync, checkEnd, markDebris, openCell, gpuModel, MATS } from './model.js';
 import { createGPU } from './gpu.js';
 
@@ -13,19 +15,19 @@ const SNAP_DT = .0004, SNAP_MS = 60, MAXIN = 9000, RUNNING = 2;
 
 export function createShellRunner(gl, o = {}) {
   const pats = new Map(), queue = [];
-  const stats = { steps: 0, pumps: 0, gpuSteps: 0, built: 0, done: 0, buildMs: 0, snapMs: 0, pumpMs: 0 };
+  const stats = { readMs: 0, nodeMs: 0, stepMs: 0, steps: 0, pumps: 0, gpuSteps: 0, built: 0, done: 0, buildMs: 0, snapMs: 0, pumpMs: 0 };
   const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
   function submit(id, spec) {
     const t0 = now();
-    const scene = sceneOf(spec), M = buildShell(scene, spec.S);
+    const S = spec.shellS || .25, scene = sceneOf(spec, S), M = buildShell(scene, S);
     const ch = spec.charge;
     loadShell(M, { C: ch.C, fill: ch.fill !== undefined ? ch.fill : ch.W, Mc: ch.Mc || 0, mf: ch.mf || .03, Wgas: ch.Wgas || 0, vapour: ch.vapour || 0, frags: ch.frags !== false });
     const R = { id, M, spec, gpu: null, state: 'queued', target: 0, watch: spec.watch !== false, lastSnapT: -1, lastSnapMs: 0, tReal0: now(), buildMs: now() - t0, runMs: 0, steps: 0 };
     stats.buildMs = R.buildMs; stats.built++;
     pats.set(id, R); queue.push(R);
     admit();
-    return { N: M.N, NS: M.NH + M.NT, NC: M.NC, K: 0, dt: M.dt, T1: M.sim.T1, buildMs: R.buildMs, solver: 'shell' };
+    return { N: M.N, NS: M.NH + M.NT, NC: M.NC, K: 0, dt: M.dt, T1: M.sim.T1, buildMs: R.buildMs, solver: 'shell', S, massAdded: M.massAdded };
   }
   function admit() {
     let running = 0; for (const R of pats.values()) if (R.state === 'run') running++;
@@ -52,23 +54,35 @@ export function createShellRunner(gl, o = {}) {
     // the steps go round the running patches, each its share
     const each = Math.max(1, Math.round(stepsMax / run.length));
     for (const R of run) {
-      const M = R.M, s = M.sim, g = R.gpu;
+      const M = R.M, s = M.sim, g = R.gpu, sync = R.spec.syncReads;
+      // (interactive, as the bench's: the read backs are asynchronous. Here once a pump: a fence polled or a buffer read
+      // is a round trip to the GPU process, which is busy with the game's frames; per sync it cost ~17 ms a call)
+      let torn = false;
+      if (!sync) {
+        const tq = now(), cl = g.readCellsAsync(); stats.readMs += now() - tq;
+        if (cl) for (let c = 0; c < M.NC; c++) if (cl[4 * c] > .5 && !M.CER[c]) { M.CER[c] = 1; M.CTE[c] = cl[4 * c + 1]; openCell(M, c, M.CTE[c]); torn = true; }
+        const tn = now();
+        if (g.readNodesAsync(M.X, M.V, M.FREE)) { R.fresh = true; if (s.n - (R.endN || 0) >= 200) { R.endN = s.n; checkEnd(M); } }
+        stats.nodeMs += now() - tn;
+      }
       for (let k = 0; k < each; k++) {
         if (!(s.t < s.T1 && s.t < R.target + M.dt)) break;
-        g.step(s.t, M.dt, s.relax ? 250 : s.alpha);
+        const tq0 = now(); g.step(s.t, M.dt, s.relax ? 250 : s.alpha); stats.stepMs += now() - tq0;
         s.t += M.dt; s.n++; R.steps++; did++;
         if (s.n % SYNC === 0) {
-          const cl = R.spec.syncReads ? g.readCells() : g.readCellsAsync();
-          let torn = false;
-          if (cl) for (let c = 0; c < M.NC; c++) if (cl[4 * c] > .5 && !M.CER[c]) { M.CER[c] = 1; M.CTE[c] = cl[4 * c + 1]; openCell(M, c, M.CTE[c]); torn = true; }
-          const dmg = commonSync(M, s.t, torn, SYNC * M.dt);
+          if (sync) {
+            const cl = (s.n / SYNC) % 4 === 0 ? g.readCells() : null;
+            if (cl) for (let c = 0; c < M.NC; c++) if (cl[4 * c] > .5 && !M.CER[c]) { M.CER[c] = 1; M.CTE[c] = cl[4 * c + 1]; openCell(M, c, M.CTE[c]); torn = true; }
+          }
+          const dmg = commonSync(M, s.t, torn, SYNC * M.dt); torn = false;
           g.setSources(s.SRC); g.setGas(M.GP);
           if (s.IMPN.length) { g.setImpulses(s.IMPN); s.IMPN.length = 0; }
           if (dmg) g.setDamage(M.CFD);
         }
-        if (s.n % 400 === 0) { g.readNodes(true, M.X, M.V, M.FREE); checkEnd(M); }
-        if (s.t >= s.T1) { R.state = 'finish'; break; }
+        if (sync && s.n % 200 === 0) { g.readNodes(true, M.X, M.V, M.FREE); checkEnd(M); }
+        if (s.t >= s.T1) break;
       }
+      if (s.t >= s.T1) R.state = 'finish';
     }
     stats.steps = did; stats.gpuSteps += did;
     const dtMs = now() - t0; stats.pumpMs = dtMs;
@@ -77,10 +91,9 @@ export function createShellRunner(gl, o = {}) {
       if (R.state === 'finish') { out.push(finish(R)); pats.delete(R.id); continue; }
       const s = R.M.sim;
       if (R.watch && s.t - R.lastSnapT >= SNAP_DT && now() - R.lastSnapMs >= SNAP_MS) {
-        R.gpu.readNodes(false, R.M.X, R.M.V, R.M.FREE);
-        const cl = R.gpu.readCells();
-        for (let c = 0; c < R.M.NC; c++) if (cl[4 * c] > .5 && !R.M.CER[c]) { R.M.CER[c] = 1; R.M.CTE[c] = cl[4 * c + 1]; openCell(R.M, c, R.M.CTE[c]); }
-        out.push(snapshot(R, false));
+        // (the positions and torn cells of the last asynchronous read back: a frame or so behind the solve)
+        if (R.spec.syncReads) { R.gpu.readNodes(false, R.M.X, R.M.V, R.M.FREE); R.fresh = true; }
+        if (R.fresh) { R.fresh = false; out.push(snapshot(R, false)); }
       }
     }
     admit();
@@ -91,7 +104,7 @@ export function createShellRunner(gl, o = {}) {
     g.readNodes(true, M.X, M.V, M.FREE);
     const cl = g.readCells();
     for (let c = 0; c < M.NC; c++) if (cl[4 * c] > .5 && !M.CER[c]) { M.CER[c] = 1; M.CTE[c] = cl[4 * c + 1]; openCell(M, c, M.CTE[c]); }
-    g.readState({ CEP: M.CEP, CDM: M.CDM, TFL: M.TFL, HTP: M.HTP });
+    g.readState({ CEP: M.CEP, CDM: M.CDM, TFL: M.TFL, HTP: M.HTP, HTPS: M.HTPS });
     g.dispose(); R.gpu = null;
     R.debris = markDebris(M);
     R.state = 'done'; stats.done++;
@@ -110,7 +123,8 @@ export function createShellRunner(gl, o = {}) {
     R.lastSnapT = s.t; R.lastSnapMs = now();
     const deb = R.debris;
     const gone = i => M.FREE[i] || (deb && deb[i]);
-    const open = c => M.CER[c] || (gone(M.CN[4 * c]) + gone(M.CN[4 * c + 1]) + gone(M.CN[4 * c + 2]) + gone(M.CN[4 * c + 3]) >= 2);
+    const open = c => c >= 0 && (M.CER[c] || (gone(M.CN[4 * c]) + gone(M.CN[4 * c + 1]) + gone(M.CN[4 * c + 2]) + gone(M.CN[4 * c + 3]) >= 2));
+    const CM = M.CMAP;
     if (final) R.open = open;
     const skins = [], tr = [];
     R.lastSkin = R.lastSkin || [];
@@ -123,7 +137,7 @@ export function createShellRunner(gl, o = {}) {
         const k = j * (nu + 1) + i, n = L.at[k], o = 4 * k;
         d[o] = X[3 * n] - R0[3 * n]; d[o + 1] = X[3 * n + 1] - R0[3 * n + 1]; d[o + 2] = X[3 * n + 2] - R0[3 * n + 2];
         let f = 0;
-        if (i < nu && j < nv && open(L.off + j * nu + i)) f |= 1;
+        if (i < nu && j < nv && open(CM[L.off + j * nu + i])) f |= 1;
         if (gone(n)) f |= 2;
         if (M.TBRK[n] >= 0) f |= 4;
         d[o + 3] = f + Math.min(.99, so ? so[k] : M.SOOT[n]);
@@ -148,7 +162,7 @@ export function createShellRunner(gl, o = {}) {
     // the inner structure near the holes of the struck plate
     const L0 = M.PAN[0], ua = L0.ax === 0 ? 2 : 0, va = L0.ax === 1 ? 2 : 1;
     let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9, nt = 0;
-    for (let c = L0.off; c < L0.off + L0.nu * L0.nv; c++) if (open(c)) {
+    for (let k = L0.off; k < L0.off + L0.nu * L0.nv; k++) { const c = CM[k]; if (!open(c)) continue;
       const u = M.CRC[3 * c + ua], v = M.CRC[3 * c + va]; nt++;
       if (u < x0) x0 = u; if (u > x1) x1 = u; if (v < y0) y0 = v; if (v > y1) y1 = v;
     }
@@ -165,7 +179,7 @@ export function createShellRunner(gl, o = {}) {
       const PAT = [[.27, .31], [.74, .69]], cells = [];
       M.PAN.forEach((L, p) => {
         if (L.skin) return;
-        for (let c = L.off; c < L.off + L.nu * L.nv; c++) { const cx = M.CRC[3 * c], cy = M.CRC[3 * c + 1];
+        for (let k = L.off; k < L.off + L.nu * L.nv; k++) { const c = CM[k]; if (c < 0) continue; const cx = M.CRC[3 * c + ua], cy = M.CRC[3 * c + va];
           if (cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1) cells.push(c); }
       });
       const stride = Math.max(1, Math.ceil(cells.length * 2 / (MAXIN * .85)));
@@ -223,7 +237,7 @@ export function createShellRunner(gl, o = {}) {
   }
   function outerSoot(M, L, open) {
     const nu = L.nu, nv = L.nv, W = nu + 1, D = new Float32Array(W * (nv + 1)).fill(1e9), Q = [];
-    for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) if (open(L.off + j * nu + i)) for (const [a, b] of [[i, j], [i + 1, j], [i, j + 1], [i + 1, j + 1]]) { const k = b * W + a; if (D[k] > 0) { D[k] = 0; Q.push(k); } }
+    for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) if (open(M.CMAP[L.off + j * nu + i])) for (const [a, b] of [[i, j], [i + 1, j], [i, j + 1], [i + 1, j + 1]]) { const k = b * W + a; if (D[k] > 0) { D[k] = 0; Q.push(k); } }
     const out = new Float32Array(W * (nv + 1));
     if (!Q.length) return out;
     const upv = L.ax === 1 ? 0 : 1, lim = 3 / M.S;
@@ -255,7 +269,7 @@ export function createShellRunner(gl, o = {}) {
       rim.push(F.O[0] + F.X[0] * lx + F.Y[0] * ly + F.Z[0] * lz, F.O[1] + F.X[1] * lx + F.Y[1] * ly + F.Z[1] * lz, F.O[2] + F.X[2] * lx + F.Y[2] * ly + F.Z[2] * lz, ly);
     }
     let cx = 0, cy = 0, n = 0, A = 0;
-    for (let c = L0.off; c < L0.off + L0.nu * L0.nv; c++) if (R.open(c)) { cx += M.CRC[3 * c + ua]; cy += M.CRC[3 * c + va]; n++; A += M.CAR[c]; }
+    for (let k = L0.off; k < L0.off + L0.nu * L0.nv; k++) { const c = M.CMAP[k]; if (!R.open(c)) continue; cx += M.CRC[3 * c + ua]; cy += M.CRC[3 * c + va]; n++; A += M.CAR[c]; }
     const hole = n ? { x: cx / n, y: cy / n, A } : null;
     let floor = null;
     if (hole) for (const L of M.PAN) if (!L.skin && L.ax === 1 && L.val < hole.y && (!floor || L.val > floor.y)) floor = { y: L.val };
