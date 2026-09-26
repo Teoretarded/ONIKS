@@ -52,6 +52,7 @@ const OPTIONAL = [
   [['./game/debrief.js'], 'createDebrief', 'debrief'],
   [['./game/debris.js'], 'createDebris', 'debris'],
   [['./game/scars.js'], 'createScars', 'scars'],                 // hits marked in the models' dots, fires at the holes
+  [['./game/structure/index.js'], 'createStructure', 'structure'],   // hulls break, float and sink as rigid pieces
   [['./game/perfguard.js'], 'createPerfGuard', 'perfguard'],   // last: it wraps game.frame after the debrief's host
 ];
 

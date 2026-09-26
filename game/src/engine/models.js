@@ -20,6 +20,20 @@ const LIN_STEP = 1 / 40;
 const LRU_MAX = 64;
 const CELL_K = 48;          // cell size code: (c + 128) / CELL_K of the level spacing (0 .. 5.3 x)
 const JIT_K = 254;          // jitter code: c / JIT_K cells
+/* sections (game/structure, d.slab): the slab of the model an instance keeps, z0..z1 along the model's +Z, each cut torn
+   (jagK: a ragged tear, the same function of the cross-section point on both sides of a break) */
+const SLAB_GLSL = `
+uniform vec4 uK0;         // the section's lower cut: z (model m), tear amplitude (m), tear seed, heat of the torn edge
+uniform vec4 uK1;         // its upper cut (same)
+uniform vec4 uKb;         // x torn band (m), y on, z tear wavelength (m), w the hull's axis height (model y, m)
+uniform mat3 uKR;         // the instance's model -> world rotation
+uniform vec3 uKT;         // its origin, relative to the eye
+float jagK(vec2 q, float s) {
+  float a = abs(fract(q.x * 0.61 + q.y * 0.23 + s) - 0.5), b = abs(fract(q.y * 0.97 - q.x * 0.31 + s * 1.37) - 0.5);
+  float c = abs(fract(q.x * 2.3 + q.y * 1.9 + s * 2.71) - 0.5);
+  return (a + 0.7 * b + 0.35 * c) * 1.9512 - 1.0;
+}
+`;
 
 export const VS = HEAD + FRAME + COMMON + `
 layout(location = 0) in vec3 aPos;
@@ -46,6 +60,7 @@ uniform vec4 uSub;        // sub-dots: x on-screen spacing of the level they fil
                           // the sub-dots of a finer cell (a stripe, a detail: the per-pixel cap close up)
 uniform vec4 uX;          // level cross-fade: x dissolve 0..1, y +1 coming in / -1 going out / 0 none
 out vec3 vCol;
+${SLAB_GLSL}
 /* the sub-lattice: rank r (0..255) of a 16 x 16 Bayer order (every prefix is stratified), rank 0 at the centre */
 vec2 subAt(int r) {
   int x = 0, y = 0;
@@ -91,6 +106,25 @@ void main() {
     else o = vec2(subAt1(inst) + h2.x * uSub.y * exp2(-floor(log2(float(inst))) - 1.0), j.y);
     p += (uR * (aCU.xyz * (1.0 / 127.0))) * (su * (o.x - j.x)) + (uR * (aCV.xyz * (1.0 / 127.0))) * (sv * (o.y - j.y));
   }
+  // a hull broken into sections (game/structure, d.slab): this instance keeps its slab of the model between two torn
+  // cuts across its length (jagged; the two sides of a break share the same tear), the plating at the tear peeled out
+  float tk = 0.0, th = 0.0;
+  if (uKb.y > 0.5) {
+    vec3 pm = (p - uKT) * uKR;
+    float c0 = uK0.x + uK0.y * jagK(pm.xy / uKb.z, uK0.z), c1 = uK1.x + uK1.y * jagK(pm.xy / uKb.z, uK1.z);
+    if (pm.z < c0 || pm.z >= c1) { ${CULL} return; }
+    float e0 = (pm.z - c0) / uKb.x, e1 = (c1 - pm.z) / uKb.x;
+    if (e0 < 1.0 || e1 < 1.0) {
+      bool lo = e0 < e1;
+      float e = lo ? e0 : e1, sg = lo ? -1.0 : 1.0, h4 = u01(hash1(hid ^ 0x3c6ef372u));
+      tk = 1.0 - e; th = lo ? uK0.w : uK1.w;
+      if (h4 < 0.3 * tk * tk) { ${CULL} return; }
+      vec2 rd = pm.xy - vec2(0.0, uKb.w);
+      float rl = length(rd), cu = tk * tk * uKb.x * (0.2 + 0.6 * h4);
+      vec2 rn = rl > 1e-3 ? rd / rl : vec2(0.0, 1.0);
+      p += uKR * vec3(rn * cu * 0.6, sg * cu * 0.3);
+    }
+  }
   // level cross-fade: the outgoing level's dots go out, the incoming one's come in, one by one
   if (uX.y != 0.0) {
     float hh = u01(hash1(hid ^ 0x27d4eb2fu));
@@ -101,6 +135,8 @@ void main() {
   float burn = 0.0, hot = 0.0, edge = 0.0, heatN = 0.0;
   if (uScN > 0 && scarAt(p, uR * aNrm.xyz, hid, false, burn, hot, edge, heatN) == 1) { ${CULL} return; }
   if (burn > 0.0 && edge <= 0.0 && u01(hash1(hid ^ 0x1b873593u)) < burn * 0.5) { ${CULL} return; }
+  // the torn edge of a section: a bright ragged rim, glowing while the break is fresh, charred behind it
+  if (tk > 0.0) { if (tk > 0.6) { edge = max(edge, tk); heatN = max(heatN, th); } hot = max(hot, th * tk * tk * 0.8); burn = max(burn, 0.55 * tk * (1.0 - tk)); }
   float yw = p.y + uEyeW.y;
   float dist = length(p);
   vec3 v = p / max(1e-4, dist);
@@ -201,12 +237,18 @@ uniform vec4 uVp;         // xy: half the viewport (px), z: largest splat (px), 
 ${scarGLSL()}
 out vec4 vAx;             // the cell's axes on screen (px): U xy, V zw
 out float vSz;
+${SLAB_GLSL}
 void main() {
   float su = (aCU.w + 128.0) * (1.0 / ${CELL_K.toFixed(1)}) * uP.w, sv = (aCV.w + 128.0) * (1.0 / ${CELL_K.toFixed(1)}) * uP.w;
   if (su <= 0.0 || sv <= 0.0) { ${CULL} return; }
   vec3 U = uR * (aCU.xyz * (1.0 / 127.0)), V = uR * (aCV.xyz * (1.0 / 127.0));
   vec2 j = aCJ.xy * (1.0 / ${JIT_K.toFixed(1)});
   vec3 p = uR * aPos + uT - U * (su * j.x) - V * (sv * j.y);
+  // a section of a broken hull (d.slab): only its own slab splats
+  if (uKb.y > 0.5) {
+    vec3 pm = (p - uKT) * uKR;
+    if (pm.z < uK0.x + uK0.y * jagK(pm.xy / uKb.z, uK0.z) || pm.z >= uK1.x + uK1.y * jagK(pm.xy / uKb.z, uK1.z)) { ${CULL} return; }
+  }
   // scars: the splats follow the bent plating; a hole's own splats are pushed back to the far end of the pocket
   // behind it (a plug: what is inside shows, the far side of the hull and the sea do not)
   if (uScN > 0) {
@@ -699,6 +741,20 @@ const BUILTIN = {
   fighter: () => HD.fighter(), fighterStores: () => HD.fighter({ stores: true }), drone: () => HD.drone(), catapult: () => HD.catapult(), satellite: () => HD.satellite(),
 };
 
+/* sections (d.slab): a part wholly outside the slab (its centre in the model frame, its radius) */
+function slabOut(K, X, Pt) {
+  const c = Pt.center, z = X ? X.R[6] * c[0] + X.R[7] * c[1] + X.R[8] * c[2] + X.T[2] : c[2];
+  return z + Pt.rad < K.z0 - (K.a0 || 0) || z - Pt.rad > K.z1 + (K.a1 || 0);
+}
+/* ... and per brick: the model's +Z in the world and its origin's offset along it (rec.kz), the slab's reach */
+function slabRec(r, K, R0, T0, eye) {
+  r.kon = !!K;
+  if (!K) return;
+  const z = r.kz || (r.kz = [0, 0, 0, 0]);
+  z[0] = R0[2]; z[1] = R0[5]; z[2] = R0[8]; z[3] = (T0[0] - eye[0]) * R0[2] + (T0[1] - eye[1]) * R0[5] + (T0[2] - eye[2]) * R0[8];
+  r.klo = K.z0 - (K.a0 || 0); r.khi = K.z1 + (K.a1 || 0);
+}
+
 export class ModelLib {
   constructor(G) {
     this.G = G; this.gl = G.gl;
@@ -731,6 +787,7 @@ export class ModelLib {
     this.pending = [];              // levels queued by warm(), sampled within the frames' budget (idle())
     this._m9 = new Float32Array(9);
     this._scA = new Float32Array(32); this._scB = new Float32Array(32);   // scars, per instance (d.scars)
+    this._km = new Float32Array(9);                                         // sections (d.slab): the instance's rotation
   }
   /* register a model factory: factory() -> {parts: [...]} in the GEO/HD part format.
      opts: { lods: [spacings], quant: {stateKey: step}, angles: [stateKeys], deps: {partName: [keys]} } */
@@ -990,7 +1047,7 @@ export class ModelLib {
     d._cut = cut;
     // occlusion (the depth splats): a solid instance large enough on screen for its gaps to matter
     d._occ = this.occlude && !cut && !(d.alpha < .95) && !(d.dissolve > 0) && !(ex > 0) && !d.noOcc && mr > this.occPx;
-    const G = d.gate || null;
+    const G = d.gate || null, K = d.slab || null;
     // the cross-fade state (per instance: its id, else its key and place)
     let S = null;
     if (this.xfT > 0) {
@@ -1010,6 +1067,8 @@ export class ModelLib {
       let X = part.xf ? part.xf(st) : null;
       let Rp = X ? mul3(R0, X.R) : R0;
       let Tp = X ? [R0[0] * X.T[0] + R0[1] * X.T[1] + R0[2] * X.T[2] + T0[0], R0[3] * X.T[0] + R0[4] * X.T[1] + R0[5] * X.T[2] + T0[1], R0[6] * X.T[0] + R0[7] * X.T[1] + R0[8] * X.T[2] + T0[2]] : T0;
+      // a section of a broken hull (d.slab): the parts wholly outside its slab are left out
+      if (K && slabOut(K, X, Pt)) continue;
       if (d.partX && d.partX[Pt.name]) { const Y = d.partX[Pt.name]; Tp = [Tp[0] + Rp[0] * Y.T[0] + Rp[1] * Y.T[1] + Rp[2] * Y.T[2], Tp[1] + Rp[3] * Y.T[0] + Rp[4] * Y.T[1] + Rp[5] * Y.T[2], Tp[2] + Rp[6] * Y.T[0] + Rp[7] * Y.T[1] + Rp[8] * Y.T[2]]; Rp = mul3(Rp, Y.R); }
       if (ex > 0) {
         // exploded view: each assembly floats away from the model's centre along its own offset
@@ -1069,6 +1128,7 @@ export class ModelLib {
       m[0] = Rp[0]; m[1] = Rp[3]; m[2] = Rp[6]; m[3] = Rp[1]; m[4] = Rp[4]; m[5] = Rp[7]; m[6] = Rp[2]; m[7] = Rp[5]; m[8] = Rp[8];
       r.t[0] = Tp[0] - eye[0]; r.t[1] = Tp[1] - eye[1]; r.t[2] = Tp[2] - eye[2];
       r.cl = cl; r.cl2 = cl2; r.k = k; r.pa = pa; r.pd = pd; r.rad = Pt.rad; r.dyn = Pt.dyn;
+      slabRec(r, K, R0, T0, eye);
       r.xr = d.partXray && d.partXray[Pt.name] !== undefined ? d.partXray[Pt.name] : (d.xray || 0);
       // the coral part tint only in a cutaway (Inspect, the hit replay: a cue there), and never on a unit with hit marks:
       // damage is local, the scars show it (no whole deck or superstructure turned coral)
@@ -1126,7 +1186,7 @@ export class ModelLib {
     const gl = this.gl, flc = frame.fl1080, near = frame.near || .1;
     gl.bindVertexArray(cl.vao);
     const B = cl.bricks, instP = depth || this._ns ? 1 : this._inst(cl, Math.max(near, r.pd - r.rad), flc);
-    if (!B || (instP <= 1 && r.spr < 300)) {
+    if (!B || (instP <= 1 && r.spr < 300 && !r.kon)) {
       if (instP > 1) { gl.drawArraysInstanced(gl.POINTS, 0, cl.n, instP); this.stats.sub += cl.n * (instP - 1); }
       else gl.drawArrays(gl.POINTS, 0, cl.n);
       return cl.n;
@@ -1142,6 +1202,8 @@ export class ModelLib {
       // (m is column-major: world = m * p + t)
       dv[0] = m[0] * x + m[3] * y + m[6] * z + t[0]; dv[1] = m[1] * x + m[4] * y + m[7] * z + t[1]; dv[2] = m[2] * x + m[5] * y + m[8] * z + t[2];
       if (!frame.sphereVisible(dv, br)) { flush(); this.stats.bricks++; continue; }
+      // a section's slab (d.slab): the bricks wholly outside it
+      if (r.kon) { const zm = dv[0] * r.kz[0] + dv[1] * r.kz[1] + dv[2] * r.kz[2] - r.kz[3]; if (zm + br < r.klo || zm - br > r.khi) { flush(); this.stats.bricks++; continue; } }
       const inst = depth || this._ns ? 1 : this._inst(cl, Math.max(near, Math.hypot(dv[0], dv[1], dv[2]) - br), flc);
       const a = Rr[b * 2], n = Rr[b * 2 + 1];
       if (cnt > 0 && (inst !== ci || a !== f0 + cnt)) flush();
@@ -1163,6 +1225,7 @@ export class ModelLib {
     const ns = this._scars(d, cam.eye);
     if (ns) { gl.uniform4fv(u.uScA, this._scA); gl.uniform4fv(u.uScB, this._scB); gl.uniform4fv(u.uScC, d.scars.C); gl.uniform4fv(u.uScD, d.scars.D || SC0); }
     gl.uniform1i(u.uScN, ns);
+    this._slab(gl, u, d, cam.eye);
     let n = 0;
     for (let i = d._p0; i < d._p1; i++) {
       const r = this._recs[i];
@@ -1196,6 +1259,7 @@ export class ModelLib {
     const ns = this._scars(d, eye);
     if (ns) { gl.uniform4fv(u.uScA, this._scA); gl.uniform4fv(u.uScB, this._scB); gl.uniform4fv(u.uScC, d.scars.C); gl.uniform4fv(u.uScD, d.scars.D || SC0); }
     gl.uniform1i(u.uScN, ns);
+    this._slab(gl, u, d, eye);
     const spMax = e.lods[e.lods.length - 1];
     let drawn = 0;
     for (let i = d._p0; i < d._p1; i++) {
@@ -1218,6 +1282,19 @@ export class ModelLib {
     return drawn;
   }
 
+  /* a section's slab (d.slab = { z0, z1, a0, a1 (tear amplitudes, m), s0, s1 (tear seeds), h0, h1 (heat of the torn
+     edges 0..1), band (m), wave (tear wavelength, m), yc (the hull's axis height) }, game/structure) into the uniforms */
+  _slab(gl, u, d, eye) {
+    const K = d.slab;
+    if (!K) { gl.uniform4f(u.uKb, 1, 0, 1, 0); return; }
+    const R0 = d.R, m = this._km;
+    m[0] = R0[0]; m[1] = R0[3]; m[2] = R0[6]; m[3] = R0[1]; m[4] = R0[4]; m[5] = R0[7]; m[6] = R0[2]; m[7] = R0[5]; m[8] = R0[8];
+    gl.uniformMatrix3fv(u.uKR, false, m);
+    gl.uniform3f(u.uKT, d.T[0] - eye[0], d.T[1] - eye[1], d.T[2] - eye[2]);
+    gl.uniform4f(u.uK0, K.z0, K.a0 || 0, K.s0 || 0, K.h0 || 0);
+    gl.uniform4f(u.uK1, K.z1, K.a1 || 0, K.s1 || 0, K.h1 || 0);
+    gl.uniform4f(u.uKb, K.band || 1, 1, K.wave || 4, K.yc || 0);
+  }
   /* screen box of an instance as drawn (thinned points of the coarse level through cam.project) */
   screenBox(d, cam) {
     const e = this.get(d.key), st = d.st || {}, R0 = d.R, T0 = d.T, q = [0, 0, 0];

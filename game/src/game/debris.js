@@ -39,6 +39,7 @@ import { createBulletTime } from './debris/slowmo.js';
 import { Splash, Dirt, Blast } from '../fx/lib/impact.js';
 import { Burst } from '../fx/lib/burst.js';
 import { Trail, STAGE } from '../fx/lib/smoke.js';
+import { WH as WHK } from './scars.js';
 
 const H_MOD = 1 / 60, H_SHARD = 1 / 40;
 const GUNS = { ciws: 1, gun30: 1 };
@@ -241,7 +242,7 @@ export async function createDebris(game) {
   /* a module (parts of `key`) as a free body from the model's pose (T0 origin, M0 row-major), velocity v, spin w */
   function spawnModule(o) {
     const { ent, key, names, st, T0, M0, v, w, t0, tint, cut } = o;
-    const box = cut ? boxOf(ent, names, st, cut.part, cut.z0, cut.z1) : boxOf(ent, names, st);
+    const box = o.cutBox ? boxOf(ent, names, st, o.cutBox.part, o.cutBox.z0, o.cutBox.z1) : cut ? boxOf(ent, names, st, cut.part, cut.z0, cut.z1) : boxOf(ent, names, st);
     if (!box) return null;
     const plate = o.plate !== undefined ? o.plate : isPlate(box.ext);
     const ext = plate ? thicken(box.ext) : [Math.max(.02, box.ext[0]), Math.max(.02, box.ext[1]), Math.max(.02, box.ext[2])];
@@ -674,8 +675,100 @@ export async function createDebris(game) {
     S.gen = b.gen;
     planes.set(u.id, S);
     taken.add(u.id);
+    // a missile's warhead: the airframe snaps at the hit, the front of it tumbling away on its own
+    try { snapAirframe(S, u, e, pose, M0, r); } catch (err) { console.error('debris: snap', err); }
     const L = Math.max(coreBox.ext[0], coreBox.ext[2]) * 2;
     announce({ t: e.t, pos: pose.pos.slice(), id: u.id, kind: u.type, key: plan.draw, L, heavy: false, side: u.side, w: 8, unit: u.id });
+  }
+  /* an aircraft shot down by a missile: the airframe snaps across at the hit, the section in front of the cut going its
+     own way, tumbling hard (the torn ends jagged and glowing: engine/models.js d.slab), the core keeping the rest */
+  const airHit = new Map();      // unit id -> its last 'hit' event (aircraft)
+  function snapAirframe(S, u, e, pose, M0, r) {
+    const h = airHit.get(u.id);
+    if (!h || !h.pos || Math.abs(h.t - e.t) > 1.5) return;
+    const W = h.kind && WHK[h.kind] !== undefined ? WHK[h.kind] : 10;
+    if (W < 5) return;                                           // gun rounds shred it; they do not cut it in two
+    const ent = S.ent, st = S.st, all = [...S.attached];
+    const fb = boxOf(ent, S.plan.core, st);
+    if (!fb) return;
+    const zlo = fb.mn[2], zhi = fb.mx[2], L = zhi - zlo;
+    const dx = h.pos[0] - pose.pos[0], dy = h.pos[1] - pose.pos[1], dz = h.pos[2] - pose.pos[2];
+    const zh = M0[2] * dx + M0[5] * dy + M0[8] * dz;
+    const zc = clamp(zh + (r.r() - .5) * L * .15, zlo + L * .3, zhi - L * .22);
+    const front = [], back = [];
+    for (const n of all) {
+      const bx = boxOf(ent, [n], st);
+      if (!bx) continue;
+      if (bx.mx[2] > zc) front.push(n);
+      if (bx.mn[2] < zc) back.push(n);
+    }
+    if (!front.length) return;
+    const body = S.plan.core[0];
+    const vel = planeVel(u, [0, 0, 0]), v = [0, 0, 0], ang = r.r() * TAU, kick = 12 + 18 * r.r();
+    const ca = Math.cos(ang), sa = Math.sin(ang);
+    const ax = [M0[0] * ca + M0[1] * sa, M0[3] * ca + M0[4] * sa, M0[6] * ca + M0[7] * sa];
+    for (let i = 0; i < 3; i++) v[i] = vel[i] * (.9 + .06 * r.r()) + ax[i] * kick + M0[i * 3 + 2] * kick * .3;
+    v[1] += 4 + 6 * r.r();
+    const tum = (5 + 5 * r.r()) * r.sign(), w = [0, 0, 0];
+    for (let i = 0; i < 3; i++) w[i] = (M0[i * 3] * sa - M0[i * 3 + 1] * ca) * tum + M0[i * 3 + 2] * r.n() * 3;
+    const mask = liveMask(ent, partNames(ent));
+    for (const n of partNames(ent)) if (!front.includes(n)) mask[n] = 0;
+    const b = spawnModule({ ent, key: S.key, names: front, st, T0: pose.pos, M0, v, w, t0: e.t, tint: tintOf(S.side), rho: S.plan.rho, sigma: S.plan.sigma, cyl: true, plate: false, seed: S.seed + 313, mask, sinkV: 3,
+      cutBox: { part: body, z0: zc, z1: zhi } });
+    if (!b) return;
+    const seedT = hsh(u.id, 17) * 50, band = Math.max(.25, L * .025), wave = Math.max(.4, L * .045);
+    b.o.inst.slab = { z0: zc, z1: 1e6, a0: L * .02, a1: 0, s0: seedT, s1: 0, h0: 1, h1: 0, band, wave, yc: fb.c[1] };
+    b.o.slabT0 = e.t;
+    b.o.burn = { stage: STAGE.wreck, until: e.t + 4 + 4 * r.r(), tr: null, z: zc, glow: 1 };
+    // the core: what is behind the cut
+    const ci = S.b.o.inst;
+    ci.slab = { z0: -1e6, z1: zc, a0: 0, a1: L * .02, s0: 0, s1: seedT, h0: 0, h1: 1, band, wave, yc: fb.c[1] };
+    S.b.o.slabT0 = e.t;
+    for (const n of front) if (!back.includes(n)) { S.attached.delete(n); ci.partAlpha[n] = 0; }
+    popAt(pose.pos, M0, [fb.c[0], fb.c[1], zc], vel, e.t, S.seed + 5, 1.2);
+  }
+  /* a vehicle a big charge went off against: thrown and rolled as one rigid body (its wreck), its fittings off first
+     (unitMods). A light vehicle goes far, a 40 t launcher is lifted and rolled, a small charge does not move it */
+  function throwVehicle(u, e) {
+    const def = u.def;
+    if (def.domain !== 'land' || def.static || u.aboard || !R.models.has(def.model) || !visUnit(u) || taken.has(u.id)) return false;
+    const S = game.scars && game.scars.last(u.id);
+    if (!S || sim.t - (S.t0h || S.t0) > 1.5) return false;
+    const m = def.mass || def.size[0] * def.size[1] * def.size[2] * 230, W = S.W;
+    const J = 2600 * Math.pow(W, .85) * (S.y < .8 ? 1.3 : 1), dv = J / m;
+    if (dv < 2) return false;
+    const pose = game.unitPose(u), M0 = attitudeM(pose.hdg, pose.pitch, pose.roll, [0, 0, 0, 0, 0, 0, 0, 0, 0]), T0 = pose.pos.slice();
+    // the wreck model (as the render system has it)
+    let key = def.model;
+    const wk = key + '_wreck';
+    if (!R.models.has(wk) && game.models && game.models.wreckOf) { try { R.models.registerModel(wk, () => game.models.wreckOf(R.models.get(def.model).model, { seed: def.model.length * 13 + 5 })); } catch (err) { /* */ } }
+    if (R.models.has(wk)) key = wk;
+    const ent = R.models.get(key), st = Object.assign({}, def.modelState ? def.modelState(u, game.t) : u.st || {}, { wreck: 1 });
+    const gone = hid.get(u.id);
+    const names = partNames(ent).filter(n => shown(ent, n, st) && (!gone || gone[n] !== 0));
+    if (!names.length) return false;
+    const box = boxOf(ent, names, st);
+    if (!box) return false;
+    // away from the face that was hit, and up (the ground throws the blast back up under it)
+    const nx = M0[0] * S.nx + M0[1] * S.ny + M0[2] * S.nz, ny = M0[3] * S.nx + M0[4] * S.ny + M0[5] * S.nz, nz = M0[6] * S.nx + M0[7] * S.ny + M0[8] * S.nz;
+    let px = -nx, py = -ny + 1.1, pz = -nz;
+    const pl = Math.hypot(px, py, pz) || 1; px /= pl; py /= pl; pz /= pl;
+    const v = [px * dv, Math.max(py * dv, dv * .45), pz * dv];
+    // the spin: the push off the centre of mass (model frame), through the box's inertia, capped
+    const bx = M0[0] * px + M0[3] * py + M0[6] * pz, by = M0[1] * px + M0[4] * py + M0[7] * pz, bz = M0[2] * px + M0[5] * py + M0[8] * pz;
+    const rx = S.x - box.c[0], ry = S.y - box.c[1], rz = S.z - box.c[2];
+    const tx = (ry * bz - rz * by) * J, ty = (rz * bx - rx * bz) * J, tz = (rx * by - ry * bx) * J;
+    const e3 = box.ext, Ib = [m / 3 * (e3[1] * e3[1] + e3[2] * e3[2]), m / 3 * (e3[0] * e3[0] + e3[2] * e3[2]), m / 3 * (e3[0] * e3[0] + e3[1] * e3[1])];
+    const wl = [tx / Ib[0], ty / Ib[1], tz / Ib[2]], wm = Math.hypot(wl[0], wl[1], wl[2]), wc = wm > 3.2 ? 3.2 / wm : 1;
+    const w = [(M0[0] * wl[0] + M0[1] * wl[1] + M0[2] * wl[2]) * wc, (M0[3] * wl[0] + M0[4] * wl[1] + M0[5] * wl[2]) * wc, (M0[6] * wl[0] + M0[7] * wl[1] + M0[8] * wl[2]) * wc];
+    const mask = liveMask(ent, partNames(ent));
+    if (gone) for (const n in gone) if (gone[n] === 0) mask[n] = 0;
+    const b = spawnModule({ ent, key, names, st, T0, M0, v, w, t0: e.t + .02, tint: tintOf(u.side), mass: m, plate: false, seed: u.id * 37 + 11, mask, life: 420, sinkV: 1.5 });
+    if (!b) return false;
+    b.o.from = u.id; b.o.tint0 = .35; b.o.fadeT = 4;
+    b.o.burn = { stage: STAGE.wreck, until: e.t + 25 + 20 * hsh(u.id, 3), tr: null, glow: 1.1 };
+    taken.add(u.id);
+    return true;
   }
   function planeVel(u, out) {
     out[0] = Math.sin(u.hdg) * (u.speed || 0); out[1] = u.vy || 0; out[2] = Math.cos(u.hdg) * (u.speed || 0);
@@ -1151,6 +1244,8 @@ export async function createDebris(game) {
       d.T[1] = P3[1] - (M9[3] * c[0] + M9[4] * c[1] + M9[5] * c[2]);
       d.T[2] = P3[2] - (M9[6] * c[0] + M9[7] * c[1] + M9[8] * c[2]);
       d.hdg = d.pitch = d.roll = undefined;
+      // a torn end (d.slab: an airframe snapped across) glowing, cooling
+      if (d.slab && o.slabT0 !== undefined) { const hk = Math.exp(-Math.max(0, t - o.slabT0) / 2.2); if (d.slab.z0 > -1e5) d.slab.h0 = hk; if (d.slab.z1 < 1e5) d.slab.h1 = hk; }
       if (d.gate) {
         // keep the model's side of its break: n (model) = (0, 0, gz); world n, and the plane through the break
         const gz = o.gz, nx = M9[2] * gz, ny = M9[5] * gz, nz = M9[8] * gz;
@@ -1319,7 +1414,9 @@ export async function createDebris(game) {
     world, stats, spins, planes,
     /* render hooks: false = drawn here */
     unit(u, d) {
-      if (taken.has(u.id)) return false;
+      // a ship taken over by the structure system (game/structure: her hull as rigid pieces) is drawn there
+      if (game.structure && game.structure.draws(u.id)) return false;
+      if (taken.has(u.id)) { if (/_wreck$/.test(d.key)) d.key = u.def.model; return false; }
       const g = hid.get(u.id);
       if (g) d.partAlpha = g;
       return true;
@@ -1339,6 +1436,8 @@ export async function createDebris(game) {
       return out;
     },
     /* the parts of a unit that left it (the replay's cutaway leaves them out too): name -> bool */
+    /* the partAlpha mask of the parts that left a unit (game/structure draws its pieces with it) */
+    mask(id) { return hid.get(id) || null; },
     gone(id) {
       const g = hid.get(id);
       if (!g) return null;
@@ -1385,7 +1484,9 @@ export async function createDebris(game) {
           if (fxq.length > 400) fxq.splice(0, fxq.length - 400);
           return;
         }
-        case 'hit': { if (e.proj) { const S = spins.get(e.proj); if (S) { broken.set(e.proj, sim.t); endSpin(S, 'gone', e); } } return; }
+        case 'hit': {
+          { const tu = e.target !== undefined && sim.units.get(e.target); if (tu && tu.def.domain === 'air' && e.pos) airHit.set(e.target, e); }
+          if (e.proj) { const S = spins.get(e.proj); if (S) { broken.set(e.proj, sim.t); endSpin(S, 'gone', e); } } return; }
         case 'destroyed': {
           const u = sim.units.get(e.unit);
           if (!u) return;
@@ -1395,10 +1496,11 @@ export async function createDebris(game) {
           const hv = game.scars ? game.scars.heavy(u.id) : 0, S = hv > 1 && game.scars.last(u.id);
           if (S && u.def.domain !== 'sea') {
             unitMods(u, e, { all: true, boost: Math.min(2.2, .9 + .4 * hv) });
+            throwVehicle(u, e);
             const pose = game.unitPose(u), M0 = attitudeM(pose.hdg, pose.pitch, pose.roll, [0, 0, 0, 0, 0, 0, 0, 0, 0]);
             const c = [pose.pos[0] + M0[0] * S.x + M0[1] * S.y + M0[2] * S.z, pose.pos[1] + M0[3] * S.x + M0[4] * S.y + M0[5] * S.z, pose.pos[2] + M0[6] * S.x + M0[7] * S.y + M0[8] * S.z];
             if (distEye(c) < 12000) spawnShards(c, [0, 4, 0], Math.min(1.5, S.r * .5), Math.round(26 * quality()), e.t, u.id * 71 + 5, 0, Math.min(.8, .25 + .1 * hv));
-          } else unitMods(u, e);
+          } else { unitMods(u, e); if (u.def.domain === 'land') throwVehicle(u, e); }
           return;
         }
         case 'part': {
@@ -1406,7 +1508,11 @@ export async function createDebris(game) {
           if (u && u.alive && visUnit(u)) partOff(u, e);
           return;
         }
-        case 'removed': { const S = planes.get(e.unit); if (S) planeEnd(S, null); hid.delete(e.unit); taken.delete(e.unit); return; }
+        case 'removed': {
+          // (the Inspect impact test's reset sends this while the unit is still there: the hull's pieces go too)
+          if (sim.units.has(e.unit) && game.structure) game.structure.drop(e.unit);
+          airHit.delete(e.unit);
+          const S = planes.get(e.unit); if (S) planeEnd(S, null); hid.delete(e.unit); taken.delete(e.unit); return; }
         default: return;
       }
     },
