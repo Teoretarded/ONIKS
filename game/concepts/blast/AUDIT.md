@@ -108,6 +108,12 @@ findings 1-3 below (in this bench's 24 m box, nothing within 8.5 m of a 5000 kg 
 - Fix: drop the velocity test for uniform motion; tear by bond strain (already there) and add transverse shear
   failure only on relative motion between neighbours (e.g. relative normal displacement over a bond > ~h, or a
   velocity jump above a mode III threshold). Calibrate against Nurick-Martin mode I/II thresholds.
+- Tried from the suite (CPU reference, 0.25 m, 1200 kg contact, tear-out disabled, everything else as is): the side
+  still opens by bond fracture, 5.3 m^2 instead of 13.6, with 2 % of the torn plating thrown loose instead of 68 %
+  (petals). But the decks behind then get almost nothing (0.56 / 0.06 / 0 m^2 torn instead of 73 / 81 / 44 without
+  diffraction): the only load reaching them is the shock through cells already open when it passes. With a
+  strain-driven hole, the product gas of finding 7 becomes the load path the decks need. Single-bond "hinges" also
+  let a petal node swing 19 m (no bending across one bond; finding 1).
 
 ### 4. Bonds: perfectly plastic, rate-independent, fixed fracture strain (medium-high)
 `blast.js:82` (SEF), `428-432`; `gpu.js:35`, `49-50`.
