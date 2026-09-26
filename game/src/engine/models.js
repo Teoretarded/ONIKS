@@ -500,6 +500,11 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
         vec2 o = (vec2(fx, fy) - vec2(lx ? 0.0 : 1.0, ly ? 0.0 : 1.0)) * S * -0.2;
         dl = tc.xyz + (ax == 2 ? vec3(o.x, o.y, 0.0) : ax == 1 ? vec3(o.x, 0.0, o.y) : vec3(0.0, o.y, o.x));
         edge = max(edge, 0.85); heatN = max(heatN, heat); hot = max(hot, heat * 0.9); burn = max(burn, 0.85);
+        // a petal bent over: its face leans with it (from the cell's corners, while none of them went)
+        if ((int(t00.w) & 2) == 0 && (int(t10.w) & 2) == 0 && (int(t01.w) & 2) == 0 && (int(t11.w) & 2) == 0) {
+          float gu = mix(t10[ax] - t00[ax], t11[ax] - t01[ax], fy) / S, gv = mix(t01[ax] - t00[ax], t11[ax] - t10[ax], fx) / S;
+          tilt -= (ax == 0 ? Z : X) * gu + (ax == 1 ? Z : Y) * gv;
+        }
       } else {
         dl = mix(mix(t00.xyz, t10.xyz, fx), mix(t01.xyz, t11.xyz, fx), fy);
         // a torn edge: its corners' flags, fading across the cell

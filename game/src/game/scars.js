@@ -303,7 +303,9 @@ export function createScars(game) {
     const P = addScar(u, S, ent, st);
     if (bl && P === S) {
       let B = null;
-      try { B = game.blast.hit(u, { a: [S.x, S.y, S.z], n: [nx, ny, nz], din, zone, tmm: t, fz, standoff, kind, whKg: Wk, deckY, halfB: halfBFn(u, G), S }); }
+      // the deck over a hit in the side at that station (the forecastle stands higher than the main deck amidships)
+      const dk = ny > .7 ? S.y : deckAbove(ent, st, S.x, S.y, S.z, nx, nz, deckY);
+      try { B = game.blast.hit(u, { a: [S.x, S.y, S.z], n: [nx, ny, nz], din, zone, tmm: t, fz, standoff, kind, whKg: Wk, deckY: dk, halfB: halfBFn(u, G), S }); }
       catch (err) { console.error('scars: blast', err); }
       if (!B) { S.bl = false; S.blast = null; build(u, S, ent, st); if (holeLike(S.kind)) ejecta(u, ent, st, S, M, pose); }
     }
@@ -380,6 +382,21 @@ export function createScars(game) {
   }
 
   /* the hull's half-beam at station z, height y (model frame), from its own dots (the envelope gridOf keeps) */
+  /* the lowest deck (dots facing up) over a point of the side, a little inboard, within 12 m; else the main deck */
+  function deckAbove(ent, st, x, y, z, nx, nz, main) {
+    const l = Math.hypot(nx, nz) || 1, ix = x - nx / l * 1.2, iz = z - nz / l * 1.2;
+    let best = 1e9;
+    eachDot(ent, st, (px, py, pz, qx, qy) => { if (qy > .85 && py > y + .3 && py < best) best = py; }, ix, y + 6, iz, 6.5);
+    return best < 1e8 ? best : main;
+  }
+  /* the deck over a module's box: the up-facing plating over its footprint, from 1 m under its top to 3 m over it */
+  function deckOver(ent, st, b) {
+    const cx = (b[0] + b[3]) / 2, cz = (b[2] + b[5]) / 2, hx = (b[3] - b[0]) / 2 + .3, hz = (b[5] - b[2]) / 2 + .3, ys = [];
+    eachDot(ent, st, (x, y, z, nx, ny) => { if (ny > .85 && Math.abs(x - cx) < hx && Math.abs(z - cz) < hz && y > b[4] - 1 && y < b[4] + 3) ys.push(y); }, cx, b[4] + 1, cz, Math.hypot(hx, hz, 2.5));
+    if (ys.length < 6) return null;
+    ys.sort((p, q) => p - q);
+    return ys[Math.floor(ys.length * .5)];
+  }
   function halfBFn(u, G) {
     const env = G && G.env, B = u.def.size[1] / 2;
     return (z, y) => {
@@ -819,7 +836,9 @@ export function createScars(game) {
     const P = addScar(u, S, ent, st);
     if (bl && P === S) {
       let B = null;
-      try { B = game.blast.cook(u, mod, { S, deckY: G ? G.deckY : u.def.size[2] * .4, halfB: halfBFn(u, G) }); } catch (err) { console.error('scars: blast cookoff', err); }
+      // at the deck over the module the load vents through (the up-facing plating right over its box), else its side
+      const dk = deckOver(ent, st, mod.box);
+      try { B = game.blast.cook(u, mod, { S, a: dk ? [(mod.box[0] + mod.box[3]) / 2, dk, (mod.box[2] + mod.box[5]) / 2] : null, n: dk ? [0, 1, 0] : null, deckY: dk || (G ? G.deckY : u.def.size[2] * .4), halfB: halfBFn(u, G) }); } catch (err) { console.error('scars: blast cookoff', err); }
       if (!B) { S.bl = false; S.blast = null; build(u, S, ent, st); }
     }
     if (P) { P.force = Math.max(P.force || 0, S.force); P.forceUntil = Math.max(P.forceUntil || 0, S.forceUntil); P.kick = 1; }

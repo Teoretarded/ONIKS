@@ -34,7 +34,7 @@ function hsh(i, s) { let h = Math.imul((i | 0) ^ Math.imul(s | 0, 0x9E3779B1), 0
 
 export async function createBlast(game) {
   const sim = game.sim, R = game.R, ML = R.models, gl = ML.gl;
-  const stats = { patches: 0, running: 0, uploads: 0, upMs: 0, drawMs: 0, dots: 0, msgs: 0, fails: 0, updMs: 0 };
+  const stats = { patches: 0, running: 0, uploads: 0, upMs: 0, drawMs: 0, dots: 0, msgs: 0, fails: 0, updMs: 0, budget: 0 };
   const patches = new Map();            // id -> B
   const byUnit = new Map();             // unit id -> [B]
   let nextId = 1, client = null, mode = 'boot', err = null;
@@ -98,7 +98,7 @@ export async function createBlast(game) {
     const H = hullOf(u); if (!H) return null;
     const det = c.det !== undefined ? c.det : 0;
     const W = (c.he || 0) * det, Wgas = (c.prop || 0) * .25 + (c.he || 0) * (1 - det) * .25;
-    const spec = cookSpec({ u, H, mod, W, Wgas, vapour: c.vapour || 0, deckY: o.deckY, halfB: o.halfB });
+    const spec = cookSpec({ u, H, mod, W, Wgas, vapour: c.vapour || 0, deckY: o.deckY, halfB: o.halfB, a: o.a, n: o.n });
     if (!spec) return null;
     return start(u, spec, o.S, { kind: 'cookoff:' + mod.id, W, Wgas, vapour: c.vapour || 0 });
   }
@@ -242,8 +242,15 @@ export async function createBlast(game) {
   let lastSent = 0;
   function update() {
     const t0 = performance.now();
-    // the solver's share of this frame's GPU time (more in slow motion, when the plate is watched tearing)
-    if (client && client.mode && stats.running) client.tick(game.timeRate < .9 || game.paused ? cfg.gpuMsSlow : cfg.gpuMs);
+    // the solver's share of this frame's GPU time: what the game's own frame leaves of ~13.5 ms (game.quality.gpuMs, the
+    // perf guard's measure, which counts the solver too: its last share is taken back out), within 1.5 .. gpuMs (more
+    // in slow motion, when the plate is watched tearing)
+    if (client && client.mode && stats.running) {
+      const q = game.quality, mx = game.timeRate < .9 || game.paused ? cfg.gpuMsSlow : cfg.gpuMs;
+      const other = q && q.gpuMs > 0 ? Math.max(0, q.gpuMs - stats.budget * .8) : 8;
+      stats.budget = Math.max(1.5, Math.min(mx, 13.5 - other));
+      client.tick(stats.budget);
+    }
     // uploads (in the frame: the renderer's GL state stays as it expects)
     if (upQ.length) {
       const tu = performance.now();

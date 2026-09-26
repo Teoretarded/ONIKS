@@ -88,7 +88,7 @@ export function hitSpec(o) {
     plates.push({ ax: 2, val: 0, u0: x0, u1: x1, v0: yb, v1: yt, h: tSkin, mat: zoneMat, fu: H.frame, pu, fv: H.long, pv: sn(-a[1]), heavy: 30e-4 * H.tie, light: 12e-4 * H.tie, tie: H.tie, skin: 1 });
     if (topSkin) plates.push({ ax: 1, val: yt, u0: x0, u1: x1, v0: -Dz, v1: 0, h: H.deck / 1000, mat: H.mat, fu: H.frame, pu, fv: 1, pv: 0, heavy: 30e-4 * H.tie, light: 10e-4 * H.tie, tie: H.tie, skin: 1 });
     // inner decks: the nearest to the hit first (up to 3)
-    const inner = levels.map(y => sn(y - a[1])).filter(y => y > yb + S * 2 && y < yt - S * 2).sort((p, q) => Math.abs(p) - Math.abs(q)).slice(0, 3);
+    const inner = levels.map(y => sn(y - a[1])).filter(y => y > yb + S * 2 && y < yt - S * 2 && !(o.open && y + a[1] > o.open[0] - .2 && y + a[1] < o.open[1] + .2)).sort((p, q) => Math.abs(p) - Math.abs(q)).slice(0, 3);
     for (const y of inner) plates.push({ ax: 1, val: y, u0: x0, u1: x1, v0: -Dz, v1: 0, h: H.inner / 1000, mat: H.innerMat, fu: H.frame, pu, fv: 1, pv: 0, heavy: 20e-4 * H.tie, light: 8e-4 * H.tie, tie: H.tie });
     // the nearest transverse bulkhead inside the patch
     let xb = null;
@@ -111,7 +111,8 @@ export function hitSpec(o) {
     const Dz = sn(clamp(below.length >= 2 ? -below[1] + .5 : (below[0] ? -below[0] + 2 : 5), 2.5, 6.5));
     depth = Dz;
     plates.push({ ax: 2, val: 0, u0: x0, u1: x1, v0: y0, v1: Math.max(y1, y0 + S * 8), h: tSkin, mat: o.zone === 'super' ? H.superMat : H.mat, fu: H.frame, pu: sn(-a[2]), fv: 1, pv: 0, heavy: 30e-4 * H.tie, light: 10e-4 * H.tie, tie: H.tie, skin: 1 });
-    const decksBelow = below.filter(y => y > -Dz + S * 2).slice(0, 2);
+    // (a module's own space, cook-offs: no decks inside its box, model y o.open[0] .. o.open[1])
+    const decksBelow = below.filter(y => y > -Dz + S * 2 && !(o.open && y + a[1] > o.open[0] - .2 && y + a[1] < o.open[1] + .2)).slice(0, 2);
     for (const y of decksBelow) plates.push({ ax: 2, val: y, u0: x0, u1: x1, v0: y0, v1: Math.max(y1, y0 + S * 8), h: H.inner / 1000, mat: H.innerMat, fu: H.frame, pu: sn(-a[2]), fv: 1, pv: 0, heavy: 20e-4 * H.tie, light: 8e-4 * H.tie, tie: H.tie });
     let xb = null;
     for (const z of bz) { const x = sn(z - a[2]); if (x > x0 + 1 && x < x1 - 1 && (xb === null || Math.abs(x) < Math.abs(xb))) xb = x; }
@@ -145,12 +146,16 @@ export function cookSpec(o) {
   const u = o.u, m = o.mod, b = m.box, H = o.H;
   const c = [(b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2];
   const hb = Math.max(1, o.halfB ? o.halfB(c[2], c[1]) : u.def.size[1] / 2);
-  const dd = o.deckY - b[4], ds = hb - Math.max(Math.abs(b[0]), Math.abs(b[3]));
+  const dd = (o.a && o.n && o.n[1] > .7 ? o.a[1] : o.deckY) - b[4], ds = hb - Math.max(Math.abs(b[0]), Math.abs(b[3]));
   const V = Math.max(10, (b[3] - b[0]) * (b[4] - b[1]) * (b[5] - b[2]) * .7);
   let a, n, zone;
-  if (dd <= ds * 1.2 + .5) { a = [c[0], o.deckY, c[2]]; n = [0, 1, 0]; zone = 'deck'; }
+  if (o.a && o.n && o.n[1] > .7) { a = o.a.slice(); n = [0, 1, 0]; zone = 'deck'; }        // the deck the load vents through (snapped)
+  else if (dd <= ds * 1.2 + .5) { a = [c[0], o.deckY, c[2]]; n = [0, 1, 0]; zone = 'deck'; }
   else { const sx = c[0] >= 0 ? 1 : -1; a = [sx * hb, c[1], c[2]]; n = [sx, 0, 0]; zone = c[1] < 1.8 ? 'belt' : 'side'; }
-  const spec = hitSpec({ u, H, a, n, din: [-n[0], -n[1], -n[2]], zone, fz: 'in', W: o.W, Wgas: o.Wgas, vapour: o.vapour, deckY: o.deckY, halfB: o.halfB, C: c, Vspace: V });
+  // the load goes up in the upper part of its space, which is open to the plating over it (a VLS module, a magazine's
+  // trunk: no decks inside its box)
+  const cc = [c[0], Math.max(c[1], b[4] - Math.min(2.5, (b[4] - b[1]) * .3)), c[2]];
+  const spec = hitSpec({ u, H, a, n, din: [-n[0], -n[1], -n[2]], zone, fz: 'in', W: o.W, Wgas: o.Wgas, vapour: o.vapour, deckY: o.deckY, halfB: o.halfB, C: zone === 'deck' ? cc : c, Vspace: V, open: [b[1], b[4]] });
   if (!spec) return null;
   // the charge in the module's space, pulled up into the patch
   const C = spec.charge.C;

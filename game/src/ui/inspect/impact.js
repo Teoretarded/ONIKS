@@ -6,8 +6,13 @@
    (click point · random · waterline · deck). The round comes in along the camera's line of sight (Camera) or from a
    bearing / elevation set on the dial (Dial: ← → bearing, PgUp PgDn elevation, or click the dial). A waterline strike
    skims in (elevation at most 3°), a deck strike dives (at least 50°). R repeats the last strike exactly, Z steps the
-   time x1 / x0.25 / x0.1 (shown on screen), C resets (marks, fires, smoke and debris gone; after sim damage a fresh
-   unit of the type takes the old one's place), D applies the sim's damage (off: visual only).
+   time x1 / x0.25 / x0.1 / x0.02 (shown on screen), C resets (marks, fires, smoke and debris gone; after sim damage a
+   fresh unit of the type takes the old one's place), D applies the sim's damage (off: visual only).
+
+   On a ship a blast charge is solved on the GPU (game/src/blast): the plating dents, tears and petals as the solver
+   goes, never ahead of the time shown (at x0.1 / x0.02 the tear follows the fireball); the readout shows the solver's
+   physical time against the hit's, the torn plating (skin, under the water, decks and bulkheads inside), the plating's
+   set and how long the GPU took.
 
    The hit is the game's own: sim 'hit' events through game.dispatchEvents (scars.js carves the hole and seats the fire,
    fx lays the hull blast, splash, torpedo column; debris blows off the struck module), at the round's real size and
@@ -27,7 +32,7 @@ import { WH } from '../../game/scars.js';
 const D2R = Math.PI / 180;
 const sat = v => v < 0 ? 0 : v > 1 ? 1 : v;
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
-const SPEEDS = [1, .25, .1];
+const SPEEDS = [1, .25, .1, .02];
 const AIMS = ['click', 'random', 'waterline', 'deck'];
 const ORDER = ['ASCM', 'LACM', 'ASM', 'ATGM', 'SAM', 'AAM', 'SHELL', 'GUN', 'TORP'];
 /* the warhead's kind, public-reference level (a round of a newer class falls back to 'HE') */
@@ -615,6 +620,21 @@ export function createImpact(I) {
     L.push([['Warhead ', F], [m.wc, Wt], [' · ', F], [m.kgTxt, Wt], [' · ', F], [`${Math.round(m.speed)} m/s`, Wt]]);
     const r = st.res;
     if (r) L.push([['Last ', F], [r.part, CORAL], [' · dmg ', F], [r.dmg.toFixed(1), Wt], [r.applied ? ' · applied' : ' · not applied', F]]);
+    // the blast solver on the last strike (game/src/blast)
+    const u = unitOf(), Bs = game.blast, B = u && Bs ? Bs.last(u.id) : null;
+    if (Bs && !Bs.mode && Bs.mode !== 'boot') L.push([['Solver ', F], ['off', Wt], [' · analytic marks', F]]);
+    else if (B && r && B.t0 >= (r.t0 || 0) - 1e-6 && B.meta) {
+      const ms = v => v < 1 ? `${(v * 1000).toFixed(v < .01 ? 1 : 0)} ms` : `${v.toFixed(2)} s`;
+      const shown = Math.max(0, game.t - B.t0);
+      const st2 = B.state === 'done' ? 'settled' : B.state === 'fail' ? 'failed' : B.state === 'wait' ? 'building' : 'solving';
+      L.push([['Solver ', F], [st2, B.state === 'fail' ? CORAL : LIME], [' · ', F], [ms(B.tSolve || 0), Wt], [B.state === 'done' ? '' : ` of ${ms(shown)} shown`, F],
+        [B.info ? ` · ${Math.round(B.info.N / 1000)}k nodes` : '', F], [B.state === 'done' && B.wallMs ? ` · ${(B.wallMs / 1000).toFixed(1)} s` : '', F]]);
+      const bp = B.byPlate || [], inner = bp.reduce((a, b) => a + b, 0) - (B.torn || 0);
+      L.push([['Torn ', F], [`${(B.torn || 0).toFixed(2)} m²`, (B.torn || 0) > 0 ? CORAL : Wt], [' skin · ', F], [`${(B.below || 0).toFixed(2)} m²`, (B.below || 0) > 0 ? CORAL : Wt],
+        [' under water · ', F], [`${Math.max(0, inner).toFixed(1)} m²`, Wt], [' inside', F]]);
+      L.push([['Set ', F], [`${Math.round((B.setMax || 0) * 1000)} mm`, Wt], [' · ', F], [B.meta.kind && B.meta.kind.startsWith('cookoff') ? B.meta.kind.slice(8) : `${B.meta.W >= 10 ? Math.round(B.meta.W) : (B.meta.W || 0).toFixed(1)} kg TNT · ${B.meta.fz === 'in' ? 'inside' : B.meta.fz === 'frag' ? 'blast-frag' : 'contact'}`, Wt],
+        [B.res && B.res.framesTorn ? ` · ${B.res.framesTorn} frames torn` : '', F]]);
+    }
     return L;
   }
   function keys() {

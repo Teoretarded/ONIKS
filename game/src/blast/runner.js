@@ -26,7 +26,7 @@ export function createRunner(gl, o = {}) {
   const pool = createPool(gl, o.pool || {});
   const pats = new Map();              // id -> R { id, P, H, spec, state, target, lastSnap, lastSnapT, t0 }
   const queue = [];
-  const stats = { steps: 0, pumps: 0, gpuSteps: 0, built: 0, done: 0, buildMs: 0 };
+  const stats = { steps: 0, pumps: 0, gpuSteps: 0, built: 0, done: 0, buildMs: 0, snapMs: 0, pumpMs: 0 };
   let nstep = 0;
   const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
@@ -94,6 +94,7 @@ export function createRunner(gl, o = {}) {
     }
     stats.steps = did; stats.gpuSteps += did;
     const dtMs = now() - t0;
+    stats.pumpMs = dtMs;
     for (const R of run) if (R.adv || R.state === 'finish') R.runMs += dtMs / run.length;
     // finals, then snapshots of those the game is watching move
     for (const R of run) {
@@ -145,10 +146,19 @@ export function createRunner(gl, o = {}) {
 
   /* ------------------------------------------------------------ what the game draws */
   function snapshot(R, final) {
+    const ts0 = now();
+    try { return snapshot1(R, final); } finally { stats.snapMs = now() - ts0; }
+  }
+  function snapshot1(R, final) {
     const P = R.P, s = P.sim, sp = R.spec, F = sp.frame;
     const tS = final ? s.t : R.snapT;
     R.lastSnapT = tS; R.lastSnapMs = now();
-    const S = P.S, X = P.X, R0 = P.R0, gone = i => P.FREE[i] || P.DISC[i];
+    const loose = looseNodes(P, final);
+    if (final) R.loose = loose;
+    const S = P.S, X = P.X, R0 = P.R0, gone = i => P.FREE[i] || P.DISC[i] || loose[i];
+    // a cell is open: torn, or gone with a piece that tore free
+    const open = c => P.CTORN[c] || (gone(P.CN[4 * c]) + gone(P.CN[4 * c + 1]) + gone(P.CN[4 * c + 2]) + gone(P.CN[4 * c + 3]) >= 2);
+    if (final) R.open = open;
     // skins
     const skins = [], tr = [];
     R.lastSkin = R.lastSkin || [];
@@ -158,12 +168,12 @@ export function createRunner(gl, o = {}) {
       // the outer face's scorch: the charge's own soot when it went off outside; when it went off inside, only round
       // the holes (the fire venting out), a stain taller above than below
       const inside = s.C[L.ax] < L.val;
-      const so = inside ? outerSoot(P, L) : null;
+      const so = inside ? outerSoot(P, L, open) : null;
       for (let j = 0; j <= nv; j++) for (let i = 0; i <= nu; i++) {
         const k = j * (nu + 1) + i, n = L.at[k], o = 4 * k;
         d[o] = X[3 * n] - R0[3 * n]; d[o + 1] = X[3 * n + 1] - R0[3 * n + 1]; d[o + 2] = X[3 * n + 2] - R0[3 * n + 2];
         let f = 0;
-        if (i < nu && j < nv && P.CTORN[L.off + j * nu + i]) f |= 1;
+        if (i < nu && j < nv && open(L.off + j * nu + i)) f |= 1;
         if (gone(n)) f |= 2;
         if (P.TBRK[n] >= 0) f |= 4;
         d[o + 3] = f + Math.min(.99, so ? so[k] : P.SOOT[n]);
@@ -189,7 +199,7 @@ export function createRunner(gl, o = {}) {
     // the region the holes open: the struck plate's torn cells, grown 1.5 m
     const L0 = P.PL[0];
     let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9, nt = 0;
-    for (let j = 0; j < L0.nv; j++) for (let i = 0; i < L0.nu; i++) if (P.CTORN[L0.off + j * L0.nu + i]) {
+    for (let j = 0; j < L0.nv; j++) for (let i = 0; i < L0.nu; i++) if (open(L0.off + j * L0.nu + i)) {
       const u = L0.u0 + (i + .5) * S, v = L0.v0 + (j + .5) * S; nt++;
       if (u < x0) x0 = u; if (u > x1) x1 = u; if (v < y0) y0 = v; if (v > y1) y1 = v;
     }
@@ -221,7 +231,8 @@ export function createRunner(gl, o = {}) {
       for (let q = 0; q < cells.length; q += 3 * stride) {
         const L = P.PL[cells[q]], i = cells[q + 1], j = cells[q + 2], nu1 = L.nu + 1;
         const a = L.at[j * nu1 + i], b = L.at[j * nu1 + i + 1], c = L.at[(j + 1) * nu1 + i + 1], d = L.at[(j + 1) * nu1 + i];
-        const torn = P.CTORN[L.off + j * L.nu + i];
+        const torn = open(L.off + j * L.nu + i);
+        if (!torn && (gone(a) || gone(b) || gone(c) || gone(d))) continue;
         for (const [u, v] of PAT) {
           let x, y, z, m = -1;
           if (!torn) {
@@ -258,23 +269,40 @@ export function createRunner(gl, o = {}) {
     }
     // numbers
     let torn0 = 0, below = 0, setMax = 0;
-    for (let c = 0; c < P.NC; c++) if (P.CTORN[c] && P.PL[P.CSURF[c]].skin) {
+    for (let c = 0; c < P.NC; c++) if (P.PL[P.CSURF[c]].skin && open(c)) {
       torn0++;
       const a = P.CN[4 * c], cc = P.CN[4 * c + 2];
       const lx = (R0[3 * a] + R0[3 * cc]) / 2, ly = (R0[3 * a + 1] + R0[3 * cc + 1]) / 2, lz = (R0[3 * a + 2] + R0[3 * cc + 2]) / 2;
       if (F.O[1] + F.X[1] * lx + F.Y[1] * ly + F.Z[1] * lz < (sp.wl || 0)) below++;
     }
     for (let i = 0; i < P.N; i++) if (P.SURF[i] === 0 && !gone(i)) { const d = Math.hypot(X[3 * i] - R0[3 * i], X[3 * i + 1] - R0[3 * i + 1], X[3 * i + 2] - R0[3 * i + 2]); if (d > setMax) setMax = d; }
-    const byPlate = new Array(P.nP).fill(0); for (let c = 0; c < P.NC; c++) if (P.CTORN[c]) byPlate[P.CSURF[c]] += S * S;
+    const byPlate = new Array(P.nP).fill(0); for (let c = 0; c < P.NC; c++) if (open(c)) byPlate[P.CSURF[c]] += S * S;
     return { type: 'state', id: R.id, final, t: tS, T1: s.T1, skins, inner, nIn, tornSkin: torn0 * S * S, tornBelow: below * S * S, byPlate, setMax,
       runMs: R.runMs, steps: R.steps, wallMs: now() - R.tReal0, transfer: tr };
   }
 
+  /* pieces of plating torn free of the ship (still holding together, so not loose node by node): no path to a fixed edge
+     through unbroken bonds (final: exact) or intact cells (while running; a lone node on a rim is kept, a petal's tip).
+     -> Uint8Array(N), 1 = gone with the blast */
+  function looseNodes(P, bonds) {
+    const N = P.N, par = new Int32Array(N);
+    for (let i = 0; i < N; i++) par[i] = i;
+    const find = i => { while (par[i] !== i) { par[i] = par[par[i]]; i = par[i]; } return i; };
+    const uni = (a, b) => { a = find(a); b = find(b); if (a !== b) par[a] = b; };
+    if (bonds) { for (let q = 0; q < P.NS; q++) if (!P.SBRK[q]) uni(P.SA[q], P.SB[q]); }
+    else for (let c = 0; c < P.NC; c++) if (!P.CTORN[c]) { const a = P.CN[4 * c]; uni(a, P.CN[4 * c + 1]); uni(a, P.CN[4 * c + 2]); uni(a, P.CN[4 * c + 3]); }
+    const att = new Uint8Array(N), size = new Int32Array(N);
+    for (let i = 0; i < N; i++) { const r = find(i); size[r]++; if (P.FIX[i]) att[r] = 1; }
+    const out = new Uint8Array(N);
+    for (let i = 0; i < N; i++) { const r = find(i); if (!att[r] && (bonds || size[r] >= 4)) out[i] = 1; }
+    return out;
+  }
+
   /* a skin plate's outer scorch round its torn cells (per node): a distance field from the holes (grid steps, up to
      3 m, twice as far upward) */
-  function outerSoot(P, L) {
+  function outerSoot(P, L, open) {
     const nu = L.nu, nv = L.nv, W = nu + 1, D = new Float32Array(W * (nv + 1)).fill(1e9), Q = [];
-    for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) if (P.CTORN[L.off + j * nu + i]) for (const [a, b] of [[i, j], [i + 1, j], [i, j + 1], [i + 1, j + 1]]) { const k = b * W + a; if (D[k] > 0) { D[k] = 0; Q.push(k); } }
+    for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) if (open(L.off + j * nu + i)) for (const [a, b] of [[i, j], [i + 1, j], [i, j + 1], [i + 1, j + 1]]) { const k = b * W + a; if (D[k] > 0) { D[k] = 0; Q.push(k); } }
     const out = new Float32Array(W * (nv + 1));
     if (!Q.length) return out;
     const up = L.ax === 1 ? 0 : 1, lim = 3 / P.S;     // (a side: v is up; a deck: no up)
@@ -301,13 +329,13 @@ export function createRunner(gl, o = {}) {
     const rim = [];
     for (let j = 0; j <= L0.nv; j++) for (let i = 0; i <= L0.nu; i++) {
       const n = L0.at[j * (L0.nu + 1) + i];
-      if (P.TBRK[n] < 0 || P.FREE[n] || P.DISC[n]) continue;
+      if (P.TBRK[n] < 0 || P.FREE[n] || P.DISC[n] || (R.loose && R.loose[n])) continue;
       const lx = X[3 * n], ly = X[3 * n + 1], lz = X[3 * n + 2];
       rim.push(F.O[0] + F.X[0] * lx + F.Y[0] * ly + F.Z[0] * lz, F.O[1] + F.X[1] * lx + F.Y[1] * ly + F.Z[1] * lz, F.O[2] + F.X[2] * lx + F.Y[2] * ly + F.Z[2] * lz, ly);
     }
     // the hole's middle and equivalent radius (struck plate)
     let cx = 0, cy = 0, n = 0;
-    for (let j = 0; j < L0.nv; j++) for (let i = 0; i < L0.nu; i++) if (P.CTORN[L0.off + j * L0.nu + i]) { cx += L0.u0 + (i + .5) * S; cy += L0.v0 + (j + .5) * S; n++; }
+    for (let j = 0; j < L0.nv; j++) for (let i = 0; i < L0.nu; i++) if (R.open ? R.open(L0.off + j * L0.nu + i) : P.CTORN[L0.off + j * L0.nu + i]) { cx += L0.u0 + (i + .5) * S; cy += L0.v0 + (j + .5) * S; n++; }
     const hole = n ? { x: cx / n, y: cy / n, A: n * S * S } : null;
     // the floor of the space behind: the highest intact inner deck under the hole
     let floor = null;
