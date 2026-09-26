@@ -122,9 +122,14 @@ set): dish 234 / 180 / 192 mm, 0.125 vs 0.0625 6 % — PASS (was 80 / 111 / 173,
 calibrated on deck-edge folding under a side push (6.5–10 mm plating, mild/HSLA); folding elsewhere (bulkheads under
 gas, decks crushed from above) uses the same table unverified.
 
-The contact hole is not converged: 5.6 / 4.0 / 10.8 m² (side 3.7 / 2.0 / 3.6, second deck 2.1 / 1.4 / 6.5). The
-second deck above the charge tears most on the finest grid, at its folds (a fold's bending strain is taken over one
-cell, so it localises as the cells shrink); a hinge-length regularisation of the fold strain is the next step.
+The contact hole is not converged, and not monotonic: full section 5.6 / 4.0 / 10.8 m² at 0.25 / 0.125 / 0.0625 m
+(side 3.7 / 2.0 / 3.6, second deck 2.1 / 1.4 / 6.5); reduced section down to 0.031 m: 4.9 / 2.7 / 4.9 / 3.5 m² (side
+3.7 / 2.1 / 3.4 / 2.3, second deck 1.2 / 0.6 / 1.2 / 0.9). Tearing scatters ±30 % from grid to grid around the 0.031 m
+value; 0.25 m tears ~40 % more than 0.031 m. Not calibrated (a single fine value would be fitting noise).
+
+verify.html `?quick=1` after these changes: 28 pass, 3 fail, 3 info. The fails are the GPU mirror check under tearing
+(float32 tie-breaks, above) and the two "petals, not cut-outs" checks (53 % / 81 % of the torn side thrown loose,
+was 61 / 82 % at the audit); energy near contact, momentum, dt, parity, mesh dish now pass.
 
 **Seam tearing at the frames (AUDIT A1b).** 120 kg at 8 m tore the second deck at every frame station where the
 side frame meets it (the frame's reaction entered the deck at one node: 10 % compression in the first cell). With the
@@ -159,7 +164,7 @@ Arleigh Burke, GPU, 0.25 m, contact at the waterline amidships (starboard, x 0, 
 | Case | Patch | Torn | Behind the hole |
 |---|---|---|---|
 | P-800 contact | x −14.8 … 19.4 m, 95 k cells | shell 3.0 m² | 2nd deck dished 394 mm, WT bulkhead 294 mm, inner bottom 165 mm; MER 1 at 7 kPa from the products |
-| P-800 inside MER 1 | same | inner bottom 0.4, 2nd deck 0.2, WT bulkhead 0.5 m² | shell dished 138 mm, decks and bulkheads ~0.43 m (MER 1 vents through the uptakes) |
+| P-800 inside MER 1 (before the v34 gas fix: the compartment was never pressurised; now its QS pressure bursts the WT bulkheads, inner bottom and 2nd deck, verify.html) | same | inner bottom 0.4, 2nd deck 0.2, WT bulkhead 0.5 m² | shell dished 138 mm, decks and bulkheads ~0.43 m (MER 1 vents through the uptakes) |
 | 1200 kg contact | x −27 … 29 m, 163 k cells | shell 63, inner bottom 82, 2nd deck 117, WT bulkheads 139, deckhouse 5 m² | decks folded up to 7.5 m |
 | 5000 kg contact | same | shell 230, inner bottom 212, 2nd deck 155, main deck 73, WT bulkheads 270, deckhouse sides 116 m² | section wrecked |
 
