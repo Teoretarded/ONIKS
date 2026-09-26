@@ -57,8 +57,9 @@
   <div class="row"><label>Side mm</label><input id="h" type="range" min="4" max="25" step="1"></div>
   <hr>
   <div class="row"><label>Solver</label><select id="solver">
-    <option value="explicit">Explicit · reference</option><option value="xpbd">XPBD · small steps</option></select></div>
+    <option value="explicit">Explicit · reference</option><option value="xpbd">XPBD · small steps</option><option value="gpu">GPU · explicit</option></select></div>
   <div class="row"><label>XPBD step</label><input id="hs" type="range" min="10" max="1000" step="10"><span id="hsv" style="width:52px;text-align:right"></span></div>
+  <div class="row"><label>Grid</label><select id="grid"><option value="0.25">0.25 m</option><option value="0.125">0.125 m</option></select></div>
   <div class="row"><label>Local patch</label><input id="patch" type="checkbox"></div>
   <div class="btns">
     <button id="go"><b>Space</b>Detonate</button><button id="reset"><b>R</b>Reset</button>

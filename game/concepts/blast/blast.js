@@ -18,14 +18,15 @@
    each other (contact with momentum exchange). Explicit steps at the plate's stable step, mass-scaled x16 once
    only the slow gas load is left. Checked against the Nurick-Martin fit for blast-loaded plates (on screen). */
 
+const { createGPU } = await import('./gpu.js?v=' + Date.now());
 const cv = document.getElementById('c');
 const gl = cv.getContext('webgl2', { antialias: false, alpha: false });
 const $ = id => document.getElementById(id);
 
 /* ------------------------------------------------------------------ constants */
-const S = 0.25, P0 = 101325, G = 9.81;
+let S = 0.25; const P0 = 101325, G = 9.81;
 const XA = -12, XZ = 12, YB = -2, YI = 3.5, YD = 7, ZI = -6, XBH = 6;
-const FRAME = 10, LONG = 3;
+let FRAME = 10, LONG = 3;                   // in cells: frames every 2.5 m, longitudinals every 0.75 m
 let TEAR_K = .06, EF_MESH = .6;
 const V_CRACK = 600;                        // m/s, a running crack in ship steel (well under the ~3 km/s limit)             // tuning: share of the tearing work, mesh-scale fracture strain factor
 const MATS = {
@@ -39,7 +40,7 @@ const ROUNDS = [
   ['Kh-35', 65], ['Harpoon', 100], ['P-800 Oniks', 120], ['Kalibr · Tomahawk', 200], ['Mk 84 bomb', 500],
 ];
 
-const st = { solver: 'explicit', hs: 100, iters: 1, patch: false, spd: 0, src: 'charge', round: 7, kg: 120, fuze: 'contact', standoff: 3, mat: 'hsla', h: 10, view: 0, post: 1,
+const st = { grid: .25, solver: 'explicit', hs: 100, iters: 1, patch: false, spd: 0, src: 'charge', round: 7, kg: 120, fuze: 'contact', standoff: 3, mat: 'hsla', h: 10, view: 0, post: 1,
   aim: [0, 2.2, 0], aimN: [0, 0, 1] };
 
 /* ------------------------------------------------------------------ small rng */
@@ -49,7 +50,7 @@ const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 42
 /* ------------------------------------------------------------------ structure */
 let UB, UN, UNB, KB, KBC, KBY, SC, RH, IMP, VC, NADJ, ADJ, DISC, N, X, V, F, M, R0, AREA, NRM, SURF, FIX, TK, TFY, TAN, LINKS, FREE, TBRK, SOOT, EPS, FRM;
 let NS, SA, SB, SL0, SLP, SK, SFY, SEF, SBRK, SCELL;
-let NC, CN, CSURF, CTORN, CU, CV2, DOTS_PER, NSP, NSN, CSP, CSN, LOSF;
+let CBOND, NC, CN, CSURF, CTORN, CU, CV2, DOTS_PER, NSP, NSN, CSP, CSN, LOSF;
 const PL = [], GP = new Float64Array(5), OPEN = new Float64Array(25);
 // compartments: 0 lower fwd, 1 lower aft (past the bulkhead), 2 upper fwd, 3 upper aft, 4 outside
 const comp = (x, y, z) => (z > 0 || y > YD || y < YB || z < ZI || x < XA || x > XZ) ? 4 : (y < YI ? 0 : 2) + (x > XBH ? 1 : 0);
@@ -57,6 +58,7 @@ const GV = [(XBH - XA) * (YI - YB) * -ZI, (XZ - XBH) * (YI - YB) * -ZI, (XBH - X
 let dt = 2e-5;
 
 function build() {
+  S = st.grid; FRAME = Math.round(2.5 / S); LONG = Math.round(.75 / S); const DK = Math.round(1 / S), SL = S / .25;
   const mt = MATS[st.mat];
   const pos = [], mass = [], area = [], nrm = [], surf = [], tk = [], tfy = [], frm = [], rh = [], vc = [];
   const key = new Map();
@@ -83,15 +85,15 @@ function build() {
   // a plate: origin o, unit steps u (i) and v (j), nu x nv cells, thickness h; frames on i % fu, stiffeners on j % fv
   const plate = (sid, o, u, v, nu, nv, h, n, m, fu, fv, heavy, light) => {
     const ax = n[0] ? 0 : n[1] ? 1 : 2, ua = u[0] ? 0 : u[1] ? 1 : 2, va = v[0] ? 0 : v[1] ? 1 : 2;
-    PL[sid] = { ax, val: o[ax], ua, va, u0: o[ua], v0: o[va], nu, nv, off: csurf.length };
     const at = [];
+    PL[sid] = { ax, val: o[ax], ua, va, u0: o[ua], v0: o[va], nu, nv, off: csurf.length, at };
     for (let j = 0; j <= nv; j++) for (let i = 0; i <= nu; i++) {
       const x = o[0] + (u[0] * i + v[0] * j) * S, y = o[1] + (u[1] * i + v[1] * j) * S, z = o[2] + (u[2] * i + v[2] * j) * S;
       const id = node(x, y, z, sid, n);
       at.push(id); mass[id] += m.rho * h * S * S; area[id] += S * S;
       if (m.rho * h > rh[id]) { rh[id] = m.rho * h; vc[id] = Math.sqrt(2 * TEAR_K * m.sy * m.ef / m.rho); }
-      if (fu && i % fu === 0) { mass[id] += 7850 * heavy * S; tk[id] = Math.max(tk[id], 6e7); tfy[id] = Math.max(tfy[id], 16e3); frm[id] = 2; }
-      else if (fv && j % fv === 0) { mass[id] += 7850 * light * S; tk[id] = Math.max(tk[id], 3e7); tfy[id] = Math.max(tfy[id], 5e3); frm[id] = Math.max(frm[id], 1); }
+      if (fu && i % fu === 0) { mass[id] += 7850 * heavy * S; tk[id] = Math.max(tk[id], 6e7 * SL); tfy[id] = Math.max(tfy[id], 16e3 * SL); frm[id] = 2; }
+      else if (fv && j % fv === 0) { mass[id] += 7850 * light * S; tk[id] = Math.max(tk[id], 3e7 * SL); tfy[id] = Math.max(tfy[id], 5e3 * SL); frm[id] = Math.max(frm[id], 1); }
     }
     const I = (i, j) => at[j * (nu + 1) + i];
     for (let j = 0; j <= nv; j++) for (let i = 0; i <= nu; i++) {
@@ -110,9 +112,9 @@ function build() {
   const hs = st.h / 1000;
   // 0 hull side (z = 0, outward +z), 1 weather deck (y = 7), 2 second deck (y = 3.5), 3 transverse bulkhead (x = 6)
   plate(0, [XA, YB, 0], [1, 0, 0], [0, 1, 0], (XZ - XA) / S, (YD - YB) / S, hs, [0, 0, 1], side, FRAME, LONG, 30e-4, 12e-4);
-  plate(1, [XA, YD, ZI], [1, 0, 0], [0, 0, 1], (XZ - XA) / S, -ZI / S, .0095, [0, 1, 0], inner, FRAME, 4, 30e-4, 10e-4);
-  plate(2, [XA, YI, ZI], [1, 0, 0], [0, 0, 1], (XZ - XA) / S, -ZI / S, .0065, [0, 1, 0], inner, FRAME, 4, 20e-4, 8e-4);
-  plate(3, [XBH, YB, ZI], [0, 0, 1], [0, 1, 0], -ZI / S, (YD - YB) / S, .0065, [1, 0, 0], inner, 0, 4, 0, 8e-4);
+  plate(1, [XA, YD, ZI], [1, 0, 0], [0, 0, 1], (XZ - XA) / S, -ZI / S, .0095, [0, 1, 0], inner, FRAME, DK, 30e-4, 10e-4);
+  plate(2, [XA, YI, ZI], [1, 0, 0], [0, 0, 1], (XZ - XA) / S, -ZI / S, .0065, [0, 1, 0], inner, FRAME, DK, 20e-4, 8e-4);
+  plate(3, [XBH, YB, ZI], [0, 0, 1], [0, 1, 0], -ZI / S, (YD - YB) / S, .0065, [1, 0, 0], inner, 0, DK, 0, 8e-4);
 
   N = pos.length / 3;
   X = new Float64Array(pos); R0 = new Float64Array(pos); V = new Float64Array(3 * N); F = new Float64Array(3 * N); IMP = new Float64Array(N);
@@ -156,6 +158,7 @@ function build() {
   // tearing work, 1/2 rho h v^2 > k sy ef h, tears out of the plate; v_c = sqrt(2 k sy ef / rho)
   VC = new Float64Array(vc);
   for (let i = 0; i < N; i++) if (FRM[i] === 2) VC[i] *= 1.8; else if (FRM[i] === 1) VC[i] *= 1.25;   // stiffened lines hold longer
+  CBOND = Int32Array.from(cellSprings.flat());
   NC = csurf.length; CN = new Int32Array(cells); CSURF = new Int8Array(csurf); CTORN = new Uint8Array(NC);
   // which space lies on each side of every node and cell (+normal side, -normal side)
   NSP = new Int8Array(N); NSN = new Int8Array(N); LOSF = new Uint8Array(N);
@@ -173,11 +176,11 @@ function build() {
   for (let s = 0; s < NS; s++) w2 = Math.max(w2, 4 * SK[s] / Math.min(M[SA[s]], M[SB[s]]));
   dt = .9 / Math.sqrt(w2);
   // render dots: a fixed pattern per cell (u, v in 0..1), density by surface
-  DOTS_PER = [18, 12, 8, 8];
+  DOTS_PER = [18, 12, 8, 8].map(d => Math.max(2, Math.round(d * (S / .25) ** 2)));
   let nd = 0; for (let c = 0; c < NC; c++) nd += DOTS_PER[CSURF[c]];
   CU = new Float32Array(nd); CV2 = new Float32Array(nd);
   seed = 7; for (let k = 0; k < nd; k++) { CU[k] = rnd(); CV2[k] = rnd(); }
-  sim = null; bufDirty = true;
+  sim = null; bufDirty = true; gpu = null;
 }
 
 /* ------------------------------------------------------------------ blast load */
@@ -272,6 +275,7 @@ function detonate() {
   sim.tLoad = Math.max(sim.tLoad, Math.min(tl, .02 + .004 * W3));
   sim.solver = st.solver; sim.hs = st.hs * 1e-6; sim.iters = st.iters;
   prepareActive();
+  if (sim.solver === 'gpu') gpuStart();
 }
 
 const fireR = W => .5 * 3.86 * Math.pow(Math.max(W, .01), .32);   // fireball radius, m
@@ -316,6 +320,9 @@ function breakBond(q, t) {
 function disc(i, t) {
   DISC[i] = 1;
   for (let k = NADJ[i]; k < NADJ[i + 1]; k++) if (!SBRK[ADJ[k]]) breakBond(ADJ[k], t);
+  crackStart(i, t);
+}
+function crackStart(i, t) {
   const p = SURF[i], P = PL[p], s = sim;
   let cr = s.cracks[p];
   const u = R0[3 * i + P.ua], v = R0[3 * i + P.va];
@@ -333,7 +340,7 @@ function disc(i, t) {
       const th = Math.atan2(dv, du);
       for (const L of lines) { let d = th - L.th; d -= Math.round(d / 6.2832) * 6.2832; if (Math.abs(d) * r < S * .6) { cand.push(q, r, L.lf); break; } }
     }
-    cr = s.cracks[p] = { u, v, t0: t, rb: 0, cand: Float64Array.from(cand) };
+    cr = s.cracks[p] = { p, u, v, t0: t, rb: 0, lines, cand: Float64Array.from(cand) };
   }
   cr.rb = Math.max(cr.rb, Math.hypot(u - cr.u, v - cr.v) + S * .5);
 }
@@ -559,8 +566,66 @@ function stepXPBD() {
   s.t += h; s.n++;
 }
 
+/* ---- solver 3: the explicit model on the GPU (gpu.js); the CPU keeps gas, line of sight and cracks, synced */
+let gpu = null; const SYNC = 25;
+function gpuModel() {
+  return { N, NS, NC, SA, SB, NADJ, SL0, SK, SFY, SEF, SC, AREA, SURF, NSP, NSN, RH, VC, R0, NRM, TK, TFY, KB, KBY, KBC, UNB, UN, PL,
+    X, V, DISC, IMP, TAN, FREE, UB, SLP, SBRK, CTORN, LOSF, GP, S, V_CRACK,
+    winv: i => WINV[i], dirSign: i => { const s = sim; return s.DIR[3 * i] * NRM[3 * i] + s.DIR[3 * i + 1] * NRM[3 * i + 1] + s.DIR[3 * i + 2] * NRM[3 * i + 2] < 0 ? -1 : 1; },
+    PR: i => sim.PR[i], TA: i => sim.TA[i], TD: i => sim.TD[i], C: () => sim.C,
+    crackPlate: q => { const a = SA[q], b = SB[q], p = SURF[a]; if (SURF[b] !== p) return -1; const P = PL[p];
+      return Math.abs(R0[3 * a + P.ax] - P.val) < 1e-3 && Math.abs(R0[3 * b + P.ax] - P.val) < 1e-3 ? p : -1; },
+    slotMid: q => { const a = SA[q], b = SB[q], P = PL[SURF[a]]; return [(R0[3 * a + P.ua] + R0[3 * b + P.ua]) / 2, (R0[3 * a + P.va] + R0[3 * b + P.va]) / 2]; },
+    cellBonds: c => CBOND.subarray(6 * c, 6 * c + 6), plateNode: (p, i, j) => PL[p].at[j * (PL[p].nu + 1) + i] };
+}
+function gpuStart() {
+  if (!gpu) gpu = createGPU(gl, gpuModel()); gpu.upload();
+  // tear-outs on plates the charge sees directly happen within the pulse: when the running impulse
+  // PR (tau - tau^2 / 2 TD) reaches rho h v_c. The first one starts that plate's cracks; the rim is the farthest.
+  const s = sim; if (!(s.W > 0)) return;
+  const first = [-1, -1, -1, -1], ft = [1e9, 1e9, 1e9, 1e9];
+  const dt0 = new Float64Array(N).fill(-1);
+  for (let k = 0; k < ANODES.length; k++) { const i = ANODES[k]; if (!LOSF[i]) continue;
+    const thr = RH[i] * VC[i], full = s.PR[i] * s.TD[i] / 2; if (full <= thr) continue;
+    const tau = s.TD[i] * (1 - Math.sqrt(Math.max(0, 1 - 2 * thr / (s.PR[i] * s.TD[i])))), ti = s.TA[i] + tau;
+    dt0[i] = ti; const p = SURF[i]; if (ti < ft[p]) { ft[p] = ti; first[p] = i; } }
+  for (let p = 0; p < 4; p++) if (first[p] >= 0) {
+    crackStart(first[p], ft[p]);
+    for (let i = 0; i < N; i++) if (dt0[i] >= 0 && SURF[i] === p) crackStart(i, dt0[i]);   // grows the rim to the last predicted tear-out
+  }
+  gpu.cracks(s.cracks.filter(Boolean));
+}
+function stepGPU() {
+  const s = sim, t = s.t;
+  if (s.slow && s.msc === 1 && t > s.tFast) s.msc = 16;
+  const h = dt * Math.sqrt(s.msc);
+  gpu.step(t, h, s.msc, 1 - (t > s.tLoad && !s.slow ? 250 : 30) * h);
+  s.t += h; s.n++;
+  if (s.n % SYNC === 0) gpuSync(h * SYNC);
+}
+function gpuSync(hs) {
+  const s = sim, t = s.t;
+  for (const q of s.srcs) { const Fn = q.kind === 'det' ? Math.min(1, t / q.tau) : 1 - Math.exp(-t / q.tau); GP[q.c] += q.Pq * (Fn - q.F); q.F = Fn; }
+  // torn cells matter to the CPU only for the gas (vents): read without stalling; at the end, read for real
+  // (the browser only completes a fence between tasks: in a synchronous run, read blocking every 2nd sync)
+  const cl = hs === 0 ? gpu.readCells() : !s.srcs.length ? null : s.sync ? ((s.n / SYNC) % 2 ? null : gpu.readCells()) : gpu.readCellsAsync();
+  if (cl) for (let c = 0; c < NC; c++) if (cl[4 * c] > .5 && !CTORN[c]) {
+    CTORN[c] = 1; if (CSURF[c] === 0) s.hullTorn++; s.cellsTorn++;
+    const pp = CSP[c], m = CSN[c]; OPEN[pp * 5 + m] += S * S; OPEN[m * 5 + pp] += S * S;
+    for (let k = 0; k < 4; k++) { const i = CN[4 * c + k]; if (TBRK[i] < 0) TBRK[i] = t; }
+  }
+  gasStep(hs);
+  if (s.n % 400 === 0 && t > s.tLoad && s.srcs.every(q => q.F > .98) && GP[0] + GP[1] + GP[2] + GP[3] < 2e4) {
+    gpu.readNodes(true); let v2 = 0;
+    for (let k = 0; k < ANODES.length; k++) { const i = ANODES[k]; if (FREE[i]) continue; const q = V[3 * i] ** 2 + V[3 * i + 1] ** 2 + V[3 * i + 2] ** 2; if (q > v2) v2 = q; }
+    if (v2 < 1) s.T1 = t;
+  }
+}
+function gpuFinish() { gpu.readNodes(true); gpu.readBonds(); gpuSync(0); }
+
 function step() {
   const s = sim;
+  if (s.solver === 'gpu') { stepGPU(); return; }
   if (s.solver === 'xpbd') stepXPBD(); else stepExplicit();
   if (s.n % 200 === 0 && s.t > s.tLoad && s.srcs.every(q => q.F > .98) && GP[0] + GP[1] + GP[2] + GP[3] < 2e4) {
     let v2 = 0; for (let k = 0; k < ANODES.length; k++) { const i = ANODES[k]; if (FREE[i]) continue;
@@ -609,6 +674,7 @@ function collide(posOnly) {
 }
 
 function settle() {                                // end of the structural response: the plate keeps its set
+  if (sim.solver === 'gpu') gpuFinish();
   for (let i = 0; i < N; i++) if (!FREE[i]) { V[3 * i] = V[3 * i + 1] = V[3 * i + 2] = 0; }
   let md = 0;
   for (let i = 0; i < N; i++) if (SURF[i] === 0 && !FREE[i]) md = Math.max(md, Math.hypot(X[3 * i] - R0[3 * i], X[3 * i + 1] - R0[3 * i + 1], X[3 * i + 2] - R0[3 * i + 2]));
@@ -730,6 +796,7 @@ function draw(now) {
     const t0 = performance.now(), ts = sim.t, goal = spd ? ts + rdt * spd : Infinity;
     while (performance.now() - t0 < 12 && sim.t < sim.T1 && sim.t < goal) for (let k = 0; k < 10 && sim.t < sim.T1 && sim.t < goal; k++) step();
     lastRate = rdt > 0 ? (sim.t - ts) / rdt : 0;
+    if (sim.solver === 'gpu' && sim.t < sim.T1) gpu.readNodes(false);
     if (sim.t >= sim.T1) { sim.phase = 2; settle(); }
   } else if (sim && sim.phase === 2) {
     const r = spd ? Math.max(spd, .05) : 1, h = rdt * r; sim.post += h; ballistic(h); lastRate = r;
@@ -902,7 +969,7 @@ function readout(tv) {
 /* ------------------------------------------------------------------ input */
 const sel = $('round');
 ROUNDS.forEach(([n, kg], i) => { const o = document.createElement('option'); o.value = i; o.textContent = `${n} · ${kg} kg`; sel.appendChild(o); });
-const sync = () => { $('solver').value = st.solver; $('hs').value = st.hs; $('hsv').textContent = st.hs + ' µs'; $('patch').checked = st.patch; $('slow').innerHTML = `<b>S</b>${SPEED_NAMES[st.spd]}`; $('src').value = st.src; sel.value = st.round; $('kg').value = st.kg; $('fuze').value = st.fuze; $('standoff').value = st.standoff; $('mat').value = st.mat; $('h').value = st.h; };
+const sync = () => { $('grid').value = st.grid; $('solver').value = st.solver; $('hs').value = st.hs; $('hsv').textContent = st.hs + ' µs'; $('patch').checked = st.patch; $('slow').innerHTML = `<b>S</b>${SPEED_NAMES[st.spd]}`; $('src').value = st.src; sel.value = st.round; $('kg').value = st.kg; $('fuze').value = st.fuze; $('standoff').value = st.standoff; $('mat').value = st.mat; $('h').value = st.h; };
 sel.onchange = () => { st.round = +sel.value; st.kg = ROUNDS[st.round][1]; sync(); };
 $('kg').onchange = () => { st.kg = Math.max(.01, +$('kg').value || .01); };
 $('fuze').onchange = () => { st.fuze = $('fuze').value; };
@@ -917,6 +984,7 @@ $('slow').onclick = () => { st.spd = (st.spd + 1) % SPEEDS.length; $('slow').inn
 $('solver').onchange = () => { st.solver = $('solver').value; };
 $('hs').oninput = () => { st.hs = +$('hs').value; $('hsv').textContent = st.hs + ' µs'; };
 $('patch').onchange = () => { st.patch = $('patch').checked; };
+$('grid').onchange = () => { st.grid = +$('grid').value; build(); };
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
   if (e.code === 'Space') { e.preventDefault(); detonate(); }
@@ -953,9 +1021,10 @@ sync(); build();
 requestAnimationFrame(draw);
 // bench: run one case to the end and measure it; shape = every node's final displacement, to compare solvers
 function runCase(cfg) {
-  Object.assign(st, cfg); build(); detonate();
+  Object.assign(st, cfg); build(); detonate(); sim.sync = true;
   const t0 = performance.now(); let steps = 0;
   while (sim.t < sim.T1) { step(); steps++; }
+  if (sim.solver === 'gpu') gpuFinish();
   const cpu = performance.now() - t0; sim.cpu = cpu; sim.phase = 2; settle();
   const by = [0, 0, 0, 0]; for (let q = 0; q < NS; q++) if (SBRK[q]) by[SURF[SA[q]]]++;
   let free = 0; for (let i = 0; i < N; i++) free += FREE[i];
@@ -971,7 +1040,7 @@ function compare(a, r) {
   let diff = 0, both = 0; for (let c = 0; c < a.cellsTorn.length; c++) { if (a.cellsTorn[c] !== r.cellsTorn[c]) diff++; else if (a.cellsTorn[c]) both++; }
   return { dispErrMm: +(s / n * 1000).toFixed(1), tornDiffCells: diff, tornBothCells: both };
 }
-window.BLAST = { PROF, ver: 12, runCase, compare, cam, stepN(n) { for (let k = 0; k < n; k++) step(); return sim.t; }, st, detonate, build, draw, dbg: () => ({ FREE, SURF, SBRK, SA, SB, SL0, X, R0, N, NS, FIX, GP, OPEN, CTORN, CSURF }), tune(k, e) { TEAR_K = k; EF_MESH = e; }, get sim() { return sim; },
+window.BLAST = { PROF, ver: 19, runCase, compare, cam, stepN(n) { for (let k = 0; k < n; k++) step(); return sim.t; }, st, detonate, build, draw, dbg: () => ({ FREE, SURF, SBRK, SA, SB, SL0, X, R0, N, NS, FIX, GP, OPEN, CTORN, CSURF }), tune(k, e) { TEAR_K = k; EF_MESH = e; }, get sim() { return sim; },
   // headless check: run the whole structural response now and report
   run() { const t0 = performance.now(); while (sim.t < sim.T1) step(); sim.phase = 2; settle();
     let free = 0; for (let i = 0; i < N; i++) free += FREE[i];
