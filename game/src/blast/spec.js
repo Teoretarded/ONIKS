@@ -5,7 +5,7 @@
    hullOf(u) -> the class's plating and framing (HULL); hitSpec(o) / cookSpec(o) -> spec, or null (nothing to model).
 
    A side patch: a vertical plate (the side, normal horizontal and outward) as wide as the charge asks (2.5 W^(1/3),
-   3 - 10 m each way), up to the main deck (a skin plate too: the model's deck dots follow it) and down as far; decks
+   3 - 10 m each way, 14 m over ~300 kg), up to the main deck (a skin plate too: the model's deck dots follow it) and down as far; decks
    at the class's levels, the nearest transverse bulkhead, the space behind up to the far side. A deck patch: the deck
    (normal up) over the same width, bounded athwartships by the side shell, the decks below, a bulkhead.
    Local frame: z the outward normal of the struck plate, y up (side) or athwartships (deck), x = y cross z. */
@@ -55,7 +55,9 @@ export function hitSpec(o) {
   const S = S_GRID, H = o.H, def = o.u.def, a = o.a, draught = def.draught || 5;
   const deck = o.n[1] > .7;
   const Wm = Math.max(o.W || 0, (o.Wgas || 0) * .6, (o.vapour || 0) * .5, 1);
-  const Rp = clamp(2.5 * Math.cbrt(Wm), 3, 10);
+  // the patch: 2.5 W^(1/3) each way, 3 - 10 m (to 14 m for the largest loads: a clamped edge closer than that would
+  // hold plating the blast should move; beyond the patch the hull stays as drawn)
+  const Rp = clamp(2.5 * Math.cbrt(Wm), 3, Wm > 300 ? 14 : 10);
   const hb = Math.max(1, o.halfB ? o.halfB(a[2], deck ? a[1] - .5 : a[1]) : def.size[1] / 2);
   // the local frame
   let Z, Y, X;

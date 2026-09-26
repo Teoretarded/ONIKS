@@ -239,6 +239,7 @@ export async function createBlast(game) {
 
   /* ------------------------------------------------------------ per frame */
   const TG = {};
+  const gone = new Set();                // units the sim removed whose hull game/structure still draws
   let lastSent = 0;
   function update() {
     const t0 = performance.now();
@@ -293,6 +294,7 @@ export async function createBlast(game) {
       }
     }
     stats.running = run;
+    for (const uid of gone) if (!(game.structure && game.structure.draws && game.structure.draws(uid))) { gone.delete(uid); dropUnit(uid); }
     if (any && client && client.mode) { client.targets(TG); for (const k in TG) delete TG[k]; lastSent = game.realT; }
     stats.updMs = performance.now() - t0;
   }
@@ -305,18 +307,20 @@ export async function createBlast(game) {
     let drawn = 0;
     const M = [1, 0, 0, 0, 1, 0, 0, 0, 1];
     for (const [uid, L] of byUnit) {
-      const u = sim.units.get(uid);
-      if (!u || !game.drawn.has(uid)) continue;
+      const u = sim.units.get(uid), hull = game.structure && game.structure.draws && game.structure.draws(uid);
+      if (!hull && (!u || !game.drawn.has(uid))) continue;
       const rec = game.scars && game.scars.of(uid);
       if (rec && rec.vis === false) continue;
+      const sea = !u || u.def.domain === 'sea';
       for (const B of L) {
         if (!B.inner || !B.nIn) continue;
         const Fr = B.spec.frame;
         // the piece of a broken hull the patch is on (game/structure), else the unit's drawn pose
-        const pz = game.structure && game.structure.poseAt ? game.structure.poseAt(uid, Fr.O[2]) : null;
+        const pz = hull && game.structure.poseAt ? game.structure.poseAt(uid, Fr.O[2]) : null;
         let p0;
         if (pz) { for (let i = 0; i < 9; i++) M[i] = pz.R[i]; p0 = pz.T; }
-        else { const pose = game.unitPose(u); attitudeM(pose.hdg, pose.pitch || 0, pose.roll || 0, M); p0 = pose.pos; }
+        else if (u) { const pose = game.unitPose(u); attitudeM(pose.hdg, pose.pitch || 0, pose.roll || 0, M); p0 = pose.pos; }
+        else continue;
         const cx = p0[0] + M[0] * Fr.O[0] + M[1] * Fr.O[1] + M[2] * Fr.O[2], cy = p0[1] + M[3] * Fr.O[0] + M[4] * Fr.O[1] + M[5] * Fr.O[2], cz = p0[2] + M[6] * Fr.O[0] + M[7] * Fr.O[1] + M[8] * Fr.O[2];
         const zc = (cx - eye[0]) * f[0] + (cy - eye[1]) * f[1] + (cz - eye[2]) * f[2];
         if (zc < -12) continue;
@@ -331,7 +335,7 @@ export async function createBlast(game) {
         for (let i = 0; i < B.nIn; i += stride) {
           const o = i * 6, x = I[o], y = I[o + 1], z = I[o + 2], b = I[o + 3], e = I[o + 4], lz = I[o + 5];
           const wx = p0[0] + M[0] * x + M[1] * y + M[2] * z, wy = p0[1] + M[3] * x + M[4] * y + M[5] * z, wz = p0[2] + M[6] * x + M[7] * y + M[8] * z;
-          if (wy < .05 && u.def.domain === 'sea') continue;                 // flooded: under the sea
+          if (wy < .05 && sea) continue;                                    // flooded: under the sea
           const hs = hsh(i, B.seed);
           const torn = (e & 1) !== 0, fr = (e & 2) !== 0;
           // charred steel: dark, the torn edges and frames catching more light; the fire's glow deep inside, flickering
@@ -359,7 +363,8 @@ export async function createBlast(game) {
     async solverStats() { return client && client.stats ? client.stats() : null; },
     init() { game.blast = sys; },
     onEvent(e) {
-      if (e.type === 'removed') dropUnit(e.unit);
+      // (a hull still drawn by game/structure, sinking in pieces, keeps its patches until it is gone)
+      if (e.type === 'removed') { if (game.structure && game.structure.draws && game.structure.draws(e.unit)) gone.add(e.unit); else dropUnit(e.unit); }
     },
     update,
     draw3d(frame) {
