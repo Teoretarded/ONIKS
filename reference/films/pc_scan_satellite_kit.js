@@ -49,7 +49,7 @@ function pj(x, y, z) {
   PJ[2] = zc; return true;
 }
 const onS = m => PJ[0] > -m && PJ[1] > -m && PJ[0] < BW + m && PJ[1] < BH + m;
-function dotW(x, y, z, s, c, a) { if (pj(x, y, z)) dot(PJ[0], PJ[1], s, c[0], c[1], c[2], a); }
+function dotW(x, y, z, s, c, a) { if (pj(x, y, z) && !(OCC_ON && occT(PJ[0], PJ[1], PJ[2]))) dot(PJ[0], PJ[1], s, c[0], c[1], c[2], a); }
 function addW(x, y, z, s, c, a) { if (pj(x, y, z) && onS(s)) add(PJ[0], PJ[1], s, c[0], c[1], c[2], a); }
 /* a straight dotted line between two world points (clipped at the near plane), optional glow every 3rd dot */
 const CA = new Float64Array(3), CB = new Float64Array(3);
@@ -81,7 +81,7 @@ function ringW(c, U, W, r, n, s, col, a, ph) {
   ph = ph || 0;
   for (let k = 0; k < n; k++) {
     const t = ph + k / n * TAU, cs = Math.cos(t) * r, sn = Math.sin(t) * r;
-    if (pj(c[0] + U[0] * cs + W[0] * sn, c[1] + U[1] * cs + W[1] * sn, c[2] + U[2] * cs + W[2] * sn)) dot(PJ[0], PJ[1], s, col[0], col[1], col[2], a);
+    if (pj(c[0] + U[0] * cs + W[0] * sn, c[1] + U[1] * cs + W[1] * sn, c[2] + U[2] * cs + W[2] * sn) && !(OCC_ON && occT(PJ[0], PJ[1], PJ[2]))) dot(PJ[0], PJ[1], s, col[0], col[1], col[2], a);
   }
 }
 /* soft round additive glow (screen px radius), falling off as (1 - d^2)^2 */
@@ -127,6 +127,7 @@ function drawStars(S, a, T, minY) {
     const zc = dx * f[0] + dy * f[1] + dz * f[2]; if (zc < .05) continue;
     const sx = cx + F * (dx * r[0] + dy * r[1] + dz * r[2]) / zc, sy = cy - F * (dx * u[0] + dy * u[1] + dz * u[2]) / zc;
     if (sx < 0 || sy < 0 || sx >= BW || sy >= BH) continue;
+    if (OCC_ON && occT(sx, sy, 1e12)) continue;
     dot(sx, sy, 1, 225, 228, 222, S[j + 3] * a * (.8 + .2 * Math.sin(T * 1.3 + S[j + 4])));
   }
 }
@@ -226,7 +227,7 @@ function sphereIn(mx, my, mz, rad) {
   if ((yc - yt * zc) / ky > rad || (-yc - yt * zc) / ky > rad) return false;
   return true;
 }
-const OPT = { a: 1, fade: 900, back: .1, lime: 0, col: WH, keep: 1, rev: null, size: 1, tint: null, tk: 0, px: 4.4, px0: 18, clip: null };
+const OPT = { a: 1, fade: 900, back: .1, lime: 0, col: WH, keep: 1, rev: null, size: 1, tint: null, tk: 0, px: 4.4, px0: 18, clip: null, occ: 0, lb: 0 };
 const OO = Object.assign({}, OPT);
 function opt(o) { for (const k in OPT) OO[k] = o && o[k] !== undefined ? o[k] : OPT[k]; return OO; }
 function runPts(P, i0, i1, sp, o) {
@@ -238,6 +239,7 @@ function runPts(P, i0, i1, sp, o) {
   let cr = col[0] + (LIME[0] - col[0]) * lm, cg = col[1] + (LIME[1] - col[1]) * lm, cb = col[2] + (LIME[2] - col[2]) * lm;
   if (o.tint) { const tk = o.tk; cr += (o.tint[0] - cr) * tk; cg += (o.tint[1] - cg) * tk; cb += (o.tint[2] - cb) * tk; }
   const cp = o.clip, c0 = cp ? cp[0] : 0, c1 = cp ? cp[1] : 0, c2 = cp ? cp[2] : 0, c3 = cp ? cp[3] : 0;
+  const oc = o.occ && OCC_ON, OZ_ = OZ, OC_ = OC;
   const rv = o.rev, rx = rv ? rv.x : 0, ry = rv ? rv.y : 0, rz = rv ? rv.z : 0, rage = rv ? rv.age : 0, rinv = rv ? 1 / rv.v : 0, rpre = rv ? rv.pre : 1, rlime = rv ? rv.after || 0 : 0;
   for (let i = i0, j = i0 * 6; i < i1; i++, j += 6) {
     if (keep < 1 && (i * .6180339887) % 1 > keep) continue;
@@ -248,6 +250,7 @@ function runPts(P, i0, i1, sp, o) {
     const iz = F / zc;
     const sx = cx + (a00 * px + a01 * py + a02 * pz + b0) * iz; if (sx < 0 || sx >= BW) continue;
     const sy = cy - (a10 * px + a11 * py + a12 * pz + b1) * iz; if (sy < 0 || sy >= BH) continue;
+    if (oc) { const t = ((sy | 0) >> 2) * OW + ((sx | 0) >> 2); if (OC_[t] && zc > OZ_[t] * 1.015 + .06) continue; }
     const nx = P[j + 3], ny = P[j + 4], nz = P[j + 5];
     let b;
     if (nx === 0 && ny === 0 && nz === 0) b = .5;
@@ -278,12 +281,62 @@ function runPts(P, i0, i1, sp, o) {
     if (b < .02) continue;
     if (b > 1) b = 1;
     const pxs = sp * iz * big;
-    if (pxs <= 3.6) {
+    if (pxs <= 6) {
       const q = ((sy | 0) * BW + (sx | 0)) << 2, R_ = r * b, G_ = g * b, B_ = bl * b;
       if (Dd[q] < R_) Dd[q] = R_; if (Dd[q + 1] < G_) Dd[q + 1] = G_; if (Dd[q + 2] < B_) Dd[q + 2] = B_;
-    } else pb.dot(sx, sy, pxs > 7.5 ? 3 : 2, r, g, bl, b);
+    } else pb.dot(sx, sy, 2, r, g, bl, b);
   }
 }
+/* ---------- occlusion: 4 px tiles holding the nearest depth of convex occluders (after pe_aegis_scope's occHouse) */
+const OW = 480, OH = 270, OZ = new Float32Array(OW * OH), OC = new Uint8Array(OW * OH);
+let OCC_ON = false;
+function occReset() { if (OCC_ON) { OZ.fill(1e9); OC.fill(0); } OCC_ON = false; }
+const NE = new Float64Array(16), NF = new Float64Array(16), NR = new Float64Array(16), NU = new Float64Array(16);
+/* planes [[nx, ny, nz, d]...] (inside: n.p <= d), corners (world) for the screen bounds */
+function occPlanes(planes, corners) {
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  for (const c of corners) { if (!pj(c[0], c[1], c[2])) { x0 = 0; y0 = 0; x1 = BW - 1; y1 = BH - 1; break; } x0 = Math.min(x0, PJ[0]); x1 = Math.max(x1, PJ[0]); y0 = Math.min(y0, PJ[1]); y1 = Math.max(y1, PJ[1]); }
+  const tx0 = Math.max(0, Math.floor(x0 / 4)), tx1 = Math.min(OW - 1, Math.floor(x1 / 4)), ty0 = Math.max(0, Math.floor(y0 / 4)), ty1 = Math.min(OH - 1, Math.floor(y1 / 4));
+  if (tx1 < tx0 || ty1 < ty0) return;
+  if (!OCC_ON) { OZ.fill(1e9); OC.fill(0); OCC_ON = true; }
+  const e = C.eye, f = C.f, r = C.r, u = C.u, np = planes.length, FL = C.fl, cx = C.cx + C.shake[0], cy = C.cy + C.shake[1];
+  for (let i = 0; i < np; i++) { const p = planes[i]; NE[i] = p[3] - (p[0] * e[0] + p[1] * e[1] + p[2] * e[2]); NF[i] = p[0] * f[0] + p[1] * f[1] + p[2] * f[2]; NR[i] = p[0] * r[0] + p[1] * r[1] + p[2] * r[2]; NU[i] = p[0] * u[0] + p[1] * u[1] + p[2] * u[2]; }
+  const S = (tx1 - tx0) * (ty1 - ty0) > 24000 ? 4 : 2, H = S * 2;
+  for (let ty = ty0 - ty0 % S; ty <= ty1; ty += S) {
+    const b = (ty * 4 + H - cy) / FL;
+    for (let tx = tx0 - tx0 % S; tx <= tx1; tx += S) {
+      const a = (tx * 4 + H - cx) / FL;
+      let tin = 0, tout = 1e9;
+      for (let i = 0; i < np; i++) {
+        const den = NF[i] + a * NR[i] - b * NU[i], num = NE[i];
+        if (den < -1e-9) { const t = num / den; if (t > tin) tin = t; }
+        else if (den > 1e-9) { const t = num / den; if (t < tout) tout = t; }
+        else if (num < 0) { tin = 1e9; break; }
+        if (tin >= tout) break;
+      }
+      if (tin >= tout || tout <= C.near) continue;
+      for (let v = 0; v < S; v++) for (let w = 0; w < S; w++) { const yy = ty + v, xx = tx + w; if (yy >= OH || xx >= OW) continue; const k = yy * OW + xx; if (tin < OZ[k]) OZ[k] = tin; OC[k] = 1; }
+    }
+  }
+}
+const OB_P = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]], OB_C = [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]];
+/* a model-space box under a rigid transform as an occluder */
+function occBox(Tw, mn, mx) {
+  const M = Tw.R, t = Tw.T;
+  for (let k = 0; k < 3; k++) {
+    const n = [M[k], M[3 + k], M[6 + k]];                                 // world direction of model axis k
+    const c0 = t[0] * n[0] + t[1] * n[1] + t[2] * n[2];
+    const P0 = OB_P[k * 2], P1 = OB_P[k * 2 + 1];
+    P0[0] = n[0]; P0[1] = n[1]; P0[2] = n[2]; P0[3] = c0 + mx[k];
+    P1[0] = -n[0]; P1[1] = -n[1]; P1[2] = -n[2]; P1[3] = -(c0 + mn[k]);
+  }
+  for (let k = 0; k < 8; k++) { const x = k & 1 ? mx[0] : mn[0], y = k & 2 ? mx[1] : mn[1], z = k & 4 ? mx[2] : mn[2], o = OB_C[k]; o[0] = M[0] * x + M[1] * y + M[2] * z + t[0]; o[1] = M[3] * x + M[4] * y + M[5] * z + t[1]; o[2] = M[6] * x + M[7] * y + M[8] * z + t[2]; }
+  occPlanes(OB_P, OB_C);
+}
+/* is a screen point at depth z behind an occluder */
+function occT(x, y, z) { if (!OCC_ON) return false; const t = ((y | 0) >> 2) * OW + ((x | 0) >> 2); return t >= 0 && t < OW * OH && OC[t] > 0 && z > OZ[t] * 1.015 + .06; }
+Object.assign(K, { occReset, occPlanes, occBox, occT });
+
 let NPTS = 0;
 function drawLod(ml, Tw, o) {
   prep(Tw);
@@ -295,6 +348,7 @@ function drawLod(ml, Tw, o) {
     const dx = mx - ex, dy = my - ey, dz = mz - ez, d = Math.max(.05, Math.sqrt(dx * dx + dy * dy + dz * dz) - rad * .7);
     let li = nl - 1; while (li > 1 && ml.sp[li] * F / d > PX) li--;
     if (li === 1 && ml.sp[1] * F / d > PX0) li = 0;
+    if (oo.lb) li = Math.min(nl - 1, li + oo.lb);
     const i0 = CH[q + 4 + li * 2], i1 = CH[q + 5 + li * 2];
     if (i1 > i0) { runPts(ml.lv[li], i0, i1, ml.sp[li], oo); NPTS += i1 - i0; }
   }
