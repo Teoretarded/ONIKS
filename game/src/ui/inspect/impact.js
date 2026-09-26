@@ -628,7 +628,7 @@ export function createImpact(I) {
       const shown = Math.max(0, game.t - B.t0);
       const st2 = B.state === 'done' ? 'settled' : B.state === 'fail' ? 'failed' : B.state === 'wait' ? 'building' : 'solving';
       L.push([['Solver ', F], [st2, B.state === 'fail' ? CORAL : LIME], [' · ', F], [ms(B.tSolve || 0), Wt], [B.state === 'done' ? '' : ` of ${ms(shown)} shown`, F],
-        [B.info ? ` · ${Math.round(B.info.N / 1000)}k nodes` : '', F], [B.state === 'done' && B.wallMs ? ` · ${(B.wallMs / 1000).toFixed(1)} s` : '', F]]);
+        [B.info ? ` · ${B.info.solver === 'shell' ? 'shell FE' : 'lattice'} · ${Math.round(B.info.N / 1000)}k nodes` : '', F], [B.state === 'done' && B.wallMs ? ` · ${(B.wallMs / 1000).toFixed(1)} s` : '', F]]);
       const bp = B.byPlate || [], inner = bp.reduce((a, b) => a + b, 0) - (B.torn || 0);
       L.push([['Torn ', F], [`${(B.torn || 0).toFixed(2)} m²`, (B.torn || 0) > 0 ? CORAL : Wt], [' skin · ', F], [`${(B.below || 0).toFixed(2)} m²`, (B.below || 0) > 0 ? CORAL : Wt],
         [' under water · ', F], [`${Math.max(0, inner).toFixed(1)} m²`, Wt], [' inside', F]]);

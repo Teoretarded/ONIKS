@@ -1,9 +1,19 @@
 # blast: ship hits solved on the GPU
 
-The blast bench's structural model (`game/concepts/blast`, ported from commit 1596bde; its physics is being
-reworked there: re-port `patch.js` / `gpu.js` / `runner.js` from the bench when that lands) running in the game, render
-side. The headless sim (hp, modules, flooding) stays authoritative and deterministic; this decides what the plating looks
+The blast bench's structural models (`game/concepts/blast`) running in the game, render side. The headless sim (hp, modules, flooding) stays authoritative and deterministic; this decides what the plating looks
 like and feeds game/structure's flooding and girder.
+
+## Two solvers (swappable: same spec, same snapshots)
+
+| Solver | Bench commit | Model | Cost (RX 9070 XT) | In game |
+|---|---|---|---|---|
+| `lattice` (`patch.js`, `gpu.js`, `runner.js`) | 1596bde | elastic-plastic lattice, velocity tear-out, running cracks, x64 mass scaling once only gas acts | ~52 us a step for 36k nodes; Oniks contact 3.6k steps, inside 8.2k | **default**: an outside hit settles in 0.2-1 s, an inside one in 2-4 s at 3 ms of GPU a frame |
+| `shell` (`shell/`) | 446c6a3 | shell FE (CST membranes, J2, hinges, stiffener members, GL erosion, absorbing edges, water backing, products, hole/image sources, fragments) | dt ~3-4 us, no mass scaling: the bench's Oniks contact is 62k steps, 32 s of full GPU (~0.5 ms a step at 87k nodes) | `?blast=shell` (or `ONIKS.game.blast.cfg.solver = 'shell'`): minutes a hit at the game's GPU share; a 5-inch shell ~15 s at 12 ms a frame |
+
+The shell port matches the bench on its own test box (`shell/check.js`: Oniks contact side 3.08 m² vs 2.98, weather deck
+0.06 vs 0.06, decks 1.43 vs 1.65, set 204 vs 172 mm, the same 62,475 steps). The lattice port matches 1596bde exactly on
+the outside cases (`check.js`). The bench's working tree has moved on since 446c6a3 (a gather pass instead of the scatter,
+the Burke scene's pieces): re-port `shell/` from the next commit.
 
 | File | What |
 |---|---|
@@ -15,7 +25,8 @@ like and feeds game/structure's flooding and girder.
 | `worker.js` | the solver in a Web Worker on an OffscreenCanvas WebGL2 context, one slice of steps per game frame (the game's tick carries the GPU time it can spare) |
 | `client.js` | the game's side: the worker, else the runner on the main thread with its own offscreen context, else nothing (the analytic marks stand) |
 | `system.js` | `createBlast(game)`: the game system `blast` (main.js optional list) |
-| `lab.js`, `check.js` | dev: staged hits with stills; the bench's test section through this module's runner |
+| `shell/model.js`, `shell/gpu.js`, `shell/runner.js` | the shell solver: the bench's build / loads / sources / gas / fragments from a spec (`sceneOf`: plates -> panels, open edges on the patch's fixed faces, the up axis), its GPU passes (copied; gravity along the up axis), a runner with the lattice runner's interface |
+| `lab.js`, `check.js`, `shell/check.js` | dev: staged hits with stills; each bench's test section through this module's runners |
 
 ## In the game
 
