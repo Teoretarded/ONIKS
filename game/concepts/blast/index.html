@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blast Test</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #0B0C0A; --ink: #E9E9E2; --dim: #85867F; --lime: #C6F432; --coral: #FF6A3D; --line: rgba(233,233,226,.13); }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); overflow: hidden;
+    font: 11px/1.5 'Geist Mono', ui-monospace, monospace; letter-spacing: .02em; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
+  #ui { position: fixed; left: 20px; top: 18px; width: 250px; user-select: none; }
+  #ui h1 { font: 500 13px 'Geist Mono', monospace; margin: 0 0 12px; letter-spacing: .08em; }
+  #ui h1 i { display: inline-block; width: 7px; height: 7px; background: var(--lime); margin-right: 8px; }
+  .row { display: flex; justify-content: space-between; align-items: center; margin: 5px 0; gap: 8px; }
+  .row label { color: var(--dim); text-transform: uppercase; }
+  select, input[type=number] { background: transparent; color: var(--ink); border: 1px solid var(--line);
+    font: inherit; padding: 2px 4px; width: 132px; }
+  select option { background: #111210; }
+  input[type=range] { width: 132px; accent-color: var(--lime); }
+  .btns { display: flex; gap: 6px; margin: 12px 0 6px; flex-wrap: wrap; }
+  button { background: transparent; color: var(--ink); border: 1px solid var(--line); font: inherit;
+    padding: 4px 8px; cursor: pointer; text-transform: uppercase; }
+  button:hover { border-color: var(--lime); }
+  button b { color: var(--lime); font-weight: 500; margin-right: 6px; }
+  #rd { position: fixed; right: 20px; top: 18px; width: 290px; text-align: right; }
+  #rd div { margin: 2px 0; color: var(--dim); }
+  #rd b { color: var(--ink); font-weight: 400; }
+  #rd .hot b { color: var(--coral); }
+  #rd .lime b { color: var(--lime); }
+  #hint { position: fixed; left: 20px; bottom: 16px; color: var(--dim); }
+  hr { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
+  @media (max-width: 700px) { #rd { display: none; } #ui { width: calc(100vw - 32px); left: 16px; } }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui">
+  <h1><i></i>BLAST · HULL SECTION</h1>
+  <div class="row"><label>Round</label><select id="round"></select></div>
+  <div class="row"><label>TNT eq kg</label><input id="kg" type="number" min="0.01" max="2000" step="any"></div>
+  <div class="row"><label>Fuze</label><select id="fuze">
+    <option value="contact">Contact · outside</option>
+    <option value="standoff">Standoff · outside</option>
+    <option value="inside">Delayed · inside</option></select></div>
+  <div class="row"><label>Standoff m</label><input id="standoff" type="range" min="0.3" max="12" step="0.1"></div>
+  <hr>
+  <div class="row"><label>Plating</label><select id="mat">
+    <option value="hsla">HSLA-80 steel</option><option value="mild">Mild steel</option><option value="alu">Al 5456</option></select></div>
+  <div class="row"><label>Side mm</label><input id="h" type="range" min="4" max="25" step="1"></div>
+  <div class="btns">
+    <button id="go"><b>Space</b>Detonate</button><button id="reset"><b>R</b>Reset</button>
+    <button id="view"><b>V</b>Strain</button><button id="slow"><b>S</b>Speed</button>
+  </div>
+</div>
+<div id="rd"></div>
+<div id="hint">Click the hull to aim · drag to orbit · right-drag to pan · wheel to zoom</div>
+<script type="module">import("./blast.js?v=" + Date.now());</script>
+</body>
+</html>
