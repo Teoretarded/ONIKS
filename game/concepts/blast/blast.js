@@ -386,7 +386,8 @@ function build() {
       const av = cross(sub(P[2], P[0]), sub(P[3], P[1]));
       // degenerate after joining (a corner pulled onto another edge): drop it, it would carry no sensible strain
       let emin = Infinity; for (let z = 0; z < 4; z++) emin = Math.min(emin, len(sub(P[(z + 1) % 4], P[z])));
-      if (len(av) < .2 * S * S || emin < .2 * S || len(sub(P[2], P[0])) < .3 * S || len(sub(P[3], P[1])) < .3 * S) { dropped++; continue; }
+      let tmin = Infinity; for (const [a, b, c] of TRI) tmin = Math.min(tmin, .5 * len(cross(sub(P[b], P[a]), sub(P[c], P[a]))));
+      if (len(av) < .2 * S * S || emin < .2 * S || len(sub(P[2], P[0])) < .3 * S || len(sub(P[3], P[1])) < .3 * S || tmin < .05 * S * S) { dropped++; continue; }
       if (dot(av, pc.n) < 0) q = [q[0], q[3], q[2], q[1]];
       const c = cpan.length; cmap[off + j * pc.nu + i] = c;
       cn.push(...q); cpan.push(pi); ch.push(pc.h); cmat.push(pc.mat);
