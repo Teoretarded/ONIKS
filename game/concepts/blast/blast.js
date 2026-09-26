@@ -40,7 +40,7 @@ const ROUNDS = [
   ['Kh-35', 65], ['Harpoon', 100], ['P-800 Oniks', 120], ['Kalibr · Tomahawk', 200], ['Mk 84 bomb', 500],
 ];
 
-const st = { grid: .25, solver: 'explicit', hs: 100, iters: 1, patch: false, spd: 0, src: 'charge', round: 7, kg: 120, fuze: 'contact', standoff: 3, mat: 'hsla', h: 10, view: 0, post: 1,
+const st = { msc: 64, grid: .125, solver: 'gpu', hs: 100, iters: 1, patch: false, spd: 0, src: 'charge', round: 7, kg: 120, fuze: 'contact', standoff: 3, mat: 'hsla', h: 10, view: 0, post: 1,
   aim: [0, 2.2, 0], aimN: [0, 0, 1] };
 
 /* ------------------------------------------------------------------ small rng */
@@ -417,7 +417,7 @@ function shockImp(i, t0, t1) {
 const PROF = { bonds: 0, nodes: 0, loads: 0, integ: 0, coll: 0, n: 0 };
 function stepExplicit() {
   const s = sim, t = s.t; let T0 = performance.now(), T1;
-  if (s.slow && s.msc === 1 && t > s.tFast) s.msc = 16;
+  if (s.slow && s.msc === 1 && t > s.tFast) s.msc = st.msc;
   const h = dt * Math.sqrt(s.msc), mi = 1 / s.msc;
   for (let k = 0; k < ANODES.length; k++) { const i = ANODES[k]; F[3 * i] = F[3 * i + 1] = F[3 * i + 2] = 0; }
   for (let k2 = 0; k2 < ASPR.length; k2++) {
@@ -597,7 +597,7 @@ function gpuStart() {
 }
 function stepGPU() {
   const s = sim, t = s.t;
-  if (s.slow && s.msc === 1 && t > s.tFast) s.msc = 16;
+  if (s.slow && s.msc === 1 && t > s.tFast) s.msc = st.msc;
   const h = dt * Math.sqrt(s.msc);
   gpu.step(t, h, s.msc, 1 - (t > s.tLoad && !s.slow ? 250 : 30) * h);
   s.t += h; s.n++;
@@ -962,7 +962,7 @@ function readout(tv) {
     if (sim.phase === 2) L1.push(`<div>Max set, side <b>${(sim.maxDef * 1000).toFixed(0)}</b> mm</div>`);
   }
   L1.push(`<div style="margin-top:8px">${N} nodes · ${NS} bonds · dt ${(dt * 1e6).toFixed(1)} µs</div>`);
-  if (sim) L1.push(`<div>${sim.solver === 'xpbd' ? 'XPBD ' + (sim.hs * 1e6).toFixed(0) + ' µs' : 'explicit'} · ${ANODES.length} live nodes${sim.patchR ? ' · patch ' + sim.patchR.toFixed(1) + ' m' : ''} · ${sim.cpu ? sim.cpu.toFixed(0) + ' ms cpu' : ''}</div>`);
+  if (sim) L1.push(`<div>${sim.solver === 'xpbd' ? 'XPBD ' + (sim.hs * 1e6).toFixed(0) + ' µs' : sim.solver === 'gpu' ? 'GPU' : 'explicit'} · ${ANODES.length} live nodes${sim.patchR ? ' · patch ' + sim.patchR.toFixed(1) + ' m' : ''} · ${sim.cpu ? sim.cpu.toFixed(0) + ' ms cpu' : ''}</div>`);
   $('rd').innerHTML = L1.join('');
 }
 
@@ -1030,7 +1030,8 @@ function runCase(cfg) {
   let free = 0; for (let i = 0; i < N; i++) free += FREE[i];
   const shape = new Float32Array(N);
   for (let i = 0; i < N; i++) shape[i] = FREE[i] ? NaN : Math.hypot(X[3 * i] - R0[3 * i], X[3 * i + 1] - R0[3 * i + 1], X[3 * i + 2] - R0[3 * i + 2]);
-  return { cpu: Math.round(cpu), steps, simMs: +(sim.t * 1000).toFixed(1), hullM2: +(sim.hullTorn * S * S).toFixed(2), torn: by, free,
+  const areas = [0, 0, 0, 0]; for (let c = 0; c < NC; c++) if (CTORN[c]) areas[CSURF[c]] += S * S;
+  return { areas: areas.map(a => +a.toFixed(2)), cpu: Math.round(cpu), steps, simMs: +(sim.t * 1000).toFixed(1), hullM2: +(sim.hullTorn * S * S).toFixed(2), torn: by, free,
     setMm: Math.round(sim.maxDef * 1000), live: ANODES.length, shape, cellsTorn: Uint8Array.from(CTORN) };
 }
 // compare a result with a reference: mean |difference| of the displacement field (mm) over nodes both kept,
@@ -1040,7 +1041,7 @@ function compare(a, r) {
   let diff = 0, both = 0; for (let c = 0; c < a.cellsTorn.length; c++) { if (a.cellsTorn[c] !== r.cellsTorn[c]) diff++; else if (a.cellsTorn[c]) both++; }
   return { dispErrMm: +(s / n * 1000).toFixed(1), tornDiffCells: diff, tornBothCells: both };
 }
-window.BLAST = { PROF, ver: 19, runCase, compare, cam, stepN(n) { for (let k = 0; k < n; k++) step(); return sim.t; }, st, detonate, build, draw, dbg: () => ({ FREE, SURF, SBRK, SA, SB, SL0, X, R0, N, NS, FIX, GP, OPEN, CTORN, CSURF }), tune(k, e) { TEAR_K = k; EF_MESH = e; }, get sim() { return sim; },
+window.BLAST = { PROF, ver: 21, runCase, compare, cam, stepN(n) { for (let k = 0; k < n; k++) step(); return sim.t; }, st, detonate, build, draw, dbg: () => ({ FREE, SURF, SBRK, SA, SB, SL0, X, R0, N, NS, FIX, GP, OPEN, CTORN, CSURF }), tune(k, e) { TEAR_K = k; EF_MESH = e; }, get sim() { return sim; },
   // headless check: run the whole structural response now and report
   run() { const t0 = performance.now(); while (sim.t < sim.T1) step(); sim.phase = 2; settle();
     let free = 0; for (let i = 0; i < N; i++) free += FREE[i];
