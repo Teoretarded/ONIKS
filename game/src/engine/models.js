@@ -40,11 +40,7 @@ uniform vec4 uDen;        // dots per pixel: x least spacing of the kept dots on
                           // floor of the facing, z least kept share (the model's coarsest level), w cutaway (0..1: the
                           // highlights on a knee)
 uniform vec4 uFill;       // the view's fill light: xyz direction (toward it), w strength
-// scars (game/scars.js, d.scars): where hits struck this instance, world-aligned, relative to the eye
-uniform vec4 uScA[8];     // xyz: the hole's centre on the surface, w: hole radius (m)
-uniform vec4 uScB[8];     // xyz: the surface's outward normal there, w: seed
-uniform vec4 uScC[8];     // y: scorch reach (x the radius), z: petal depth (x the radius), w: heat of the rim (0..1)
-uniform int uScN;         // how many (0: none)
+${scarGLSL()}
 uniform vec4 uSub;        // sub-dots: x on-screen spacing of the level they fill to (1080 px; 0 off), y their jitter (of
                           // their lattice's spacing), z largest dot (as an on-screen spacing, 1080 px), w least spacing of
                           // the sub-dots of a finer cell (a stripe, a detail: the per-pixel cap close up)
@@ -100,63 +96,10 @@ void main() {
     float hh = u01(hash1(hid ^ 0x27d4eb2fu));
     if (uX.y > 0.0 ? hh > uX.x : hh < uX.x) { ${CULL} return; }
   }
-  // scars: the hole (dots gone, a few torn ones bent in), the petalled rim (bent in, torn in strips, glowing while
-  // hot), the scorch round it (charred: dimmer, sparser, grey; the stain taller above than below)
-  float burn = 0.0, hot = 0.0, edge = 0.0, heatN = 0.0, inner = 0.0;
-  for (int i = 0; i < 8; i++) {
-    if (i >= uScN) break;
-    vec4 A = uScA[i];
-    vec3 d = p - A.xyz;
-    float r = A.w, reach = r * uScC[i].y;
-    if (r <= 0.0 || dot(d, d) > reach * reach * 4.0) continue;
-    vec3 nn = uScB[i].xyz;
-    float sd = uScB[i].w;
-    float h2 = u01(hash1(hid ^ 0x68bc21ebu)), h3 = u01(hash1(hid ^ 0x2f6b9a13u));
-    float al = dot(d, nn);
-    vec3 lat = d - nn * al;
-    vec3 ax = normalize(abs(nn.y) < 0.9 ? cross(nn, vec3(0.0, 1.0, 0.0)) : cross(nn, vec3(1.0, 0.0, 0.0)));
-    float ang = atan(dot(lat, cross(nn, ax)), dot(lat, ax));
-    float rag = 1.0 + 0.2 * sin(3.0 * ang + sd) + 0.12 * sin(5.0 * ang + sd * 1.7) + 0.07 * sin(9.0 * ang + sd * 2.9);
-    float rr = r * rag * (0.9 + 0.2 * h2);
-    float q = sqrt(dot(lat, lat) + al * al * 0.55) / rr;
-    float lq = length(lat) / rr;
-    if (q < 1.0) {
-      // the hole: gone, a few torn dots left bent in, black
-      if (h3 > 0.05 + 0.12 * q) { ${CULL} return; }
-      p -= nn * (1.0 - q) * r * 0.85;
-      p.y -= (1.0 - q) * r * 0.3 * h2;
-      burn = 1.0; hot = max(hot, (0.5 + 0.5 * q) * uScC[i].w);
-    } else if (lq < 1.05 && al < 0.0 && al > -r * 3.5) {
-      // what is seen through the hole (decks, bulkheads, the far side): burnt out, black, the fire inside glowing
-      // on it (so the hole reads as a hole into a burning hull)
-      burn = 1.0; inner = max(inner, max(uScC[i].w, 0.3) * (1.0 - lq * 0.5));
-      if (h3 < 0.5) { ${CULL} return; }
-    } else if (q < 1.6) {
-      // the torn rim: petals of plating, strips curled out (the blast came out through it) and bent in between
-      float e = (1.6 - q) / 0.6;
-      float strip = 0.5 + 0.5 * sin(ang * (5.0 + mod(floor(sd), 4.0)) + sd * 3.1);
-      bool rim = q < 1.36 + 0.18 * strip;
-      if (!rim && h3 < 0.3 * e * e) { ${CULL} return; }
-      float curl = strip > 0.55 ? 1.0 : -0.55;
-      vec3 radial = lat / max(1e-3, length(lat));
-      p += nn * curl * e * e * r * uScC[i].z * (0.5 + 0.9 * strip);
-      p += radial * curl * e * e * r * 0.18 * strip;
-      p.y -= e * e * r * 0.12 * strip * h2;
-      burn = max(burn, 0.65 + 0.35 * e);
-      if (rim) { edge = max(edge, 0.8 + 0.2 * strip); heatN = max(heatN, uScC[i].w); }
-      hot = max(hot, e * e * uScC[i].w);
-    } else {
-      // round it the plating is buckled (dished in, rippled) and charred; the stain taller above than below
-      vec3 ds = d; if (ds.y > 0.0) ds.y *= 0.45;
-      float qs = (length(ds) - rr * 1.6) / max(1e-3, rr * (uScC[i].y - 1.6));
-      if (qs < 1.0) {
-        float s = 1.0 - max(qs, 0.0);
-        float qb = (lq - 1.6) / max(1e-3, uScC[i].y * 0.9);
-        if (qb < 1.0) { float kb = (1.0 - qb) * (1.0 - qb); p -= nn * kb * r * (0.16 + 0.1 * sin(2.0 * ang + sd * 0.7) + 0.06 * sin(lq * 5.0 + sd)); }
-        burn = max(burn, s * (0.45 + 0.45 * s) * (0.75 + 0.5 * h2));
-      }
-    }
-  }
+  // scars (game/scars.js): the plating dished, bulged, bent, holed, charred where hits struck; the model's own dots in
+  // the pocket behind a hole gone (scars.js draws what is inside)
+  float burn = 0.0, hot = 0.0, edge = 0.0, heatN = 0.0;
+  if (uScN > 0 && scarAt(p, uR * aNrm.xyz, hid, false, burn, hot, edge, heatN) == 1) { ${CULL} return; }
   if (burn > 0.0 && edge <= 0.0 && u01(hash1(hid ^ 0x1b873593u)) < burn * 0.5) { ${CULL} return; }
   float yw = p.y + uEyeW.y;
   float dist = length(p);
@@ -228,12 +171,12 @@ void main() {
   vec3 rgb = col * b;
   // the rim still hot: warm white at the tear, flickering
   if (hot > 0.01) rgb = max(rgb, vec3(1.0, 0.72, 0.45) * hot * (0.75 + 0.25 * sin(uEyeW.w * 11.0 + hr * 40.0)));
-  if (inner > 0.0) rgb = max(rgb, vec3(1.0, 0.5, 0.2) * inner * (0.3 + 0.25 * sin(uEyeW.w * 7.0 + hr * 23.0)) * (0.5 + hr));
   if (sc.x > 0.01) rgb = max(mix(rgb, uScanC[0].rgb * max(b, 0.95), sc.x), rgb);
   if (sc.y > 0.0) rgb = mix(rgb, rgb * 0.6 + uScanC[0].rgb * b * 0.5, 0.3 * sc.y);
   if (gk > 0.01) rgb = max(mix(rgb, LIME * max(b, 0.95), gk), rgb);
-  // charred plating takes little of the light (the fire lights the hull round the hole, the hole stays black)
-  rgb += lightsAt(p, two ? vec3(0.0) : n) * (0.35 + 0.65 * lit) * uP.x * (1.0 - 0.8 * burn * (1.0 - edge));
+  // charred plating takes little of the light (the fire lights the hull round the hole, the hole stays black); under
+  // the water hardly any
+  rgb += lightsAt(p, two ? vec3(0.0) : n) * (0.35 + 0.65 * lit) * uP.x * (1.0 - 0.8 * burn * (1.0 - edge)) * (yw < 0.0 ? 0.15 : 1.0);
   vCol = min(rgb * sub, vec3(1.0));
   // the dot's size from the spacing it keeps on screen (the sub-dots' own), capped (never a blob close up)
   float pe = pxs / (sv > 0.0 ? sqrt(max(need, 1.0)) : max(need, 1.0));
@@ -255,9 +198,7 @@ uniform mat3 uR;
 uniform vec3 uT;
 uniform vec4 uP;          // y: push back (cells), w: level spacing (m)
 uniform vec4 uVp;         // xy: half the viewport (px), z: largest splat (px), w: least cell splatted (px)
-uniform vec4 uScA[8];     // scars: xyz centre (RTE), w hole radius: no splats in a hole
-uniform vec4 uScB[8];     // xyz the surface's outward normal there
-uniform int uScN;
+${scarGLSL()}
 out vec4 vAx;             // the cell's axes on screen (px): U xy, V zw
 out float vSz;
 void main() {
@@ -266,13 +207,11 @@ void main() {
   vec3 U = uR * (aCU.xyz * (1.0 / 127.0)), V = uR * (aCV.xyz * (1.0 / 127.0));
   vec2 j = aCJ.xy * (1.0 / ${JIT_K.toFixed(1)});
   vec3 p = uR * aPos + uT - U * (su * j.x) - V * (sv * j.y);
-  for (int i = 0; i < 8; i++) {
-    if (i >= uScN) break;
-    // the hole (its ragged edge reaches ~1.4 radii), through the plating: the rim, the scorch round it and what is
-    // seen inside still hide what is behind them
-    vec3 dd = p - uScA[i].xyz;
-    float r = uScA[i].w, al = dot(dd, uScB[i].xyz);
-    if (r > 0.0 && abs(al) < r * 1.2 && dot(dd, dd) - al * al < r * r * 2.1) { ${CULL} return; }
+  // scars: the splats follow the bent plating; a hole's own splats are pushed back to the far end of the pocket
+  // behind it (a plug: what is inside shows, the far side of the hull and the sea do not)
+  if (uScN > 0) {
+    float b0 = 0.0, h0 = 0.0, e0 = 0.0, n0 = 0.0;
+    if (scarAt(p, uR * aNrm.xyz, hash1(uint(gl_VertexID) * 747796405u + 2891336453u), true, b0, h0, e0, n0) == 1) { ${CULL} return; }
   }
   float dist = length(p);
   vec3 v = p / max(dist, 1e-4);
@@ -315,6 +254,141 @@ void main() {
   o = vec4(0.0);
 }
 `;
+
+/* scars (game/scars.js, d.scars: its rule and kinds there): the uniforms and scarAt(), shared by the dots and the
+   occlusion splats (the splats follow the bent plating; a hole's are pushed back into a plug) */
+const SC0 = new Float32Array(32);
+function scarGLSL() {
+  return `
+// scars: where hits struck this instance, world-aligned, relative to the eye
+uniform vec4 uScA[8];     // xyz: the mark's centre on the surface, w: its radius (m: the hole, the dent, the pockmarks' spread)
+uniform vec4 uScB[8];     // xyz: the surface's outward normal there, w: seed
+uniform vec4 uScC[8];     // y: reach of the buckling and scorch (x the radius), z: petal depth (x r) | dent depth (x r) |
+                          // pockmark hole radius (m), w: heat (0..1)
+uniform vec4 uScD[8];     // x: kind (0 hole, 1 dent, 2 pockmarks, 3 rupture), y: depth of the pocket behind a hole (m),
+                          // z: +1 blown out (a charge inside) / -1 pushed in, w: pockmarks (< 0: dents only)
+uniform int uScN;         // how many (0: none)
+/* p (RTE) moved by the marks; n the dot's world normal. -> 1 gone, 2 (depth pass) a hole's plug, 0 kept; burn (charred),
+   hot (glowing), edge (a torn edge), heatN (its heat) */
+int scarAt(inout vec3 p, vec3 n, uint hid, bool dp, inout float burn, inout float hot, inout float edge, inout float heatN) {
+  for (int i = 0; i < 8; i++) {
+    if (i >= uScN) break;
+    vec4 A = uScA[i], C = uScC[i], K = uScD[i];
+    float r = A.w;
+    if (r <= 0.0) continue;
+    vec3 d = p - A.xyz;
+    float reach = r * max(C.y, 1.3) + K.y;
+    if (dot(d, d) > reach * reach * 2.0) continue;
+    int kind = int(K.x + 0.5);
+    vec3 nn = uScB[i].xyz;
+    float sd = uScB[i].w, sg = K.z;
+    float h2 = u01(hash1(hid ^ 0x68bc21ebu)), h3 = u01(hash1(hid ^ 0x2f6b9a13u));
+    float al = dot(d, nn);
+    vec3 lat = d - nn * al;
+    float ll = length(lat);
+    vec3 ax = normalize(abs(nn.y) < 0.9 ? cross(nn, vec3(0.0, 1.0, 0.0)) : cross(nn, vec3(1.0, 0.0, 0.0)));
+    vec3 bx = cross(nn, ax);
+    float ang = atan(dot(lat, bx), dot(lat, ax));
+    if (kind == 2) {
+      // pockmarks: a round through the plating at each, a small hole with a dished, scorched ring (dents only on
+      // plating too thick for them)
+      if (abs(al) > 0.9) continue;
+      bool holes = K.w > 0.0;
+      int N = int(abs(K.w) + 0.5);
+      for (int k = 0; k < 16; k++) {
+        if (k >= N) break;
+        float fk = float(k) * 1.618 + sd * 0.031;
+        float a1 = 6.2832 * fract(sin(fk * 12.9898 + sd) * 43758.5453), r1 = r * sqrt(fract(sin(fk * 78.233 + sd * 1.3) * 24634.6345));
+        vec3 o = (ax * cos(a1) + bx * sin(a1)) * r1;
+        float rk = C.z * (0.6 + 0.8 * fract(sin(fk * 39.346 + sd * 0.7) * 11235.813));
+        float dk = length(lat - o) / rk;
+        if (dk < 1.0) {
+          if (holes) {
+            if (dp) { p -= nn * 0.8; return 2; }
+            if (h3 > 0.1) return 1;
+          }
+          p -= nn * (1.0 - dk) * rk * (holes ? 0.8 : 0.35); burn = 1.0; hot = max(hot, C.w * (holes ? 1.0 : 0.5));
+        } else if (dk < 2.3) {
+          float e = 1.0 - (dk - 1.0) / 1.3;
+          p -= nn * e * e * rk * 0.3;
+          burn = max(burn, 0.5 + 0.45 * e);
+          if (dk < 1.3 && holes) { edge = max(edge, 0.7); heatN = max(heatN, C.w); }
+        }
+      }
+      float qs = ll / (r * 1.25);
+      if (qs < 1.0) burn = max(burn, (1.0 - qs) * 0.3 * (0.6 + 0.8 * h2));
+      continue;
+    }
+    float rag = 1.0 + 0.2 * sin(3.0 * ang + sd) + 0.12 * sin(5.0 * ang + sd * 1.7) + 0.07 * sin(9.0 * ang + sd * 2.9);
+    if (kind == 1) {
+      // a dent: the plating dished in (bulged out for a charge inside), wrinkled, scorched; no hole
+      if (abs(al) > r * 0.8) continue;
+      float q = ll / (r * (0.85 + 0.15 * rag));
+      if (q < 1.0) {
+        float k = 1.0 - q * q; k *= k;
+        p += nn * sg * C.z * r * (k + 0.15 * q * k * sin(4.0 * ang + sd));
+        burn = max(burn, (0.45 + 0.4 * k) * (0.75 + 0.5 * h2));
+        hot = max(hot, k * k * C.w * 0.5);
+      } else {
+        vec3 ds = d; if (ds.y > 0.0) ds.y *= 0.45;
+        float qs = (length(ds) / r - 1.0) / max(1e-3, C.y - 1.0);
+        if (qs < 1.0) { float s = 1.0 - max(qs, 0.0); burn = max(burn, s * (0.4 + 0.45 * s) * (0.75 + 0.5 * h2)); }
+      }
+      continue;
+    }
+    // a hole (0) or a rupture (3)
+    float rr = r * rag * (0.9 + 0.2 * h2);
+    float q = sqrt(ll * ll + al * al * 1.5) / rr, lq = ll / rr;
+    // the model's own surfaces across the pocket behind it (a far wall, a deck inside a deck hole): gone, scars.js draws
+    // the inside (what is beyond, the far side, is behind the plug); plating along the pocket (a hull side under a deck
+    // hole, a deck over a side hole) stays
+    if (lq < 1.05 && al < -0.3 && al > -K.y - 0.4 && abs(dot(n, nn)) > 0.6) return 1;
+    if (q < 1.0) {
+      if (dp) { p -= nn * (K.y + 0.3); return 2; }
+      // the hole: gone, a few torn dots left bent the blast's way
+      if (h3 > 0.05 + 0.12 * q) return 1;
+      p += nn * (sg > 0.0 ? 0.6 : -0.85) * (1.0 - q) * r;
+      p.y -= (1.0 - q) * r * 0.3 * h2;
+      burn = 1.0; hot = max(hot, (0.5 + 0.5 * q) * C.w);
+      continue;
+    }
+    bool big = kind == 3;
+    if (q < 1.6) {
+      // the torn rim: petals, most bent the blast's way, strips curled the other; torn in strips
+      float e = (1.6 - q) / 0.6;
+      float strip = 0.5 + 0.5 * sin(ang * (5.0 + mod(floor(sd), 4.0)) + sd * 3.1);
+      bool rim = q < 1.36 + 0.18 * strip;
+      if (!rim && h3 < 0.3 * e * e) return 1;
+      float curl = strip > 0.55 ? sg : -0.5 * sg;
+      vec3 radial = lat / max(1e-3, ll);
+      p += nn * curl * e * e * min(r * C.z * (0.5 + 0.9 * strip) * (big ? 1.3 : 1.0), 2.2 + 0.1 * r);
+      p += radial * abs(curl) * e * e * r * 0.18 * strip;
+      p.y -= e * e * r * 0.12 * strip * h2;
+      burn = max(burn, 0.65 + 0.35 * e);
+      if (rim) { edge = max(edge, 0.8 + 0.2 * strip); heatN = max(heatN, C.w); }
+      hot = max(hot, e * e * C.w);
+      continue;
+    }
+    // round it the plating buckled: a hole's dished the blast's way and rippled; a rupture's displaced in and out over
+    // a wide area (ridges where the frames hold it), a deck over it lifted; charred, the stain taller above than below
+    float qb = (lq - 1.6) / max(1e-3, C.y - 1.6);
+    if (qb < 1.0) {
+      float kb = (1.0 - qb) * (1.0 - qb);
+      float w1 = sin(2.0 * ang + sd * 0.7), w2 = sin(3.0 * ang + sd * 1.9), w3 = sin(lq * 4.0 + sd);
+      if (big) {
+        p += nn * min(r, 6.0) * (0.1 * sg + 0.09 * w1 + 0.05 * w2 + 0.03 * w3) * kb;
+        p += (lat / max(1e-3, ll)) * r * 0.05 * sin(lq * 6.0 + sd) * kb;
+        if (abs(nn.y) < 0.5 && n.y > 0.7 && d.y > -0.5) p.y += min(r * 0.25, 1.6) * kb * (0.7 + 0.3 * w2) * max(sg, 0.3);
+      } else p += nn * sg * min(r, 4.0) * (0.12 + 0.07 * w1 + 0.04 * w3) * kb;
+    }
+    vec3 ds = d; if (ds.y > 0.0) ds.y *= 0.45;
+    float qs = (length(ds) - rr * 1.6) / max(1e-3, rr * (C.y - 1.6));
+    if (qs < 1.0) { float s = 1.0 - max(qs, 0.0); burn = max(burn, s * (0.45 + 0.45 * s) * (0.75 + 0.5 * h2)); }
+  }
+  return 0;
+}
+`;
+}
 
 /* rotation (row-major 3x3) from heading (0 = north), pitch (+ nose up), roll (+ right wing down) */
 export function attitude(hdg, pitch, roll) {
@@ -996,8 +1070,9 @@ export class ModelLib {
       r.t[0] = Tp[0] - eye[0]; r.t[1] = Tp[1] - eye[1]; r.t[2] = Tp[2] - eye[2];
       r.cl = cl; r.cl2 = cl2; r.k = k; r.pa = pa; r.pd = pd; r.rad = Pt.rad; r.dyn = Pt.dyn;
       r.xr = d.partXray && d.partXray[Pt.name] !== undefined ? d.partXray[Pt.name] : (d.xray || 0);
-      // the coral part tint only in a cutaway (Inspect, the hit replay: a cue there); in play the scars show the damage
-      r.dm = cut && d.damage && d.damage[Pt.name] ? d.damage[Pt.name] : 0;
+      // the coral part tint only in a cutaway (Inspect, the hit replay: a cue there), and never on a unit with hit marks:
+      // damage is local, the scars show it (no whole deck or superstructure turned coral)
+      r.dm = cut && d.damage && d.damage[Pt.name] && !(d.scars && d.scars.n) ? d.damage[Pt.name] : 0;
       r.gm = G ? (d.partGate && d.partGate[Pt.name] !== undefined ? d.partGate[Pt.name] : (G.mode || 0)) : 0;
       r.gy = 1 + (cl.layer - 1) * kCut;
       // dots per pixel: thinned on screen, never below the density of the model's coarsest level. Faces seen edge-on
@@ -1086,7 +1161,7 @@ export class ModelLib {
     gl.useProgram(P.p);
     gl.uniform4f(u.uVp, G.W / 2, G.H / 2, Math.min(G.pointMax || 256, 511), this.occMinPx * G.H / 1080);
     const ns = this._scars(d, cam.eye);
-    if (ns) { gl.uniform4fv(u.uScA, this._scA); gl.uniform4fv(u.uScB, this._scB); }
+    if (ns) { gl.uniform4fv(u.uScA, this._scA); gl.uniform4fv(u.uScB, this._scB); gl.uniform4fv(u.uScC, d.scars.C); gl.uniform4fv(u.uScD, d.scars.D || SC0); }
     gl.uniform1i(u.uScN, ns);
     let n = 0;
     for (let i = d._p0; i < d._p1; i++) {
@@ -1119,7 +1194,7 @@ export class ModelLib {
     const G = d.gate || null;
     if (G) gl.uniform4f(u.uGP, G.n[0], G.n[1], G.n[2], G.d - (G.n[0] * eye[0] + G.n[1] * eye[1] + G.n[2] * eye[2]));
     const ns = this._scars(d, eye);
-    if (ns) { gl.uniform4fv(u.uScA, this._scA); gl.uniform4fv(u.uScB, this._scB); gl.uniform4fv(u.uScC, d.scars.C); }
+    if (ns) { gl.uniform4fv(u.uScA, this._scA); gl.uniform4fv(u.uScB, this._scB); gl.uniform4fv(u.uScC, d.scars.C); gl.uniform4fv(u.uScD, d.scars.D || SC0); }
     gl.uniform1i(u.uScN, ns);
     const spMax = e.lods[e.lods.length - 1];
     let drawn = 0;

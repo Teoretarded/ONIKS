@@ -3,28 +3,55 @@
    On a sim 'hit' (a ship, a vehicle, a site; not an aircraft, not a boat under the water):
      where    the sim's hit point (the part box the round entered) is carried along the round's path onto the model's
               real surface (its sampled dots), in the model frame, with that surface's normal: the mark moves with the
-              hull as she rolls, turns and sinks
-     size     from the warhead (kg, public figures, WH below) and the target's build (steel hull, a carrier's heavy
-              plating, a light vehicle or container): hole radius k * 0.5 * cbrt(kg) (an Oniks on a Burke: a ~6 m
-              hole; a 5" round: under 2 m; a Hellfire on a truck: ~2.5 m), capped by the target's size; the scorch
-              reaches 2-3 hole radii, stretched up the side (smoke rising over the plating)
-     look     (engine/models.js, the models' vertex shader, d.scars): the dots inside the hole are gone except a few
-              torn ones bent in; the rim's plating is bent in (petals, torn in strips) and glows for a while; around
-              it the dots are charred (dimmer, sparser, grey), the stain taller above than below
-     ejecta   the very dots that left the hole (sampled from the model's cloud there) are blown out along the normal:
-              some fast as debris, most at a few tens of m/s arcing into the sea / onto the ground, some just falling
-              away down the side; hot ones glowing for their first half second
-     fire     one fx Fire per scar, seated at the hole (just outside it, on the right face) in the model frame:
-              flames rising from the hole, embers, a flickering light on the nearby dots, a smoke column that leans
-              downwind; it grows over the first seconds, dies back to a smoulder as the damage control gains
-              (faster for a small hit), flares when the unit is lost. A hit at a ship's waterline vents smoke with
-              hardly a flame; a flooded hole goes out
-   Merged: a hit landing on an old scar enlarges it; up to 8 scars a unit (the shader's arrays).
+              hull as she rolls, turns, lists and sinks
+     what     the steel's answer to the charge (the rule below): a dent, a petalled hole, a rupture, or pockmarks
+     look     (engine/models.js, scarGLSL, d.scars): the dots of the plating moved (dished, bulged, petals bent, a deck
+              lifted), gone in a hole, charred round it; the model's own dots in the pocket behind a hole gone, and the
+              occlusion splats of the hole pushed back to the pocket's far end (a plug: neither the far side of the hull
+              nor the sea shows through)
+     inside   what is behind a hole, drawn here as dots in the model frame (draw3d): the deck levels cut at the hole
+              (ragged edges bent the blast's way), the frames and stiffeners of the shell torn and bent, a bulkhead, the
+              pocket's back wall, rubble on the deck below; charred dark, the fire inside glowing on them (deepest and
+              lowest most). A vehicle: its floor, back wall and ribs
+     ejecta   the very dots that left the hole (sampled from the model's cloud there) blown out along the normal
+     fire     one fx Fire per hole, seated on the burning surface itself (fx/lib/impact.js Fire seats, model frame,
+              carried with the full pose every frame): on the torn upper rim of a hole in a side, round the rim of one in
+              a deck, and inside on the deck below (flames rising out of the hole); a seat under the water burns no
+              flame (steam and smoke only where the sea meets it). Its light stays local (never reaching the water)
 
-   Hooks: game.scars = { surface(ev) (the snapped world point of the hit just handled: the fx blast sits there),
-   burning(id), heavy(id) (> 1: the warhead was far too big for the target: a catastrophic break-up), of(id), clear(id)
-   (the marks, fires and ejecta off at once: the Inspect impact test's reset), stats }. WH (warhead kg) is exported.
-   The render instance gets d.scars (drawn this frame, game.drawn) for engine/models.js. Console: ONIKS.game.scars.
+   THE RULE (a game approximation of common engineering figures; kg = warhead mass, t = the local plating, mm steel
+   equivalent). The punch x = cbrt(kg_eff) x 10 / t (1: a 1 kg charge on 10 mm plate):
+     plating t (PLATE): DDG / CG hull side 10, waterline belt 12, weather deck 9, superstructure 6 (aluminium LCS 7 /
+       5); LHD side 12, flight deck 20; carrier (Nimitz) side 22, belt 25, flight deck 45, island 10; small craft 5;
+       a surfaced boat's pressure hull 35, sail 12; trucks, TELs, containers 4; Tigr 6; ACV 14; a site 8
+     charge kg_eff: the warhead (WH); a blast-frag SAM counts half (the rest is its fragment case); a stand-off burst
+       (the sim's blast / miss distance d) falls off as (1 - z)^2 with z = d / cbrt(kg) (120 kg at 5 m: a shallow dish)
+     (checked against game/concepts/blast, a Kinney-Graham load on a plate lattice: small charges dent, ~120 kg in
+     contact with 10 mm opens a few m^2, 5 m off only dishes it, a charge inside tears decks and bulkheads)
+     outcome:
+       gun rounds (Phalanx, 30 mm, 12.7 mm)   pockmarks: a hole per round (0.07-0.25 m) scattered over 1-4 m, each
+                                              with a dished, scorched ring; on plating too thick (x < 0.25), dents only
+       x < 0.7                                a dent: dished in (or bulged out), no hole; radius 0.7 cbrt(kg) + 0.2 m,
+                                              depth up to a fifth of it; scorched
+       0.7 <= x < 4.5                          a petalled hole: radius k cbrt(kg) sqrt((x - 0.7) / (x + 0.3)), at least
+                                              0.25 k cbrt(kg); k 0.95 for a charge inside (it tears the plating out from
+                                              within: Stark, Cole), 0.45 for a contact or stand-off burst (a Hellfire on
+                                              a DDG side ~0.8 m, a 5" round ~0.5 m, 120 kg ~1.8 m); the petals bent the way
+                                              the blast went; the plating round it buckled out to ~2.6 radii; frames torn
+       x >= 4.5, or kg >= 200 and x >= 1.5    a rupture: the same hole, the plating displaced in and out over ~4 radii,
+                                              a deck over it lifted and warped, frames torn and sticking out
+     the blast's way: a penetrating round with a delayed fuze (Oniks, Kalibr, Kh-35, Tomahawk, SLAM-ER, a bomb) goes
+     off inside: petals and plating blown out, a deck lifted; a contact or stand-off burst (shells, ATGMs, SAMs)
+     pushes them in. A blast-frag SAM also peppers the plating round its burst with fragment holes. Capped by the
+     target's size (0.35 x its larger cross dimension). A hit on an old mark adds its charge (a second dent may open
+     a hole). Up to 8 marks a unit (the shader's arrays).
+
+   Hooks: game.scars = { surface(ev), normal(ev), charge(ev) (the snapped world point, normal and kg of the hit just
+   handled: the fx blast sits there), burning(id), heavy(id) (> 1: the warhead was far too big for the target),
+   last(id), of(id), clear(id), ignite(id) (a ship lost with no fire of her own: one at her worst hole, else on her
+   deck amidships), stats }. WH (warhead kg) is exported. A 'cookoff' (sim/damage.js) blows a rupture out through the
+   deck over the module. The render instance gets d.scars (drawn this frame, game.drawn) for engine/models.js.
+   Console: ONIKS.game.scars.
 
    createScars(game) -> system 'scars' (priority 12: its events before debris (11) and fx (5); draws after render). */
 import { Fire } from '../fx/lib/impact.js';
@@ -32,47 +59,96 @@ import { attitudeM } from './debris/math.js';
 
 /* warhead (kg): public figures, rounded */
 export const WH = { oniks: 250, kalibr: 200, tlam: 450, slam: 360, uran: 145, hellfire: 9, kornet: 7, shell: 3.6, shell130: 3.6,
-  shell57: .4, sm6: 64, pdms: 39, sam: 20, sam48: 180, ram: 11, aam: 18, mk48: 290, mk54: 44, t53: 300, ciws: .05, gun30: .1, rws: .05 };
-const MAXS = 8, MAXE = 700, GROUPS = 16, EJ_LIFE = 7;
+  shell57: .4, sm6: 64, pdms: 39, sam: 20, sam48: 180, ram: 11, aam: 18, mk48: 290, mk54: 44, t53: 300, ciws: .05, gun30: .1, rws: .05,
+  mk84: 430 };
+/* how the charge meets the plating: 'in' a delayed fuze inside the hull, 'out' contact, 'frag' blast-frag, 'gun' rounds */
+const FUZE = { oniks: 'in', kalibr: 'in', uran: 'in', tlam: 'in', slam: 'in', mk84: 'in', hellfire: 'out', kornet: 'out',
+  shell: 'out', shell130: 'out', shell57: 'out', sm6: 'frag', pdms: 'frag', sam: 'frag', sam48: 'frag', ram: 'frag', aam: 'frag',
+  ciws: 'gun', gun30: 'gun', rws: 'gun' };
+const KE = { ciws: 1, rws: 1 };           // kinetic rounds: a clean small hole, no charge
+/* the plating (mm, steel equivalent) by zone: belt (waterline), side, deck, super (superstructure / island / sail) */
+const PLATE = {
+  warship: { belt: 12, side: 10, deck: 9, super: 6 },
+  alu: { belt: 8, side: 7, deck: 7, super: 5 },
+  amphib: { belt: 14, side: 12, deck: 20, super: 8 },
+  carrier: { belt: 25, side: 22, deck: 45, super: 10 },
+  craft: { belt: 5, side: 5, deck: 5, super: 4 },
+  sub: { belt: 35, side: 35, deck: 35, super: 12 },
+};
+const LAND = { acv: 14, kornet: 6 };      // else 4 (trucks, TELs, containers, cabs); a site 8
+const KIND = { hole: 0, dent: 1, pock: 2, rupture: 3 };
+const MAXS = 8, MAXE = 700, GROUPS = 16, EJ_LIFE = 7, DECK_H = 2.7;
 const sat = v => v < 0 ? 0 : v > 1 ? 1 : v;
 const ss = (a, b, v) => { const t = sat((v - a) / (b - a)); return t * t * (3 - 2 * t); };
 function hsh(i, s) { let h = Math.imul((i | 0) ^ Math.imul(s | 0, 0x9E3779B1), 0x85EBCA77); h ^= h >>> 13; h = Math.imul(h, 0xC2B2AE35); h ^= h >>> 16; return (h >>> 0) / 4294967296; }
 
-/* the target's build: hole scale k, scorch reach (x hole radius), petal depth (x hole radius) */
-function buildOf(def) {
-  if (def.domain === 'sea') {
-    if (def.size[0] > 250) return { k: .95, reach: 3.4, petal: .3, sea: true };           // a carrier's plating, decks
-    if (def.size[0] < 45 || def.hover) return { k: 1.25, reach: 2.6, petal: .5, sea: true };   // small craft
-    return { k: 1, reach: 3.2, petal: .42, sea: true };                                    // a steel warship
+/* the plating class of a unit */
+function classOf(u) {
+  const d = u.def;
+  if (d.domain === 'sea') {
+    if (d.sub) return 'sub';
+    if (d.size[0] < 45 || d.hover) return 'craft';
+    if (u.type === 'lcs') return 'alu';
+    if (d.size[0] > 300) return 'carrier';
+    if (d.size[0] > 200) return 'amphib';
+    return 'warship';
   }
-  if (def.static) return { k: 1.1, reach: 2.8, petal: .3, sea: false };
-  return { k: 1.2, reach: 2.6, petal: .5, sea: false };                                    // trucks, containers, cabs
+  return 'land';
 }
+/* where it struck: 'belt' (at the waterline), 'deck', 'super', 'side' (model frame point y, normal y, the main deck's height) */
+function zoneOf(sea, y, ny, deckY) {
+  if (!sea) return ny > .7 ? 'deck' : 'side';
+  if (y < 1.8 && ny < .7) return 'belt';
+  if (ny > .7 && y < deckY + 1.4) return 'deck';
+  if (y > deckY + .8) return 'super';
+  return 'side';
+}
+function plateOf(u, zone) {
+  const c = classOf(u);
+  if (c === 'land') return u.def.static ? 8 : LAND[u.type] || 4;
+  return PLATE[c][zone] || PLATE[c].side;
+}
+/* the steel's answer: { kind, r (m), reach (x r), pet (petal depth x r | dent depth x r | pock hole radius m), sg (+1 blown
+   out, -1 pushed in), n (pockmarks), Weff, x } */
+export function outcome(kg, t, fz, standoff, nRounds) {
+  if (fz === 'gun') {
+    const ce = Math.cbrt(kg), x = ce * 10 / t, n = Math.max(1, Math.min(16, Math.round(nRounds || 4)));
+    const rp = KE_RP(kg, x);
+    return { kind: 'pock', r: Math.min(4, 1 + .35 * Math.sqrt(n)), reach: 1.3, pet: rp, sg: -1, n: x < .25 ? -n : n, Weff: kg, x };
+  }
+  let W = fz === 'frag' ? kg * .5 : kg;
+  if (standoff > 0) W *= sat(1 - standoff / Math.max(.3, Math.cbrt(kg))) ** 2;
+  const ce = Math.cbrt(Math.max(W, 1e-4)), x = ce * 10 / t, sg = fz === 'in' ? 1 : -1;
+  if (x < .7 || W < .15) return { kind: 'dent', r: .7 * ce + .2, reach: 2.2, pet: .05 + .15 * Math.min(1, x / .7), sg, n: 0, Weff: W, x };
+  const r = (fz === 'in' ? .95 : .45) * ce * Math.max(.26, Math.sqrt((x - .7) / (x + .3)));
+  const rup = x >= 4.5 || (W >= 200 && x >= 1.5);
+  return { kind: rup ? 'rupture' : 'hole', r, reach: rup ? Math.min(5, 3.6 + .15 * x) : Math.min(3.2, 2.4 + .1 * x), pet: rup ? .5 : .42, sg, n: 0, Weff: W, x };
+}
+function KE_RP(kg, x) { return x < .25 ? .12 + .25 * Math.cbrt(kg) : .06 + .3 * Math.cbrt(kg); }
 
 export function createScars(game) {
   const sim = game.sim, R = game.R;
-  const recs = new Map();                 // unit id -> { id, n, L (8 x [x y z r nx ny nz seed]), C (8 x [0 reach petal heat]), list, M, now, dead }
+  const recs = new Map();                 // unit id -> { id, n, L (8 x [x y z r nx ny nz seed]), C (8 x [0 reach pet heat]), D (8 x [kind depth sg n]), list, M, now, dead }
   const groups = [];                      // ejecta: { t0, n, P, V, K, gy, sea, near }
-  const M9 = [1, 0, 0, 0, 1, 0, 0, 0, 1], W3 = [0, 0, 0];
+  const W3 = [0, 0, 0];
   let lastEv = null, lastPos = [0, 0, 0], lastN = [0, 1, 0], lastW = 0;
-  const stats = { scars: 0, fires: 0, ejecta: 0, snapMs: 0, drawMs: 0 };
-  // scratch for the snap: the dots near the hit (model frame + normal), reused
+  const stats = { scars: 0, fires: 0, ejecta: 0, inside: 0, snapMs: 0, drawMs: 0 };
   let TMP = new Float32Array(6 * 20000);
 
   const fxSys = () => game.getSystem('fx');
   const ground = (x, z) => (game.ground ? game.ground(x, z) : 0);
+  const stOf = u => (u.def.modelState ? u.def.modelState(u, game.t) : u.st) || {};
 
   /* ------------------------------------------------------------ the model's dots near a point */
   /* Per model, once: its static parts' dots (model frame, rest state; the level of about L / 300 spacing, else the
-     finest sampled so far) with their normals, bucketed in a grid of CELL-m cells. Rebuilt once a finer level is there.
-     A hit then looks only at the cells round it (no pass over the whole cloud). */
+     finest sampled so far) with their normals, bucketed in a grid of CELL-m cells, and its main deck's height (the
+     most up-facing dots). Rebuilt once a finer level is there. A hit then looks only at the cells round it. */
   const CELL = 4, GRIDS = new Map();
   const ck = (i, j, k) => ((i + 512) * 1024 + (j + 512)) * 1024 + (k + 512);
   function gridOf(ent, st) {
     const want = Math.max(.15, ent.L / 300);
     let G = GRIDS.get(ent.key);
     if (G && (G.sp <= want * 1.01 || G.tries > 3)) return G;
-    // what the clouds have now (a level not yet sampled is not waited for)
     let sp = 0, n = 0;
     const use = [];
     for (const P of ent.parts) {
@@ -87,7 +163,7 @@ export function createScars(game) {
     }
     if (!n) return G || null;
     if (G && sp >= G.sp) { G.tries++; return G; }
-    const D = new Float32Array(n * 6), cells = new Map();
+    const D = new Float32Array(n * 6), cells = new Map(), hist = new Map(), env = new Map();
     let m = 0;
     for (const [cl, X] of use) {
       const f = cl.pts, by = new Int8Array(f.buffer, f.byteOffset, cl.n * 16);
@@ -102,11 +178,16 @@ export function createScars(game) {
         D[m * 6] = x; D[m * 6 + 1] = y; D[m * 6 + 2] = z; D[m * 6 + 3] = nx; D[m * 6 + 4] = ny; D[m * 6 + 5] = nz;
         const key = ck(Math.floor(x / CELL), Math.floor(y / CELL), Math.floor(z / CELL));
         let a = cells.get(key); if (!a) { a = []; cells.set(key, a); } a.push(m);
+        if (ny > .85) { const b = Math.round(y * 2); hist.set(b, (hist.get(b) || 0) + 1); }
+        const ek = Math.floor(z / 2) * 4096 + Math.floor(y) + 2048, ax = Math.abs(x);
+        if (!(env.get(ek) >= ax)) env.set(ek, ax);
       }
     }
     const idx = new Map();
     for (const [k, a] of cells) idx.set(k, Int32Array.from(a));
-    G = { sp, D, idx, tries: G ? G.tries + 1 : 0 };
+    let deckY = 0, best = 0;
+    for (const [b, c] of hist) if (c > best) { best = c; deckY = b / 2; }
+    G = { sp, D, idx, deckY, env, tries: G ? G.tries + 1 : 0 };
     GRIDS.set(ent.key, G);
     return G;
   }
@@ -140,15 +221,24 @@ export function createScars(game) {
         if (s < bs) { bs = s; found = true; o[0] = x; o[1] = y; o[2] = z; o[3] = two ? -din[0] : nx; o[4] = two ? -din[1] : ny; o[5] = two ? -din[2] : nz; }
       }
     };
-    // along the path, a short sphere at a time, until the first surface
     for (let s0 = -12; s0 <= 36 && !found; s0 += 3) eachDot(ent, st, along, h[0] + din[0] * s0, h[1] + din[1] * s0, h[2] + din[2] * s0, rs + 1.6);
     if (found) return true;
-    // else the nearest dot to the hit
     eachDot(ent, st, (x, y, z, nx, ny, nz) => {
       const d2 = (x - h[0]) ** 2 + (y - h[1]) ** 2 + (z - h[2]) ** 2, two = nx * nx + ny * ny + nz * nz < .01;
       if (d2 < fb) { fb = d2; o[0] = x; o[1] = y; o[2] = z; o[3] = two ? -din[0] : nx; o[4] = two ? -din[1] : ny; o[5] = two ? -din[2] : nz; }
     }, h[0], h[1], h[2], 10);
-    return fb < 1e9;
+    if (fb < 1e9) return true;
+    // further along the path (a hit point well off the hull)
+    for (let s0 = 39; s0 <= 150 && !found; s0 += 3) eachDot(ent, st, along2, h[0] + din[0] * s0, h[1] + din[1] * s0, h[2] + din[2] * s0, rs + 1.6);
+    return found;
+    function along2(x, y, z, nx, ny, nz) {
+      const vx = x - h[0], vy = y - h[1], vz = z - h[2];
+      const s = vx * din[0] + vy * din[1] + vz * din[2], d2 = vx * vx + vy * vy + vz * vz;
+      const two = nx * nx + ny * ny + nz * nz < .01;
+      if (s > 0 && d2 - s * s < rs * rs && (two || nx * din[0] + ny * din[1] + nz * din[2] < .25) && s < bs) {
+        bs = s; found = true; o[0] = x; o[1] = y; o[2] = z; o[3] = two ? -din[0] : nx; o[4] = two ? -din[1] : ny; o[5] = two ? -din[2] : nz;
+      }
+    }
   }
 
   /* ------------------------------------------------------------ a hit */
@@ -157,19 +247,18 @@ export function createScars(game) {
     if (!u || !e.pos || u.aboard) return;
     const def = u.def;
     if (def.domain === 'air' || (def.sub && (u.depth || 0) > def.draught + 1)) return;
-    const Wk = WH[e.kind] !== undefined ? WH[e.kind] : ((game.PROJ[e.kind] && game.PROJ[e.kind].dmg) || 10) * 2.5;
-    if (Wk < .2 && !e.under) return;                              // gun rounds: the blast only
     if (!R.models.has(def.model)) return;
+    const kind = e.kind;
+    const Wk = WH[kind] !== undefined ? WH[kind] : ((game.PROJ[kind] && game.PROJ[kind].dmg) || 10) * 2.5;
+    const fz = FUZE[kind] || (Wk < .3 && e.n !== undefined ? 'gun' : 'out');
     const t0 = performance.now();
-    const ent = R.models.get(def.model), st = (def.modelState ? def.modelState(u, game.t) : u.st) || {};
-    const B = buildOf(def), pose = game.unitPose(u), M = attitudeM(pose.hdg, pose.pitch || 0, pose.roll || 0, [0, 0, 0, 0, 0, 0, 0, 0, 0]);
-    // the hit and the round's path in the model frame
+    const ent = R.models.get(def.model), st = stOf(u);
+    const pose = game.unitPose(u), M = attitudeM(pose.hdg, pose.pitch || 0, pose.roll || 0, [0, 0, 0, 0, 0, 0, 0, 0, 0]);
     const dx = e.pos[0] - pose.pos[0], dy = e.pos[1] - pose.pos[1], dz = e.pos[2] - pose.pos[2];
     const h = [M[0] * dx + M[3] * dy + M[6] * dz, M[1] * dx + M[4] * dy + M[7] * dz, M[2] * dx + M[5] * dy + M[8] * dz];
     let din;
     const v = e.vel;
     if (e.under) {
-      // a torpedo under the keel: the hull broken at the waterline on the side it ran in from
       const sx = h[0] >= 0 ? 1 : -1;
       h[0] = sx * (def.size[1] * .5 + 12); h[1] = Math.min(1.2, def.size[2] * .03); din = [-sx, 0, 0];
     } else if (v && Math.hypot(v[0], v[1], v[2]) > 1) {
@@ -179,44 +268,82 @@ export function createScars(game) {
       const l = Math.hypot(h[0], h[2] * .3) || 1;
       din = [-h[0] / l, 0, -h[2] * .3 / l];
     }
-    const cap = .35 * Math.max(def.size[1], def.size[2]);
-    const r0 = B.k * .95 * Math.cbrt(Wk) * (e.under ? 1.25 : 1), r = Math.min(r0, cap);
-    const o = new Array(12), ts = performance.now();
-    if (!snap(ent, st, h, din, e.under ? .8 : Math.max(1.5, r * .55), o)) { o[0] = h[0]; o[1] = h[1]; o[2] = h[2]; o[3] = -din[0]; o[4] = -din[1]; o[5] = -din[2]; }
+    const G = gridOf(ent, st), deckY = G ? G.deckY : def.size[2] * .3, sea = def.domain === 'sea';
+    const guess = Math.cbrt(Wk) * .6;
+    const o = new Array(6), ts = performance.now();
+    if (!snap(ent, st, h, din, e.under ? .8 : Math.max(1.2, guess * .55), o)) return;          // nothing of the model there: no mark
     const nl = Math.hypot(o[3], o[4], o[5]) || 1;
-    const S = { x: o[0], y: o[1], z: o[2], nx: o[3] / nl, ny: o[4] / nl, nz: o[5] / nl, r, r0, W: Wk, t0: sim.t, seed: (u.id * 131 + Math.floor(sim.t * 20)) % 997,
-      reach: B.reach, petal: B.petal, sea: B.sea, wl: B.sea && (o[1] < 1.8 || !!e.under) && !def.hover, fire: null, merged: 0 };
-    // the world point of the surface hit (the fx blast is laid there)
+    const nx = o[3] / nl, ny = o[4] / nl, nz = o[5] / nl;
+    // the plating there and what the charge does to it
+    const zone = e.under ? 'belt' : zoneOf(sea, o[1], ny, deckY), t = plateOf(u, zone);
+    const standoff = fz === 'frag' ? Math.max(0, e.miss || 0, e.blast || 0) : Math.max(0, e.blast || 0);
+    const Oc = outcome(Wk * (e.under ? 1.6 : 1), t, e.under ? 'in' : fz, standoff, e.n);
+    const cap = .35 * Math.max(def.size[1], def.size[2]);
+    const S = { x: o[0], y: o[1], z: o[2], nx, ny, nz, kind: Oc.kind, r: Math.min(Oc.r, cap), r0: Oc.r, reach: Oc.reach, pet: Oc.pet, sg: Oc.sg,
+      np: Oc.n, W: Oc.Weff, px: Oc.x, fz: e.under ? 'in' : fz, t: t, zone, t0: sim.t, seed: (u.id * 131 + Math.floor(sim.t * 20) + (S_N++)) % 997,
+      sea, wl: sea && (o[1] < 1.8 || !!e.under) && !def.hover, fire: null, merged: 0, deckY, D: 0, inn: null, nIn: 0, seats: null };
     lastEv = e;
     lastPos[0] = pose.pos[0] + M[0] * S.x + M[1] * S.y + M[2] * S.z;
     lastPos[1] = pose.pos[1] + M[3] * S.x + M[4] * S.y + M[5] * S.z;
     lastPos[2] = pose.pos[2] + M[6] * S.x + M[7] * S.y + M[8] * S.z;
     lastN[0] = M[0] * S.nx + M[1] * S.ny + M[2] * S.nz; lastN[1] = M[3] * S.nx + M[4] * S.ny + M[5] * S.nz; lastN[2] = M[6] * S.nx + M[7] * S.ny + M[8] * S.nz;
-    lastW = Wk;
+    lastW = fz === 'gun' ? Wk : Oc.Weff;
     stats.surfMs = performance.now() - ts;
-    addScar(u, S);
-    const te = performance.now();
-    ejecta(u, ent, st, S, M, pose);
-    stats.ejMs = performance.now() - te;
+    const P = addScar(u, S, ent, st);
+    // a blast-frag warhead also peppers the plating round its burst
+    if (fz === 'frag' && P) {
+      const F = { x: S.x - S.nx * .2, y: S.y, z: S.z, nx: S.nx, ny: S.ny, nz: S.nz, kind: 'pock', r: Math.min(6, 1.5 + .8 * Math.cbrt(Wk)), r0: 0, reach: 1.25,
+        pet: .1 + .02 * Math.cbrt(Wk), sg: -1, np: 14, W: .1, px: 1, fz: 'gun', t, zone, t0: sim.t, seed: (S.seed * 7 + 5) % 997, sea, wl: false, fire: null, merged: 0,
+        deckY, D: 0, inn: null, nIn: 0, seats: null, frag: true, t0h: sim.t - .001 };
+      addScar(u, F, ent, st);
+    }
+    if (P && (P.kind === 'hole' || P.kind === 'rupture') && !P.merged) {
+      const te = performance.now();
+      ejecta(u, ent, st, P, M, pose);
+      stats.ejMs = performance.now() - te;
+    }
     stats.snapMs = performance.now() - t0;
   }
+  let S_N = 0;
 
   function recOf(u) {
     let rec = recs.get(u.id);
-    if (!rec) { rec = { id: u.id, n: 0, L: new Float32Array(MAXS * 8), C: new Float32Array(MAXS * 4), list: [], M: [1, 0, 0, 0, 1, 0, 0, 0, 1], now: 0, dead: false, heavy: 0 }; recs.set(u.id, rec); }
+    if (!rec) { rec = { id: u.id, n: 0, L: new Float32Array(MAXS * 8), C: new Float32Array(MAXS * 4), D: new Float32Array(MAXS * 4), list: [], M: [1, 0, 0, 0, 1, 0, 0, 0, 1], now: 0, dead: false, heavy: 0 }; recs.set(u.id, rec); }
     return rec;
   }
-  function addScar(u, S) {
+  const holeLike = k => k === 'hole' || k === 'rupture';
+  function addScar(u, S, ent, st) {
     const rec = recOf(u), L = rec.list;
-    rec.heavy = Math.max(rec.heavy, S.r0 / Math.max(.5, .35 * Math.max(u.def.size[1], u.def.size[2])));
-    // on an old scar: it grows (the volumes add), its fire flares
+    if (holeLike(S.kind)) rec.heavy = Math.max(rec.heavy, S.r0 / Math.max(.5, .35 * Math.max(u.def.size[1], u.def.size[2])));
     for (const P of L) {
       const d = Math.hypot(P.x - S.x, P.y - S.y, P.z - S.z);
+      if (S.kind === 'pock') {
+        // rounds into an old hole: nothing more to see; onto old pockmarks: more of them
+        if (holeLike(P.kind) && d < P.r * 1.2) return null;
+        if (P.kind === 'pock' && d < P.r + S.r * .7) {
+          const n = Math.min(16, Math.abs(P.np) + Math.abs(S.np));
+          P.np = P.np < 0 && S.np < 0 ? -n : n; P.r = Math.min(5, Math.max(P.r, d + S.r * .6)); P.t0h = S.t0; P.merged++;
+          return P;
+        }
+        continue;
+      }
+      if (P.kind === 'pock') continue;
       if (d < (P.r + S.r) * .6 || (L.length >= MAXS && d < (P.r + S.r) * 2.5)) {
+        // on an old mark: the charges add (a dent may open, a hole grows), its fire flares
         const w = S.r ** 3 / (P.r ** 3 + S.r ** 3);
         P.x += (S.x - P.x) * w; P.y += (S.y - P.y) * w; P.z += (S.z - P.z) * w;
-        P.r = Math.min(Math.max(P.r, S.r) * 1.6, Math.cbrt(P.r ** 3 + S.r ** 3) * 1.05); P.W += S.W; P.merged++;
-        P.t0h = S.t0;
+        P.W += S.W;
+        const Oc = outcome(P.W * (P.fz === 'frag' ? 2 : 1), P.t, P.fz === 'frag' ? 'frag' : S.fz === 'in' ? 'in' : P.fz, 0, 0);
+        const was = P.kind;
+        if (holeLike(Oc.kind) || holeLike(was)) {
+          P.kind = Oc.kind === 'rupture' || was === 'rupture' ? 'rupture' : 'hole';
+          P.r = Math.max(Oc.r, holeLike(was) ? Math.cbrt(P.r ** 3 + S.r ** 3) : 0);
+          P.pet = P.kind === 'rupture' ? .5 : .42; P.reach = Math.max(P.reach, Oc.reach);
+        } else { P.r = Math.max(P.r, Oc.r); P.pet = Math.max(P.pet, Oc.pet); }
+        P.r = Math.min(P.r, .35 * Math.max(u.def.size[1], u.def.size[2]));
+        if (S.fz === 'in') P.sg = 1;
+        P.merged++; P.t0h = S.t0;
+        build(u, P, ent, st);
         if (P.fire) P.kick = Math.min(1, (P.kick || 0) + .5);
         else startFire(u, P);
         return P;
@@ -228,21 +355,213 @@ export function createScars(game) {
       const Q = L[mi]; if (Q.fire) Q.fire.stop(sim.t); L.splice(mi, 1);
     }
     L.push(S);
+    build(u, S, ent, st);
     startFire(u, S);
     return S;
   }
 
-  /* a fire seated at the scar (none for a small hit on a steel hull that only scorches) */
+  /* ------------------------------------------------------------ what is behind a hole */
+  /* the pocket's depth, its interior dots and the fire's seats (model frame) */
+  function build(u, S, ent, st) {
+    S.inn = null; S.nIn = 0; S.seats = null;
+    if (!holeLike(S.kind) || S.r < .3) { S.D = 0; return; }
+    const def = u.def, B = def.size[1], sea = S.sea, deck = S.ny > .7;
+    S.D = sea ? (deck ? Math.min(1.3 * S.r + DECK_H, Math.max(2.5, S.y + (def.draught || 5) * .4)) : Math.min(1.4 * S.r + 1, B * (S.zone === 'super' ? .38 : .42)))
+      : Math.min(1.2 * S.r + .3, B * .8);
+    interior(u, S);
+    seatsOf(u, S, ent, st);
+  }
+
+  /* The interior (model frame): x y z, kind (0 deck / floor, 1 cut edge, 2 frame / stiffener, 3 bulkhead, 4 back wall,
+     5 rubble), glow weight (how much of the fire's light it takes: deep and low most). Local frame: -n into the hull
+     (a: depth), t1 along the surface (horizontal), t2 up the surface. Shuffled, so a stride of it is an even sample */
+  function interior(u, S) {
+    const r = S.r, D = S.D, deck = S.ny > .7, land = !S.sea;
+    const sp = Math.max(.12, Math.min(.42, r / 12)), rs = S.seed;
+    const n = [S.nx, S.ny, S.nz];
+    let t1, t2;
+    if (deck) { t1 = [1, 0, 0]; t2 = [n[1] * t1[2] - n[2] * t1[1], n[2] * t1[0] - n[0] * t1[2], n[0] * t1[1] - n[1] * t1[0]]; }
+    else { const l = Math.hypot(n[2], n[0]) || 1; t1 = [n[2] / l, 0, -n[0] / l]; t2 = [n[1] * t1[2] - n[2] * t1[1], n[2] * t1[0] - n[0] * t1[2], n[0] * t1[1] - n[1] * t1[0]]; }
+    if (t2[1] < 0) { t2 = [-t2[0], -t2[1], -t2[2]]; }
+    const out = [];
+    const Rp = (a, ang) => r * (1.05 - .22 * a / D) * (1 + .12 * Math.sin(3 * ang + rs) + .07 * Math.sin(5 * ang + rs * 1.7));
+    const inPocket = (a, s, v) => { const ang = Math.atan2(v, s); return s * s + v * v < Rp(a, ang) ** 2; };
+    const P = (a, s, v) => [S.x - n[0] * a + t1[0] * s + t2[0] * v, S.y - n[1] * a + t1[1] * s + t2[1] * v, S.z - n[2] * a + t1[2] * s + t2[2] * v];
+    const glowW = (a, yFloor, y) => sat(.25 + .55 * a / D + .45 * (1 - sat((y - yFloor) / 3)));
+    const push = (p, k, g) => { out.push(p[0], p[1], p[2], k, g); };
+    const cap = 5200;
+    let yFloor;
+    if (!deck) {
+      // a side / superstructure / vehicle: deck levels (horizontal planes) cut at the hole, the shell's frames torn at
+      // it, a bulkhead, the back wall, rubble on the floor
+      const lev = [];
+      const base = land ? Math.max(.6, S.deckY * .4) : S.deckY;
+      const step = land ? 99 : DECK_H;
+      for (let k = -8; k <= 8; k++) { const y = base + k * step; if (y > S.y - r * 1.15 && y < S.y + r * 1.15 && (!S.sea || y > -1)) lev.push(y); }
+      if (!lev.length) lev.push(S.y - r * .8);
+      yFloor = lev.filter(y => y <= S.y).pop(); if (yFloor === undefined) yFloor = S.y - r;
+      for (const y of lev) {
+        const v = y - S.y;
+        for (let a = sp * .5; a < D; a += sp) for (let s = -r * 1.1; s <= r * 1.1; s += sp) {
+          const j1 = (hsh(out.length, rs) - .5) * sp * .7, j2 = (hsh(out.length, rs + 1) - .5) * sp * .7;
+          const aa = a + j1, s2 = s + j2;
+          if (!inPocket(aa, s2, v)) continue;
+          const p = P(aa, s2, v);
+          const e = aa < .7 + .4 * hsh(out.length, rs + 2);
+          // the cut edge bent the blast's way, ragged; a charge inside lifted the deck over it
+          if (e) p[1] += (S.sg > 0 && y > S.y ? .6 : -.5) * (.7 - Math.min(.7, aa)) * (.5 + hsh(out.length, rs + 3));
+          push(p, e ? 1 : 0, glowW(aa, yFloor, y));
+          if (out.length > cap * 5) break;
+        }
+      }
+      // frames (transverse webs, every 1.8 m of the length) and stiffeners (every 0.75 m of the height), torn in the middle
+      const fs = land ? 1.1 : 1.8;
+      const z0 = Math.ceil((S.z - r * 1.1) / fs) * fs;
+      for (let z = z0; z < S.z + r * 1.1; z += fs) {
+        const s = (z - S.z) / (Math.abs(t1[2]) > .3 ? t1[2] : 1);
+        if (Math.abs(t1[2]) < .3) break;
+        for (let v = -r * 1.1; v <= r * 1.1; v += sp * .6) {
+          const rho = Math.hypot(s, v) / r;
+          if (rho > 1.05) continue;
+          const torn = rho < .45 + .2 * hsh(Math.round(v * 10), rs + Math.round(z));
+          if (torn) continue;
+          const bend = (1.05 - rho) * (1.05 - rho) * r * .5 * (S.sg > 0 ? -1 : 1);
+          for (let a = .05; a < .5; a += sp * .7) push(P(a + bend * .6, s + bend * .15, v), 2, glowW(a, yFloor, S.y + v));
+          if (out.length > cap * 5) break;
+        }
+      }
+      for (let v = -Math.floor(r / .75) * .75; v <= r; v += .75) {
+        for (let s = -r * 1.1; s <= r * 1.1; s += sp * .6) {
+          const rho = Math.hypot(s, v) / r;
+          if (rho > 1.05 || rho < .55 + .15 * hsh(Math.round(s * 10), rs + 7)) continue;
+          push(P(.12 + (1.05 - rho) * r * .2 * (S.sg > 0 ? -1 : 1), s, v), 2, glowW(.12, yFloor, S.y + v));
+        }
+      }
+      // a bulkhead across the pocket (every 12 m of the length)
+      if (!land && Math.abs(t1[2]) > .3) {
+        const zb = Math.round((S.z - 6) / 12) * 12 + 6;
+        const s = (zb - S.z) / t1[2];
+        if (Math.abs(s) < r * .9) for (let a = .6; a < D; a += sp) for (let v = -r; v <= r; v += sp) {
+          if (!inPocket(a, s, v) || hsh(out.length, rs + 6) < .45) continue;
+          push(P(a, s + (hsh(out.length, rs + 5) - .5) * .1, v), 3, glowW(a, yFloor, S.y + v) * .7);
+        }
+      }
+    } else {
+      // a deck: the levels below (the first holed under a big charge), the deck's beams torn and bent, a girder
+      yFloor = S.y - D;
+      for (let k = 1; k * DECK_H < D + .2; k++) {
+        const a0 = k * DECK_H, holed = k === 1 && S.W > 60 ? r * .5 : 0;
+        for (let s = -r * 1.1; s <= r * 1.1; s += sp) for (let v = -r * 1.1; v <= r * 1.1; v += sp) {
+          const s2 = s + (hsh(out.length, rs) - .5) * sp * .7, v2 = v + (hsh(out.length, rs + 1) - .5) * sp * .7;
+          if (!inPocket(a0, s2, v2)) continue;
+          const rho = Math.hypot(s2, v2);
+          if (rho < holed * (1 + .2 * Math.sin(5 * Math.atan2(v2, s2) + rs))) continue;
+          const e = holed > 0 && rho < holed + .6;
+          const p = P(a0 + (e ? .5 * (holed + .6 - rho) : 0), s2, v2);
+          push(p, e ? 1 : 0, glowW(a0, yFloor, p[1]));
+          if (out.length > cap * 5) break;
+        }
+        if (k === Math.floor((D + .2) / DECK_H)) yFloor = S.y - a0;
+      }
+      const fs = 1.8, z0 = Math.ceil((S.z - r * 1.1) / fs) * fs;
+      for (let z = z0; z < S.z + r * 1.1; z += fs) {
+        const v = (z - S.z) * (t2[2] >= 0 ? 1 : -1);
+        for (let s = -r * 1.1; s <= r * 1.1; s += sp * .6) {
+          const rho = Math.hypot(s, v) / r;
+          if (rho > 1.05 || rho < .5 + .2 * hsh(Math.round(s * 10), rs + 3)) continue;
+          const bend = (1.05 - rho) ** 2 * r * .45 * (S.sg > 0 ? -1 : 1);
+          for (let a = .05; a < .45; a += sp * .7) push(P(a + bend, s, v), 2, glowW(a, yFloor, S.y - a));
+        }
+      }
+      // the back wall of the pocket (the level it opens onto), rubble on it
+    }
+    // the back wall: the far end of the pocket (a longitudinal bulkhead, the next deck down)
+    for (let s = -r; s <= r; s += sp) for (let v = -r; v <= r; v += sp) {
+      const s2 = s + (hsh(out.length, rs + 8) - .5) * sp * .7, v2 = v + (hsh(out.length, rs + 9) - .5) * sp * .7;
+      if (!inPocket(D, s2, v2)) continue;
+      const p = P(D, s2, v2);
+      if (!deck && S.sea && p[1] < -1) continue;
+      push(p, 4, glowW(D, yFloor, p[1]));
+    }
+    // rubble on the floor
+    const nR = Math.round(Math.min(600, 60 + r * r * 14));
+    for (let i = 0; i < nR; i++) {
+      const a = D * (.15 + .8 * hsh(i, rs + 11)), s = (hsh(i, rs + 12) - .5) * 1.6 * r;
+      const p = P(a, s, deck ? (hsh(i, rs + 14) - .5) * 1.6 * r : 0);
+      p[1] = yFloor + .05 + Math.pow(hsh(i, rs + 13), 3) * .9;
+      if (!deck && Math.hypot(s, yFloor - S.y) > Rp(a, 0) * 1.1) continue;
+      push(p, 5, glowW(a, yFloor, p[1]) + .15);
+    }
+    // only what lies inside the hull (its half-beam at that height and station, from the model's own dots): a pocket
+    // near the bow or a keel never pokes out through the plating
+    const G = GRIDS.get(u.def.model), env = G && G.env;
+    if (env) {
+      const halfB = (z, y) => {
+        let m = -1;
+        for (let dz = -1; dz <= 1; dz++) for (let dy = -1; dy <= 1; dy++) { const v = env.get((Math.floor(z / 2) + dz) * 4096 + Math.floor(y) + dy + 2048); if (v > m) m = v; }
+        return m;
+      };
+      let w = 0;
+      for (let i = 0; i < out.length; i += 5) {
+        const hb = halfB(out[i + 2], out[i + 1]);
+        if (hb < 0 || Math.abs(out[i]) > hb - .15) continue;
+        if (w !== i) for (let k = 0; k < 5; k++) out[w + k] = out[i + k];
+        w += 5;
+      }
+      out.length = w;
+    }
+    // shuffled (a stride is an even sample of it), capped
+    let N = out.length / 5;
+    const F = new Float32Array(Math.min(N, cap) * 5);
+    const idx = new Uint32Array(N); for (let i = 0; i < N; i++) idx[i] = i;
+    for (let i = N - 1; i > 0; i--) { const j = Math.floor(hsh(i, rs + 17) * (i + 1)); const t = idx[i]; idx[i] = idx[j]; idx[j] = t; }
+    N = Math.min(N, cap);
+    for (let i = 0; i < N; i++) { const q = idx[i] * 5; for (let k = 0; k < 5; k++) F[i * 5 + k] = out[q + k]; }
+    S.inn = F; S.nIn = N; S.yFloor = yFloor; S.sp = sp;
+  }
+
+  /* the fire's seats (model frame: x y z, spread (m), tangent x y z): on the plating's own dots at the torn rim (the
+     upper part of a hole in a side, all round one in a deck) and inside on the floor of the pocket */
+  function seatsOf(u, S, ent, st) {
+    const r = S.r, deck = S.ny > .7, cand = [];
+    eachDot(ent, st, (x, y, z) => {
+      const dx = x - S.x, dy = y - S.y, dz = z - S.z, al = dx * S.nx + dy * S.ny + dz * S.nz;
+      const lx = dx - S.nx * al, ly = dy - S.ny * al, lz = dz - S.nz * al, ll = Math.hypot(lx, ly, lz);
+      if (ll < r * 1.02 || ll > r * 1.45 || Math.abs(al) > r * .6) return;
+      if (!deck && ly < -r * .35) return;
+      cand.push(x, y, z, deck ? Math.atan2(lz, lx) : Math.atan2(ly, lx * S.nz - lz * S.nx));
+    }, S.x, S.y, S.z, r * 1.6);
+    const nRim = deck ? 4 : 4, seats = [];
+    const tx = deck ? 1 : S.nz, tz = deck ? 0 : -S.nx, tl = Math.hypot(tx, tz) || 1;
+    for (let k = 0; k < nRim && cand.length; k++) {
+      // one per sector of the rim (sides: its upper part), the dot nearest the sector's middle
+      const a0 = deck ? -Math.PI + (k + .2 + .6 * hsh(k, S.seed + 19)) / nRim * 2 * Math.PI : -.35 + (k + .5) / nRim * (Math.PI + .7);
+      let bi = -1, bd = 1e9;
+      for (let i = 0; i < cand.length; i += 4) { let da = Math.abs(cand[i + 3] - a0); if (da > Math.PI) da = 2 * Math.PI - da; if (da < bd) { bd = da; bi = i; } }
+      if (bi >= 0 && bd < 1) seats.push(cand[bi], cand[bi + 1], cand[bi + 2], Math.max(.3, r * .32), tx / tl, 0, tz / tl);
+    }
+    // inside: on the floor of the pocket, where the fire burns (seen through the hole)
+    const nIn = r > 1.2 ? (deck ? 4 : 3) : 1;
+    for (let k = 0; k < nIn; k++) {
+      const a = S.D * (.3 + .4 * hsh(k, S.seed + 21)), s = (hsh(k, S.seed + 22) - .5) * r, s2 = (hsh(k, S.seed + 23) - .5) * r;
+      const x = S.x - S.nx * a + (deck ? s : tx / tl * s), z = S.z - S.nz * a + (deck ? s2 : tz / tl * s);
+      seats.push(x, deck ? S.y - Math.min(S.D, DECK_H) + .1 : S.yFloor + .1, z, Math.max(.3, r * .3), tx / tl, 0, tz / tl);
+    }
+    if (!seats.length) seats.push(S.x + S.nx * .2, S.y, S.z + S.nz * .2, Math.max(.3, r * .4), tx / tl, 0, tz / tl);
+    S.seats = Float32Array.from(seats);
+  }
+
+  /* a fire seated on the hole's burning surfaces (none for a dent, pockmarks, a small hit that only scorches) */
   function startFire(u, S) {
     const f = fxSys();
-    if (!f || !f.add) return;
+    if (!f || !f.add || !S.seats || S.fire) return;
     if (S.W < 2 && !S.wl) return;
-    const sea = S.sea, sz = Math.max(.12, Math.min(1.1, .18 + Math.sqrt(S.W) / 18));
-    const r = S.r;
+    const sea = S.sea, sz = Math.max(.12, Math.min(1.1, .18 + Math.sqrt(S.W) / 18)), r = S.r;
     const F = new Fire({ t0: sim.t, seed: S.seed * 7 + 3, size: sz, local: [0, 0, 0],
-      spread: [r * .9 + .4, r * 2.6 + (sea ? 3 : 1), r * .55 + .3], ceiling: (sea ? 900 : 240) * sz + 60,
-      life: sea ? (sz > .5 ? 220 : 130) : 90, flame: S.wl ? .15 : 1, embers: S.wl ? .25 : 1.6, lightR: 8 + r * 5, lightI: 1.1, lightRgb: [255, 170, 90], dense: S.wl ? 13 : 12 });
-    F.k = 0;
+      spread: [r * .6 + .3, Math.min(10, 1.2 + r * 1.15), r * .3 + .2], ceiling: (sea ? 900 : 240) * sz + 60,
+      life: sea ? (sz > .5 ? 220 : 130) : 90, flame: S.wl ? .35 : 1, embers: S.wl ? .3 : 1.4, lightR: 4 + r * 2.2, lightI: .9, lightRgb: [255, 196, 138], dense: S.wl ? 13 : 12 });
+    F.k = 0; F.sea = sea;
+    F.seat(S.seats.length / 7);
     f.add(F, 0);
     S.fire = F;
     stats.fires++;
@@ -257,6 +576,7 @@ export function createScars(game) {
     k *= a < hold ? 1 : .18 + .82 * Math.exp(-(a - hold) / tau);
     if (!S.sea && a > 30 + 60 * big) k *= Math.exp(-(a - 30 - 60 * big) / 40);
     if (S.kick) { k = Math.min(1, k + S.kick); S.kick = Math.max(0, S.kick - .002); }
+    if (S.force && t < (S.forceUntil || 1e18)) k = Math.max(k, S.force);
     if (u.alive) k = Math.max(k, sat((.4 - u.hp / u.hpMax) * 1.6) * (.4 + .6 * big));
     else if (rec.dead) k = u.def.domain === 'sea' ? (u.dying < .85 ? Math.max(k, .7 + .3 * big) : k * (1 - ss(.85, .97, u.dying))) : 0;
     return k;
@@ -285,18 +605,16 @@ export function createScars(game) {
       else { x = S.x + (hsh(i, S.seed) - .5) * r; y = S.y + (hsh(i, S.seed + 1) - .5) * r; z = S.z + (hsh(i, S.seed + 2) - .5) * r; }
       if (m && i >= m) { x += (hsh(i, S.seed + 3) - .5) * .3; y += (hsh(i, S.seed + 4) - .5) * .3; z += (hsh(i, S.seed + 5) - .5) * .3; }
       const wx = pose.pos[0] + M[0] * x + M[1] * y + M[2] * z, wy = pose.pos[1] + M[3] * x + M[4] * y + M[5] * z, wz = pose.pos[2] + M[6] * x + M[7] * y + M[8] * z;
-      // out along the normal and away from the middle of the hole, with a scatter
       const ox = wx - lastPos[0], oy = wy - lastPos[1], oz = wz - lastPos[2], ol = Math.hypot(ox, oy, oz) || 1;
       const c = hsh(i, S.seed + 6);
-      // a quarter fall away down the side, most go as debris, a fifth fly fast
       const spd = c < .25 ? .5 + 3 * hsh(i, S.seed + 7) : c < .8 ? (6 + 22 * hsh(i, S.seed + 7)) * Math.min(2.2, .6 + kick) : (30 + 70 * hsh(i, S.seed + 7)) * Math.min(2, .5 + kick);
       const sc = c < .25 ? .35 : 1;
-      let vx = Nw[0] + ox / ol * .8 * sc + (hsh(i, S.seed + 8) - .5) * .9, vy = Nw[1] + oy / ol * .8 * sc + (hsh(i, S.seed + 9) - .5) * .9 + (c < .25 ? -.6 : .35), vz = Nw[2] + oz / ol * .8 * sc + (hsh(i, S.seed + 10) - .5) * .9;
+      const vx = Nw[0] + ox / ol * .8 * sc + (hsh(i, S.seed + 8) - .5) * .9, vy = Nw[1] + oy / ol * .8 * sc + (hsh(i, S.seed + 9) - .5) * .9 + (c < .25 ? -.6 : .35), vz = Nw[2] + oz / ol * .8 * sc + (hsh(i, S.seed + 10) - .5) * .9;
       const vl = Math.hypot(vx, vy, vz) || 1;
       G.P[i * 3] = wx; G.P[i * 3 + 1] = wy; G.P[i * 3 + 2] = wz;
       G.V[i * 3] = vbx + vx / vl * spd; G.V[i * 3 + 1] = vy / vl * spd; G.V[i * 3 + 2] = vbz + vz / vl * spd;
-      G.K[i * 2] = c < .25 ? .3 + .5 * hsh(i, S.seed + 11) : .5 + 1.6 * hsh(i, S.seed + 11);      // drag (1/s): plates flutter
-      G.K[i * 2 + 1] = hsh(i, S.seed + 12) < .35 ? 1 : 0;                                         // hot for a moment
+      G.K[i * 2] = c < .25 ? .3 + .5 * hsh(i, S.seed + 11) : .5 + 1.6 * hsh(i, S.seed + 11);
+      G.K[i * 2 + 1] = hsh(i, S.seed + 12) < .35 ? 1 : 0;
     }
     G.sea = u.def.domain === 'sea';
     G.gy = G.sea ? 0 : ground(lastPos[0], lastPos[2]);
@@ -322,7 +640,7 @@ export function createScars(game) {
         let y = P[i * 3 + 1] + V[i * 3 + 1] * f1 - 9.81 * f2;
         if (y < G.gy) {
           if (G.sea) continue;
-          y = G.gy + .05;                                     // on the ground: lies there, dim
+          y = G.gy + .05;
         }
         const hot = K[i * 2 + 1] > 0 ? 1 - ss(.05, .7, a) : 0;
         if (hot > .02) sink.add(x, y, z, sz, 255, 214 + 30 * hot, 170 + 60 * hot, hot);
@@ -334,9 +652,50 @@ export function createScars(game) {
     return drawn;
   }
 
+  /* the interiors of the holes near the lens: charred structure, the fire inside glowing on it */
+  function drawInside(frame) {
+    const sink = frame.sink;
+    if (!sink || !sink.cam) return 0;
+    const cam = sink.cam, eye = cam.eye, f = cam.f, fl = cam.fl || 1300, tr = frame.realT || game.realT || 0;
+    let drawn = 0;
+    for (const [id, rec] of recs) {
+      if (!rec.n || !game.drawn.has(id) || !rec.vis) continue;
+      const u = sim.units.get(id); if (!u) continue;
+      const pose = game.unitPose(u), M = rec.M, p0 = pose.pos;
+      for (const S of rec.list) {
+        if (!S.nIn || game.t < S.t0) continue;
+        const cx = p0[0] + M[0] * S.x + M[1] * S.y + M[2] * S.z, cy = p0[1] + M[3] * S.x + M[4] * S.y + M[5] * S.z, cz = p0[2] + M[6] * S.x + M[7] * S.y + M[8] * S.z;
+        const zc = (cx - eye[0]) * f[0] + (cy - eye[1]) * f[1] + (cz - eye[2]) * f[2];
+        if (zc < -S.r * 2) continue;
+        const pxm = fl / Math.max(1, zc);
+        if (S.r * pxm < 2.5) continue;
+        // facing: the hole seen from its own side only
+        const nwx = M[0] * S.nx + M[1] * S.ny + M[2] * S.nz, nwy = M[3] * S.nx + M[4] * S.ny + M[5] * S.nz, nwz = M[6] * S.nx + M[7] * S.ny + M[8] * S.nz;
+        if ((eye[0] - cx) * nwx + (eye[1] - cy) * nwy + (eye[2] - cz) * nwz < -S.r) continue;
+        const px = S.sp * pxm, stride = px >= 2 ? 1 : Math.min(40, Math.ceil((2 / px) ** 2));
+        const size = px > 9 ? 3 : px > 4 ? 2 : 1;
+        const fk = S.fire ? S.fire.k : 0, heat = rec.C[rec.list.indexOf(S) * 4 + 3] || 0, I = S.inn;
+        const grow = sat((game.t - S.t0) / .15);
+        for (let i = 0; i < S.nIn; i += stride) {
+          const o = i * 5, x = I[o], y = I[o + 1], z = I[o + 2], k = I[o + 3], gw = I[o + 4];
+          const wx = p0[0] + M[0] * x + M[1] * y + M[2] * z, wy = p0[1] + M[3] * x + M[4] * y + M[5] * z, wz = p0[2] + M[6] * x + M[7] * y + M[8] * z;
+          if (S.sea && wy < .05) continue;                                 // flooded: under the sea
+          const hs = hsh(i, S.seed + 31);
+          // charred steel: dark, the cut edges and frames catching more light; the fire's glow on it, flickering
+          let c = k === 4 ? .075 + .05 * hs : k === 1 ? .2 + .14 * hs : k === 2 ? .15 + .1 * hs : k === 5 ? .09 + .09 * hs : .11 + .07 * hs;
+          c *= grow;
+          const fl2 = .72 + .28 * Math.sin(tr * (5.3 + 3 * hs) + i * .7);
+          const g2 = gw * gw, g = Math.max(fk * (.08 + .72 * g2) * fl2, heat * .6 * g2) * (k === 1 ? 1.15 : 1);
+          const rr = 255 * Math.min(1, c * .95 + .6 * g), gg = 255 * Math.min(1, c * .9 + .36 * g), bb = 255 * Math.min(1, c * .84 + .13 * g);
+          sink.dot(wx, wy, wz, size, rr, gg, bb, 1);
+          drawn++;
+        }
+      }
+    }
+    return drawn;
+  }
+
   /* ------------------------------------------------------------ per frame */
-  /* the grids built ahead of the hits, one model a while, from what the renderer has sampled (a first hit on a type then
-     costs no build) */
   let prepN = 0;
   function prep() {
     if (++prepN % 45) return;
@@ -346,11 +705,12 @@ export function createScars(game) {
       const G = GRIDS.get(m), ent = R.models.entries.get(m);
       if (!ent || (G && (G.sp <= Math.max(.15, ent.L / 300) * 1.01 || G.tries > 3))) continue;
       if (!game.drawn.has(u.id)) continue;
-      gridOf(ent, (u.def.modelState ? u.def.modelState(u, game.t) : u.st) || {});
+      gridOf(ent, stOf(u));
       return;
     }
   }
 
+  const KC = { hole: 0, dent: 1, pock: 2, rupture: 3 };
   function update() {
     const t = sim.t;
     let ns = 0;
@@ -358,28 +718,38 @@ export function createScars(game) {
     for (const [id, rec] of recs) {
       const u = sim.units.get(id);
       if (!u) { for (const S of rec.list) if (S.fire) S.fire.stop(t); recs.delete(id); continue; }
-      const pose = game.unitPose(u), M = attitudeM(pose.hdg, pose.pitch || 0, pose.roll || 0, rec.M);
+      const pose = game.unitPose(u), M = attitudeM(pose.hdg, pose.pitch || 0, pose.roll || 0, rec.M), p0 = pose.pos;
       const vis = !sim.fog || u.side === game.side || !!(game.vis && (game.vis(u) === 'own' || game.vis(u) === 'track'));
-      const L = rec.L, C = rec.C, list = rec.list;
+      rec.vis = vis;
+      const L = rec.L, C = rec.C, Dd = rec.D, list = rec.list;
       rec.n = list.length; ns += rec.n;
       for (let i = 0; i < list.length; i++) {
         const S = list[i], a = game.t - S.t0, ah = game.t - (S.t0h || S.t0);
         // the hole opens in a few hundredths of a second; the rim glows, cooling over half a minute
         const grow = Math.min(1, .3 + Math.max(0, ah) / .12);
-        L[i * 8] = S.x; L[i * 8 + 1] = S.y; L[i * 8 + 2] = S.z; L[i * 8 + 3] = a < 0 ? 0 : S.r * grow;
+        L[i * 8] = S.x; L[i * 8 + 1] = S.y; L[i * 8 + 2] = S.z; L[i * 8 + 3] = a < 0 ? 0 : S.r * (S.kind === 'pock' ? 1 : grow);
         L[i * 8 + 4] = S.nx; L[i * 8 + 5] = S.ny; L[i * 8 + 6] = S.nz; L[i * 8 + 7] = S.seed;
-        C[i * 4] = 0; C[i * 4 + 1] = S.reach; C[i * 4 + 2] = S.petal;
-        C[i * 4 + 3] = ah < 0 ? 0 : .05 + .95 * Math.exp(-ah / 28) * (S.W > 2 ? 1 : .5);
-        if (S.fire) {
-          // seated just outside the hole, at its upper edge on a side (the flames lick up the plating from the tear;
-          // the hole itself stays dark), in the crater on a deck
-          const deck = S.ny > .7, off = S.r * (deck ? .15 : .5), up = deck ? 0 : S.r * .55;
-          const lx = S.x + S.nx * off, ly = S.y + S.ny * off + up, lz = S.z + S.nz * off;
-          W3[0] = pose.pos[0] + M[0] * lx + M[1] * ly + M[2] * lz; W3[1] = pose.pos[1] + M[3] * lx + M[4] * ly + M[5] * lz; W3[2] = pose.pos[2] + M[6] * lx + M[7] * ly + M[8] * lz;
+        C[i * 4] = 0; C[i * 4 + 1] = S.reach; C[i * 4 + 2] = S.pet;
+        C[i * 4 + 3] = ah < 0 ? 0 : .04 + .96 * Math.exp(-ah / (S.kind === 'pock' ? 3 : 9)) * (S.W > 2 || S.kind === 'pock' ? 1 : .5);
+        Dd[i * 4] = KC[S.kind]; Dd[i * 4 + 1] = S.D; Dd[i * 4 + 2] = S.sg; Dd[i * 4 + 3] = S.np;
+        const F = S.fire;
+        if (F) {
+          // the seats carried with the full pose (roll, pitch, list, sinking); the smoke leaves from the highest one
+          const Z = S.seats, n = Z.length / 7, SW = F.SW;
+          let hi = -1e9, hx = 0, hz = 0, above = 0;
+          for (let j = 0; j < n; j++) {
+            const x = Z[j * 7], y = Z[j * 7 + 1], z = Z[j * 7 + 2], tx = Z[j * 7 + 4], ty = Z[j * 7 + 5], tz = Z[j * 7 + 6];
+            const wx = p0[0] + M[0] * x + M[1] * y + M[2] * z, wy = p0[1] + M[3] * x + M[4] * y + M[5] * z, wz = p0[2] + M[6] * x + M[7] * y + M[8] * z;
+            SW[j * 7] = wx; SW[j * 7 + 1] = wy; SW[j * 7 + 2] = wz; SW[j * 7 + 3] = Z[j * 7 + 3];
+            SW[j * 7 + 4] = M[0] * tx + M[1] * ty + M[2] * tz; SW[j * 7 + 5] = M[3] * tx + M[4] * ty + M[5] * tz; SW[j * 7 + 6] = M[6] * tx + M[7] * ty + M[8] * tz;
+            if (!S.sea || wy > .25) above++;
+            if (wy > hi) { hi = wy; hx = wx; hz = wz; }
+          }
+          W3[0] = hx; W3[1] = hi; W3[2] = hz;
           let k = kOf(u, S, rec, t);
-          if (W3[1] < -.4 && S.sea) k = 0;                                   // under the water: out
-          S.fire.k = k;
-          S.fire.follow(t, W3, pose.hdg, vis ? k : 0);
+          if (S.sea && !above) k = 0;                                          // all under the water: out
+          F.k = k;
+          F.follow(t, W3, pose.hdg, vis ? k : 0);
         }
       }
       rec.now = game.t;
@@ -387,19 +757,57 @@ export function createScars(game) {
     stats.scars = ns;
   }
 
+  /* a cook-off (sim/damage.js 'cookoff'): the module's load going up blows out through the deck over it */
+  function onCookoff(e) {
+    const u = sim.units.get(e.unit);
+    if (!u || !e.at || u.def.domain === 'air' || !R.models.has(u.def.model)) return;
+    const ent = R.models.get(u.def.model), st = stOf(u), G = gridOf(ent, st);
+    const at = e.at, o = new Array(6), top = (G ? G.deckY : u.def.size[2] * .4) + 14;
+    if (!snap(ent, st, [at[0], top, at[2]], [0, -1, 0], 1.6, o)) return;
+    const kg = Math.min(3000, Math.pow(Math.max(2, e.size || 8) / 1.25, 3));
+    const nl = Math.hypot(o[3], o[4], o[5]) || 1;
+    const zone = zoneOf(u.def.domain === 'sea', o[1], o[4] / nl, G ? G.deckY : 0), t = plateOf(u, zone);
+    const Oc = outcome(kg, t, 'in', 0, 0), cap = .35 * Math.max(u.def.size[1], u.def.size[2]);
+    const S = { x: o[0], y: o[1], z: o[2], nx: o[3] / nl, ny: o[4] / nl, nz: o[5] / nl, kind: Oc.kind === 'dent' ? 'hole' : Oc.kind, r: Math.min(Math.max(Oc.r, .6), cap), r0: Oc.r,
+      reach: Oc.reach, pet: .5, sg: 1, np: 0, W: Oc.Weff, px: Oc.x, fz: 'in', t, zone, t0: sim.t, seed: (u.id * 71 + (S_N++)) % 997, sea: u.def.domain === 'sea', wl: false,
+      fire: null, merged: 0, deckY: G ? G.deckY : 0, D: 0, inn: null, nIn: 0, seats: null, force: .95, forceUntil: sim.t + Math.max(20, e.fire || 0) };
+    // the world point where it vents (fx lays its blast there)
+    const pose = game.unitPose(u), M = attitudeM(pose.hdg, pose.pitch || 0, pose.roll || 0, [0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    lastEv = e; lastW = Oc.Weff;
+    lastPos[0] = pose.pos[0] + M[0] * S.x + M[1] * S.y + M[2] * S.z; lastPos[1] = pose.pos[1] + M[3] * S.x + M[4] * S.y + M[5] * S.z; lastPos[2] = pose.pos[2] + M[6] * S.x + M[7] * S.y + M[8] * S.z;
+    lastN[0] = M[0] * S.nx + M[1] * S.ny + M[2] * S.nz; lastN[1] = M[3] * S.nx + M[4] * S.ny + M[5] * S.nz; lastN[2] = M[6] * S.nx + M[7] * S.ny + M[8] * S.nz;
+    const P = addScar(u, S, ent, st);
+    if (P) { P.force = Math.max(P.force || 0, S.force); P.forceUntil = Math.max(P.forceUntil || 0, S.forceUntil); P.kick = 1; }
+  }
+
   const sys = {
     name: 'scars', priority: 12,
-    stats, groups,
-    /* the snapped world point of the hit event just handled (fx lays its blast there) */
+    stats, groups, outcome, PLATE,
     surface(ev) { return ev && ev === lastEv ? lastPos : null; },
-    /* the world normal of the surface there and the warhead (kg) of the hit just handled */
     normal(ev) { return ev && ev === lastEv ? lastN : null; },
     charge(ev) { return ev && ev === lastEv ? lastW : 0; },
     burning(id) { const r = recs.get(id); return !!(r && r.list.some(S => S.fire)); },
     heavy(id) { const r = recs.get(id); return r ? r.heavy : 0; },
-    /* the latest scar of a unit, model frame: { x, y, z, nx, ny, nz, r, W } */
     last(id) { const r = recs.get(id); return r && r.list.length ? r.list.reduce((a, b) => ((b.t0h || b.t0) >= (a.t0h || a.t0) ? b : a)) : null; },
     of(id) { return recs.get(id) || null; },
+    /* a ship lost with no fire of her own: her worst hole burns, else a fire on her deck amidships. -> true if lit */
+    ignite(id) {
+      const u = sim.units.get(id);
+      if (!u || !R.models.has(u.def.model)) return false;
+      const rec = recOf(u);
+      let best = null;
+      for (const S of rec.list) if (holeLike(S.kind) && (!best || S.r > best.r)) best = S;
+      if (best) { if (!best.fire) { best.W = Math.max(best.W, 20); startFire(u, best); } if (best.fire) { best.force = .8; return true; } }
+      const ent = R.models.get(u.def.model), st = stOf(u), G = gridOf(ent, st), o = new Array(6);
+      if (!snap(ent, st, [0, (G ? G.deckY : 5) + 14, 0], [0, -1, 0], 2, o)) return false;
+      const S = { x: o[0], y: o[1], z: o[2], nx: 0, ny: 1, nz: 0, kind: 'dent', r: 0, r0: 0, reach: 2, pet: 0, sg: 1, np: 0, W: 40, px: 0, fz: 'in', t: 10, zone: 'deck', t0: sim.t,
+        seed: (id * 37) % 997, sea: u.def.domain === 'sea', wl: false, fire: null, merged: 0, deckY: G ? G.deckY : 0, D: 0, inn: null, nIn: 0, force: .8,
+        seats: Float32Array.from([o[0] - 3, o[1], o[2] - 4, 2, 0, 0, 1, o[0] + 2, o[1], o[2], 2, 0, 0, 1, o[0], o[1], o[2] + 5, 2, 0, 0, 1]) };
+      if (rec.list.length >= MAXS) return false;
+      rec.list.push(S);
+      startFire(u, S);
+      return !!S.fire;
+    },
     /* take a unit's marks off now (the Inspect impact test's reset): its scars, their fires and smoke (out of the fx
        list at once), its ejecta */
     clear(id) {
@@ -413,7 +821,8 @@ export function createScars(game) {
     init() { game.scars = sys; },
     onEvent(e) {
       switch (e.type) {
-        case 'hit': if (e.target !== undefined && !e.miss) { try { onHit(e); } catch (err) { console.error('scars: hit', err); } } return;
+        case 'hit': if (e.target !== undefined) { try { onHit(e); } catch (err) { console.error('scars: hit', err); } } return;
+        case 'cookoff': try { onCookoff(e); } catch (err) { console.error('scars: cookoff', err); } return;
         case 'destroyed': {
           const rec = recs.get(e.unit);
           if (!rec) return;
@@ -434,10 +843,10 @@ export function createScars(game) {
     update,
     draw3d(frame) {
       const t0 = performance.now();
-      // the marks ride on this frame's render instance of each unit
       for (const [id, rec] of recs) { const d = game.drawn.get(id); if (d) d.scars = rec.n ? rec : null; }
       if (!R.pcOff && groups.length) stats.ejecta = drawEjecta(frame);
       else stats.ejecta = 0;
+      stats.inside = !R.pcOff && R.style !== 'orbital' ? drawInside(frame) : 0;
       stats.drawMs = performance.now() - t0;
     },
     dispose() { for (const rec of recs.values()) for (const S of rec.list) if (S.fire) S.fire.stop(sim.t); recs.clear(); if (game.scars === sys) game.scars = null; },

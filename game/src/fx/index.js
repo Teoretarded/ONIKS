@@ -305,7 +305,9 @@ class FxSystem {
             return;
           }
           this.add(new Blast({ t0: t + .3, pos: [pos[0], pos[1] + 6, pos[2]], sc: 1.4, sea: true, gy: 0, seed: seed + 5 }), 3);
-          const f = this.fires.get(ev.unit) || (this.game && this.game.scars && this.game.scars.burning(ev.unit) ? null : this.startFire(u, t, null, L > 200 ? 1.5 : 1, seed));
+          // with the scars system her fires stand on her holes (a ship lost with none burning gets one there, or on her deck)
+          const SC = this.game && this.game.scars;
+          const f = this.fires.get(ev.unit) || (SC && (SC.burning(ev.unit) || (SC.ignite && SC.ignite(ev.unit))) ? null : this.startFire(u, t, null, L > 200 ? 1.5 : 1, seed));
           if (f) f.k = 1;
           this.sinks.set(ev.unit, this.add(new Sinking({ t0: t, pos, hdg: u.hdg, L, B, seed, dur: u.def.dieTime }), 0));
         } else if (dom === 'air') {
@@ -318,6 +320,29 @@ class FxSystem {
           const f = u ? (this.fires.get(ev.unit) || this.startFire(u, t, null, .3, seed)) : this.startFire(null, t, [pos[0], gy, pos[2]], .3, seed);
           f.k = 1;
         }
+        return;
+      }
+      case 'cookoff': {
+        // a magazine / a load going up (sim/damage.js): a huge blast venting up through the deck over it (the scars
+        // system opens the hole there), then the rounds in it going off for a few seconds
+        const u = sim && sim.units.get(ev.unit);
+        if (!u || !ev.pos || u.def.domain === 'air') return;
+        const SC = this.game && this.game.scars, sp = SC && SC.surface(ev), p = sp ? sp.slice() : ev.pos.slice();
+        const sz = Math.max(3, ev.size || 8), kg = Math.min(4000, (sz / 1.25) ** 3), wet = u.def.domain === 'sea' || this.wet(p[0], p[2]);
+        const gy = u.def.domain === 'sea' ? 0 : this.groundAt(p[0], p[2]);
+        p[1] = Math.max(p[1], gy + .5);
+        this.add(new HullBlast({ t0: t, pos: p, n: [0, 1, 0], kg, seed, sea: wet, gy }), 3);
+        this.add(new HullBlast({ t0: t + .12, pos: [p[0], p[1] + sz * .15, p[2]], n: [0, 1, 0], kg: kg * .35, seed: seed + 1, sea: wet, gy }), 3);
+        // what was in it going off after: a few pops for a vehicle's load ('kill'), a long rolling series for a big ship's
+        // magazine ('heavy')
+        const heavy = ev.out === 'heavy', nP = heavy ? Math.round(8 + Math.min(14, sz / 1.2)) : Math.round(2 + Math.min(4, sz / 5)), span = heavy ? 8 : 2.5;
+        for (let i = 0; i < nP; i++) {
+          const a = hsh(i, seed + 3) * TAU, d = sz * .35 * hsh(i, seed + 4), up = [Math.sin(a) * .6, 1, Math.cos(a) * .6];
+          this.add(new HullBlast({ t0: t + .4 + span * Math.pow(hsh(i, seed + 5), 1.4), pos: [p[0] + Math.sin(a) * d, p[1] + .5 + sz * .15 * hsh(i, seed + 6), p[2] + Math.cos(a) * d], n: up,
+            kg: 6 + 45 * hsh(i, seed + 7), seed: seed + 11 + i, sea: wet, gy }), 3);
+        }
+        if (u.def.domain === 'sea' && p[1] < 10) this.add(new Splash({ t0: t + .05, pos: [p[0], 0, p[2]], size: 10 * Math.cbrt(kg), seed: seed + 2, ring: 0 }), 2);
+        if (this.game && this.game.scars && u.def.domain !== 'sea') { const f = this.fires.get(u.id) || this.startFire(u, t, null, .45, seed); f.k = 1; }
         return;
       }
       case 'gunfire': {

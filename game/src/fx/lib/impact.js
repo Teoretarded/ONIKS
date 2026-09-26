@@ -197,7 +197,12 @@ export class Blast {
    lightR (m) / lightI (x) / lightRgb the flicker's light on what is near, dense (the smoke's opacity: 3.4 default, a thick
    column ~7) }
    Each frame the system calls follow(t, pos, hdg, k) (k: how hard it burns now, 0..1); stop(t) lets it burn out.
-   Embers: sparks lifted off the flames by the heat, drifting downwind, flickering out (real time, as the flames). */
+   Embers: sparks lifted off the flames by the heat, drifting downwind, flickering out (real time, as the flames).
+   Seats (game/scars.js): seat(n), then every frame before follow() the owner fills SW (n x [x y z spread tx ty tz],
+   world: where the fire stands on the burning surface, how far it spreads there and the surface's horizontal tangent):
+   the flames rise from those seats (spread along the surface, not out into the air), the embers leave them, the
+   light stays local (over the sea it never reaches the water: sea true), a seat under the water burns no flame and
+   only steams; follow()'s pos is then where the smoke leaves (the highest seat). */
 export class Fire {
   constructor(o) {
     const r = rng(o.seed || 5150), sz = o.size || 1;
@@ -216,6 +221,77 @@ export class Fire {
     this.FP = new Float32Array(nF * 4);
     for (let i = 0; i < nF; i++) { this.FP[i * 4] = (r() - .5) * 2 * this.spr[0]; this.FP[i * 4 + 1] = Math.pow(r(), 1.8) * this.spr[1]; this.FP[i * 4 + 2] = (r() - .5) * 2 * this.spr[2]; this.FP[i * 4 + 3] = r() * 40; }
     this.nF = nF;
+    this.nS = 0; this.SW = null; this.sea = false;
+  }
+  /* n seats on the burning surface (the owner fills SW every frame, world) */
+  seat(n) { this.nS = n | 0; this.SW = new Float32Array(Math.max(1, this.nS) * 7); }
+  /* the flames on their seats (see seat()): tongues standing on the burning surface, rising (world up, leaning
+     downwind), white-hot at the root through amber to a dull coral at the tip; steam where a seat is under the sea */
+  drawSeats(C, kNow, fx, fy, fz) {
+    const V = C.V, dot = C.dot, sz = this.size, q = C.q, tr = C.tr, sd = this.seed, SW = this.SW, nS = this.nS;
+    const W0 = C.wind[0], W2 = C.wind[2], S1 = this.spr[1];
+    const zc = V.depth(fx, fy, fz), pxm = zc > V.near ? V.fl / zc : 0;
+    const flick = .75 + .25 * noise(tr * 3.1, sd * .1, 0);
+    // the light: over the flames, local (never down to the water)
+    const ly = fy + S1 * .35;
+    let lR = this.lR; if (this.sea) lR = Math.min(lR, Math.max(1.5, (ly - .3) * 1.05));
+    C.light(fx, ly, fz, this.lc[0], this.lc[1], this.lc[2], .3 * kNow * flick * Math.sqrt(sz) * this.lI, lR);
+    if (pxm * S1 < 3) {
+      // far: a flickering amber point (it still reads as a fire from kilometres)
+      dot(fx, fy + S1 * .3, fz, 2, 255, 214, 150, Math.min(1, kNow * flick * 1.4));
+      C.glow(fx, fy + S1 * .3, fz, 3, 255, 150, 70, .25 * kNow * flick);
+      return;
+    }
+    const big = pxm > .5 ? 2 : 1, lean = .04;
+    let nTot = Math.max(nS * 2, Math.min(44, Math.round(4 + S1 * pxm / 5)));
+    const per = Math.max(1, Math.round(nTot / nS));
+    const hpx = S1 * pxm, mT = Math.max(4, Math.round(Math.min(90, 5 + hpx * .55) * q));
+    for (let s = 0; s < nS; s++) {
+      const o = s * 7, X = SW[o], Y = SW[o + 1], Z = SW[o + 2], w = SW[o + 3], tx = SW[o + 4], tz = SW[o + 6];
+      if (this.sea && Y < .25) {
+        // under the water: steam where the sea meets the hot plating
+        if (Y > -3) for (let j = 0, nj = Math.round(18 * q); j < nj; j++) {
+          const Tj = 2.5 + 2 * hsh(j, sd + s * 13 + 40), ph = tr / Tj + hsh(j, sd + s * 13 + 41), cyc = Math.floor(ph), a = (ph - cyc) * Tj;
+          const ex = X + (hsh(j + cyc, sd + s + 42) - .5) * w * 2 + W0 * a * .5, ez = Z + (hsh(j + cyc, sd + s + 43) - .5) * w * 2 + W2 * a * .5;
+          dot(ex, .3 + a * 1.4, ez, pxm > 3 ? 2 : 1, 236, 240, 234, .35 * kNow * (1 - a / Tj) * Math.min(1, a * 3));
+        }
+        continue;
+      }
+      const hk = s < 1 ? 1 : .8 + .2 * hsh(s, sd + 3);
+      for (let i = 0; i < per; i++) {
+        const ii = s * per + i, u = (hsh(ii, sd + 1) - .5) * 2 * w, cr = (hsh(ii, sd + 2) - .5) * .25 * w;
+        const rx = X + tx * u + tz * cr, rz = Z + tz * u - tx * cr;
+        const fl = .7 + .2 * Math.sin(tr * (5 + 3 * hsh(ii, sd + 3)) + ii * 1.7) + .15 * noise(tr * 2.2, ii * .37, sd * .01);
+        const Hi = S1 * (.35 + .65 * hsh(ii, sd + 4)) * (.45 + .55 * kNow) * fl * hk;
+        const Wi = Math.max(.2, w * .85) * (.7 + .5 * hsh(ii, sd + 5));
+        const ph0 = tr * (1.4 + 1.2 * hsh(ii, sd + 6)), swx = Math.sin(tr * 2.1 + ii * 2.3) * .12 * Hi;
+        for (let j = 0; j < mT; j++) {
+          let v = hsh(j, sd + 7 + ii * 13) + ph0; v -= Math.floor(v); v = Math.pow(v, 1.25);
+          const wd = Wi * Math.pow(1 - v, .7), off = (hsh(j, sd + 8 + ii * 7) - .5) * 2 * wd, off2 = (hsh(j, sd + 9 + ii * 5) - .5) * wd * .5;
+          const bend = v * v, lw = lean * Hi * bend;
+          const wx = rx + tx * (off + swx * bend) + tz * off2 + W0 * lw, wz = rz + tz * (off + swx * bend) - tx * off2 + W2 * lw, wy = Y + v * Hi;
+          const hot = 1 - v, al = Math.min(1, 2.4 * kNow) * Math.pow(1 - v, .55) * (.7 + .3 * hsh(j + Math.floor(tr * 20), sd + 10));
+          if (al < .03) continue;
+          dot(wx, wy, wz, big, 255, 106 + 146 * Math.pow(hot, .8), 61 + 175 * hot * hot, al > 1 ? 1 : al);
+        }
+      }
+      C.glow(X, Y + S1 * .2, Z, Math.min(24, Math.max(2, w * pxm)), 255, 176, 92, .08 * kNow * flick);
+    }
+    // embers off the seats
+    const nEm = Math.round(Math.min(200, 10 + 60 * sz) * q * this.emb * Math.min(1, kNow * 1.4));
+    for (let j = 0; j < nEm; j++) {
+      const sd2 = sd + 31, Tj = 2 + 3 * hsh(j, sd2), ph = tr / Tj + hsh(j, sd2 + 1), cyc = Math.floor(ph), a = (ph - cyc) * Tj;
+      const s = Math.floor(hsh(j + cyc * 11, sd2 + 9) * nS), o = s * 7;
+      if (this.sea && SW[o + 1] < .25) continue;
+      const vu = (4 + 7 * hsh(j + cyc * 7, sd2 + 2)) * Math.sqrt(sz + .2), up = vu * 1.6 * (1 - Math.exp(-a / 1.6));
+      const u = (hsh(j + cyc * 3, sd2 + 3) - .5) * 2 * SW[o + 3];
+      const dr = a * (.35 + .5 * hsh(j, sd2 + 5)), sw = Math.sin(tr * (1.3 + hsh(j, sd2 + 6)) + j) * .6 * a;
+      const ex = SW[o] + SW[o + 4] * u + W0 * dr + sw, ez = SW[o + 2] + SW[o + 6] * u + W2 * dr + sw * .7, ey = SW[o + 1] + S1 * .3 + up;
+      const blink = hsh(j + Math.floor(tr * 14), sd2 + 7) < .8 ? 1 : .25, al = Math.pow(1 - a / Tj, 1.6) * blink * Math.min(1, kNow * 1.5);
+      if (al < .04) continue;
+      const hot = 1 - a / Tj;
+      dot(ex, ey, ez, pxm > 3 ? 2 : 1, 255, 150 + 95 * hot, 70 + 120 * hot * hot, al);
+    }
   }
   /* the unit's pose now and how hard it burns; lays the smoke puffs due since the last call */
   follow(t, pos, hdg, k) {
@@ -241,7 +317,8 @@ export class Fire {
     const kNow = t < this.end ? this.k * sat(age / .5) * this.fl : 0;
     const s = Math.sin(this.hdg), c = Math.cos(this.hdg), L = this.loc, P = this.pos;
     const fx = P[0] + s * L[0] + c * L[2], fz = P[2] + c * L[0] - s * L[2], fy = P[1] + L[1];
-    if (kNow > .02 && V.vis(fx, fy, fz, 60 * sz + 10)) {
+    if (this.nS && kNow > .02 && V.vis(fx, fy, fz, 60 * sz + 10)) this.drawSeats(C, kNow, fx, fy, fz);
+    else if (kNow > .02 && V.vis(fx, fy, fz, 60 * sz + 10)) {
       const zc = V.depth(fx, fy, fz), pxm = zc > V.near ? V.fl / zc : 0, tr = C.tr, FP = this.FP;
       const flick = .75 + .25 * noise(tr * 3.1, this.seed * .1, 0);
       C.light(fx, fy + this.spr[1] * .5, fz, this.lc[0], this.lc[1], this.lc[2], .3 * kNow * flick * Math.sqrt(sz) * this.lI, this.lR);
