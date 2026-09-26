@@ -79,7 +79,7 @@ const SEC = {
   bhdStiff: { hw: .15, tw: .006, bf: .075, tf: .008 },
 };
 
-const st = { plate: null, scene: 'box', grid: .125, solver: 'gpu', spd: 0, src: 'charge', round: 7, kg: 120, casing: 130, fuze: 'contact',
+const st = { relaxAt: 0, patchL: 0, beamM: 0, fineR: 0, uniformGrid: false, plate: null, scene: 'box', grid: .125, solver: 'gpu', spd: 0, src: 'charge', round: 7, kg: 120, casing: 130, fuze: 'contact',
   standoff: 3, mat: 'hsla', h: 10, view: 0, msc: 1, frags: true, aim: [0, 2.2, 0], aimN: [0, 0, 1] };
 
 /* ------------------------------------------------------------------ small helpers */
@@ -188,16 +188,36 @@ function sceneBurke() {
   const spc = k => outside(k) ? AIR : k, wetK = k => C[k].id === 'SEA' || C[k].kind === 'flooded';
   const spaces = C.map(c => ({ name: c.name, box: c.box ? [c.box.x[0], c.box.y[0], c.box.z[0], c.box.x[1], c.box.y[1], c.box.z[1]] : null,
     V: c.kind === 'outside' || c.kind === 'flooded' ? Infinity : c.vol }));
-  // the patch: along the ship around the aim, out to the next watertight bulkhead if it is close
-  const fill = CONTENTS[st.src] ? 400 : st.kg, L = Math.min(25, Math.max(6, 4 + 2 * Math.cbrt(fill)));
-  const ST = B.STATIONS, ax = st.aim[0];
-  let x0 = ST.filter(x => x <= ax - L).pop() ?? ST[0], x1 = ST.find(x => x >= ax + L) ?? ST[ST.length - 1];
-  for (const b of B.BULKHEADS) { if (b.x < x0 && b.x > x0 - 6) x0 = b.x; if (b.x > x1 && b.x < x1 + 6) x1 = b.x; }
-  x0 = ST.reduce((a, x) => Math.abs(x - x0) < Math.abs(a - x0) ? x : a, ST[0]); x1 = ST.reduce((a, x) => Math.abs(x - x1) < Math.abs(a - x1) ? x : a, ST[0]);
+  // the patch: a box around the charge (half-size L from its size) joined with the compartment the blast works in
+  // (the one holding the charge, or the one behind the struck plating: its walls take the gas and the reflections);
+  // where the box cuts plating, the ship continues (anchored edges)
+  const fill = CONTENTS[st.src] ? 400 : st.kg, L = st.patchL || Math.min(14, Math.max(3, 3 + 1.5 * Math.cbrt(fill)));
+  const ST = B.STATIONS, am = st.aim, an = st.aimN, inside = st.fuze === 'inside' || !!CONTENTS[st.src];
+  const probe = inside ? [am[0] - an[0] * 1.6, am[1] - an[1] * 1.6, am[2] - an[2] * 1.6] : [am[0] - an[0] * .4, am[1] - an[1] * .4, am[2] - an[2] * .4];
+  const ci = spc(BURKE.compAt(probe[0], probe[1], probe[2]));
+  const box = [am[0] - L, am[1] - L, am[2] - L, am[0] + L, am[1] + L, am[2] + L];
+  if (ci !== AIR && C[ci].box && !st.patchL) { const b = C[ci].box; box[0] = Math.min(box[0], b.x[0] - .3); box[1] = Math.min(box[1], b.y[0] - .3); box[2] = Math.min(box[2], b.z[0] - .3);
+    box[3] = Math.max(box[3], b.x[1] + .3); box[4] = Math.max(box[4], b.y[1] + .3); box[5] = Math.max(box[5], b.z[1] + .3); }
+  const x0 = ST.filter(x => x <= box[0]).pop() ?? ST[0], x1 = ST.find(x => x >= box[3]) ?? ST[ST.length - 1];
+  const outBox = p => p[1] < box[1] || p[1] > box[4] || p[2] < box[2] || p[2] > box[5];
+  // cells whose centre leaves the box (in y or z) are cut away; their edges with kept cells are open
+  const cutCells = (G, nu, nv, mask) => { const cut = new Uint8Array(nu * nv); let kept = 0;
+    for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) { const k = j * nu + i; if (mask && !mask[k]) continue;
+      const c = [0, 1, 2].map(q => .25 * (G[3 * (j * (nu + 1) + i) + q] + G[3 * (j * (nu + 1) + i + 1) + q] + G[3 * ((j + 1) * (nu + 1) + i) + q] + G[3 * ((j + 1) * (nu + 1) + i + 1) + q]));
+      if (outBox(c)) cut[k] = 1; else kept++; }
+    return [cut, kept]; };
   // x lines: every bay between stations subdivided evenly (so all pieces share them)
+  // graded grid: the chosen size S in a band of half-width Rf round the hit along each axis, 2 S outside it (the
+  // coarse lines are every other fine line, so pieces that share an axis still share their lines)
+  const Hp = st.aim, Rf = st.fineR || Math.min(6, Math.max(2, 1.5 + .6 * Math.cbrt(fill))), Sc = st.uniformGrid ? S : 2 * S;
+  const inBand = (lo, hi, h) => hi > h - Rf && lo < h + Rf;
   const xLines = (a, b) => { const br = [a, ...ST.filter(x => x > a + 1e-6 && x < b - 1e-6), b], out = [a];
-    for (let k = 0; k + 1 < br.length; k++) { const n = Math.max(1, Math.round((br[k + 1] - br[k]) / S)); for (let q = 1; q <= n; q++) out.push(br[k] + (br[k + 1] - br[k]) * q / n); }
+    for (let k = 0; k + 1 < br.length; k++) { const sp = inBand(br[k], br[k + 1], Hp[0]) ? S : Sc, n = Math.max(1, Math.round((br[k + 1] - br[k]) / sp));
+      for (let q = 1; q <= n; q++) out.push(br[k] + (br[k + 1] - br[k]) * q / n); }
     return out; };
+  const gLines = (lo, hi, h) => { const out = []; for (let k = Math.floor(lo / S) - 1; k * S <= hi + Sc; k++) { const v = k * S; if (Math.abs(v - h) <= Rf || Math.abs(v / Sc - Math.round(v / Sc)) < 1e-6) out.push(v); }
+    return out; };
+  const nearest = (arr, v) => { let b = 0; for (let k = 1; k < arr.length; k++) if (Math.abs(arr[k] - v) < Math.abs(arr[b] - v)) b = k; return b; };
   const isFrame = x => Math.abs(frameAt(x) - Math.round(frameAt(x))) < .01;
   const pieces = [], vents = [];
   const kindOf = pn => pn.kind === 'shell' || pn.kind === 'appendage' || pn.kind === 'dome' ? 0 : pn.kind === 'deck' ? (/Main deck/.test(pn.part) ? 1 : 2) : pn.kind === 'house' ? 4 : 3;
@@ -231,7 +251,8 @@ function sceneBurke() {
         const mid = mul(add(pa, pb), .5); if (prev) gir[j] = gir[j - 1] + len(sub(mid, prev)); prev = mid;
         for (let i = 0; i <= nu; i++) { const u = (xl[i] - xa) / (xb - xa); G.set(add(mul(pa, 1 - u), mul(pb, u)), 3 * (j * (nu + 1) + i)); }
       }
-      const pc = { ...base, nu, nv, G, mask: null, planar: false };
+      const [cut, kept] = cutCells(G, nu, nv, null); if (!kept) continue;
+      const pc = { ...base, nu, nv, G, mask: cut.map(v => 1 - v), cut, planar: false };
       if (secS && Math.abs(pn.stiff.dir[0]) > .7) for (let q = 1; q * pn.stiff.s < gir[nv] - pn.stiff.s * .3; q++) {
         let best = -1, bd = 1e9; for (let jj = 1; jj < nv; jj++) { const d = Math.abs(gir[jj] - q * pn.stiff.s); if (d < bd) { bd = d; best = jj; } }
         if (best > 0 && !pc.lines.some(l => l.along === 'u' && l.g === best)) pc.lines.push({ along: 'u', g: best, sec: secS, spacing: pn.stiff.s });
@@ -248,8 +269,8 @@ function sceneBurke() {
     const pv = poly.map(p => dot(p, vh)), pu = poly.map(p => trans ? dot(p, uh) : p[0]);
     const umin = Math.min(...pu), umax = Math.max(...pu), vmin = Math.min(...pv), vmax = Math.max(...pv);
     if (umax - umin < S * .5 || vmax - vmin < S * .5) continue;
-    const ul = trans ? (() => { const a = []; for (let k = Math.floor(umin / S); k * S <= umax + S; k++) a.push(k * S); return a; })() : xLines(Math.max(x0, umin), Math.min(x1, umax));
-    const vl = []; for (let k = Math.floor(vmin / S); k * S <= vmax + S; k++) vl.push(k * S);
+    const ul = trans ? gLines(umin, umax, dot(Hp, uh)) : xLines(Math.max(x0, umin), Math.min(x1, umax));
+    const vl = gLines(vmin, vmax, dot(Hp, vh));
     const nu = ul.length - 1, nv = vl.length - 1;
     if (nu < 1 || nv < 1) continue;
     const G = new Float64Array(3 * (nu + 1) * (nv + 1));
@@ -264,19 +285,21 @@ function sceneBurke() {
     const inside = (x, y) => { let c = false; for (let k = 0, m = pu.length - 1; k < pu.length; m = k++) { if ((pv[k] > y) !== (pv[m] > y) && x < (pu[m] - pu[k]) * (y - pv[k]) / (pv[m] - pv[k]) + pu[k]) c = !c; } return c; };
     for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) if (inside((ul[i] + ul[i + 1]) / 2, (vl[j] + vl[j + 1]) / 2)) { mask[j * nu + i] = 1; cnt++; }
     if (!cnt) continue;
-    const pc = { ...base, nu, nv, G, mask, planar: true };
+    const [cut, kept] = cutCells(G, nu, nv, mask); if (!kept) continue;
+    for (let k = 0; k < nu * nv; k++) if (cut[k]) mask[k] = 0;
+    const pc = { ...base, nu, nv, G, mask, cut, planar: true };
     for (const [spec, sec] of [[pn.stiff, secS], [pn.frame, secF]]) {
       if (!spec || !sec) continue;
       const alongU = Math.abs(dot(spec.dir, uh)) >= Math.abs(dot(spec.dir, vh));
-      if (alongU) { for (let k = Math.ceil(vmin / spec.s); k * spec.s < vmax; k++) { const g = Math.round((k * spec.s - vl[0]) / S); if (g > 0 && g < nv) pc.lines.push({ along: 'u', g, sec, spacing: spec.s }); } }
+      if (alongU) { for (let k = Math.ceil(vmin / spec.s); k * spec.s < vmax; k++) { const g = nearest(vl, k * spec.s); if (g > 0 && g < nv) pc.lines.push({ along: 'u', g, sec, spacing: spec.s }); } }
       else if (!trans && Math.abs(spec.s - B.FRAMES.spacing) < .1) { for (let i = 0; i < nu; i++) if (isFrame(ul[i])) pc.lines.push({ along: 'v', g: i, sec, spacing: spec.s }); }
-      else { for (let k = Math.ceil(umin / spec.s); k * spec.s < umax; k++) { const g = trans ? Math.round((k * spec.s - ul[0]) / S) : ul.findIndex(x => x >= k * spec.s - S / 2);
+      else { for (let k = Math.ceil(umin / spec.s); k * spec.s < umax; k++) { const g = nearest(ul, k * spec.s);
         if (g > 0 && g < nu) pc.lines.push({ along: 'v', g, sec, spacing: spec.s }); } }
     }
     pieces.push(pc);
   }
   const spaceAt = p => spc(BURKE.compAt(p[0], p[1], p[2]));
-  return { name: 'burke', pieces, spaces, OUT: AIR, spaceAt, waterline: 0, snap: true, vents, patch: [x0, x1],
+  return { name: 'burke', pieces, spaces, OUT: AIR, spaceAt, waterline: 0, snap: true, vents, patch: [x0, x1], box: [x0, box[1], box[2], x1, box[4], box[5]], L,
     isCut: p => Math.abs(p[0] - x0) < 1e-3 || Math.abs(p[0] - x1) < 1e-3,
     aimDefault: [0, 2.5, BURKE.halfBreadth(0, 2.5)], aimNDefault: [0, 0, 1], cam: { tgt: [st.aim[0], 3, 0], dist: 45 }, aimOK: p => p[1] > .3 };
 }
@@ -403,6 +426,7 @@ function build() {
     PAN.push({ o, U: nrm(Ue), V: nrm(Ve), Lu: len(Ue), Lv: len(Ve), n: pc.n, nu: pc.nu, nv: pc.nv, off, kind: pc.kind, name: pc.name, planar: pc.planar });
   });
   CMAP = Int32Array.from(cmap);
+  const CMAPtmp = (pi, i, j) => cmap[PAN[pi].off + j * PAN[pi].nu + i];
   // ---- 5. anchors on open edges (flagged sides of a piece, or the scene's cut planes)
   const anchors = [];
   const openEdge = (a, b, c) => {
@@ -422,6 +446,11 @@ function build() {
     if (op[1]) for (let j = 0; j < pc.nv; j++) edge(pc.nu, j, pc.nu, j + 1);
     if (op[2]) for (let i = 0; i < pc.nu; i++) edge(i, 0, i + 1, 0);
     if (op[3]) for (let i = 0; i < pc.nu; i++) edge(i, pc.nv, i + 1, pc.nv); });
+  pieces.forEach((pc, pi) => { if (!pc.cut) return; const ids = gid[pi], nu = pc.nu, nv = pc.nv;
+    const node = (i, j) => nid(ids[j * (nu + 1) + i]);
+    for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) { const c = CMAPtmp(pi, i, j); if (c < 0) continue;
+      const nb = [[i - 1, j, i, j, i, j + 1], [i + 1, j, i + 1, j, i + 1, j + 1], [i, j - 1, i, j, i + 1, j], [i, j + 1, i, j + 1, i + 1, j + 1]];
+      for (const [ni, nj, ai, aj, bi, bj] of nb) if (ni >= 0 && nj >= 0 && ni < nu && nj < nv && pc.cut[nj * nu + ni]) { const a = node(ai, aj), b = node(bi, bj); if (a >= 0 && b >= 0 && emap.has(EK(a, b))) openEdge(a, b, c); } } });
   if (scene.isCut) for (const [k, l] of emap) if (l.length === 1) { const a = Math.floor(k / 4194304), b = k % 4194304;
     if (scene.isCut([pos[3 * a], pos[3 * a + 1], pos[3 * a + 2]]) && scene.isCut([pos[3 * b], pos[3 * b + 1], pos[3 * b + 2]])) openEdge(a, b, l[0][0]); }
   // ---- 6. stiffener lines: members (axial) along the grid line
@@ -588,7 +617,7 @@ function build() {
       NCC[4 * i + k++] = q;
     }
   }
-  scene.snapped = snapped; scene.unsnapped = unsnapped; scene.dropped = dropped; scene.aimX = st.aim[0]; scene.fill = CONTENTS[st.src] ? 400 : st.kg;
+  scene.snapped = snapped; scene.unsnapped = unsnapped; scene.dropped = dropped; scene.key = patchKey();
   buildGrid();
   DOTS_PER = [18, 10, 8, 8, 8].map(d => Math.max(2, Math.round(d * (S / .25) ** 2)));
   sim = null; gpu = null; EN = null; CU = null;
@@ -740,9 +769,10 @@ let sim = null, gpu = null, EN = null;
 const GP = [], OPEN = new Map();
 let GV = [];
 
+const patchKey = () => JSON.stringify([st.aim, st.aimN, st.kg, st.fuze, st.src, st.patchL, st.grid, st.fineR, st.uniformGrid]);
 function detonate() {
   const fillNow = CONTENTS[st.src] ? 400 : st.kg;
-  if (sim || (scene.name === 'burke' && (Math.abs(st.aim[0] - scene.aimX) > 1 || scene.fill !== fillNow))) { build(); scene.aimX = st.aim[0]; scene.fill = fillNow; }
+  if (sim || (scene.name === 'burke' && scene.key !== patchKey())) build();
   const src = CONTENTS[st.src];
   const inside = st.fuze === 'inside' || !!src;
   const a = st.aim, n = st.aimN;
@@ -1155,7 +1185,8 @@ function memberAngles(k, P) {
   const bx = P[3 * q3] - P[3 * q1], by = P[3 * q3 + 1] - P[3 * q1 + 1], bz = P[3 * q3 + 2] - P[3 * q1 + 2];
   const nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx;
   const a = TA[k], b = TB[k], tx = P[3 * b] - P[3 * a], ty = P[3 * b + 1] - P[3 * a + 1], tz = P[3 * b + 2] - P[3 * a + 2];
-  let ex = ny * tz - nz * ty, ey = nz * tx - nx * tz, ez = nx * ty - ny * tx; const el = Math.hypot(ex, ey, ez) || 1; ex /= el; ey /= el; ez /= el;
+  let ex = ny * tz - nz * ty, ey = nz * tx - nx * tz, ez = nx * ty - ny * tx; const el = Math.hypot(ex, ey, ez) || 1e-30;
+  MG.bad = el < .3 * Math.hypot(nx, ny, nz) * Math.hypot(tx, ty, tz); ex /= el; ey /= el; ez /= el;   // member turned off its plating's plane
   MG.ex = ex; MG.ey = ey; MG.ez = ez;
   const ang = (ux, uy, uz, vx, vy, vz) => { let q = ux * ex + uy * ey + uz * ez; ux -= q * ex; uy -= q * ey; uz -= q * ez; q = vx * ex + vy * ey + vz * ez; vx -= q * ex; vy -= q * ey; vz -= q * ez;
     return Math.atan2((uy * vz - uz * vy) * ex + (uz * vx - ux * vz) * ey + (ux * vy - uy * vx) * ez, ux * vx + uy * vy + uz * vz); };
@@ -1183,8 +1214,9 @@ function trussPass(t, h) {
     const fa = f; f += fd;
     F[3 * a] += f * ux; F[3 * a + 1] += f * uy; F[3 * a + 2] += f * uz; F[3 * b] -= f * ux; F[3 * b + 1] -= f * uy; F[3 * b + 2] -= f * uz;
     let ebend = 0;
-    if (TCL[k] >= 0 && (TBA[k] >= 0 || TSC[k] >= 0)) {
+    if (TCL[k] >= 0 && !CER[TCL[k]] && (TBA[k] >= 0 || TSC[k] >= 0)) {       // bending needs its plating (the reference plane) in place
       const g = memberAngles(k, X), ex = MG.ex, ey = MG.ey, ez = MG.ez;
+      if (!MG.bad) {
       // d(angle from u to v)/d(head of v) = (e x v)/|v|^2 and d/d(tail of v) = -that; for u the signs flip
       const gr = (x, y, z) => { const q = x * ex + y * ey + z * ez; x -= q * ex; y -= q * ey; z -= q * ez; const l2 = x * x + y * y + z * z || 1e-30;
         return [(ey * z - ez * y) / l2, (ez * x - ex * z) / l2, (ex * y - ey * x) / l2]; };
@@ -1216,6 +1248,7 @@ function trussPass(t, h) {
         eel += .5 * Q * Q / ks; ebend += .5 * Q * Q / ks;
         const Qd = BETA * ks * gd; if (EN) EN.damp += Qd * gd * h; Q += Qd;
         addF(b, -Q, gs[0], gs[1], gs[2]); addF(a, Q, gs[0], gs[1], gs[2]); addF(C1, Q, gc[0], gc[1], gc[2]); addF(C0, -Q, gc[0], gc[1], gc[2]);
+      }
       }
     }
     if (Math.max(0, Math.log(TLP[k] / L0)) + Math.abs(TBP[k]) * TFIB[k] >= TEF[k]) { TFL[k] = 1; if (EN) EN.frac += .5 * fa * fa / kk + ebend; }
@@ -1360,7 +1393,7 @@ function checkEnd() {
   s.kepeak = Math.max(s.kepeak || 0, ke);
   // loads over and the structure's kinetic energy down to 5 % of its peak: settle the remaining elastic ringing with
   // strong damping (dynamic relaxation) to read the permanent set
-  if (!s.relax && quiet && gas < 2e4 && s.t > s.tMin && (ke < .05 * s.kepeak || s.t > s.tMin + .1)) { s.relax = true; s.tRelax = s.t; }
+  if (!s.relax && (st.relaxAt ? s.t >= st.relaxAt : quiet && gas < 2e4 && s.t > s.tMin && (ke < .05 * s.kepeak || s.t > s.tMin + .1))) { s.relax = true; s.tRelax = s.t; }
   if (s.relax && (v2 < .25 || s.t - s.tRelax > .025)) s.T1 = s.t;
   s.vmax = vm;
 }
@@ -1566,8 +1599,8 @@ function draw(now) {
     }
   }
   if (scene.name === 'burke' && SHIP) {
-    const D = SHIP.dots, [x0, x1] = scene.patch;
-    for (let k = 0; k < D.length; k += 3) { const x = D[k]; if (x > x0 && x < x1) continue; put(x, D[k + 1], D[k + 2], .3, .3, .29, .035); }
+    const D = SHIP.dots, b = scene.box;
+    for (let k = 0; k < D.length; k += 3) { const x = D[k], y = D[k + 1], z = D[k + 2]; if (x > b[0] && x < b[3] && y > b[1] && y < b[4] && z > b[2] && z < b[5]) continue; put(x, y, z, .3, .3, .29, .035); }
   }
   const T = now / 1000, wl = scene.waterline;
   for (let j = 0; j < SEA_D; j++) for (let i = 0; i < SEA_W; i++) {
@@ -1744,7 +1777,7 @@ function pick(mx, my) {
     const p = add(eye, mul(d, r[0])); let n = r[1]; if (dot(n, d) > 0) n = mul(n, -1);
     if (!scene.aimOK(p, n)) return;
     st.aim = p; st.aimN = n;
-    if (p[0] < scene.patch[0] + 3 || p[0] > scene.patch[1] - 3) build();
+    build();
     return;
   }
   const h = firstHit(eye, d, 1000, false); if (!h) return;

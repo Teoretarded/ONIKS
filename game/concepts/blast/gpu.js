@@ -226,7 +226,7 @@ void main(){
 }`;
 
 const TRUSS_FS = HEAD + `
-uniform sampler2D uTS, uTSt, uTSt2, uCS;
+uniform sampler2D uTS, uTSt, uTSt2, uCS, uCSt;
 layout(location=0) out vec4 oSt; layout(location=1) out vec4 oSt2;
 layout(location=2) out vec4 oF0; layout(location=3) out vec4 oF1; layout(location=4) out vec4 oF2; layout(location=5) out vec4 oF3;
 vec3 EX;
@@ -253,12 +253,12 @@ void main(){
   vec3 F0 = fo * u, F1 = -fo * u, F2 = vec3(0.0), F3 = vec3(0.0), F4 = vec3(0.0);
   float tbp = st.w, tsp = st2.x;
   int cl = int(t1.w), A = int(t2.x), B = int(t2.y), C0 = int(t4.x);
-  if (cl >= 0 && (A >= 0 || C0 >= 0)) {
+  if (cl >= 0 && texelFetch(uCSt, AT(cl), 0).x < 0.5 && (A >= 0 || C0 >= 0)) {
     vec4 cc = texelFetch(uCS, ATW(cl, 11, 0), 0);
     vec3 nC = cross(XR(int(cc.z)) - XR(int(cc.x)), XR(int(cc.w)) - XR(int(cc.y)));
-    EX = normalize(cross(nC, d));
+    EX = cross(nC, d); float exl = length(EX); bool ok = exl > 0.3 * length(nC) * L; EX /= max(exl, 1e-30);
     vec3 xa = XR(a), xB = B >= 0 ? XR(B) : xa;
-    if (A >= 0) {
+    if (ok && A >= 0) {
       vec3 xA = XR(A), e1 = xa - xA, e2 = xB - xa, g1 = gr(e1), g2 = gr(e2);
       float thd = dot(g2, VV(B) - VV(a)) - dot(g1, VV(a) - VV(A));
       float dth = ang(e1, e2) - t3.w; dth -= 6.283185307 * floor(dth / 6.283185307 + 0.5);
@@ -268,7 +268,7 @@ void main(){
       Q += uBeta * kb * thd;
       F3 -= Q * g2; F2 -= Q * g1; F0 += Q * (g1 + g2);
     }
-    if (C0 >= 0) {
+    if (ok && C0 >= 0) {
       vec3 c = xB - XR(C0), gc = gr(c), gs = gr(d);
       float gd = dot(gs, VV(b) - VV(a)) - dot(gc, VV(B) - VV(C0));
       float dg = ang(c, d) - t5.x; dg -= 6.283185307 * floor(dg / 6.283185307 + 0.5);
@@ -542,7 +542,7 @@ export function createGPU(gl, M) {
     // 3. trusses
     tq('members');
     if (NT) { gl.useProgram(pT); gl.bindFramebuffer(gl.FRAMEBUFFER, fTruss[nx]); gl.viewport(0, 0, Wd, THr); common(pT, t, h);
-      bind(pT, 'uPos', s.pos, 0); bind(pT, 'uVel', s.vel, 1); bind(pT, 'uNS', T.ns, 2); bind(pT, 'uTS', T.ts, 3); bind(pT, 'uTSt', tS[cur], 4); bind(pT, 'uTSt2', tS2[cur], 5); bind(pT, 'uCS', T.cs, 6);
+      bind(pT, 'uPos', s.pos, 0); bind(pT, 'uVel', s.vel, 1); bind(pT, 'uNS', T.ns, 2); bind(pT, 'uTS', T.ts, 3); bind(pT, 'uTSt', tS[cur], 4); bind(pT, 'uTSt2', tS2[cur], 5); bind(pT, 'uCS', T.cs, 6); bind(pT, 'uCSt', cellS[nx].s, 7);
       gl.drawArrays(gl.TRIANGLES, 0, 3); }
     // 4. gather the element forces at the nodes; add last step's contact push-back
     tq('gather');
