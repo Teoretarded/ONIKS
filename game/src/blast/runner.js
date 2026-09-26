@@ -98,7 +98,8 @@ export function createRunner(gl, o = {}) {
     for (const R of run) if (R.adv || R.state === 'finish') R.runMs += dtMs / run.length;
     // finals, then snapshots of those the game is watching move
     for (const R of run) {
-      if (R.state === 'finish') { out.push(finish(R)); continue; }
+      // (a finished patch's model is let go: the game keeps what it drew)
+      if (R.state === 'finish') { out.push(finish(R)); pats.delete(R.id); continue; }
       const s = R.P.sim;
       // the readback asked for last time, once the GPU is done with it (never a stall); then a new one when due
       if (R.snapQ) { const cl = pool.snapTake(R.H, R.snapQ); if (cl) { R.snapQ = null; tearCells(R.P, cl, R.snapT); out.push(snapshot(R, false)); } }
@@ -140,7 +141,6 @@ export function createRunner(gl, o = {}) {
     admit();
     const m = snapshot(R, true);
     m.results = results(R);
-    // the CPU model is kept a while (the game may ask for it: a second hit there), then dropped by the owner
     return m;
   }
 

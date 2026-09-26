@@ -27,7 +27,7 @@ import { hitSpec, cookSpec, hullOf } from './spec.js';
 import { tntOf, S_GRID } from './phys.js';
 import { attitudeM } from '../game/debris/math.js';
 
-const AW = 1024, AH = 1024;             // the skin atlas (RGBA32F texels)
+const AW = 2048, AH = 2048;             // the skin atlas (RGBA16F texels: local displacement, flags + soot)
 const MAXU = 6;                          // patches drawn per unit (engine/models.js BTMAX)
 const sat = v => v < 0 ? 0 : v > 1 ? 1 : v;
 function hsh(i, s) { let h = Math.imul((i | 0) ^ Math.imul(s | 0, 0x9E3779B1), 0x85EBCA77); h ^= h >>> 13; h = Math.imul(h, 0xC2B2AE35); h ^= h >>> 16; return (h >>> 0) / 4294967296; }
@@ -47,22 +47,25 @@ export async function createBlast(game) {
   if (gl.getExtension('EXT_color_buffer_float') || true) {
     tex = gl.createTexture();
     gl.activeTexture(gl.TEXTURE7); gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA32F, AW, AH);
+    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA16F, AW, AH);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.activeTexture(gl.TEXTURE0);
     ML.blastTex = tex;
   }
-  // shelves: rows of the atlas, each a height, filled left to right
-  const shelves = [];
+  // shelves: rows of the atlas, each a height, filled left to right; a rect given back is reused by a plate it fits
+  const shelves = [], freed = [];
   function allocRect(w, h) {
+    let bi = -1;
+    for (let i = 0; i < freed.length; i++) { const f = freed[i]; if (f.w >= w && f.h >= h && (bi < 0 || f.w * f.h < freed[bi].w * freed[bi].h)) bi = i; }
+    if (bi >= 0) { const f = freed.splice(bi, 1)[0]; return { x: f.x, y: f.y, w: f.w, h: f.h }; }
     for (const s of shelves) if (s.h >= h && s.h < h * 1.6 && s.x + w <= AW) { const r = { x: s.x, y: s.y, w, h }; s.x += w + 1; s.n++; return r; }
     const y = shelves.length ? shelves[shelves.length - 1].y + shelves[shelves.length - 1].h + 1 : 0;
     if (y + h > AH || w > AW) return null;
     const s = { y, h, x: w + 1, n: 1 }; shelves.push(s);
     return { x: 0, y, w, h };
   }
-  function freeRect() { /* shelves are kept (a match's worth of holes fits); the atlas is dropped with the game */ }
+  function freeRect(r) { if (r && r.aw) freed.push({ x: r.x, y: r.y, w: r.aw, h: r.ah }); }
   const zero = new Float32Array(AW * 8 * 4);
 
   /* ------------------------------------------------------------ the client */
@@ -125,6 +128,8 @@ export async function createBlast(game) {
   function drop(id) {
     const B = patches.get(id); if (!B) return;
     patches.delete(id);
+    for (let i = upQ.length - 1; i >= 0; i--) if (B.rects.includes(upQ[i].r)) upQ.splice(i, 1);
+    for (const r of B.rects) freeRect(r);
     if (client && client.mode && B.state !== 'done') client.drop(id);
     const L = byUnit.get(B.uid); if (L) { const i = L.indexOf(B); if (i >= 0) L.splice(i, 1); if (!L.length) byUnit.delete(B.uid); }
     if (B.S && B.S.blast === B) B.S.blast = null;
@@ -147,7 +152,7 @@ export async function createBlast(game) {
       if (!r) {
         const q = allocRect(k.nu + 1, k.nv + 1);
         if (!q) { fail(B, 'atlas full'); return; }
-        r = { p: k.p, ax: k.ax, val: k.val, u0: k.u0, v0: k.v0, nu: k.nu, nv: k.nv, x: q.x, y: q.y, ready: false };
+        r = { p: k.p, ax: k.ax, val: k.val, u0: k.u0, v0: k.v0, nu: k.nu, nv: k.nv, x: q.x, y: q.y, aw: q.w, ah: q.h, ready: false };
         B.rects.push(r);
         upQ.push({ r, clear: true });
       }
