@@ -98,6 +98,7 @@ const glf = (m, t, le) => m.eg + m.ee * Math.min(.2, t / le);          // GL fai
 // Calibrated on the side-push case (120 kg at 5 m on the section: the deck edge folds at the side seam, which
 // needs cells ~ fold length / 10 to resolve): the knock-down that makes each grid give the 0.0156 m grid's side and
 // seam displacements, tabled against S / H, H = 0.9 (b^2 t)^(1/3) the fold length (b = 1 m); band 0.6 m from a seam.
+const JMIN = () => st.jmin === undefined ? .25 : st.jmin;            // a cell squashed to this area ratio erodes
 const KC_EPS = () => st.kEps === undefined || st.kEps === null ? .004 : st.kEps;
 const KC_TAB = [[.093, 1], [.186, .4], [.372, .15], [.744, .12], [1.49, .03]];
 function kcLaw(S_, t) {
@@ -1361,7 +1362,7 @@ function cellPass(t, h) {
     // fracture: ductile (GL: non-compressive plastic strain + plastic bending strain of the outer fibre)
     let eb = 0; const hs = [CHG[4 * c], CHG[4 * c + 1], CHG[4 * c + 2], CHG[4 * c + 3]];
     for (const k of hs) if (k >= 0) eb = Math.max(eb, Math.abs(HTP[k]) * CH[c] / (2 * HDB[k]));
-    if (CDM[c] + eb >= CEF[c] || CFD[c] >= 1 || jmin < .25) { CER[c] = 1; CTE[c] = t; if (EN) EN.frac += eel - eel0; }
+    if (CDM[c] + eb >= CEF[c] || CFD[c] >= 1 || jmin < JMIN()) { CER[c] = 1; CTE[c] = t; if (EN) EN.frac += eel - eel0; }
   }
   return eel;
 }
@@ -1617,8 +1618,8 @@ function commonSync(t, torn) {
 
 /* ------------------------------------------------------------------ GPU solver glue */
 function gpuModel() {
-  return { N, NC, NH, NT, R0, M, WINV, AK, AF, AC, CN, CH, CMAT, CEF, CKC, KCE: KC_EPS(), CSP, CSN, CWET, CAR, CTR, CHG, CDB, CRC, CVIS: () => CVIS,
-    HN, HC, HKP, HMP, HKS, HMS, HT0, HDB, HTR, HHP, HMAT, HLN, HTL0, TBA, TBB, TSC, TCL, TCL2, TQN, TPRV, TNXT, TKC, TKB, TQB, TB0, TKS, TQS, TS0, TMM, TA, TB, TL0, TAR, TMAT, TEF, TFIB, THG, NCC, PAN, CMAP, MATS, TA1, S,
+  return { N, NC, NH, NT, R0, M, WINV, AK, AF, AC, CN, CH, CMAT, CEF, CKC, KCE: KC_EPS(), JMN: JMIN(), CSP, CSN, CWET, CAR, CTR, CHG, CDB, CRC, CVIS: () => CVIS,
+    HN, HC, HKP, HMP, HKS, HMS, HT0, HDB, HTR, HHP, HMAT, HLN, HTL0, TBA, TBB, TSC, TCL, TCL2, TQN, TPRV, TNXT, TKC, TKB, TQB, TB0, TKS, TQS, TS0, TMM, TA, TB, TL0, TAR, TMAT, TEF, TFIB, THG, NCC, PAN, CMAP, MATS: st.noRate ? MATS.map(m => ({ ...m, D: 1e30, Du: 1e30 })) : MATS, TA1, S,
     OUT: () => scene.OUT, csf, nspace: () => GV.length, BETA: () => BETA, U_MAX, RHO_W, C_W, P0, G, K_SHEAR };
 }
 let gpuT = 0;

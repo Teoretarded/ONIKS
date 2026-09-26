@@ -235,7 +235,7 @@ void main(){
   float eb = 0.0; int H[4]; H[0] = int(hg.x); H[1] = int(hg.y); H[2] = int(hg.z); H[3] = int(hg.w);
   vec4 hs[4];
   for (int k = 0; k < 4; k++) { hs[k] = H[k] >= 0 ? texelFetch(uHSt, AT(H[k]), 0) : vec4(0.0); if (H[k] >= 0) eb = max(eb, abs(hs[k].x) * r1.w / (2.0 * c9.w)); }
-  float torn = (Dd + eb >= r3.w || fd <= 0.0 || jmin < 0.25) ? 1.0 : 0.0;
+  float torn = (Dd + eb >= r3.w || fd <= 0.0 || jmin < c10.w) ? 1.0 : 0.0;
   oC = vec4(torn, torn > 0.5 ? uT : -1.0, Dd, min(1.0, util));
 }`;
 
@@ -502,7 +502,7 @@ export function createGPU(gl, M) {
     const ex = [M.CSP[c], M.CSN[c], M.CWET[c], M.CAR[c]];
     for (let t = 0; t < 4; t++) put(4 + t, [M.CTR[12 * c + 3 * t], M.CTR[12 * c + 3 * t + 1], M.CTR[12 * c + 3 * t + 2], ex[t]]);
     put(8, [0, 1, 2, 3].map(k => M.CHG[4 * c + k])); put(9, [M.CRC[3 * c] - O[0], M.CRC[3 * c + 1] - O[1], M.CRC[3 * c + 2] - O[2], M.CDB[c]]);
-    put(10, [M.CVIS()[c], M.CKC ? M.CKC[c] : 1, M.KCE || 0, 0]);
+    put(10, [M.CVIS()[c], M.CKC ? M.CKC[c] : 1, M.KCE || 0, M.JMN === undefined ? .25 : M.JMN]);
   });
   T.cs = tex(Wd * 11, CHr, csData());
   T.hs = wide(NH, 9, (k, put) => { const rv = z => [0, 1, 2].map(q => M.R0[3 * M.HN[6 * k + z] + q] - M.R0[3 * M.HN[6 * k] + q]);

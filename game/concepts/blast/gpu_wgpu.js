@@ -255,7 +255,7 @@ fn retMap(sp: ptr<function, vec3f>, eb: f32, mA: vec4f, rf: f32) -> vec2f {
     // fracture
     var eb = 0.0; var H: array<i32, 4>; H[0] = i32(hg.x); H[1] = i32(hg.y); H[2] = i32(hg.z); H[3] = i32(hg.w);
     for (var k = 0; k < 4; k++) { if (H[k] >= 0) { let hs = DY[O_HT + i32(w) * NH + H[k]]; eb = max(eb, abs(hs.x) * r1.w / (2.0 * c9.w)); } }
-    let torn = select(0.0, 1.0, Dd + eb >= r3.w || fd <= 0.0 || jmin < 0.25);
+    let torn = select(0.0, 1.0, Dd + eb >= r3.w || fd <= 0.0 || jmin < c10.w);
     oC = vec4f(torn, select(-1.0, uT, torn > 0.5), Dd, min(1.0, util));
     break;
   }
@@ -507,7 +507,7 @@ export function createWGPU(dev, M, opt = {}) {
     const ex = [M.CSP[c], M.CSN[c], M.CWET[c], M.CAR[c]];
     for (let t = 0; t < 4; t++) p(4 + t, [M.CTR[12 * c + 3 * t], M.CTR[12 * c + 3 * t + 1], M.CTR[12 * c + 3 * t + 2], ex[t]]);
     p(8, [0, 1, 2, 3].map(k => M.CHG[4 * c + k])); p(9, [M.CRC[3 * c] - O[0], M.CRC[3 * c + 1] - O[1], M.CRC[3 * c + 2] - O[2], M.CDB[c]]);
-    p(10, [M.CVIS()[c], M.CKC ? M.CKC[c] : 1, M.KCE || 0, 0]); } };
+    p(10, [M.CVIS()[c], M.CKC ? M.CKC[c] : 1, M.KCE || 0, M.JMN === undefined ? .25 : M.JMN]); } };
   fillCS();
   for (let k = 0; k < NH; k++) { const p = (t, v) => put(L.O_HS, k, 9, t, v);
     const rv = z => [0, 1, 2].map(q => M.R0[3 * M.HN[6 * k + z] + q] - M.R0[3 * M.HN[6 * k] + q]);

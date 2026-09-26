@@ -1,4 +1,4 @@
-# Blast bench: model, checks, results (v33, 2026-09-26)
+# Blast bench: model, checks, results (v34, 2026-09-26)
 
 Test page: `game/concepts/blast/index.html` (served by `tools/serve_game.py`). Scenes: **Section · 30 m** (a
 destroyer side section: side, weather deck, second deck, platform deck, two bulkheads), **Arleigh Burke** (a patch
@@ -21,6 +21,9 @@ runs; the three run the same passes and agree to 0.01–0.05 %. Machine: AMD RX 
 | 8 | Bonds: EPP, compression capped at 0.12 fy; "bending" a one-sided Laplacian spring (not conservative, stiffness ∝ 1/S²); frames/stiffeners as ties to fixed anchors | Membrane: 4 crossed constant-strain triangles per cell, corotational, plane-stress J2 (Simo–Taylor return map), linear hardening, Cowper–Symonds (constants moving from initial-yield to large-strain values, Jones 1989). Bending: dihedral hinges on every shared edge (Bridson/Tamstorf–Grinspun gradients), plastic moment σy h²/4 per length reduced by membrane utilisation (M/Mp + (N/Np)² = 1); plate junctions are hinges too. Stiffeners: axial members + a shear-limited (Timoshenko-type) beam on the member's own line: bending as the angle between the chords to the nodes m cells either side (m = round(0.75 d / S), base ~1.5 × the section depth, k = EI/(m² S), cap Mp/m), plus the shear of each segment against the chord around it (G A_w, cap τy A_w). The angles are taken about axes in the plating: for the bending at a node, the line between the plating nodes across it on either side; for a segment's shear, the line between the far corners of the cells on either side; their gradients run through those axes too, so the member exerts no net moment, and nothing prefers one side or one end (the bending at a node needs both segments there, a segment fails on the larger start-of-step bending strain of its two nodes). Where a member runs into a perpendicular plate (a frame at a deck), in-plane web-end ties (area A_w) carry its end reaction into that plate over the web depth. Fail at the GL strain of the web. Compression to full yield; buckling comes from the geometry, with hungry-horse imperfections min(0.1 β² t, b/200) between stiffeners | Simo & Taylor 1986; Grinspun et al. 2003; Jones 2012; Smith et al. 1988 |
 | 9 | Mass scaling ×64 in the gas phase | None. Stable step node by node (Gershgorin); the few nodes stiffer than the 0.2th percentile get extra mass (added mass 1e-10 … 3e-4 of the total, reported per build) | |
 | 10 | Fragments drawn only (kick from the render loop); seams double stiffness; mass/area per plate edge | Casing fragments: Gurney velocity (cylinder), Fisher/Fano blast reduction W(0.2 + 0.8/(1 + M/C)), deterministic spray ray-traced through the structure with air drag; each impact perforates (Recht–Ipson plugging) or embeds, passes its momentum, and holes the plate (net-section damage, erosion at 100 %). Mass, area, stiffness assembled per cell, so seams and edges get exactly their share. Water-backed plating (radiation pressure ρ_w c_w v_n, cavitation limit). A burst at the waterline also drives a water shock: the charge's share below or within 2 charge radii above the surface (½ at the surface) as an equivalent charge just under it; Cole's similitude (Pm = 52.4 MPa (W^⅓/R)^1.13, θ = 0.084 ms W^⅓ (W^⅓/R)^−0.23), cut off when the free surface's relief (negative image) arrives, (1 + cos) × incident on wet plating in view through the water; with the radiation term this is Taylor's plate. Loose pieces found by connectivity | Recht & Ipson 1963; Fisher 1953; Taylor 1941; Cole 1948 |
+| 11 | — | Folding a coarse grid cannot resolve: the side's push folds the deck edge at the seam, which needs cells of ~1/10 of the fold length (H = 0.9 (b² t)^⅓, b = 1 m: 0.17 m for 6.5 mm). Plating and members within 0.6 m of a junction between plates at an angle get a compressive knock-down of their yield (weighted by the trial stress's compression, ramped in over 0.4 % plastic strain), tabled against S/H: 0.03 / 0.12 / 0.15 / 0.4 / 1 at S/H = 1.49 / 0.74 / 0.37 / 0.19 / 0.09 (0.25 / 0.125 / 0.0625 / 0.031 / 0.016 m for the 6.5 mm deck). Section frames have brackets (a square of web plate, legs ~ the frame's depth) where they meet the decks | calibrated here (grid convergence below) |
+| 12 | Openings always open | The scene's own openings are open; hatches (1 m², 50 kPa), watertight doors (1.3 m², 100 kPa), ventilation trunks (≤ 1.2 m², 30 kPa) and weather doors (1.5 m², 70 kPa) are shut until the pressure across them reaches that (condition Zebra; the game's ventsOf) | public damage-control figures |
+| 13 | Read-backs used when they arrive | Torn cells (every sync) and the attached structure's motion (every 200 steps) are used a fixed ~1 ms later (a whole number of syncs) on the CPU, WebGL2 and WebGPU alike; a hole source that appears late delivers what it owed on its first step. Runs are deterministic: async WebGPU, async WebGL2 and headless runs end on the same step with the same result | |
 
 Also fixed on the way: the GPU hinges never yielded in the first rewrite (a material uniform was only set when a
 shader used both material blocks: infinite rate factor) — the game port copied that version (446c6a3); GPU node
@@ -50,7 +53,11 @@ as well): on the GPU, mirrored cells reach the erosion limit within float32 roun
 hole grows from there; the 30 kg cases pass (0.004–0.02 %).
 
 **Energy ledger (CPU).** Work of the loads = kinetic + elastic + plastic (membrane, hinges, members, anchors) +
-damping + boundary radiation + contact + fracture. Box, 30 kg at 2 m, 0.25 m: closes to 0.36 %. Plate 120 kg at 3 m:
+damping + boundary radiation + contact + fracture. Plastic work is booked with the mean of last step's and this step's
+returned force over the plastic increment (trapezoid, as the leapfrog kinetic energy); booking it with the trial force
+counted the explicit step's overshoot as dissipation, which moved with dt (AUDIT A2): 120 kg contact, first 4 ms,
+unexplained −3.7 % → +0.5 % at dt and +0.3 % at dt/2, membrane plastic 4.8 / 4.8 %, members 3.4 / 3.2 % (was 6.5 / 5.6
+and 5.9 / 4.3). Box, 30 kg at 2 m, 0.25 m: closes to 0.36 %. Plate 120 kg at 3 m:
 1.2 % (59 kJ in: 48 membrane plastic, 10.5 hinge plastic). Plate torn open (120 kg at 1.5 m, φ 35): 7.5 % — the
 corotational CST uses Biot strain with a Cauchy-like stress, not an exact hyperelastic pair, and loses conservation
 at the very large strains of a shredded plate. Numerical damping (stiffness-proportional, 3 % of critical at the
@@ -76,6 +83,15 @@ torn cells at every sync, as the CPU sees them): all five pass, the fragments ca
 
 Within the fit's scatter (±25–30 %). Mesh: the φ 20 case gives 26.0 / 24.3 / 26.3 mm at 12 / 24 / 48 cells across.
 
+**Rate and the ship-scale panel (AUDIT A3).** The verifier's rig (2.5 × 0.75 m, 6 mm mild, clamped, 2 m standoff) is
+grid-converged (above), so its shortfall is not A1: with Cowper–Symonds on, φ 16.7 / 24.8 / 46.8 give 60 / 78 / 86 %
+of Nurick–Martin; with the rate effect off 86 / 101 % (and the φ 47 plate blows out). Nurick–Martin's φ uses static
+yield, so most of the gap is the rate law (mild steel D 40.4 → 6844 /s, q 5 → 3.91 with strain, Jones). Measured
+localised tests (Langdon, Lee & Louca 2015, 4 mm mild 400 mm square, PE4 discs at 25 mm; game/research/
+plate_validation.csv): the spherical-charge near field gives 40 % of the measured impulse (23–34 vs 56–83 N·s: a disc
+throws its products at the plate), and 64 % of the measured deflection per unit impulse. No tearing data in the file
+yet (all mode I), so tearing onset (A4) is still unchecked against data.
+
 **At ship scale** (2.5 × 0.75 m panel, 10 mm, 0.125 m cells) the model dishes less than the fit: HSLA 120 kg at
 2 m: 59 vs 73 mm, at 1.5 m 106 vs 112 mm; mild steel 120 kg at 3 m 41 vs 62 mm, at 2 m 90 vs 111 mm; small φ
 (< 8) mostly elastic. This is expected physics, not a calibration gap: at 1.5–8 m a 120 kg pulse lasts about as
@@ -83,19 +99,32 @@ long as the panel takes to respond, so the load is not impulsive (work done 59 k
 HSLA's elastic range (with rate hardening) is a large share of these deflections. Tearing sets in near φ ≈ 35 for
 mild steel (1.06 m² torn at 1.5 m), consistent with the mode II onset of clamped steel plates.
 
-**Grid convergence (verify.html `mesh`, box, GPU; not converged).**
+**Grid convergence (AUDIT A1).** The side dish kept growing with refinement (80 / 111 / 173 mm at 0.25 / 0.125 /
+0.0625 m) while the loads were the same on every grid (215.8 kN·s on the side). A clamped plate alone converges (mild
+6 mm, φ 17 and 25: 29 / 35 / 30 / 35 and 57 / 57 / 60 mm at 0.25 … 0.031 m; HSLA 10 mm 120 kg at 2 m: 44 / 58 / 59 / 57),
+so the plating is not the cause. Runs on a reduced section (x ±5 m, decks 4 m; `boxX`, `boxZ`) down to 0.0156 m
+(870 k cells) show where it goes: the side pushes the second deck's edge in and the deck folds at the seam. A coarse
+grid cannot fold, so it holds the side up; the fold needs cells of ~1/10 of its length.
 
-| Case | 0.25 m | 0.125 m | 0.0625 m |
-|---|---|---|---|
-| 120 kg at 5 m, side panel centre dish | 80 mm | 111 mm | 173 mm |
-| 120 kg contact, torn | 3.7 m² | 2.3 m² | 10.7 m² |
-| run time (headless) | 2 s | 8–13 s | 68–103 s |
+| 120 kg at 5 m, 20 ms, erosion off | 0.25 | 0.125 | 0.0625 | 0.031 | 0.0156 m |
+|---|---|---|---|---|---|
+| side at the charge (no knock-down) | 92 | 124 | 143 | 218 | **242** mm |
+| deck edge at the frame (no knock-down) | 49 | 80 | 104 | 187 | **217** mm |
+| side at the charge (knock-down, row 11) | 210 | 230 | 240 | 239 | |
+| deck edge at the frame (knock-down) | 182 | 206 | 219 | 214 | |
 
-The dish grows with every refinement (the 0.75 m panel is 3 / 6 / 12 cells across) and the loads are the same on
-every grid (total impulse on the side 215.8 kN·s at all three), so it is the plating's response: a coarse CST/hinge
-panel is stiff in a doubly curved dish; whether 0.0625 m is close needs a 0.03 m run. The contact hole is grid-bound
-at the erosion front. The stiffness-proportional damping is not the cause (β × ¼ changes the 0.25 m dish by 0.4 mm).
-Use the numbers as a range, not as converged values.
+Checked on two cases it was not fitted to (0.0156 m reference; side / deck edge at 20 ms, then at 30 ms):
+120 kg at 8 m: fine 130 / 118, 167 / 150; knock-down 0.25 m 114 / 103, 126 / 112; 0.125 m 127 / 116, 154 / 138
+(without it 54 / 28 and 75 / 48). 30 kg at 2 m: fine 49 / 40 at 10 ms, 43 / 35 at 30 ms; knock-down 0.25 m 43 / 33,
+41 / 34; 0.125 m 49 / 40, 49 / 41 (without it 21 / 7 and 28 / 15). So 0.125 m with the knock-down is within ~10 % of
+the fine grid and 0.25 m within ~10–25 % (low), where both were 50–75 % low. verify.html `mesh` (full section, final
+set): dish 234 / 180 / 192 mm, 0.125 vs 0.0625 6 % — PASS (was 80 / 111 / 173, FAIL). The knock-down's range: it was
+calibrated on deck-edge folding under a side push (6.5–10 mm plating, mild/HSLA); folding elsewhere (bulkheads under
+gas, decks crushed from above) uses the same table unverified.
+
+The contact hole is not converged: 5.6 / 4.0 / 10.8 m² (side 3.7 / 2.0 / 3.6, second deck 2.1 / 1.4 / 6.5). The
+second deck above the charge tears most on the finest grid, at its folds (a fold's bending strain is taken over one
+cell, so it localises as the cells shrink); a hinge-length regularisation of the fold strain is the next step.
 
 **Seam tearing at the frames (AUDIT A1b).** 120 kg at 8 m tore the second deck at every frame station where the
 side frame meets it (the frame's reaction entered the deck at one node: 10 % compression in the first cell). With the
@@ -103,6 +132,16 @@ web-end ties: 0.66 → 0 m² at 0.25 m, 0.68 → 0.2–0.5 m² at 0.125 m; 120 k
 1.06 → 0.28 m². What remains at 0.125 m: the member model has no web shear yield, so a frame can pass more than τy A_w
 to the deck (tried: capping each bending element's moment by its web's shear capacity also capped the moment at
 coarse grids; bar knees to the deck landed out of plane on one node and doubled contact-case deck tearing).
+
+**Deck hit from inside (the game's deck Oniks).** 120 kg + 130 kg casing 0.8 m under the Burke's main deck in the
+CPO mess (411 m³): the compartment's quasi-static pressure is ~1 MPa. Torn within 30 ms: 105.5 m² at 0.25 m, 102.6 m²
+at 0.125 m (first cells at ~9–10 ms, half by ~19 ms: the gas, not the shock), of which ~30 m² within 0.3 m of a seam
+on both grids; the rest is the WT bulkheads (53 m²), the second deck below (~25 m²), the shell and the main deck
+(~7 m²) bursting. The shut openings barely matter (the first, a ventilation trunk, goes at 0.3 ms; 1–1.5 m² against
+~100 m² of holes). So the extent is physical (≈ 1 MPa on 6–10 mm plating), and on the bench it is not a seam or
+frame-end artefact; the roof is not cut free along its seams here. By 400 ms the gas has burst through ~500 m² of the
+patch. Found on the way: an inside charge on the Burke never pressurised its compartment (the outside space is index 0
+there, and the gas source was only made for spaces below it); the game's shell/model.js has the same test (`cc < sc.OUT`).
 
 ## The user's cases
 
@@ -188,17 +227,22 @@ under the products' gas pressure: relaxing at 70 ms instead of the natural end (
   rotational restraint at the cut; the rest of the Burke is rigid; gravity only on loose pieces.
 - Timing: the permanent set is read after dynamic relaxation (strong mass damping once the motion of the structure
   still joined to the ship has decayed: debris is left out); if a mechanism is still moving, the last 25 ms of
-  relaxation damp it. The end time depends on when asynchronous reads complete, so interactive and `runCaseAsync`
-  runs can end at different steps (and the inside case moves by it); `runCase` (headless) is reproducible.
-- Energy near contact moves with dt (AUDIT A2: −3.7 % unexplained at dt, −1.7 % at dt/2, the plastic work at very
-  large strain increments per step); the 30 kg and Hellfire cases close to 0.1–0.6 %.
+  relaxation damp it. Runs are deterministic (row 13).
+- The unresolved-folding knock-down (row 11) is a calibration, not a fold model: it makes 0.125 m within ~10 % and
+  0.25 m within ~10–25 % of a 0.0156 m grid on deck-edge folding under a side push; other folding modes use it
+  unverified. The contact hole is still grid-sensitive (fold strain over one cell).
+- Read-backs are used ~1 ms after the step they describe (hole sources, vents and fragments see new holes that late;
+  a late hole source delivers the impulse it owed at once).
 
 ## For scripts
 
 `BLAST.runCaseAsync(cfg)` (fast) or `BLAST.runCase(cfg)` (synchronous, reproducible) with `{ scene: 'box' | 'burke' |
 'plate', grid, kg, casing, fuze: 'contact' | 'standoff' | 'inside', standoff, solver: 'gpu' | 'cpu', backend: 'auto' |
 'webgpu' | 'webgl', h, mat, plate: [a, b] }` plus knobs `relaxAt` (fixed relax time), `relaxGas` (relax under
-sustained gas), `patchL`, `fineR`, `uniformGrid`, `noWebEnds`, `noWater`, `wgBatch`, `wgDepth`, `dtK`, `betaK`;
+sustained gas), `patchL`, `fineR`, `uniformGrid`, `noWebEnds`, `noWater`, `wgBatch`, `wgDepth`, `dtK`, `betaK`, `boxX`,
+`boxZ` (reduced section), `brackets`, `kLaw`, `kComp`, `kBand`, `kEps` (knock-down), `efScale` (failure strain ×),
+`shutVents`, `inDepth` (inside charge depth), `insideLOS`, `latMs` (read-back latency), `noRate`;
+`BLAST.probe(cfg, times, points, stopAt)` (displacements at points and times, headless or WebGPU);
 results per piece (torn m², max displacement), `energy` (CPU), `nm` (plate). `BLAST.parity(cfg, steps)` (CPU vs
 WebGL), `BLAST.parityA({ ...cfg, pair: ['cpu' | 'gpu' | 'webgpu', ...] }, steps)`, `BLAST.bench(n, backend)`
 (steps/s), `BLAST.stress(iters, draws)` (a heavy WebGL scene alongside; 0 stops it), `BLAST.fdCheck(node, 'cell' |
