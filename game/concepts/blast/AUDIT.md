@@ -71,6 +71,10 @@ findings 1-3 below (in this bench's 24 m box, nothing within 8.5 m of a 5000 kg 
   per unit length times the hinge length S) rather than a per-node force; or switch to dihedral-angle hinges on each
   interior cell edge (standard discrete-shell bending) with that cap. Keep the hinges that remain when a neighbour
   bond breaks. Make the dashpot two-sided the same way.
+- Tried from the suite (CPU reference, 120 kg at 3 m, panel centre; the missing reactions added to the neighbours
+  after each step, KB = 16 D / S^2): permanent set 163 mm at 0.25 m and 165 mm at 0.125 m (grid-independent; now
+  59 and 28 mm), and it keeps 86-87 % of its peak (now 47 % / 37 %). The larger set then exposes finding 2: the
+  grillage is too weak and translates.
 
 ### 2. Frames and stiffeners are springs to fixed world anchors (high)
 `blast.js:95-96` (TK, TFY), `442-450`; `gpu.js:100-103`.
