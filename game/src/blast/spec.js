@@ -81,7 +81,8 @@ export function hitSpec(o) {
     // the main deck over the hit: the top of the patch (a skin plate: the model's deck follows it)
     const main = o.deckY - a[1];
     let topSkin = false;
-    if (main > .4 && main < yt + 1.2) { yt = sn(main); topSkin = true; }
+    // (a hit at the deck edge: the deck is the top of the patch, the side below it)
+    if (main > -1 && main < yt + 1.2) { yt = sn(main); topSkin = true; }
     if (yt - yb < 2) { yb = yt - sn(2); }
     const x0 = -sn(Rp), x1 = sn(Rp);
     plates.push({ ax: 2, val: 0, u0: x0, u1: x1, v0: yb, v1: yt, h: tSkin, mat: zoneMat, fu: H.frame, pu, fv: H.long, pv: sn(-a[1]), heavy: 30e-4 * H.tie, light: 12e-4 * H.tie, tie: H.tie, skin: 1 });
@@ -132,6 +133,9 @@ export function hitSpec(o) {
   C[0] = clamp(C[0], box[0] + .5, box[3] - .5);
   if (C[2] < 0) { C[1] = clamp(C[1], box[1] + .3, box[4] - .3); C[2] = clamp(C[2], box[2] + .4, -.3); }
   if (o.Vspace) { for (const c of comps) { const b = c.b; if (C[0] >= b[0] && C[0] <= b[3] && C[1] >= b[1] && C[1] <= b[4] && C[2] >= b[2] && C[2] <= b[5]) { c.V = o.Vspace; break; } } }
+  // at most 7 spaces: the charge's own and its neighbours first
+  const gap = b => { let d = 0; for (let k = 0; k < 3; k++) d += Math.max(0, b[k] - C[k], C[k] - b[k + 3]) ** 2; return d; };
+  comps.sort((p, q) => gap(p.b) - gap(q.b));
   return { S, plates, box, comps: comps.slice(0, 7), depth, frame: { O: a.slice(), X, Y, Z }, charge: { C, W, Wgas: o.Wgas || 0, vapour: o.vapour || 0, inside: C[2] < 0 },
     wl: 0, kind: deck ? 'deck' : 'side', Rp };
 }
@@ -150,7 +154,8 @@ export function cookSpec(o) {
   if (!spec) return null;
   // the charge in the module's space, pulled up into the patch
   const C = spec.charge.C;
-  C[2] = Math.max(spec.box[2] + .5, Math.min(-.4, C[2]));
+  if (C[2] < 0) C[2] = Math.max(spec.box[2] + .5, Math.min(-.4, C[2]));
+  else C[2] = Math.min(3, Math.max(.3, C[2]));                  // a load on deck (aircraft, a launcher): it goes off over the plating
   spec.zone = zone;
   return spec;
 }

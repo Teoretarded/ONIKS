@@ -53,9 +53,17 @@
    deck over the module. The render instance gets d.scars (drawn this frame, game.drawn) for engine/models.js.
    Console: ONIKS.game.scars.
 
+   THE BLAST SOLVER (game/src/blast): a ship hit by a blast charge (not gun rounds, not under the keel) and a cook-off with
+   contents (data/modules.js) are solved on the GPU with the bench's structural model: the mark here keeps its
+   bookkeeping (where, the charge, the fire, the hooks), its analytic carve and interior are left out (S.blast: the
+   blast system draws the plating as the solver left it and what is inside), its ejecta fly when the plating tears, its
+   fire re-seats on the torn rim and the deck inside when the patch settles. Where the solver cannot run (or a patch
+   fails) the analytic mark comes back (rebuild).
+
    createScars(game) -> system 'scars' (priority 12: its events before debris (11) and fx (5); draws after render). */
 import { Fire } from '../fx/lib/impact.js';
 import { attitudeM } from './debris/math.js';
+import { MODULES } from '../data/modules.js';
 
 /* warhead (kg): public figures, rounded */
 export const WH = { oniks: 250, kalibr: 200, tlam: 450, slam: 360, uran: 145, hellfire: 9, kornet: 7, shell: 3.6, shell130: 3.6,
@@ -289,7 +297,16 @@ export function createScars(game) {
     lastN[0] = M[0] * S.nx + M[1] * S.ny + M[2] * S.nz; lastN[1] = M[3] * S.nx + M[4] * S.ny + M[5] * S.nz; lastN[2] = M[6] * S.nx + M[7] * S.ny + M[8] * S.nz;
     lastW = fz === 'gun' ? Wk : Oc.Weff;
     stats.surfMs = performance.now() - ts;
+    // a blast charge on a ship: solved on the GPU (game/src/blast); this mark keeps the bookkeeping and the fire
+    const bl = !!(game.blast && game.blast.accepts(u, e.under ? 'under' : fz, e));
+    if (bl) S.bl = true;
     const P = addScar(u, S, ent, st);
+    if (bl && P === S) {
+      let B = null;
+      try { B = game.blast.hit(u, { a: [S.x, S.y, S.z], n: [nx, ny, nz], din, zone, tmm: t, fz, standoff, kind, whKg: Wk, deckY, halfB: halfBFn(u, G), S }); }
+      catch (err) { console.error('scars: blast', err); }
+      if (!B) { S.bl = false; S.blast = null; build(u, S, ent, st); if (holeLike(S.kind)) ejecta(u, ent, st, S, M, pose); }
+    }
     // a blast-frag warhead also peppers the plating round its burst
     if (fz === 'frag' && P) {
       const F = { x: S.x - S.nx * .2, y: S.y, z: S.z, nx: S.nx, ny: S.ny, nz: S.nz, kind: 'pock', r: Math.min(6, 1.5 + .8 * Math.cbrt(Wk)), r0: 0, reach: 1.25,
@@ -297,7 +314,7 @@ export function createScars(game) {
         deckY, D: 0, inn: null, nIn: 0, seats: null, frag: true, t0h: sim.t - .001 };
       addScar(u, F, ent, st);
     }
-    if (P && (P.kind === 'hole' || P.kind === 'rupture') && !P.merged) {
+    if (P && (P.kind === 'hole' || P.kind === 'rupture') && !P.merged && !P.bl) {
       const te = performance.now();
       ejecta(u, ent, st, P, M, pose);
       stats.ejMs = performance.now() - te;
@@ -328,6 +345,7 @@ export function createScars(game) {
         continue;
       }
       if (P.kind === 'pock') continue;
+      if (S.bl || P.blast) continue;                                   // a solved patch stands on its own
       if (d < (P.r + S.r) * .6 || (L.length >= MAXS && d < (P.r + S.r) * 2.5)) {
         // on an old mark: the charges add (a dent may open, a hole grows), its fire flares
         const w = S.r ** 3 / (P.r ** 3 + S.r ** 3);
@@ -353,6 +371,7 @@ export function createScars(game) {
       // full: the smallest old one makes room
       let mi = 0; for (let i = 1; i < L.length; i++) if (L[i].r < L[mi].r) mi = i;
       const Q = L[mi]; if (Q.fire) Q.fire.stop(sim.t); L.splice(mi, 1);
+      if (Q.blast && game.blast) game.blast.drop(Q.blast.id);
     }
     L.push(S);
     build(u, S, ent, st);
@@ -360,11 +379,27 @@ export function createScars(game) {
     return S;
   }
 
+  /* the hull's half-beam at station z, height y (model frame), from its own dots (the envelope gridOf keeps) */
+  function halfBFn(u, G) {
+    const env = G && G.env, B = u.def.size[1] / 2;
+    return (z, y) => {
+      if (!env) return B;
+      let m = -1;
+      for (let dz = -1; dz <= 1; dz++) for (let dy = -1; dy <= 1; dy++) { const v = env.get((Math.floor(z / 2) + dz) * 4096 + Math.floor(y) + dy + 2048); if (v > m) m = v; }
+      return m > .5 ? m : B;
+    };
+  }
+
   /* ------------------------------------------------------------ what is behind a hole */
   /* the pocket's depth, its interior dots and the fire's seats (model frame) */
   function build(u, S, ent, st) {
     S.inn = null; S.nIn = 0; S.seats = null;
     if (!holeLike(S.kind) || S.r < .3) { S.D = 0; return; }
+    if (S.bl) {
+      // solved by the blast system: its fire's first seats from the estimate (re-seated on the torn rim when it settles)
+      S.D = Math.min(1.4 * S.r + 1, u.def.size[1] * .42); S.yFloor = S.y - S.r; seatsOf(u, S, ent, st);
+      return;
+    }
     const def = u.def, B = def.size[1], sea = S.sea, deck = S.ny > .7;
     S.D = sea ? (deck ? Math.min(1.3 * S.r + DECK_H, Math.max(2.5, S.y + (def.draught || 5) * .4)) : Math.min(1.4 * S.r + 1, B * (S.zone === 'super' ? .38 : .42)))
       : Math.min(1.2 * S.r + .3, B * .8);
@@ -583,7 +618,8 @@ export function createScars(game) {
   }
 
   /* ------------------------------------------------------------ ejecta: the dots that left the hole */
-  function ejecta(u, ent, st, S, M, pose) {
+  function ejecta(u, ent, st, S, M, pose, cpos) {
+    const cp = cpos || lastPos;
     const cap = Math.round(Math.min(MAXE, 60 + 700 * (S.r / 3) ** 2));
     let m = 0;
     const r = S.r;
@@ -605,7 +641,7 @@ export function createScars(game) {
       else { x = S.x + (hsh(i, S.seed) - .5) * r; y = S.y + (hsh(i, S.seed + 1) - .5) * r; z = S.z + (hsh(i, S.seed + 2) - .5) * r; }
       if (m && i >= m) { x += (hsh(i, S.seed + 3) - .5) * .3; y += (hsh(i, S.seed + 4) - .5) * .3; z += (hsh(i, S.seed + 5) - .5) * .3; }
       const wx = pose.pos[0] + M[0] * x + M[1] * y + M[2] * z, wy = pose.pos[1] + M[3] * x + M[4] * y + M[5] * z, wz = pose.pos[2] + M[6] * x + M[7] * y + M[8] * z;
-      const ox = wx - lastPos[0], oy = wy - lastPos[1], oz = wz - lastPos[2], ol = Math.hypot(ox, oy, oz) || 1;
+      const ox = wx - cp[0], oy = wy - cp[1], oz = wz - cp[2], ol = Math.hypot(ox, oy, oz) || 1;
       const c = hsh(i, S.seed + 6);
       const spd = c < .25 ? .5 + 3 * hsh(i, S.seed + 7) : c < .8 ? (6 + 22 * hsh(i, S.seed + 7)) * Math.min(2.2, .6 + kick) : (30 + 70 * hsh(i, S.seed + 7)) * Math.min(2, .5 + kick);
       const sc = c < .25 ? .35 : 1;
@@ -617,8 +653,8 @@ export function createScars(game) {
       G.K[i * 2 + 1] = hsh(i, S.seed + 12) < .35 ? 1 : 0;
     }
     G.sea = u.def.domain === 'sea';
-    G.gy = G.sea ? 0 : ground(lastPos[0], lastPos[2]);
-    G.cx = lastPos[0]; G.cy = lastPos[1]; G.cz = lastPos[2];
+    G.gy = G.sea ? 0 : ground(cp[0], cp[2]);
+    G.cx = cp[0]; G.cy = cp[1]; G.cz = cp[2];
     groups.push(G);
   }
 
@@ -663,7 +699,7 @@ export function createScars(game) {
       const u = sim.units.get(id); if (!u) continue;
       const pose = game.unitPose(u), M = rec.M, p0 = pose.pos;
       for (const S of rec.list) {
-        if (!S.nIn || game.t < S.t0) continue;
+        if (!S.nIn || game.t < S.t0 || S.blast) continue;
         const cx = p0[0] + M[0] * S.x + M[1] * S.y + M[2] * S.z, cy = p0[1] + M[3] * S.x + M[4] * S.y + M[5] * S.z, cz = p0[2] + M[6] * S.x + M[7] * S.y + M[8] * S.z;
         const zc = (cx - eye[0]) * f[0] + (cy - eye[1]) * f[1] + (cz - eye[2]) * f[2];
         if (zc < -S.r * 2) continue;
@@ -727,7 +763,7 @@ export function createScars(game) {
         const S = list[i], a = game.t - S.t0, ah = game.t - (S.t0h || S.t0);
         // the hole opens in a few hundredths of a second; the rim glows, cooling over half a minute
         const grow = Math.min(1, .3 + Math.max(0, ah) / .12);
-        L[i * 8] = S.x; L[i * 8 + 1] = S.y; L[i * 8 + 2] = S.z; L[i * 8 + 3] = a < 0 ? 0 : S.r * (S.kind === 'pock' ? 1 : grow);
+        L[i * 8] = S.x; L[i * 8 + 1] = S.y; L[i * 8 + 2] = S.z; L[i * 8 + 3] = a < 0 || S.blast ? 0 : S.r * (S.kind === 'pock' ? 1 : grow);
         L[i * 8 + 4] = S.nx; L[i * 8 + 5] = S.ny; L[i * 8 + 6] = S.nz; L[i * 8 + 7] = S.seed;
         C[i * 4] = 0; C[i * 4 + 1] = S.reach; C[i * 4 + 2] = S.pet;
         C[i * 4 + 3] = ah < 0 ? 0 : .04 + .96 * Math.exp(-ah / (S.kind === 'pock' ? 3 : 9)) * (S.W > 2 || S.kind === 'pock' ? 1 : .5);
@@ -776,7 +812,16 @@ export function createScars(game) {
     lastEv = e; lastW = Oc.Weff;
     lastPos[0] = pose.pos[0] + M[0] * S.x + M[1] * S.y + M[2] * S.z; lastPos[1] = pose.pos[1] + M[3] * S.x + M[4] * S.y + M[5] * S.z; lastPos[2] = pose.pos[2] + M[6] * S.x + M[7] * S.y + M[8] * S.z;
     lastN[0] = M[0] * S.nx + M[1] * S.ny + M[2] * S.nz; lastN[1] = M[3] * S.nx + M[4] * S.ny + M[5] * S.nz; lastN[2] = M[6] * S.nx + M[7] * S.ny + M[8] * S.nz;
+    // the module's contents on the GPU solver (game/src/blast): explosive, propellant, fuel vapour
+    const mod = (MODULES[u.type] || []).find(m => m.id === e.module);
+    const bl = !!(mod && mod.contents && game.blast && game.blast.accepts(u, 'in', e));
+    if (bl) S.bl = true;
     const P = addScar(u, S, ent, st);
+    if (bl && P === S) {
+      let B = null;
+      try { B = game.blast.cook(u, mod, { S, deckY: G ? G.deckY : u.def.size[2] * .4, halfB: halfBFn(u, G) }); } catch (err) { console.error('scars: blast cookoff', err); }
+      if (!B) { S.bl = false; S.blast = null; build(u, S, ent, st); }
+    }
     if (P) { P.force = Math.max(P.force || 0, S.force); P.forceUntil = Math.max(P.forceUntil || 0, S.forceUntil); P.kick = 1; }
   }
 
@@ -790,6 +835,23 @@ export function createScars(game) {
     heavy(id) { const r = recs.get(id); return r ? r.heavy : 0; },
     last(id) { const r = recs.get(id); return r && r.list.length ? r.list.reduce((a, b) => ((b.t0h || b.t0) >= (a.t0h || a.t0) ? b : a)) : null; },
     of(id) { return recs.get(id) || null; },
+    /* the blast system (game/src/blast): a fire for a solved mark, the dots that left its hole (r: the torn skin's
+       equivalent radius), the analytic mark back when its patch failed */
+    startFire(u, S) { startFire(u, S); },
+    ejectaAt(u, S, r) {
+      if (!R.models.has(u.def.model) || !(r > .1)) return;
+      const ent = R.models.get(u.def.model), st = stOf(u), pose = game.unitPose(u), M = attitudeM(pose.hdg, pose.pitch || 0, pose.roll || 0, [0, 0, 0, 0, 0, 0, 0, 0, 0]);
+      const x = S.hx !== undefined ? S.hx : S.x, y = S.hy !== undefined ? S.hy : S.y, z = S.hz !== undefined ? S.hz : S.z;
+      const c = [pose.pos[0] + M[0] * x + M[1] * y + M[2] * z, pose.pos[1] + M[3] * x + M[4] * y + M[5] * z, pose.pos[2] + M[6] * x + M[7] * y + M[8] * z];
+      ejecta(u, ent, st, Object.assign({}, S, { x, y, z, r }), M, pose, c);
+    },
+    rebuild(id, S) {
+      const u = sim.units.get(id); if (!u || !R.models.has(u.def.model)) return;
+      S.bl = false; S.blast = null;
+      const ent = R.models.get(u.def.model), st = stOf(u);
+      build(u, S, ent, st);
+      if (!S.fire) startFire(u, S);
+    },
     /* a ship lost with no fire of her own: her worst hole burns, else a fire on her deck amidships. -> true if lit */
     ignite(id) {
       const u = sim.units.get(id);
@@ -814,6 +876,7 @@ export function createScars(game) {
       const rec = recs.get(id), f = fxSys();
       if (rec) for (const S of rec.list) if (S.fire) { S.fire.stop(sim.t); const i = f && f.fx ? f.fx.indexOf(S.fire) : -1; if (i >= 0) f.fx.splice(i, 1); }
       recs.delete(id);
+      if (game.blast) game.blast.dropUnit(id);
       for (let i = groups.length - 1; i >= 0; i--) if (groups[i].unit === id) groups.splice(i, 1);
       const d = game.drawn && game.drawn.get(id); if (d) d.scars = null;
       if (lastEv && lastEv.target === id) lastEv = null;

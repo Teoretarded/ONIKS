@@ -20,6 +20,7 @@ const LIN_STEP = 1 / 40;
 const LRU_MAX = 64;
 const CELL_K = 48;          // cell size code: (c + 128) / CELL_K of the level spacing (0 .. 5.3 x)
 const JIT_K = 254;          // jitter code: c / JIT_K cells
+const BTMAX = 6;            // blast patches drawn per instance (game/src/blast)
 /* sections (game/structure, d.slab): the slab of the model an instance keeps, z0..z1 along the model's +Z, each cut torn
    (jagK: a ragged tear, the same function of the cross-section point on both sides of a break) */
 const SLAB_GLSL = `
@@ -55,6 +56,7 @@ uniform vec4 uDen;        // dots per pixel: x least spacing of the kept dots on
                           // highlights on a knee)
 uniform vec4 uFill;       // the view's fill light: xyz direction (toward it), w strength
 ${scarGLSL()}
+${blastGLSL()}
 uniform vec4 uSub;        // sub-dots: x on-screen spacing of the level they fill to (1080 px; 0 off), y their jitter (of
                           // their lattice's spacing), z largest dot (as an on-screen spacing, 1080 px), w least spacing of
                           // the sub-dots of a finer cell (a stripe, a detail: the per-pixel cap close up)
@@ -134,6 +136,9 @@ void main() {
   // the pocket behind a hole gone (scars.js draws what is inside)
   float burn = 0.0, hot = 0.0, edge = 0.0, heatN = 0.0;
   if (uScN > 0 && scarAt(p, uR * aNrm.xyz, hid, false, burn, hot, edge, heatN) == 1) { ${CULL} return; }
+  // blast patches (game/src/blast): the plating as the solver left it
+  vec3 btTilt = vec3(0.0);
+  if (uBtN > 0 && blastAt(p, uR * aNrm.xyz, false, burn, hot, edge, heatN, btTilt) == 1) { ${CULL} return; }
   if (burn > 0.0 && edge <= 0.0 && u01(hash1(hid ^ 0x1b873593u)) < burn * 0.5) { ${CULL} return; }
   // the torn edge of a section: a bright ragged rim, glowing while the break is fresh, charred behind it
   if (tk > 0.0) { if (tk > 0.6) { edge = max(edge, tk); heatN = max(heatN, th); } hot = max(hot, th * tk * tk * 0.8); burn = max(burn, 0.55 * tk * (1.0 - tk)); }
@@ -157,6 +162,7 @@ void main() {
     else if (gd >= gw) gk = exp(-(gd - gw) / max(1e-3, uG.w)) * 0.8;
   }
   vec3 n = uR * aNrm.xyz;
+  if (dot(btTilt, btTilt) > 1e-6 && dot(n, n) > 0.01) n = normalize(n + btTilt * length(n));
   float b, rim = 0.0, fk = 1.0;
   bool two = dot(aNrm.xyz, aNrm.xyz) < 0.01;
   float lit = 0.45;
@@ -235,6 +241,7 @@ uniform vec3 uT;
 uniform vec4 uP;          // y: push back (cells), w: level spacing (m)
 uniform vec4 uVp;         // xy: half the viewport (px), z: largest splat (px), w: least cell splatted (px)
 ${scarGLSL()}
+${blastGLSL()}
 out vec4 vAx;             // the cell's axes on screen (px): U xy, V zw
 out float vSz;
 ${SLAB_GLSL}
@@ -254,6 +261,10 @@ void main() {
   if (uScN > 0) {
     float b0 = 0.0, h0 = 0.0, e0 = 0.0, n0 = 0.0;
     if (scarAt(p, uR * aNrm.xyz, hash1(uint(gl_VertexID) * 747796405u + 2891336453u), true, b0, h0, e0, n0) == 1) { ${CULL} return; }
+  }
+  if (uBtN > 0) {
+    float b0 = 0.0, h0 = 0.0, e0 = 0.0, n0 = 0.0; vec3 t0 = vec3(0.0);
+    if (blastAt(p, uR * aNrm.xyz, true, b0, h0, e0, n0, t0) == 1) { ${CULL} return; }
   }
   float dist = length(p);
   vec3 v = p / max(dist, 1e-4);
@@ -426,6 +437,84 @@ int scarAt(inout vec3 p, vec3 n, uint hid, bool dp, inout float burn, inout floa
     vec3 ds = d; if (ds.y > 0.0) ds.y *= 0.45;
     float qs = (length(ds) - rr * 1.6) / max(1e-3, rr * (C.y - 1.6));
     if (qs < 1.0) { float s = 1.0 - max(qs, 0.0); burn = max(burn, s * (0.45 + 0.45 * s) * (0.75 + 0.5 * h2)); }
+  }
+  return 0;
+}
+`;
+}
+
+/* blast patches (game/src/blast, d.scars.blast): the plating's own displacement from the structural solver (an atlas of
+   the skin plates' grids: local displacement xyz, flags + soot in w: 1 cell torn, 2 node gone, 4 node on a torn edge),
+   the dots of a torn cell riding their corner (petals), torn edges hot then charred, the model's surfaces across the
+   pocket behind a hole gone and the hole's splats pushed back into a plug */
+function blastGLSL() {
+  return `
+uniform int uBtN;
+uniform vec4 uBtO[${BTMAX}];     // xyz: the patch's origin (RTE), w: the pocket's depth behind a hole (m)
+uniform vec4 uBtX[${BTMAX}];     // xyz: its local x (world), w: heat of the torn edges (0..1)
+uniform vec4 uBtY[${BTMAX}];     // xyz: local y, w: grid (m)
+uniform vec4 uBtZ[${BTMAX}];     // xyz: local z (the struck plate's outward normal), w: the skin band (m)
+uniform vec4 uBtP[${BTMAX * 2}]; // skin plate k of patch i (i * 2 + k): x axis (-1 none), y plane (local m), z u0, w v0
+uniform vec4 uBtQ[${BTMAX * 2}]; // x nu, y nv (cells), zw its first texel in the atlas
+uniform highp sampler2D uBtT;
+int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, inout float edge, inout float heatN, inout vec3 tilt) {
+  bool two = dot(n, n) < 0.01;
+  for (int i = 0; i < ${BTMAX}; i++) {
+    if (i >= uBtN) break;
+    vec3 X = uBtX[i].xyz, Y = uBtY[i].xyz, Z = uBtZ[i].xyz;
+    vec3 d = p - uBtO[i].xyz;
+    vec3 l = vec3(dot(d, X), dot(d, Y), dot(d, Z));
+    float S = uBtY[i].w, band = uBtZ[i].w, heat = uBtX[i].w, D = uBtO[i].w;
+    for (int k = 0; k < 2; k++) {
+      vec4 P = uBtP[i * 2 + k];
+      if (P.x < -0.5) continue;
+      int ax = int(P.x + 0.5);
+      vec3 A = ax == 0 ? X : ax == 1 ? Y : Z;
+      float off = (ax == 0 ? l.x : ax == 1 ? l.y : l.z) - P.y;
+      float u = (ax == 0 ? l.z : l.x) - P.z, v = (ax == 1 ? l.z : l.y) - P.w;
+      vec4 Q = uBtQ[i * 2 + k];
+      float fi = u / S, fj = v / S;
+      if (fi < 0.0 || fj < 0.0 || fi > Q.x || fj > Q.y) continue;
+      bool face = two || abs(dot(n, A)) > 0.5;
+      int i0 = min(int(fi), int(Q.x) - 1), j0 = min(int(fj), int(Q.y) - 1);
+      float fx = fi - float(i0), fy = fj - float(j0);
+      ivec2 b = ivec2(int(Q.z) + i0, int(Q.w) + j0);
+      vec4 t00 = texelFetch(uBtT, b, 0);
+      int f00 = int(t00.w);
+      bool torn = (f00 & 1) != 0;
+      if (abs(off) > band || !face) {
+        // behind a hole in the struck plate: the model's own surfaces across the pocket are gone (the blast system
+        // draws what is inside)
+        if (k == 0 && torn && face && off < -0.3 && off > -D - 0.4) return 1;
+        continue;
+      }
+      vec4 t10 = texelFetch(uBtT, b + ivec2(1, 0), 0), t01 = texelFetch(uBtT, b + ivec2(0, 1), 0), t11 = texelFetch(uBtT, b + ivec2(1, 1), 0);
+      vec3 dl;
+      if (torn) {
+        // the hole: the depth splat pushed back to the pocket's far end (a plug); the dots ride their quarter's corner
+        // (petals bent the blast's way), gone with it if it went
+        if (dp) { p -= A * (D + 0.3); return 2; }
+        bool lx = fx < 0.5, ly = fy < 0.5;
+        vec4 tc = lx ? (ly ? t00 : t01) : (ly ? t10 : t11);
+        if ((int(tc.w) & 2) != 0) return 1;
+        vec2 o = (vec2(fx, fy) - vec2(lx ? 0.0 : 1.0, ly ? 0.0 : 1.0)) * S * -0.2;
+        dl = tc.xyz + (ax == 2 ? vec3(o.x, o.y, 0.0) : ax == 1 ? vec3(o.x, 0.0, o.y) : vec3(0.0, o.y, o.x));
+        edge = max(edge, 0.85); heatN = max(heatN, heat); hot = max(hot, heat * 0.9); burn = max(burn, 0.85);
+      } else {
+        dl = mix(mix(t00.xyz, t10.xyz, fx), mix(t01.xyz, t11.xyz, fx), fy);
+        // a torn edge: its corners' flags, fading across the cell
+        float e = mix(mix(float((f00 & 4) >> 2), float((int(t10.w) & 4) >> 2), fx), mix(float((int(t01.w) & 4) >> 2), float((int(t11.w) & 4) >> 2), fx), fy);
+        if (e > 0.3) { edge = max(edge, 0.8 * e); heatN = max(heatN, heat); hot = max(hot, heat * 0.55 * e); }
+        float so = mix(mix(fract(t00.w), fract(t10.w), fx), mix(fract(t01.w), fract(t11.w), fx), fy);
+        burn = max(burn, so * so * 0.8);
+        // the dent's slope: the normal leans with it
+        float gu = mix(t10[ax] - t00[ax], t11[ax] - t01[ax], fy) / S, gv = mix(t01[ax] - t00[ax], t11[ax] - t10[ax], fx) / S;
+        vec3 Uw = ax == 0 ? Z : X, Vw = ax == 1 ? Z : Y;
+        tilt -= Uw * gu + Vw * gv;
+      }
+      p += X * dl.x + Y * dl.y + Z * dl.z;
+      break;
+    }
   }
   return 0;
 }
@@ -788,6 +877,8 @@ export class ModelLib {
     this._m9 = new Float32Array(9);
     this._scA = new Float32Array(32); this._scB = new Float32Array(32);   // scars, per instance (d.scars)
     this._km = new Float32Array(9);                                         // sections (d.slab): the instance's rotation
+    this._btO = new Float32Array(BTMAX * 4); this._btX = new Float32Array(BTMAX * 4); this._btY = new Float32Array(BTMAX * 4); this._btZ = new Float32Array(BTMAX * 4);
+    this.blastTex = null;                                                   // the blast patches' atlas (game/src/blast/system.js), unit 7
   }
   /* register a model factory: factory() -> {parts: [...]} in the GEO/HD part format.
      opts: { lods: [spacings], quant: {stateKey: step}, angles: [stateKeys], deps: {partName: [keys]} } */
@@ -1173,6 +1264,27 @@ export class ModelLib {
     }
     return ns;
   }
+  /* blast patches (d.scars.blast: { n, F: Float32Array(6 x 16: origin xyz, depth, x axis, heat, y axis, grid, z axis,
+     band) model frame, P, Q: Float32Array(12 x 4) }): model frame -> world, relative to the eye, into the uniforms */
+  _blast(gl, P, d, eye) {
+    const u = P.u, B = d.scars && d.scars.blast, n = B && B.n && this.blastTex ? Math.min(BTMAX, B.n) : 0;
+    gl.uniform1i(u.uBtN, n);
+    if (!n) return 0;
+    if (P._bt !== this.blastTex) { gl.uniform1i(u.uBtT, 7); P._bt = this.blastTex; }
+    const R0 = d.R, T0 = d.T, F = B.F, O = this._btO, X = this._btX, Y = this._btY, Z = this._btZ;
+    for (let i = 0; i < n; i++) {
+      const o = i * 16, x = F[o], y = F[o + 1], z = F[o + 2];
+      O[i * 4] = R0[0] * x + R0[1] * y + R0[2] * z + T0[0] - eye[0]; O[i * 4 + 1] = R0[3] * x + R0[4] * y + R0[5] * z + T0[1] - eye[1]; O[i * 4 + 2] = R0[6] * x + R0[7] * y + R0[8] * z + T0[2] - eye[2]; O[i * 4 + 3] = F[o + 3];
+      for (let q = 0; q < 3; q++) {
+        const A = q === 0 ? X : q === 1 ? Y : Z, k = 4 + q * 4, ax = F[o + k], ay = F[o + k + 1], az = F[o + k + 2];
+        A[i * 4] = R0[0] * ax + R0[1] * ay + R0[2] * az; A[i * 4 + 1] = R0[3] * ax + R0[4] * ay + R0[5] * az; A[i * 4 + 2] = R0[6] * ax + R0[7] * ay + R0[8] * az; A[i * 4 + 3] = F[o + k + 3];
+      }
+    }
+    gl.uniform4fv(u.uBtO, O); gl.uniform4fv(u.uBtX, X); gl.uniform4fv(u.uBtY, Y); gl.uniform4fv(u.uBtZ, Z);
+    gl.uniform4fv(u.uBtP, B.P); gl.uniform4fv(u.uBtQ, B.Q);
+    gl.activeTexture(gl.TEXTURE7); gl.bindTexture(gl.TEXTURE_2D, this.blastTex); gl.activeTexture(gl.TEXTURE0);
+    return n;
+  }
   /* sub-dot instances a cloud needs at distance dn (m): its level's spacing on screen over the sub-dot spacing,
      squared (1..256) */
   _inst(cl, dn, flc) {
@@ -1225,6 +1337,7 @@ export class ModelLib {
     const ns = this._scars(d, cam.eye);
     if (ns) { gl.uniform4fv(u.uScA, this._scA); gl.uniform4fv(u.uScB, this._scB); gl.uniform4fv(u.uScC, d.scars.C); gl.uniform4fv(u.uScD, d.scars.D || SC0); }
     gl.uniform1i(u.uScN, ns);
+    this._blast(gl, P, d, cam.eye);
     this._slab(gl, u, d, cam.eye);
     let n = 0;
     for (let i = d._p0; i < d._p1; i++) {
@@ -1259,6 +1372,7 @@ export class ModelLib {
     const ns = this._scars(d, eye);
     if (ns) { gl.uniform4fv(u.uScA, this._scA); gl.uniform4fv(u.uScB, this._scB); gl.uniform4fv(u.uScC, d.scars.C); gl.uniform4fv(u.uScD, d.scars.D || SC0); }
     gl.uniform1i(u.uScN, ns);
+    this._blast(gl, P, d, eye);
     this._slab(gl, u, d, eye);
     const spMax = e.lods[e.lods.length - 1];
     let drawn = 0;

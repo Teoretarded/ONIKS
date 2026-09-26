@@ -99,7 +99,9 @@ export function createRunner(gl, o = {}) {
     for (const R of run) {
       if (R.state === 'finish') { out.push(finish(R)); continue; }
       const s = R.P.sim;
-      if (R.watch && s.t - R.lastSnapT >= SNAP_DT && now() - R.lastSnapMs >= SNAP_MS) out.push(snapshot(R, false));
+      // the readback asked for last time, once the GPU is done with it (never a stall); then a new one when due
+      if (R.snapQ) { const cl = pool.snapTake(R.H, R.snapQ); if (cl) { R.snapQ = null; tearCells(R.P, cl, R.snapT); out.push(snapshot(R, false)); } }
+      else if (R.watch && s.t - R.lastSnapT >= SNAP_DT && now() - R.lastSnapMs >= SNAP_MS) { R.snapQ = pool.snapReq(R.H); R.snapT = s.t; R.lastSnapMs = now(); if (!R.snapQ) R.lastSnapMs = 0; }
     }
     return out;
   }
@@ -132,7 +134,7 @@ export function createRunner(gl, o = {}) {
     pool.readNodes(R.H, true); pool.readBonds(R.H);
     tearCells(P, pool.readCells(R.H), s.t);
     for (let q = 0; q < P.NS; q++) if (P.SBRK[q]) { const a = P.SA[q], b = P.SB[q]; if (P.TBRK[a] < 0) P.TBRK[a] = s.t; if (P.TBRK[b] < 0) P.TBRK[b] = s.t; }
-    pool.release(R.H); R.H = null;
+    pool.release(R.H); R.H = null; R.snapQ = null;
     R.state = 'done'; stats.done++;
     admit();
     const m = snapshot(R, true);
@@ -144,14 +146,19 @@ export function createRunner(gl, o = {}) {
   /* ------------------------------------------------------------ what the game draws */
   function snapshot(R, final) {
     const P = R.P, s = P.sim, sp = R.spec, F = sp.frame;
-    if (!final) { pool.readNodes(R.H, false); tearCells(P, pool.readCells(R.H), s.t); }
-    R.lastSnapT = s.t; R.lastSnapMs = now();
+    const tS = final ? s.t : R.snapT;
+    R.lastSnapT = tS; R.lastSnapMs = now();
     const S = P.S, X = P.X, R0 = P.R0, gone = i => P.FREE[i] || P.DISC[i];
     // skins
     const skins = [], tr = [];
+    R.lastSkin = R.lastSkin || [];
     P.PL.forEach((L, p) => {
       if (!L.skin) return;
       const nu = L.nu, nv = L.nv, d = new Float32Array((nu + 1) * (nv + 1) * 4);
+      // the outer face's scorch: the charge's own soot when it went off outside; when it went off inside, only round
+      // the holes (the fire venting out), a stain taller above than below
+      const inside = s.C[L.ax] < L.val;
+      const so = inside ? outerSoot(P, L) : null;
       for (let j = 0; j <= nv; j++) for (let i = 0; i <= nu; i++) {
         const k = j * (nu + 1) + i, n = L.at[k], o = 4 * k;
         d[o] = X[3 * n] - R0[3 * n]; d[o + 1] = X[3 * n + 1] - R0[3 * n + 1]; d[o + 2] = X[3 * n + 2] - R0[3 * n + 2];
@@ -159,11 +166,25 @@ export function createRunner(gl, o = {}) {
         if (i < nu && j < nv && P.CTORN[L.off + j * nu + i]) f |= 1;
         if (gone(n)) f |= 2;
         if (P.TBRK[n] >= 0) f |= 4;
-        d[o + 3] = f + Math.min(.99, P.SOOT[n]);
+        d[o + 3] = f + Math.min(.99, so ? so[k] : P.SOOT[n]);
         if (!(d[o] === d[o])) { d[o] = d[o + 1] = d[o + 2] = 0; d[o + 3] = 2; }
       }
-      skins.push({ p, ax: L.ax, val: L.val, u0: L.u0, v0: L.v0, nu, nv, data: d });
-      tr.push(d.buffer);
+      // only what changed since the last snapshot (the rest of the plate is already on the game's side)
+      const last = R.lastSkin[p];
+      let i0 = nu + 1, i1 = -1, j0 = nv + 1, j1 = -1;
+      for (let j = 0; j <= nv; j++) for (let i = 0; i <= nu; i++) {
+        const o = 4 * (j * (nu + 1) + i);
+        const ch = last ? Math.abs(d[o] - last[o]) > 2e-4 || Math.abs(d[o + 1] - last[o + 1]) > 2e-4 || Math.abs(d[o + 2] - last[o + 2]) > 2e-4 || Math.abs(d[o + 3] - last[o + 3]) > .02
+          : d[o] !== 0 || d[o + 1] !== 0 || d[o + 2] !== 0 || d[o + 3] !== 0;
+        if (ch) { if (i < i0) i0 = i; if (i > i1) i1 = i; if (j < j0) j0 = j; if (j > j1) j1 = j; }
+      }
+      R.lastSkin[p] = d;
+      if (i1 < 0 && last) return;
+      if (i1 < 0) { i0 = 0; j0 = 0; i1 = 0; j1 = 0; }
+      const w = i1 - i0 + 1, h = j1 - j0 + 1, sub = new Float32Array(w * h * 4);
+      for (let j = 0; j < h; j++) sub.set(d.subarray(4 * ((j0 + j) * (nu + 1) + i0), 4 * ((j0 + j) * (nu + 1) + i0 + w)), 4 * j * w);
+      skins.push({ p, ax: L.ax, val: L.val, u0: L.u0, v0: L.v0, nu, nv, i0, j0, w, h, data: sub });
+      tr.push(sub.buffer);
     });
     // the region the holes open: the struck plate's torn cells, grown 1.5 m
     const L0 = P.PL[0];
@@ -245,8 +266,29 @@ export function createRunner(gl, o = {}) {
     }
     for (let i = 0; i < P.N; i++) if (P.SURF[i] === 0 && !gone(i)) { const d = Math.hypot(X[3 * i] - R0[3 * i], X[3 * i + 1] - R0[3 * i + 1], X[3 * i + 2] - R0[3 * i + 2]); if (d > setMax) setMax = d; }
     const byPlate = new Array(P.nP).fill(0); for (let c = 0; c < P.NC; c++) if (P.CTORN[c]) byPlate[P.CSURF[c]] += S * S;
-    return { type: 'state', id: R.id, final, t: s.t, T1: s.T1, skins, inner, nIn, tornSkin: torn0 * S * S, tornBelow: below * S * S, byPlate, setMax,
+    return { type: 'state', id: R.id, final, t: tS, T1: s.T1, skins, inner, nIn, tornSkin: torn0 * S * S, tornBelow: below * S * S, byPlate, setMax,
       runMs: R.runMs, steps: R.steps, wallMs: now() - R.tReal0, transfer: tr };
+  }
+
+  /* a skin plate's outer scorch round its torn cells (per node): a distance field from the holes (grid steps, up to
+     3 m, twice as far upward) */
+  function outerSoot(P, L) {
+    const nu = L.nu, nv = L.nv, W = nu + 1, D = new Float32Array(W * (nv + 1)).fill(1e9), Q = [];
+    for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) if (P.CTORN[L.off + j * nu + i]) for (const [a, b] of [[i, j], [i + 1, j], [i, j + 1], [i + 1, j + 1]]) { const k = b * W + a; if (D[k] > 0) { D[k] = 0; Q.push(k); } }
+    const out = new Float32Array(W * (nv + 1));
+    if (!Q.length) return out;
+    const up = L.ax === 1 ? 0 : 1, lim = 3 / P.S;     // (a side: v is up; a deck: no up)
+    for (let h = 0; h < Q.length; h++) {
+      const k = Q[h], i = k % W, j = (k / W) | 0, d0 = D[k];
+      if (d0 >= lim * 2) continue;
+      for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const a = i + di, b = j + dj; if (a < 0 || b < 0 || a > nu || b > nv) continue;
+        const c = dj > 0 && up ? .5 : 1, q = b * W + a;
+        if (d0 + c < D[q]) { D[q] = d0 + c; Q.push(q); }
+      }
+    }
+    for (let k = 0; k < out.length; k++) { const x = 1 - D[k] / lim; out[k] = x > 0 ? .95 * x * x : 0; }
+    return out;
   }
 
   /* for the game's girder and flooding (structure/) and fires: plastic work, frames torn, the rim */

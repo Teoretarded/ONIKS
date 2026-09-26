@@ -261,6 +261,7 @@ export function createPool(gl, o = {}) {
   }
   function release(H) {
     if (!H || pids[H.pid] !== H) return;
+    snapFree(H);
     // the rows go back empty: slots -1, nodes inactive
     const z = new Float32Array(NW * H.nr * 4);
     for (const k of ['info', 'bend']) put(T[k], 0, H.r0, NW, H.nr, z);
@@ -439,9 +440,41 @@ export function createPool(gl, o = {}) {
     for (let q = 0; q < P.NS; q++) { const a = H.slotOf[2 * q], o = (((a >>> 16)) * SW + (a & 0xffff)) * 4; P.SLP[q] = b[o]; P.SBRK[q] = b[o + 1] > .5 ? 1 : 0; }
   }
   function refreshParams(H) { params(H); }
+  /* a snapshot's readback without stalling: positions + tear-outs, loose plate, torn cells copied into pixel buffers
+     now; snapTake(q) fills the patch's CPU arrays once the GPU is done with them (false until then) */
+  function snapReq(H) {
+    const q = H.snapQ || (H.snapQ = { pos: gl.createBuffer(), anc: gl.createBuffer(), cell: gl.createBuffer(), f: null, busy: false });
+    if (q.busy) return null;
+    const bn = NW * H.nr * 16, bc = CW * H.cr * 16, PB = gl.PIXEL_PACK_BUFFER;
+    for (const [b, n] of [[q.pos, bn], [q.anc, bn], [q.cell, bc]]) { gl.bindBuffer(PB, b); if (b.size !== n) { gl.bufferData(PB, n, gl.STREAM_READ); b.size = n; } }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fNode[cur]);
+    gl.readBuffer(gl.COLOR_ATTACHMENT0); gl.bindBuffer(PB, q.pos); gl.readPixels(0, H.r0, NW, H.nr, gl.RGBA, gl.FLOAT, 0);
+    gl.readBuffer(gl.COLOR_ATTACHMENT2); gl.bindBuffer(PB, q.anc); gl.readPixels(0, H.r0, NW, H.nr, gl.RGBA, gl.FLOAT, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fCell[cc]); gl.readBuffer(gl.COLOR_ATTACHMENT0);
+    gl.bindBuffer(PB, q.cell); gl.readPixels(0, H.c0, CW, H.cr, gl.RGBA, gl.FLOAT, 0);
+    gl.bindBuffer(PB, null); gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    q.f = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0); gl.flush(); q.busy = true;
+    return q;
+  }
+  function snapTake(H, q) {
+    if (!q || !q.busy) return null;
+    if (gl.clientWaitSync(q.f, 0, 0) === gl.TIMEOUT_EXPIRED) return null;
+    gl.deleteSync(q.f); q.f = null; q.busy = false;
+    const P = H.P, PB = gl.PIXEL_PACK_BUFFER, b = rb(NW * H.nr * 4);
+    gl.bindBuffer(PB, q.pos); gl.getBufferSubData(PB, 0, b, 0, NW * H.nr * 4);
+    for (let i = 0; i < P.N; i++) { P.X[3 * i] = b[4 * i]; P.X[3 * i + 1] = b[4 * i + 1]; P.X[3 * i + 2] = b[4 * i + 2]; P.DISC[i] = b[4 * i + 3] > .5 ? 1 : 0; }
+    gl.bindBuffer(PB, q.anc); gl.getBufferSubData(PB, 0, b, 0, NW * H.nr * 4);
+    for (let i = 0; i < P.N; i++) P.FREE[i] = b[4 * i + 3] > .5 ? 1 : 0;
+    const c = new Float32Array(CW * H.cr * 4), out = new Uint8Array(P.NC);
+    gl.bindBuffer(PB, q.cell); gl.getBufferSubData(PB, 0, c, 0, CW * H.cr * 4);
+    for (let k = 0; k < P.NC; k++) out[k] = c[4 * k] > .5 ? 1 : 0;
+    gl.bindBuffer(PB, null);
+    return out;
+  }
+  function snapFree(H) { const q = H.snapQ; if (!q) return; if (q.f) gl.deleteSync(q.f); for (const b of [q.pos, q.anc, q.cell]) gl.deleteBuffer(b); H.snapQ = null; }
   /* a GPU fence the caller can poll (throttling: never more than a slice of work queued) */
   function fenceNow() { const f = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0); gl.flush(); return f; }
   function fenceDone(f) { if (!f) return true; const st = gl.clientWaitSync(f, 0, 0); if (st === gl.TIMEOUT_EXPIRED) return false; gl.deleteSync(f); return true; }
-  return { add, release, step, setStep, freeze, setGas, readNodes, readCells, readCellsAsync, readBonds, refreshParams, cellPass, fenceNow, fenceDone,
+  return { add, release, step, setStep, freeze, setGas, readNodes, readCells, readCellsAsync, readBonds, refreshParams, cellPass, fenceNow, fenceDone, snapReq, snapTake, snapFree,
     get room() { return rN.largest * NW; }, K, NW, NH, CW, CH, pids };
 }

@@ -23,6 +23,10 @@
                          damage bursting from the module (it reaches size x COOK.chainR and may set off its neighbours)
                          and a fire burning burn hp/s for fire s
                    ammo  only while there is something to go up: a weapon name (or several: any > 0), 'cargo'
+       contents  what goes up in one cook-off, for the blast solver (game/src/blast; ships): { he (kg TNT-eq of explosive
+                 fill), det (the share of it that detonates at once; the rest burns), prop (kg of propellant that burns: gas
+                 ~0.25 TNT-eq), fuel (kg), vapour (kg of fuel vapour that deflagrates, capped ~0.8 MPa in its space) }.
+                 Coarse public figures (an 8-cell Mk 41 module, a magazine's racks, a tank's ullage), not an inventory
 
    Munitions carry no internals here: a charge is its PROJ dmg only (its reach: COOK.reach). */
 
@@ -46,6 +50,10 @@ export const HULL_SLOW = { carrier: .7, lhd: .7, ddg: .7, cg: .7, lcs: .6, ssn: 
 const M = (id, label, part, box, hp, more) => Object.assign({ id, label, part, box, hp }, more || {});
 const kill = (p, size, ammo) => ({ p, size, out: 'kill', ammo });
 const heavy = (p, size, dmg, fire, burn, ammo) => ({ p, size, out: 'heavy', dmg, fire, burn, ammo });
+/* contents (blast solver): an 8-cell VLS module (missiles' fill and motors), a gun magazine's racks, fuel */
+const VLS8 = { he: 480, det: .5, prop: 3600 };
+const MAG5 = { he: 600, det: .15, prop: 1200 };
+const fuelOf = (kg, vapour) => ({ fuel: kg, vapour });
 
 /* the MZKT-7930 8x8 every Bastion vehicle stands on (cab, YaMZ-846, tank, wheel runs) */
 const mzkt = () => [
@@ -128,7 +136,7 @@ export const MODULES = {
   ],
 
   ssk: [
-    M('torpRoom', 'Torpedo room · 6 tubes · 12 reloads', 'bow', [-3.4, -4, 17.5, 3.4, -.5, 36.7], 20, { armor: .2, cook: kill(.3, 20, ['t53', 'klub']) }),
+    M('torpRoom', 'Torpedo room · 6 tubes · 12 reloads', 'bow', [-3.4, -4, 17.5, 3.4, -.5, 36.7], 20, { armor: .2, cook: kill(.3, 20, ['t53', 'klub']), contents: { he: 1000, det: .25, prop: 300 } }),
     M('sonar', 'MGK-400EM sonar · bow array', 'bow', [-4.4, -6.3, 30, 4.4, 2.5, 36.9], 12, { disables: ['sonar'] }),
     M('control', 'Control room · attack centre', 'hull', [-3.5, -1.6, -3.5, 3.5, 2.5, 8.5], 15, { disables: ['klub', 't53'], group: 'fc' }),
     M('battery', 'Battery · 2 × 120 cells', 'hull', [-3.3, -5.5, -4, 3.3, -3.8, 16.5], 20, { armor: .2, slow: .5, cook: kill(.12, 10) }),
@@ -180,12 +188,12 @@ export const MODULES = {
 
   /* ------------------------------------------------------------------ FLEET */
   carrier: [
-    M('magF', 'Magazines · forward · bombs and missiles', 'hull', [-14.5, -9.6, 38, 14.5, 4.8, 98], 110, { armor: .5, cook: heavy(.2, 80, 110, 300, .12) }),
-    M('magA', 'Magazines · aft · bombs and missiles', 'hull', [-14.5, -9.6, -104, 14.5, 4.8, -44], 110, { armor: .5, cook: heavy(.2, 80, 110, 300, .12) }),
-    M('jp5F', 'Aviation fuel · JP-5 · forward', 'hull', [-16.5, -9.6, 98, 16.5, 2, 130], 80, { armor: .3, cook: heavy(.15, 50, 50, 420, .1) }),
-    M('jp5A', 'Aviation fuel · JP-5 · aft', 'hull', [-16.5, -9.6, -130, 16.5, 2, -104], 80, { armor: .3, cook: heavy(.15, 50, 50, 420, .1) }),
-    M('hangar', 'Hangar deck · aircraft fuelled and armed', 'hull', [-16.5, 8, -130, 16.5, 16.4, 78], 120, { cook: heavy(.12, 60, 60, 240, .1) }),
-    M('parked', 'Air wing · parked on deck', 'air', [-12, 19.57, -150, 36, 24.5, -60], 60, { cook: heavy(.15, 40, 25, 180, .08) }),
+    M('magF', 'Magazines · forward · bombs and missiles', 'hull', [-14.5, -9.6, 38, 14.5, 4.8, 98], 110, { armor: .5, cook: heavy(.2, 80, 110, 300, .12), contents: { he: 8000, det: .02, prop: 1500 } }),
+    M('magA', 'Magazines · aft · bombs and missiles', 'hull', [-14.5, -9.6, -104, 14.5, 4.8, -44], 110, { armor: .5, cook: heavy(.2, 80, 110, 300, .12), contents: { he: 8000, det: .02, prop: 1500 } }),
+    M('jp5F', 'Aviation fuel · JP-5 · forward', 'hull', [-16.5, -9.6, 98, 16.5, 2, 130], 80, { armor: .3, cook: heavy(.15, 50, 50, 420, .1), contents: fuelOf(900000, 60) }),
+    M('jp5A', 'Aviation fuel · JP-5 · aft', 'hull', [-16.5, -9.6, -130, 16.5, 2, -104], 80, { armor: .3, cook: heavy(.15, 50, 50, 420, .1), contents: fuelOf(900000, 60) }),
+    M('hangar', 'Hangar deck · aircraft fuelled and armed', 'hull', [-16.5, 8, -130, 16.5, 16.4, 78], 120, { cook: heavy(.12, 60, 60, 240, .1), contents: { he: 1500, det: .03, prop: 300, fuel: 40000, vapour: 30 } }),
+    M('parked', 'Air wing · parked on deck', 'air', [-12, 19.57, -150, 36, 24.5, -60], 60, { cook: heavy(.15, 40, 25, 180, .08), contents: { he: 1000, det: .05, fuel: 30000, vapour: 20 } }),
     M('reactors', 'A4W reactor ×2', 'hull', [-12, -9.6, -24, 12, 6.4, 38], 150, { armor: .6, slow: .3 }),
     M('machinery', 'Main machinery rooms ×2 · turbines ×4', 'hull', [-16.5, -9.6, -44, 16.5, 6.4, 20], 120, { armor: .4, slow: .6 }),
     M('shafts', 'Shafts ×4 · propellers · rudders', 'hull', [-20.1, -10.6, -159.2, 20.1, 0, -92], 100, { armor: .3, slow: .6 }),
@@ -198,10 +206,10 @@ export const MODULES = {
   ],
 
   ddg: [
-    M('vlsF', 'Mk 41 VLS · fwd · 32 cells', 'vlsF', [-4.2, -.9, 37.2, 4.2, 7.4, 40.6], 35, { lose: { sm6: .33, strike: .33 }, cook: kill(.22, 45, ['sm6', 'strike']) }),
-    M('vlsA', 'Mk 41 VLS · aft · 64 cells', 'vlsA', [-4.2, -2.1, -32.8, 4.2, 6.2, -26], 45, { lose: { sm6: .67, strike: .67 }, cook: kill(.22, 60, ['sm6', 'strike']) }),
+    M('vlsF', 'Mk 41 VLS · fwd · 32 cells', 'vlsF', [-4.2, -.9, 37.2, 4.2, 7.4, 40.6], 35, { lose: { sm6: .33, strike: .33 }, cook: kill(.22, 45, ['sm6', 'strike']), contents: VLS8 }),
+    M('vlsA', 'Mk 41 VLS · aft · 64 cells', 'vlsA', [-4.2, -2.1, -32.8, 4.2, 6.2, -26], 45, { lose: { sm6: .67, strike: .67 }, cook: kill(.22, 60, ['sm6', 'strike']), contents: VLS8 }),
     M('gun', 'Mk 45 Mod 4 · 5"/62', 'gun', [-2, 7.8, 46.2, 2.1, 10.2, 56.8], 20, { disables: ['gun5'] }),
-    M('mag5', 'Gun magazine · 5" rounds', 'hull', [-3.5, -4, 44, 3.5, 6.5, 52], 30, { armor: .3, cook: kill(.2, 25, 'gun5') }),
+    M('mag5', 'Gun magazine · 5" rounds', 'hull', [-3.5, -4, 44, 3.5, 6.5, 52], 30, { armor: .3, cook: kill(.2, 25, 'gun5'), contents: MAG5 }),
     M('spyF', 'AN/SPY-1D · fwd faces', 'spy', [-7, 12.1, 20, 7, 15.7, 30], 30, { group: 'spy', disables: ['radar', 'sm6'] }),
     M('spyA', 'AN/SPY-1D · aft faces', 'spy', [-7, 12.1, 9.1, 7, 15.7, 20], 30, { group: 'spy', disables: ['radar', 'sm6'] }),
     M('bridge', 'Bridge · CIC below', 'super', [-8, 11, 24, 8, 19, 35.5], 30, { slow: .8 }),
@@ -210,7 +218,7 @@ export const MODULES = {
     M('engA', 'Engine room 2 · LM2500 ×2', 'hull', [-5.4, -5.7, -26.8, 4.4, -.9, -8], 40, { slow: .6 }),
     M('shafts', 'Shafts ×2 · CRP propellers', 'hull', [-6.5, -7.2, -72.5, 6.5, 0, -39.7], 30, { slow: .5 }),
     M('hangar', 'Hangars ×2 · MH-60R', 'hangar', [-7.5, 5.8, -53, 7.5, 11.5, -36.3], 30, { disables: ['air'] }),
-    M('jp5', 'Aviation fuel · JP-5', 'hull', [-4, -4, -60, 4, 4, -53], 20, { cook: heavy(.25, 25, 35, 150, .1) }),
+    M('jp5', 'Aviation fuel · JP-5', 'hull', [-4, -4, -60, 4, 4, -53], 20, { cook: heavy(.25, 25, 35, 150, .1), contents: fuelOf(60000, 25) }),
     M('ciwsF', 'Phalanx 1B · fwd', 'ciwsF', [-1, 11, 31.6, 1.1, 14.4, 35], 8, { disables: ['ciwsF'] }),
     M('ciwsA', 'Phalanx 1B · aft', 'ciwsA', [-1.1, 13.9, -49.6, 1, 17.3, -46.2], 8, { disables: ['ciwsA'] }),
   ],
@@ -253,8 +261,8 @@ export const MODULES = {
   ],
 
   ssn: [
-    M('torpRoom', 'Torpedo room · 4 tubes · Mk 48 ×25', 'bow', [-5, -7.3, 20.5, 5, -5.2, 40.6], 30, { armor: .2, cook: kill(.25, 25, 'mk48') }),
-    M('vpt', 'Virginia Payload Tubes · Tomahawk ×12', 'vpt', [-1.1, -8.7, 41.5, 1.1, 1.3, 47.4], 25, { disables: ['strike'], cook: kill(.25, 25, 'strike') }),
+    M('torpRoom', 'Torpedo room · 4 tubes · Mk 48 ×25', 'bow', [-5, -7.3, 20.5, 5, -5.2, 40.6], 30, { armor: .2, cook: kill(.25, 25, 'mk48'), contents: { he: 1200, det: .25, prop: 400 } }),
+    M('vpt', 'Virginia Payload Tubes · Tomahawk ×12', 'vpt', [-1.1, -8.7, 41.5, 1.1, 1.3, 47.4], 25, { disables: ['strike'], cook: kill(.25, 25, 'strike'), contents: { he: 1200, det: .2, prop: 1800 } }),
     M('sonar', 'Large Aperture Bow array', 'bow', [-5.2, -9.3, 47.5, 5.2, 1.1, 57.5], 15, { disables: ['sonar'] }),
     M('control', 'Control room · command centre', 'hull', [-4.2, -2, 5, 4.2, 1.1, 20], 20, { disables: ['strike', 'mk48'] }),
     M('reactor', 'S9G reactor compartment', 'hull', [-4.4, -8.3, -6, 4.4, -.2, 6], 40, { armor: .5, slow: .15 }),
@@ -264,10 +272,10 @@ export const MODULES = {
   ],
 
   lhd: [
-    M('mag', 'Magazines · missiles and ordnance', 'hull', [-10, -6.6, 20, 10, 1, 60], 70, { armor: .4, cook: heavy(.2, 50, 70, 240, .1) }),
-    M('jp5', 'Aviation fuel · JP-5', 'hull', [-10, -6.6, 64, 10, 1, 90], 50, { armor: .3, cook: heavy(.15, 40, 40, 300, .08) }),
-    M('hangar', 'Hangar deck · helicopters · AV-8B', 'hull', [-14.6, 10.7, -84, 14.6, 17.1, 14], 80, { cook: heavy(.1, 40, 40, 200, .08) }),
-    M('vehicles', 'Vehicle decks · fuelled', 'hull', [-10.5, 1, -46.9, 10.5, 10.6, 8], 60, { cook: heavy(.08, 30, 25, 180, .06) }),
+    M('mag', 'Magazines · missiles and ordnance', 'hull', [-10, -6.6, 20, 10, 1, 60], 70, { armor: .4, cook: heavy(.2, 50, 70, 240, .1), contents: { he: 3000, det: .03, prop: 1500 } }),
+    M('jp5', 'Aviation fuel · JP-5', 'hull', [-10, -6.6, 64, 10, 1, 90], 50, { armor: .3, cook: heavy(.15, 40, 40, 300, .08), contents: fuelOf(400000, 40) }),
+    M('hangar', 'Hangar deck · helicopters · AV-8B', 'hull', [-14.6, 10.7, -84, 14.6, 17.1, 14], 80, { cook: heavy(.1, 40, 40, 200, .08), contents: { he: 800, det: .03, prop: 200, fuel: 20000, vapour: 20 } }),
+    M('vehicles', 'Vehicle decks · fuelled', 'hull', [-10.5, 1, -46.9, 10.5, 10.6, 8], 60, { cook: heavy(.08, 30, 25, 180, .06), contents: { he: 300, det: .02, fuel: 15000, vapour: 15 } }),
     M('well', 'Well deck · 81 × 15.2 m', 'well', [-7.6, 1, -128.6, 7.6, 10.2, -30.8], 70, { disables: ['well'] }),
     M('gate', 'Stern gate', 'gate', [-7.6, 1, -129.05, 7.6, 9.2, -127.5], 25, { disables: ['well'] }),
     M('machinery', 'Machinery rooms · boilers ×2 · turbines', 'hull', [-12.5, -6.6, -40, 12.5, .6, 4], 70, { armor: .3, slow: .5 }),
@@ -282,7 +290,7 @@ export const MODULES = {
   lcac: [
     M('turbines', 'TF40B gas turbines ×4', 'sideS', [-5.5, 3, -8.1, 5.5, 4.9, 0], 6, { slow: .4 }),
     M('fans', 'Lift fans ×4', 'hull', [-6, 2.3, -5.4, 6, 4.2, 1.8], 6, { slow: .5 }),
-    M('tanks', 'Fuel tanks · JP-5', 'hull', [-3.6, 1.5, -9.7, 3.6, 2.2, 4.7], 5, { cook: kill(.25, 10) }),
+    M('tanks', 'Fuel tanks · JP-5', 'hull', [-3.6, 1.5, -9.7, 3.6, 2.2, 4.7], 5, { cook: kill(.25, 10), contents: fuelOf(20000, 8) }),
     M('propS', 'Propeller · 3.58 m · stbd', 'propS', [3.1, 3.2, -11.7, 6.9, 7.1, -8.9], 4, { slow: .6 }),
     M('propP', 'Propeller · 3.58 m · port', 'propP', [-6.9, 3.2, -11.7, -3.1, 7.1, -8.9], 4, { slow: .6 }),
     M('cab', 'Control cab · crew 5', 'cabS', [4.1, 4.8, 6.4, 6, 8, 10], 4, { slow: .6 }),
@@ -299,12 +307,12 @@ export const MODULES = {
   ],
 
   cg: [
-    M('vlsF', 'Mk 41 VLS · fwd · 61 cells', 'vlsF', [-4.2, -1.9, 47.6, 4.2, 7.3, 54.4], 40, { lose: { sm6: .5, pdms: .5, strike: .5 }, cook: kill(.22, 55, ['sm6', 'pdms', 'strike']) }),
-    M('vlsA', 'Mk 41 VLS · aft · 61 cells', 'vlsA', [-4.2, -1.9, -64.4, 4.2, 6.1, -57.6], 40, { lose: { sm6: .5, pdms: .5, strike: .5 }, cook: kill(.22, 55, ['sm6', 'pdms', 'strike']) }),
+    M('vlsF', 'Mk 41 VLS · fwd · 61 cells', 'vlsF', [-4.2, -1.9, 47.6, 4.2, 7.3, 54.4], 40, { lose: { sm6: .5, pdms: .5, strike: .5 }, cook: kill(.22, 55, ['sm6', 'pdms', 'strike']), contents: VLS8 }),
+    M('vlsA', 'Mk 41 VLS · aft · 61 cells', 'vlsA', [-4.2, -1.9, -64.4, 4.2, 6.1, -57.6], 40, { lose: { sm6: .5, pdms: .5, strike: .5 }, cook: kill(.22, 55, ['sm6', 'pdms', 'strike']), contents: VLS8 }),
     M('gunF', 'Mk 45 5"/54 · fwd', 'gunF', [-2, 7.7, 60.1, 2, 10.1, 70], 20, { disables: ['gun5'] }),
-    M('magF', 'Gun magazine · fwd', 'hull', [-3.5, -4, 58, 3.5, 6, 66], 30, { armor: .3, cook: kill(.2, 25, 'gun5') }),
+    M('magF', 'Gun magazine · fwd', 'hull', [-3.5, -4, 58, 3.5, 6, 66], 30, { armor: .3, cook: kill(.2, 25, 'gun5'), contents: MAG5 }),
     M('gunA', 'Mk 45 5"/54 · aft', 'gunA', [-2, 5.7, -80.5, 2, 8.1, -70.6], 20),
-    M('magA', 'Gun magazine · aft', 'hull', [-3.5, -4, -78, 3.5, 5, -70], 30, { armor: .3, cook: kill(.2, 25, 'gun5') }),
+    M('magA', 'Gun magazine · aft', 'hull', [-3.5, -4, -78, 3.5, 5, -70], 30, { armor: .3, cook: kill(.2, 25, 'gun5'), contents: MAG5 }),
     M('spyF', 'AN/SPY-1B · fwd faces', 'spy', [-6.5, 11.2, 30, 6.3, 15.4, 40.7], 30, { group: 'spy', disables: ['radar', 'sm6', 'pdms'] }),
     M('spyA', 'AN/SPY-1B · aft faces', 'spy', [-6.5, 11.2, -29.6, 6.3, 15.4, -20], 30, { group: 'spy', disables: ['radar', 'sm6', 'pdms'] }),
     M('bridge', 'Bridge · CIC below', 'houseF', [-7.9, 12, 36, 7.9, 18.3, 42], 30, { slow: .8 }),
@@ -313,7 +321,7 @@ export const MODULES = {
     M('engA', 'Engine room 2 · LM2500 ×2', 'hull', [-3.2, -4.5, -36.2, 3.2, -.4, -15], 40, { slow: .6 }),
     M('shafts', 'Shafts ×2 · propellers', 'hull', [-6.6, -7.5, -73.6, 6.7, -1.4, -30], 30, { slow: .5 }),
     M('hangar', 'Hangars · aft deckhouse', 'hangar', [-6, 5.9, -36.1, 6, 11.1, -28], 25, { disables: ['air'] }),
-    M('jp5', 'Aviation fuel · JP-5', 'hull', [-3, -4, -46, 3, 3, -38], 20, { cook: heavy(.25, 25, 35, 150, .1) }),
+    M('jp5', 'Aviation fuel · JP-5', 'hull', [-3, -4, -46, 3, 3, -38], 20, { cook: heavy(.25, 25, 35, 150, .1), contents: fuelOf(60000, 25) }),
     M('harpoon', 'Harpoon launchers ×2', 'harpoon', [-5.6, 5.7, -80.9, 5.6, 10.3, -78.1], 10),
     M('svtt', 'Mk 32 SVTT', 'arms', [-7.4, 6.1, -1.2, 7.4, 7.9, 1.9], 8, { disables: ['svtt'] }),
     M('ciwsF', 'Phalanx 1B · stbd', 'ciwsF', [2.9, 15.4, 20.9, 5, 18.8, 24.3], 8, { disables: ['ciwsF'] }),
@@ -322,13 +330,13 @@ export const MODULES = {
 
   lcs: [
     M('gun', 'Mk 110 57 mm', 'gun', [-1.45, 9.5, 38.2, 1.45, 11.42, 45.4], 12, { disables: ['gun57'] }),
-    M('mag57', 'Gun magazine · 57 mm', 'hull', [-2, -2, 36, 2, 9.5, 44], 15, { cook: kill(.2, 12, 'gun57') }),
-    M('searam', 'SeaRAM · 11 rounds', 'searam', [-.82, 15.6, -23.85, .95, 18.8, -21.85], 8, { disables: ['searam'], cook: kill(.15, 8, 'searam') }),
+    M('mag57', 'Gun magazine · 57 mm', 'hull', [-2, -2, 36, 2, 9.5, 44], 15, { cook: kill(.2, 12, 'gun57'), contents: { he: 120, det: .2, prop: 150 } }),
+    M('searam', 'SeaRAM · 11 rounds', 'searam', [-.82, 15.6, -23.85, .95, 18.8, -21.85], 8, { disables: ['searam'], cook: kill(.15, 8, 'searam'), contents: { he: 50, det: .3, prop: 275 } }),
     M('radar', 'Sea Giraffe AMB', 'radar', [-1.2, 30.2, 9.4, 1.2, 31.8, 10.1], 6, { disables: ['radar', 'searam'] }),
     M('bridge', 'Bridge · integrated mast', 'bridge', [-10.5, 9.2, 0, 10.5, 29.8, 24], 25, { disables: ['scan'] }),
     M('hangar', 'Hangar · MH-60', 'hangar', [-9, 9.2, -26, 9, 15.6, 0], 20, { disables: ['air'] }),
     M('bay', 'Mission bay', 'cross', [-12.5, 3.6, -60, 12.5, 8.9, -28], 25),
-    M('jp5', 'Aviation fuel · JP-5', 'hull', [-3, -2.8, -44, 3, 0, -36], 12, { cook: kill(.2, 20) }),
+    M('jp5', 'Aviation fuel · JP-5', 'hull', [-3, -2.8, -44, 3, 0, -36], 12, { cook: kill(.2, 20), contents: fuelOf(20000, 12) }),
     M('mach', 'Engine rooms · diesels · gas turbines', 'hull', [-3.4, -2.8, -36, 3.4, -.2, -8], 25, { slow: .5 }),
     M('jets', 'Waterjets ×4', 'jets', [-3.6, -.5, -64.65, 3.6, 1.2, -60], 12, { slow: .5 }),
   ],
@@ -345,6 +353,8 @@ export function checkModules(UNITS) {
       if (!UNITS[k].parts[m.part]) bad.push(`${k}.${m.id}: unknown part ${m.part}`);
       if (!(m.hp > 0) || m.box.length !== 6 || m.box[0] > m.box[3] || m.box[1] > m.box[4] || m.box[2] > m.box[5]) bad.push(`${k}.${m.id}: bad hp or box`);
       if (m.cook && !(m.cook.p >= 0 && m.cook.p <= 1 && m.cook.size > 0)) bad.push(`${k}.${m.id}: bad cook`);
+      const c = m.contents;
+      if (c && (['he', 'prop', 'fuel', 'vapour'].some(q => c[q] !== undefined && !(c[q] >= 0)) || (c.det !== undefined && !(c.det >= 0 && c.det <= 1)))) bad.push(`${k}.${m.id}: bad contents`);
     }
   }
   return bad;

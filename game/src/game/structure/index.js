@@ -23,6 +23,9 @@
    shows any time compression). The sim removes the unit when its own death animation ends; the pieces carry on here
    until they are under, then go.
    Hooks: game.structure = { draws(id), pose(id), of(id), drop(id), hit(id, o) (tests: a charge at a model point),
+   refine(id, t, o) (game/src/blast: the solved hole replaces the estimate: its torn area and middle, the frames torn and
+   the plastic work weaken the girder; a dent that did not tear floods nothing), poseAt(id, z) (the drawn pose of the piece
+   holding model station z),
    stats }; game.unitPose answers for a ship taken over (its main piece), so fires, labels and the camera follow her.
    Events: 'hit' (kept), 'destroyed' (take over), 'cookoff' (sim/damage.js: a magazine or VLS going up: a charge deep
    inside, sized from the event's blast size; 'kill' is followed by 'destroyed'),
@@ -87,7 +90,7 @@ export async function createStructure(game) {
     // the girder's girth amidships (the plating near the ends is thinner as the moments there are smaller: a hole
     // takes the same share of it anywhere)
     const H = S.H, zm = (H.z0 + H.z1) / 2, per = 2 * (2 * Math.max(1, H.beam(zm)) + H.deck(zm) + H.keel(zm));
-    let k = Math.min(1.2, 2.2 * 2 * h.r / per) * S.armor;
+    let k = Math.min(1.2, 2.2 * 2 * h.r / per) * S.armor * (h.kf || 1);
     k *= h.under ? 2.6 : h.inside ? 2.2 : h.y < -1.5 ? 1.8 : h.y > H.deck(zj) - 1.5 ? 1.25 : 1;
     const reach = h.r * 1.5 + S.L.sec[0].len * .35, dz = (h.z - zj) / reach;
     return k * Math.exp(-dz * dz);
@@ -100,12 +103,13 @@ export async function createStructure(game) {
   }
   /* a hole's inflow: the part of it under the water, through a ragged hole, into its compartment */
   function addHole(S, h) {
+    if (h.dent) return;                                               // (solved: the plating held)
     const L = S.L, i = secAt(S, h.z), side = h.x < 0 ? 0 : 1;
     // the compartment's volume (the buoyancy it holds at the design draught, and what is above it to the deck); the
     // water gets in through the part of the ragged hole under the surface (flood(): a circle cut by the waterline, a
     // head of water over it), the decks and bulkheads inside slowing it (at most a twentieth of it a second)
     const low = h.under || h.inside;
-    const put = (j, sd, k) => S.holes.push({ i: j, c: j * 2 + sd, x: sd === side ? h.x : -h.x, y: h.y, z: h.z, r: h.r * .8, Vc: Math.max(50, L.sec[j].V0 * .5 * 1.7), k, under: low, sub: 0, rate: 0 });
+    const put = (j, sd, k) => S.holes.push({ i: j, c: j * 2 + sd, x: sd === side ? h.x : -h.x, y: h.y, z: h.z, r: h.r * .8, Vc: Math.max(50, L.sec[j].V0 * .5 * 1.7), k, under: low, sub: 0, rate: 0, h });
     put(i, side, low ? 1.2 : 1);
     // a charge under her or deep inside, or a hole as wide as the hull there (the bow): both sides open
     const both = low || h.r * .8 > .7 * Math.max(.5, S.H.beam(h.z));
@@ -144,6 +148,7 @@ export async function createStructure(game) {
       wave: Math.max(1.2, H.L / 48), band: Math.max(.8, H.L / 85), amp: Math.max(1, H.L / 45), yc: (H.top * .6 - H.T) / 2,
     };
     for (const h of hits) { damageGirder(S, h); addHole(S, h); }
+    S.hitsSeen = hits.slice();
     setCaps(S);
     S.bubble = hits.some(h => h.under && sim.t - h.t < 2) ? hits.filter(h => h.under).reduce((a, h) => Math.max(a, h.W), 0) : 0;
     // the water already in her (the sim's flooding) where the holes are
@@ -184,7 +189,7 @@ export async function createStructure(game) {
     }
     if (!best) return;
     const h = { x: e.under ? (hm[0] >= 0 ? 1 : -1) * S.def.size[1] * .3 : hm[0], y: e.under ? -S.H.T * 1.1 : hm[1], z: hm[2], r: holeR(S.def, W, !!e.under), W, under: !!e.under, t: sim.t };
-    damageGirder(S, h); addHole(S, h);
+    damageGirder(S, h); addHole(S, h); (S.hitsSeen || (S.hitsSeen = [])).push(h);
     // the blast's shove
     kick(best, h, W);
     for (let j = best.i0 + 1; j <= best.i1; j++) if (S.str[j] < .02 && !S.pend) S.pend = { j, t: game.t + .3 };
@@ -220,7 +225,7 @@ export async function createStructure(game) {
     // (in the frame of the piece it is in, once she is broken: the model frame is the same for all of them)
     const h = { x, y: Math.min(y, -(u.def.draught || 5) * .35), z, r: holeR(u.def, W, false) * 1.15, W, under: false, inside: true, t: sim.t };
     if (S) {
-      damageGirder(S, h); addHole(S, h);
+      damageGirder(S, h); addHole(S, h); (S.hitsSeen || (S.hitsSeen = [])).push(h);
       const P = S.pieces.find(q => z >= S.L.zc[q.i0] && z <= S.L.zc[q.i1 + 1]);
       if (P) kick(P, h, W);
       for (let j = 1; j < S.n; j++) if (S.str[j] < .02 && !S.pend) { S.pend = { j, t: game.t + .12 }; break; }
@@ -612,6 +617,38 @@ export async function createStructure(game) {
     of(id) { return ships.get(id) || null; },
     drop(id) { const S = ships.get(id); if (!S) return; for (const B of S.breaks) if (B.F) { B.F.stop(sim.t); const f = fxSys(); const i = f && f.fx ? f.fx.indexOf(B.F) : -1; if (i >= 0) f.fx.splice(i, 1); } ships.delete(id); hist.delete(id); },
     /* tests / console: a charge of kg at a model point of a unit ({ x, y, z, kg, under }) */
+    /* the blast solver's result for the hit at sim time t (game/src/blast/system.js): { x, y, z (the hole's middle, model),
+       A (torn skin, m^2), below (of it under the water), frames (frame lines torn), work (plastic work, J), W } */
+    refine(id, t, o) {
+      const S = ships.get(id), L = S ? null : hist.get(id);
+      const match = h => Math.abs(h.t - t) < 1e-6 && Math.abs(h.z - o.z) < 12;
+      const h = L ? L.find(match) : S ? (S.hitsSeen || []).find(match) : null;
+      if (!h) return false;
+      const was = { r: h.r, kf: h.kf || 1, dent: h.dent };
+      h.r = Math.max(.15, Math.sqrt(Math.max(0, o.A) / Math.PI));
+      h.kf = 1 + .12 * Math.min(8, o.frames || 0) + Math.min(.5, (o.work || 0) / 2e7);
+      h.dent = !(o.A > .02);
+      if (o.y !== undefined) h.y = Math.min(h.y, o.y);
+      h.solved = true;
+      if (S) {
+        // taken over already: the girder gets the difference, the holes the solved size
+        const old = Object.assign({}, h, was);
+        for (let j = 1; j < S.n; j++) S.str[j] = Math.max(0, Math.min(1, S.str[j] + lossAt(S, old, S.L.zc[j]) - lossAt(S, h, S.L.zc[j])));
+        setCaps(S);
+        if (h.dent) S.holes = S.holes.filter(q => q.h !== h);
+        else { for (const q of S.holes) if (q.h === h) q.r = h.r * .8; if (was.dent) addHole(S, h); }
+        for (let j = 1; j < S.n; j++) if (S.str[j] < .02 && !S.pend) { S.pend = { j, t: game.t + .2 }; break; }
+      }
+      return true;
+    },
+    /* the drawn pose of the piece of a broken ship that holds model station z: { R (3x3 row-major), T } (null: not taken over) */
+    poseAt(id, z) {
+      const S = ships.get(id); if (!S || S.done || !S.pieces.length) return null;
+      const P = pieceOf(S, secAt(S, z)); if (!P || P.sunk) return null;
+      const a = S.h > 0 ? sat((game.t - S.t) / S.h) : 1, Tq = [0, 0, 0], Rq = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+      poseOf(P, a, Tq, Rq);
+      return { R: Rq, T: Tq };
+    },
     hit(id, o) {
       const u = sim.units.get(id); if (!u) return;
       const h = { x: o.x || 0, y: o.y === undefined ? 0 : o.y, z: o.z || 0, r: holeR(u.def, o.kg || 250, !!o.under), W: o.kg || 250, under: !!o.under, t: sim.t };
