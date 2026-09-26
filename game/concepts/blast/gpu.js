@@ -187,6 +187,16 @@ void main(){
     vec3 d = xc - S0.xyz; float R = max(length(d), 1e-6);
     float ca = abs(dot(d, nn)) / R, c2 = ca * ca, co = 1.0;
     int kind = int(S1.w);
+    if (kind == 3) {                     // water shock (Cole), wet plating only, cut off by the free surface's relief
+      if (tr[2].w < 0.0) continue;
+      float Rw = max(R, S3.x), W3 = pow(S0.w, 1.0 / 3.0), Xw = W3 / Rw;
+      float Pw = (1.0 + ca) * 52.4e6 * pow(Xw, 1.13), th = 0.084e-3 * W3 * pow(Xw, -0.23), TAw = S1.y + Rw / 1500.0;
+      float tc = min((sqrt(Rw * Rw + 4.0 * S2.x * tr[2].w) - Rw) / 1500.0, 10.0 * th);
+      float a = clamp(uT - TAw, 0.0, tc), b = clamp(uT + uH - TAw, 0.0, tc);
+      float Iw = Pw * th * (exp(-a / th) - exp(-b / th)) * S2.w;
+      if (Iw > 0.0) L += (Iw / uH * A * sg) * nn;
+      continue;
+    }
     if (kind == 1) { co = dot(d, S2.xyz) / R; if (co < 0.0) continue; co = max(co, 0.02); }
     R = max(R, S3.x);
     float Weq = kind == 1 ? 4.0 * S0.w * co : S0.w;

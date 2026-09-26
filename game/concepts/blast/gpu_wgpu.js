@@ -208,6 +208,16 @@ fn retMap(sp: ptr<function, vec3f>, eb: f32, mA: vec4f, rf: f32) -> vec2f {
       let d = xc - S0.xyz; var R = max(length(d), 1e-6);
       let ca = abs(dot(d, nn)) / R; let c2 = ca * ca; var co = 1.0;
       let kind = i32(S1.w);
+      if (kind == 3) {
+        if (tr[2].w < 0.0) { continue; }
+        let Rw = max(R, S3.x); let W3 = pow(S0.w, 1.0 / 3.0); let Xw = W3 / Rw;
+        let Pw = (1.0 + ca) * 52.4e6 * pow(Xw, 1.13); let th = 0.084e-3 * W3 * pow(Xw, -0.23); let TAw = S1.y + Rw / 1500.0;
+        let tc = min((sqrt(Rw * Rw + 4.0 * S2.x * tr[2].w) - Rw) / 1500.0, 10.0 * th);
+        let a = clamp(uT - TAw, 0.0, tc); let b = clamp(uT + uH - TAw, 0.0, tc);
+        let Iw = Pw * th * (exp(-a / th) - exp(-b / th)) * S2.w;
+        if (Iw > 0.0) { L += (Iw / uH * A * sg) * nn; }
+        continue;
+      }
       if (kind == 1) { co = dot(d, S2.xyz) / R; if (co < 0.0) { continue; } co = max(co, 0.02); }
       R = max(R, S3.x);
       let Weq = select(S0.w, 4.0 * S0.w * co, kind == 1);

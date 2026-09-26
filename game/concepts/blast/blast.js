@@ -463,7 +463,7 @@ function build() {
     for (const ln of pc.lines) {
       const nn = ln.along === 'u' ? pc.nu : pc.nv, sec = tee(ln.sec, ln.spacing, pc.h), heavy = sec.d > .25 ? 2 : 1;
       let run = [], trs = [];
-      const flush = () => { if (trs.length) lineRec.push({ nodes: run, trusses: trs, sec, mat: m, h: pc.h, spacing: ln.spacing, n: pc.n }); run = []; trs = []; };
+      const flush = () => { if (trs.length) lineRec.push({ nodes: run, trusses: trs, sec, mat: m, h: pc.h, spacing: ln.spacing, n: pc.n, pi }); run = []; trs = []; };
       for (let k = 0; k < nn; k++) {
         const [i1, j1, i2, j2] = ln.along === 'u' ? [k, ln.g, k + 1, ln.g] : [ln.g, k, ln.g, k + 1];
         const a = nid(ids[j1 * (pc.nu + 1) + i1]), b = nid(ids[j2 * (pc.nu + 1) + i2]);
@@ -479,6 +479,46 @@ function build() {
       flush();
     }
   });
+  // web ends: where a member runs into a perpendicular plate (a frame at a deck, a deck beam or a longitudinal at a
+  // bulkhead), its web is welded to that plate along the web's depth d, in the member's plane. The member's end
+  // reaction therefore enters the plate as a line load over d, not at the one seam node: a chain of in-plane ties
+  // (the web end, area A_w) from the seam node d into the plate carries it (the deck beam there, if any, runs in
+  // parallel). Without it a far hit crushed the deck at every frame's seam node (AUDIT A1b).
+  if (!st.noWebEnds) {
+    const ncell = Array.from({ length: N0 }, () => []); for (let c = 0; c < cpan.length; c++) for (let z = 0; z < 4; z++) ncell[cn[4 * c + z]].push(c);
+    const cnorm = c => { const q = [0, 1, 2, 3].map(z => cn[4 * c + z]), P = k => [pos[3 * q[k]], pos[3 * q[k] + 1], pos[3 * q[k] + 2]];
+      return nrm(cross(sub(P(2), P(0)), sub(P(3), P(1)))); };
+    const ccen = c => { const o = [0, 0, 0]; for (let z = 0; z < 4; z++) for (let q = 0; q < 3; q++) o[q] += pos[3 * cn[4 * c + z] + q] / 4; return o; };
+    const P3 = i => [pos[3 * i], pos[3 * i + 1], pos[3 * i + 2]], wkey = new Set();
+    for (const lr of lineRec) {
+      const nd = lr.nodes, sec = lr.sec, m = lr.mat; if (nd.length < 2) continue;
+      for (let j = 0; j < nd.length; j++) {
+        const J = nd[j], own = ncell[J].filter(c => cpan[c] === lr.pi);
+        if (!own.length) continue;
+        const n1 = cnorm(own[0]), t = nrm(sub(P3(nd[Math.min(j + 1, nd.length - 1)]), P3(nd[Math.max(j - 1, 0)])));
+        // cells of another plate at this node: perpendicular to the member's plating, and the member runs into it
+        const other = ncell[J].filter(c => !own.includes(c) && Math.abs(dot(cnorm(c), n1)) < .3 && Math.abs(dot(cnorm(c), t)) > .7);
+        if (!other.length) continue;
+        // in the other plate, in the member's plane (across the seam), toward the other plate's cells
+        const pc2 = cpan[other[0]], n2 = cnorm(other[0]); let dv = nrm(cross(n2, nrm(cross(n1, n2))));
+        if (dot(sub(ccen(other[0]), P3(J)), dv) < 0) dv = [-dv[0], -dv[1], -dv[2]];
+        // walk the other plate's grid from the seam node, a node at a time, along dv, out to the web's depth
+        let cur = J, dist = 0;
+        for (let it = 0; it < 12 && dist < sec.d - 1e-3; it++) {
+          let best = -1, bs = -1;
+          for (const c of ncell[cur]) { if (cpan[c] !== pc2) continue;
+            for (let z = 0; z < 4; z++) { const q = cn[4 * c + z]; if (q === cur) continue; const e = sub(P3(q), P3(cur)), el = len(e), al = dot(e, dv) / (el || 1);
+              if (al > .95 && el > 1e-3 && al * el > bs) { bs = al * el; best = q; } } }
+          if (best < 0) break;
+          const key = EK(cur, best);
+          if (!wkey.has(key)) { wkey.add(key); const L = len(sub(P3(best), P3(cur))), A = sec.Aw;
+            ta.push(cur); tb.push(best); tar.push(A); tmat.push(pieces[lr.pi].mat); tsec.push([sec, L]); tkind.push(1);
+            mass[cur] += m.rho * A * L / 2; mass[best] += m.rho * A * L / 2; }
+          dist += bs; cur = best;
+        }
+      }
+    }
+  }
   // members crossing an open edge continue there
   const onOpen = new Uint8Array(N0); for (const [q] of anchors) onOpen[q] = 1;
   for (const lr of lineRec) for (const [end, t] of [[lr.nodes[0], lr.trusses[0]], [lr.nodes[lr.nodes.length - 1], lr.trusses[lr.trusses.length - 1]]]) {
@@ -715,11 +755,25 @@ const fireR = W => .5 * 3.86 * Math.pow(Math.max(W, .01), .32);
 
 // the pulse a source gives a surface element at xc with unit normal n (area-independent): air shock (P, TD, TA) and
 // the extra products impulse (Ix, front tau0 after t0). Returns null if the source doesn't reach it.
-const PUL = { P: 0, I: 0, TD: 0, TA: 0, Ix: 0, tf: 0, t0: 0, g: 1 };
-function pulse(s, xc, n) {
+const PUL = { P: 0, I: 0, TD: 0, TA: 0, Ix: 0, tf: 0, t0: 0, g: 1, tc: 0 };
+// water shock of a burst at the waterline (kind 3, wet plating only, depth dc): Cole's similitude, Pm = 52.4 MPa
+// (W^1/3/R)^1.13, decay theta = 0.084 ms W^1/3 (W^1/3/R)^-0.23, cut off when the free surface's relief (the negative
+// image of the source, depth ds) arrives; on the plating (1 + cos) x the incident wave (rigid-wall doubling head on),
+// the water's radiation term (cell pass) takes back what the moving plate doesn't feel
+const C_WS = 1500;
+function waterPulse(s, R, ca, dc) {
+  R = Math.max(R, s.rc); const W3 = Math.cbrt(s.W), X = W3 / R;
+  PUL.P = (1 + ca) * 52.4e6 * Math.pow(X, 1.13); PUL.TD = .084e-3 * W3 * Math.pow(X, -.23);
+  PUL.TA = s.t0 + R / C_WS; PUL.tc = Math.min((Math.sqrt(R * R + 4 * s.ax[0] * Math.max(dc, 0)) - R) / C_WS, 10 * PUL.TD);
+  PUL.I = PUL.P * PUL.TD * (1 - Math.exp(-PUL.tc / PUL.TD)); PUL.Ix = 0; PUL.g = s.gain; PUL.t0 = s.t0;
+  return PUL;
+}
+function pulse(s, xc, n, dc = -1) {
   let dx = xc[0] - s.pos[0], dy = xc[1] - s.pos[1], dz = xc[2] - s.pos[2];
   let R = Math.hypot(dx, dy, dz); if (R < 1e-6) R = 1e-6;
   const ca = Math.abs(dx * n[0] + dy * n[1] + dz * n[2]) / R, c2 = ca * ca;
+  PUL.tc = 0;
+  if (s.kind === 3) return dc >= 0 ? waterPulse(s, R, ca, dc) : null;
   let co = 1;
   if (s.kind === 1) { co = (dx * s.ax[0] + dy * s.ax[1] + dz * s.ax[2]) / R; if (co < 0) return null; co = Math.max(co, .02); }
   R = Math.max(R, s.rc);
@@ -748,6 +802,7 @@ function pulse(s, xc, n) {
 // impulse per unit area between t and t + h
 function pulseImp(p, t, h) {
   let I = 0;
+  if (p.tc > 0) { const a = Math.min(Math.max(t - p.TA, 0), p.tc), b = Math.min(Math.max(t + h - p.TA, 0), p.tc); return p.P * p.TD * (Math.exp(-a / p.TD) - Math.exp(-b / p.TD)) * p.g; }
   if (p.P > 0) { let a = t - p.TA, b = a + h; const TD = p.TD;
     if (b > 0 && a < TD) { if (a < 0) a = 0; if (b > TD) b = TD; I += p.P * ((b - b * b / (2 * TD)) - (a - a * a / (2 * TD))); } }
   if (p.Ix > 0) { const F = x => x <= p.tf ? 0 : 1 - Math.pow(p.tf / x, 4); I += p.Ix * (F(t + h - p.t0) - F(t - p.t0)); }
@@ -819,6 +874,23 @@ function detonate() {
       }
     }
   }
+  // a burst at the waterline also drives a shock into the water: the charge's share below (or within 2 charge radii
+  // above) the surface, as an equivalent charge just under it; it loads the wet plating it sees through the water
+  sim.water = null;
+  if (cc === scene.OUT && W > 0 && scene.waterline !== undefined && !st.noWater) {
+    const hgt = C[1] - scene.waterline, f = Math.min(1, Math.max(0, .5 - .5 * hgt / (2 * rc)));
+    if (f > .01) {
+      const Ww = W * f, rw = Math.cbrt(3 * Ww / (4 * Math.PI * RHO_TNT)), ds = Math.max(0, -hgt) + rw, Cw = [C[0], scene.waterline - ds, C[2]];
+      for (let c = 0; c < NC; c++) {
+        if (CWET[c] < 0 || (CSP[c] !== scene.OUT && CSN[c] !== scene.OUT)) continue;
+        const xc = [CRC[3 * c], CRC[3 * c + 1], CRC[3 * c + 2]], nn = [CNR[3 * c], CNR[3 * c + 1], CNR[3 * c + 2]];
+        const outN = CSP[c] === scene.OUT ? nn : mul(nn, -1);
+        if (dot(sub(Cw, xc), outN) <= 0) continue;
+        const d = sub(xc, Cw), L = len(d); if (!firstHit(Cw, mul(d, 1 / L), L - 1e-3, false, c)) CVIS[c] |= 4;
+      }
+      sim.water = { pos: Cw, W: Ww, Wsrc: Ww, Pm: 0, t0: 0, space: scene.OUT, kind: 3, ax: [ds, 0, 0], gain: 1, rc: rw, vis: 2, plane: null, gen: 0, key: 'W', frac: f };
+    }
+  }
   sim.frags = Mc > 0 && st.frags && fill > 0 ? makeFrags(C, fill, Mc) : null;
   EN = { ext: 0, kin: 0, el: 0, plM: 0, plH: 0, plT: 0, plA: 0, damp: 0, rad: 0, frac: 0, contact: 0, frag: 0, water: 0 };
   rebuildSources(0);
@@ -858,6 +930,7 @@ function makeFrags(C, fill, Mc) {
 function rebuildSources(t) {
   const s = sim, list = [];
   if (s.W > 0) list.push(s.prim);
+  if (s.water) list.push(s.water);
   // holes: eroded cells between a space that has a source and another space
   const holes = new Map();
   let gen = [s.prim].filter(q => q.W > 0);
@@ -1169,7 +1242,7 @@ function cellPass(t, h) {
         if (CSN[c] === s.space) sg = 1; else if (CSP[c] === s.space) sg = -1; else continue;
         if (s.vis >= 0 && !(CVIS[c] & (1 << s.vis))) continue;
         if (s.plane && Math.abs(CRC[3 * c] * s.plane[0] + CRC[3 * c + 1] * s.plane[1] + CRC[3 * c + 2] * s.plane[2] - s.plane[3]) < .3 * S + .02) continue;
-        const p = pulse(s, xc, nn); if (!p) continue;
+        const p = pulse(s, xc, nn, CWET[c]); if (!p) continue;
         const I = pulseImp(p, t, h); if (I <= 0) continue;
         const f = I / h * A * sg; Lx += f * nx; Ly += f * ny; Lz += f * nz;
       }
@@ -1371,10 +1444,23 @@ function markFree() {
   for (let k = 0; k < NT; k++) if (!TFL[k]) { cnt[TA[k]]++; cnt[TB[k]]++; }
   for (let i = 0; i < N; i++) if (!cnt[i] && !FREE[i] && AK[i] === 0) FREE[i] = 1;
 }
+// nodes still joined (through intact cells and members) to the fixed structure; flying debris is not. The end-of-run
+// test and the "quiet" clock look at these only (debris that keeps eroding or tumbling does not hold the run open)
+let ATT = null;
+function attachedNodes() {
+  const par = new Int32Array(N); for (let i = 0; i < N; i++) par[i] = i;
+  const fd = i => { while (par[i] !== i) { par[i] = par[par[i]]; i = par[i]; } return i; }, un = (a, b) => { a = fd(a); b = fd(b); if (a !== b) par[a] = b; };
+  for (let c = 0; c < NC; c++) if (!CER[c]) { const a = CN[4 * c]; for (let k = 1; k < 4; k++) un(a, CN[4 * c + k]); }
+  for (let k = 0; k < NT; k++) if (!TFL[k]) un(TA[k], TB[k]);
+  const root = new Uint8Array(N); for (let i = 0; i < N; i++) if (AK[i] > 0 || WINV[i] === 0) root[fd(i)] = 1;
+  const a = new Uint8Array(N); for (let i = 0; i < N; i++) a[i] = root[fd(i)];
+  return a;
+}
+const attachedCell = c => !ATT || ATT[CN[4 * c]] || ATT[CN[4 * c + 1]] || ATT[CN[4 * c + 2]] || ATT[CN[4 * c + 3]];
 function syncCPU() {
   const s = sim, t = s.t;
   let torn = false;
-  for (let c = 0; c < NC; c++) if (CER[c] === 1) { openCell(c, CTE[c]); torn = true; }
+  for (let c = 0; c < NC; c++) if (CER[c] === 1) { openCell(c, CTE[c]); if (attachedCell(c)) torn = true; }
   commonSync(t, torn);
 }
 // shared by both solvers: gas sources, venting, hole sources, fragments, end of run
@@ -1410,7 +1496,7 @@ function gpuSync() {
     const cl = s.sync || s.headless ? gpu.readCells() : gpu.readCellsAsync();
     PROF.read += performance.now() - tq;
     let torn = false;
-    if (cl) for (let c = 0; c < NC; c++) if (cl[4 * c] > .5 && !CER[c]) { CER[c] = 1; CTE[c] = cl[4 * c + 1]; openCell(c, CTE[c]); torn = true; }
+    if (cl) for (let c = 0; c < NC; c++) if (cl[4 * c] > .5 && !CER[c]) { CER[c] = 1; CTE[c] = cl[4 * c + 1]; openCell(c, CTE[c]); if (attachedCell(c)) torn = true; }
     const t2 = performance.now(); commonSync(s.t, torn); PROF.sync += performance.now() - t2;
   }
 }
@@ -1424,7 +1510,8 @@ function step() {
 function checkEnd() {
   const s = sim;
   if (s.solver === 'gpu') { if (s.headless) gpu.readNodes(true, X, V, FREE); else if (!gpu.readNodesAsync(X, V, FREE)) return; }
-  let v2 = 0, ke = 0; for (let i = 0; i < N; i++) { if (FREE[i]) continue; const q = V[3 * i] ** 2 + V[3 * i + 1] ** 2 + V[3 * i + 2] ** 2; ke += .5 * M[i] * q; if (q > v2) v2 = q; }
+  if (!ATT || s.n % 1000 === 0) ATT = attachedNodes();
+  let v2 = 0, ke = 0; for (let i = 0; i < N; i++) { if (FREE[i] || !ATT[i]) continue; const q = V[3 * i] ** 2 + V[3 * i + 1] ** 2 + V[3 * i + 2] ** 2; ke += .5 * M[i] * q; if (q > v2) v2 = q; }
   let gas = 0; for (let k = 0; k < GV.length; k++) if (GV[k] < Infinity) gas = Math.max(gas, Math.abs(GP[k]));
   const quiet = s.srcs.every(q => q.F > .98) && s.t - s.lastSrc > .005, vm = Math.sqrt(v2);
   s.kepeak = Math.max(s.kepeak || 0, ke);
@@ -1472,7 +1559,7 @@ function ballistic(h) {
     if (X[3 * i + 1] < scene.waterline - .2 && scene.spaceAt([X[3 * i], X[3 * i + 1] + .3, X[3 * i + 2]]) === scene.OUT) { V[3 * i] = V[3 * i + 1] = V[3 * i + 2] = 0; X[3 * i + 1] = -60; }
   }
 }
-function startRun() { F = new Float64Array(3 * N); FL = new Float64Array(3 * N); XO = new Float64Array(3 * N); VO = new Float64Array(3 * N); CPB.length = 0; IMPN.length = 0; }
+function startRun() { ATT = null; F = new Float64Array(3 * N); FL = new Float64Array(3 * N); XO = new Float64Array(3 * N); VO = new Float64Array(3 * N); CPB.length = 0; IMPN.length = 0; }
 
 /* ------------------------------------------------------------------ the whole ship (Burke): picking and context */
 let SHIP = null;
