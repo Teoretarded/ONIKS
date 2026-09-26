@@ -13,7 +13,7 @@ import { createGPU } from './gpu.js';
 import { createWGPU } from './gpu_wgpu.js';
 
 const SYNC = 25;
-const SNAP_DT = .0004, SNAP_MS = 60, MAXIN = 9000, RUNNING = 2;
+const SNAP_DT = .0004, SNAP_MS = 60, MAXIN = 24000, RUNNING = 2;
 
 export function createShellRunner(gl, o = {}) {
   const pats = new Map(), queue = [];
@@ -131,10 +131,59 @@ export function createShellRunner(gl, o = {}) {
     R.state = 'done'; stats.done++;
     const m = snapshot(R, true);
     m.results = results(R);
+    m.debris = debrisOf(R); if (m.debris) m.transfer.push(m.debris.buffer);
     return m;
+  }
+  /* the pieces that came loose (no longer joined to the ship through intact cells and members): dots on their cells,
+     in the model frame, with the solver's velocity, for the game to fly on (land on the deck, sink): x y z vx vy vz,
+     brightness, a piece id */
+  function debrisOf(R) {
+    const M = R.M, F = R.spec.frame, deb = R.debris, X = M.X, V = M.V, MAXD = 6000;
+    const gone = i => M.FREE[i] || deb[i];
+    const cells = [];
+    for (let c = 0; c < M.NC; c++) { const q = M.CN, k = 4 * c; if (gone(q[k]) && gone(q[k + 1]) && gone(q[k + 2]) && gone(q[k + 3])) cells.push(c); }
+    if (!cells.length) return null;
+    const per = Math.max(1, Math.min(4, Math.floor(MAXD / cells.length))), stride = Math.max(1, Math.ceil(cells.length * per / MAXD));
+    const PAT = [[.25, .25], [.75, .75], [.75, .25], [.25, .75]], out = new Float32Array(Math.ceil(cells.length / stride) * per * 8);
+    const w = v => [F.X[0] * v[0] + F.Y[0] * v[1] + F.Z[0] * v[2], F.X[1] * v[0] + F.Y[1] * v[1] + F.Z[1] * v[2], F.X[2] * v[0] + F.Y[2] * v[1] + F.Z[2] * v[2]];
+    let n = 0;
+    for (let q = 0; q < cells.length; q += stride) {
+      const c = cells[q], a = M.CN[4 * c], b = M.CN[4 * c + 1], cc = M.CN[4 * c + 2], dd = M.CN[4 * c + 3];
+      const vel = w([(V[3 * a] + V[3 * b] + V[3 * cc] + V[3 * dd]) / 4, (V[3 * a + 1] + V[3 * b + 1] + V[3 * cc + 1] + V[3 * dd + 1]) / 4, (V[3 * a + 2] + V[3 * b + 2] + V[3 * cc + 2] + V[3 * dd + 2]) / 4]);
+      // (a node left alone by eroded cells can carry an unphysical speed: plating fragments leave at 150 m/s at most)
+      { const sp = Math.hypot(vel[0], vel[1], vel[2]); if (sp > 150) { vel[0] *= 150 / sp; vel[1] *= 150 / sp; vel[2] *= 150 / sp; } }
+      const skin = M.PAN[M.CPAN[c]].skin ? 1 : 0, so = (M.SOOT[a] + M.SOOT[cc]) / 2;
+      for (let k = 0; k < per; k++) {
+        const [u, v] = PAT[k], w0 = (1 - u) * (1 - v), w1 = u * (1 - v), w2 = u * v, w3 = (1 - u) * v;
+        const l = [0, 1, 2].map(z => X[3 * a + z] * w0 + X[3 * b + z] * w1 + X[3 * cc + z] * w2 + X[3 * dd + z] * w3);
+        if (!(l[0] === l[0])) continue;
+        const p = w(l), o = 8 * n++;
+        out[o] = F.O[0] + p[0]; out[o + 1] = F.O[1] + p[1]; out[o + 2] = F.O[2] + p[2];
+        out[o + 3] = vel[0]; out[o + 4] = vel[1]; out[o + 5] = vel[2]; out[o + 6] = (skin ? .55 : .42) * (1 - .6 * so); out[o + 7] = c;
+      }
+    }
+    return out.subarray(0, 8 * n).slice();
   }
 
   /* ------------------------------------------------------------ what the game draws (as the lattice runner) */
+  /* a plate's uniform texture grid (S) against its solver grid (ul, vl): for each texel column / row the solver cell
+     and fraction under it (nodes), the cell under the texel's middle (cells), and the ease toward anchored edges */
+  function skinMap(R, L, S) {
+    R.skinMaps = R.skinMaps || new Map();
+    let m = R.skinMaps.get(L); if (m) return m;
+    const ul = L.ul, vl = L.vl, nu = Math.max(1, Math.round((ul[ul.length - 1] - ul[0]) / S)), nv = Math.max(1, Math.round((vl[vl.length - 1] - vl[0]) / S));
+    const find = (Lc, x) => { let k = 0; while (k < Lc.length - 2 && Lc[k + 1] <= x) k++; return k; };
+    const ease = (x, a, b, oa, ob) => { let w = 1; const E = 1.5; if (oa) w *= sm((x - a) / E); if (ob) w *= sm((b - x) / E); return w; };
+    const sm = x => { x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 * x); };
+    const axisMap = (Lc, n, oa, ob) => { const I = new Int32Array(n + 1), Fr = new Float32Array(n + 1), C = new Int32Array(n + 1), E = new Float32Array(n + 1);
+      for (let i = 0; i <= n; i++) { const x = Math.min(Lc[Lc.length - 1], Lc[0] + i * S), k = find(Lc, x); I[i] = k; Fr[i] = Math.max(0, Math.min(1, (x - Lc[k]) / (Lc[k + 1] - Lc[k])));
+        C[i] = find(Lc, Math.min(Lc[Lc.length - 1] - 1e-6, x + S / 2)); E[i] = ease(x, Lc[0], Lc[Lc.length - 1], oa, ob); }
+      return [I, Fr, C, E]; };
+    const op = L.open || [0, 0, 0, 0];
+    const [iu, fx, ciu, eu] = axisMap(ul, nu, op[0], op[1]), [jv, fy, cjv, ev] = axisMap(vl, nv, op[2], op[3]);
+    m = { nu, nv, iu, fx, ciu, eu, jv, fy, cjv, ev }; R.skinMaps.set(L, m);
+    return m;
+  }
   function snapshot(R, final) {
     const ts0 = now();
     try { return snapshot1(R, final); } finally { stats.snapMs = now() - ts0; }
@@ -149,20 +198,29 @@ export function createShellRunner(gl, o = {}) {
     if (final) R.open = open;
     const skins = [], tr = [];
     R.lastSkin = R.lastSkin || [];
+    // a skin as the game's texture wants it: on a uniform S grid over the plate (a graded plate resampled: bilinear
+    // displacement, the torn / gone / broken flags of the cell or node under each texel). While the solve runs, pieces
+    // that came loose fly on in it (drawn where the solver has them); at the end they leave as debris (results.debris)
+    // and their dots go. The displacement eases to nothing over the last 1.5 m before a plate's anchored edges, so the
+    // patch meets the model beyond it without a step.
     M.PAN.forEach((L, p) => {
       if (!L.skin) return;
-      const nu = L.nu, nv = L.nv, d = new Float32Array((nu + 1) * (nv + 1) * 4);
+      const mp = skinMap(R, L, S), nu = mp.nu, nv = mp.nv, d = new Float32Array((nu + 1) * (nv + 1) * 4);
       const inside = s.C[L.ax] < L.val;
-      const so = inside ? outerSoot(M, L, open) : null;
+      const so = inside ? outerSoot(M, L, open) : null, Wn = L.nu + 1;
+      const skGone = i => final ? gone(i) : 0;
       for (let j = 0; j <= nv; j++) for (let i = 0; i <= nu; i++) {
-        const k = j * (nu + 1) + i, n = L.at[k], o = 4 * k;
-        d[o] = X[3 * n] - R0[3 * n]; d[o + 1] = X[3 * n + 1] - R0[3 * n + 1]; d[o + 2] = X[3 * n + 2] - R0[3 * n + 2];
+        const k = j * (nu + 1) + i, o = 4 * k, ic = mp.iu[i], jc = mp.jv[j], fx = mp.fx[i], fy = mp.fy[j];
+        const k00 = jc * Wn + ic, n00 = L.at[k00], n10 = L.at[k00 + 1], n01 = L.at[k00 + Wn], n11 = L.at[k00 + Wn + 1];
+        const w00 = (1 - fx) * (1 - fy), w10 = fx * (1 - fy), w01 = (1 - fx) * fy, w11 = fx * fy, eb = mp.eu[i] * mp.ev[j];
+        for (let q = 0; q < 3; q++) d[o + q] = eb * ((X[3 * n00 + q] - R0[3 * n00 + q]) * w00 + (X[3 * n10 + q] - R0[3 * n10 + q]) * w10 + (X[3 * n01 + q] - R0[3 * n01 + q]) * w01 + (X[3 * n11 + q] - R0[3 * n11 + q]) * w11);
+        const nn = fx < .5 ? (fy < .5 ? n00 : n01) : (fy < .5 ? n10 : n11), kn = fx < .5 ? (fy < .5 ? k00 : k00 + Wn) : (fy < .5 ? k00 + 1 : k00 + Wn + 1);
         let f = 0;
-        if (i < nu && j < nv && open(CM[L.off + j * nu + i])) f |= 1;
-        if (gone(n)) f |= 2;
-        if (M.TBRK[n] >= 0) f |= 4;
-        d[o + 3] = f + Math.min(.99, so ? so[k] : M.SOOT[n]);
-        if (!(d[o] === d[o])) { d[o] = d[o + 1] = d[o + 2] = 0; d[o + 3] = 2; }
+        if (i < nu && j < nv) { const c = CM[L.off + mp.cjv[j] * L.nu + mp.ciu[i]]; if (c >= 0 && (M.CER[c] || (final && open(c)))) f |= 1; }
+        if (skGone(nn)) f |= 2;
+        if (M.TBRK[nn] >= 0) f |= 4;
+        d[o + 3] = f + Math.min(.99, so ? so[kn] : M.SOOT[nn]);
+        if (!(d[o] === d[o] && d[o + 1] === d[o + 1] && d[o + 2] === d[o + 2])) { d[o] = d[o + 1] = d[o + 2] = 0; d[o + 3] = 2; }
       }
       const last = R.lastSkin[p];
       let i0 = nu + 1, i1 = -1, j0 = nv + 1, j1 = -1;
@@ -177,7 +235,7 @@ export function createShellRunner(gl, o = {}) {
       if (i1 < 0) { i0 = 0; j0 = 0; i1 = 0; j1 = 0; }
       const w = i1 - i0 + 1, h = j1 - j0 + 1, sb = new Float32Array(w * h * 4);
       for (let j = 0; j < h; j++) sb.set(d.subarray(4 * ((j0 + j) * (nu + 1) + i0), 4 * ((j0 + j) * (nu + 1) + i0 + w)), 4 * j * w);
-      skins.push({ p, ax: L.ax, val: L.val, u0: L.u0, v0: L.v0, nu, nv, i0, j0, w, h, data: sb });
+      skins.push({ p, ax: L.ax, val: L.val, u0: L.u0, v0: L.v0, nu, nv, i0, j0, w, h, data: sb, S });
       tr.push(sb.buffer);
     });
     // the inner structure near the holes of the struck plate
@@ -197,17 +255,22 @@ export function createShellRunner(gl, o = {}) {
         A[o] = F.O[0] + F.X[0] * lx + F.Y[0] * ly + F.Z[0] * lz; A[o + 1] = F.O[1] + F.X[1] * lx + F.Y[1] * ly + F.Z[1] * lz; A[o + 2] = F.O[2] + F.X[2] * lx + F.Y[2] * ly + F.Z[2] * lz;
         A[o + 3] = b; A[o + 4] = e; A[o + 5] = lz; nIn++;
       };
-      const PAT = [[.27, .31], [.74, .69]], cells = [];
+      const cells = [];
       M.PAN.forEach((L, p) => {
         if (L.skin) return;
         for (let k = L.off; k < L.off + L.nu * L.nv; k++) { const c = CM[k]; if (c < 0) continue; const cx = M.CRC[3 * c + ua], cy = M.CRC[3 * c + va];
           if (cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1) cells.push(c); }
       });
-      const stride = Math.max(1, Math.ceil(cells.length * 2 / (MAXIN * .85)));
+      const per = c => Math.min(12, Math.max(3, Math.round(4 * M.CAR[c] / (S * S))));
+      let want = 0; for (const c of cells) want += per(c);
+      const stride = Math.max(1, Math.ceil(want / (MAXIN * .85)));
       const base = [0, .55, .42, .42, .38, .38];
       for (let q = 0; q < cells.length; q += stride) {
         const c = cells[q], a = M.CN[4 * c], b = M.CN[4 * c + 1], cc = M.CN[4 * c + 2], dd = M.CN[4 * c + 3], torn = open(c);
         if (!torn && (gone(a) || gone(b) || gone(cc) || gone(dd))) continue;
+        // (jittered in the cell, a hash of the cell: the plating reads as plating, not as a grid of points)
+        const np = per(c), PAT = [];
+        for (let k = 0; k < np; k++) { let h = Math.imul(c * 16 + k + 1, 0x9E3779B1); h ^= h >>> 15; h = Math.imul(h, 0x85EBCA77); const h2 = Math.imul(h ^ (h >>> 13), 0xC2B2AE35); PAT.push([.06 + .88 * ((h >>> 8) & 1023) / 1023, .06 + .88 * ((h2 >>> 8) & 1023) / 1023]); }
         for (const [u, v] of PAT) {
           let x, y, z, m = -1;
           const w0 = (1 - u) * (1 - v), w1 = u * (1 - v), w2 = u * v, w3 = (1 - u) * v;
@@ -242,10 +305,10 @@ export function createShellRunner(gl, o = {}) {
       tr.push(inner.buffer);
     }
     let torn0 = 0, below = 0, setMax = 0;
-    const byPlate = new Array(M.PAN.length).fill(0);
+    const byPlate = new Array(sp.plates.length).fill(0);
     for (let c = 0; c < M.NC; c++) {
       if (!open(c)) continue;
-      byPlate[M.CPAN[c]] += M.CAR[c];
+      byPlate[M.PAN[M.CPAN[c]].plate] += M.CAR[c];
       if (!M.PAN[M.CPAN[c]].skin) continue;
       torn0 += M.CAR[c];
       const lx = M.CRC[3 * c], ly = M.CRC[3 * c + 1], lz = M.CRC[3 * c + 2];
@@ -289,14 +352,24 @@ export function createShellRunner(gl, o = {}) {
       const lx = X[3 * n], ly = X[3 * n + 1], lz = X[3 * n + 2];
       rim.push(F.O[0] + F.X[0] * lx + F.Y[0] * ly + F.Z[0] * lz, F.O[1] + F.X[1] * lx + F.Y[1] * ly + F.Z[1] * lz, F.O[2] + F.X[2] * lx + F.Y[2] * ly + F.Z[2] * lz, ly);
     }
-    let cx = 0, cy = 0, n = 0, A = 0;
-    for (let k = L0.off; k < L0.off + L0.nu * L0.nv; k++) { const c = M.CMAP[k]; if (!R.open(c)) continue; cx += M.CRC[3 * c + ua]; cy += M.CRC[3 * c + va]; n++; A += M.CAR[c]; }
+    let cx = 0, cy = 0, n = 0, A = 0, bu0 = 1e9, bu1 = -1e9, bv0 = 1e9, bv1 = -1e9;
+    for (let k = L0.off; k < L0.off + L0.nu * L0.nv; k++) { const c = M.CMAP[k]; if (!R.open(c)) continue; const u = M.CRC[3 * c + ua], v = M.CRC[3 * c + va]; cx += u; cy += v; n++; A += M.CAR[c];
+      if (u < bu0) bu0 = u; if (u > bu1) bu1 = u; if (v < bv0) bv0 = v; if (v > bv1) bv1 = v; }
     const hole = n ? { x: cx / n, y: cy / n, A } : null;
     let floor = null;
-    if (hole) for (const L of M.PAN) if (!L.skin && L.ax === 1 && L.val < hole.y && (!floor || L.val > floor.y)) floor = { y: L.val };
+    if (hole && L0.ax !== 2) for (const L of M.PAN) if (!L.skin && L.ax === 1 && L.val < hole.y && (!floor || L.val > floor.y)) floor = { y: L.val };
+    // (a deck struck: the floor under the hole is the first deck below that still stands there)
+    if (hole && L0.ax === 2) {
+      const decks = M.PAN.filter(L => !L.skin && L.ax === 2 && L.val < 0).sort((p, q) => q.val - p.val);
+      for (const L of decks) { let tot = 0, op = 0; for (let k = L.off; k < L.off + L.nu * L.nv; k++) { const c = M.CMAP[k]; if (c < 0) continue; const u = M.CRC[3 * c], v = M.CRC[3 * c + 1];
+          if (u < bu0 || u > bu1 || v < bv0 || v > bv1) continue; tot += M.CAR[c]; if (R.open(c)) op += M.CAR[c]; }
+        if (tot > 0 && op < .5 * tot) { floor = { z: L.val }; break; } }
+      if (!floor && decks.length) floor = { z: decks[decks.length - 1].val };
+    }
     const loc = (lx, ly, lz) => [F.O[0] + F.X[0] * lx + F.Y[0] * ly + F.Z[0] * lz, F.O[1] + F.X[1] * lx + F.Y[1] * ly + F.Z[1] * lz, F.O[2] + F.X[2] * lx + F.Y[2] * ly + F.Z[2] * lz];
     return { work, framesTorn: lines.size, rim: Float32Array.from(rim.length > 1600 ? rim.filter((_, k) => Math.floor(k / 4) % Math.ceil(rim.length / 1600) === 0) : rim),
-      hole: hole ? { c: loc(hole.x, hole.y, 0), A: hole.A, floor: floor ? loc(hole.x, floor.y + .1, -Math.min(2, R.spec.depth || 2) * .5) : null } : null };
+      hole: hole ? { c: loc(hole.x, hole.y, 0), A: hole.A, bb: [bu0 - .3, bu1 + .3, bv0 - .3, bv1 + .3],
+        floor: floor ? (floor.z !== undefined ? loc(hole.x, hole.y, floor.z + .1) : loc(hole.x, floor.y + .1, -Math.min(2, R.spec.depth || 2) * .5)) : null } : null };
   }
 
   return { submit, target, drop, pump, stats, pats, queue, get busy() { for (const R of pats.values()) if (R.state === 'run' || R.state === 'queued' || R.state === 'finishing' || R.state === 'final') return true; return false; } };

@@ -69,36 +69,52 @@ export function tee(s, be, tp) {
 
 /* ------------------------------------------------------------ the scene from a patch spec */
 const AXES = [[2, 1], [0, 2], [0, 1]];          // ax -> [ua, va] (as blast/patch.js)
-/* the bench's rectPiece, with the stiffener lines at the ship's frame phase (spacing `every` from `phase`) */
-function rectPiece(P, S) {
-  const Lu = len(sub(P.p10, P.p00)), Lv = len(sub(P.p01, P.p00));
-  const nu = Math.max(1, Math.round(Lu / S)), nv = Math.max(1, Math.round(Lv / S));
+/* the bench's rectPiece on given grid lines (ul along u, vl along v: absolute local coordinates; a graded grid shares its
+   lines between the pieces), with the stiffener lines at the ship's frame phase (spacing `every` from `phase`) */
+function rectPiece(P, ul, vl) {
+  const [ua, va] = AXES[P.ax], nu = ul.length - 1, nv = vl.length - 1;
   const Gd = new Float64Array(3 * (nu + 1) * (nv + 1));
-  for (let j = 0; j <= nv; j++) for (let i = 0; i <= nu; i++) {
-    const u = i / nu, v = j / nv, o = 3 * (j * (nu + 1) + i);
-    for (let q = 0; q < 3; q++) Gd[o + q] = P.p00[q] * (1 - u) * (1 - v) + P.p10[q] * u * (1 - v) + P.p01[q] * (1 - u) * v + P.p11[q] * u * v;
-  }
+  for (let j = 0; j <= nv; j++) for (let i = 0; i <= nu; i++) { const o = 3 * (j * (nu + 1) + i); Gd[o + P.ax] = P.val; Gd[o + ua] = ul[i]; Gd[o + va] = vl[j]; }
+  const near = (L, x) => { let b = 0; for (let k = 1; k < L.length; k++) if (Math.abs(L[k] - x) < Math.abs(L[b] - x)) b = k; return b; };
   const lines = [];
   for (const s of P.stiff || []) {
-    const Lx = s.along === 'u' ? Lv : Lu, nn = s.along === 'u' ? nv : nu;
+    const L = s.along === 'u' ? vl : ul, Lx = L[L.length - 1] - L[0], nn = L.length - 1;
     const ph = ((s.phase || 0) % s.every + s.every) % s.every;
-    for (let x = ph; x < Lx - 1e-6; x += s.every) { const g = Math.round(x / Lx * nn); if (g > 0 && g < nn && !lines.some(l => l.along === s.along && l.g === g)) lines.push({ along: s.along, g, sec: s.sec, spacing: s.every }); }
+    for (let x = ph; x < Lx - 1e-6; x += s.every) { const g = near(L, L[0] + x); if (g > 0 && g < nn && !lines.some(l => l.along === s.along && l.g === g)) lines.push({ along: s.along, g, sec: s.sec, spacing: s.every }); }
   }
-  return { name: P.name, kind: P.kind, nu, nv, G: Gd, mask: null, h: P.h, mat: P.mat, n: nrm(cross(sub(P.p10, P.p00), sub(P.p01, P.p00))), sides: null, wet: null,
-    lines, open: P.open || [0, 0, 0, 0], planar: true, imperfSign: P.imperfSign, skin: P.skin, ax: P.ax, val: P.val, u0: P.u0, v0: P.v0 };
+  const p00 = [0, 0, 0], p10 = [0, 0, 0], p01 = [0, 0, 0]; p00[P.ax] = p10[P.ax] = p01[P.ax] = P.val;
+  p00[ua] = p01[ua] = ul[0]; p10[ua] = ul[nu]; p00[va] = p10[va] = vl[0]; p01[va] = vl[nv];
+  return { name: P.name, kind: P.kind, nu, nv, G: Gd, mask: null, h: P.h, mat: P.mat, n: nrm(cross(sub(p10, p00), sub(p01, p00))), sides: null, wet: null,
+    lines, open: P.open || [0, 0, 0, 0], planar: true, imperfSign: P.imperfSign, skin: P.skin, ax: P.ax, val: P.val, u0: ul[0], v0: vl[0], ul: Float64Array.from(ul), vl: Float64Array.from(vl) };
+}
+/* the grid lines of one local axis over [lo, hi]: every S within the fine band (spec.grade, the bench's graded grid:
+   S within 1.5 + 0.6 W^(1/3) m of the hit), every 2 S beyond; lo and hi themselves */
+function axisLines(lo, hi, S, fine) {
+  const out = [], S2 = fine ? 2 * S : S, e = S * .3;
+  for (let k = Math.ceil((lo - 1e-6) / S); k * S <= hi + 1e-6; k++) {
+    const x = k * S, inF = !fine || (x >= fine[0] - 1e-6 && x <= fine[1] + 1e-6);
+    if (inF || Math.abs(x / S2 - Math.round(x / S2)) < 1e-6) out.push(x);
+  }
+  if (!out.length || out[0] - lo > e) out.unshift(lo); else out[0] = lo;
+  if (hi - out[out.length - 1] > e) out.push(hi); else out[out.length - 1] = hi;
+  return out;
 }
 /* spec -> { pieces, spaces, OUT, spaceAt, up, waterline }; each piece keeps its plate's grid order (i along u, j along v)
-   so the skins map one to one */
+   so the skins map one to one (a graded piece's lines are in its ul / vl) */
 export function sceneOf(spec, S) {
-  const B = spec.box, e = S * .25, sn = v => Math.round(v / S) * S;
-  const plates = spec.plates.slice(0, 6);
-  const faceFree = [0, 1, 2, 3, 4, 5].map(f => plates.some(p => p.ax === f % 3 && Math.abs(sn(p.val) - B[f]) < e));
-  const onFixed = (axis, v) => (Math.abs(v - B[axis]) < e && !faceFree[axis]) || (Math.abs(v - B[axis + 3]) < e && !faceFree[axis + 3]);
+  const B = spec.box, e = S * .25, g = spec.grade;
+  const LN = [0, 1, 2].map(k => axisLines(Math.round(B[k] / S) * S, Math.round(B[k + 3] / S) * S, S, g && g.fine[k]));
+  const sn = (k, v) => { const L = LN[k]; let b = L[0]; for (const x of L) if (Math.abs(x - v) < Math.abs(b - v)) b = x; return b; };
+  const Bs = [0, 1, 2, 3, 4, 5].map(f => sn(f % 3, B[f]));
+  const plates = spec.plates.slice(0, 10);
+  const faceFree = [0, 1, 2, 3, 4, 5].map(f => plates.some(p => p.ax === f % 3 && Math.abs(sn(p.ax, p.val) - Bs[f]) < e));
+  const onFixed = (axis, v) => (Math.abs(v - Bs[axis]) < e && !faceFree[axis]) || (Math.abs(v - Bs[axis + 3]) < e && !faceFree[axis + 3]);
   const deckPatch = spec.kind === 'deck';
   const pieces = plates.map((pl, pi) => {
     const ax = pl.ax, [ua, va] = AXES[ax];
-    const o = [0, 0, 0]; o[ax] = sn(pl.val); o[ua] = sn(pl.u0); o[va] = sn(pl.v0);
-    const U = [0, 0, 0], V = [0, 0, 0]; U[ua] = sn(pl.u1) - sn(pl.u0); V[va] = sn(pl.v1) - sn(pl.v0);
+    const val = sn(ax, pl.val), u0 = sn(ua, pl.u0), u1 = sn(ua, pl.u1), v0 = sn(va, pl.v0), v1 = sn(va, pl.v1);
+    const ul = LN[ua].filter(x => x >= u0 - 1e-6 && x <= u1 + 1e-6), vl = LN[va].filter(x => x >= v0 - 1e-6 && x <= v1 + 1e-6);
+    if (ul.length < 2 || vl.length < 2) return null;
     const mat = MATI[pl.mat] !== undefined ? MATI[pl.mat] : MATI.mild;
     // stiffeners: along u at the longitudinal spacing (lines of constant v), along v at the frame spacing (constant u),
     // sections by kind (side 0, weather deck 1, inner deck 2, bulkhead 3) scaled by the class's tie factor
@@ -107,19 +123,19 @@ export function sceneOf(spec, S) {
     const secV = kind === 0 ? SEC.sideFrame : kind === 1 ? SEC.deckBeam : kind === 3 ? SEC.bhdStiff : SEC.d2Beam;
     const scale = s => { const k = Math.sqrt(pl.tie || 1); return k === 1 ? s : { hw: s.hw * k, tw: s.tw * k, bf: s.bf * k, tf: s.tf * k }; };
     const stiff = [];
-    if (pl.fv > 0) stiff.push({ along: 'u', every: pl.fv, phase: sn(pl.pv || 0) - o[va], sec: scale(secU) });
-    if (pl.fu > 0) stiff.push({ along: 'v', every: pl.fu, phase: sn(pl.pu || 0) - o[ua], sec: scale(secV) });
-    const open = pl.open || [onFixed(ua, o[ua]), onFixed(ua, o[ua] + U[ua]), onFixed(va, o[va]), onFixed(va, o[va] + V[va])].map(b => b ? 1 : 0);
+    if (pl.fv > 0) stiff.push({ along: 'u', every: pl.fv, phase: (pl.pv || 0) - v0, sec: scale(secU) });
+    if (pl.fu > 0) stiff.push({ along: 'v', every: pl.fu, phase: (pl.pu || 0) - u0, sec: scale(secV) });
+    const open = pl.open || [onFixed(ua, u0), onFixed(ua, u1), onFixed(va, v0), onFixed(va, v1)].map(b => b ? 1 : 0);
     // (the bench's decks and bulkheads face the other way: their imperfection dimples as the bench's do)
-    return rectPiece({ imperfSign: ax === 2 ? 1 : -1, name: 'plate ' + pi, kind: pl.kind !== undefined ? pl.kind : kind, p00: o, p10: add(o, U), p01: add(o, V), p11: add(add(o, U), V),
-      h: pl.h, mat, stiff, open, skin: !!pl.skin, ax, val: o[ax], u0: o[ua], v0: o[va] }, S);
+    return rectPiece({ imperfSign: ax === 2 ? 1 : -1, name: 'plate ' + pi, kind: pl.kind !== undefined ? pl.kind : kind, ax, val, h: pl.h, mat, stiff, open, skin: !!pl.skin }, ul, vl);
   });
   const comps = (spec.comps || []).slice(0, 16), OUT = comps.length;
   const spaces = comps.map((c, k) => ({ name: 'space ' + k, box: c.img || c.b, V: c.V }));
   spaces.push({ name: 'outside', box: null, V: Infinity });
   const spaceAt = p => { for (let k = 0; k < comps.length; k++) { const b = comps[k].b; if (p[0] >= b[0] && p[0] <= b[3] && p[1] >= b[1] && p[1] <= b[4] && p[2] >= b[2] && p[2] <= b[5]) return k; } return OUT; };
   const up = deckPatch ? 2 : 1;
-  return { pieces, spaces, OUT, spaceAt, up, waterline: spec.wlLocal !== undefined ? spec.wlLocal : -1e9, snap: false, vents: spec.vents || [], isCut: null };
+  // (a plate too small for the grid is left out: pieces keeps the spec's plate numbering, null where none)
+  return { scatter: spec.scatter || 0, seed: spec.seed || 1, pieces: pieces.filter(Boolean), plateOf: pieces.map((p, i) => p ? i : -1).filter(i => i >= 0), spaces, OUT, spaceAt, up, waterline: spec.wlLocal !== undefined ? spec.wlLocal : -1e9, snap: false, vents: spec.vents || [], isCut: null };
 }
 
 /* ------------------------------------------------------------ the model (bench build(), into an object) */
@@ -157,7 +173,7 @@ export function buildShell(scene, S) {
     for (let j = 0; j <= pc.nv; j++) for (let i = 0; i <= pc.nu; i++) {
       const k = nid(gid[pi][j * (pc.nu + 1) + i]); if (k < 0 || npc2[k].length !== 1) continue;
       const [ua, ub] = brk(cols, i), [va, vb] = brk(rows, j);
-      const b = Math.max(S, Math.min((ub - ua) * du, (vb - va) * dv)), beta = b / pc.h * Math.sqrt(m.sy / m.E), w0 = Math.min(.1 * beta * beta * pc.h, b / 200);
+      const b = Math.max(S, pc.ul ? Math.min(pc.ul[ub] - pc.ul[ua], pc.vl[vb] - pc.vl[va]) : Math.min((ub - ua) * du, (vb - va) * dv)), beta = b / pc.h * Math.sqrt(m.sy / m.E), w0 = Math.min(.1 * beta * beta * pc.h, b / 200);
       const w = -(pc.imperfSign || 1) * w0 * Math.sin(Math.PI * (i - ua) / Math.max(1, ub - ua)) * Math.sin(Math.PI * (j - va) / Math.max(1, vb - va));
       for (let q = 0; q < 3; q++) pos[3 * k + q] += pc.n[q] * w;
     }
@@ -191,7 +207,7 @@ export function buildShell(scene, S) {
     }
     const g3 = k => [pc.G[3 * k], pc.G[3 * k + 1], pc.G[3 * k + 2]], o = g3(0), Ue = sub(g3(pc.nu), o), Ve = sub(g3(pc.nv * (pc.nu + 1)), o);
     PAN.push({ o, U: nrm(Ue), V: nrm(Ve), Lu: len(Ue), Lv: len(Ve), n: pc.n, nu: pc.nu, nv: pc.nv, off, kind: pc.kind, name: pc.name, planar: pc.planar,
-      at: Int32Array.from(ids, i => nid(i)), skin: pc.skin, ax: pc.ax, val: pc.val, u0: pc.u0, v0: pc.v0, h: pc.h, mat: pc.mat });
+      at: Int32Array.from(ids, i => nid(i)), skin: pc.skin, ax: pc.ax, val: pc.val, u0: pc.u0, v0: pc.v0, h: pc.h, mat: pc.mat, ul: pc.ul, vl: pc.vl, open: pc.open, plate: scene.plateOf ? scene.plateOf[pi] : pi });
   });
   const CMAP = M.CMAP = Int32Array.from(cmap);
   // ---- 5. anchors on open edges (flagged sides of a piece)
@@ -300,6 +316,9 @@ export function buildShell(scene, S) {
     CAR[c] = len(av); CNR.set(nrm(av), 3 * c);
     CRC.set(mul(add(add(P[0], P[1]), add(P[2], P[3])), .25), 3 * c);
     CEF[c] = glf(MATS[CMAT[c]], CH[c], Math.sqrt(CAR[c]));
+    // (the game's patches: the steel's scatter, seeded per cell: tears start at the weaker spots and run, rather than a
+    // whole panel letting go along its perfect edges at once; the bench's check box runs without it)
+    if (scene.scatter) { let h = Math.imul(c + 1, 0x9E3779B1) ^ (scene.seed | 0); h = Math.imul(h ^ (h >>> 15), 0x85EBCA77); h ^= h >>> 13; CEF[c] *= 1 + scene.scatter * (((h >>> 0) / 4294967296) * 2 - 1); }
     CDB[c] = Math.sqrt(CAR[c]);
     for (const i of q) M.NCON[i]++;
   }

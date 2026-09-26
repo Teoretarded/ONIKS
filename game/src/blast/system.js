@@ -47,7 +47,7 @@ export async function createBlast(game) {
   // ONIKS.game.blast.cfg.solver
   const DEFAULT_SOLVER = typeof navigator !== 'undefined' && navigator.gpu ? 'shell' : 'lattice';
   const q0 = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('blast') : null;
-  const cfg = { watchDist: 4000, upTexels: 6000, maxDots: 7000, on: q0 !== 'off', gpuMs: 3, gpuMsSlow: 5, gpuMsShell: 6, gpuMsShellSlow: 8, shellS: .25,
+  const cfg = { watchDist: 4000, upTexels: 6000, maxDots: 9000, on: q0 !== 'off', gpuMs: 3, gpuMsSlow: 5, gpuMsShell: 6, gpuMsShellSlow: 8, shellS: .25, scatter: .15,
     solver: q0 === 'shell' || q0 === 'lattice' ? q0 : DEFAULT_SOLVER };
 
   /* ------------------------------------------------------------ the atlas */
@@ -99,12 +99,12 @@ export async function createBlast(game) {
     const H = hullOf(u); if (!H) return null;
     const W = tntOf(o.kind, o.whKg);
     if (!(W > .02)) return null;
-    const spec = hitSpec({ u, H, a: o.a, n: o.n, din: o.din, zone: o.zone, tmm: o.tmm, fz: o.fz, standoff: o.standoff, W: o.fz === 'frag' ? W * .8 : W, deckY: o.deckY, halfB: o.halfB });
+    const spec = hitSpec({ u, H, a: o.a, n: o.n, din: o.din, zone: o.zone, tmm: o.tmm, fz: o.fz, standoff: o.standoff, W: o.fz === 'frag' ? W * .8 : W, deckY: o.deckY, halfB: o.halfB, big: bigPatch() });
     if (!spec) return null;
     if (o.band > 0) spec.band = o.band;
     const cs = CASING[o.kind] || [W * .8, .02];
     Object.assign(spec.charge, { fill: W, Mc: cs[0], mf: cs[1] });
-    return start(u, spec, o.S, { kind: o.kind, W, fz: o.fz });
+    return start(u, spec, o.S, { kind: o.kind, W, fz: o.fz, deckY: o.deckY, halfB: o.halfB });
   }
   /* a cook-off: the module's contents ({ he, prop, det, fuel, vapour }) -> patch or null */
   function cook(u, mod, o) {
@@ -112,16 +112,19 @@ export async function createBlast(game) {
     const H = hullOf(u); if (!H) return null;
     const det = c.det !== undefined ? c.det : 0;
     const W = (c.he || 0) * det, Wgas = (c.prop || 0) * .25 + (c.he || 0) * (1 - det) * .25;
-    const spec = cookSpec({ u, H, mod, W, Wgas, vapour: c.vapour || 0, deckY: o.deckY, halfB: o.halfB, a: o.a, n: o.n });
+    const spec = cookSpec({ u, H, mod, W, Wgas, vapour: c.vapour || 0, deckY: o.deckY, halfB: o.halfB, a: o.a, n: o.n, big: bigPatch() });
     if (!spec) return null;
     Object.assign(spec.charge, { fill: W, Mc: 0, mf: .03 });
-    return start(u, spec, o.S, { kind: 'cookoff:' + mod.id, W, Wgas, vapour: c.vapour || 0 });
+    return start(u, spec, o.S, { kind: 'cookoff:' + mod.id, W, Wgas, vapour: c.vapour || 0, deckY: o.deckY, halfB: o.halfB });
   }
+  // the shell solver's patch: sized as the bench's (the compartment round the charge, a graded grid)
+  const bigPatch = () => cfg.solver === 'shell' && !(client && client.mode === 'main');
   function start(u, spec, S, meta) {
     const id = nextId++;
     spec.watch = true;
     spec.solver = client && client.mode === 'main' ? 'lattice' : cfg.solver;
     spec.gridS = spec.solver === 'shell' ? (spec.shellS = cfg.shellS) : S_GRID;
+    if (spec.solver === 'shell') { spec.scatter = cfg.scatter; spec.seed = (u.id * 7919 + id * 104729) | 0; }
     const B = { id, uid: u.id, S, spec, meta, t0: sim.t, state: 'wait', rects: [], inner: null, nIn: 0, tShow: 0, tSolve: 0, tearT: -1, final: null, res: null,
       depth: spec.depth || 4, heat: 0, lastT: -1, lastW: null, seed: (u.id * 131 + id * 7) % 997, info: null, ej: false };
     patches.set(id, B);
@@ -180,7 +183,7 @@ export async function createBlast(game) {
     if (m.inner) { B.inner = m.inner; B.nIn = m.nIn; }
     B.tSolve = m.t; B.torn = m.tornSkin; B.below = m.tornBelow; B.setMax = m.setMax; B.byPlate = m.byPlate; B.runMs = m.runMs; B.wallMs = m.wallMs; B.steps = m.steps;
     if (m.tornSkin > 0 && B.tearT < 0) B.tearT = sim.t;
-    if (m.final) { B.state = 'done'; B.final = m; B.res = m.results; B.doneT = sim.t; settle(B); }
+    if (m.final) { B.state = 'done'; B.final = m; B.res = m.results; B.doneT = sim.t; if (m.debris && m.debris.length) B.debris = { a: m.debris, n: m.debris.length / 8, t0: game.t, end: game.t + 40 }; settle(B); }
     else if (m.tornSkin > .05 && !B.ej) ejecta(B, m);
   }
 
@@ -371,12 +374,64 @@ export async function createBlast(game) {
           const hs = hsh(i, B.seed);
           const torn = (e & 1) !== 0, fr = (e & 2) !== 0;
           // charred steel: dark, the torn edges and frames catching more light; the fire's glow deep inside, flickering
-          let c = (.1 + .12 * b) * (fr ? 1.25 : 1) * (.8 + .4 * hs);
+          let c = (.15 + .22 * b) * (fr ? 1.3 : 1) * (.8 + .4 * hs);
           const gw = sat(.3 + .25 * Math.min(4, -lz) / 4);
           const fl2 = .72 + .28 * Math.sin(tr * (5.3 + 3 * hs) + i * .7);
           const g = Math.max(fk * (.08 + .7 * gw * gw) * fl2, torn ? heat * .8 : 0);
           const rr = 255 * Math.min(1, c * .95 + .62 * g), gg = 255 * Math.min(1, c * .9 + .36 * g), bb = 255 * Math.min(1, c * .84 + .12 * g);
           sink.dot(wx, wy, wz, size, rr, gg, bb, 1);
+          drawn++;
+        }
+      }
+    }
+    return drawn;
+  }
+
+  /* the pieces that came loose: dots flying on from where the solver left them (linear drag, gravity), landing on the
+     deck when over the hull, sinking when they reach the sea; hot at first, then charred. Model frame, the unit's pose */
+  const DK = .6, GR = 9.81;
+  function drawDebris(frame) {
+    const sink = frame.sink;
+    if (!sink || !sink.cam || R.pcOff || R.style === 'orbital') return 0;
+    const cam = sink.cam, eye = cam.eye, f = cam.f, fl = cam.fl || 1300;
+    let drawn = 0;
+    const M = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+    for (const [uid, L] of byUnit) {
+      const u = sim.units.get(uid), hull = game.structure && game.structure.draws && game.structure.draws(uid);
+      if (!hull && (!u || !game.drawn.has(uid))) continue;
+      for (const B of L) {
+        const D = B.debris; if (!D) continue;
+        const t = game.t - D.t0; if (t > 40) { B.debris = null; continue; }
+        const Fr = B.spec.frame, pz = hull && game.structure.poseAt ? game.structure.poseAt(uid, Fr.O[2]) : null;
+        let p0;
+        if (pz) { for (let i = 0; i < 9; i++) M[i] = pz.R[i]; p0 = pz.T; }
+        else if (u) { const pose = game.unitPose(u); attitudeM(pose.hdg, pose.pitch || 0, pose.roll || 0, M); p0 = pose.pos; }
+        else continue;
+        const cx = p0[0] + M[0] * Fr.O[0] + M[1] * Fr.O[1] + M[2] * Fr.O[2], cy = p0[1] + M[3] * Fr.O[0] + M[4] * Fr.O[1] + M[5] * Fr.O[2], cz = p0[2] + M[6] * Fr.O[0] + M[7] * Fr.O[1] + M[8] * Fr.O[2];
+        const zc = (cx - eye[0]) * f[0] + (cy - eye[1]) * f[1] + (cz - eye[2]) * f[2];
+        const pxm = fl / Math.max(1, zc);
+        if (zc < -60 || pxm * 20 < 2) continue;
+        const e = 1 - Math.exp(-DK * t), hx = e / DK, hy = (GR / DK) * (hx - t) / 1, deckY = B.meta.deckY || 0, hb = B.meta.halfB;
+        const hot = Math.exp(-t / 1.6), size = pxm * .12 > 3 ? 3 : pxm * .12 > 1.4 ? 2 : 1;
+        const hl = B.res && B.res.hole, hbb = hl && hl.bb && B.spec.kind === 'deck' ? hl.bb : null, floorY = hl && hl.floor ? hl.floor[1] : deckY;
+        const stride = Math.max(1, Math.ceil(D.n / Math.max(400, cfg.maxDots * .5)));
+        const A = D.a;
+        for (let i = 0; i < D.n; i += stride) {
+          const o = 8 * i, x0 = A[o], y0 = A[o + 1], z0 = A[o + 2];
+          let x = x0 + A[o + 3] * hx, y = y0 + A[o + 4] * hx + hy, z = z0 + A[o + 5] * hx;
+          // over the hull: it lands on the deck (pieces that started below it stay inside, where they came to rest)
+          const over = hb ? Math.abs(x) < hb(z, deckY) * .98 : false;
+          let fade = 1;
+          // (over the hole: it falls in, onto the first deck that stands under it)
+          let land = deckY;
+          if (hbb) { const dx = x - Fr.O[0], dy = y - Fr.O[1], dz = z - Fr.O[2], lu = dx * Fr.X[0] + dy * Fr.X[1] + dz * Fr.X[2], lv = dx * Fr.Y[0] + dy * Fr.Y[1] + dz * Fr.Y[2];
+            if (lu > hbb[0] && lu < hbb[1] && lv > hbb[2] && lv < hbb[3]) land = floorY; }
+          if (over && y < land + .05) { if (y0 >= land - .3) y = land + .05; else { x = x0; y = y0; z = z0; } }
+          else if (!over && y < 0) { const ts = t - (y0 > 0 ? Math.max(.1, t * y0 / Math.max(1e-3, y0 - y)) : 0); fade = sat(1 - ts / 1.2); if (fade <= 0) continue; y = Math.max(y, -.6); }
+          const wx = p0[0] + M[0] * x + M[1] * y + M[2] * z, wy = p0[1] + M[3] * x + M[4] * y + M[5] * z, wz = p0[2] + M[6] * x + M[7] * y + M[8] * z;
+          const hs = hsh(i, B.seed + 17), b = A[o + 6] * (.75 + .5 * hs), g = hot * (.6 + .4 * hs);
+          const rr = 255 * Math.min(1, b * .95 + 1.1 * g), gg = 255 * Math.min(1, b * .9 + .55 * g), bb = 255 * Math.min(1, b * .84 + .15 * g);
+          sink.dot(wx, wy, wz, size, rr, gg, bb, fade);
           drawn++;
         }
       }
@@ -401,7 +456,7 @@ export async function createBlast(game) {
     update,
     draw3d(frame) {
       const t0 = performance.now();
-      stats.dots = byUnit.size ? drawInner(frame) : 0;
+      stats.dots = byUnit.size ? drawInner(frame) + drawDebris(frame) : 0;
       stats.drawMs = performance.now() - t0;
     },
     dispose() {

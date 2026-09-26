@@ -161,14 +161,16 @@ void main() {
     if (gd > -gw * 0.25 && gd < gw) gk = gd < 0.0 ? 1.0 + gd / (gw * 0.25) : 1.0;
     else if (gd >= gw) gk = exp(-(gd - gw) / max(1e-3, uG.w)) * 0.8;
   }
-  vec3 n = uR * aNrm.xyz;
-  if (dot(btTilt, btTilt) > 1e-6 && dot(n, n) > 0.01) n = normalize(n + btTilt * length(n));
+  vec3 n = uR * aNrm.xyz, n0 = n;
+  // a blast patch's plating bent: the light follows the bent face (tilted at most ~50 deg: a dent catches light across
+  // its slope instead of going black), the facing test stays the model's own face
+  if (dot(btTilt, btTilt) > 1e-6 && dot(n, n) > 0.01) { float tl = length(btTilt); n = normalize(n + btTilt * (min(tl, 1.2) / tl) * length(n)); }
   float b, rim = 0.0, fk = 1.0;
   bool two = dot(aNrm.xyz, aNrm.xyz) < 0.01;
   float lit = 0.45;
   if (two) { b = 0.45; }
   else {
-    float dn = dot(n, v);
+    float dn = dot(n0, v);
     if (dn > 0.0) {
       // back face: a third of them at 0.09 (more under the x-ray: the far wall shows through)
       if (uQ.x > 0.5 && xr <= 0.0) { ${CULL} return; }
@@ -177,7 +179,7 @@ void main() {
     } else {
       // the moon, and a fill fixed to the view (behind the lens, over its left shoulder): a hull side turned to the
       // camera never goes black from the wrong heading (the films frame their hulls lit); the moon keeps the decks
-      float fac = min(1.0, -dn), lam = max(dot(n, uSun.xyz), uFill.w * dot(n, uFill.xyz)), w = 1.0 - fac;
+      float fac = min(1.0, max(-dn, -dot(n, v) * 0.6)), lam = max(dot(n, uSun.xyz), uFill.w * dot(n, uFill.xyz)), w = 1.0 - fac;
       fk = max(fac, uDen.y);
       b = 0.06 + 0.74 * max(lam, 0.0) + 0.14 * fac + 0.34 * w * w * w;
       b *= 0.55 + 0.45 * b;
@@ -497,8 +499,14 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
         bool lx = fx < 0.5, ly = fy < 0.5;
         vec4 tc = lx ? (ly ? t00 : t01) : (ly ? t10 : t11);
         if ((int(tc.w) & 2) != 0) return 1;
-        vec2 o = (vec2(fx, fy) - vec2(lx ? 0.0 : 1.0, ly ? 0.0 : 1.0)) * S * -0.2;
+        // (a torn cell's plating: shreds hanging off its corner, ragged (each dot its own share drawn in) and curled the
+        // way the corner went, as the petals the grid is too coarse to tear)
+        vec2 r0 = vec2(fx, fy) - vec2(lx ? 0.0 : 1.0, ly ? 0.0 : 1.0);
+        float hq = fract(sin(dot(floor(p * 7.3), vec3(12.99, 78.23, 37.71))) * 43758.55);
+        vec2 o = r0 * S * -mix(0.15, 0.6, hq);
         dl = tc.xyz + (ax == 2 ? vec3(o.x, o.y, 0.0) : ax == 1 ? vec3(o.x, 0.0, o.y) : vec3(0.0, o.y, o.x));
+        float dn = tc[ax], rr = dot(r0, r0);
+        dl[ax] += sign(dn) * min(abs(dn) * 0.9, S * 1.4) * rr * 1.6;
         edge = max(edge, 0.85); heatN = max(heatN, heat); hot = max(hot, heat * 0.9); burn = max(burn, 0.85);
         // a petal bent over: its face leans with it (from the cell's corners, while none of them went)
         if ((int(t00.w) & 2) == 0 && (int(t10.w) & 2) == 0 && (int(t01.w) & 2) == 0 && (int(t11.w) & 2) == 0) {
@@ -516,6 +524,10 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
         float gu = mix(t10[ax] - t00[ax], t11[ax] - t01[ax], fy) / S, gv = mix(t01[ax] - t00[ax], t11[ax] - t10[ax], fx) / S;
         vec3 Uw = ax == 0 ? Z : X, Vw = ax == 1 ? Z : Y;
         tilt -= Uw * gu + Vw * gv;
+        // plating strained past yield buckles finer than the grid: facets ~0.3 m catching the light unevenly
+        float gs = clamp((length(vec2(gu, gv)) - 0.1) * 1.5, 0.0, 0.5);
+        if (gs > 0.04) { vec3 q = floor(p * 3.3); float h1 = fract(sin(dot(q, vec3(127.1, 311.7, 74.7))) * 43758.55), h2 = fract(sin(dot(q, vec3(269.5, 183.3, 246.1))) * 43758.55);
+          tilt += (Uw * (h1 - 0.5) + Vw * (h2 - 0.5)) * gs; }
       }
       p += X * dl.x + Y * dl.y + Z * dl.z;
       break;

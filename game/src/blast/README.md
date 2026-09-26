@@ -19,8 +19,15 @@ WebGL2: a fence polled or a buffer read there is a round trip to Chrome's GPU pr
 moves on; re-port `shell/model.js` and copy `shell/gpu.js`, `shell/gpu_wgpu.js` from its next commit (the one change in
 each: gravity on free pieces along the patch's up axis).
 
-Known: a hit whose damage reaches the patch's edge (a deck burst, a cook-off: the whole 20 m section torn) shows the
-patch's rectangle as the hole's outline; the plating beyond the patch is not modelled.
+The shell solver's patch (spec.js `big`): the bench's Burke sizing, a box of half-size clamp(3 + 1.5 W^(1/3), 3, 14) m
+joined with the compartment the blast works in (both its bulkheads and its decks; a deck hit also models the side
+shells its deck meets), on the bench's graded grid (S within 1.5 + 0.6 W^(1/3) m of the hit and the charge, 2 S beyond;
+skins resampled to a uniform S for the atlas), the displacement eased to nothing over the last 1.5 m before anchored
+edges, and a seeded +-15 % scatter of the steel's failure strain (`cfg.scatter`; off in the parity check) so tears start
+at weak spots instead of whole panels letting go at once. Drawn: pieces that come loose fly on in the solve, then leave
+as debris dots (linear drag, gravity; they land on the deck, or on the deck under a hole, or sink); torn cells' plating
+hangs off its corners ragged and curled the way it went; dented plating is lit along its bent face (at most ~50 deg)
+with sub-grid buckle facets; the structure behind a hole as jittered charred dots, the fire inside lighting it.
 
 | File | What |
 |---|---|
