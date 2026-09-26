@@ -1,13 +1,215 @@
 # Blast bench audit (independent verification, 2026-09-26)
 
-Scope: `blast.js` and `gpu.js` at commit 1596bde (bench v22), structural model only (steel plating under blast
-loading). Verification suite: `verify.html` + `verify.js` (runs the bench's own code; results below). Line numbers
-refer to 1596bde. Ranked by how much each item biases the results the user questioned (steel looks brittle, the deck
-behind a contact hole doesn't respond, a very large charge leaves plating pristine).
+Scope: the structural model of the blast bench (`blast.js`, `gpu.js`): steel ship plating under blast loading.
+The audit started on the lattice model (v22, 1596bde). While it ran, the physics agent replaced that model with a
+shell finite-element model (446c6a3 v30 ... ca26a00 v32). The suite was rebuilt for the new model, and the final run
+is on ca26a00 (bench v32), box, clamped-plate and Burke scenes.
 
-Status: baseline results at 1596bde below; re-run against the physics fixes as they land (see the end).
+- Part A: the current model (v32): findings from reading the code and from the suite, and the suite's final results.
+- Part B: the audit of the lattice model (v22) that led to the rewrite, with the status of each finding in v32.
 
-## What the numbers say, in short
+Suite: `verify.html` + `verify.js` (http://127.0.0.1:8771/game/concepts/blast/verify.html; `?quick=1` skips the
+slow checks, `?only=energy,nurick` runs a subset; results in `window.VERIFY.results`; a full run takes ~1.5 h, most
+of it the 0.0625 m grid and the Burke). It loads the bench's own blast.js/gpu.js (only the relative gpu.js import is
+made absolute and a read-only accessor appended: the same arrays as `BLAST.model()` plus the step functions and the
+per-step load array FL), stubs the render loop, runs every case headless like `runCase`, and finds everything
+scene-specific from the model's arrays, so the same checks run on the box, the clamped plate and the Burke. The CPU
+reference is 15-30 ms a step at 0.25 m, so CPU checks use the loading window (3-6 ms) and full runs are on the GPU.
+
+# Part A: the shell model (v32, ca26a00)
+
+## In short
+
+- The rewrite fixes what made steel look brittle and plating look pristine. Internal forces sum to zero (5e-8 N
+  against 26 MN of load), the bench's energy ledger closes to 0.1-0.6 % while plating deforms and agrees with an
+  independent count of the loads' work and the kinetic energy, tearing is strain-driven (GL) instead of a 37 m/s
+  trigger, holes petal, products flow into the compartment behind a hole, a dished clamped plate keeps 93 % of its
+  peak (the lattice kept 37-47 %), and GPU = CPU (0.0003-0.04 % on the field, same torn cells) now that the v30 hinge
+  bug is fixed.
+- Two things bias the damage numbers most: grid convergence and spurious tearing at the deck/side seam where frames
+  end (A1, A1b). Grid: the side panel's dish grows 112 / 146 / 190 mm and the contact hole
+  3.8 / 4.9 / 9.4 m^2 from 0.25 to 0.125 to 0.0625 m. 0.125 m is not converged for either (A1).
+- Near contact the energy split still moves with the time step (-4.2 % unexplained and plastic 13.3 % of the input
+  at dt; -2.0 % and 10.9 % at dt/2) (A2).
+- The clamped 2.5 x 0.75 m, 6 mm mild plate dishes 70-100 % of Nurick-Martin in the plastic range (phi 17-25): inside
+  the fit's +-30 % from phi 20, 30 % short at phi 17 (A3). Tearing starts between phi 47 and 68 (A4).
+- The user's cases: 1200 kg contact on the box tears the side and blows the second deck behind it away; 5000 kg
+  leaves nothing within 8.5 m pristine (0.6 %). Burke: 120 kg inside main engine room 1 moves all 80 bounding panels
+  (decks and WT bulkheads 0.5-0.7 m); a deckhouse hit dents the structure behind; a waterline contact barely holes
+  the belt and 5000 kg leaves 4.1 % of the plating within 8.5 m under 2h, because nothing below the waterline is
+  loaded (A8).
+
+## Findings, ranked
+
+### A1. Not grid-converged at 0.125 m (high)
+Box, GPU. Panel centre dish, 120 kg at 5 m: 111.7 / 146.0 / 190.0 mm at 0.25 / 0.125 / 0.0625 m (+23 %, +30 %).
+Contact hole, 120 kg: 3.81 / 4.86 / 9.43 m^2 (0.0625 m tears twice as much). BENCH.md's own grid study covers a
+0.3 m lab plate at 12-48 cells across (converged) and the box only at 0.25 vs 0.125; the side panel is 0.75 m wide,
+so 0.125 m puts 6 cells across it, too few to resolve its dish, and near contact the loaded spot and the erosion
+front are cell-sized. Numbers from the default grid are low on dishing and on hole size. Options: a finer grid
+(0.0625 m costs ~20x: dt 0.85 us instead of 3.4 us, set by the frames' Euler-Bernoulli bending at grid scale, plus
+4x the cells), a Timoshenko member (BENCH.md already names it) to lift dt, or local refinement around the hit;
+and a calibration of the GL constants per grid for near-contact loading, which GL was not made for.
+
+### A1b. Decks tear at the side seam, at every frame, under far hits (high)
+120 kg at 8 m (Z = 1.6; the side dishes ~0.1 m) tears 37 cells (0.58 m^2), all of them second-deck cells at the
+side junction (z = 0 to -0.13 m, y = 3.5 m) on the frame lines x = -7.5, -5, -2.5, 0, 2.5, 10: the side frames end on
+the deck edge (member ends are pinned at plate edges, BENCH.md) and pull on single deck cells, whose strain passes
+the GL limit. The same seam tearing runs the length of the section in the contact cases (it is why 90 % of the torn
+side plating lies within ~11 m of a 1200 kg charge although only ~40 m^2 is torn) and it opens vents along the
+seam. Real frames end in brackets that spread the load over the deck; model the connection (a bracket element or
+the member's end load spread over the cells it lands on), or exclude junction cells from single-cell erosion.
+
+### A2. Energy split not converged near contact (medium)
+120 kg contact, first 4 ms, CPU 0.25 m: unexplained -4.2 % of the loads' work at dt, -2.0 % at dt/2; plastic work
+13.3 % -> 10.9 % of the input (hinges 7.0 -> 5.4 %, membrane 6.3 -> 5.4 %). Displacements agree between the two
+steps (field 0.03 mm), so it is the dissipation at very large strain increments per step: strain rates of 1e3-1e4 /s
+near the charge, the rate factor taken from the start-of-step rate and capped at 1e4 /s, and (BENCH.md) the Biot
+strain / Cauchy-like stress pair that is not exactly hyperelastic at large strain. The 30 kg and Hellfire cases
+close to 0.1-0.6 % and don't move with dt. Suggest the Cowper-Symonds factor at the step's mid rate and sub-stepped
+returns when the plastic increment per step exceeds a few yield strains; keep the dt/2 ledger as the gate.
+
+### A3. Clamped plate 70-100 % of Nurick-Martin (medium-low)
+Bench plate scene (2.5 x 0.75 m, 6 mm mild steel, clamped), impulse on the plate measured on the CPU (edge nodes
+half-weighted), dish on the GPU at 0.125 m: phi 16.9 -> 35 mm vs 50 (70 %), phi 20.4 -> 44 vs 60 (73 %), phi 22.4 -> 66
+vs 66 (100 %), phi 25.0 -> 57 vs 74 (77 %). Below Er = 10 (kinetic energy given / elastic capacity) the plate is
+largely elastic and not judged. BENCH.md explains the ship-scale shortfall by the pulse not being impulsive; A1
+(6 cells across the 0.75 m width) is a second cause, and the rate law a third (Cowper-Symonds for mild steel roughly
+doubles yield at ~100 /s, while Nurick-Martin's phi uses static yield and already contains the rate effect of the
+tested plates). A convergence study of this scene at 0.0625 m would separate them.
+
+### A4. Tearing onset (low, needs data)
+Clamped plate, 2 m standoff: no torn cell at phi 47 (dish 19 h), 88 cells at phi 68. BENCH.md puts the onset near
+phi 35 (1.5 m standoff). The suite only checks a floor (phi >= 20); `game/research/plate_validation.csv` has no
+tearing points yet. Add mode II onset data and make this a real pass/fail; mind A1 (erosion is grid-sensitive).
+
+### A5. Hidden element deletion and force switches (medium)
+- `jmin < .25`: a cell whose smallest triangle keeps under 25 % of its area erodes (cellPass; GPU CELL_FS), and
+  `F22 = max(p3y / P3y, .05)` clamps the transverse stretch. This deletes cells that are crushed or folded, not
+  failed in tension. It shows in the runs: in the 0.0625 m contact case cells were still eroding at 0.19 s (debris
+  folding in flight), which kept the run from relaxing until T1 (A6).
+- A hinge whose flap lever is under 0.2 d (`hmin`) contributes no force and its stored energy leaves the ledger
+  unbooked; it comes back with its old plastic rotation when the lever grows.
+- Rates are capped at 1e4 /s in the Cowper-Symonds factor.
+- The member line-angle term is not exactly rotation-free: the internal torque sums to 293 N m in the 30 kg case
+  (it was 0.3 N m before that term; negligible physically, but it shows the term uses a fixed frame).
+
+### A6. The end of a run (medium)
+Relax (250 /s global damping) starts once the loads are quiet and the kinetic energy is under 5 % of its peak, or
+at tMin + 0.1 s, and lasts at most 25 ms. In the 30 kg at 2 m whole run (CPU, cut at 147 ms) damping took 36 % of the
+loads' work and plastic work 49 %; most of the damping is the stiffness-proportional term eating the elastic ringing
+of the whole section, which has to go somewhere, but check that plastic work has stopped before relax. Any cell
+eroding restarts the 5 ms "quiet" clock, so flying debris that keeps eroding (A5) holds the run to T1. Debris is
+only found in `settle`. Interactive runs (async reads) end at a step that depends on when GPU fences complete, so
+they are not reproducible; `runCase` (headless) is.
+
+### A7. Line of sight (medium on the Burke)
+Visibility is traced once at detonation on the rest geometry and only for an outside charge (and its sea image).
+Inside charges and hole sources load every cell of their compartment as if in view (compartments are treated as
+convex boxes, BENCH.md), including cells shadowed by machinery, enclosure walls or other decks' edges.
+
+### A8. Nothing below the waterline is loaded by an air or contact burst (medium on the Burke)
+`detonate`: `if (CWET[c] >= 0) continue` - wet cells never get line of sight, and water is only a radiation
+pressure on moving plating. A contact charge at the waterline (the Burke case below, 0.3 m above it) loads only the
+dry half of the hull around it; the underwater half of the charge would drive a water shock into the hull, which is
+stronger than the air shock at the same distance. The Burke waterline case therefore tears little (see results).
+
+### A9. Loads (low-medium)
+Kinney-Graham air shock, ad hoc reflected impulse is (Pr/Ps)^0.75, ideal-gas reflection, cos^2 obliquity without a
+Mach stem; spherical charges only; products stagnate. Secondary sources are clustered points, two generations,
+first-order images only, and the list is capped (10 holes per generation, 32 sources). BENCH.md lists these.
+
+### A10. Boundaries and the Burke patch (low)
+Open edges are isotropic anchors (the in-plane continuation stiffness also out of plane) with Lysmer dashpots. On
+the Burke only a patch is simulated (x within 4 + 2 W^(1/3) m of the hit, out to the next WT bulkhead); beyond it the
+ship is rigid and pristine by construction, and there is no hull-girder response.
+
+### A11. Cost (information)
+GPU 0.125 m box runs: 14-21 s (dish, contact); 0.0625 m: 270-450 s; Burke at 0.125 m: see results. The CPU reference
+is 15-30 ms a step at 0.25 m; a full reference run takes minutes to hours, so parity is checked over the loading
+window.
+
+### A12. The game module (for whoever owns game/src/blast)
+
+`game/src/blast` (2bda277) carries the shell solver re-ported from ca26a00, but the lattice (1596bde, Part B) is
+still its default because the shell costs ~7x the GPU time per hit, so in the game the v22 findings still apply.
+Its patch around a hit (`spec.js:60`) spans Rp = clamp(2.5 W^(1/3), 3, 10 or 14) m along the hull, 0.75 Rp up/down
+(clipped at the draught), at most 6 m inboard, three inner decks and one bulkhead, with a fixed boundary: plating
+beyond it is never simulated and stays pristine by construction, and the clamped patch edge acts as a rigid
+support. Together with the lattice's velocity tear-out (Part B, 3) that is a likely source of "a 5000 kg charge
+leaves nearby plating pristine" in the game.
+
+## Final suite results (bench v32, ca26a00; full run, GPU at 0.125 m and box scene unless stated)
+
+Wall times on the RX 9070 XT with other agents' work running.
+
+| Check | Result | Numbers |
+|---|---|---|
+| bench loads | PASS | 86 633 nodes, 86 400 cells, 173 752 hinges, 14 424 member elements; dt 3.42 us; mass added for the step 6e-8 % |
+| reruns, GPU and CPU (headless) | PASS | identical to the bit (interactive runs are not: A6) |
+| energy, loading window, CPU 0.25 m: 30 kg @ 2 m, Hellfire contact, both at dt and dt/2 | PASS | ledger closes to 0.1-0.6 %; the independent count of the loads' work and of the (leapfrog) kinetic energy match the ledger exactly |
+| energy, 120 kg contact, first 4 ms | FAIL at dt, PASS at dt/2 | unexplained -4.2 % / -2.0 %; plastic work 13.3 % / 10.9 % of the input (A2) |
+| energy, 30 kg @ 2 m, whole run (CPU, cut at 147 ms) | FAIL (flag) | closes (-1.3 %); damping 36.2 % of the input, plastic 49.1 %, elastic 4.7 % (A6) |
+| internal force sum (both cases) | PASS | 5e-8 N against 26 MN and 740 MN of load |
+| internal torque, 30 kg @ 2 m / 120 kg contact | FAIL / PASS | 293 N m / 5.5 kN m (threshold 1e-5 N m per N of load); tiny, from the member line-angle term (A5) |
+| mirror symmetry, early: GPU 0.125, CPU 0.25, tearing | PASS | 0.027 %, 0.004 %, 0.067 % |
+| mirror symmetry, final | INFO | 0.73 % (the box is not mirror-symmetric about the panel) |
+| dt vs dt/2: CPU windows; GPU 30 kg @ 2 m; GPU 120 kg contact | PASS | fields within 0.1 %; contact torn 4.86 / 4.73 m^2 |
+| mesh, 120 kg @ 5 m, side panel centre | FAIL | 111.7 / 146.0 / 190.0 mm at 0.25 / 0.125 / 0.0625 m (A1) |
+| mesh, 120 kg contact, torn area | FAIL | 3.81 / 4.86 / 9.43 m^2 (A1) |
+| GPU vs CPU (0.25 m, 3-5 ms): 30 kg @ 2 m, Hellfire, 120 kg contact, 120 kg inside | PASS | fields within 0.0003-0.04 %; same torn area (inside: 4 cells differ, same total) |
+| GPU vs CPU: Oniks with casing and fragments | FAIL | field 0.02 %, but torn 1.50 vs 1.25 m^2 (4 cells): the fragment-damage path differs slightly |
+| Nurick-Martin, clamped 6 mm mild plate, phi 16.9 / 20.4 / 22.4 / 25.0 | FAIL / PASS / PASS / PASS | dish 35 / 44 / 66 / 57 mm vs 50 / 60 / 66 / 74 mm (A3) |
+| Nurick-Martin, phi 7.9 and 11.9 (Er < 10) | INFO | largely elastic: 8 and 6 mm |
+| tearing onset, clamped plate | PASS (floor) | none at phi 47.1 (dish 19 h); 88 cells at phi 67.7 (A4) |
+| springback, clamped plate | PASS | keeps 93 % (47 -> 44 mm) |
+| springback, box side 120 kg @ 3 m | INFO | keeps 67 % (214 -> 143 mm; includes the elastic swing of the stiffened side) |
+| monotonic: charge @ 3 m | PASS | torn 0.02 / 0.69 / 9.6 / 79 m^2 for 30 / 120 / 500 / 2000 kg |
+| monotonic: contact | PASS | 0.13 / 0.75 / 4.9 / 108 / 217 m^2 for 5 / 30 / 120 / 500 / 1200 kg |
+| monotonic: standoff, 120 kg | PASS | 0.50 / 0.91 / 0.88 / 2.14 m^2 at 8 / 4 / 2 / 1 m (4 m and 2 m equal within 2 cells; note 8 m tears at all) |
+| monotonic: side thickness, 120 kg contact | PASS | 21.4 / 4.9 / 2.0 / 1.2 m^2 for 6 / 10 / 16 / 25 mm |
+| 1200 kg contact: structure behind | PASS | hull torn 39.7 m^2; all 443 nodes of the second deck within 2.5 m torn and blown away; 369 kPa of products in the struck space at 4 ms (CPU), ~30 kPa in the neighbours at the end |
+| 1200 kg contact: petals | FAIL (loose share) | 61 % of the torn side thrown loose (criterion <= 50 %), rim moved up to 1.9 m, intact ring 1 m outside the hole: 89 % set > 5h |
+| 1200 kg: load reaches the structure behind (CPU) | PASS | 106 / 106 nodes loaded |
+| 5000 kg contact: structure behind | PASS | hull torn 63.5 m^2; second deck behind blown away |
+| 5000 kg contact: nothing pristine within 8.5 m | PASS | 154 of 24 919 nodes under 2h (0.6 %, all on the side); 94 % of the region torn |
+| 5000 kg contact: petals | FAIL (loose share) | 82 % thrown loose, rim up to 15.9 m, ring 86 % > 5h |
+| Burke, 1200 kg contact amidships at the waterline (aim 0.3 m above it) | PASS | 30 nodes of other plating within 3 m behind, all set > 50 mm; hole radius 1.6 m, all of it thrown loose; small because nothing below the waterline is loaded (A8); 254 s |
+| Burke, 120 kg contact on the forward deckhouse side | PASS | 1943 nodes within 3 m behind: 16 torn, 1380 set > 50 mm, 547 under; hole 2.1 m, 48 % loose, rim up to 0.9 m; 168 s |
+| Burke, 120 kg inside main engine room 1 | PASS | all 80 bounding panels respond: inner bottom up to 0.70 m, 2nd deck 0.54 m, WT bulkheads fr 25 / fr 32 0.62 / 0.69 m, shell 0.03-0.24 m; a few cells torn in the decks and bulkheads; 133 s |
+| Burke, 5000 kg contact amidships | PASS (barely) | within 8.5 m: 28 399 nodes, 16 157 torn (13 783 loose), 1153 (4.1 %) under 2h, most likely the underwater plating (A8); 312 s |
+
+Totals: 37 pass, 9 fail, 4 info. The fails: energy near contact at the default step (A2), the whole-run damping
+share (A6), the member torque (A5), grid convergence x2 (A1), GPU-CPU torn area with fragments (4 cells), Nurick at
+phi 16.9 (A3), and the petal loose-share heuristic at 1200 and 5000 kg (61 % and 82 % of the torn side thrown loose).
+
+# Part B: the lattice model (v22, 1596bde), superseded
+
+This is the audit that led to the rewrite, kept for the record. Line numbers refer to 1596bde. The suite version that
+produced these numbers is verify.js at 99ad039.
+
+## Status of each v22 finding in the shell model (v32)
+
+| # | v22 finding | v32 |
+|---|---|---|
+| 1 | one-sided Laplacian "bending" (momentum, energy, 1/S^2 stiffening, springback) | replaced by dihedral hinges with exact gradients: internal forces sum to 7e-8 N, a clamped plate keeps 91 % of its peak dish. Fixed |
+| 2 | frames/stiffeners as springs to world anchors | members (axial elements + composite tee bending on the hinges they cross); world anchors only at open section edges. Fixed |
+| 3 | tear-out at 37 m/s | GL ductile erosion (plus the distortion deletion of A5): first tearing at phi 47-68 on the clamped plate. Fixed (see A4) |
+| 4 | perfect plasticity, no rate, fixed fracture strain | J2 with hardening and Cowper-Symonds, GL mesh-regularised fracture strain. Fixed (rate law, A3) |
+| 5 | compression cap at 12 % yield with set | continuum J2, buckling through the hinges and built-in imperfections. Fixed |
+| 6 | 30-45 % of the energy to artificial damping | stiffness-proportional damping 0.4-10 % during loading; global damping only in the end relax (31 %, A6). Mostly fixed |
+| 7 | an outside charge sends no gas inside | products let in through outside openings (366 kPa in the struck space at 4 ms, 1200 kg contact). Fixed |
+| 8 | scripted cracks | removed; cracks are erosion paths. Fixed |
+| 9 | a cell torn when any of its bonds breaks | cells erode whole; vent area = eroded area. Fixed |
+| 10 | GPU and CPU run different models | same passes; the v30 hinge-yield bug (found by the parity check and by the physics agent) fixed in 5916518; parity 0.0003-0.04 % |
+| 11 | line of sight stale / every 8 steps | traced once on the rest geometry, outside charges only (A7). Partly |
+| 12 | shock load (Kinney-Graham, ad hoc reflection) | unchanged, products near field added (A9). Open |
+| 13 | seam and edge nodes load | loads per cell on the current area vector. Fixed |
+| 14 | x64 mass scaling | gone; selective mass scaling of the stiffest 0.2 % of nodes (reported in the load check). Fixed |
+| 15 | fragments only in the render loop | fragments stepped in the sync, deterministic. Fixed |
+| 16 | GPU objects leaked, runCase mutated st | `dispose()`, runCase restores st. Fixed |
+
+## v22: what the numbers said
 
 - The plate itself absorbs almost none of the blast energy. Energy ledger (CPU reference, 0.25 m): of the work the
   loads do, plate bonds take 0.5-5 %, the frame/stiffener ties (springs to fixed world anchors) take 40-56 %,
@@ -32,16 +234,7 @@ Status: baseline results at 1596bde below; re-run against the physics fixes as t
 - Mass scaling is not harmless: the 120 kg inside case tears 67 m^2 unscaled vs 53 m^2 at x16 / x64 (side 13.8 vs
   7.2 m^2); x16 and x64 agree with each other, not with x1.
 
-### Related, outside this bench (for whoever owns game/src/blast)
-
-`game/src/blast/spec.js:59` onward (ported from this bench): the in-game patch around a hit spans
-Rp = clamp(2.5 W^(1/3), 3, 10) m along the hull, 0.75 Rp up/down (clipped at the draught), at most 6 m inboard,
-three inner decks and one bulkhead, with a fixed boundary. For 1200 kg and 5000 kg charges Rp is capped at 10 m, so
-plating beyond the patch is never simulated and stays pristine by construction, and the clamped patch edge acts as
-a rigid support. That is a likely source of "a 5000 kg charge leaves nearby plating pristine" in the game, on top of
-findings 1-3 below (in this bench's 24 m box, nothing within 8.5 m of a 5000 kg contact charge stays pristine).
-
-## Findings, ranked
+## v22 findings, ranked
 
 ### 1. The "plastic bending" term is a one-sided Laplacian spring (high)
 `blast.js:138-156` (setup), `451-463` (explicit), `545-557` (XPBD); `gpu.js:104-119`.
@@ -225,7 +418,7 @@ results depend on the frame rate.
 - Readouts: "max set" is the largest side displacement anywhere (grillage translation incl. elastic part at T1),
   not a dish; "side torn" includes crack-adjacent cells (9).
 
-## Hazards for the move to the whole ship (Burke)
+## v22: hazards for the move to the whole ship
 
 - Four plates and five spaces are hard-coded: `blast.js:54` (GP[5], OPEN[25]), `202`, `269` (cracks[4]), `285`, `348`,
   `363`, `592`, `642`; `gpu.js:22` (uCr[4], uCrA/uCrL[32]), `59` (uGP[5]), `60` (uPl[4]...), `73`, `107`, `137`.
@@ -241,7 +434,7 @@ results depend on the frame rate.
 - The ties (finding 2) anchor frames to the world: on a whole ship there is no "world" to anchor to; the frames have
   to become members.
 
-## The suite
+## v22 suite
 
 Open http://127.0.0.1:8771/game/concepts/blast/verify.html (full run ~3 min, most of it CPU reference runs);
 `?quick=1` skips the slow ones, `?only=energy,mesh` runs a subset; results in `window.VERIFY.results`. It loads the

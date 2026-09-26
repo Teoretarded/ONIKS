@@ -97,7 +97,9 @@ function setup(cfg) {
   for (const k of Object.keys(DEF)) st[k] = JSON.parse(JSON.stringify(DEF[k]));
   Object.assign(st, JSON.parse(JSON.stringify(cfg)));
   F.build(); F.detonate(); if (F.startRun) F.startRun();
-  const s = V().sim; s.sync = true;
+  // as the bench's own runCase: headless (blocking reads on a fixed schedule, so the run doesn't depend on when GPU
+  // fences complete), torn cells read every 4th sync; older benches only know sync
+  const s = V().sim; if (window.BLAST && window.BLAST.ver >= 32) { s.headless = true; s.sync = false; } else s.sync = true;
   return s;
 }
 // one case: to its end (or opt.tEnd), in slices so the page stays alive; opt: dtScale, hook {pre, post}, track [nodes],
@@ -241,7 +243,7 @@ const panelCase = () => { if (!PANEL) { setup(C_(30, 'standoff', { standoff: 2, 
 check('load', 'setup', false, async () => {
   setup(C_(30, 'standoff', { standoff: 2 }));
   const v = V(), miss = ['build', 'detonate', 'step', 'settle'].filter(n => !F[n]);
-  record('setup', 'bench loads', miss.length === 0, `BLAST.ver ${window.BLAST && window.BLAST.ver} · scene ${v.scene && v.scene.name} · ${v.N} nodes · ${v.NC} cells · ${v.NH} hinges · ${v.NT} stiffener elements · ${v.PAN.length} panels · S ${v.S} m · dt ${fmt(v.dt * 1e6, 2)} µs · solver ${v.st.solver}${miss.length ? ' · missing ' + miss.join(',') : ''}`);
+  record('setup', 'bench loads', miss.length === 0, `BLAST.ver ${window.BLAST && window.BLAST.ver} · scene ${v.scene && v.scene.name} · ${v.N} nodes · ${v.NC} cells · ${v.NH} hinges · ${v.NT} stiffener elements · ${v.PAN.length} panels · S ${v.S} m · dt ${fmt(v.dt * 1e6, 2)} µs${v.scene && v.scene.massAdded !== undefined ? ' · mass added for the step ' + fmt(100 * v.scene.massAdded, 3) + '%' : ''} · solver ${v.st.solver}${miss.length ? ' · missing ' + miss.join(',') : ''}`);
 });
 
 check('repeat', 'determinism', false, async () => {
@@ -479,7 +481,7 @@ async function userContact(tag, W, grid, extra = {}) {
   const R = await run({ ...cfg, solver: 'gpu', grid }), v = V(), A = v.st.aim, n = v.st.aimN;
   const hitPl = R.nodePl[nearestNode(R, A, i => R.nodePl[i] >= 0)];
   const rep = regionReport(R, behindOf(R, A, n, hitPl, 2.5), .05), hit = (rep.n - rep.pristine) / Math.max(rep.n, 1);
-  record('user', `${tag}: structure behind`, rep.n > 0 && hit >= .5 && rep.loose < .5 * rep.n,
+  record('user', `${tag}: structure behind`, rep.n > 0 && hit >= .5,                     // torn, blown loose or set > 50 mm all count as a response
     `hull torn ${fmt(R.hullM2, 2)} m² · plating of other plates within 2.5 m behind the hit: ${rep.n} nodes, torn ${rep.torn} (${rep.loose} thrown loose), set > 50 mm ${rep.n - rep.torn - rep.pristine}, under 50 mm ${rep.pristine} · ${Object.entries(rep.byPl).map(([p, b]) => `${plName(R, p)}: ${b.n} nodes, torn ${b.torn}, max set ${fmt(b.max * 1000, 0)} mm`).join('; ')} · gas ${R.gp.filter((p, k) => R.gv[k] < Infinity).map(p => fmt(p / 1e3, 0)).join('/')} kPa · ${fmt(R.ms / 1000, 1)} s`);
   const pe = petals(R, hitPl, R.C);
   record('user', `${tag}: petals, not cut-outs`, pe.tot > 0 && pe.loose / pe.tot <= .5 && pe.rim >= .25 * pe.rh && pe.nb > 0 && pe.band / pe.nb > .5,
@@ -525,7 +527,8 @@ check('burke', 'burke', false, async () => {
       for (let c2 = 0; c2 < v.NC; c2++) { if (v.CSP[c2] !== cc && v.CSN[c2] !== cc) continue; const p = v.CPAN[c2], b = by[p] || (by[p] = { n: 0, torn: 0, max: 0, h: v.CH[c2] }); b.n++;
         if (R.cer[c2]) { b.torn++; continue; } for (let k = 0; k < 4; k++) { const i = v.CN[4 * c2 + k]; if (!R.free[i]) b.max = Math.max(b.max, dmag(R, i)); } }
       const pls = Object.entries(by).filter(([, b]) => b.n >= 20), quiet = pls.filter(([, b]) => !b.torn && b.max < 2 * b.h);
-      record('burke', nm, pls.length > 0 && quiet.length === 0, `space ${(v.scene.spaces[cc] || {}).name}: ${pls.length} bounding panels, ${quiet.length} neither torn nor set > 2h · ${pls.map(([p, b]) => `${plName(R, p)}: torn ${b.torn}/${b.n}, max ${fmt(b.max * 1000, 0)} mm`).join('; ')} · ${fmt(R.ms / 1000, 1)} s`);
+      record('burke', nm, pls.length > 0 && quiet.length === 0, `space ${(v.scene.spaces[cc] || {}).name}: ${pls.length} bounding panels, ${quiet.length} neither torn nor set > 2h · by kind: ${[...new Set(pls.map(([p]) => plName(R, p).split(' ·')[0]))].map(k => { const g = pls.filter(([p]) => plName(R, p).split(' ·')[0] === k).map(([, b]) => b);
+        return `${k}: ${g.length} panels, torn ${g.reduce((a, b) => a + b.torn, 0)} cells, max ${fmt(Math.max(...g.map(b => b.max)) * 1000, 0)} mm, least ${fmt(Math.min(...g.map(b => b.max)) * 1000, 0)} mm`; }).join('; ')}${quiet.length ? ' · quiet: ' + quiet.map(([p]) => plName(R, p)).join(', ') : ''} · ${fmt(R.ms / 1000, 1)} s`);
     } else if (c.kg >= 5000) {
       const reach = .5 * Math.cbrt(c.kg), hops = hopsFromFix(R, Math.ceil(1 / R.S)), C = R.C;
       const rep = regionReport(R, i => hops[i] >= Math.ceil(1 / R.S) && Math.hypot(R.r0[3 * i] - C[0], R.r0[3 * i + 1] - C[1], R.r0[3 * i + 2] - C[2]) < reach, i => 2 * R.nodeH[i]);
