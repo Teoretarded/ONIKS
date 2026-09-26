@@ -141,7 +141,9 @@ void main(){
     float i11 = 1.0 / F11, i12 = -F12 / (F11 * F22), i22 = 1.0 / F22;
     float D11 = Fd11 * i11, D22 = Fd21 * i12 + Fd22 * i22, D12 = 0.5 * ((Fd11 * i12 + Fd12 * i22) + Fd21 * i11);
     float edot = sqrt(2.0 / 3.0 * (D11 * D11 + D22 * D22 + (D11 + D22) * (D11 + D22) + 2.0 * D12 * D12));
-    float rf = CSF(mi, edot, ep.w);
+    float vt = sqrt(s.x * s.x + s.y * s.y - s.x * s.y + 3.0 * s.z * s.z), wc = vt > 0.0 ? clamp(-(s.x + s.y) / vt, 0.0, 1.0) : 0.0;
+    float rmp = c10.z > 0.0 ? min(1.0, ep.w / c10.z) : 1.0;
+    float rf = CSF(mi, edot, ep.w) * (1.0 - (1.0 - c10.y) * wc * rmp);
     vec2 rm = retMap(s, ep.w, mA, rf);
     if (rm.x >= 0.0) {
       float g = rm.x; vec3 de = vec3(g * (2.0 * s.x - s.y) / 3.0, g * (2.0 * s.y - s.x) / 3.0, g * s.z);
@@ -263,7 +265,7 @@ void main(){
   float kk = mA.x * Ar / L0, fy = (mA.z + mA.w * st.z) * rf * Ar;
   float Lp = st.x, eb = st.z, fo = kk * (L - Lp);
   if (fo > fy) { float np = L - fy / kk; eb += abs(np - Lp) / L0; Lp = np; fo = fy; }
-  else if (fo < -fy) { float np = L + fy / kk; eb += abs(np - Lp) / L0; Lp = np; fo = -fy; }
+  else if (fo < -fy * t5.w) { float fc = fy * t5.w, np = L + fc / kk; eb += abs(np - Lp) / L0; Lp = np; fo = -fc; }
   fo += uBeta * kk * vr;
   vec3 F[9]; for (int z = 0; z < 9; z++) F[z] = vec3(0.0);
   F[0] = fo * u; F[1] = -fo * u;
@@ -499,7 +501,7 @@ export function createGPU(gl, M) {
     const ex = [M.CSP[c], M.CSN[c], M.CWET[c], M.CAR[c]];
     for (let t = 0; t < 4; t++) put(4 + t, [M.CTR[12 * c + 3 * t], M.CTR[12 * c + 3 * t + 1], M.CTR[12 * c + 3 * t + 2], ex[t]]);
     put(8, [0, 1, 2, 3].map(k => M.CHG[4 * c + k])); put(9, [M.CRC[3 * c] - O[0], M.CRC[3 * c + 1] - O[1], M.CRC[3 * c + 2] - O[2], M.CDB[c]]);
-    put(10, [M.CVIS()[c], 0, 0, 0]);
+    put(10, [M.CVIS()[c], M.CKC ? M.CKC[c] : 1, M.KCE || 0, 0]);
   });
   T.cs = tex(Wd * 11, CHr, csData());
   T.hs = wide(NH, 9, (k, put) => { const rv = z => [0, 1, 2].map(q => M.R0[3 * M.HN[6 * k + z] + q] - M.R0[3 * M.HN[6 * k] + q]);
@@ -509,7 +511,7 @@ export function createGPU(gl, M) {
     put(8, [M.HTL0[k], M.HTR[2 * k] >= 0 ? M.TFIB[M.HTR[2 * k]] : 0, 0, 0]); });
   T.ts = wide(NT, 7, (k, put) => { const a = M.TA[k], b = M.TB[k]; put(0, [a, b, M.TL0[k], M.TAR[k]]); put(1, [M.TMAT[k], M.TEF[k], M.TFIB[k], M.TCL[k]]);
     put(2, [M.TBA[k], M.TBB[k], M.TKB[k], M.TQB[k]]); put(3, [...[0, 1, 2].map(z => M.R0[3 * b + z] - M.R0[3 * a + z]), M.TB0[k]]);
-    put(4, [M.TSC[k], M.TPRV[k], M.TKS[k], M.TQS[k]]); put(5, [M.TS0[k], M.TCL2[k], M.TNXT[k], 0]); put(6, [0, 1, 2, 3].map(z => M.TQN[4 * k + z])); });
+    put(4, [M.TSC[k], M.TPRV[k], M.TKS[k], M.TQS[k]]); put(5, [M.TS0[k], M.TCL2[k], M.TNXT[k], M.TKC ? M.TKC[k] : 1]); put(6, [0, 1, 2, 3].map(z => M.TQN[4 * k + z])); });
   const pan = new Float32Array(5 * Math.max(1, M.PAN.length) * 4);
   M.PAN.forEach((P, q) => pan.set([P.o[0] - O[0], P.o[1] - O[1], P.o[2] - O[2], P.nu, ...P.U, P.Lu, ...P.V, P.Lv, ...P.n, P.off, P.nv, 0, 0, 0], 20 * q));
   T.pan = tex(5 * Math.max(1, M.PAN.length), 1, pan);

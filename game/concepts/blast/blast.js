@@ -93,6 +93,21 @@ const mul = (a, k) => [a[0] * k, a[1] * k, a[2] * k], dot = (a, b) => a[0] * b[0
 const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 const len = a => Math.hypot(a[0], a[1], a[2]), nrm = a => mul(a, 1 / (len(a) || 1));
 const glf = (m, t, le) => m.eg + m.ee * Math.min(.2, t / le);          // GL failure strain (valid for le/t >= 5)
+// compressive knock-down of a plating cell's membrane yield (1 = none): cells too coarse to fold stand in for the
+// folds they cannot form (see BENCH.md, grid convergence); st.kComp forces a value
+// Calibrated on the side-push case (120 kg at 5 m on the section: the deck edge folds at the side seam, which
+// needs cells ~ fold length / 10 to resolve): the knock-down that makes each grid give the 0.0156 m grid's side and
+// seam displacements, tabled against S / H, H = 0.9 (b^2 t)^(1/3) the fold length (b = 1 m); band 0.6 m from a seam.
+const KC_EPS = () => st.kEps === undefined || st.kEps === null ? .004 : st.kEps;
+const KC_TAB = [[.093, 1], [.186, .4], [.372, .15], [.744, .12], [1.49, .03]];
+function kcLaw(S_, t) {
+  const x = S_ / (.9 * Math.cbrt(t || .0065)), T = KC_TAB;
+  if (x <= T[0][0]) return 1; if (x >= T[T.length - 1][0]) return T[T.length - 1][1];
+  for (let i = 1; i < T.length; i++) if (x <= T[i][0]) { const f = Math.log(x / T[i - 1][0]) / Math.log(T[i][0] / T[i - 1][0]); return T[i - 1][1] + (T[i][1] - T[i - 1][1]) * f; }
+  return 1;
+}
+const compKnock = (m, t, le, ds) => { const band = st.kBand || .6; if (!(ds <= Math.max(le * .5, band))) return 1;
+  if (st.kComp) return st.kComp; return st.kLaw !== false ? kcLaw(S, t) : 1; };
 
 // tee stiffener with attached plating: stiffener area, composite I and plastic modulus, extreme fibre, web area
 function tee(s, be, tp) {
@@ -132,7 +147,8 @@ function rectPiece(P) {
     lines, open: P.open || [0, 0, 0, 0], planar: true };
 }
 function sceneBox() {
-  const XA = -15, XZ = 15, YB = -2, YI = 3.5, YD = 7, ZC = -10, XB = [-10, 5], ZF = -20;
+  // st.boxX / st.boxZ shrink the section (half-length along x, deck width) for grid studies; default 15 / 10 m
+  const bx = st.boxX || 15, XA = -bx, XZ = bx, YB = -2, YI = 3.5, YD = 7, ZC = -(st.boxZ || 10), XB = [-10, 5], ZF = -20;
   const P = (name, kind, o, U, V, h, mat, stiff, open) => ({ name, kind, p00: o, p10: add(o, U), p01: add(o, V), p11: add(add(o, U), V), h, mat, stiff, open });
   const sm = MATI[st.mat], mild = MATI.mild;
   const panels = [
@@ -144,9 +160,18 @@ function sceneBox() {
       [{ along: 'u', every: 1, sec: SEC.d2Long }, { along: 'v', every: 2.5, sec: SEC.d2Beam }], [1, 1, 0, 1]),
     P('platform deck', 2, [XA, YB, 0], [XZ - XA, 0, 0], [0, 0, ZC], .008, mild,
       [{ along: 'u', every: 1, sec: SEC.d2Long }, { along: 'v', every: 2.5, sec: SEC.d2Beam }], [1, 1, 0, 1]),
-    ...XB.map(x => P('bulkhead x=' + x, 3, [x, YB, 0], [0, 0, ZC], [0, YD - YB, 0], .0065, mild,
+    ...XB.filter(x => Math.abs(x) < bx).map(x => P('bulkhead x=' + x, 3, [x, YB, 0], [0, 0, ZC], [0, YD - YB, 0], .0065, mild,
       [{ along: 'v', every: .75, sec: SEC.bhdStiff }], [0, 1, 1, 0])),
   ];
+  // frame brackets: at every frame station where a deck meets the side, a square of the frame's web plate (legs
+  // ~ the frame's depth, on grid lines) joins the frame and the deck beam, above and below the deck. The frame's end
+  // reaction goes into the deck over the bracket's leg instead of at the one seam node (a point load into the deck,
+  // which crushes more on every finer grid: AUDIT A1/A1b)
+  if (st.brackets !== false) {
+    const fr = SEC.sideFrame, Lb = S * Math.max(1, Math.round((fr.hw + fr.tf) / S));
+    for (let x = XA + 2.5; x < XZ - 1e-6; x += 2.5) for (const [y, dirs] of [[YB, [1]], [YI, [-1, 1]], [YD, [-1]]]) for (const dy of dirs)
+      panels.push(P('bracket', 3, [x, y, 0], [0, 0, -Lb], [0, dy * Lb, 0], fr.tw, sm, [], [0, 0, 0, 0]));
+  }
   const xb = [-25, XB[0], XB[1], 20], yb = [YB - 5, YB, YI, YD], names = ['hold', 'lower', 'upper'], fa = ['fwd', 'mid', 'aft'];
   const spaces = [];
   for (let iy = 0; iy < 3; iy++) for (let ix = 0; ix < 3; ix++) {
@@ -161,7 +186,7 @@ function sceneBox() {
     return iy * 3 + ix;
   };
   return { name: 'box', pieces: panels.map(rectPiece), spaces, OUT, spaceAt, waterline: 0, aimDefault: [0, 2.2, 0], aimNDefault: [0, 0, 1],
-    cam: { tgt: [0, 2.5, -.5], dist: 26 }, aimOK: p => p[1] > .3, snap: false, vents: [], isCut: null };
+    cam: { tgt: [0, 2.5, -.5], dist: 26 }, aimOK: p => p[1] > .3, snap: false, vents: [], isCut: null, brackets: st.brackets !== false };
 }
 
 /* ---- a single clamped plate (2.5 x 0.75 m, the panel between frames and longitudinals) for the Nurick-Martin check */
@@ -316,7 +341,7 @@ let NC = 0, CN, CPAN, CH, CMAT, CEF, CSP, CSN, CWET, CAR, CTR, CHG, CDB, CVIS, C
 // hinges: 6 nodes, 2 cells, plate stiffness/moment, stiffener stiffness/moment, rest angle, lever, trusses, state
 let NH = 0, HEL, HLN, HTL0, HTPS, HN, HC, HKP, HMP, HKS, HMS, HT0, HDB, HTR, HHP, HMAT, HTP, HTH, HSAME;
 // trusses (stiffener axial members)
-let NT = 0, TA, TB, TL0, TAR, TMAT, TEF, TFIB, THG, TLP, TFL, TEB, TKIND, TBA, TBB, TSC, TCL, TCL2, TQN, TPRV, TNXT, TKB, TQB, TB0, TKS, TQS, TS0, TBP, TSP, TMM, emapRef = null;
+let CKC = null, CSD = null, TKC = null, seamDist = () => Infinity, NT = 0, TA, TB, TL0, TAR, TMAT, TEF, TFIB, THG, TLP, TFL, TEB, TKIND, TBA, TBB, TSC, TCL, TCL2, TQN, TPRV, TNXT, TKB, TQB, TB0, TKS, TQS, TS0, TBP, TSP, TMM, emapRef = null;
 // pieces (contact maps)
 let PAN = [];
 const TRI = [[0, 1, 2], [0, 2, 3], [0, 1, 3], [1, 2, 3]];
@@ -484,7 +509,7 @@ function build() {
   // reaction therefore enters the plate as a line load over d, not at the one seam node: a chain of in-plane ties
   // (the web end, area A_w) from the seam node d into the plate carries it (the deck beam there, if any, runs in
   // parallel). Without it a far hit crushed the deck at every frame's seam node (AUDIT A1b).
-  if (!st.noWebEnds) {
+  if (!st.noWebEnds && !scene.brackets) {
     const ncell = Array.from({ length: N0 }, () => []); for (let c = 0; c < cpan.length; c++) for (let z = 0; z < 4; z++) ncell[cn[4 * c + z]].push(c);
     const cnorm = c => { const q = [0, 1, 2, 3].map(z => cn[4 * c + z]), P = k => [pos[3 * q[k]], pos[3 * q[k] + 1], pos[3 * q[k] + 2]];
       return nrm(cross(sub(P(2), P(0)), sub(P(3), P(1)))); };
@@ -511,7 +536,7 @@ function build() {
               if (al > .95 && el > 1e-3 && al * el > bs) { bs = al * el; best = q; } } }
           if (best < 0) break;
           const key = EK(cur, best);
-          if (!wkey.has(key)) { wkey.add(key); const L = len(sub(P3(best), P3(cur))), A = sec.Aw;
+          if (!wkey.has(key)) { wkey.add(key); const L = len(sub(P3(best), P3(cur))), A = sec.Aw * (st.webEndK || 1);
             ta.push(cur); tb.push(best); tar.push(A); tmat.push(pieces[lr.pi].mat); tsec.push([sec, L]); tkind.push(1);
             mass[cur] += m.rho * A * L / 2; mass[best] += m.rho * A * L / 2; }
           dist += bs; cur = best;
@@ -537,7 +562,7 @@ function build() {
   NC = cpan.length; CN = new Int32Array(cn); CPAN = new Int32Array(cpan); CH = new Float64Array(ch); CMAT = new Uint8Array(cmat);
   CSP = new Int32Array(csp); CSN = new Int32Array(csn); CWET = new Float64Array(cwet);
   CAR = new Float64Array(NC); CEF = new Float64Array(NC); CTR = new Float64Array(12 * NC); CHG = new Int32Array(4 * NC).fill(-1); CDB = new Float64Array(NC);
-  CVIS = new Uint32Array(NC); CEP = new Float64Array(16 * NC); CER = new Uint8Array(NC); CTE = new Float64Array(NC).fill(-1);
+  CVIS = new Uint32Array(NC); CKC = new Float64Array(NC).fill(1); CEP = new Float64Array(16 * NC); CER = new Uint8Array(NC); CTE = new Float64Array(NC).fill(-1);
   CDM = new Float64Array(NC); CUT = new Float64Array(NC); CFD = new Float64Array(NC); CRC = new Float64Array(3 * NC); CNR = new Float64Array(3 * NC);
   for (let c = 0; c < NC; c++) {
     const q = [0, 1, 2, 3].map(k => CN[4 * c + k]), P = q.map(i => [R0[3 * i], R0[3 * i + 1], R0[3 * i + 2]]);
@@ -549,9 +574,27 @@ function build() {
     const av = mul(cross(sub(P[2], P[0]), sub(P[3], P[1])), .5);
     CAR[c] = len(av); CNR.set(nrm(av), 3 * c);
     CRC.set(mul(add(add(P[0], P[1]), add(P[2], P[3])), .25), 3 * c);
-    CEF[c] = glf(MATS[CMAT[c]], CH[c], Math.sqrt(CAR[c]));
+    CEF[c] = glf(MATS[CMAT[c]], CH[c], Math.sqrt(CAR[c])) * (st.efScale || 1);
     CDB[c] = Math.sqrt(CAR[c]);
     for (const i of q) NCON[i]++;
+  }
+  // seam band: cells within the fold length of a junction with a plate at an angle (where in-plane load enters a
+  // plate and a compressed plate folds first); their compressive yield is knocked down on grids too coarse to fold
+  {
+    const ncl = Array.from({ length: N }, () => []); for (let c = 0; c < NC; c++) for (let k = 0; k < 4; k++) ncl[CN[4 * c + k]].push(c);
+    const seam = []; for (let i = 0; i < N; i++) { const l = ncl[i]; let ok = false;
+      for (let a = 0; a < l.length && !ok; a++) for (let b = a + 1; b < l.length; b++) { const x = l[a], y = l[b];
+        if (Math.abs(CNR[3 * x] * CNR[3 * y] + CNR[3 * x + 1] * CNR[3 * y + 1] + CNR[3 * x + 2] * CNR[3 * y + 2]) < .7) { ok = true; break; } }
+      if (ok) seam.push(i); }
+    const hb = new Map(), HB = .5, hk = (x, y, z) => Math.floor(x / HB) + ',' + Math.floor(y / HB) + ',' + Math.floor(z / HB);
+    for (const i of seam) { const k = hk(R0[3 * i], R0[3 * i + 1], R0[3 * i + 2]); (hb.get(k) || hb.set(k, []).get(k)).push(i); }
+    CSD = new Float64Array(NC).fill(Infinity);
+    for (let c = 0; c < NC; c++) { const x = CRC[3 * c], y = CRC[3 * c + 1], z = CRC[3 * c + 2]; let d = Infinity;
+      for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (let e = -1; e <= 1; e++) { const l = hb.get((Math.floor(x / HB) + a) + ',' + (Math.floor(y / HB) + b) + ',' + (Math.floor(z / HB) + e)); if (!l) continue;
+        for (const i of l) d = Math.min(d, Math.hypot(R0[3 * i] - x, R0[3 * i + 1] - y, R0[3 * i + 2] - z)); }
+      CSD[c] = d; CKC[c] = compKnock(MATS[CMAT[c]], CH[c], Math.sqrt(CAR[c]), d); }
+    seamDist = (x, y, z) => { let d = Infinity; for (let p = -1; p <= 1; p++) for (let q = -1; q <= 1; q++) for (let e = -1; e <= 1; e++) { const l = hb.get((Math.floor(x / HB) + p) + ',' + (Math.floor(y / HB) + q) + ',' + (Math.floor(z / HB) + e)); if (!l) continue;
+      for (const i of l) d = Math.min(d, Math.hypot(R0[3 * i] - x, R0[3 * i + 1] - y, R0[3 * i + 2] - z)); } return d; };
   }
   // ---- 7. hinges: every edge shared by two or more cells, one hinge per pair of cells
   const hn = [], hc = [], hkp = [], hmp = [], ht0 = [], hdb = [], hhp = [], hmat = [], hsame = [], hOfEdge = new Map();
@@ -586,6 +629,9 @@ function build() {
     const [sec, L] = tsec[t], m = MATS[TMAT[t]];
     TEF[t] = glf(m, sec.tw, L); TFIB[t] = sec.c / Math.max(L, sec.d);
   }
+  // members in the seam band: their compressive (axial) yield too
+  TKC = new Float64Array(NT).fill(1);
+  for (let k = 0; k < NT; k++) { const a = TA[k], b = TB[k]; TKC[k] = compKnock(null, 0, TL0[k], seamDist(.5 * (R0[3 * a] + R0[3 * b]), .5 * (R0[3 * a + 1] + R0[3 * b + 1]), .5 * (R0[3 * a + 2] + R0[3 * b + 2]))); }
   // Stiffener bending as a shear-limited (Timoshenko-type) beam on the member's own line: bending measured as the
   // angle between the chords to the nodes m cells either side (base 2 m S ~ the section depth: a deep member cannot
   // bend over less than its depth), and transverse shear of each segment against the chord around it (G A_w), which
@@ -1199,7 +1245,10 @@ function cellPass(t, h) {
       const L11 = Fd11 * i11, L12r = Fd11 * i12 + Fd12 * i22, L21 = Fd21 * i11, L22 = Fd21 * i12 + Fd22 * i22;
       const D11 = L11, D22 = L22, D12 = .5 * (L12r + L21);
       const edot = Math.sqrt(2 / 3 * (D11 * D11 + D22 * D22 + (D11 + D22) ** 2 + 2 * D12 * D12));
-      const rf = csf(m, edot, eb);
+      // compression the cell cannot fold in: its yield is knocked down by the cell's factor (trial triaxiality weight)
+      const vt = Math.sqrt(st11 * st11 + st22 * st22 - st11 * st22 + 3 * st12 * st12), wc = vt > 0 ? Math.min(1, Math.max(0, -(st11 + st22) / vt)) : 0;
+      const e0 = KC_EPS(), rmp = e0 > 0 ? Math.min(1, eb / e0) : 1;             // softening after the fold starts (plastic strain e0)
+      const rf = csf(m, edot, eb) * (1 - (1 - CKC[c]) * wc * rmp);
       const pl = returnMap(SIG, eb, m, rf);
       const s11 = SIG[0], s22 = SIG[1], s12 = SIG[2];
       const vol = A0 * hh * fd;
@@ -1316,7 +1365,7 @@ function trussPass(t, h) {
     const kk = m.E * TAR[k] / L0, fy = (m.sy + m.H * TEB[k]) * rf * TAR[k];
     let f = kk * (L - TLP[k]);
     if (f > fy) { const np = L - fy / kk; TEB[k] += Math.abs(np - TLP[k]) / L0; if (EN) EN.plT += .5 * (f + fy) * Math.abs(np - TLP[k]); TLP[k] = np; f = fy; }
-    else if (f < -fy) { const np = L + fy / kk; TEB[k] += Math.abs(np - TLP[k]) / L0; if (EN) EN.plT += .5 * (fy - f) * Math.abs(np - TLP[k]); TLP[k] = np; f = -fy; }
+    else if (f < -fy * TKC[k]) { const fc = fy * TKC[k], np = L + fc / kk; TEB[k] += Math.abs(np - TLP[k]) / L0; if (EN) EN.plT += .5 * (fc - f) * Math.abs(np - TLP[k]); TLP[k] = np; f = -fc; }
     eel += .5 * f * f / kk;
     const fd = BETA * kk * vr; if (EN) EN.damp += fd * vr * h;
     const fa = f; f += fd;
@@ -1494,8 +1543,8 @@ function commonSync(t, torn) {
 
 /* ------------------------------------------------------------------ GPU solver glue */
 function gpuModel() {
-  return { N, NC, NH, NT, R0, M, WINV, AK, AF, AC, CN, CH, CMAT, CEF, CSP, CSN, CWET, CAR, CTR, CHG, CDB, CRC, CVIS: () => CVIS,
-    HN, HC, HKP, HMP, HKS, HMS, HT0, HDB, HTR, HHP, HMAT, HLN, HTL0, TBA, TBB, TSC, TCL, TCL2, TQN, TPRV, TNXT, TKB, TQB, TB0, TKS, TQS, TS0, TMM, TA, TB, TL0, TAR, TMAT, TEF, TFIB, THG, NCC, PAN, CMAP, MATS, TA1, S,
+  return { N, NC, NH, NT, R0, M, WINV, AK, AF, AC, CN, CH, CMAT, CEF, CKC, KCE: KC_EPS(), CSP, CSN, CWET, CAR, CTR, CHG, CDB, CRC, CVIS: () => CVIS,
+    HN, HC, HKP, HMP, HKS, HMS, HT0, HDB, HTR, HHP, HMAT, HLN, HTL0, TBA, TBB, TSC, TCL, TCL2, TQN, TPRV, TNXT, TKC, TKB, TQB, TB0, TKS, TQS, TS0, TMM, TA, TB, TL0, TAR, TMAT, TEF, TFIB, THG, NCC, PAN, CMAP, MATS, TA1, S,
     OUT: () => scene.OUT, csf, nspace: () => GV.length, BETA: () => BETA, U_MAX, RHO_W, C_W, P0, G, K_SHEAR };
 }
 let gpuT = 0;
@@ -2006,7 +2055,7 @@ function compare(a, r) {
 window.BLAST = { ver: 33, get backend() { return gpu ? gpu.kind || 'webgl' : null; }, webgpu: () => !!WG, PROF, st, runCase, runCaseAsync, compare, cam, build, detonate: () => { asyncRun = false; detonate(); startRun(); }, get sim() { return sim; }, energy, draw,
   stepN(n) { sim.headless = true; for (let k = 0; k < n && sim.t < sim.T1; k++) step(); return sim.t; },
   model: () => ({ N, NC, NH, NT, S, dt, X, V, R0, M, FREE, CN, CPAN, CH, CMAT, CEF, CSP, CSN, CER, CTE, CDM, CEP, CUT, CFD, CAR, CRC, CNR,
-    HN, HC, HKP, HMP, HKS, HMS, HT0, HTP, HTH, HDB, HLN, HTL0, HTPS, HTR, TBA, TBB, TSC, TCL, TCL2, TQN, TPRV, TNXT, TKB, TQB, TB0, TKS, TQS, TS0, TBP, TSP, TMM, TFIB, TA, TB, TL0, TLP, TFL, TAR, AK, AF, AC, PAN, GP, GV, OPEN, scene, MATS, EN }),
+    HN, HC, HKP, HMP, HKS, HMS, HT0, HTP, HTH, HDB, HLN, HTL0, HTPS, HTR, TBA, TBB, TSC, TCL, TCL2, TQN, TPRV, TNXT, TKC, CKC, CSD, TKB, TQB, TB0, TKS, TQS, TS0, TBP, TSP, TMM, TFIB, TA, TB, TL0, TLP, TFL, TAR, AK, AF, AC, PAN, GP, GV, OPEN, scene, MATS, EN }),
   pulse, kinneyPs, kinneyIs1, reflect, U_MEAN, U_MAX, tee, SEC,
   rawSteps(n) { const t0 = performance.now(); for (let k = 0; k < n; k++) gpu.step(sim.t, dt, 0); const t1 = performance.now(); gl.finish(); return [t1 - t0, performance.now() - t0]; },
   gpuProfile(n) { gpu.profile(true); for (let k = 0; k < n; k++) gpu.step(sim.t, dt, 0); gl.finish(); return new Promise(r => setTimeout(() => r(gpu.profile(false)), 300)); },
@@ -2060,6 +2109,26 @@ window.BLAST = { ver: 33, get backend() { return gpu ? gpu.kind || 'webgl' : nul
     else { for (let k = 0; k < n; k++) gpu.step(sim.t, dt, 0); gpu.readNodes(false, X, V, FREE); }
     const ms = performance.now() - t0; st.backend = keep; sim.external = false;
     return { backend: gpu.kind || 'webgl', N, NC, steps: n, ms: Math.round(ms), stepsPerS: Math.round(n / ms * 1000), usPerStep: +(ms / n * 1000).toFixed(1), errors: gpu.errors || [] };
+  },
+  // displacements (mm, along -aimN) at the nodes nearest `pts` at the given times, then at the run's end; headless
+  // (reproducible); cfg as runCase; also members failed and cells torn at the end
+  async probe(cfg, times = [], pts = [], stopAt = Infinity) {
+    const keep = { ...st }; Object.assign(st, { relaxAt: 0, beamM: 0, efScale: 1, webEndK: 1, boxX: 0, boxZ: 0, brackets: true, kComp: 0, kBand: 0, kEps: null, kLaw: true, backend: 'webgl' }, cfg);
+    const wg = st.backend === 'webgpu' && !!WG;                // WebGPU: torn cells read asynchronously (fast, not bit-reproducible)
+    build(); asyncRun = wg; detonate(); startRun(); const s = sim; s.headless = !wg; s.external = true;
+    const n = cfg.probeDir || st.aimN, near = p => { let bi = 0, bd = 1e18; for (let i = 0; i < N; i++) { const d = (R0[3 * i] - p[0]) ** 2 + (R0[3 * i + 1] - p[1]) ** 2 + (R0[3 * i + 2] - p[2]) ** 2; if (d < bd) { bd = d; bi = i; } } return bi; };
+    const ids = pts.map(near), rec = [];
+    const read = async lab => { if (s.solver === 'gpu') { if (wg) await gpu.flush(); gpu.readNodes(false, X, V, FREE); } rec.push([lab, ...ids.map(i => +(-((X[3 * i] - R0[3 * i]) * n[0] + (X[3 * i + 1] - R0[3 * i + 1]) * n[1] + (X[3 * i + 2] - R0[3 * i + 2]) * n[2]) * 1000).toFixed(1))]); };
+    const t0 = performance.now();
+    for (const T of [...times, stopAt]) {
+      while (s.t < Math.min(T, s.T1)) { for (let k = 0; k < 100 && s.t < Math.min(T, s.T1); k++) step(); if (wg) { gpu.submit(); await gpu.pace(); } await tick0(); }
+      await read(T === Infinity ? 'end ' + (s.t * 1e3).toFixed(0) : +(s.t * 1e3).toFixed(1));
+    }
+    if (wg) await finishWG();
+    s.phase = 2; settle();
+    let tf = 0; for (let k = 0; k < NT; k++) tf += TFL[k]; let torn = 0; for (let c = 0; c < NC; c++) if (CER[c]) torn += CAR[c];
+    const res = { grid: st.grid, NC, dt: +(dt * 1e6).toFixed(2), rec, membersFailed: tf, tornM2: +torn.toFixed(2), ms: Math.round(performance.now() - t0) };
+    Object.assign(st, keep); return res;
   },
   // a heavy WebGL scene rendering alongside (worker + OffscreenCanvas, 1920x1080, `iters` per pixel, ~60 Hz): the
   // GPU process busy as when the game renders (`draws` small draw calls a frame load its command decoding); stress(0) stops it. Returns the worker's frame times.

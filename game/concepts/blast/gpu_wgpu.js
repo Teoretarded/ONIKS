@@ -161,7 +161,9 @@ fn retMap(sp: ptr<function, vec3f>, eb: f32, mA: vec4f, rf: f32) -> vec2f {
       let i11 = 1.0 / F11; let i12 = -F12 / (F11 * F22); let i22 = 1.0 / F22;
       let D11 = Fd11 * i11; let D22 = Fd21 * i12 + Fd22 * i22; let D12 = 0.5 * ((Fd11 * i12 + Fd12 * i22) + Fd21 * i11);
       let edot = sqrt(2.0 / 3.0 * (D11 * D11 + D22 * D22 + (D11 + D22) * (D11 + D22) + 2.0 * D12 * D12));
-      let rf = CSF(mi, edot, ep.w);
+      let vt = sqrt(s.x * s.x + s.y * s.y - s.x * s.y + 3.0 * s.z * s.z); var wc = 0.0; if (vt > 0.0) { wc = clamp(-(s.x + s.y) / vt, 0.0, 1.0); }
+      var rmp = 1.0; if (c10.z > 0.0) { rmp = min(1.0, ep.w / c10.z); }
+      let rf = CSF(mi, edot, ep.w) * (1.0 - (1.0 - c10.y) * wc * rmp);
       let rm = retMap(&s, ep.w, mA, rf);
       if (rm.x >= 0.0) {
         let g = rm.x; let de = vec3f(g * (2.0 * s.x - s.y) / 3.0, g * (2.0 * s.y - s.x) / 3.0, g * s.z);
@@ -282,7 +284,7 @@ fn dAe(u: vec3f, v: vec3f) -> vec3f { let cx = cross(u, v); let s = dot(EX, cx);
     let kk = mA.x * Ar / L0; let fy = (mA.z + mA.w * st.z) * rf * Ar;
     var Lp = st.x; var eb = st.z; var fo = kk * (L - Lp);
     if (fo > fy) { let np = L - fy / kk; eb += abs(np - Lp) / L0; Lp = np; fo = fy; }
-    else if (fo < -fy) { let np = L + fy / kk; eb += abs(np - Lp) / L0; Lp = np; fo = -fy; }
+    else if (fo < -fy * t5.w) { let fc = fy * t5.w; let np = L + fc / kk; eb += abs(np - Lp) / L0; Lp = np; fo = -fc; }
     fo += KC.s0.x * kk * vr;
     F[0] = fo * u; F[1] = -fo * u;
     var tbp = st.w; var tsp = st.y;
@@ -504,7 +506,7 @@ export function createWGPU(dev, M, opt = {}) {
     const ex = [M.CSP[c], M.CSN[c], M.CWET[c], M.CAR[c]];
     for (let t = 0; t < 4; t++) p(4 + t, [M.CTR[12 * c + 3 * t], M.CTR[12 * c + 3 * t + 1], M.CTR[12 * c + 3 * t + 2], ex[t]]);
     p(8, [0, 1, 2, 3].map(k => M.CHG[4 * c + k])); p(9, [M.CRC[3 * c] - O[0], M.CRC[3 * c + 1] - O[1], M.CRC[3 * c + 2] - O[2], M.CDB[c]]);
-    p(10, [M.CVIS()[c], 0, 0, 0]); } };
+    p(10, [M.CVIS()[c], M.CKC ? M.CKC[c] : 1, M.KCE || 0, 0]); } };
   fillCS();
   for (let k = 0; k < NH; k++) { const p = (t, v) => put(L.O_HS, k, 9, t, v);
     const rv = z => [0, 1, 2].map(q => M.R0[3 * M.HN[6 * k + z] + q] - M.R0[3 * M.HN[6 * k] + q]);
@@ -515,7 +517,7 @@ export function createWGPU(dev, M, opt = {}) {
   for (let k = 0; k < NT; k++) { const p = (t, v) => put(L.O_TS, k, 7, t, v), a = M.TA[k], b = M.TB[k];
     p(0, [a, b, M.TL0[k], M.TAR[k]]); p(1, [M.TMAT[k], M.TEF[k], M.TFIB[k], M.TCL[k]]);
     p(2, [M.TBA[k], M.TBB[k], M.TKB[k], M.TQB[k]]); p(3, [...[0, 1, 2].map(z => M.R0[3 * b + z] - M.R0[3 * a + z]), M.TB0[k]]);
-    p(4, [M.TSC[k], M.TPRV[k], M.TKS[k], M.TQS[k]]); p(5, [M.TS0[k], M.TCL2[k], M.TNXT[k], 0]); p(6, [0, 1, 2, 3].map(z => M.TQN[4 * k + z])); }
+    p(4, [M.TSC[k], M.TPRV[k], M.TKS[k], M.TQS[k]]); p(5, [M.TS0[k], M.TCL2[k], M.TNXT[k], M.TKC ? M.TKC[k] : 1]); p(6, [0, 1, 2, 3].map(z => M.TQN[4 * k + z])); }
   M.PAN.forEach((P, q) => stat.set([P.o[0] - O[0], P.o[1] - O[1], P.o[2] - O[2], P.nu, ...P.U, P.Lu, ...P.V, P.Lv, ...P.n, P.off, P.nv, 0, 0, 0], 4 * (L.O_PAN + 5 * q)));
   for (let k = 0; k < NCM; k++) stat[4 * (L.O_CMAP + k)] = M.CMAP[k];
   stat.set(flat, 4 * L.O_ADJ);
