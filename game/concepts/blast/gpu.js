@@ -21,7 +21,8 @@ uniform sampler2D uPos, uVel, uNS;              // displacement + free flag, vel
 vec3 XR(int i) { return texelFetch(uNS, ATW(i, 5, 1), 0).xyz + texelFetch(uPos, AT(i), 0).xyz; }
 vec3 UU(int i) { return texelFetch(uPos, AT(i), 0).xyz; }
 vec3 VV(int i) { return texelFetch(uVel, AT(i), 0).xyz; }
-uniform vec4 uMatA[8], uMatB[8];                // (E, nu, sy, H), (D, q, rho, -)
+uniform vec4 uMatA[8], uMatB[8], uMatC[8];      // (E, nu, sy, H), (D, q, rho, -), (D, q at large strain, strain for them, -)
+float CSF(int mi, float ed, float ep) { vec4 b = uMatB[mi], c = uMatC[mi]; float f = min(1.0, ep / c.z); return 1.0 + pow(min(ed, 1e4) / mix(b.x, c.x, f), 1.0 / mix(b.y, c.y, f)); }
 uniform float uBeta, uT, uH;
 `;
 
@@ -54,7 +55,7 @@ void main(){
   vec3 v1 = 0.5 * (VV(a1) + VV(b1)), v2 = 0.5 * (VV(a2) + VV(b2));
   float thd = dot(u1, v1) + dot(u2, v2) + dot(u3, VV(i3)) + dot(u4, VV(i4));
   int mi = int(h4.x); vec4 mB = uMatB[mi];
-  float edot = min(1e4, abs(thd) * h3.w / (2.0 * h3.z)), rf = 1.0 + pow(edot / mB.x, 1.0 / mB.y);
+  float edot = abs(thd) * h3.w / (2.0 * h3.z), rf = CSF(mi, edot, abs(st.x) * h3.w / (2.0 * h3.z));
   float ut = min(1.0, 0.5 * (s1.w + s2.w));
   bool sf = h3.x < 0.0 || (texelFetch(uTSt, AT(int(h3.x)), 0).y < 0.5 && texelFetch(uTSt, AT(int(h3.y)), 0).y < 0.5);
   float kk = h2.x + (sf ? h2.z : 0.0), cap = h2.y * rf * (1.0 - ut * ut) + (sf ? h2.w * rf : 0.0);
@@ -140,7 +141,7 @@ void main(){
     float i11 = 1.0 / F11, i12 = -F12 / (F11 * F22), i22 = 1.0 / F22;
     float D11 = Fd11 * i11, D22 = Fd21 * i12 + Fd22 * i22, D12 = 0.5 * ((Fd11 * i12 + Fd12 * i22) + Fd21 * i11);
     float edot = sqrt(2.0 / 3.0 * (D11 * D11 + D22 * D22 + (D11 + D22) * (D11 + D22) + 2.0 * D12 * D12));
-    float rf = 1.0 + pow(min(edot, 1e4) / mB.x, 1.0 / mB.y);
+    float rf = CSF(mi, edot, ep.w);
     vec2 rm = retMap(s, ep.w, mA, rf);
     if (rm.x >= 0.0) {
       float g = rm.x; vec3 de = vec3(g * (2.0 * s.x - s.y) / 3.0, g * (2.0 * s.y - s.x) / 3.0, g * s.z);
@@ -227,7 +228,7 @@ void main(){
   int a = int(t0.x), b = int(t0.y); float L0 = t0.z, Ar = t0.w;
   vec3 d = t3.xyz + UU(b) - UU(a); float L = length(d); vec3 u = d / L;
   int mi = int(t1.x); vec4 mA = uMatA[mi], mB = uMatB[mi];
-  float vr = dot(VV(b) - VV(a), u), rf = 1.0 + pow(min(1e4, abs(vr) / L0) / mB.x, 1.0 / mB.y);
+  float vr = dot(VV(b) - VV(a), u), rf = CSF(mi, abs(vr) / L0, st.z);
   float kk = mA.x * Ar / L0, fy = (mA.z + mA.w * st.z) * rf * Ar;
   float Lp = st.x, eb = st.z, fo = kk * (L - Lp);
   if (fo > fy) { float np = L - fy / kk; eb += abs(np - Lp) / L0; Lp = np; fo = fy; }
@@ -414,12 +415,12 @@ export function createGPU(gl, M) {
   const TQ = gl.getExtension('EXT_disjoint_timer_query_webgl2'); let prof = null; const pending = [];
   const tq = name => { if (!prof || !TQ) return; if (prof.q) gl.endQuery(TQ.TIME_ELAPSED_EXT); const q = gl.createQuery(); gl.beginQuery(TQ.TIME_ELAPSED_EXT, q); prof.q = q; pending.push([name, q]); };
   const tqEnd = () => { if (prof && prof.q) { gl.endQuery(TQ.TIME_ELAPSED_EXT); prof.q = null; } };
-  const matA = new Float32Array(32), matB = new Float32Array(32);
-  M.MATS.forEach((m, i) => { matA.set([m.E, m.nu, m.sy, m.H], 4 * i); matB.set([m.D, m.q, m.rho, 0], 4 * i); });
+  const matA = new Float32Array(32), matB = new Float32Array(32), matC = new Float32Array(32);
+  M.MATS.forEach((m, i) => { matA.set([m.E, m.nu, m.sy, m.H], 4 * i); matB.set([m.D, m.q, m.rho, 0], 4 * i); matC.set([m.Du, m.qu, m.eu, 0], 4 * i); });
   const S0 = new Float32Array(128), S1 = new Float32Array(128), S2 = new Float32Array(128), S3 = new Float32Array(128), S4 = new Float32Array(128);
   let nsrc = 0; const gpu4 = new Float32Array(128);
   const bind = (p, name, t, unit) => { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, t); gl.uniform1i(p.u[name], unit); };
-  const common = (p, t, h) => { if (p.u.uMatA) gl.uniform4fv(p.u.uMatA, matA); if (p.u.uMatB) gl.uniform4fv(p.u.uMatB, matB);
+  const common = (p, t, h) => { if (p.u.uMatA) gl.uniform4fv(p.u.uMatA, matA); if (p.u.uMatB) gl.uniform4fv(p.u.uMatB, matB); if (p.u.uMatC) gl.uniform4fv(p.u.uMatC, matC);
     if (p.u.uBeta) gl.uniform1f(p.u.uBeta, M.BETA()); if (p.u.uT) gl.uniform1f(p.u.uT, t); if (p.u.uH) gl.uniform1f(p.u.uH, h); };
 
   function upload() {

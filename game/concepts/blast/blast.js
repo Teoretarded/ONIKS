@@ -56,12 +56,15 @@ const U_MAX = Math.sqrt(10 * E_G / 3), U_MEAN = .75 * U_MAX;   // homologous pro
 const RHO_TNT = 1600, K_SHEAR = 1.0, LC_BOUND = 2.0;
 // materials: E, yield, linear hardening H, Cowper-Symonds D (1/s) and q, GL failure-strain constants
 const MATS = [
-  { key: 'hsla', name: 'HSLA-80', rho: 7850, E: 207e9, nu: .3, sy: 550e6, H: 1.0e9, D: 3200, q: 5, eg: .056, ee: .54 },
-  { key: 'hts', name: 'HTS', rho: 7850, E: 204e9, nu: .3, sy: 324e6, H: .9e9, D: 400, q: 5, eg: .056, ee: .54 },
-  { key: 'mild', name: 'mild steel', rho: 7850, E: 200e9, nu: .3, sy: 235e6, H: .9e9, D: 40.4, q: 5, eg: .056, ee: .54 },
-  { key: 'alu', name: 'Al 5456', rho: 2660, E: 70e9, nu: .33, sy: 228e6, H: .5e9, D: 6500, q: 4, eg: .034, ee: .32 },
+  { key: 'hsla', name: 'HSLA-80', rho: 7850, E: 207e9, nu: .3, sy: 550e6, H: 1.0e9, D: 3200, q: 5, Du: 3200, qu: 5, eu: .15, eg: .056, ee: .54 },
+  { key: 'hts', name: 'HTS', rho: 7850, E: 204e9, nu: .3, sy: 324e6, H: .9e9, D: 40.4, q: 5, Du: 6844, qu: 3.91, eu: .2, eg: .056, ee: .54 },
+  { key: 'mild', name: 'mild steel', rho: 7850, E: 200e9, nu: .3, sy: 235e6, H: .9e9, D: 40.4, q: 5, Du: 6844, qu: 3.91, eu: .2, eg: .056, ee: .54 },
+  { key: 'alu', name: 'Al 5456', rho: 2660, E: 70e9, nu: .33, sy: 228e6, H: .5e9, D: 6500, q: 4, Du: 6500, qu: 4, eu: .1, eg: .034, ee: .32 },
 ];
 const MATI = Object.fromEntries(MATS.map((m, i) => [m.key, i]));
+// Cowper-Symonds rate factor with the constants moving from their initial-yield values to their large-strain values
+// as plastic strain grows (Jones 1989, Structural Impact 2012 sec. 8.4: mild steel D 40.4 -> 6844 /s, q 5 -> 3.91)
+const csf = (m, ed, ep) => { const f = Math.min(1, ep / m.eu), D = m.D + (m.Du - m.D) * f, q = m.q + (m.qu - m.q) * f; return 1 + Math.pow(Math.min(ed, 1e4) / D, 1 / q); };
 // warheads: fill as TNT equivalent, casing mass, typical fragment mass (approximate public figures)
 const ROUNDS = [
   ['30 mm HE', .05, .3, .002], ['76 mm HE', .75, 5.5, .008], ['127 mm HE', 3.2, 28, .015], ['Hellfire', 5, 4, .005],
@@ -76,7 +79,7 @@ const SEC = {
   bhdStiff: { hw: .15, tw: .006, bf: .075, tf: .008 },
 };
 
-const st = { scene: 'box', grid: .125, solver: 'gpu', spd: 0, src: 'charge', round: 7, kg: 120, casing: 130, fuze: 'contact',
+const st = { plate: null, scene: 'box', grid: .125, solver: 'gpu', spd: 0, src: 'charge', round: 7, kg: 120, casing: 130, fuze: 'contact',
   standoff: 3, mat: 'hsla', h: 10, view: 0, msc: 1, frags: true, aim: [0, 2.2, 0], aimN: [0, 0, 1] };
 
 /* ------------------------------------------------------------------ small helpers */
@@ -160,7 +163,7 @@ function sceneBox() {
 
 /* ---- a single clamped plate (2.5 x 0.75 m, the panel between frames and longitudinals) for the Nurick-Martin check */
 function scenePlate() {
-  const a = 2.5, b = .75, w = 2 * S;
+  const [a, b] = st.plate || [2.5, .75], w = 2 * S;
   const pc = rectPiece({ name: 'plate', kind: 0, p00: [-a / 2 - w, -b / 2 - w, 0], p10: [a / 2 + w, -b / 2 - w, 0], p01: [-a / 2 - w, b / 2 + w, 0], p11: [a / 2 + w, b / 2 + w, 0],
     h: st.h / 1000, mat: MATI[st.mat], stiff: [], open: [0, 0, 0, 0] });
   pc.sides = [0, 1]; pc.wet = false;
@@ -958,7 +961,7 @@ function hingePass(t, h) {
     const v2x = (V[3 * a2] + V[3 * b2]) / 2, v2y = (V[3 * a2 + 1] + V[3 * b2 + 1]) / 2, v2z = (V[3 * a2 + 2] + V[3 * b2 + 2]) / 2;
     const thd = u1x * v1x + u1y * v1y + u1z * v1z + u2x * v2x + u2y * v2y + u2z * v2z
       + u3x * V[3 * i3] + u3y * V[3 * i3 + 1] + u3z * V[3 * i3 + 2] + u4x * V[3 * i4] + u4y * V[3 * i4 + 1] + u4z * V[3 * i4 + 2];
-    const m = MATS[HMAT[k]], edot = Math.min(1e4, Math.abs(thd) * HHP[k] / (2 * HDB[k])), rf = 1 + Math.pow(edot / m.D, 1 / m.q);
+    const m = MATS[HMAT[k]], edot = Math.min(1e4, Math.abs(thd) * HHP[k] / (2 * HDB[k])), rf = csf(m, edot, Math.abs(HTP[k]) * HHP[k] / (2 * HDB[k]));
     const ut = Math.min(1, .5 * (CUT[c1] + CUT[c2]));
     const sf = HTR[2 * k] < 0 || (!TFL[HTR[2 * k]] && !TFL[HTR[2 * k + 1]]);
     const kk = HKP[k] + (sf ? HKS[k] : 0), cap = HMP[k] * rf * (1 - ut * ut) + (sf ? HMS[k] * rf : 0);
@@ -1045,7 +1048,7 @@ function cellPass(t, h) {
       const L11 = Fd11 * i11, L12r = Fd11 * i12 + Fd12 * i22, L21 = Fd21 * i11, L22 = Fd21 * i12 + Fd22 * i22;
       const D11 = L11, D22 = L22, D12 = .5 * (L12r + L21);
       const edot = Math.sqrt(2 / 3 * (D11 * D11 + D22 * D22 + (D11 + D22) ** 2 + 2 * D12 * D12));
-      const rf = 1 + Math.pow(Math.min(edot, 1e4) / m.D, 1 / m.q);
+      const rf = csf(m, edot, eb);
       const pl = returnMap(SIG, eb, m, rf);
       const s11 = SIG[0], s22 = SIG[1], s12 = SIG[2];
       const vol = A0 * hh * fd;
@@ -1125,7 +1128,7 @@ function trussPass(t, h) {
     const dx = X[3 * b] - X[3 * a], dy = X[3 * b + 1] - X[3 * a + 1], dz = X[3 * b + 2] - X[3 * a + 2], L = Math.hypot(dx, dy, dz);
     const ux = dx / L, uy = dy / L, uz = dz / L, L0 = TL0[k];
     const vr = (V[3 * b] - V[3 * a]) * ux + (V[3 * b + 1] - V[3 * a + 1]) * uy + (V[3 * b + 2] - V[3 * a + 2]) * uz;
-    const rf = 1 + Math.pow(Math.min(1e4, Math.abs(vr) / L0) / m.D, 1 / m.q);
+    const rf = csf(m, Math.abs(vr) / L0, TEB[k]);
     const kk = m.E * TAR[k] / L0, fy = (m.sy + m.H * TEB[k]) * rf * TAR[k];
     let f = kk * (L - TLP[k]);
     if (f > fy) { const np = L - fy / kk; TEB[k] += Math.abs(np - TLP[k]) / L0; if (EN) EN.plT += .5 * (f + fy) * Math.abs(np - TLP[k]); TLP[k] = np; f = fy; }
@@ -1243,7 +1246,7 @@ function commonSync(t, torn) {
 function gpuModel() {
   return { N, NC, NH, NT, R0, M, WINV, AK, AF, AC, CN, CH, CMAT, CEF, CSP, CSN, CWET, CAR, CTR, CHG, CDB, CRC, CVIS: () => CVIS,
     HN, HC, HKP, HMP, HKS, HMS, HT0, HDB, HTR, HHP, HMAT, TA, TB, TL0, TAR, TMAT, TEF, TFIB, THG, NCC, PAN, CMAP, MATS, TA1, S,
-    OUT: () => scene.OUT, nspace: () => GV.length, BETA: () => BETA, U_MAX, RHO_W, C_W, P0, G, K_SHEAR };
+    OUT: () => scene.OUT, csf, nspace: () => GV.length, BETA: () => BETA, U_MAX, RHO_W, C_W, P0, G, K_SHEAR };
 }
 let gpuT = 0;
 function stepGPU() {
@@ -1673,7 +1676,9 @@ requestAnimationFrame(draw);
 /* ------------------------------------------------------------------ bench API */
 function runCase(cfg) {
   const keep = { ...st };
-  Object.assign(st, cfg); build(); detonate(); startRun(); sim.sync = true;
+  Object.assign(st, cfg);
+  if (cfg.scene && !cfg.aim) { st.aim = cfg.scene === 'plate' ? [0, 0, 0] : cfg.scene === 'burke' && BURKE ? [0, 2.5, BURKE.halfBreadth(0, 2.5)] : [0, 2.2, 0]; st.aimN = [0, 0, 1]; }
+  build(); detonate(); startRun(); sim.sync = true;
   const t0 = performance.now(); let steps = 0;
   while (sim.t < sim.T1) { step(); steps++; }
   const cpu = performance.now() - t0; sim.cpu = cpu; sim.phase = 2; settle();
@@ -1686,6 +1691,14 @@ function runCase(cfg) {
       return { name: P.name, torn: +a.toFixed(2), maxDisp: +dmax.toFixed(3) }; }),
     ms: Math.round(cpu), steps, simMs: +(sim.t * 1000).toFixed(1), setMm: Math.round(sim.maxDef * 1000), free, shape, cellsTorn: Uint8Array.from(CER, v => v ? 1 : 0),
     energy: EN && sim.solver === 'cpu' ? energy() : null, gas: GV.map((v, k) => v < Infinity ? Math.round(GP[k]) : 0), sources: sim.SRC.length, holes: sim.holes.length };
+  if (scene.name === 'plate') {                      // Nurick-Martin: delta/h = 0.480 phi + 0.277, phi = I / (2 h^2 sqrt(B L rho sy))
+    const [a, b] = scene.dims, m = MATS[MATI[st.mat]], h = st.h / 1000; let I = 0;
+    for (let c = 0; c < NC; c++) { const x = CRC[3 * c], y = CRC[3 * c + 1]; if (Math.abs(x) > a / 2 || Math.abs(y) > b / 2) continue;
+      for (const s of sim.SRC) { if (s.kind === 2) continue; const p = pulse(s, [x, y, 0], [0, 0, 1]); if (p) I += (p.I + p.Ix) * p.g * CAR[c]; } }
+    const phi = I / (2 * h * h * Math.sqrt(a * b * m.rho * m.sy)); let ci = 0, bd = 1e9;
+    for (let i = 0; i < N; i++) { const d = Math.hypot(R0[3 * i], R0[3 * i + 1]); if (d < bd) { bd = d; ci = i; } }
+    res.nm = { I: Math.round(I), phi: +phi.toFixed(2), dNM: +(1000 * h * (.48 * phi + .277)).toFixed(1), dSim: +(1000 * Math.abs(X[3 * ci + 2] - R0[3 * ci + 2])).toFixed(1) };
+  }
   Object.assign(st, keep, { grid: cfg.grid ?? keep.grid });
   return res;
 }
