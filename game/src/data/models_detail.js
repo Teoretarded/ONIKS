@@ -88,6 +88,14 @@ function flat(m, st, T) {
   return out;
 }
 const cached = f => { let m = null; return () => K.cloneModel(m || (m = f())); };
+/* the HD kit's slab() (fins, tails, stabilators) samples one face only (the films draw back faces); the game drops
+   most back-face dots, so a canted tail seen from its unsampled side vanished. Aircraft plates get both faces */
+const slab1 = pr => pr && pr.t === 'hex' && pr.bottom !== true && pr.skip && pr.skip.length === 4 && [2, 3, 4, 5].every(k => pr.skip.includes(k));
+const twoPr = L => L && L.some(slab1) ? L.map(pr => slab1(pr) ? O(pr, { bottom: true }) : pr) : L;
+function twoSided(m) {
+  for (const p of m.parts) { p.prims = twoPr(p.prims); if (p.dyn) { const d = p.dyn; p.dyn = st => twoPr(d(st)); } }
+  return m;
+}
 /* a part's prims regrouped: [name, label, test(pr, centre)] first match wins, the last group takes the rest */
 function regroup(prims, groups) {
   const out = groups.map(() => []);
@@ -290,7 +298,7 @@ const faHookXf = st => about(R.x(-sat(st.hook || 0) * 62 * DEG), FA.HOOK);
 const faProbeXf = st => { const p = sat(st.probe || 0); return about(R.mul(R.y(.42 * p), R.x(-.16 * p)), FA.PROBE); };
 function fighterD() {
   const B = HD.fighter(), by = n => B.parts.find(p => p.name === n), g = FA_GEO(), noz = by('nozzles');
-  return {
+  return twoSided({
     name: 'fighter', L: 18.31, GEAR_H: FA.GEAR_H,
     parts: [
       { name: 'fuselage', label: 'F/A-18E Super Hornet', prims: by('fuselage').prims.concat(g.FUX) },
@@ -307,7 +315,7 @@ function fighterD() {
       { name: 'hook', label: 'Arresting hook', prims: g.HK, xf: faHookXf },
       { name: 'probe', label: 'Refuelling probe · retractable', prims: g.PR, xf: faProbeXf, show: st => (st.probe || 0) > .01 },
     ],
-  };
+  });
 }
 /* cutaway: sides split for the exploded view, the gear by leg; cockpit, radar, gun, engines, fuel as volumes */
 function faInside() {
@@ -509,7 +517,7 @@ function heloD() {
   const B = HD.helo(), g = HL_GEO(), trp = B.parts.find(p => p.name === 'tailrotor').prims;
   const hb = V.mad(HL.TR, HL.TRA, .05);
   const TRH = [lathe(V.mad(HL.TR, HL.TRA, -.02), HL.TRA, [[0, .09], [.18, .09]], fn({ n: 10, gen: 0, caps: true })), rod(hb, V.add(hb, [0, .3, 0]), .02, fn()), rod(hb, V.add(hb, [0, -.3, 0]), .02, fn())];
-  return {
+  return twoSided({
     name: 'helo', L: 19.76, HUB: HL.HC.slice(),
     parts: [
       { name: 'fuselage', label: 'MH-60R Seahawk', prims: g.FU },
@@ -520,7 +528,7 @@ function heloD() {
       { name: 'sensors', label: 'MTS FLIR · AN/APS-153 radome · AQS-22 dome', prims: g.SN },
       { name: 'pylons', label: 'Weapon pylons · Mk 54 ×2 · M299 · AGM-114 ×4', prims: hlPylons({}), dyn: hlPylons },
     ],
-  };
+  });
 }
 function hlInside() {
   const CB = [], EN = [], GB = [], TD = [], FC = [];
@@ -616,7 +624,7 @@ function e2Gear(st) {
 const E2_GEAR_PART = { name: 'gear', label: 'Landing gear · twin nose wheels · mains', prims: [], dyn: e2Gear, show: st => (st.gear || 0) > .01 };
 function aewD() {
   const M = K.aew();
-  return O(M, { GEAR_H: -E2G.Y0, parts: M.parts.map(p => O(p)).concat([O(E2_GEAR_PART, { prims: e2Gear({ gear: 1 }) })]) });
+  return twoSided(O(M, { GEAR_H: -E2G.Y0, parts: M.parts.map(p => O(p)).concat([O(E2_GEAR_PART, { prims: e2Gear({ gear: 1 }) })]) }));
 }
 /* the rotodome's structure (dome frame): radial ribs, ring frames, the rotary coupler and its drive */
 function e2DomeFrame() {
@@ -894,7 +902,7 @@ function droneD() {
   by('fuselage').prims = FU;
   by('prop').prims = drProp();
   const gim = by('gimbal'); gim.dyn = drGimbal; gim.prims = drGimbal({});
-  return O(m, { parts });
+  return twoSided(O(m, { parts }));
 }
 function droneCutD() {
   const C = K.cutBySides(droneD(), 'drone_cut', { wing: 'Wing panel' }), EN = [], FT = [], AV = [];

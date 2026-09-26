@@ -351,6 +351,7 @@ export async function createInspect(game, ctx) {
     const V = S;
     V.t += dt;
     const live = resolve(dt);
+    followWreck(V);
     if (!live && V.phase !== 'out') { close(); }
     if (V.lostT && V.phase !== 'out' && V.t - V.lostT > (V.kind === 'proj' ? 3.2 : 1.6)) close();
     // animations
@@ -439,6 +440,25 @@ export async function createInspect(game, ctx) {
     }
   }
 
+  /* an aircraft coming apart is drawn by the debris system (game/debris.js planeDown), its airframe tumbling off the
+     unit's own pose: the cutaway follows that airframe (the parts it shed left out) and the debris copy steps aside
+     (both were drawn, the debris one dimmed with the world: a ghost at another angle). null: not taken */
+  function wreckOf(V) {
+    const D = game.debris;
+    if (V.kind !== 'unit' || !D || !D.planes) return null;
+    const P = D.planes.get(V.id), o = P && P.b && P.b.o;
+    if (o && o.inst && (!V.wreck || V.wreck.inst !== o.inst)) V.wreck = { b: P.b, gen: P.gen, inst: o.inst };
+    const W = V.wreck;
+    if (W && (!W.b.on || W.b.gen !== W.gen)) V.wreck = null;
+    // posed once the debris system has drawn it
+    const d = V.wreck && V.wreck.inst;
+    return d && (d.T[0] !== 0 || d.T[1] !== 0 || d.T[2] !== 0) ? d : null;
+  }
+  function followWreck(V) {
+    const wk = wreckOf(V);
+    if (wk) { for (let i = 0; i < 9; i++) V.R0[i] = wk.R[i]; V.T0[0] = wk.T[0]; V.T0[1] = wk.T[1]; V.T0[2] = wk.T[2]; }
+  }
+
   /* ------------------------------------------------------------ 3D */
   function draw3d() {
     if (!S) return;
@@ -452,6 +472,9 @@ export async function createInspect(game, ctx) {
       if (mine.has(q)) continue;
       let k = V.dimK;
       if (hideId !== undefined && q.id === hideId) k = 0;
+      else if (V.wreck && q === V.wreck.inst && cutOn) k = 0;
+      // what it shed (the same model, other parts masked) stays lit with it, not a dimmed see-through double
+      else if (V.wreck && q.key === V.wreck.inst.key && q.id === undefined && q.T && Math.hypot(q.T[0] - V.T0[0], q.T[1] - V.T0[1], q.T[2] - V.T0[2]) < 400) k = 1;
       else if (hideProj && q.T && Math.abs(q.T[0] - hideProj[0]) < 1e-3 && Math.abs(q.T[1] - hideProj[1]) < 1e-3 && Math.abs(q.T[2] - hideProj[2]) < 1e-3) k = 0;
       if (k >= .999 && q._inspA === undefined) continue;
       const a = q.alpha === undefined ? 1 : q.alpha;
@@ -460,6 +483,8 @@ export async function createInspect(game, ctx) {
     }
     dimFx(V.kind === 'museum' ? 1 - V.worldK : lerp(1, V.kind === 'proj' ? .22 : .2, V.worldK), V);
     if (!cutOn) return;
+    // (the debris system drew this frame's wreck pose before this)
+    followWreck(V);
     // the instance
     for (let i = 0; i < 9; i++) d.R[i] = V.R0[i];
     d.T[0] = V.T0[0]; d.T[1] = V.T0[1]; d.T[2] = V.T0[2];
@@ -499,6 +524,7 @@ export async function createInspect(game, ctx) {
       const dm = dmg ? dmg[nm] || 0 : 0;
       if (dm >= .99) a *= .16;
       if (gone && gone(nm)) a = 0;
+      if (V.wreck && V.wreck.inst.partAlpha && V.wreck.inst.partAlpha[nm] === 0) a = 0;
       d.partAlpha[nm] = a;
     }
     R.draw(d);
