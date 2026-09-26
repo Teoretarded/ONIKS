@@ -140,7 +140,7 @@ export function hitSpec(o) {
   const gap = b => { let d = 0; for (let k = 0; k < 3; k++) d += Math.max(0, b[k] - C[k], C[k] - b[k + 3]) ** 2; return d; };
   comps.sort((p, q) => gap(p.b) - gap(q.b));
   return { S, plates, box, comps: comps.slice(0, 7), depth, frame: { O: a.slice(), X, Y, Z }, charge: { C, W, Wgas: o.Wgas || 0, vapour: o.vapour || 0, inside: C[2] < 0 },
-    wl: 0, kind: deck ? 'deck' : 'side', Rp };
+    wl: 0, wlLocal: -a[1], kind: deck ? 'deck' : 'side', Rp };
 }
 
 /* a cook-off: the module's contents at the nearest outer surface (the deck over it, else the side) */

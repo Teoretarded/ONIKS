@@ -25,6 +25,7 @@
 import { createClient } from './client.js';
 import { hitSpec, cookSpec, hullOf } from './spec.js';
 import { tntOf, S_GRID } from './phys.js';
+import { CASING } from './shell/model.js';
 import { attitudeM } from '../game/debris/math.js';
 
 const AW = 2048, AH = 2048;             // the skin atlas (RGBA16F texels: local displacement, flags + soot)
@@ -40,7 +41,10 @@ export async function createBlast(game) {
   let nextId = 1, client = null, mode = 'boot', err = null;
   const pending = [];                    // specs before the client is up
   const upQ = [];                        // atlas uploads to do in the frame
-  const cfg = { watchDist: 4000, upTexels: 6000, maxDots: 7000, on: true, gpuMs: 3, gpuMsSlow: 5 };
+  // solver: 'lattice' (the bench at 1596bde: the default, a hit in 0.2-4 s) or 'shell' (the bench's rewrite, 446c6a3:
+  // shell FE, ~100x the steps; ?blast=shell or ONIKS.game.blast.cfg.solver = 'shell')
+  const q0 = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('blast') : null;
+  const cfg = { watchDist: 4000, upTexels: 6000, maxDots: 7000, on: q0 !== 'off', gpuMs: 3, gpuMsSlow: 5, solver: q0 === 'shell' ? 'shell' : 'lattice' };
 
   /* ------------------------------------------------------------ the atlas */
   let tex = null;
@@ -94,6 +98,8 @@ export async function createBlast(game) {
     const spec = hitSpec({ u, H, a: o.a, n: o.n, din: o.din, zone: o.zone, tmm: o.tmm, fz: o.fz, standoff: o.standoff, W: o.fz === 'frag' ? W * .8 : W, deckY: o.deckY, halfB: o.halfB });
     if (!spec) return null;
     if (o.band > 0) spec.band = o.band;
+    const cs = CASING[o.kind] || [W * .8, .02];
+    Object.assign(spec.charge, { fill: W, Mc: cs[0], mf: cs[1] });
     return start(u, spec, o.S, { kind: o.kind, W, fz: o.fz });
   }
   /* a cook-off: the module's contents ({ he, prop, det, fuel, vapour }) -> patch or null */
@@ -104,11 +110,13 @@ export async function createBlast(game) {
     const W = (c.he || 0) * det, Wgas = (c.prop || 0) * .25 + (c.he || 0) * (1 - det) * .25;
     const spec = cookSpec({ u, H, mod, W, Wgas, vapour: c.vapour || 0, deckY: o.deckY, halfB: o.halfB, a: o.a, n: o.n });
     if (!spec) return null;
+    Object.assign(spec.charge, { fill: W, Mc: 0, mf: .03 });
     return start(u, spec, o.S, { kind: 'cookoff:' + mod.id, W, Wgas, vapour: c.vapour || 0 });
   }
   function start(u, spec, S, meta) {
     const id = nextId++;
     spec.watch = true;
+    spec.solver = client && client.mode === 'main' ? 'lattice' : cfg.solver;
     const B = { id, uid: u.id, S, spec, meta, t0: sim.t, state: 'wait', rects: [], inner: null, nIn: 0, tShow: 0, tSolve: 0, tearT: -1, final: null, res: null,
       depth: spec.depth || 4, heat: 0, lastT: -1, lastW: null, seed: (u.id * 131 + id * 7) % 997, info: null, ej: false };
     patches.set(id, B);

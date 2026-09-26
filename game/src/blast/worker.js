@@ -12,7 +12,14 @@
         { type: 'fail', id, err } · { type: 'stats', ... } */
 import { createRunner } from './runner.js';
 
-let runner = null, gl = null, fence = null;
+let runner = null, gl = null, fence = null, shell = null, shellP = null;
+const owner = new Map();                // patch id -> the runner solving it
+/* the shell solver (bench 446c6a3), loaded when a patch asks for it */
+async function shellRunner() {
+  if (shell) return shell;
+  if (!shellP) shellP = import('./shell/runner.js').then(m => (shell = m.createShellRunner(gl)));
+  return shellP;
+}
 const cfg = { us0: 8, usNode: .00125, minSteps: 8, maxSteps: 400, calibrate: false, fixedSteps: 0 };
 const perf = { slices: 0, skipped: 0, steps: 0, lastMs: 0 };
 function post(m) { const tr = m.transfer || []; delete m.transfer; self.postMessage(m, tr); }
@@ -41,6 +48,14 @@ function watchFence() {
   sent.done = true;
 }
 function slice(ms) {
+  // the shell solver takes its share of the frame first (its steps cost more; ~60 us + 5 ns a node)
+  if (shell && shell.busy) {
+    let nodes = 0; for (const R of shell.pats.values()) if (R.state === 'run') nodes += R.M.N;
+    const share = runner.busy ? ms * .5 : ms, st = Math.max(2, Math.min(200, Math.round(share * 1000 / (60 + .005 * nodes))));
+    try { for (const m of shell.pump(st)) post(m); } catch (e) { post({ type: 'error', err: String(e && e.stack || e) }); }
+    if (!runner.busy) { if (fence) { gl.deleteSync(fence); } fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0); gl.flush(); return; }
+    ms *= .5;
+  }
   if (fence) {
     if (gl.clientWaitSync(fence, 0, 0) === gl.TIMEOUT_EXPIRED) { perf.skipped++; if (cfg.calibrate) kcal = Math.min(12, kcal * 1.05); return; }
     gl.deleteSync(fence); fence = null;
@@ -69,11 +84,15 @@ self.onmessage = ev => {
   try {
     switch (m.type) {
       case 'tick': slice(m.ms || 3); break;
-      case 'hit': { const info = runner.submit(m.id, m.spec); post({ type: 'built', id: m.id, info }); break; }
-      case 'targets': for (const k in m.t) { const v = m.t[k]; if (Array.isArray(v)) runner.target(+k, v[0], v[1]); else runner.target(+k, v); } break;
-      case 'drop': runner.drop(m.id); break;
+      case 'hit':
+        if (m.spec.solver === 'shell') { shellRunner().then(R => { try { const info = R.submit(m.id, m.spec); owner.set(m.id, R); post({ type: 'built', id: m.id, info }); } catch (e) { post({ type: 'fail', id: m.id, err: String(e && e.stack || e) }); } }); break; }
+        { const info = runner.submit(m.id, m.spec); owner.set(m.id, runner); post({ type: 'built', id: m.id, info }); break; }
+      case 'targets': for (const k in m.t) { const v = m.t[k], R = owner.get(+k) || runner; if (Array.isArray(v)) R.target(+k, v[0], v[1]); else R.target(+k, v); } break;
+      case 'drop': { const R = owner.get(m.id) || runner; R.drop(m.id); owner.delete(m.id); break; }
       case 'cfg': Object.assign(cfg, m.cfg || {}); break;
-      case 'stats': post({ type: 'stats', cfg, perf, stats: runner.stats, pats: [...runner.pats.values()].map(R => ({ id: R.id, state: R.state, t: R.P.sim.t, T1: R.P.sim.T1, N: R.P.N, steps: R.steps, runMs: R.runMs })) }); break;
+      case 'stats': post({ type: 'stats', cfg, perf, stats: runner.stats, shell: shell && shell.stats,
+        pats: [...runner.pats.values()].map(R => ({ id: R.id, state: R.state, t: R.P.sim.t, T1: R.P.sim.T1, N: R.P.N, steps: R.steps, runMs: R.runMs }))
+          .concat(shell ? [...shell.pats.values()].map(R => ({ id: R.id, solver: 'shell', state: R.state, t: R.M.sim.t, T1: R.M.sim.T1, N: R.M.N, steps: R.steps, runMs: R.runMs })) : []) }); break;
     }
   } catch (e) { post({ type: 'fail', id: m.id, err: String(e && e.stack || e) }); }
 };
