@@ -290,7 +290,7 @@ let NC = 0, CN, CPAN, CH, CMAT, CEF, CSP, CSN, CWET, CAR, CTR, CHG, CDB, CVIS, C
 // hinges: 6 nodes, 2 cells, plate stiffness/moment, stiffener stiffness/moment, rest angle, lever, trusses, state
 let NH = 0, HEL, HLN, HTL0, HTPS, HN, HC, HKP, HMP, HKS, HMS, HT0, HDB, HTR, HHP, HMAT, HTP, HTH, HSAME;
 // trusses (stiffener axial members)
-let NT = 0, TA, TB, TL0, TAR, TMAT, TEF, TFIB, THG, TLP, TFL, TEB, TKIND;
+let NT = 0, TA, TB, TL0, TAR, TMAT, TEF, TFIB, THG, TLP, TFL, TEB, TKIND, TBA, TBB, TSC, TCL, TKB, TQB, TB0, TKS, TQS, TS0, TBP, TSP, TMM, emapRef = null;
 // pieces (contact maps)
 let PAN = [];
 const TRI = [[0, 1, 2], [0, 2, 3], [0, 1, 3], [1, 2, 3]];
@@ -410,7 +410,7 @@ function build() {
     const cL = Math.sqrt(m.E / (m.rho * (1 - m.nu * m.nu)));
     for (const q of [a, b]) anchors.push([q, m.E * h * (L / 2) / LC_BOUND, m.sy * h * L / 2, m.rho * cL * h * L / 2]);
   };
-  const emap = new Map();
+  const emap = new Map(); emapRef = emap;
   for (let c = 0; c < cpan.length; c++) for (let e = 0; e < 4; e++) {
     const k = EK(cn[4 * c + e], cn[4 * c + (e + 1) % 4]);
     let l = emap.get(k); if (!l) emap.set(k, l = []); l.push([c, e]);
@@ -514,39 +514,32 @@ function build() {
     const [sec, L] = tsec[t], m = MATS[TMAT[t]];
     TEF[t] = glf(m, sec.tw, L); TFIB[t] = sec.c / Math.max(L, sec.d);
   }
-  const nodeEdges = new Map();
-  for (const ek of hOfEdge.keys()) { const a = Math.floor(ek / 4194304), b = ek % 4194304; for (const q of [a, b]) { let l = nodeEdges.get(q); if (!l) nodeEdges.set(q, l = []); l.push(ek); } }
-  const tH = new Map();
+  // Stiffener bending as a shear-limited (Timoshenko-type) beam on the member's own line: bending measured as the
+  // angle between the chords to the nodes m cells either side (base 2 m S ~ the section depth: a deep member cannot
+  // bend over less than its depth), and transverse shear of each segment against the chord around it (G A_w), which
+  // carries the short-wave modes the base does not see. Smooth curvature: exact bending, no shear; m = 1: Euler-Bernoulli.
+  TBA = new Int32Array(NT).fill(-1); TBB = new Int32Array(NT).fill(-1); TSC = new Int32Array(NT).fill(-1); TCL = new Int32Array(NT).fill(-1);
+  TKB = new Float64Array(NT); TQB = new Float64Array(NT); TB0 = new Float64Array(NT); TKS = new Float64Array(NT); TQS = new Float64Array(NT); TS0 = new Float64Array(NT);
+  TBP = new Float64Array(NT); TSP = new Float64Array(NT); TMM = new Uint8Array(NT).fill(1);
   for (const lr of lineRec) {
-    const { sec, mat: m, h, spacing } = lr;
-    const D = m.E * h ** 3 / (12 * (1 - m.nu * m.nu));
+    const { sec, mat: m, h, spacing } = lr, L = lr.trusses.length, nd = lr.nodes;
+    const D = m.E * h ** 3 / (12 * (1 - m.nu * m.nu)), Gm = m.E / (2 * (1 + m.nu));
     // the stiffener's own share: composite tee minus the attached plating's bending (already in the plate hinges)
     const EIs = Math.max(0, m.E * sec.I - D * spacing), Mps = Math.max(0, m.sy * sec.Zp - m.sy * h * h / 4 * spacing);
-    for (let k = 1; k + 1 < lr.nodes.length; k++) {
-      const p = lr.nodes[k], a = lr.nodes[k - 1], b = lr.nodes[k + 1];
-      const t = nrm([R0[3 * b] - R0[3 * a], R0[3 * b + 1] - R0[3 * a + 1], R0[3 * b + 2] - R0[3 * a + 2]]);
-      const hs = [];
-      for (const ek of nodeEdges.get(p) || []) {
-        const e0 = Math.floor(ek / 4194304), e1 = ek % 4194304, q = e0 === p ? e1 : e0;
-        const ed = nrm([R0[3 * q] - R0[3 * p], R0[3 * q + 1] - R0[3 * p + 1], R0[3 * q + 2] - R0[3 * p + 2]]);
-        if (Math.abs(dot(ed, t)) > .3) continue;                        // an edge across the member: its hinges bend it
-        for (const hi of hOfEdge.get(ek)) { const c1 = HC[2 * hi], c2 = HC[2 * hi + 1];      // only the member's own plating
-          if (Math.abs(HT0[hi]) < .35 && Math.abs(dot([CNR[3 * c1], CNR[3 * c1 + 1], CNR[3 * c1 + 2]], lr.n)) > .9 && Math.abs(dot([CNR[3 * c2], CNR[3 * c2 + 1], CNR[3 * c2 + 2]], lr.n)) > .9) hs.push(hi); }
-      }
-      for (const hi of hs) {
-        const share = 1 / hs.length;
-        const nodes = [0, 1, 2, 3, 4, 5].map(z => HN[6 * hi + z]), rp = nodes.indexOf(p), ra = nodes.indexOf(a), rb = nodes.indexOf(b);
-        if (rp < 0 || ra < 0 || rb < 0 || HLN[hi] >= 0) continue;
-        HKS[hi] = share * EIs / (.5 * (TL0[lr.trusses[k - 1]] + TL0[lr.trusses[k]])); HMS[hi] = share * Mps;
-        HTR[2 * hi] = lr.trusses[k - 1]; HTR[2 * hi + 1] = lr.trusses[k]; HLN[hi] = rp + 6 * ra + 36 * rb;
-        { const E = sub([R0[3 * HN[6 * hi + 1]], R0[3 * HN[6 * hi + 1] + 1], R0[3 * HN[6 * hi + 1] + 2]], [R0[3 * HN[6 * hi]], R0[3 * HN[6 * hi] + 1], R0[3 * HN[6 * hi] + 2]]), eh = nrm(E);
-          const P = z => [R0[3 * z], R0[3 * z + 1], R0[3 * z + 2]], pr = v => sub(v, mul(eh, dot(v, eh)));
-          const e1 = pr(sub(P(p), P(a))), e2 = pr(sub(P(b), P(p))); HTL0[hi] = Math.atan2(dot(cross(e1, e2), eh), dot(e1, e2)); }
-        for (const tt of [lr.trusses[k - 1], lr.trusses[k]]) { let l = tH.get(tt); if (!l) tH.set(tt, l = []); if (!l.includes(hi)) l.push(hi); }
-      }
+    let Sb = 0; for (const t of lr.trusses) Sb += TL0[t]; Sb /= L;
+    const mm = Math.max(1, Math.min(st.beamM === 1 ? 1 : Math.round(.75 * sec.d / Sb), Math.floor(L / 2)));   // base 2 m S ~ 1.5 depth
+    for (let j = 0; j < L; j++) {
+      const t = lr.trusses[j]; TMM[t] = mm; TFIB[t] = sec.c / (mm * Sb);
+      const l = emapRef.get(EK(nd[j], nd[j + 1])) || [];
+      let cl = -1; for (const [c] of l) { if (Math.abs(dot([CNR[3 * c], CNR[3 * c + 1], CNR[3 * c + 2]], lr.n)) > .9) { cl = c; break; } }
+      if (cl < 0 && l.length) cl = l[0][0];
+      if (cl < 0) continue;
+      TCL[t] = cl;
+      if (j - mm >= 0 && j + mm <= L && EIs > 0) { TBA[t] = nd[j - mm]; TBB[t] = nd[j + mm]; TKB[t] = EIs / (mm * mm * Sb); TQB[t] = Mps / mm; }
+      if (mm >= 2 && j + 1 - mm >= 0 && j + mm <= L) { TSC[t] = nd[j + 1 - mm]; TBB[t] = nd[j + mm]; TKS[t] = Gm * sec.Aw * Sb; TQS[t] = Sb * m.sy / Math.sqrt(3) * sec.Aw; }
+      const g = memberAngles(t, R0); TB0[t] = g[0]; TS0[t] = g[1];
     }
   }
-  for (const [t, l] of tH) for (let k = 0; k < Math.min(4, l.length); k++) THG[4 * t + k] = l[k];
   for (let h = 0; h < NH; h++) HTP[h] = 0;
   // ---- stable step: dilatational wave across the smallest triangle altitude; stiffness-proportional damping
   // stable step, node by node (Gershgorin bound): the stiffness a node sees over its mass, dt_i = 1 / sqrt(k_i / m_i).
@@ -559,14 +552,17 @@ function build() {
       for (const z of TRI[t]) kn[CN[4 * c + z]] += k; } }
   for (let t = 0; t < NT; t++) { const k = MATS[TMAT[t]].E * TAR[t] / TL0[t]; kn[TA[t]] += k; kn[TB[t]] += k; }
   for (let k = 0; k < NH; k++) { const kk = HKP[k] / (HDB[k] * HDB[k]); for (let z = 0; z < 6; z++) kn[HN[6 * k + z]] += z < 2 ? kk : kk / 4;   // |du/dx|: 1/d on the hinge line, 1/(2d) at a flap node
-    if (HLN[k] >= 0) { const L = TL0[HTR[2 * k]], ks = HKS[k] / (L * L), nodes = [0, 1, 2, 3, 4, 5].map(z => HN[6 * k + z]);
-      kn[nodes[HLN[k] % 6]] += 4 * ks; kn[nodes[Math.floor(HLN[k] / 6) % 6]] += ks; kn[nodes[Math.floor(HLN[k] / 36)]] += ks; } }
+  }
+  for (let t = 0; t < NT; t++) { const Lm = TMM[t] * TL0[t];
+    if (TBA[t] >= 0) { const kb = TKB[t] / (Lm * Lm); kn[TA[t]] += 4 * kb; kn[TBA[t]] += kb; kn[TBB[t]] += kb; }
+    if (TSC[t] >= 0) { const ks = TKS[t] / (TL0[t] * TL0[t]), kc = TKS[t] / ((2 * TMM[t] - 1) * TL0[t]) ** 2; kn[TA[t]] += ks; kn[TB[t]] += ks; kn[TSC[t]] += kc; kn[TBB[t]] += kc; } }
   for (let i = 0; i < N; i++) kn[i] += AK[i];
   { let wi = 0, wr = 0; for (let i = 0; i < N; i++) if (WINV[i] > 0 && kn[i] / M[i] > wr) { wr = kn[i] / M[i]; wi = i; }
     const kc = new Float64Array(3);
     for (let c = 0; c < NC; c++) for (let t = 0; t < 4; t++) for (const z of TRI[t]) if (CN[4 * c + z] === wi) { const m = MATS[CMAT[c]], Ep = m.E / (1 - m.nu * m.nu), L12 = CTR[12 * c + 3 * t], px = CTR[12 * c + 3 * t + 1], py = CTR[12 * c + 3 * t + 2], A = .5 * L12 * py, amin = 2 * A / Math.max(L12, Math.hypot(px, py), Math.hypot(px - L12, py)); kc[0] += Ep * CH[c] / 2 * A / (amin * amin); }
-    for (let t = 0; t < NT; t++) if (TA[t] === wi || TB[t] === wi) kc[1] += MATS[TMAT[t]].E * TAR[t] / TL0[t];
-    for (let k = 0; k < NH; k++) for (let z = 0; z < 6; z++) if (HN[6 * k + z] === wi) kc[2] += (HKP[k] + HKS[k]) / (HDB[k] * HDB[k]) * (z < 2 ? 1 : .25);
+    for (let t = 0; t < NT; t++) { if (TA[t] === wi || TB[t] === wi) kc[1] += MATS[TMAT[t]].E * TAR[t] / TL0[t];
+      const Lm = TMM[t] * TL0[t]; if (TBA[t] >= 0) { const kb = TKB[t] / (Lm * Lm); if (TA[t] === wi) kc[1] += 4 * kb; if (TBA[t] === wi || TBB[t] === wi) kc[1] += kb; } }
+    for (let k = 0; k < NH; k++) for (let z = 0; z < 6; z++) if (HN[6 * k + z] === wi) kc[2] += HKP[k] / (HDB[k] * HDB[k]) * (z < 2 ? 1 : .25);
     scene.dtWorst = { node: wi, pos: [R0[3 * wi], R0[3 * wi + 1], R0[3 * wi + 2]], m: M[wi], frm: NFRM[wi], cells: kc[0], members: kc[1], hinges: kc[2], anchor: AK[wi], dt: Math.sqrt(M[wi] / kn[wi]) }; }
   const dti = []; for (let i = 0; i < N; i++) if (kn[i] > 0 && M[i] > 0 && WINV[i] > 0) dti.push(Math.sqrt(M[i] / kn[i]));
   dti.sort((a, b) => a - b);
@@ -1009,35 +1005,6 @@ function hingePass(t, h) {
     F[3 * b2] -= .5 * Mm * u2x; F[3 * b2 + 1] -= .5 * Mm * u2y; F[3 * b2 + 2] -= .5 * Mm * u2z;
     F[3 * i3] -= Mm * u3x; F[3 * i3 + 1] -= Mm * u3y; F[3 * i3 + 2] -= Mm * u3z;
     F[3 * i4] -= Mm * u4x; F[3 * i4 + 1] -= Mm * u4y; F[3 * i4 + 2] -= Mm * u4z;
-    // the stiffener crossing this hinge: its own bending, the angle between its two segments (line nodes a-p-b)
-    // about the hinge edge axis, acting on its own nodes (a beam on the line, not on the plating beside it)
-    const code = HLN[k];
-    if (code >= 0 && !TFL[HTR[2 * k]] && !TFL[HTR[2 * k + 1]]) {
-      const nodes = [i3, i4, a1, b1, a2, b2], p = nodes[code % 6], a = nodes[Math.floor(code / 6) % 6], b = nodes[Math.floor(code / 36)];
-      let e1x = X[3 * p] - X[3 * a], e1y = X[3 * p + 1] - X[3 * a + 1], e1z = X[3 * p + 2] - X[3 * a + 2];
-      let e2x = X[3 * b] - X[3 * p], e2y = X[3 * b + 1] - X[3 * p + 1], e2z = X[3 * b + 2] - X[3 * p + 2];
-      let q = e1x * ex + e1y * ey + e1z * ez; e1x -= q * ex; e1y -= q * ey; e1z -= q * ez;
-      q = e2x * ex + e2y * ey + e2z * ez; e2x -= q * ex; e2y -= q * ey; e2z -= q * ez;
-      const L1 = e1x * e1x + e1y * e1y + e1z * e1z, L2 = e2x * e2x + e2y * e2y + e2z * e2z;
-      if (L1 > 1e-8 && L2 > 1e-8) {
-        const cx = e1y * e2z - e1z * e2y, cy = e1z * e2x - e1x * e2z, cz = e1x * e2y - e1y * e2x;
-        let ds = Math.atan2(cx * ex + cy * ey + cz * ez, e1x * e2x + e1y * e2y + e1z * e2z) - HTL0[k]; ds -= Math.round(ds / 6.283185307) * 6.283185307;
-        // d(theta)/da = (e x e1) / |e1|^2, d/db = (e x e2) / |e2|^2, d/dp = -(both)
-        const gax = (ey * e1z - ez * e1y) / L1, gay = (ez * e1x - ex * e1z) / L1, gaz = (ex * e1y - ey * e1x) / L1;
-        const gbx = (ey * e2z - ez * e2y) / L2, gby = (ez * e2x - ex * e2z) / L2, gbz = (ex * e2y - ey * e2x) / L2;
-        const ths = gax * (V[3 * a] - V[3 * p]) + gay * (V[3 * a + 1] - V[3 * p + 1]) + gaz * (V[3 * a + 2] - V[3 * p + 2])
-          + gbx * (V[3 * b] - V[3 * p]) + gby * (V[3 * b + 1] - V[3 * p + 1]) + gbz * (V[3 * b + 2] - V[3 * p + 2]);
-        const ks = HKS[k], rfs = csf(m, Math.abs(ths) * TFIB[HTR[2 * k]], Math.abs(HTPS[k]) * TFIB[HTR[2 * k]]), caps = HMS[k] * rfs;
-        let Ms = ks * (ds - HTPS[k]);
-        if (Ms > caps) { const np = ds - caps / ks; if (EN) EN.plH += .5 * (Ms + caps) * Math.abs(np - HTPS[k]); HTPS[k] = np; Ms = caps; }
-        else if (Ms < -caps) { const np = ds + caps / ks; if (EN) EN.plH += .5 * (caps - Ms) * Math.abs(np - HTPS[k]); HTPS[k] = np; Ms = -caps; }
-        eel += .5 * Ms * Ms / ks; HEL[k] += .5 * Ms * Ms / ks;
-        const Mds = BETA * ks * ths, M2 = Ms + Mds; if (EN) EN.damp += Mds * ths * h;
-        F[3 * a] -= M2 * gax; F[3 * a + 1] -= M2 * gay; F[3 * a + 2] -= M2 * gaz;
-        F[3 * b] -= M2 * gbx; F[3 * b + 1] -= M2 * gby; F[3 * b + 2] -= M2 * gbz;
-        F[3 * p] += M2 * (gax + gbx); F[3 * p + 1] += M2 * (gay + gby); F[3 * p + 2] += M2 * (gaz + gbz);
-      }
-    }
   }
   return eel;
 }
@@ -1179,8 +1146,27 @@ function cellPass(t, h) {
   return eel;
 }
 
+// the member's bending angle (chords to the nodes m either side, about the in-plate axis across the member) and the
+// shear angle of its segment against the chord around it; rest values are subtracted by the caller
+const MG = { ex: 0, ey: 0, ez: 0 };
+function memberAngles(k, P) {
+  const c = TCL[k], q0 = CN[4 * c], q1 = CN[4 * c + 1], q2 = CN[4 * c + 2], q3 = CN[4 * c + 3];
+  const ax = P[3 * q2] - P[3 * q0], ay = P[3 * q2 + 1] - P[3 * q0 + 1], az = P[3 * q2 + 2] - P[3 * q0 + 2];
+  const bx = P[3 * q3] - P[3 * q1], by = P[3 * q3 + 1] - P[3 * q1 + 1], bz = P[3 * q3 + 2] - P[3 * q1 + 2];
+  const nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx;
+  const a = TA[k], b = TB[k], tx = P[3 * b] - P[3 * a], ty = P[3 * b + 1] - P[3 * a + 1], tz = P[3 * b + 2] - P[3 * a + 2];
+  let ex = ny * tz - nz * ty, ey = nz * tx - nx * tz, ez = nx * ty - ny * tx; const el = Math.hypot(ex, ey, ez) || 1; ex /= el; ey /= el; ez /= el;
+  MG.ex = ex; MG.ey = ey; MG.ez = ez;
+  const ang = (ux, uy, uz, vx, vy, vz) => { let q = ux * ex + uy * ey + uz * ez; ux -= q * ex; uy -= q * ey; uz -= q * ez; q = vx * ex + vy * ey + vz * ez; vx -= q * ex; vy -= q * ey; vz -= q * ez;
+    return Math.atan2((uy * vz - uz * vy) * ex + (uz * vx - ux * vz) * ey + (ux * vy - uy * vx) * ez, ux * vx + uy * vy + uz * vz); };
+  let th = 0, ga = 0;
+  if (TBA[k] >= 0) { const A = TBA[k], B = TBB[k]; th = ang(P[3 * a] - P[3 * A], P[3 * a + 1] - P[3 * A + 1], P[3 * a + 2] - P[3 * A + 2], P[3 * B] - P[3 * a], P[3 * B + 1] - P[3 * a + 1], P[3 * B + 2] - P[3 * a + 2]); }
+  if (TSC[k] >= 0) { const C0 = TSC[k], C1 = TBB[k]; ga = ang(P[3 * C1] - P[3 * C0], P[3 * C1 + 1] - P[3 * C0 + 1], P[3 * C1 + 2] - P[3 * C0 + 2], tx, ty, tz); }
+  return [th, ga];
+}
 function trussPass(t, h) {
   let eel = 0;
+  const addF = (i, s, gx, gy, gz) => { F[3 * i] += s * gx; F[3 * i + 1] += s * gy; F[3 * i + 2] += s * gz; };
   for (let k = 0; k < NT; k++) {
     if (TFL[k]) continue;
     const a = TA[k], b = TB[k], m = MATS[TMAT[k]];
@@ -1194,10 +1180,45 @@ function trussPass(t, h) {
     else if (f < -fy) { const np = L + fy / kk; TEB[k] += Math.abs(np - TLP[k]) / L0; if (EN) EN.plT += .5 * (fy - f) * Math.abs(np - TLP[k]); TLP[k] = np; f = -fy; }
     eel += .5 * f * f / kk;
     const fd = BETA * kk * vr; if (EN) EN.damp += fd * vr * h;
-    f += fd;
+    const fa = f; f += fd;
     F[3 * a] += f * ux; F[3 * a + 1] += f * uy; F[3 * a + 2] += f * uz; F[3 * b] -= f * ux; F[3 * b + 1] -= f * uy; F[3 * b + 2] -= f * uz;
-    let hb = 0; for (let q = 0; q < 4; q++) { const hi = THG[4 * k + q]; if (hi >= 0) hb = Math.max(hb, Math.abs(HTPS[hi])); }
-    if (Math.max(0, Math.log(TLP[k] / L0)) + hb * TFIB[k] >= TEF[k]) { TFL[k] = 1; if (EN) EN.frac += .5 * (f - fd) * (f - fd) / kk; }
+    let ebend = 0;
+    if (TCL[k] >= 0 && (TBA[k] >= 0 || TSC[k] >= 0)) {
+      const g = memberAngles(k, X), ex = MG.ex, ey = MG.ey, ez = MG.ez;
+      // d(angle from u to v)/d(head of v) = (e x v)/|v|^2 and d/d(tail of v) = -that; for u the signs flip
+      const gr = (x, y, z) => { const q = x * ex + y * ey + z * ez; x -= q * ex; y -= q * ey; z -= q * ez; const l2 = x * x + y * y + z * z || 1e-30;
+        return [(ey * z - ez * y) / l2, (ez * x - ex * z) / l2, (ex * y - ey * x) / l2]; };
+      const vdot = (gv, i, j) => gv[0] * (V[3 * i] - V[3 * j]) + gv[1] * (V[3 * i + 1] - V[3 * j + 1]) + gv[2] * (V[3 * i + 2] - V[3 * j + 2]);
+      if (TBA[k] >= 0) {
+        const A = TBA[k], B = TBB[k];
+        const g1 = gr(X[3 * a] - X[3 * A], X[3 * a + 1] - X[3 * A + 1], X[3 * a + 2] - X[3 * A + 2]), g2 = gr(X[3 * B] - X[3 * a], X[3 * B + 1] - X[3 * a + 1], X[3 * B + 2] - X[3 * a + 2]);
+        // theta = angle(u = a - A, v = B - a): d/dB = g2, d/dA = g1, d/da = -(g1 + g2)
+        const thd = vdot(g2, B, a) - vdot(g1, a, A);
+        let d = g[0] - TB0[k]; d -= Math.round(d / 6.283185307) * 6.283185307;
+        const rfb = csf(m, Math.abs(thd) * TFIB[k], Math.abs(TBP[k]) * TFIB[k]), cap = TQB[k] * rfb, kb = TKB[k];
+        let Q = kb * (d - TBP[k]);
+        if (Q > cap) { const np = d - cap / kb; if (EN) EN.plT += .5 * (Q + cap) * Math.abs(np - TBP[k]); TBP[k] = np; Q = cap; }
+        else if (Q < -cap) { const np = d + cap / kb; if (EN) EN.plT += .5 * (cap - Q) * Math.abs(np - TBP[k]); TBP[k] = np; Q = -cap; }
+        eel += .5 * Q * Q / kb; ebend = .5 * Q * Q / kb;
+        const Qd = BETA * kb * thd; if (EN) EN.damp += Qd * thd * h; Q += Qd;
+        addF(B, -Q, g2[0], g2[1], g2[2]); addF(A, -Q, g1[0], g1[1], g1[2]); addF(a, Q, g1[0] + g2[0], g1[1] + g2[1], g1[2] + g2[2]);
+      }
+      if (TSC[k] >= 0) {
+        const C0 = TSC[k], C1 = TBB[k];
+        const gc = gr(X[3 * C1] - X[3 * C0], X[3 * C1 + 1] - X[3 * C0 + 1], X[3 * C1 + 2] - X[3 * C0 + 2]), gs = gr(dx, dy, dz);
+        // gamma = angle(u = chord C1 - C0, v = segment b - a): d/db = gs, d/da = -gs, d/dC1 = -gc, d/dC0 = gc
+        const gd = vdot(gs, b, a) - vdot(gc, C1, C0);
+        let d = g[1] - TS0[k]; d -= Math.round(d / 6.283185307) * 6.283185307;
+        const cap = TQS[k] * rf, ks = TKS[k];
+        let Q = ks * (d - TSP[k]);
+        if (Q > cap) { const np = d - cap / ks; if (EN) EN.plT += .5 * (Q + cap) * Math.abs(np - TSP[k]); TSP[k] = np; Q = cap; }
+        else if (Q < -cap) { const np = d + cap / ks; if (EN) EN.plT += .5 * (cap - Q) * Math.abs(np - TSP[k]); TSP[k] = np; Q = -cap; }
+        eel += .5 * Q * Q / ks; ebend += .5 * Q * Q / ks;
+        const Qd = BETA * ks * gd; if (EN) EN.damp += Qd * gd * h; Q += Qd;
+        addF(b, -Q, gs[0], gs[1], gs[2]); addF(a, Q, gs[0], gs[1], gs[2]); addF(C1, Q, gc[0], gc[1], gc[2]); addF(C0, -Q, gc[0], gc[1], gc[2]);
+      }
+    }
+    if (Math.max(0, Math.log(TLP[k] / L0)) + Math.abs(TBP[k]) * TFIB[k] >= TEF[k]) { TFL[k] = 1; if (EN) EN.frac += .5 * fa * fa / kk + ebend; }
   }
   return eel;
 }
@@ -1304,7 +1325,7 @@ function commonSync(t, torn) {
 /* ------------------------------------------------------------------ GPU solver glue */
 function gpuModel() {
   return { N, NC, NH, NT, R0, M, WINV, AK, AF, AC, CN, CH, CMAT, CEF, CSP, CSN, CWET, CAR, CTR, CHG, CDB, CRC, CVIS: () => CVIS,
-    HN, HC, HKP, HMP, HKS, HMS, HT0, HDB, HTR, HHP, HMAT, HLN, HTL0, TA, TB, TL0, TAR, TMAT, TEF, TFIB, THG, NCC, PAN, CMAP, MATS, TA1, S,
+    HN, HC, HKP, HMP, HKS, HMS, HT0, HDB, HTR, HHP, HMAT, HLN, HTL0, TBA, TBB, TSC, TCL, TKB, TQB, TB0, TKS, TQS, TS0, TMM, TA, TB, TL0, TAR, TMAT, TEF, TFIB, THG, NCC, PAN, CMAP, MATS, TA1, S,
     OUT: () => scene.OUT, csf, nspace: () => GV.length, BETA: () => BETA, U_MAX, RHO_W, C_W, P0, G, K_SHEAR };
 }
 let gpuT = 0;
@@ -1347,7 +1368,7 @@ function checkEnd() {
 function settle() {
   const s = sim;
   if (s.solver === 'gpu') { gpu.readNodes(true, X, V, FREE); const cl = gpu.readCells(); for (let c = 0; c < NC; c++) if (cl[4 * c] > .5 && !CER[c]) { CER[c] = 1; CTE[c] = cl[4 * c + 1]; openCell(c, CTE[c]); }
-    gpu.readState({ CEP, CDM, TFL, HTP, HTPS }); }
+    gpu.readState({ CEP, CDM, TFL, HTP, HTPS, TBP }); }
   // pieces no longer connected (through intact cells and members) to the rest of the ship are debris
   const par = new Int32Array(N); for (let i = 0; i < N; i++) par[i] = i;
   const fd = i => { while (par[i] !== i) { par[i] = par[par[i]]; i = par[i]; } return i; }, un = (a, b) => { a = fd(a); b = fd(b); if (a !== b) par[a] = b; };
@@ -1790,10 +1811,10 @@ function compare(a, r) {
 window.BLAST = { ver: 32, PROF, st, runCase, runCaseAsync, compare, cam, build, detonate: () => { detonate(); startRun(); }, get sim() { return sim; }, energy, draw,
   stepN(n) { sim.headless = true; for (let k = 0; k < n && sim.t < sim.T1; k++) step(); return sim.t; },
   model: () => ({ N, NC, NH, NT, S, dt, X, V, R0, M, FREE, CN, CPAN, CH, CMAT, CEF, CSP, CSN, CER, CTE, CDM, CEP, CUT, CFD, CAR, CRC, CNR,
-    HN, HC, HKP, HMP, HKS, HMS, HT0, HTP, HTH, HDB, HLN, HTL0, HTPS, HTR, TA, TB, TL0, TLP, TFL, TAR, AK, AF, AC, PAN, GP, GV, OPEN, scene, MATS, EN }),
+    HN, HC, HKP, HMP, HKS, HMS, HT0, HTP, HTH, HDB, HLN, HTL0, HTPS, HTR, TBA, TBB, TSC, TCL, TKB, TQB, TB0, TKS, TQS, TS0, TBP, TSP, TMM, TFIB, TA, TB, TL0, TLP, TFL, TAR, AK, AF, AC, PAN, GP, GV, OPEN, scene, MATS, EN }),
   pulse, kinneyPs, kinneyIs1, reflect, U_MEAN, U_MAX, tee, SEC,
   gpuProfile(n) { gpu.profile(true); for (let k = 0; k < n; k++) gpu.step(sim.t, dt, 0); gl.finish(); return new Promise(r => setTimeout(() => r(gpu.profile(false)), 300)); },
-  snapshot() { if (sim && sim.solver === 'gpu') { gpu.readNodes(true, X, V, FREE); const cl = gpu.readCellsFull(); for (let c = 0; c < NC; c++) { CER[c] = cl[4 * c] > .5 ? 1 : 0; CTE[c] = cl[4 * c + 1]; CUT[c] = cl[4 * c + 3]; } gpu.readState({ CEP, CDM, TFL, HTP, HTH, HTPS }); } },
+  snapshot() { if (sim && sim.solver === 'gpu') { gpu.readNodes(true, X, V, FREE); const cl = gpu.readCellsFull(); for (let c = 0; c < NC; c++) { CER[c] = cl[4 * c] > .5 ? 1 : 0; CTE[c] = cl[4 * c + 1]; CUT[c] = cl[4 * c + 3]; } gpu.readState({ CEP, CDM, TFL, HTP, HTH, HTPS, TBP }); } },
   // CPU vs GPU after the same number of steps: displacement field and eroded cells
   parity(cfg, steps) {
     const keep = { ...st }, res = {};
@@ -1803,7 +1824,7 @@ window.BLAST = { ver: 32, PROF, st, runCase, runCaseAsync, compare, cam, build, 
       if (sv0.endsWith('+')) { for (let i = 0; i < N; i++) X[3 * i + 2] += 1e-7 * Math.sin(i); }
       const t0 = performance.now(); for (let k = 0; k < steps; k++) step();
       if (solver === 'gpu') { gpu.readNodes(true, X, V, FREE); const cl = gpu.readCells(); for (let c = 0; c < NC; c++) CER[c] = cl[4 * c] > .5 ? 1 : 0; }
-      if (solver === 'gpu') gpu.readState({ CEP, CDM, TFL, HTP, HTH, HTPS });
+      if (solver === 'gpu') gpu.readState({ CEP, CDM, TFL, HTP, HTH, HTPS, TBP });
       const d = new Float64Array(3 * N); for (let i = 0; i < 3 * N; i++) d[i] = X[i] - R0[i];
       let ebS = 0, hpS = 0, hthS = 0, cdS = 0; for (let k = 0; k < 4 * NC; k++) ebS += CEP[4 * k + 3]; for (let k = 0; k < NH; k++) { hpS += Math.abs(HTP[k]); hthS += Math.abs(HTH[k]); } for (let c = 0; c < NC; c++) cdS += CDM[c];
       (res.states || (res.states = {}))[sv] = { ebS, hpS, hthS, cdS };
@@ -1822,7 +1843,7 @@ window.BLAST = { ver: 32, PROF, st, runCase, runCaseAsync, compare, cam, build, 
   fdCheck(node, pass, eps = 1e-6) {
     const P = { hinge: hingePass, cell: cellPass, truss: trussPass }[pass];
     const saveEN = EN; EN = null; const keep = [HTP.slice(), CEP.slice(), CDM.slice(), CUT.slice(), TLP.slice(), TEB.slice(), CER.slice()];
-    const hps = HTPS.slice(); const restore = () => { HTPS.set(hps); HTP.set(keep[0]); CEP.set(keep[1]); CDM.set(keep[2]); CUT.set(keep[3]); TLP.set(keep[4]); TEB.set(keep[5]); CER.set(keep[6]); };
+    const hps = HTPS.slice(), tbp = TBP.slice(), tsp = TSP.slice(); const restore = () => { TBP.set(tbp); TSP.set(tsp); HTPS.set(hps); HTP.set(keep[0]); CEP.set(keep[1]); CDM.set(keep[2]); CUT.set(keep[3]); TLP.set(keep[4]); TEB.set(keep[5]); CER.set(keep[6]); };
     const Vs = V.slice(); V.fill(0); const Fs = F.slice(), SRC = sim.SRC; sim.SRC = [];
     F.fill(0); const e0 = P(0, 1e-9); restore(); const f = [F[3 * node], F[3 * node + 1], F[3 * node + 2]]; const out = [];
     for (let q = 0; q < 3; q++) { X[3 * node + q] += eps; F.fill(0); const e1 = P(0, 1e-9); restore(); X[3 * node + q] -= 2 * eps; F.fill(0); const e2 = P(0, 1e-9); restore(); X[3 * node + q] += eps;

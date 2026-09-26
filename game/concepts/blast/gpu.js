@@ -27,15 +27,14 @@ uniform float uBeta, uT, uH;
 `;
 
 const HINGE_FS = HEAD + `
-uniform sampler2D uHS, uHSt, uCSt, uTSt;
+uniform sampler2D uHS, uHSt, uCSt;
 layout(location=0) out vec4 oSt; layout(location=1) out vec4 oF0; layout(location=2) out vec4 oF1; layout(location=3) out vec4 oF2;
-layout(location=4) out vec4 oF3; layout(location=5) out vec4 oF4; layout(location=6) out vec4 oF5;
 void main(){
   ivec2 p = ivec2(gl_FragCoord.xy); int k = p.y * W + p.x;
   vec4 h0 = texelFetch(uHS, ATW(k, 9, 0), 0), h1 = texelFetch(uHS, ATW(k, 9, 1), 0), h2 = texelFetch(uHS, ATW(k, 9, 2), 0),
        h3 = texelFetch(uHS, ATW(k, 9, 3), 0), h4 = texelFetch(uHS, ATW(k, 9, 4), 0);
   vec4 st = texelFetch(uHSt, p, 0);
-  oSt = vec4(st.x, 0.0, st.z, 0.0); oF0 = vec4(0.0); oF1 = vec4(0.0); oF2 = vec4(0.0); oF3 = vec4(0.0); oF4 = vec4(0.0); oF5 = vec4(0.0);
+  oSt = vec4(st.x, 0.0, 0.0, 0.0); oF0 = vec4(0.0); oF1 = vec4(0.0); oF2 = vec4(0.0);
   if (h0.x < 0.0) return;
   int c1 = int(h1.z), c2 = int(h1.w);
   vec4 s1 = texelFetch(uCSt, AT(c1), 0), s2 = texelFetch(uCSt, AT(c2), 0);
@@ -58,34 +57,13 @@ void main(){
   int mi = int(h4.x); vec4 mB = uMatB[mi];
   float edot = abs(thd) * h3.w / (2.0 * h3.z), rf = CSF(mi, edot, abs(st.x) * h3.w / (2.0 * h3.z));
   float ut = min(1.0, 0.5 * (s1.w + s2.w));
-  bool sf = h3.x < 0.0 || (texelFetch(uTSt, AT(int(h3.x)), 0).y < 0.5 && texelFetch(uTSt, AT(int(h3.y)), 0).y < 0.5);
   float kk = h2.x, cap = h2.y * rf * (1.0 - ut * ut);
   float tp = st.x, Mt = kk * (d - tp);
   if (Mt > cap) { tp = d - cap / kk; Mt = cap; } else if (Mt < -cap) { tp = d + cap / kk; Mt = -cap; }
   float Mm = Mt + uBeta * kk * thd;
-  vec3 F[6]; F[0] = -Mm * u3; F[1] = -Mm * u4; F[2] = -0.5 * Mm * u1; F[3] = F[2]; F[4] = -0.5 * Mm * u2; F[5] = F[4];
-  // the stiffener crossing this hinge: angle between its segments a-p-b about the hinge edge axis, on its own nodes
-  float tps = st.z; int code = int(h4.z);
-  if (code >= 0 && sf) {
-    int ids[6]; ids[0] = i3; ids[1] = i4; ids[2] = a1; ids[3] = b1; ids[4] = a2; ids[5] = b2;
-    int rp = code % 6, ra = (code / 6) % 6, rb = code / 36;
-    vec4 r4 = texelFetch(uHS, ATW(k, 9, 8), 0);
-    vec3 xa = XR(ids[ra]), xp = XR(ids[rp]), xb = XR(ids[rb]);
-    vec3 e1 = xp - xa, e2 = xb - xp; e1 -= dot(e1, e) * e; e2 -= dot(e2, e) * e;
-    float L1 = dot(e1, e1), L2 = dot(e2, e2);
-    if (L1 > 1e-8 && L2 > 1e-8) {
-      float ds = atan(dot(cross(e1, e2), e), dot(e1, e2)) - r4.x; ds -= 6.283185307 * floor(ds / 6.283185307 + 0.5);
-      vec3 ga = cross(e, e1) / L1, gb = cross(e, e2) / L2;
-      float ths = dot(ga, VV(ids[ra]) - VV(ids[rp])) + dot(gb, VV(ids[rb]) - VV(ids[rp]));
-      float ks = h2.z, rfs = CSF(mi, abs(ths) * r4.y, abs(tps) * r4.y), caps = h2.w * rfs;
-      float Ms = ks * (ds - tps);
-      if (Ms > caps) { tps = ds - caps / ks; Ms = caps; } else if (Ms < -caps) { tps = ds + caps / ks; Ms = -caps; }
-      float M2 = Ms + uBeta * ks * ths;
-      for (int z = 0; z < 6; z++) { if (z == ra) F[z] -= M2 * ga; if (z == rb) F[z] -= M2 * gb; if (z == rp) F[z] += M2 * (ga + gb); }
-    }
-  }
-  oSt = vec4(tp, d, tps, 0.0);
-  oF0 = vec4(F[0], 0.0); oF1 = vec4(F[1], 0.0); oF2 = vec4(F[2], 0.0); oF3 = vec4(F[3], 0.0); oF4 = vec4(F[4], 0.0); oF5 = vec4(F[5], 0.0);
+  oSt = vec4(tp, d, 0.0, 0.0);
+  vec3 F3 = -Mm * u3, F4 = -Mm * u4, Fa = -Mm * u1, Fb = -Mm * u2;
+  oF0 = vec4(F3, F4.x); oF1 = vec4(F4.yz, Fa.xy); oF2 = vec4(Fa.z, Fb);
 }`;
 
 const CELL_FS = HEAD + `
@@ -248,26 +226,61 @@ void main(){
 }`;
 
 const TRUSS_FS = HEAD + `
-uniform sampler2D uTS, uTSt, uHSt;
-layout(location=0) out vec4 oSt; layout(location=1) out vec4 oF;
+uniform sampler2D uTS, uTSt, uTSt2, uCS;
+layout(location=0) out vec4 oSt; layout(location=1) out vec4 oSt2;
+layout(location=2) out vec4 oF0; layout(location=3) out vec4 oF1; layout(location=4) out vec4 oF2; layout(location=5) out vec4 oF3;
+vec3 EX;
+// angle from u to v about EX (both projected off EX)
+float ang(vec3 u, vec3 v) { u -= dot(u, EX) * EX; v -= dot(v, EX) * EX; return atan(dot(cross(u, v), EX), dot(u, v)); }
+vec3 gr(vec3 v) { v -= dot(v, EX) * EX; return cross(EX, v) / max(dot(v, v), 1e-30); }
 void main(){
   ivec2 p = ivec2(gl_FragCoord.xy); int k = p.y * W + p.x;
-  vec4 t0 = texelFetch(uTS, ATW(k, 4, 0), 0), t1 = texelFetch(uTS, ATW(k, 4, 1), 0), t2 = texelFetch(uTS, ATW(k, 4, 2), 0), t3 = texelFetch(uTS, ATW(k, 4, 3), 0);
-  vec4 st = texelFetch(uTSt, p, 0);
-  oSt = st; oF = vec4(0.0);
+  vec4 t0 = texelFetch(uTS, ATW(k, 6, 0), 0), t1 = texelFetch(uTS, ATW(k, 6, 1), 0), t2 = texelFetch(uTS, ATW(k, 6, 2), 0), t3 = texelFetch(uTS, ATW(k, 6, 3), 0),
+       t4 = texelFetch(uTS, ATW(k, 6, 4), 0), t5 = texelFetch(uTS, ATW(k, 6, 5), 0);
+  vec4 st = texelFetch(uTSt, p, 0), st2 = texelFetch(uTSt2, p, 0);
+  oSt = st; oSt2 = st2; oF0 = vec4(0.0); oF1 = vec4(0.0); oF2 = vec4(0.0); oF3 = vec4(0.0);
   if (t0.x < 0.0 || st.y > 0.5) return;
   int a = int(t0.x), b = int(t0.y); float L0 = t0.z, Ar = t0.w;
   vec3 d = t3.xyz + UU(b) - UU(a); float L = length(d); vec3 u = d / L;
-  int mi = int(t1.x); vec4 mA = uMatA[mi], mB = uMatB[mi];
+  int mi = int(t1.x); vec4 mA = uMatA[mi];
   float vr = dot(VV(b) - VV(a), u), rf = CSF(mi, abs(vr) / L0, st.z);
   float kk = mA.x * Ar / L0, fy = (mA.z + mA.w * st.z) * rf * Ar;
   float Lp = st.x, eb = st.z, fo = kk * (L - Lp);
   if (fo > fy) { float np = L - fy / kk; eb += abs(np - Lp) / L0; Lp = np; fo = fy; }
   else if (fo < -fy) { float np = L + fy / kk; eb += abs(np - Lp) / L0; Lp = np; fo = -fy; }
   fo += uBeta * kk * vr;
-  float hb = 0.0; for (int q = 0; q < 4; q++) { int hi = int(t2[q]); if (hi >= 0) hb = max(hb, abs(texelFetch(uHSt, AT(hi), 0).z)); }
-  float failed = max(0.0, log(Lp / L0)) + hb * t1.z >= t1.y ? 1.0 : 0.0;
-  oSt = vec4(Lp, failed, eb, 0.0); oF = vec4(fo * u, 0.0);
+  // roles: 0 a, 1 b, 2 bending node A (m back), 3 node m ahead (bending and chord end), 4 chord start
+  vec3 F0 = fo * u, F1 = -fo * u, F2 = vec3(0.0), F3 = vec3(0.0), F4 = vec3(0.0);
+  float tbp = st.w, tsp = st2.x;
+  int cl = int(t1.w), A = int(t2.x), B = int(t2.y), C0 = int(t4.x);
+  if (cl >= 0 && (A >= 0 || C0 >= 0)) {
+    vec4 cc = texelFetch(uCS, ATW(cl, 11, 0), 0);
+    vec3 nC = cross(XR(int(cc.z)) - XR(int(cc.x)), XR(int(cc.w)) - XR(int(cc.y)));
+    EX = normalize(cross(nC, d));
+    vec3 xa = XR(a), xB = B >= 0 ? XR(B) : xa;
+    if (A >= 0) {
+      vec3 xA = XR(A), e1 = xa - xA, e2 = xB - xa, g1 = gr(e1), g2 = gr(e2);
+      float thd = dot(g2, VV(B) - VV(a)) - dot(g1, VV(a) - VV(A));
+      float dth = ang(e1, e2) - t3.w; dth -= 6.283185307 * floor(dth / 6.283185307 + 0.5);
+      float rfb = CSF(mi, abs(thd) * t1.z, abs(tbp) * t1.z), cap = t2.w * rfb, kb = t2.z;
+      float Q = kb * (dth - tbp);
+      if (Q > cap) { tbp = dth - cap / kb; Q = cap; } else if (Q < -cap) { tbp = dth + cap / kb; Q = -cap; }
+      Q += uBeta * kb * thd;
+      F3 -= Q * g2; F2 -= Q * g1; F0 += Q * (g1 + g2);
+    }
+    if (C0 >= 0) {
+      vec3 c = xB - XR(C0), gc = gr(c), gs = gr(d);
+      float gd = dot(gs, VV(b) - VV(a)) - dot(gc, VV(B) - VV(C0));
+      float dg = ang(c, d) - t5.x; dg -= 6.283185307 * floor(dg / 6.283185307 + 0.5);
+      float cap = t4.w * rf, ks = t4.z, Q = ks * (dg - tsp);
+      if (Q > cap) { tsp = dg - cap / ks; Q = cap; } else if (Q < -cap) { tsp = dg + cap / ks; Q = -cap; }
+      Q += uBeta * ks * gd;
+      F1 -= Q * gs; F0 += Q * gs; F3 += Q * gc; F4 -= Q * gc;
+    }
+  }
+  float failed = max(0.0, log(Lp / L0)) + abs(tbp) * t1.z >= t1.y ? 1.0 : 0.0;
+  oSt = vec4(Lp, failed, eb, tbp); oSt2 = vec4(tsp, 0.0, 0.0, 0.0);
+  oF0 = vec4(F0, F1.x); oF1 = vec4(F1.yz, F2.xy); oF2 = vec4(F2.z, F3); oF3 = vec4(F4, 0.0);
 }`;
 
 // scatter: one point per (element, node); the fragment adds the force (and an element count in w)
@@ -295,7 +308,7 @@ void main(){
 
 // gather: each node sums the forces its elements computed for it (adjacency lists), and counts the intact ones
 const GATHER_FS = HEAD + `
-uniform sampler2D uAdj, uCF0, uCF1, uCF2, uHF0, uHF1, uHF2, uHF3, uHF4, uHF5, uTF, uCSt, uTSt;
+uniform sampler2D uAdj, uCF0, uCF1, uCF2, uHF0, uHF1, uHF2, uMF0, uMF1, uMF2, uMF3, uCSt, uTSt;
 out vec4 o;
 int ADJ(int k) { return int(texelFetch(uAdj, AT(k >> 2), 0)[k & 3]); }
 void main(){
@@ -312,12 +325,18 @@ void main(){
     if (texelFetch(uCSt, q, 0).x < 0.5) cnt += 1.0; }
   for (int k = 0; k < 512; k++) { if (k >= n1) break;
     int e = ADJ(o1 + k), h = e / 8, r = e - 8 * h; ivec2 q = AT(h);
-    F += r == 0 ? texelFetch(uHF0, q, 0).xyz : r == 1 ? texelFetch(uHF1, q, 0).xyz : r == 2 ? texelFetch(uHF2, q, 0).xyz
-       : r == 3 ? texelFetch(uHF3, q, 0).xyz : r == 4 ? texelFetch(uHF4, q, 0).xyz : texelFetch(uHF5, q, 0).xyz; }
-  for (int k = 0; k < 64; k++) { if (k >= n2) break;
-    int e = ADJ(o2 + k), t = e / 2, r = e - 2 * t; ivec2 q = AT(t);
-    vec3 f = texelFetch(uTF, q, 0).xyz; F += r == 0 ? f : -f;
-    if (texelFetch(uTSt, q, 0).y < 0.5) cnt += 1.0; }
+    if (r == 0) F += texelFetch(uHF0, q, 0).xyz;
+    else if (r == 1) F += vec3(texelFetch(uHF0, q, 0).w, texelFetch(uHF1, q, 0).xy);
+    else if (r < 4) F += 0.5 * vec3(texelFetch(uHF1, q, 0).zw, texelFetch(uHF2, q, 0).x);
+    else F += 0.5 * texelFetch(uHF2, q, 0).yzw; }
+  for (int k = 0; k < 128; k++) { if (k >= n2) break;
+    int e = ADJ(o2 + k), t = e / 8, r = e - 8 * t; ivec2 q = AT(t);
+    if (r == 0) F += texelFetch(uMF0, q, 0).xyz;
+    else if (r == 1) F += vec3(texelFetch(uMF0, q, 0).w, texelFetch(uMF1, q, 0).xy);
+    else if (r == 2) F += vec3(texelFetch(uMF1, q, 0).zw, texelFetch(uMF2, q, 0).x);
+    else if (r == 3) F += texelFetch(uMF2, q, 0).yzw;
+    else F += texelFetch(uMF3, q, 0).xyz;
+    if (r < 2 && texelFetch(uTSt, q, 0).y < 0.5) cnt += 1.0; }
   o = vec4(F, cnt);
 }`;
 
@@ -413,7 +432,8 @@ export function createGPU(gl, M) {
   const adjL = [Array.from({ length: N }, () => []), Array.from({ length: N }, () => []), Array.from({ length: N }, () => [])];
   for (let c = 0; c < NC; c++) for (let k = 0; k < 4; k++) adjL[0][M.CN[4 * c + k]].push(c * 4 + k);
   for (let h = 0; h < NH; h++) for (let k = 0; k < 6; k++) adjL[1][M.HN[6 * h + k]].push(h * 8 + k);
-  for (let t = 0; t < NT; t++) { adjL[2][M.TA[t]].push(t * 2); adjL[2][M.TB[t]].push(t * 2 + 1); }
+  for (let t = 0; t < NT; t++) { adjL[2][M.TA[t]].push(t * 8); adjL[2][M.TB[t]].push(t * 8 + 1);
+    if (M.TBA[t] >= 0) adjL[2][M.TBA[t]].push(t * 8 + 2); if (M.TBB[t] >= 0) adjL[2][M.TBB[t]].push(t * 8 + 3); if (M.TSC[t] >= 0) adjL[2][M.TSC[t]].push(t * 8 + 4); }
   const adjOff = [new Int32Array(N), new Int32Array(N), new Int32Array(N)], flat = [];
   for (let q = 0; q < 3; q++) for (let i = 0; i < N; i++) { adjOff[q][i] = flat.length; for (const e of adjL[q][i]) flat.push(e); }
   { const nt = Math.ceil(flat.length / 4), a = new Float32Array(Wd * rows(nt) * 4); a.set(flat); T.adj = tex(Wd, rows(nt), a); }
@@ -433,8 +453,9 @@ export function createGPU(gl, M) {
     put(5, [E[0], E[1], E[2], f1[0]]); put(6, [f1[1], f1[2], f2[0], f2[1]]); put(7, [f2[2], 0, 0, 0]); put(0, [0, 1, 2, 3].map(z => M.HN[6 * k + z])); put(1, [M.HN[6 * k + 4], M.HN[6 * k + 5], M.HC[2 * k], M.HC[2 * k + 1]]);
     put(2, [M.HKP[k], M.HMP[k], M.HKS[k], M.HMS[k]]); put(3, [M.HTR[2 * k], M.HTR[2 * k + 1], M.HDB[k], M.HHP[k]]); put(4, [M.HMAT[k], M.HT0[k], M.HLN[k], 0]);
     put(8, [M.HTL0[k], M.HTR[2 * k] >= 0 ? M.TFIB[M.HTR[2 * k]] : 0, 0, 0]); });
-  T.ts = wide(NT, 4, (k, put) => { const a = M.TA[k], b = M.TB[k]; put(0, [a, b, M.TL0[k], M.TAR[k]]); put(1, [M.TMAT[k], M.TEF[k], M.TFIB[k], 0]);
-    put(2, [0, 1, 2, 3].map(z => M.THG[4 * k + z])); put(3, [0, 1, 2].map(z => M.R0[3 * b + z] - M.R0[3 * a + z]).concat([0])); });
+  T.ts = wide(NT, 6, (k, put) => { const a = M.TA[k], b = M.TB[k]; put(0, [a, b, M.TL0[k], M.TAR[k]]); put(1, [M.TMAT[k], M.TEF[k], M.TFIB[k], M.TCL[k]]);
+    put(2, [M.TBA[k], M.TBB[k], M.TKB[k], M.TQB[k]]); put(3, [...[0, 1, 2].map(z => M.R0[3 * b + z] - M.R0[3 * a + z]), M.TB0[k]]);
+    put(4, [M.TSC[k], 0, M.TKS[k], M.TQS[k]]); put(5, [M.TS0[k], 0, 0, 0]); });
   const pan = new Float32Array(5 * Math.max(1, M.PAN.length) * 4);
   M.PAN.forEach((P, q) => pan.set([P.o[0] - O[0], P.o[1] - O[1], P.o[2] - O[2], P.nu, ...P.U, P.Lu, ...P.V, P.Lv, ...P.n, P.off, P.nv, 0, 0, 0], 20 * q));
   T.pan = tex(5 * Math.max(1, M.PAN.length), 1, pan);
@@ -446,10 +467,10 @@ export function createGPU(gl, M) {
   const con = tex(Wd, NHr, null), frc = tex(Wd, NHr, null);
   const cellS = [0, 1].map(() => ({ t: [0, 1, 2, 3].map(() => tex(Wd, CHr, null)), s: tex(Wd, CHr, null) }));
   const cF = [0, 1, 2].map(() => tex(Wd, CHr, null));
-  const hS = [tex(Wd, HHr, null), tex(Wd, HHr, null)], hF = [0, 1, 2, 3, 4, 5].map(() => tex(Wd, HHr, null));
-  const tS = [tex(Wd, THr, null), tex(Wd, THr, null)], tF = tex(Wd, THr, null);
+  const hS = [tex(Wd, HHr, null), tex(Wd, HHr, null)], hF = [0, 1, 2].map(() => tex(Wd, HHr, null));
+  const tS = [tex(Wd, THr, null), tex(Wd, THr, null)], tS2 = [tex(Wd, THr, null), tex(Wd, THr, null)], mF = [0, 1, 2, 3].map(() => tex(Wd, THr, null));
   const fNode = nodeS.map(s => fbo([s.pos, s.vel, s.anc, con])), fFrc = fbo([frc]);
-  const fCell = cellS.map(s => fbo([...s.t, s.s, ...cF])), fHinge = hS.map(s => fbo([s, ...hF])), fTruss = tS.map(s => fbo([s, tF]));
+  const fCell = cellS.map(s => fbo([...s.t, s.s, ...cF])), fHinge = hS.map(s => fbo([s, ...hF])), fTruss = tS.map((s, i) => fbo([s, tS2[i], ...mF]));
   let cur = 0, useImp = 0;
   const TQ = gl.getExtension('EXT_disjoint_timer_query_webgl2'); let prof = null; const pending = [];
   const tq = name => { if (!prof || !TQ) return; if (prof.q) gl.endQuery(TQ.TIME_ELAPSED_EXT); const q = gl.createQuery(); gl.beginQuery(TQ.TIME_ELAPSED_EXT, q); prof.q = q; pending.push([name, q]); };
@@ -477,7 +498,8 @@ export function createGPU(gl, M) {
     for (const t of [...cellS[cur].t, cellS[cur].s, T.dmg]) { gl.bindTexture(gl.TEXTURE_2D, t); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, Wd, CHr, gl.RGBA, gl.FLOAT, z(NC)); }
     { const c = z(NC); for (let k = 0; k < NC; k++) c[4 * k + 1] = -1; gl.bindTexture(gl.TEXTURE_2D, cellS[cur].s); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, Wd, CHr, gl.RGBA, gl.FLOAT, c); }
     gl.bindTexture(gl.TEXTURE_2D, hS[cur]); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, Wd, HHr, gl.RGBA, gl.FLOAT, z(NH));
-    { const c = z(NT); for (let k = 0; k < NT; k++) c[4 * k] = M.TL0[k]; gl.bindTexture(gl.TEXTURE_2D, tS[cur]); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, Wd, THr, gl.RGBA, gl.FLOAT, c); }
+    { const c = z(NT); for (let k = 0; k < NT; k++) c[4 * k] = M.TL0[k]; gl.bindTexture(gl.TEXTURE_2D, tS[cur]); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, Wd, THr, gl.RGBA, gl.FLOAT, c);
+      gl.bindTexture(gl.TEXTURE_2D, tS2[cur]); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, Wd, THr, gl.RGBA, gl.FLOAT, z(NT)); }
     // line-of-sight bits are known now (detonation): refresh the cell statics
     gl.deleteTexture(T.cs); T.cs = mkCS();
   }
@@ -504,7 +526,7 @@ export function createGPU(gl, M) {
     tq('hinges');
     gl.useProgram(pH); gl.bindFramebuffer(gl.FRAMEBUFFER, fHinge[nx]); gl.viewport(0, 0, Wd, HHr); common(pH, t, h);
     bind(pH, 'uPos', s.pos, 0); bind(pH, 'uVel', s.vel, 1); bind(pH, 'uNS', T.ns, 2); bind(pH, 'uHS', T.hs, 3); bind(pH, 'uHSt', hS[cur], 4);
-    bind(pH, 'uCSt', cellS[cur].s, 5); bind(pH, 'uTSt', tS[cur], 6);
+    bind(pH, 'uCSt', cellS[cur].s, 5);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     // 2. cells
     tq('cells');
@@ -520,13 +542,13 @@ export function createGPU(gl, M) {
     // 3. trusses
     tq('members');
     if (NT) { gl.useProgram(pT); gl.bindFramebuffer(gl.FRAMEBUFFER, fTruss[nx]); gl.viewport(0, 0, Wd, THr); common(pT, t, h);
-      bind(pT, 'uPos', s.pos, 0); bind(pT, 'uVel', s.vel, 1); bind(pT, 'uNS', T.ns, 2); bind(pT, 'uTS', T.ts, 3); bind(pT, 'uTSt', tS[cur], 4); bind(pT, 'uHSt', hS[nx], 5);
+      bind(pT, 'uPos', s.pos, 0); bind(pT, 'uVel', s.vel, 1); bind(pT, 'uNS', T.ns, 2); bind(pT, 'uTS', T.ts, 3); bind(pT, 'uTSt', tS[cur], 4); bind(pT, 'uTSt2', tS2[cur], 5); bind(pT, 'uCS', T.cs, 6);
       gl.drawArrays(gl.TRIANGLES, 0, 3); }
     // 4. gather the element forces at the nodes; add last step's contact push-back
     tq('gather');
     gl.useProgram(pG); gl.bindFramebuffer(gl.FRAMEBUFFER, fFrc); gl.viewport(0, 0, Wd, NHr);
     bind(pG, 'uNS', T.ns, 0); bind(pG, 'uAdj', T.adj, 1); bind(pG, 'uCF0', cF[0], 2); bind(pG, 'uCF1', cF[1], 3); bind(pG, 'uCF2', cF[2], 4);
-    for (let z = 0; z < 6; z++) bind(pG, 'uHF' + z, hF[z], 5 + z); bind(pG, 'uTF', tF, 11); bind(pG, 'uCSt', cellS[nx].s, 12); bind(pG, 'uTSt', tS[nx], 13);
+    for (let z = 0; z < 3; z++) bind(pG, 'uHF' + z, hF[z], 5 + z); for (let z = 0; z < 4; z++) bind(pG, 'uMF' + z, mF[z], 8 + z); bind(pG, 'uCSt', cellS[nx].s, 12); bind(pG, 'uTSt', tS[nx], 13);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     tq('contact');
     gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
@@ -610,7 +632,7 @@ export function createGPU(gl, M) {
     const tmp = new Float32Array(Wd * CHr * 4);
     for (let k = 0; k < 4; k++) { read(fCell[cur], k, Wd, CHr, tmp); for (let c = 0; c < NC; c++) for (let z = 0; z < 4; z++) o.CEP[16 * c + 4 * k + z] = tmp[4 * c + z]; }
     read(fCell[cur], 4, Wd, CHr, tmp); for (let c = 0; c < NC; c++) o.CDM[c] = tmp[4 * c + 2];
-    if (NT) { const a = new Float32Array(Wd * THr * 4); read(fTruss[cur], 0, Wd, THr, a); for (let k = 0; k < NT; k++) o.TFL[k] = a[4 * k + 1] > .5 ? 1 : 0; }
+    if (NT) { const a = new Float32Array(Wd * THr * 4); read(fTruss[cur], 0, Wd, THr, a); for (let k = 0; k < NT; k++) { o.TFL[k] = a[4 * k + 1] > .5 ? 1 : 0; if (o.TBP) o.TBP[k] = a[4 * k + 3]; } }
     if (NH) { const a = new Float32Array(Wd * HHr * 4); read(fHinge[cur], 0, Wd, HHr, a); for (let k = 0; k < NH; k++) { o.HTP[k] = a[4 * k]; if (o.HTH) o.HTH[k] = a[4 * k + 1]; if (o.HTPS) o.HTPS[k] = a[4 * k + 2]; } }
   }
   function dispose() { if (fence) gl.deleteSync(fence); if (fenceN) gl.deleteSync(fenceN); for (const [f, o] of objs) try { gl[f](o); } catch (e) {} objs.length = 0; }
