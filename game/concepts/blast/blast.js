@@ -67,7 +67,7 @@ const MATS = [
 const MATI = Object.fromEntries(MATS.map((m, i) => [m.key, i]));
 // Cowper-Symonds rate factor with the constants moving from their initial-yield values to their large-strain values
 // as plastic strain grows (Jones 1989, Structural Impact 2012 sec. 8.4: mild steel D 40.4 -> 6844 /s, q 5 -> 3.91)
-const csf = (m, ed, ep) => { const f = Math.min(1, ep / m.eu), D = m.D + (m.Du - m.D) * f, q = m.q + (m.qu - m.q) * f; return 1 + Math.pow(Math.min(ed, 1e4) / D, 1 / q); };
+const csf = (m, ed, ep) => { if (st.noRate) return 1; const f = Math.min(1, ep / m.eu), D = m.D + (m.Du - m.D) * f, q = m.q + (m.qu - m.q) * f; return 1 + Math.pow(Math.min(ed, 1e4) / D, 1 / q); };
 // warheads: fill as TNT equivalent, casing mass, typical fragment mass (approximate public figures)
 const ROUNDS = [
   ['30 mm HE', .05, .3, .002], ['76 mm HE', .75, 5.5, .008], ['127 mm HE', 3.2, 28, .015], ['Hellfire', 5, 4, .005],
@@ -979,7 +979,10 @@ function detonate() {
     }
   }
   sim.frags = Mc > 0 && st.frags && fill > 0 ? makeFrags(C, fill, Mc) : null;
-  EN = { ext: 0, kin: 0, el: 0, plM: 0, plH: 0, plT: 0, plA: 0, damp: 0, rad: 0, frac: 0, contact: 0, frag: 0, water: 0 };
+  EN = { ext: 0, kin: 0, el: 0, plM: 0, plH: 0, plT: 0, plA: 0, damp: 0, rad: 0, frac: 0, contact: 0, frag: 0, water: 0,
+    // plastic work: the mean of last step's and this step's (returned) force over the plastic increment (trapezoid, as
+    // the kinetic energy): the split no longer counts the explicit step's overshoot as dissipation (AUDIT A2)
+    pvh: new Float64Array(NH), pvc: new Float64Array(12 * NC), pvf: new Float64Array(NT), pvb: new Float64Array(NT), pvs: new Float64Array(NT) };
   rebuildSources(0);
   // the GPU backend is made here (scripts and harnesses read it right after): WebGPU for runs that read back
   // asynchronously (interactive, runCaseAsync: asyncRun), WebGL2 for blocking ones and without WebGPU
@@ -1204,8 +1207,9 @@ function hingePass(t, h) {
     const ut = Math.min(1, .5 * (CUT[c1] + CUT[c2]));
     const kk = HKP[k], cap = HMP[k] * rf * (1 - ut * ut);
     let Mt = kk * (d - HTP[k]);
-    if (Mt > cap) { const np = d - cap / kk; if (EN) EN.plH += .5 * (Mt + cap) * Math.abs(np - HTP[k]); HTP[k] = np; Mt = cap; }
-    else if (Mt < -cap) { const np = d + cap / kk; if (EN) EN.plH += .5 * (cap - Mt) * Math.abs(np - HTP[k]); HTP[k] = np; Mt = -cap; }
+    if (Mt > cap) { const np = d - cap / kk; if (EN) EN.plH += .5 * (EN.pvh[k] + cap) * (np - HTP[k]); HTP[k] = np; Mt = cap; }
+    else if (Mt < -cap) { const np = d + cap / kk; if (EN) EN.plH += .5 * (EN.pvh[k] - cap) * (np - HTP[k]); HTP[k] = np; Mt = -cap; }
+    if (EN) EN.pvh[k] = Mt;
     HTH[k] = d;
     eel += .5 * Mt * Mt / kk; HEL[k] = .5 * Mt * Mt / kk;
     const Md = BETA * kk * thd, Mm = Mt + Md;
@@ -1296,10 +1300,11 @@ function cellPass(t, h) {
       if (pl) {
         const g = RM[0], de11 = g * (2 * s11 - s22) / 3, de22 = g * (2 * s22 - s11) / 3, de12 = g * s12, deb = Math.SQRT2 / Math.sqrt(3) * g * RM[1];
         CEP[o] = ep11 + de11; CEP[o + 1] = ep22 + de22; CEP[o + 2] = ep12 + de12; CEP[o + 3] = eb + deb;
-        if (EN) EN.plM += .5 * vol * ((s11 + st11) * de11 + (s22 + st22) * de22 + 2 * (s12 + st12) * de12);   // = drop of elastic energy in the return
+        if (EN) { const q = EN.pvc, j = 12 * c + 3 * tr; EN.plM += .5 * vol * ((s11 + q[j]) * de11 + (s22 + q[j + 1]) * de22 + 2 * (s12 + q[j + 2]) * de12); }
         const vm = Math.sqrt(s11 * s11 + s22 * s22 - s11 * s22 + 3 * s12 * s12);
         if ((s11 + s22) / (3 * vm + 1e-9) > -1 / 3) dDam = Math.max(dDam, deb);
       }
+      if (EN) { const j = 12 * c + 3 * tr; EN.pvc[j] = s11; EN.pvc[j + 1] = s22; EN.pvc[j + 2] = s12; }
       const vm = Math.sqrt(s11 * s11 + s22 * s22 - s11 * s22 + 3 * s12 * s12);
       util = Math.max(util, vm / ((m.sy + m.H * CEP[o + 3]) * rf));
       const xe11 = U11 - 1 - CEP[o], xe22 = U22 - 1 - CEP[o + 1], xe12 = U12 - CEP[o + 2];
@@ -1405,8 +1410,9 @@ function trussPass(t, h) {
     const rf = csf(m, Math.abs(vr) / L0, TEB[k]);
     const kk = m.E * TAR[k] / L0, fy = (m.sy + m.H * TEB[k]) * rf * TAR[k];
     let f = kk * (L - TLP[k]);
-    if (f > fy) { const np = L - fy / kk; TEB[k] += Math.abs(np - TLP[k]) / L0; if (EN) EN.plT += .5 * (f + fy) * Math.abs(np - TLP[k]); TLP[k] = np; f = fy; }
-    else if (f < -fy * TKC[k]) { const fc = fy * TKC[k], np = L + fc / kk; TEB[k] += Math.abs(np - TLP[k]) / L0; if (EN) EN.plT += .5 * (fc - f) * Math.abs(np - TLP[k]); TLP[k] = np; f = -fc; }
+    if (f > fy) { const np = L - fy / kk; TEB[k] += Math.abs(np - TLP[k]) / L0; if (EN) EN.plT += .5 * (EN.pvf[k] + fy) * (np - TLP[k]); TLP[k] = np; f = fy; }
+    else if (f < -fy * TKC[k]) { const fc = fy * TKC[k], np = L + fc / kk; TEB[k] += Math.abs(np - TLP[k]) / L0; if (EN) EN.plT += .5 * (EN.pvf[k] - fc) * (np - TLP[k]); TLP[k] = np; f = -fc; }
+    if (EN) EN.pvf[k] = f;
     eel += .5 * f * f / kk;
     const fd = BETA * kk * vr; if (EN) EN.damp += fd * vr * h;
     const fa = f; f += fd;
@@ -1439,8 +1445,9 @@ function trussPass(t, h) {
         let d = g[0] - TB0[k]; d -= Math.round(d / 6.283185307) * 6.283185307;
         const rfb = csf(m, Math.abs(thd) * TFIB[k], Math.abs(TBP[k]) * TFIB[k]), cap = TQB[k] * rfb, kb = TKB[k];
         let Q = kb * (d - TBP[k]);
-        if (Q > cap) { const np = d - cap / kb; if (EN) EN.plT += .5 * (Q + cap) * Math.abs(np - TBP[k]); TBP[k] = np; Q = cap; }
-        else if (Q < -cap) { const np = d + cap / kb; if (EN) EN.plT += .5 * (cap - Q) * Math.abs(np - TBP[k]); TBP[k] = np; Q = -cap; }
+        if (Q > cap) { const np = d - cap / kb; if (EN) EN.plT += .5 * (EN.pvb[k] + cap) * (np - TBP[k]); TBP[k] = np; Q = cap; }
+        else if (Q < -cap) { const np = d + cap / kb; if (EN) EN.plT += .5 * (EN.pvb[k] - cap) * (np - TBP[k]); TBP[k] = np; Q = -cap; }
+        if (EN) EN.pvb[k] = Q;
         eel += .5 * Q * Q / kb; ebend = .5 * Q * Q / kb;
         const Qd = BETA * kb * thd; if (EN) EN.damp += Qd * thd * h; Q += Qd;
         addF(B, -Q, g2[0], g2[1], g2[2]); addF(A, -Q, g1[0], g1[1], g1[2]); addF(a, Q, g1[0] + g2[0], g1[1] + g2[1], g1[2] + g2[2]);
@@ -1455,8 +1462,9 @@ function trussPass(t, h) {
         let d = g[1] - TS0[k]; d -= Math.round(d / 6.283185307) * 6.283185307;
         const cap = TQS[k] * rf, ks = TKS[k];
         let Q = ks * (d - TSP[k]);
-        if (Q > cap) { const np = d - cap / ks; if (EN) EN.plT += .5 * (Q + cap) * Math.abs(np - TSP[k]); TSP[k] = np; Q = cap; }
-        else if (Q < -cap) { const np = d + cap / ks; if (EN) EN.plT += .5 * (cap - Q) * Math.abs(np - TSP[k]); TSP[k] = np; Q = -cap; }
+        if (Q > cap) { const np = d - cap / ks; if (EN) EN.plT += .5 * (EN.pvs[k] + cap) * (np - TSP[k]); TSP[k] = np; Q = cap; }
+        else if (Q < -cap) { const np = d + cap / ks; if (EN) EN.plT += .5 * (EN.pvs[k] - cap) * (np - TSP[k]); TSP[k] = np; Q = -cap; }
+        if (EN) EN.pvs[k] = Q;
         eel += .5 * Q * Q / ks; ebend += .5 * Q * Q / ks;
         const Qd = BETA * ks * gd; if (EN) EN.damp += Qd * gd * h; Q += Qd;
         addF(b, -Q, gs[0], gs[1], gs[2]); addF(a, Q, gs[0], gs[1], gs[2]); addF(C1, Q, gc[0], gc[1], gc[2]); addF(C0, -Q, gc[0], gc[1], gc[2]);
