@@ -120,7 +120,8 @@ const VIEWS = {
 };
 function setView(k) {
   const v = VIEWS[k]; Object.assign(cam, { yaw: v.yaw, pitch: v.pitch, dist: v.dist, tgt: v.tgt.slice() }); st.slab = v.slab; st.view = k;
-  if (k === 'section') cam.tgt[0] = Math.min(st.cut, 77);
+  // a section at the bow tip (the slider's "show everything" end) is empty: start it amidships
+  if (k === 'section') { if (Math.abs(st.cut) > 70) { st.cut = 0; $('cut').value = 0; } cam.tgt[0] = st.cut; }
   document.querySelectorAll('#views button').forEach(b => b.classList.toggle('on', b.dataset.v === k)); dirty = true;
 }
 function matrix(w, h) {
