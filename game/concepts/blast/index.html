@@ -39,6 +39,11 @@
 <canvas id="c"></canvas>
 <div id="ui">
   <h1><i></i>BLAST · HULL SECTION</h1>
+  <div class="row"><label>Source</label><select id="src">
+    <option value="charge">Warhead</option>
+    <option value="vls_burn">Missile cells ×8 · burn</option>
+    <option value="vls_det">Missile cells ×8 · detonate</option>
+    <option value="fuel">Fuel tank · JP-5</option></select></div>
   <div class="row"><label>Round</label><select id="round"></select></div>
   <div class="row"><label>TNT eq kg</label><input id="kg" type="number" min="0.01" max="2000" step="any"></div>
   <div class="row"><label>Fuze</label><select id="fuze">
