@@ -71,7 +71,8 @@ export function massOf(P) {
   let Ix = 0, Iy = 0, Iz = 0;
   for (let i = P.i0; i <= P.i1; i++) {
     const s = sec[i], lx = 2 * S.H.beam(s.zc), ly = S.H.deck(s.zc) + S.H.keel(s.zc), lz = s.len, dz = s.zc - z;
-    Ix += s.m / 12 * (ly * ly + lz * lz) + s.m * dz * dz;
+    s.Ix = s.m / 12 * (ly * ly + lz * lz);
+    Ix += s.Ix + s.m * dz * dz;
     Iy += s.m / 12 * (lx * lx + lz * lz) + s.m * dz * dz;
     Iz += s.m / 12 * (lx * lx + ly * ly);
   }
@@ -82,7 +83,7 @@ export function massOf(P) {
 const F = [0, 0, 0], TQ = [0, 0, 0], VB = [0, 0, 0], T3 = [0, 0, 0], A3 = [0, 0, 0], AL = [0, 0, 0];
 
 /* one step of every piece of ship S over h (sim s); sea(x, z) -> the water's height there */
-export function stepShip(S, h, sea, t) {
+export function stepShip(S, h, sea, t, bed) {
   const L = S.L, sec = L.sec, n = L.n, FS = S.FS, MS = S.MS;
   for (const P of S.pieces) {
     P.pp[0] = P.p[0]; P.pp[1] = P.p[1]; P.pp[2] = P.p[2];
@@ -118,7 +119,7 @@ export function stepShip(S, h, sea, t) {
     const R = P.R, cm = P.cm;
     const ex = R[0], ey = R[3], ez = R[6];             // model +X in the world (across)
     const lx = R[2], ly = R[5], lz = R[8];             // model +Z (along)
-    let sub = 0, colN = 0, low = 1e9, top = -1e9;
+    let sub = 0, colN = 0, low = 1e9, top = -1e9, vmax = 0;
     for (let i = P.i0; i <= P.i1; i++) {
       const s = sec[i];
       let fsx = 0, fsy = 0, fsz = 0, msx = 0, msy = 0, msz = 0;
@@ -134,6 +135,7 @@ export function stepShip(S, h, sea, t) {
         const bX = R[0] * bx0 + R[1] * by0 + R[2] * mz, bY = R[3] * bx0 + R[4] * by0 + R[5] * mz, bZ = R[6] * bx0 + R[7] * by0 + R[8] * mz;
         const tX = R[0] * tx0 + R[1] * ty0 + R[2] * mz, tY = R[3] * tx0 + R[4] * ty0 + R[5] * mz, tZ = R[6] * tx0 + R[7] * ty0 + R[8] * mz;
         const yb = P.p[1] + bY, yt = P.p[1] + tY;
+        vmax += C.A * (C.yt - C.yb) * (1 - S.flood[i * 2 + C.side]);
         if (yb < low) low = yb; if (yt < low) low = yt; if (yb > top) top = yb; if (yt > top) top = yt;
         let fr, fx0, fy0, fz0;                           // fraction under water, the wet end
         if (yb <= yw && yt <= yw) { fr = 1; }
@@ -168,7 +170,7 @@ export function stepShip(S, h, sea, t) {
     }
     P.wetK = colN ? sub / colN : 0; P.low = low; P.top = top;
     // added mass: the water round a hull moves with it
-    const ka = 1 + .7 * Math.min(1, P.wetK * 1.5);
+    const ka = P.ka = 1 + .7 * Math.min(1, P.wetK * 1.5);
     const im = 1 / (P.m * ka);
     A3[0] = P.fx * im; A3[1] = P.fy * im; A3[2] = P.fz * im;
     // angular: I_w^-1 tau = R I^-1 R^T tau
@@ -183,8 +185,14 @@ export function stepShip(S, h, sea, t) {
     const wd = Math.exp(-h * .02); P.w[0] *= wd; P.w[1] *= wd; P.w[2] *= wd;
     P.p[0] += P.v[0] * h; P.p[1] += P.v[1] * h; P.p[2] += P.v[2] * h;
     qTurn(P.q, P.w[0], P.w[1], P.w[2], h);
-    // under for good: the whole piece a few metres down and still going
-    if (top < -4 && P.v[1] < .5) { P.sunk = true; P.sunkT = t; }
+    // the bottom (shallow water, a beach): she comes to rest on it
+    if (bed) {
+      const gy = bed(P.p[0], P.p[2]);
+      if (low < gy) { P.p[1] += Math.min(1, gy - low); if (P.v[1] < 0) P.v[1] = 0; const k = Math.exp(-h * 1.5); P.v[0] *= k; P.v[2] *= k; P.w[0] *= k; P.w[1] *= k; P.w[2] *= k; P.aground = true; }
+    }
+    // under for good: what buoyancy is left (every column under) can no longer carry her, and she is well down
+    P.reserve = RHO * vmax / P.m - 1;
+    if (P.reserve < 0 && top < -6 && (P.v[1] < 0 || P.aground)) { P.sunk = true; P.sunkT = t; }
   }
 }
 
@@ -205,10 +213,14 @@ function bending(P, S, t) {
       Mx += MS[i * 3] - (jy * fz - jz * fy); My += MS[i * 3 + 1] - (jz * fx - jx * fz); Mz += MS[i * 3 + 2] - (jx * fy - jy * fx);
       // inertial: -m a_s at the section, a_s = a + alpha x r_s
       const asx = A3[0] + AL[1] * rz - AL[2] * ry, asy = A3[1] + AL[2] * rx - AL[0] * rz, asz = A3[2] + AL[0] * ry - AL[1] * rx;
-      const ix = -s.m * asx, iy = -s.m * asy, iz = -s.m * asz, dx = rx - jx, dy = ry - jy, dz = rz - jz;
+      // (with its share of the water carried along: the added mass the piece moves with)
+      const mk = s.m * P.ka, ix = -mk * asx, iy = -mk * asy, iz = -mk * asz, dx = rx - jx, dy = ry - jy, dz = rz - jz;
       Mx += dy * iz - dz * iy; My += dz * ix - dx * iz; Mz += dx * iy - dy * ix;
     }
-    const m = Mx * ex + My * ey + Mz * ez;
+    let m = Mx * ex + My * ey + Mz * ez;
+    // the sections' own turning inertia (about the hull's cross axis)
+    const ax = AL[0] * ex + AL[1] * ey + AL[2] * ez;
+    for (let i = j; i <= P.i1; i++) m -= P.ka * sec[i].Ix * ax;
     P.over[j] = m / Math.max(1, S.cap[j]);
   }
 }

@@ -37,7 +37,7 @@ import { Splash, Fire } from '../../fx/lib/impact.js';
 
 const G = 9.81, RHO = 1025;
 const sat = v => v < 0 ? 0 : v > 1 ? 1 : v;
-const K_M = 1 / 34;                // the girder's ultimate moment as a share of displacement x g x length (intact)
+const K_M = 1 / 12;                // the girder's ultimate moment as a share of displacement x g x length (intact: a destroyer ~1.2 GN m)
 const LEAK = .0012;                // a lost ship's slow leak (fraction of a compartment per s)
 const OPEN = .02;                  // an open torn end under the water (fraction per s: decks and bulkheads in the way)
 
@@ -53,7 +53,7 @@ export async function createStructure(game) {
   const fxSys = () => game.getSystem('fx');
   const addFx = (e, layer) => { const f = fxSys(); if (f && f.add) f.add(e, layer); return e; };
   const sea = (x, z) => { const s = T.seaAt ? T.seaAt(x, z, game.seaT) : null; return s ? s.y * .85 : 0; };
-  const flatSea = () => 0;
+  const bed = (x, z) => { const y = game.map.h(x, z); return y < 0 ? y : y + .5; };
 
   /* ------------------------------------------------------------ hits kept while she floats */
   function warheadOf(kind) { return WH[kind] !== undefined ? WH[kind] : ((game.PROJ[kind] && game.PROJ[kind].dmg) || 10) * 2.5; }
@@ -101,13 +101,18 @@ export async function createStructure(game) {
   /* a hole's inflow: the part of it under the water, through a ragged hole, into its compartment */
   function addHole(S, h) {
     const L = S.L, i = secAt(S, h.z), side = h.x < 0 ? 0 : 1;
-    const area = Math.PI * h.r * h.r * .55;
-    const Vc = Math.max(50, L.sec[i].V0 * .5 * 1.7);
-    const rate = Math.min(1 / 45, area * .6 * Math.sqrt(2 * G * Math.max(1.5, S.H.T * .5)) / Vc);
+    // the compartment's volume (the buoyancy it holds at the design draught, and what is above it to the deck); the
+    // water gets in through the part of the ragged hole under the surface (flood(): a circle cut by the waterline, a
+    // head of water over it), the decks and bulkheads inside slowing it (at most a twentieth of it a second)
     const low = h.under || h.inside;
-    S.holes.push({ i, c: i * 2 + side, x: h.x, y: h.y, z: h.z, r: h.r, rate: rate * (low ? 1.25 : 1), under: low, sub: 0 });
-    // a charge under her, or deep inside: both sides of the keel open
-    if (low) S.holes.push({ i, c: i * 2 + (1 - side), x: -h.x, y: h.y, z: h.z, r: h.r, rate: rate * .8, under: true, sub: 0 });
+    const put = (j, sd, k) => S.holes.push({ i: j, c: j * 2 + sd, x: sd === side ? h.x : -h.x, y: h.y, z: h.z, r: h.r * .8, Vc: Math.max(50, L.sec[j].V0 * .5 * 1.7), k, under: low, sub: 0, rate: 0 });
+    put(i, side, low ? 1.2 : 1);
+    // a charge under her or deep inside, or a hole as wide as the hull there (the bow): both sides open
+    const both = low || h.r * .8 > .7 * Math.max(.5, S.H.beam(h.z));
+    if (both) put(i, 1 - side, .8);
+    // the blast reaches over the bulkhead into the next compartment
+    if (i > 0 && h.z - L.zc[i] < h.r) { put(i - 1, side, .6); if (both) put(i - 1, 1 - side, .5); }
+    if (i < S.n - 1 && L.zc[i + 1] - h.z < h.r) { put(i + 1, side, .6); if (both) put(i + 1, 1 - side, .5); }
   }
   function secAt(S, z) { const zc = S.L.zc; for (let i = 0; i < S.n; i++) if (z < zc[i + 1]) return i; return S.n - 1; }
 
@@ -115,6 +120,7 @@ export async function createStructure(game) {
   function takeover(u, e) {
     const def = u.def;
     if (def.domain !== 'sea' || def.sub || u.aboard || ships.has(u.id) || !R.models.has(def.model)) return null;
+    if (def.size[0] < 40) return null;                     // small craft (an LCAC): the sim's own sinking
     if (def.hover && game.map.h(u.pos[0], u.pos[2]) > -1) return null;
     const vis = u.side === game.side || !sim.fog || game.vis(u) === 'own' || game.vis(u) === 'track';
     if (!vis) return null;
@@ -141,8 +147,8 @@ export async function createStructure(game) {
     setCaps(S);
     S.bubble = hits.some(h => h.under && sim.t - h.t < 2) ? hits.filter(h => h.under).reduce((a, h) => Math.max(a, h.W), 0) : 0;
     // the water already in her (the sim's flooding) where the holes are
-    const f0 = Math.min(.9, (u.flood || 0) * 1.6);
-    if (f0 > 0 && S.holes.length) { const wt = S.holes.reduce((a, o) => a + o.rate, 0) || 1; for (const o of S.holes) S.flood[o.c] = Math.min(.95, S.flood[o.c] + f0 * o.rate / wt * S.holes.length * .5); }
+    const f0 = Math.min(.5, (u.flood || 0) * .8);
+    if (f0 > 0) for (const o of S.holes) S.flood[o.c] = Math.max(S.flood[o.c], Math.min(.9, f0 * o.k));
     // one piece, where she is drawn now, with her way on
     const pose = base(u), P = newPiece(S, 0, n - 1);
     attitudeM(pose.hdg, pose.pitch || 0, pose.roll || 0, M9);
@@ -229,8 +235,18 @@ export async function createStructure(game) {
       const P = pieceOf(S, o.i);
       if (!P || P.sunk) { o.sub = 0; continue; }
       const Rm = P.R, dx = o.x - P.cm[0], dy = o.y - P.cm[1], dz = o.z - P.cm[2];
-      const y = P.p[1] + Rm[3] * dx + Rm[4] * dy + Rm[5] * dz;
-      o.sub = o.under ? 1 : Math.max(.08, sat((o.r * .8 - y) / (1.6 * o.r)));
+      const y = P.p[1] + Rm[3] * dx + Rm[4] * dy + Rm[5] * dz, r = o.r;
+      // the circle's segment under the water, the head over its middle
+      let A, head;
+      if (o.under) { A = Math.PI * r * r; head = Math.max(1, -y); }
+      else {
+        const d = Math.max(-r, Math.min(r, -y));                         // how far the centre is under (+) / over (-)
+        const hh = r + d;                                                // the segment's height under the water
+        A = hh <= 0 ? 0 : hh >= 2 * r ? Math.PI * r * r : r * r * Math.acos((r - hh) / r) - (r - hh) * Math.sqrt(Math.max(0, 2 * r * hh - hh * hh));
+        head = Math.max(.4, hh * .45 + Math.max(0, d));
+      }
+      o.rate = Math.min(1 / 30, (A * .6 * Math.sqrt(2 * G * head) + (A > 0 ? 0 : 4)) / o.Vc) * o.k;
+      o.sub = 1;
     }
     for (const P of S.pieces) {
       if (P.sunk) continue;
@@ -316,13 +332,13 @@ export async function createStructure(game) {
       const burning = game.scars && game.scars.burning(S.id);
       while (S.t + h <= t1) {
         const t = S.t + h;
-        stepShip(S, h, sea, t);
+        stepShip(S, h, sea, t, bed);
         flood(S, h);
         if (burning) for (let j = 1; j < S.n; j++) if (S.str[j] < .9) S.str[j] = Math.max(0, S.str[j] - .0004 * h);
         // a joint that has carried more than it can for a moment gives way (not a piece that has just broken)
         let fj = 0, fp = null, fo = 1;
         for (const P of S.pieces) {
-          if (P.sunk || P.i1 <= P.i0 || t - P.lastFail < 4) continue;
+          if (P.sunk || P.i1 <= P.i0 || t - P.lastFail < 4 || t - S.t0 < 1.5) continue;
           for (let j = P.i0 + 1; j <= P.i1; j++) {
             const o = Math.abs(P.over[j]);
             S.overT[j] = o > 1 ? S.overT[j] + h : 0;
@@ -366,7 +382,7 @@ export async function createStructure(game) {
   function instOf(S, P, below) {
     const k = below ? 'instB' : 'inst';
     let d = P[k];
-    if (!d) d = P[k] = { key: below ? S.H.below : S.key, T: [0, 0, 0], R: [1, 0, 0, 0, 1, 0, 0, 0, 1], st: below ? {} : S.st, tint: S.tint, tintK: .45, id: `st${S.id}.${P.id}${below ? 'b' : ''}`, alpha: 1, dissolve: 0, slab: null, scars: null, partAlpha: null, damage: null };
+    if (!d) d = P[k] = { key: below ? S.H.below : S.key, T: [0, 0, 0], R: [1, 0, 0, 0, 1, 0, 0, 0, 1], st: below ? {} : S.st, tint: S.tint, tintK: .45, id: `st${S.id}.${P.id}${below ? 'b' : ''}`, stUnit: S.id, alpha: 1, dissolve: 0, slab: null, scars: null, partAlpha: null, damage: null };
     return d;
   }
   function slabOf(S, P, t) {
@@ -383,8 +399,19 @@ export async function createStructure(game) {
     return S.vis;
   }
   const Tm = [0, 0, 0], Rm = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  /* (the Orbital style) the parts of the model whose middle lies in piece P, the hull on the main piece; with the debris
+     system's mask (m) of what left */
+  function orbMask(S, P, m) {
+    const e = R.models.get(S.key), z0 = S.L.zc[P.i0], z1 = S.L.zc[P.i1 + 1];
+    const k = P.orbM || (P.orbM = {});
+    for (const Pt of e.parts) {
+      const X = Pt.part.xf ? Pt.part.xf(S.st) : null, c = Pt.center, z = X ? X.R[6] * c[0] + X.R[7] * c[1] + X.R[8] * c[2] + X.T[2] : c[2];
+      k[Pt.name] = (Pt.name === 'hull' ? P === S.main : z >= z0 && z < z1) && !(m && m[Pt.name] === 0) ? 1 : 0;
+    }
+    return k;
+  }
   function drawShips(frame) {
-    const t = game.t, cam = R.camera, e = cam.eye, fx = R.fx;
+    const t = game.t, cam = R.camera, e = cam.eye, fx = R.fx, orb = R.style === 'orbital';
     let dots = 0;
     const mask = game.debris && game.debris.mask ? game.debris.mask : null;
     for (const S of ships.values()) {
@@ -406,9 +433,11 @@ export async function createStructure(game) {
           for (let i = 0; i < 9; i++) d.R[i] = Rm[i];
           d.T[0] = Tm[0]; d.T[1] = Tm[1]; d.T[2] = Tm[2];
           d.hdg = d.pitch = d.roll = undefined;
-          d.slab = K; d.tint = S.tint;
+          // the Orbital hairlines have no clip: each piece keeps the parts centred in it (the hull on the main one)
+          if (orb) { d.slab = null; if (below) continue; } else d.slab = K;
+          d.tint = S.tint;
           d.dissolve = P.sunk ? sat((t - P.sunkT) / 3) : 0;
-          if (!below) { d.scars = S.scars && S.scars.n ? S.scars : null; d.partAlpha = pm; d.damage = S.u.parts; }
+          if (!below) { d.scars = S.scars && S.scars.n ? S.scars : null; d.partAlpha = orb && S.pieces.length > 1 ? orbMask(S, P, pm) : pm; d.damage = S.u.parts; }
           R.draw(d);
         }
         if (P === S.main && live) game.drawn.set(S.id, P.inst);

@@ -465,13 +465,17 @@ export async function createInspect(game, ctx) {
     const V = S, subj = V.subj, d = V.inst, out = V.phase === 'out';
     const cutOn = !out || V.ex.e > 0 || V.xr.k > 0;
     // the unit's own instance steps aside for the cutaway; the rest of the world steps back
-    const hideId = V.kind === 'unit' && cutOn ? V.id : undefined;
+    // a ship the structure system has taken over (game/structure: broken, sinking) is drawn there piece by piece: lit
+    // with the subject, and no cutaway of the whole hull over it
+    const stTaken = V.kind === 'unit' && game.structure && game.structure.draws(V.id);
+    const hideId = V.kind === 'unit' && cutOn && !stTaken ? V.id : undefined;
     let hideProj = null;
     if (V.kind === 'proj' && V.p && cutOn) hideProj = game.projPose(V.p).pos;
     for (const q of R.queue) {
       if (mine.has(q)) continue;
       let k = V.dimK;
-      if (hideId !== undefined && q.id === hideId) k = 0;
+      if (stTaken && q.stUnit === V.id) k = 1;
+      else if (hideId !== undefined && q.id === hideId) k = 0;
       else if (V.wreck && q === V.wreck.inst && cutOn) k = 0;
       // what it shed (the same model, other parts masked) stays lit with it, not a dimmed see-through double
       else if (V.wreck && q.key === V.wreck.inst.key && q.id === undefined && q.T && Math.hypot(q.T[0] - V.T0[0], q.T[1] - V.T0[1], q.T[2] - V.T0[2]) < 400) k = 1;
@@ -482,7 +486,7 @@ export async function createInspect(game, ctx) {
       q._inspK = k; q.alpha = q._inspA * k; touched.add(q);
     }
     dimFx(V.kind === 'museum' ? 1 - V.worldK : lerp(1, V.kind === 'proj' ? .22 : .2, V.worldK), V);
-    if (!cutOn) return;
+    if (!cutOn || stTaken) return;
     // (the debris system drew this frame's wreck pose before this)
     followWreck(V);
     // the instance
