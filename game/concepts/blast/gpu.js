@@ -239,7 +239,7 @@ void main(){
 const TRUSS_FS = HEAD + `
 uniform sampler2D uTS, uCS; uniform sampler2DArray uMA;
 // state (Lp, negative once failed; shear set; accumulated strain; bending set); forces on 9 nodes: a, b, A (m back),
-// B (m ahead), C0 (chord start), and the plating cell's 4 corners (the angles are taken about an axis in the plating)
+// B (m ahead), C0 (chord start), the plating nodes across a and b on either side (the angles' axes run between them)
 layout(location=0) out vec4 oSt;
 layout(location=1) out vec4 oF0; layout(location=2) out vec4 oF1; layout(location=3) out vec4 oF2; layout(location=4) out vec4 oF3;
 layout(location=5) out vec4 oF4; layout(location=6) out vec4 oF5; layout(location=7) out vec4 oF6;
@@ -251,8 +251,8 @@ vec3 gr(vec3 v) { v -= dot(v, EX) * EX; return cross(EX, v) / max(dot(v, v), 1e-
 vec3 dAe(vec3 u, vec3 v) { vec3 cx = cross(u, v); float s = dot(EX, cx), ue = dot(u, EX), ve = dot(v, EX), c = dot(u, v) - ue * ve; return (c * cx + s * (ve * u + ue * v)) / max(s * s + c * c, 1e-30); }
 void main(){
   ivec2 p = ivec2(gl_FragCoord.xy); int k = p.y * W + p.x;
-  vec4 t0 = texelFetch(uTS, ATW(k, 6, 0), 0), t1 = texelFetch(uTS, ATW(k, 6, 1), 0), t2 = texelFetch(uTS, ATW(k, 6, 2), 0), t3 = texelFetch(uTS, ATW(k, 6, 3), 0),
-       t4 = texelFetch(uTS, ATW(k, 6, 4), 0), t5 = texelFetch(uTS, ATW(k, 6, 5), 0);
+  vec4 t0 = texelFetch(uTS, ATW(k, 7, 0), 0), t1 = texelFetch(uTS, ATW(k, 7, 1), 0), t2 = texelFetch(uTS, ATW(k, 7, 2), 0), t3 = texelFetch(uTS, ATW(k, 7, 3), 0),
+       t4 = texelFetch(uTS, ATW(k, 7, 4), 0), t5 = texelFetch(uTS, ATW(k, 7, 5), 0);
   vec4 st = texelFetch(uMA, ivec3(p, 0), 0);
   oSt = st; oF0 = vec4(0.0); oF1 = vec4(0.0); oF2 = vec4(0.0); oF3 = vec4(0.0); oF4 = vec4(0.0); oF5 = vec4(0.0); oF6 = vec4(0.0);
   if (t0.x < 0.0 || st.x < 0.0) return;
@@ -268,38 +268,52 @@ void main(){
   vec3 F[9]; for (int z = 0; z < 9; z++) F[z] = vec3(0.0);
   F[0] = fo * u; F[1] = -fo * u;
   float tbp = st.w, tsp = st.y;
-  int cl = int(t1.w), A = int(t2.x), B = int(t2.y), C0 = int(t4.x);
-  if (cl >= 0 && CST(AT(cl)).x < 0.5 && (A >= 0 || C0 >= 0)) {
-    vec4 cc = texelFetch(uCS, ATW(cl, 11, 0), 0);
-    int q0 = int(cc.x), q1 = int(cc.y), q2 = int(cc.z), q3 = int(cc.w);
-    vec3 D1 = XR(q2) - XR(q0), D2 = XR(q3) - XR(q1), nC = cross(D1, D2);
-    EX = cross(nC, d); float exl = length(EX); bool ok = exl > 0.3 * length(nC) * L; EX /= max(exl, 1e-30);
-    vec3 xa = XR(a), xB = B >= 0 ? XR(B) : xa, Ge = vec3(0.0);
-    if (ok && A >= 0) {
-      vec3 xA = XR(A), e1 = xa - xA, e2 = xB - xa, g1 = gr(e1), g2 = gr(e2);
-      float thd = dot(g2, VV(B) - VV(a)) - dot(g1, VV(a) - VV(A));
-      float dth = ang(e1, e2) - t3.w; dth -= 6.283185307 * floor(dth / 6.283185307 + 0.5);
-      float rfb = CSF(mi, abs(thd) * t1.z, abs(tbp) * t1.z), cap = t2.w * rfb, kb = t2.z;
-      float Q = kb * (dth - tbp);
-      if (Q > cap) { tbp = dth - cap / kb; Q = cap; } else if (Q < -cap) { tbp = dth + cap / kb; Q = -cap; }
-      Q += uBeta * kb * thd;
-      F[3] -= Q * g2; F[2] -= Q * g1; F[0] += Q * (g1 + g2); Ge += Q * dAe(e1, e2);
+  int cl = int(t1.w), cl2 = int(t5.y), A = int(t2.x), B = int(t2.y), C0 = int(t4.x);
+  if (cl >= 0 && CST(AT(cl)).x < 0.5 && (cl2 < 0 || CST(AT(cl2)).x < 0.5) && (A >= 0 || C0 >= 0)) {
+    vec4 t6 = texelFetch(uTS, ATW(k, 7, 6), 0);
+    int r1 = int(t6.x), r2 = int(t6.y), l1 = int(t6.z), l2 = int(t6.w);
+    vec3 xa = XR(a), xB = B >= 0 ? XR(B) : xa;
+    int pv = int(t4.y); bool bOn = pv < 0 || texelFetch(uMA, ivec3(AT(pv), 0), 0).x > 0.0;
+    if (A >= 0 && bOn) {
+      // bending at a, about the axis across a (between the plating nodes across a), t = B - A
+      vec3 xA = XR(A), D = XR(r1) - XR(l1), t = xB - xA;
+      float dd = dot(t, t), Dd = dot(D, t); vec3 P = D - t * (Dd / dd); float pl = length(P);
+      if (pl > 0.3 * length(D)) {
+        EX = -P / pl;
+        vec3 e1 = xa - xA, e2 = xB - xa, g1 = gr(e1), g2 = gr(e2);
+        float thd = dot(g2, VV(B) - VV(a)) - dot(g1, VV(a) - VV(A));
+        float dth = ang(e1, e2) - t3.w; dth -= 6.283185307 * floor(dth / 6.283185307 + 0.5);
+        float rfb = CSF(mi, abs(thd) * t1.z, abs(tbp) * t1.z), cap = t2.w * rfb, kb = t2.z;
+        float Q = kb * (dth - tbp);
+        if (Q > cap) { tbp = dth - cap / kb; Q = cap; } else if (Q < -cap) { tbp = dth + cap / kb; Q = -cap; }
+        Q += uBeta * kb * thd;
+        F[3] -= Q * g2; F[2] -= Q * g1; F[0] += Q * (g1 + g2);
+        vec3 Ge = Q * dAe(e1, e2), gP = -(Ge - dot(Ge, EX) * EX) / pl; float dg = dot(t, gP);
+        vec3 gD = gP - t * (dg / dd), gt = -(Dd / dd) * gP - (dg / dd) * D + (2.0 * Dd * dg / (dd * dd)) * t;
+        F[3] -= gt; F[2] += gt; F[5] -= gD; F[7] += gD;
+      }
     }
-    if (ok && C0 >= 0) {
-      vec3 c = xB - XR(C0), gc = gr(c), gs = gr(d);
-      float gd = dot(gs, VV(b) - VV(a)) - dot(gc, VV(B) - VV(C0));
-      float dg = ang(c, d) - t5.x; dg -= 6.283185307 * floor(dg / 6.283185307 + 0.5);
-      float cap = t4.w * rf, ks = t4.z, Q = ks * (dg - tsp);
-      if (Q > cap) { tsp = dg - cap / ks; Q = cap; } else if (Q < -cap) { tsp = dg + cap / ks; Q = -cap; }
-      Q += uBeta * ks * gd;
-      F[1] -= Q * gs; F[0] += Q * gs; F[3] += Q * gc; F[4] -= Q * gc; Ge += Q * dAe(c, d);
-    }
-    if (ok) {                     // through the axis: EX = (n x d)/|n x d|, n = D1 x D2
-      vec3 gm = (Ge - dot(Ge, EX) * EX) / exl, gn = cross(d, gm), gt = cross(gm, nC), g1 = cross(D2, gn), g2 = cross(gn, D1);
-      F[0] += gt; F[1] -= gt; F[5] += g1; F[7] -= g1; F[6] += g2; F[8] -= g2;
+    if (C0 >= 0) {
+      // shear of a-b, about the axis between the far corners of the cells on either side, t = b - a
+      vec3 D = 0.5 * (XR(r1) + XR(r2) - XR(l1) - XR(l2));
+      float dd = dot(d, d), Dd = dot(D, d); vec3 P = D - d * (Dd / dd); float pl = length(P);
+      if (pl > 0.3 * length(D)) {
+        EX = -P / pl;
+        vec3 c = xB - XR(C0), gc = gr(c), gs = gr(d);
+        float gd = dot(gs, VV(b) - VV(a)) - dot(gc, VV(B) - VV(C0));
+        float dgm = ang(c, d) - t5.x; dgm -= 6.283185307 * floor(dgm / 6.283185307 + 0.5);
+        float cap = t4.w * rf, ks = t4.z, Q = ks * (dgm - tsp);
+        if (Q > cap) { tsp = dgm - cap / ks; Q = cap; } else if (Q < -cap) { tsp = dgm + cap / ks; Q = -cap; }
+        Q += uBeta * ks * gd;
+        F[1] -= Q * gs; F[0] += Q * gs; F[3] += Q * gc; F[4] -= Q * gc;
+        vec3 Ge = Q * dAe(c, d), gP = -(Ge - dot(Ge, EX) * EX) / pl; float dg = dot(d, gP);
+        vec3 gD = gP - d * (dg / dd), gt = -(Dd / dd) * gP - (dg / dd) * D + (2.0 * Dd * dg / (dd * dd)) * d;
+        F[1] -= gt; F[0] += gt; F[5] -= 0.5 * gD; F[6] -= 0.5 * gD; F[7] += 0.5 * gD; F[8] += 0.5 * gD;
+      }
     }
   }
-  float failed = max(0.0, log(Lp / L0)) + abs(tbp) * t1.z >= t1.y ? 1.0 : 0.0;
+  int nx = int(t5.z); float tbn = nx >= 0 ? abs(texelFetch(uMA, ivec3(AT(nx), 0), 0).w) : 0.0;
+  float failed = max(0.0, log(Lp / L0)) + max(abs(st.w), tbn) * t1.z >= t1.y ? 1.0 : 0.0;
   oSt = vec4(failed > 0.5 ? -Lp : Lp, tsp, eb, tbp);
   oF0 = vec4(F[0], F[1].x); oF1 = vec4(F[1].yz, F[2].xy); oF2 = vec4(F[2].z, F[3]); oF3 = vec4(F[4], F[5].x);
   oF4 = vec4(F[5].yz, F[6].xy); oF5 = vec4(F[6].z, F[7]); oF6 = vec4(F[8], 0.0);
@@ -473,7 +487,7 @@ export function createGPU(gl, M) {
   for (let h = 0; h < NH; h++) for (let k = 0; k < 6; k++) adjL[1][M.HN[6 * h + k]].push(h * 8 + k);
   for (let t = 0; t < NT; t++) { adjL[2][M.TA[t]].push(t * 16); adjL[2][M.TB[t]].push(t * 16 + 1);
     if (M.TBA[t] >= 0) adjL[2][M.TBA[t]].push(t * 16 + 2); if (M.TBB[t] >= 0) adjL[2][M.TBB[t]].push(t * 16 + 3); if (M.TSC[t] >= 0) adjL[2][M.TSC[t]].push(t * 16 + 4);
-    if (M.TCL[t] >= 0 && (M.TBA[t] >= 0 || M.TSC[t] >= 0)) for (let z = 0; z < 4; z++) adjL[2][M.CN[4 * M.TCL[t] + z]].push(t * 16 + 5 + z); }
+    if (M.TCL[t] >= 0 && (M.TBA[t] >= 0 || M.TSC[t] >= 0)) for (let z = 0; z < 4; z++) adjL[2][M.TQN[4 * t + z]].push(t * 16 + 5 + z); }
   const adjOff = [new Int32Array(N), new Int32Array(N), new Int32Array(N)], flat = [];
   for (let q = 0; q < 3; q++) for (let i = 0; i < N; i++) { adjOff[q][i] = flat.length; for (const e of adjL[q][i]) flat.push(e); }
   { const nt = Math.ceil(flat.length / 4), a = new Float32Array(Wd * rows(nt) * 4); a.set(flat); T.adj = tex(Wd, rows(nt), a); }
@@ -493,9 +507,9 @@ export function createGPU(gl, M) {
     put(5, [E[0], E[1], E[2], f1[0]]); put(6, [f1[1], f1[2], f2[0], f2[1]]); put(7, [f2[2], 0, 0, 0]); put(0, [0, 1, 2, 3].map(z => M.HN[6 * k + z])); put(1, [M.HN[6 * k + 4], M.HN[6 * k + 5], M.HC[2 * k], M.HC[2 * k + 1]]);
     put(2, [M.HKP[k], M.HMP[k], M.HKS[k], M.HMS[k]]); put(3, [M.HTR[2 * k], M.HTR[2 * k + 1], M.HDB[k], M.HHP[k]]); put(4, [M.HMAT[k], M.HT0[k], M.HLN[k], 0]);
     put(8, [M.HTL0[k], M.HTR[2 * k] >= 0 ? M.TFIB[M.HTR[2 * k]] : 0, 0, 0]); });
-  T.ts = wide(NT, 6, (k, put) => { const a = M.TA[k], b = M.TB[k]; put(0, [a, b, M.TL0[k], M.TAR[k]]); put(1, [M.TMAT[k], M.TEF[k], M.TFIB[k], M.TCL[k]]);
+  T.ts = wide(NT, 7, (k, put) => { const a = M.TA[k], b = M.TB[k]; put(0, [a, b, M.TL0[k], M.TAR[k]]); put(1, [M.TMAT[k], M.TEF[k], M.TFIB[k], M.TCL[k]]);
     put(2, [M.TBA[k], M.TBB[k], M.TKB[k], M.TQB[k]]); put(3, [...[0, 1, 2].map(z => M.R0[3 * b + z] - M.R0[3 * a + z]), M.TB0[k]]);
-    put(4, [M.TSC[k], 0, M.TKS[k], M.TQS[k]]); put(5, [M.TS0[k], 0, 0, 0]); });
+    put(4, [M.TSC[k], M.TPRV[k], M.TKS[k], M.TQS[k]]); put(5, [M.TS0[k], M.TCL2[k], M.TNXT[k], 0]); put(6, [0, 1, 2, 3].map(z => M.TQN[4 * k + z])); });
   const pan = new Float32Array(5 * Math.max(1, M.PAN.length) * 4);
   M.PAN.forEach((P, q) => pan.set([P.o[0] - O[0], P.o[1] - O[1], P.o[2] - O[2], P.nu, ...P.U, P.Lu, ...P.V, P.Lv, ...P.n, P.off, P.nv, 0, 0, 0], 20 * q));
   T.pan = tex(5 * Math.max(1, M.PAN.length), 1, pan);

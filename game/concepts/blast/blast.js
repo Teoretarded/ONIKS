@@ -316,7 +316,7 @@ let NC = 0, CN, CPAN, CH, CMAT, CEF, CSP, CSN, CWET, CAR, CTR, CHG, CDB, CVIS, C
 // hinges: 6 nodes, 2 cells, plate stiffness/moment, stiffener stiffness/moment, rest angle, lever, trusses, state
 let NH = 0, HEL, HLN, HTL0, HTPS, HN, HC, HKP, HMP, HKS, HMS, HT0, HDB, HTR, HHP, HMAT, HTP, HTH, HSAME;
 // trusses (stiffener axial members)
-let NT = 0, TA, TB, TL0, TAR, TMAT, TEF, TFIB, THG, TLP, TFL, TEB, TKIND, TBA, TBB, TSC, TCL, TKB, TQB, TB0, TKS, TQS, TS0, TBP, TSP, TMM, emapRef = null;
+let NT = 0, TA, TB, TL0, TAR, TMAT, TEF, TFIB, THG, TLP, TFL, TEB, TKIND, TBA, TBB, TSC, TCL, TCL2, TQN, TPRV, TNXT, TKB, TQB, TB0, TKS, TQS, TS0, TBP, TSP, TMM, emapRef = null;
 // pieces (contact maps)
 let PAN = [];
 const TRI = [[0, 1, 2], [0, 2, 3], [0, 1, 3], [1, 2, 3]];
@@ -590,7 +590,7 @@ function build() {
   // angle between the chords to the nodes m cells either side (base 2 m S ~ the section depth: a deep member cannot
   // bend over less than its depth), and transverse shear of each segment against the chord around it (G A_w), which
   // carries the short-wave modes the base does not see. Smooth curvature: exact bending, no shear; m = 1: Euler-Bernoulli.
-  TBA = new Int32Array(NT).fill(-1); TBB = new Int32Array(NT).fill(-1); TSC = new Int32Array(NT).fill(-1); TCL = new Int32Array(NT).fill(-1);
+  TBA = new Int32Array(NT).fill(-1); TBB = new Int32Array(NT).fill(-1); TSC = new Int32Array(NT).fill(-1); TCL = new Int32Array(NT).fill(-1); TCL2 = new Int32Array(NT).fill(-1); TQN = new Int32Array(4 * NT).fill(-1); TPRV = new Int32Array(NT).fill(-1); TNXT = new Int32Array(NT).fill(-1);
   TKB = new Float64Array(NT); TQB = new Float64Array(NT); TB0 = new Float64Array(NT); TKS = new Float64Array(NT); TQS = new Float64Array(NT); TS0 = new Float64Array(NT);
   TBP = new Float64Array(NT); TSP = new Float64Array(NT); TMM = new Uint8Array(NT).fill(1);
   for (const lr of lineRec) {
@@ -601,12 +601,19 @@ function build() {
     let Sb = 0; for (const t of lr.trusses) Sb += TL0[t]; Sb /= L;
     const mm = Math.max(1, Math.min(st.beamM === 1 ? 1 : Math.round(.75 * sec.d / Sb), Math.floor(L / 2)));   // base 2 m S ~ 1.5 depth
     for (let j = 0; j < L; j++) {
-      const t = lr.trusses[j]; TMM[t] = mm; TFIB[t] = sec.c / (mm * Sb);
+      const t = lr.trusses[j]; TMM[t] = mm; TPRV[t] = j > 0 ? lr.trusses[j - 1] : -1; TNXT[t] = j + 1 < L ? lr.trusses[j + 1] : -1; TFIB[t] = sec.c / (mm * Sb);
       const l = emapRef.get(EK(nd[j], nd[j + 1])) || [];
-      let cl = -1; for (const [c] of l) { if (Math.abs(dot([CNR[3 * c], CNR[3 * c + 1], CNR[3 * c + 2]], lr.n)) > .9) { cl = c; break; } }
-      if (cl < 0 && l.length) cl = l[0][0];
-      if (cl < 0) continue;
-      TCL[t] = cl;
+      // the plating on both sides of the member (one at an edge): the axis across the member is taken between the
+      // outer corners of the two cells, so neither side is preferred (mirror-symmetric)
+      const cs = l.map(([c]) => c).filter(c => Math.abs(dot([CNR[3 * c], CNR[3 * c + 1], CNR[3 * c + 2]], lr.n)) > .9);
+      if (!cs.length && l.length) cs.push(l[0][0]);
+      if (!cs.length) continue;
+      const outer = c => { const o = []; for (let z = 0; z < 4; z++) { const q = CN[4 * c + z]; if (q !== nd[j] && q !== nd[j + 1]) o.push(q); } if (o.length !== 2) return null;
+        const da = q => Math.hypot(R0[3 * q] - R0[3 * nd[j]], R0[3 * q + 1] - R0[3 * nd[j] + 1], R0[3 * q + 2] - R0[3 * nd[j] + 2]); return da(o[0]) <= da(o[1]) ? o : [o[1], o[0]]; };
+      const o1 = outer(cs[0]), o2 = cs.length > 1 ? outer(cs[1]) : null;
+      if (!o1) continue;
+      TCL[t] = cs[0]; TCL2[t] = o2 ? cs[1] : -1;
+      TQN.set([o1[0], o1[1], o2 ? o2[0] : nd[j], o2 ? o2[1] : nd[j + 1]], 4 * t);
       if (j - mm >= 0 && j + mm <= L && EIs > 0) { TBA[t] = nd[j - mm]; TBB[t] = nd[j + mm]; TKB[t] = EIs / (mm * mm * Sb); TQB[t] = Mps / mm; }
       if (mm >= 2 && j + 1 - mm >= 0 && j + mm <= L) { TSC[t] = nd[j + 1 - mm]; TBB[t] = nd[j + mm]; TKS[t] = Gm * sec.Aw * Sb; TQS[t] = Sb * m.sy / Math.sqrt(3) * sec.Aw; }
       const g = memberAngles(t, R0); TB0[t] = g[0]; TS0[t] = g[1];
@@ -894,11 +901,15 @@ function detonate() {
   sim.frags = Mc > 0 && st.frags && fill > 0 ? makeFrags(C, fill, Mc) : null;
   EN = { ext: 0, kin: 0, el: 0, plM: 0, plH: 0, plT: 0, plA: 0, damp: 0, rad: 0, frac: 0, contact: 0, frag: 0, water: 0 };
   rebuildSources(0);
-  if (sim.solver === 'gpu') sim.gpuInit = false;
+  // the GPU backend is made here (scripts and harnesses read it right after): WebGPU for runs that read back
+  // asynchronously (interactive, runCaseAsync: asyncRun), WebGL2 for blocking ones and without WebGPU
+  if (sim.solver === 'gpu') { sim.gpuInit = false; sim.headless = !asyncRun; initGPU(); sim.headless = false; }
 }
+let asyncRun = false;
 // the GPU backend for this run: WebGPU unless asked for WebGL2, or the run reads back blocking (headless / sync)
 function initGPU() {
   const s = sim, want = WG && (st.backend === 'webgpu' || (st.backend === 'auto' && !s.headless && !s.sync)) ? 'webgpu' : 'webgl';
+  if (s.gpuInit && gpu && (gpu.kind || 'webgl') === want) return;
   if (gpu && (gpu.kind || 'webgl') !== want) { gpu.dispose(); gpu = null; }
   if (!gpu) gpu = want === 'webgpu' ? createWGPU(WG, gpuModel(), { batch: st.wgBatch, depth: st.wgDepth }) : createGPU(gl, gpuModel());
   gpu.upload(); gpu.setSources(s.SRC); gpu.setGas(GP); s.gpuInit = true; s.backend = want;
@@ -1262,25 +1273,38 @@ function cellPass(t, h) {
 
 // the member's bending angle (chords to the nodes m either side, about the in-plate axis across the member) and the
 // shear angle of its segment against the chord around it; rest values are subtracted by the caller
-const MG = { ex: 0, ey: 0, ez: 0 };
+// Axes across the member in its plating (the angles are measured about them): e = -P/|P|, P = D - t (D.t)/(t.t),
+// D across the member, t along it. Bending at node a: D between the plating nodes across a on either side, t = B - A;
+// shear of segment a-b: D between the far corners of the cells on either side (half each), t = b - a. Both are
+// mirror-symmetric about their element, and their dependence on the nodes enters the gradient (no net moment).
+const MB = { e: [0, 0, 0], D: [0, 0, 0], t: [0, 0, 0], pl: 0, dd: 0, Dd: 0, bad: true }, MS = { e: [0, 0, 0], D: [0, 0, 0], t: [0, 0, 0], pl: 0, dd: 0, Dd: 0, bad: true };
+function setAxis(o, Dx, Dy, Dz, tx, ty, tz) {
+  const dd = tx * tx + ty * ty + tz * tz, Dd = Dx * tx + Dy * ty + Dz * tz, px = Dx - tx * Dd / dd, py = Dy - ty * Dd / dd, pz = Dz - tz * Dd / dd;
+  const pl = Math.hypot(px, py, pz) || 1e-30;
+  o.bad = pl < .3 * Math.hypot(Dx, Dy, Dz);                                        // the plating folded onto the member's line
+  o.e[0] = -px / pl; o.e[1] = -py / pl; o.e[2] = -pz / pl; o.pl = pl; o.dd = dd; o.Dd = Dd;
+  o.D[0] = Dx; o.D[1] = Dy; o.D[2] = Dz; o.t[0] = tx; o.t[1] = ty; o.t[2] = tz;
+}
+// angle from u to v about e (both projected off e)
+function angAbout(e, ux, uy, uz, vx, vy, vz) { const ex = e[0], ey = e[1], ez = e[2];
+  let q = ux * ex + uy * ey + uz * ez; ux -= q * ex; uy -= q * ey; uz -= q * ez; q = vx * ex + vy * ey + vz * ez; vx -= q * ex; vy -= q * ey; vz -= q * ez;
+  return Math.atan2((uy * vz - uz * vy) * ex + (uz * vx - ux * vz) * ey + (ux * vy - uy * vx) * ez, ux * vx + uy * vy + uz * vz); }
 function memberAngles(k, P) {
-  const c = TCL[k], q0 = CN[4 * c], q1 = CN[4 * c + 1], q2 = CN[4 * c + 2], q3 = CN[4 * c + 3];
-  const ax = P[3 * q2] - P[3 * q0], ay = P[3 * q2 + 1] - P[3 * q0 + 1], az = P[3 * q2 + 2] - P[3 * q0 + 2];
-  const bx = P[3 * q3] - P[3 * q1], by = P[3 * q3 + 1] - P[3 * q1 + 1], bz = P[3 * q3 + 2] - P[3 * q1 + 2];
-  const nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx;
-  const a = TA[k], b = TB[k], tx = P[3 * b] - P[3 * a], ty = P[3 * b + 1] - P[3 * a + 1], tz = P[3 * b + 2] - P[3 * a + 2];
-  let ex = ny * tz - nz * ty, ey = nz * tx - nx * tz, ez = nx * ty - ny * tx; const el = Math.hypot(ex, ey, ez) || 1e-30;
-  MG.bad = el < .3 * Math.hypot(nx, ny, nz) * Math.hypot(tx, ty, tz); ex /= el; ey /= el; ez /= el;   // member turned off its plating's plane
-  MG.ex = ex; MG.ey = ey; MG.ez = ez; MG.nx = nx; MG.ny = ny; MG.nz = nz; MG.el = el; MG.q0 = q0; MG.q1 = q1; MG.q2 = q2; MG.q3 = q3;
-  const ang = (ux, uy, uz, vx, vy, vz) => { let q = ux * ex + uy * ey + uz * ez; ux -= q * ex; uy -= q * ey; uz -= q * ez; q = vx * ex + vy * ey + vz * ez; vx -= q * ex; vy -= q * ey; vz -= q * ez;
-    return Math.atan2((uy * vz - uz * vy) * ex + (uz * vx - ux * vz) * ey + (ux * vy - uy * vx) * ez, ux * vx + uy * vy + uz * vz); };
-  let th = 0, ga = 0;
-  if (TBA[k] >= 0) { const A = TBA[k], B = TBB[k]; th = ang(P[3 * a] - P[3 * A], P[3 * a + 1] - P[3 * A + 1], P[3 * a + 2] - P[3 * A + 2], P[3 * B] - P[3 * a], P[3 * B + 1] - P[3 * a + 1], P[3 * B + 2] - P[3 * a + 2]); }
-  if (TSC[k] >= 0) { const C0 = TSC[k], C1 = TBB[k]; ga = ang(P[3 * C1] - P[3 * C0], P[3 * C1 + 1] - P[3 * C0 + 1], P[3 * C1 + 2] - P[3 * C0 + 2], tx, ty, tz); }
+  const a = TA[k], b = TB[k], r1 = TQN[4 * k], r2 = TQN[4 * k + 1], l1 = TQN[4 * k + 2], l2 = TQN[4 * k + 3];
+  const tx = P[3 * b] - P[3 * a], ty = P[3 * b + 1] - P[3 * a + 1], tz = P[3 * b + 2] - P[3 * a + 2];
+  let th = 0, ga = 0; MB.bad = MS.bad = true;
+  if (TBA[k] >= 0) { const A = TBA[k], B = TBB[k];
+    setAxis(MB, P[3 * r1] - P[3 * l1], P[3 * r1 + 1] - P[3 * l1 + 1], P[3 * r1 + 2] - P[3 * l1 + 2], P[3 * B] - P[3 * A], P[3 * B + 1] - P[3 * A + 1], P[3 * B + 2] - P[3 * A + 2]);
+    th = angAbout(MB.e, P[3 * a] - P[3 * A], P[3 * a + 1] - P[3 * A + 1], P[3 * a + 2] - P[3 * A + 2], P[3 * B] - P[3 * a], P[3 * B + 1] - P[3 * a + 1], P[3 * B + 2] - P[3 * a + 2]); }
+  if (TSC[k] >= 0) { const C0 = TSC[k], C1 = TBB[k];
+    setAxis(MS, .5 * (P[3 * r1] + P[3 * r2] - P[3 * l1] - P[3 * l2]), .5 * (P[3 * r1 + 1] + P[3 * r2 + 1] - P[3 * l1 + 1] - P[3 * l2 + 1]), .5 * (P[3 * r1 + 2] + P[3 * r2 + 2] - P[3 * l1 + 2] - P[3 * l2 + 2]), tx, ty, tz);
+    ga = angAbout(MS.e, P[3 * C1] - P[3 * C0], P[3 * C1 + 1] - P[3 * C0 + 1], P[3 * C1 + 2] - P[3 * C0 + 2], tx, ty, tz); }
   return [th, ga];
 }
+let TFLS = null, TBPS = null;                         // member failures and bending sets at the start of the step
 function trussPass(t, h) {
   let eel = 0;
+  if (!TFLS || TFLS.length !== NT) { TFLS = new Uint8Array(NT); TBPS = new Float64Array(NT); } TFLS.set(TFL); TBPS.set(TBP);
   const addF = (i, s, gx, gy, gz) => { F[3 * i] += s * gx; F[3 * i + 1] += s * gy; F[3 * i + 2] += s * gz; };
   for (let k = 0; k < NT; k++) {
     if (TFL[k]) continue;
@@ -1298,22 +1322,28 @@ function trussPass(t, h) {
     const fa = f; f += fd;
     F[3 * a] += f * ux; F[3 * a + 1] += f * uy; F[3 * a + 2] += f * uz; F[3 * b] -= f * ux; F[3 * b + 1] -= f * uy; F[3 * b + 2] -= f * uz;
     let ebend = 0;
-    if (TCL[k] >= 0 && !CER[TCL[k]] && (TBA[k] >= 0 || TSC[k] >= 0)) {       // bending needs its plating (the reference plane) in place
-      const g = memberAngles(k, X), ex = MG.ex, ey = MG.ey, ez = MG.ez;
-      if (!MG.bad) {
-      // d(angle from u to v)/d(head of v) = (e x v)/|v|^2 and d/d(tail of v) = -that; for u the signs flip
-      const gr = (x, y, z) => { const q = x * ex + y * ey + z * ez; x -= q * ex; y -= q * ey; z -= q * ez; const l2 = x * x + y * y + z * z || 1e-30;
+    if (TCL[k] >= 0 && !CER[TCL[k]] && (TCL2[k] < 0 || !CER[TCL2[k]]) && (TBA[k] >= 0 || TSC[k] >= 0)) {       // bending needs its plating (the reference plane) in place
+      const g = memberAngles(k, X);
+      // d(angle from u to v about e)/d(head of v) = (e x v)/|v|^2, d/d(tail of v) = -that; for u the signs flip
+      const gr = (e, x, y, z) => { const ex = e[0], ey = e[1], ez = e[2], q = x * ex + y * ey + z * ez; x -= q * ex; y -= q * ey; z -= q * ez; const l2 = x * x + y * y + z * z || 1e-30;
         return [(ey * z - ez * y) / l2, (ez * x - ex * z) / l2, (ex * y - ey * x) / l2]; };
       const vdot = (gv, i, j) => gv[0] * (V[3 * i] - V[3 * j]) + gv[1] * (V[3 * i + 1] - V[3 * j + 1]) + gv[2] * (V[3 * i + 2] - V[3 * j + 2]);
-      // the angles are measured about e = n x t (n the plating's normal): their dependence on e, through n (the cell's
-      // corners) and t (a, b), completes the gradient, so the forces carry no net moment
-      let Gx = 0, Gy = 0, Gz = 0;
-      const addGe = (Q, ux, uy, uz, vx, vy, vz) => { const cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
+      // Q dAngle/de, then through e = -P/|P| to D (weights wD on the across nodes: +r, -l) and t (+head, -tail)
+      const axisForces = (ax, Q, ux, uy, uz, vx, vy, vz, rr, ll, wD, th, tt) => {
+        const e = ax.e, ex = e[0], ey = e[1], ez = e[2], cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
         const s = ex * cx + ey * cy + ez * cz, ue = ux * ex + uy * ey + uz * ez, ve = vx * ex + vy * ey + vz * ez, c = ux * vx + uy * vy + uz * vz - ue * ve, dn = s * s + c * c || 1e-30;
-        Gx += Q * (c * cx + s * (ve * ux + ue * vx)) / dn; Gy += Q * (c * cy + s * (ve * uy + ue * vy)) / dn; Gz += Q * (c * cz + s * (ve * uz + ue * vz)) / dn; };
-      if (TBA[k] >= 0) {
-        const A = TBA[k], B = TBB[k];
-        const g1 = gr(X[3 * a] - X[3 * A], X[3 * a + 1] - X[3 * A + 1], X[3 * a + 2] - X[3 * A + 2]), g2 = gr(X[3 * B] - X[3 * a], X[3 * B + 1] - X[3 * a + 1], X[3 * B + 2] - X[3 * a + 2]);
+        const Gx = Q * (c * cx + s * (ve * ux + ue * vx)) / dn, Gy = Q * (c * cy + s * (ve * uy + ue * vy)) / dn, Gz = Q * (c * cz + s * (ve * uz + ue * vz)) / dn;
+        const q = Gx * ex + Gy * ey + Gz * ez, gx = -(Gx - q * ex) / ax.pl, gy = -(Gy - q * ey) / ax.pl, gz = -(Gz - q * ez) / ax.pl;
+        const t = ax.t, D = ax.D, dd = ax.dd, Dd = ax.Dd, dg = t[0] * gx + t[1] * gy + t[2] * gz;
+        const gDx = gx - t[0] * dg / dd, gDy = gy - t[1] * dg / dd, gDz = gz - t[2] * dg / dd;
+        const c1 = -Dd / dd, c2 = -dg / dd, c3 = 2 * Dd * dg / (dd * dd);
+        const gtx = c1 * gx + c2 * D[0] + c3 * t[0], gty = c1 * gy + c2 * D[1] + c3 * t[1], gtz = c1 * gz + c2 * D[2] + c3 * t[2];
+        addF(th, -1, gtx, gty, gtz); addF(tt, 1, gtx, gty, gtz);
+        for (const i of rr) addF(i, -wD, gDx, gDy, gDz); for (const i of ll) addF(i, wD, gDx, gDy, gDz); };
+      if (TBA[k] >= 0 && !MB.bad && (TPRV[k] < 0 || !TFLS[TPRV[k]])) {   // the bending at node a needs both segments there
+        const A = TBA[k], B = TBB[k], e = MB.e;
+        const ux = X[3 * a] - X[3 * A], uy = X[3 * a + 1] - X[3 * A + 1], uz = X[3 * a + 2] - X[3 * A + 2], vx = X[3 * B] - X[3 * a], vy = X[3 * B + 1] - X[3 * a + 1], vz = X[3 * B + 2] - X[3 * a + 2];
+        const g1 = gr(e, ux, uy, uz), g2 = gr(e, vx, vy, vz);
         // theta = angle(u = a - A, v = B - a): d/dB = g2, d/dA = g1, d/da = -(g1 + g2)
         const thd = vdot(g2, B, a) - vdot(g1, a, A);
         let d = g[0] - TB0[k]; d -= Math.round(d / 6.283185307) * 6.283185307;
@@ -1324,11 +1354,12 @@ function trussPass(t, h) {
         eel += .5 * Q * Q / kb; ebend = .5 * Q * Q / kb;
         const Qd = BETA * kb * thd; if (EN) EN.damp += Qd * thd * h; Q += Qd;
         addF(B, -Q, g2[0], g2[1], g2[2]); addF(A, -Q, g1[0], g1[1], g1[2]); addF(a, Q, g1[0] + g2[0], g1[1] + g2[1], g1[2] + g2[2]);
-        addGe(Q, X[3 * a] - X[3 * A], X[3 * a + 1] - X[3 * A + 1], X[3 * a + 2] - X[3 * A + 2], X[3 * B] - X[3 * a], X[3 * B + 1] - X[3 * a + 1], X[3 * B + 2] - X[3 * a + 2]);
+        axisForces(MB, Q, ux, uy, uz, vx, vy, vz, [TQN[4 * k]], [TQN[4 * k + 2]], 1, B, A);
       }
-      if (TSC[k] >= 0) {
-        const C0 = TSC[k], C1 = TBB[k];
-        const gc = gr(X[3 * C1] - X[3 * C0], X[3 * C1 + 1] - X[3 * C0 + 1], X[3 * C1 + 2] - X[3 * C0 + 2]), gs = gr(dx, dy, dz);
+      if (TSC[k] >= 0 && !MS.bad) {
+        const C0 = TSC[k], C1 = TBB[k], e = MS.e;
+        const cx = X[3 * C1] - X[3 * C0], cy = X[3 * C1 + 1] - X[3 * C0 + 1], cz = X[3 * C1 + 2] - X[3 * C0 + 2];
+        const gc = gr(e, cx, cy, cz), gs = gr(e, dx, dy, dz);
         // gamma = angle(u = chord C1 - C0, v = segment b - a): d/db = gs, d/da = -gs, d/dC1 = -gc, d/dC0 = gc
         const gd = vdot(gs, b, a) - vdot(gc, C1, C0);
         let d = g[1] - TS0[k]; d -= Math.round(d / 6.283185307) * 6.283185307;
@@ -1339,24 +1370,12 @@ function trussPass(t, h) {
         eel += .5 * Q * Q / ks; ebend += .5 * Q * Q / ks;
         const Qd = BETA * ks * gd; if (EN) EN.damp += Qd * gd * h; Q += Qd;
         addF(b, -Q, gs[0], gs[1], gs[2]); addF(a, Q, gs[0], gs[1], gs[2]); addF(C1, Q, gc[0], gc[1], gc[2]); addF(C0, -Q, gc[0], gc[1], gc[2]);
-        addGe(Q, X[3 * C1] - X[3 * C0], X[3 * C1 + 1] - X[3 * C0 + 1], X[3 * C1 + 2] - X[3 * C0 + 2], dx, dy, dz);
-      }
-      { // dE/de -> dE/dm (m = n x t, e = m/|m|) -> dE/dn, dE/dt -> the cell's corners (n = D1 x D2) and a, b
-        const q = Gx * ex + Gy * ey + Gz * ez, mx = (Gx - q * ex) / MG.el, my = (Gy - q * ey) / MG.el, mz = (Gz - q * ez) / MG.el;
-        const nx = MG.nx, ny = MG.ny, nz = MG.nz;
-        const gnx = dy * mz - dz * my, gny = dz * mx - dx * mz, gnz = dx * my - dy * mx;          // t x g_m
-        const gtx = my * nz - mz * ny, gty = mz * nx - mx * nz, gtz = mx * ny - my * nx;          // g_m x n
-        addF(a, 1, gtx, gty, gtz); addF(b, -1, gtx, gty, gtz);
-        const q0 = MG.q0, q1 = MG.q1, q2 = MG.q2, q3 = MG.q3;
-        const d1x = X[3 * q2] - X[3 * q0], d1y = X[3 * q2 + 1] - X[3 * q0 + 1], d1z = X[3 * q2 + 2] - X[3 * q0 + 2];
-        const d2x = X[3 * q3] - X[3 * q1], d2y = X[3 * q3 + 1] - X[3 * q1 + 1], d2z = X[3 * q3 + 2] - X[3 * q1 + 2];
-        const g1x = d2y * gnz - d2z * gny, g1y = d2z * gnx - d2x * gnz, g1z = d2x * gny - d2y * gnx;   // D2 x g_n
-        const g2x = gny * d1z - gnz * d1y, g2y = gnz * d1x - gnx * d1z, g2z = gnx * d1y - gny * d1x;   // g_n x D1
-        addF(q2, -1, g1x, g1y, g1z); addF(q0, 1, g1x, g1y, g1z); addF(q3, -1, g2x, g2y, g2z); addF(q1, 1, g2x, g2y, g2z);
-      }
+        axisForces(MS, Q, cx, cy, cz, dx, dy, dz, [TQN[4 * k], TQN[4 * k + 1]], [TQN[4 * k + 2], TQN[4 * k + 3]], .5, b, a);
       }
     }
-    if (Math.max(0, Math.log(TLP[k] / L0)) + Math.abs(TBP[k]) * TFIB[k] >= TEF[k]) { TFL[k] = 1; if (EN) EN.frac += .5 * fa * fa / kk + ebend; }
+    // a segment fails on its stretch plus the larger plastic bending strain at its two nodes (either end alike, both
+    // taken at the start of the step, so neither end is ahead)
+    if (Math.max(0, Math.log(TLP[k] / L0)) + Math.max(Math.abs(TBPS[k]), TNXT[k] >= 0 ? Math.abs(TBPS[TNXT[k]]) : 0) * TFIB[k] >= TEF[k]) { TFL[k] = 1; if (EN) EN.frac += .5 * fa * fa / kk + ebend; }
   }
   return eel;
 }
@@ -1476,7 +1495,7 @@ function commonSync(t, torn) {
 /* ------------------------------------------------------------------ GPU solver glue */
 function gpuModel() {
   return { N, NC, NH, NT, R0, M, WINV, AK, AF, AC, CN, CH, CMAT, CEF, CSP, CSN, CWET, CAR, CTR, CHG, CDB, CRC, CVIS: () => CVIS,
-    HN, HC, HKP, HMP, HKS, HMS, HT0, HDB, HTR, HHP, HMAT, HLN, HTL0, TBA, TBB, TSC, TCL, TKB, TQB, TB0, TKS, TQS, TS0, TMM, TA, TB, TL0, TAR, TMAT, TEF, TFIB, THG, NCC, PAN, CMAP, MATS, TA1, S,
+    HN, HC, HKP, HMP, HKS, HMS, HT0, HDB, HTR, HHP, HMAT, HLN, HTL0, TBA, TBB, TSC, TCL, TCL2, TQN, TPRV, TNXT, TKB, TQB, TB0, TKS, TQS, TS0, TMM, TA, TB, TL0, TAR, TMAT, TEF, TFIB, THG, NCC, PAN, CMAP, MATS, TA1, S,
     OUT: () => scene.OUT, csf, nspace: () => GV.length, BETA: () => BETA, U_MAX, RHO_W, C_W, P0, G, K_SHEAR };
 }
 let gpuT = 0;
@@ -1881,7 +1900,7 @@ $('scene').onchange = async () => {
   else { st.aim = [0, 2.2, 0]; st.aimN = [0, 0, 1]; }
   build(); Object.assign(cam, { tgt: [...scene.cam.tgt], dist: scene.cam.dist });
 };
-$('go').onclick = () => { detonate(); startRun(); };
+$('go').onclick = () => { asyncRun = true; detonate(); startRun(); };
 $('reset').onclick = () => build();
 $('view').onclick = () => { st.view ^= 1; };
 $('slow').onclick = () => { st.spd = (st.spd + 1) % SPEEDS.length; $('slow').innerHTML = `<b>S</b>${SPEED_NAMES[st.spd]}`; };
@@ -1889,7 +1908,7 @@ $('solver').onchange = () => { st.solver = $('solver').value; };
 $('grid').onchange = () => { st.grid = +$('grid').value; build(); };
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-  if (e.code === 'Space') { e.preventDefault(); detonate(); startRun(); }
+  if (e.code === 'Space') { e.preventDefault(); asyncRun = true; detonate(); startRun(); }
   else if (e.code === 'KeyR') build();
   else if (e.code === 'KeyV') st.view ^= 1;
   else if (e.code === 'KeyS') $('slow').click();
@@ -1932,7 +1951,7 @@ function runCase(cfg) {
   const keep = { ...st };
   Object.assign(st, cfg);
   if (cfg.scene && !cfg.aim) { st.aim = cfg.scene === 'plate' ? [0, 0, 0] : cfg.scene === 'burke' && BURKE ? [0, 2.5, BURKE.halfBreadth(0, 2.5)] : [0, 2.2, 0]; st.aimN = [0, 0, 1]; }
-  build(); detonate(); startRun(); sim.sync = !!cfg.sync; sim.headless = true;
+  build(); asyncRun = false; detonate(); startRun(); sim.sync = !!cfg.sync; sim.headless = true;
   const t0 = performance.now(); let steps = 0;
   while (sim.t < sim.T1) { step(); steps++; }
   const cpu = performance.now() - t0; sim.cpu = cpu; sim.phase = 2; settle();
@@ -1961,7 +1980,7 @@ async function runCaseAsync(cfg) {
   const keep = { ...st };
   Object.assign(st, cfg);
   if (cfg.scene && !cfg.aim) { st.aim = cfg.scene === 'plate' ? [0, 0, 0] : cfg.scene === 'burke' && BURKE ? [0, 2.5, BURKE.halfBreadth(0, 2.5)] : [0, 2.2, 0]; st.aimN = [0, 0, 1]; }
-  build(); detonate(); startRun(); sim.headless = false; sim.external = true;
+  build(); asyncRun = true; detonate(); startRun(); sim.headless = false; sim.external = true;
   const ch = new MessageChannel(), tick = () => new Promise(r => { ch.port1.onmessage = r; ch.port2.postMessage(0); });
   const t0 = performance.now(); let steps = 0;
   while (sim.t < sim.T1) {
@@ -1984,10 +2003,10 @@ function compare(a, r) {
   let diff = 0, both = 0; for (let c = 0; c < a.cellsTorn.length; c++) { if (a.cellsTorn[c] !== r.cellsTorn[c]) diff++; else if (a.cellsTorn[c]) both++; }
   return { dispErrMm: +(s / n * 1000).toFixed(2), tornDiffCells: diff, tornBothCells: both };
 }
-window.BLAST = { ver: 33, get backend() { return gpu ? gpu.kind || 'webgl' : null; }, webgpu: () => !!WG, PROF, st, runCase, runCaseAsync, compare, cam, build, detonate: () => { detonate(); startRun(); }, get sim() { return sim; }, energy, draw,
+window.BLAST = { ver: 33, get backend() { return gpu ? gpu.kind || 'webgl' : null; }, webgpu: () => !!WG, PROF, st, runCase, runCaseAsync, compare, cam, build, detonate: () => { asyncRun = false; detonate(); startRun(); }, get sim() { return sim; }, energy, draw,
   stepN(n) { sim.headless = true; for (let k = 0; k < n && sim.t < sim.T1; k++) step(); return sim.t; },
   model: () => ({ N, NC, NH, NT, S, dt, X, V, R0, M, FREE, CN, CPAN, CH, CMAT, CEF, CSP, CSN, CER, CTE, CDM, CEP, CUT, CFD, CAR, CRC, CNR,
-    HN, HC, HKP, HMP, HKS, HMS, HT0, HTP, HTH, HDB, HLN, HTL0, HTPS, HTR, TBA, TBB, TSC, TCL, TKB, TQB, TB0, TKS, TQS, TS0, TBP, TSP, TMM, TFIB, TA, TB, TL0, TLP, TFL, TAR, AK, AF, AC, PAN, GP, GV, OPEN, scene, MATS, EN }),
+    HN, HC, HKP, HMP, HKS, HMS, HT0, HTP, HTH, HDB, HLN, HTL0, HTPS, HTR, TBA, TBB, TSC, TCL, TCL2, TQN, TPRV, TNXT, TKB, TQB, TB0, TKS, TQS, TS0, TBP, TSP, TMM, TFIB, TA, TB, TL0, TLP, TFL, TAR, AK, AF, AC, PAN, GP, GV, OPEN, scene, MATS, EN }),
   pulse, kinneyPs, kinneyIs1, reflect, U_MEAN, U_MAX, tee, SEC,
   rawSteps(n) { const t0 = performance.now(); for (let k = 0; k < n; k++) gpu.step(sim.t, dt, 0); const t1 = performance.now(); gl.finish(); return [t1 - t0, performance.now() - t0]; },
   gpuProfile(n) { gpu.profile(true); for (let k = 0; k < n; k++) gpu.step(sim.t, dt, 0); gl.finish(); return new Promise(r => setTimeout(() => r(gpu.profile(false)), 300)); },
@@ -1997,7 +2016,7 @@ window.BLAST = { ver: 33, get backend() { return gpu ? gpu.kind || 'webgl' : nul
     const keep = { ...st }, res = {};
     const pair = cfg.pair || ['cpu', 'gpu'];
     for (const [ix, sv0] of pair.entries()) { const sv = ix === 0 ? 'cpu' : 'gpu', solver = sv0.replace('+', '');
-      Object.assign(st, cfg, { solver }); build(); detonate(); startRun(); sim.sync = true;
+      Object.assign(st, cfg, { solver }); build(); asyncRun = false; detonate(); startRun(); sim.sync = true;
       if (sv0.endsWith('+')) { for (let i = 0; i < N; i++) X[3 * i + 2] += 1e-7 * Math.sin(i); }
       const t0 = performance.now(); for (let k = 0; k < steps; k++) step();
       if (solver === 'gpu') { gpu.readNodes(true, X, V, FREE); const cl = gpu.readCells(); for (let c = 0; c < NC; c++) CER[c] = cl[4 * c] > .5 ? 1 : 0; }
@@ -2020,7 +2039,7 @@ window.BLAST = { ver: 33, get backend() { return gpu ? gpu.kind || 'webgl' : nul
   async parityA(cfg, steps) {
     const keep = { ...st }, res = {}, pair = cfg.pair || ['cpu', 'webgpu'];
     for (const [ix, sv] of pair.entries()) { const key = ix === 0 ? 'a' : 'b';
-      Object.assign(st, cfg, { solver: sv === 'cpu' ? 'cpu' : 'gpu', backend: sv === 'webgpu' ? 'webgpu' : 'webgl' }); build(); detonate(); startRun(); sim.sync = true; sim.headless = true; sim.external = true;
+      Object.assign(st, cfg, { solver: sv === 'cpu' ? 'cpu' : 'gpu', backend: sv === 'webgpu' ? 'webgpu' : 'webgl' }); build(); asyncRun = false; detonate(); startRun(); sim.sync = true; sim.headless = true; sim.external = true;
       const t0 = performance.now(); for (let k = 0; k < steps; k++) { await stepExact(); if (k % 400 === 399) await tick0(); }
       if (sv !== 'cpu') { if (isWG()) await finishWG(); gpu.readNodes(true, X, V, FREE); const cl = gpu.readCells(); for (let c = 0; c < NC; c++) CER[c] = cl[4 * c] > .5 ? 1 : 0; gpu.readState({ CEP, CDM, TFL, HTP, HTH, HTPS, TBP }); }
       const d = new Float64Array(3 * N); for (let i = 0; i < 3 * N; i++) d[i] = X[i] - R0[i];
@@ -2034,7 +2053,7 @@ window.BLAST = { ver: 33, get backend() { return gpu ? gpu.kind || 'webgl' : nul
   },
   // steps/s of a backend on the current model: n steps, timed to the end of the GPU work
   async bench(n, backend) {
-    const keep = st.backend; st.backend = backend; build(); detonate(); startRun(); sim.headless = backend !== 'webgpu'; sim.external = true;
+    const keep = st.backend; st.backend = backend; build(); asyncRun = backend === 'webgpu'; detonate(); startRun(); sim.headless = backend !== 'webgpu'; sim.external = true;
     stepGPU(); if (isWG()) await gpu.flush(); else gl.finish();
     const t0 = performance.now();
     if (isWG()) { for (let k = 0; k < n; k++) { gpu.step(sim.t, dt, 0); if (gpu.busy()) await gpu.pace(); } await gpu.flush(); }

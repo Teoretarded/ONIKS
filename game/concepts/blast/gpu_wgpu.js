@@ -269,7 +269,7 @@ fn dAe(u: vec3f, v: vec3f) -> vec3f { let cx = cross(u, v); let s = dot(EX, cx);
 @compute @workgroup_size(${WGS}) fn main(@builtin(global_invocation_id) gid: vec3u) {
   let k = i32(gid.x); if (k >= NT) { return; }
   let v = PP.par; let w = 1u - v;
-  let tb = O_TS + 6 * k;
+  let tb = O_TS + 7 * k;
   let t0 = ST[tb]; let t1 = ST[tb + 1]; let t2 = ST[tb + 2]; let t3 = ST[tb + 3]; let t4 = ST[tb + 4]; let t5 = ST[tb + 5];
   let st = DY[mbB(v) + k];
   var oSt = st; var F: array<vec3f, 9>; for (var z = 0; z < 9; z++) { F[z] = vec3f(0.0); }
@@ -286,39 +286,53 @@ fn dAe(u: vec3f, v: vec3f) -> vec3f { let cx = cross(u, v); let s = dot(EX, cx);
     fo += KC.s0.x * kk * vr;
     F[0] = fo * u; F[1] = -fo * u;
     var tbp = st.w; var tsp = st.y;
-    let cl = i32(t1.w); let A = i32(t2.x); let B = i32(t2.y); let C0 = i32(t4.x);
-    if (cl >= 0 && (A >= 0 || C0 >= 0)) { if (CST(cl, w).x < 0.5) {
-      let cc = ST[O_CS + 11 * cl];
-      let q0 = i32(cc.x); let q1 = i32(cc.y); let q2 = i32(cc.z); let q3 = i32(cc.w);
-      let D1 = XR(q2) - XR(q0); let D2 = XR(q3) - XR(q1); let nC = cross(D1, D2);
-      EX = cross(nC, d); let exl = length(EX); let ok = exl > 0.3 * length(nC) * L; EX /= max(exl, 1e-30);
+    let cl = i32(t1.w); let cl2 = i32(t5.y); let A = i32(t2.x); let B = i32(t2.y); let C0 = i32(t4.x);
+    var on = cl >= 0 && (A >= 0 || C0 >= 0);
+    if (on) { on = CST(cl, w).x < 0.5; }
+    if (on && cl2 >= 0) { on = CST(cl2, w).x < 0.5; }
+    if (on) {
+      let t6 = ST[tb + 6];
+      let r1 = i32(t6.x); let r2 = i32(t6.y); let l1 = i32(t6.z); let l2 = i32(t6.w);
       let xa = XR(a); var xB = xa; if (B >= 0) { xB = XR(B); }
-      var Ge = vec3f(0.0);
-      if (ok && A >= 0) {
-        let xA = XR(A); let e1 = xa - xA; let e2 = xB - xa; let g1 = gr(e1); let g2 = gr(e2);
-        let thd = dot(g2, VV(B) - VV(a)) - dot(g1, VV(a) - VV(A));
-        let dth = wrapA(ang(e1, e2) - t3.w);
-        let rfb = CSF(mi, abs(thd) * t1.z, abs(tbp) * t1.z); let cap = t2.w * rfb; let kb = t2.z;
-        var Q = kb * (dth - tbp);
-        if (Q > cap) { tbp = dth - cap / kb; Q = cap; } else if (Q < -cap) { tbp = dth + cap / kb; Q = -cap; }
-        Q += KC.s0.x * kb * thd;
-        F[3] -= Q * g2; F[2] -= Q * g1; F[0] += Q * (g1 + g2); Ge += Q * dAe(e1, e2);
+      let pv = i32(t4.y); var bOn = pv < 0; if (!bOn) { bOn = DY[mbB(v) + pv].x > 0.0; }
+      if (A >= 0 && bOn) {
+        let xA = XR(A); let D = XR(r1) - XR(l1); let t = xB - xA;
+        let dd = dot(t, t); let Dd = dot(D, t); let P = D - t * (Dd / dd); let pl = length(P);
+        if (pl > 0.3 * length(D)) {
+          EX = -P / pl;
+          let e1 = xa - xA; let e2 = xB - xa; let g1 = gr(e1); let g2 = gr(e2);
+          let thd = dot(g2, VV(B) - VV(a)) - dot(g1, VV(a) - VV(A));
+          let dth = wrapA(ang(e1, e2) - t3.w);
+          let rfb = CSF(mi, abs(thd) * t1.z, abs(tbp) * t1.z); let cap = t2.w * rfb; let kb = t2.z;
+          var Q = kb * (dth - tbp);
+          if (Q > cap) { tbp = dth - cap / kb; Q = cap; } else if (Q < -cap) { tbp = dth + cap / kb; Q = -cap; }
+          Q += KC.s0.x * kb * thd;
+          F[3] -= Q * g2; F[2] -= Q * g1; F[0] += Q * (g1 + g2);
+          let Ge = Q * dAe(e1, e2); let gP = -(Ge - dot(Ge, EX) * EX) / pl; let dg = dot(t, gP);
+          let gD = gP - t * (dg / dd); let gt = -(Dd / dd) * gP - (dg / dd) * D + (2.0 * Dd * dg / (dd * dd)) * t;
+          F[3] -= gt; F[2] += gt; F[5] -= gD; F[7] += gD;
+        }
       }
-      if (ok && C0 >= 0) {
-        let c = xB - XR(C0); let gc = gr(c); let gs = gr(d);
-        let gd = dot(gs, VV(b) - VV(a)) - dot(gc, VV(B) - VV(C0));
-        let dg = wrapA(ang(c, d) - t5.x);
-        let cap = t4.w * rf; let ks = t4.z; var Q = ks * (dg - tsp);
-        if (Q > cap) { tsp = dg - cap / ks; Q = cap; } else if (Q < -cap) { tsp = dg + cap / ks; Q = -cap; }
-        Q += KC.s0.x * ks * gd;
-        F[1] -= Q * gs; F[0] += Q * gs; F[3] += Q * gc; F[4] -= Q * gc; Ge += Q * dAe(c, d);
+      if (C0 >= 0) {
+        let D = 0.5 * (XR(r1) + XR(r2) - XR(l1) - XR(l2));
+        let dd = dot(d, d); let Dd = dot(D, d); let P = D - d * (Dd / dd); let pl = length(P);
+        if (pl > 0.3 * length(D)) {
+          EX = -P / pl;
+          let c = xB - XR(C0); let gc = gr(c); let gs = gr(d);
+          let gd = dot(gs, VV(b) - VV(a)) - dot(gc, VV(B) - VV(C0));
+          let dgm = wrapA(ang(c, d) - t5.x);
+          let cap = t4.w * rf; let ks = t4.z; var Q = ks * (dgm - tsp);
+          if (Q > cap) { tsp = dgm - cap / ks; Q = cap; } else if (Q < -cap) { tsp = dgm + cap / ks; Q = -cap; }
+          Q += KC.s0.x * ks * gd;
+          F[1] -= Q * gs; F[0] += Q * gs; F[3] += Q * gc; F[4] -= Q * gc;
+          let Ge = Q * dAe(c, d); let gP = -(Ge - dot(Ge, EX) * EX) / pl; let dg = dot(d, gP);
+          let gD = gP - d * (dg / dd); let gt = -(Dd / dd) * gP - (dg / dd) * D + (2.0 * Dd * dg / (dd * dd)) * d;
+          F[1] -= gt; F[0] += gt; F[5] -= 0.5 * gD; F[6] -= 0.5 * gD; F[7] += 0.5 * gD; F[8] += 0.5 * gD;
+        }
       }
-      if (ok) {
-        let gm = (Ge - dot(Ge, EX) * EX) / exl; let gn = cross(d, gm); let gt = cross(gm, nC); let g1 = cross(D2, gn); let g2 = cross(gn, D1);
-        F[0] += gt; F[1] -= gt; F[5] += g1; F[7] -= g1; F[6] += g2; F[8] -= g2;
-      }
-    } }
-    let failed = max(0.0, log(Lp / L0)) + abs(tbp) * t1.z >= t1.y;
+    }
+    let nx = i32(t5.z); var tbn = 0.0; if (nx >= 0) { tbn = abs(DY[mbB(v) + nx].w); }
+    let failed = max(0.0, log(Lp / L0)) + max(abs(st.w), tbn) * t1.z >= t1.y;
     oSt = vec4f(select(Lp, -Lp, failed), tsp, eb, tbp);
     break;
   }
@@ -468,12 +482,12 @@ export function createWGPU(dev, M, opt = {}) {
   for (let h = 0; h < NH; h++) for (let k = 0; k < 6; k++) adjL[1][M.HN[6 * h + k]].push(h * 8 + k);
   for (let t = 0; t < NT; t++) { adjL[2][M.TA[t]].push(t * 16); adjL[2][M.TB[t]].push(t * 16 + 1);
     if (M.TBA[t] >= 0) adjL[2][M.TBA[t]].push(t * 16 + 2); if (M.TBB[t] >= 0) adjL[2][M.TBB[t]].push(t * 16 + 3); if (M.TSC[t] >= 0) adjL[2][M.TSC[t]].push(t * 16 + 4);
-    if (M.TCL[t] >= 0 && (M.TBA[t] >= 0 || M.TSC[t] >= 0)) for (let z = 0; z < 4; z++) adjL[2][M.CN[4 * M.TCL[t] + z]].push(t * 16 + 5 + z); }
+    if (M.TCL[t] >= 0 && (M.TBA[t] >= 0 || M.TSC[t] >= 0)) for (let z = 0; z < 4; z++) adjL[2][M.TQN[4 * t + z]].push(t * 16 + 5 + z); }
   const adjOff = [new Int32Array(N), new Int32Array(N), new Int32Array(N)], flat = [];
   for (let q = 0; q < 3; q++) for (let i = 0; i < N; i++) { adjOff[q][i] = flat.length; for (const e of adjL[q][i]) flat.push(e); }
   const NP = Math.max(1, M.PAN.length), NCM = M.CMAP.length, NADJ = Math.ceil(flat.length / 4);
   const L = {}; let off = 0; const at = (k, n) => { L[k] = off; off += one(n); };
-  at('O_NS', 5 * N); at('O_CS', 11 * NC); at('O_HS', 9 * NH); at('O_TS', 6 * NT); at('O_PAN', 5 * NP); at('O_CMAP', NCM); at('O_ADJ', NADJ); at('O_AUX', 2048);
+  at('O_NS', 5 * N); at('O_CS', 11 * NC); at('O_HS', 9 * NH); at('O_TS', 7 * NT); at('O_PAN', 5 * NP); at('O_CMAP', NCM); at('O_ADJ', NADJ); at('O_AUX', 2048);
   const nST = off;
   off = 0; at('O_ND', 6 * N); at('O_CL', 10 * NC); at('O_HT', 2 * NH); at('O_MB', 2 * NT); const nDY = off;
   const MAXIMP = N + 4096;
@@ -498,10 +512,10 @@ export function createWGPU(dev, M, opt = {}) {
     p(5, [E[0], E[1], E[2], f1[0]]); p(6, [f1[1], f1[2], f2[0], f2[1]]); p(7, [f2[2], 0, 0, 0]); p(0, [0, 1, 2, 3].map(z => M.HN[6 * k + z])); p(1, [M.HN[6 * k + 4], M.HN[6 * k + 5], M.HC[2 * k], M.HC[2 * k + 1]]);
     p(2, [M.HKP[k], M.HMP[k], M.HKS[k], M.HMS[k]]); p(3, [M.HTR[2 * k], M.HTR[2 * k + 1], M.HDB[k], M.HHP[k]]); p(4, [M.HMAT[k], M.HT0[k], M.HLN[k], 0]);
     p(8, [M.HTL0[k], M.HTR[2 * k] >= 0 ? M.TFIB[M.HTR[2 * k]] : 0, 0, 0]); }
-  for (let k = 0; k < NT; k++) { const p = (t, v) => put(L.O_TS, k, 6, t, v), a = M.TA[k], b = M.TB[k];
+  for (let k = 0; k < NT; k++) { const p = (t, v) => put(L.O_TS, k, 7, t, v), a = M.TA[k], b = M.TB[k];
     p(0, [a, b, M.TL0[k], M.TAR[k]]); p(1, [M.TMAT[k], M.TEF[k], M.TFIB[k], M.TCL[k]]);
     p(2, [M.TBA[k], M.TBB[k], M.TKB[k], M.TQB[k]]); p(3, [...[0, 1, 2].map(z => M.R0[3 * b + z] - M.R0[3 * a + z]), M.TB0[k]]);
-    p(4, [M.TSC[k], 0, M.TKS[k], M.TQS[k]]); p(5, [M.TS0[k], 0, 0, 0]); }
+    p(4, [M.TSC[k], M.TPRV[k], M.TKS[k], M.TQS[k]]); p(5, [M.TS0[k], M.TCL2[k], M.TNXT[k], 0]); p(6, [0, 1, 2, 3].map(z => M.TQN[4 * k + z])); }
   M.PAN.forEach((P, q) => stat.set([P.o[0] - O[0], P.o[1] - O[1], P.o[2] - O[2], P.nu, ...P.U, P.Lu, ...P.V, P.Lv, ...P.n, P.off, P.nv, 0, 0, 0], 4 * (L.O_PAN + 5 * q)));
   for (let k = 0; k < NCM; k++) stat[4 * (L.O_CMAP + k)] = M.CMAP[k];
   stat.set(flat, 4 * L.O_ADJ);
