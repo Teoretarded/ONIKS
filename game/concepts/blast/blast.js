@@ -642,7 +642,7 @@ function build() {
   let added = 0, total = 0;
   for (let i = 0; i < N; i++) { total += M[i]; const need = kn[i] * dtT * dtT; if (M[i] > 0 && WINV[i] > 0 && need > M[i]) { added += need - M[i]; M[i] = need; WINV[i] = 1 / need; } }
   scene.massAdded = added / total;
-  dt = (st.dtK || .75) * dtT; BETA = .033 * dt;
+  dt = (st.dtK || .75) * dtT; BETA = (st.betaK ?? .033) * dt;
   // ---- contact candidates: planar pieces whose plane passes within 1.5 m of the node (not its own)
   NCC = new Int32Array(4 * N).fill(-1);
   const bucket = new Map(), BK = 3;
@@ -1517,7 +1517,7 @@ function checkEnd() {
   s.kepeak = Math.max(s.kepeak || 0, ke);
   // loads over and the structure's kinetic energy down to 5 % of its peak: settle the remaining elastic ringing with
   // strong damping (dynamic relaxation) to read the permanent set
-  if (!s.relax && (st.relaxAt ? s.t >= st.relaxAt : quiet && gas < 2e4 && s.t > s.tMin && (ke < .05 * s.kepeak || s.t > s.tMin + .1))) { s.relax = true; s.tRelax = s.t; }
+  if (!s.relax && (st.relaxAt ? s.t >= st.relaxAt : quiet && (st.relaxGas || gas < 2e4) && s.t > s.tMin && (ke < .05 * s.kepeak || s.t > s.tMin + .1))) { s.relax = true; s.tRelax = s.t; }
   if (s.relax && (v2 < .25 || s.t - s.tRelax > .025)) s.T1 = s.t;
   s.vmax = vm;
 }
