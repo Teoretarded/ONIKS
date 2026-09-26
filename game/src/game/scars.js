@@ -283,7 +283,11 @@ export function createScars(game) {
     const nl = Math.hypot(o[3], o[4], o[5]) || 1;
     const nx = o[3] / nl, ny = o[4] / nl, nz = o[5] / nl;
     // the plating there and what the charge does to it
-    const zone = e.under ? 'belt' : zoneOf(sea, o[1], ny, deckY), t = plateOf(u, zone);
+    // (a deck hit above the main deck's mean height: the hull's own deck where it rises with the sheer (the forecastle) is
+    // still the deck, not a deckhouse roof: the weather deck at this station, found from the side)
+    let deckZ = deckY;
+    if (sea && ny > .7 && o[1] >= deckY + 1.4) { const hb = halfBFn(u, G)(o[2], 2), sx = o[0] >= 0 ? 1 : -1; deckZ = deckAbove(ent, st, sx * hb, 2, o[2], sx, 0, deckY); if (!(deckZ > deckY)) deckZ = deckY; }
+    const zone = e.under ? 'belt' : zoneOf(sea, o[1], ny, deckZ), t = plateOf(u, zone);
     const standoff = fz === 'frag' ? Math.max(0, e.miss || 0, e.blast || 0) : Math.max(0, e.blast || 0);
     const Oc = outcome(Wk * (e.under ? 1.6 : 1), t, e.under ? 'in' : fz, standoff, e.n);
     const cap = .35 * Math.max(def.size[1], def.size[2]);

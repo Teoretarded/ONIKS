@@ -37,7 +37,8 @@ export function classOf(def, type) {
   if (def.size[0] > 200) return 'amphib';
   return 'warship';
 }
-export function hullOf(u) { const c = classOf(u.def, u.type); return c ? Object.assign({ cls: c }, HULL[c]) : null; }
+/* (the DDG-51's deckhouses are steel, unlike the CG-47's aluminium ones) */
+export function hullOf(u) { const c = classOf(u.def, u.type); if (!c) return null; const H = Object.assign({ cls: c }, HULL[c]); if (u.type === 'ddg') { H.superMat = 'hsla'; H.super = 8; } return H; }
 
 /* the deck levels (model y) of a hull round a height range */
 function levelsOf(H, deckY, draught, y0, y1) {
@@ -183,8 +184,34 @@ export function hitSpec(o) {
   // at most 7 spaces: the charge's own and its neighbours first
   const gap = b => { let d = 0; for (let k = 0; k < 3; k++) d += Math.max(0, b[k] - C[k], C[k] - b[k + 3]) ** 2; return d; };
   comps.sort((p, q) => gap(p.b) - gap(q.b));
-  return { S, plates, box, comps: comps.slice(0, 7), depth, grade, frame: { O: a.slice(), X, Y, Z }, charge: { C, W, Wgas: o.Wgas || 0, vapour: o.vapour || 0, inside: C[2] < 0 },
+  const cs = comps.slice(0, 7);
+  return { S, plates, box, comps: cs, vents: o.big ? ventsOf(cs, deck ? 2 : 1, deck ? 0 : box[4]) : [], depth, grade, frame: { O: a.slice(), X, Y, Z }, charge: { C, W, Wgas: o.Wgas || 0, vapour: o.vapour || 0, inside: C[2] < 0 },
     wl: 0, wlLocal: -a[1], kind: deck ? 'deck' : 'side', Rp };
+}
+
+/* the openings the gas finds (the shell solver's patches): [a, b, area m^2, failure pressure Pa] between spaces a and b
+   (-1: the weather). In action (condition Zebra) doors, hatches and ventilation closures are shut; they let go at their
+   pressures: ventilation closures and ducting ~30 kPa, hatches and scuttles between decks ~50 kPa, weather doors ~70 kPa,
+   watertight doors in the transverse bulkheads ~100 kPa (public damage-control figures, coarse). Non-watertight
+   partitions inside a space are not modelled: a space is the whole slice between its watertight bulkheads and decks. */
+function ventsOf(cs, up, top) {
+  const V = [], ov = (a0, a1, b0, b1) => Math.min(a1, b1) - Math.max(a0, b0);
+  for (let i = 0; i < cs.length; i++) for (let j = i + 1; j < cs.length; j++) {
+    const a = cs[i].b, b = cs[j].b;
+    for (let k = 0; k < 3; k++) {
+      if (!(Math.abs(a[k + 3] - b[k]) < .05 || Math.abs(b[k + 3] - a[k]) < .05)) continue;
+      const o1 = (k + 1) % 3, o2 = (k + 2) % 3;
+      if (ov(a[o1], a[o1 + 3], b[o1], b[o1 + 3]) < .5 || ov(a[o2], a[o2 + 3], b[o2], b[o2 + 3]) < .5) continue;
+      if (k === up) V.push([i, j, 1.0, 50e3]);            // a hatch / scuttle / ladder trunk between decks
+      else V.push([i, j, 1.3, 100e3]);                     // a watertight door in the bulkhead
+    }
+  }
+  for (let i = 0; i < cs.length; i++) {
+    const b = cs[i].b;
+    V.push([i, -1, Math.max(.1, Math.min(1.2, cs[i].V / 400)), 30e3]);                  // ventilation trunks
+    if (Math.abs(b[up + 3] - top) < .3) V.push([i, -1, 1.5, 70e3]);                     // a weather door / hatch
+  }
+  return V;
 }
 
 /* a cook-off: the module's contents at the nearest outer surface (the deck over it, else the side) */

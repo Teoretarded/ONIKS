@@ -505,8 +505,12 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
         float hq = fract(sin(dot(floor(p * 7.3), vec3(12.99, 78.23, 37.71))) * 43758.55);
         vec2 o = r0 * S * -mix(0.15, 0.6, hq);
         dl = tc.xyz + (ax == 2 ? vec3(o.x, o.y, 0.0) : ax == 1 ? vec3(o.x, 0.0, o.y) : vec3(0.0, o.y, o.x));
-        float dn = tc[ax], rr = dot(r0, r0);
-        dl[ax] += sign(dn) * min(abs(dn) * 0.9, S * 1.4) * rr * 1.6;
+        float dn = tc[ax], rr = dot(r0, r0), cu = sign(dn) * min(abs(dn) * 0.9, S * 1.4);
+        dl[ax] += cu * rr * 1.6;
+        // the petal's face leans with its curl: it catches the light across the bend
+        { vec3 Ua = ax == 0 ? Z : X, Va = ax == 1 ? Z : Y; tilt -= (Ua * r0.x + Va * r0.y) * (cu * 3.2 / S); }
+        // (a shred hangs off its corner: past a ragged length it is gone)
+        if (length(r0) > mix(0.35, 0.8, fract(hq * 7.13))) return 1;
         edge = max(edge, 0.85); heatN = max(heatN, heat); hot = max(hot, heat * 0.9); burn = max(burn, 0.85);
         // a petal bent over: its face leans with it (from the cell's corners, while none of them went)
         if ((int(t00.w) & 2) == 0 && (int(t10.w) & 2) == 0 && (int(t01.w) & 2) == 0 && (int(t11.w) & 2) == 0) {
@@ -514,6 +518,20 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
           tilt -= (ax == 0 ? Z : X) * gu + (ax == 1 ? Z : Y) * gv;
         }
       } else {
+        // next to a torn cell: the edge bitten ragged (the tear runs through the plating, not along the cell's side)
+        {
+          float dmin = 9.0;
+          if (i0 > 0 && (int(texelFetch(uBtT, b - ivec2(1, 0), 0).w) & 1) != 0) dmin = min(dmin, fx);
+          if (i0 < int(Q.x) - 1 && (int(t10.w) & 1) != 0) dmin = min(dmin, 1.0 - fx);
+          if (j0 > 0 && (int(texelFetch(uBtT, b - ivec2(0, 1), 0).w) & 1) != 0) dmin = min(dmin, fy);
+          if (j0 < int(Q.y) - 1 && (int(t01.w) & 1) != 0) dmin = min(dmin, 1.0 - fy);
+          if (dmin < 0.6) {
+            vec3 q = floor(p * 5.0);
+            float hn = fract(sin(dot(q, vec3(41.3, 289.1, 97.7))) * 43758.55), hj = fract(sin(dot(floor(p * 1.6), vec3(12.9, 78.2, 37.7))) * 43758.55);
+            if (dmin < 0.55 * hj * (0.6 + 0.4 * hn)) return 1;
+            edge = max(edge, 0.7 * (1.0 - dmin / 0.6)); heatN = max(heatN, heat); hot = max(hot, heat * 0.5 * (1.0 - dmin / 0.6));
+          }
+        }
         dl = mix(mix(t00.xyz, t10.xyz, fx), mix(t01.xyz, t11.xyz, fx), fy);
         // a torn edge: its corners' flags, fading across the cell
         float e = mix(mix(float((f00 & 4) >> 2), float((int(t10.w) & 4) >> 2), fx), mix(float((int(t01.w) & 4) >> 2), float((int(t11.w) & 4) >> 2), fx), fy);

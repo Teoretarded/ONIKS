@@ -1,5 +1,5 @@
 /* (game/concepts/blast/gpu_wgpu.js at commit e00312c, copied; the one change: gravity on free pieces along the patch's up
-   axis, UPAX) The blast bench's structural model on WebGPU compute: the same physics as gpu.js (WebGL2) and the CPU reference in
+   axis, UPAX; and o.manualReads: read backs only on submit(true), so a caller can take them at fixed steps) The blast bench's structural model on WebGPU compute: the same physics as gpu.js (WebGL2) and the CPU reference in
    blast.js, pass for pass (hinges, cells, members, gather, contact scatter, nodes), with the state in three storage
    buffers:
      ST  statics (node, cell, hinge, member records; panels, cell map, adjacency, arrival table), read only
@@ -472,7 +472,7 @@ ${Object.entries(c).map(([k, v]) => `const ${k}: i32 = ${v};`).join('\n')}
 
 export function createWGPU(dev, M, opt = {}) {
   const { N, NC, NH, NT } = M;
-  const batch = opt.batch || 100; let depth = opt.depth || 3;
+  const batch = opt.batch || 100; let depth = opt.depth || 3; const manualReads = !!opt.manualReads;
   const one = n => Math.max(1, n);
   // local origin: the middle of the model (keeps float32 coordinates small)
   const O = [0, 0, 0]; { const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9]; for (let i = 0; i < N; i++) for (let q = 0; q < 3; q++) { const v = M.R0[3 * i + q]; if (!Number.isFinite(v)) continue; lo[q] = Math.min(lo[q], v); hi[q] = Math.max(hi[q], v); } for (let q = 0; q < 3; q++) O[q] = (lo[q] + hi[q]) / 2; }
@@ -602,7 +602,7 @@ export function createWGPU(dev, M, opt = {}) {
   }
   function submit(forceRead) {
     if (!enc) { if (!forceRead) return null; begin(); }
-    const wantRead = !reading;
+    const wantRead = !reading && (forceRead || !manualReads);
     if (wantRead) addRead();
     endPass();
     if (nsteps || wantRead) dev.queue.writeBuffer(bP, 0, par, 0, PSTRIDE * (nsteps + 1));

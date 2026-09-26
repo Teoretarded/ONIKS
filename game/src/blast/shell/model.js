@@ -135,7 +135,7 @@ export function sceneOf(spec, S) {
   const spaceAt = p => { for (let k = 0; k < comps.length; k++) { const b = comps[k].b; if (p[0] >= b[0] && p[0] <= b[3] && p[1] >= b[1] && p[1] <= b[4] && p[2] >= b[2] && p[2] <= b[5]) return k; } return OUT; };
   const up = deckPatch ? 2 : 1;
   // (a plate too small for the grid is left out: pieces keeps the spec's plate numbering, null where none)
-  return { scatter: spec.scatter || 0, seed: spec.seed || 1, pieces: pieces.filter(Boolean), plateOf: pieces.map((p, i) => p ? i : -1).filter(i => i >= 0), spaces, OUT, spaceAt, up, waterline: spec.wlLocal !== undefined ? spec.wlLocal : -1e9, snap: false, vents: spec.vents || [], isCut: null };
+  return { scatter: spec.scatter || 0, seed: spec.seed || 1, pieces: pieces.filter(Boolean), plateOf: pieces.map((p, i) => p ? i : -1).filter(i => i >= 0), spaces, OUT, spaceAt, up, waterline: spec.wlLocal !== undefined ? spec.wlLocal : -1e9, snap: false, vents: (spec.vents || []).map(([a, b, A, pf]) => [a < 0 ? OUT : a, b < 0 ? OUT : b, A, pf || 0]).filter(v => v[0] <= OUT && v[1] <= OUT), isCut: null };
 }
 
 /* ------------------------------------------------------------ the model (bench build(), into an object) */
@@ -598,7 +598,9 @@ export function loadShell(M, ch) {
   const rc = Math.cbrt(3 * Math.max(fill, .01) / (4 * Math.PI * RHO_TNT));
   const C = ch.C.slice(), cc = sc.spaceAt(C);
   M.GV = sc.spaces.map(s => s.V); M.GP = M.GV.map(() => 0); M.OPEN = new Map(); M.WALLS = new Map();
-  for (const [a, b, A] of sc.vents || []) if (a !== b) { const k = (Math.min(a, b) << 8) | Math.max(a, b); M.OPEN.set(k, (M.OPEN.get(k) || 0) + A); }
+  // openings: open from the start (no failure pressure), or shut until the pressure across them passes it (M.SHUT)
+  M.SHUT = [];
+  for (const [a, b, A, pf] of sc.vents || []) if (a !== b) { if (pf > 0) M.SHUT.push([a, b, A, pf]); else { const k = (Math.min(a, b) << 8) | Math.max(a, b); M.OPEN.set(k, (M.OPEN.get(k) || 0) + A); } }
   const prim = { pos: C, W, Pm: W * U_MEAN, t0: 0, space: cc, kind: 0, ax: [0, 0, 0], gain: 1, rc, vis: cc === sc.OUT ? 0 : -1, plane: null, gen: 0, Wsrc: W, key: 'P' };
   const srcs = [];
   if (cc < sc.OUT) {
@@ -756,6 +758,11 @@ function wallTorn(M, sp, ax, pv) {
 /* ------------------------------------------------------------ gas, openings, fragments, the end (bench) */
 export function gasStep(M, h) {
   const { GP, GV } = M;
+  // a shut opening that the pressure across it has passed: it lets go (game side; the bench's vents are always open)
+  if (M.SHUT && M.SHUT.length) for (let i = M.SHUT.length - 1; i >= 0; i--) {
+    const [a, b, A, pf] = M.SHUT[i];
+    if (Math.abs(GP[a] - GP[b]) >= pf) { const k = (Math.min(a, b) << 8) | Math.max(a, b); M.OPEN.set(k, (M.OPEN.get(k) || 0) + A); M.SHUT.splice(i, 1); (M.ventLog || (M.ventLog = [])).push([a, b, A, +(M.sim.t * 1000).toFixed(2)]); }
+  }
   for (const [k, A] of M.OPEN) {
     const a = k >> 8, b = k & 255;
     const dp = GP[a] - GP[b]; if (dp > -1 && dp < 1) continue;

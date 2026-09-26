@@ -24,7 +24,12 @@ joined with the compartment the blast works in (both its bulkheads and its decks
 shells its deck meets), on the bench's graded grid (S within 1.5 + 0.6 W^(1/3) m of the hit and the charge, 2 S beyond;
 skins resampled to a uniform S for the atlas), the displacement eased to nothing over the last 1.5 m before anchored
 edges, and a seeded +-15 % scatter of the steel's failure strain (`cfg.scatter`; off in the parity check) so tears start
-at weak spots instead of whole panels letting go at once. Drawn: pieces that come loose fly on in the solve, then leave
+at weak spots instead of whole panels letting go at once (seeded from the impact's geometry: the same hit on the same
+class tears the same way). Openings (spec.js `ventsOf`, condition Zebra: shut until the pressure across them passes
+their failure pressure, then open): a hatch between decks 1 m² at 50 kPa, a watertight door 1.3 m² at 100 kPa, ventilation
+trunks to the weather ~1 m² at 30 kPa, a weather door 1.5 m² at 70 kPa (coarse public figures); the shell model opens them
+in its gas step (`M.SHUT`; the bench's vents are always open). WebGPU runs in whole blocks of 125 steps with the read
+back applied at the next block: the same spec gives the same result. Drawn: pieces that come loose fly on in the solve, then leave
 as debris dots (linear drag, gravity; they land on the deck, or on the deck under a hole, or sink); torn cells' plating
 hangs off its corners ragged and curled the way it went; dented plating is lit along its bent face (at most ~50 deg)
 with sub-grid buckle facets; the structure behind a hole as jittered charred dots, the fire inside lighting it.

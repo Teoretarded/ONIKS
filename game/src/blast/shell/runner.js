@@ -12,7 +12,7 @@ import { sceneOf, buildShell, loadShell, commonSync, checkEnd, markDebris, openC
 import { createGPU } from './gpu.js';
 import { createWGPU } from './gpu_wgpu.js';
 
-const SYNC = 25;
+const SYNC = 25, BLK = 125;
 const SNAP_DT = .0004, SNAP_MS = 60, MAXIN = 24000, RUNNING = 2;
 
 export function createShellRunner(gl, o = {}) {
@@ -38,7 +38,7 @@ export function createShellRunner(gl, o = {}) {
       if (R.state !== 'queued') continue;
       try {
         const wg = o.wg && !R.spec.syncReads;
-        R.gpu = wg ? createWGPU(o.wg, gpuModel(R.M), { batch: o.batch || 200, depth: o.depth || 2 }) : createGPU(gl, gpuModel(R.M));
+        R.gpu = wg ? createWGPU(o.wg, gpuModel(R.M), { batch: 1e6, depth: 2, manualReads: true }) : createGPU(gl, gpuModel(R.M));
         R.wg = !!wg; R.gpu.upload(); R.gpu.setSources(R.M.sim.SRC); R.gpu.setGas(R.M.GP);
         R.state = 'run'; running++;
       } catch (e) { R.state = 'failed'; R.err = String(e && e.message || e); if (R.gpu) { try { R.gpu.dispose(); } catch (e2) { /* */ } R.gpu = null; } }
@@ -61,9 +61,31 @@ export function createShellRunner(gl, o = {}) {
     const each = Math.max(1, Math.round(stepsMax / run.length));
     for (const R of run) {
       const M = R.M, s = M.sim, g = R.gpu, sync = R.spec.syncReads;
-      if (R.wg && g.busy()) { stats.skipped++; continue; }          // WebGPU: its queue is full, the GPU is behind
-      // the latest read back (asynchronous: a pump or so behind the solve)
       let torn = false;
+      if (R.wg) {
+        // WebGPU, deterministic: blocks of BLK steps; each block's end state is read back (mapAsync) and applied at the
+        // start of the next block, which waits for it (a tick or so); only whole blocks, so the same hit runs the same
+        const cl = g.readCellsAsync();
+        if (R.pend && !cl) { stats.skipped++; continue; }
+        R.pend = false;
+        torn = tornFrom(M, cl);
+        if (g.readNodesAsync(M.X, M.V, M.FREE)) { R.fresh = true; if (s.n - (R.endN || 0) >= 200) { R.endN = s.n; checkEnd(M); } }
+        if (s.t < s.T1 && s.t + BLK * M.dt > R.target + M.dt && s.t + BLK * M.dt < s.T1) continue;    // (whole blocks only)
+        for (let k = 0; k < BLK; k++) {
+          if (!(s.t < s.T1)) break;
+          g.step(s.t, M.dt, s.relax ? 250 : s.alpha);
+          s.t += M.dt; s.n++; R.steps++; did++;
+          if (s.n % SYNC === 0) {
+            const dmg = commonSync(M, s.t, torn, SYNC * M.dt); torn = false;
+            g.setSources(s.SRC); g.setGas(M.GP);
+            if (s.IMPN.length) { g.setImpulses(s.IMPN); s.IMPN.length = 0; }
+            if (dmg) g.setDamage(M.CFD);
+          }
+        }
+        g.submit(true); R.pend = true;
+        if (s.t >= s.T1) R.state = 'finish';
+        continue;
+      }
       if (!sync) {
         const tq = now(); torn = tornFrom(M, g.readCellsAsync()); stats.readMs += now() - tq;
         const tn = now();
@@ -84,7 +106,6 @@ export function createShellRunner(gl, o = {}) {
         if (sync && s.n % 200 === 0) { g.readNodes(true, M.X, M.V, M.FREE); checkEnd(M); }
         if (s.t >= s.T1) break;
       }
-      if (R.wg) g.submit();
       if (s.t >= s.T1) R.state = 'finish';
     }
     stats.steps = did; stats.gpuSteps += did;

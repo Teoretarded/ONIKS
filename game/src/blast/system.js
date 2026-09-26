@@ -47,7 +47,7 @@ export async function createBlast(game) {
   // ONIKS.game.blast.cfg.solver
   const DEFAULT_SOLVER = typeof navigator !== 'undefined' && navigator.gpu ? 'shell' : 'lattice';
   const q0 = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('blast') : null;
-  const cfg = { watchDist: 4000, upTexels: 6000, maxDots: 9000, on: q0 !== 'off', gpuMs: 3, gpuMsSlow: 5, gpuMsShell: 6, gpuMsShellSlow: 8, shellS: .25, scatter: .15,
+  const cfg = { watchDist: 4000, upTexels: 6000, maxDots: 5000, on: q0 !== 'off', gpuMs: 3, gpuMsSlow: 5, gpuMsShell: 6, gpuMsShellSlow: 8, shellS: .25, scatter: .15,
     solver: q0 === 'shell' || q0 === 'lattice' ? q0 : DEFAULT_SOLVER };
 
   /* ------------------------------------------------------------ the atlas */
@@ -124,7 +124,8 @@ export async function createBlast(game) {
     spec.watch = true;
     spec.solver = client && client.mode === 'main' ? 'lattice' : cfg.solver;
     spec.gridS = spec.solver === 'shell' ? (spec.shellS = cfg.shellS) : S_GRID;
-    if (spec.solver === 'shell') { spec.scatter = cfg.scatter; spec.seed = (u.id * 7919 + id * 104729) | 0; }
+    // (the steel's scatter seeded by the impact's geometry: the same hit on the same class tears the same way)
+    if (spec.solver === 'shell') { spec.scatter = cfg.scatter; let h = 2166136261; for (const v of [...String(u.type)].map(c => c.charCodeAt(0)).concat(spec.frame.O.map(x => Math.round(x * 4)), spec.charge.C.map(x => Math.round(x * 4)))) h = Math.imul(h ^ (v & 0xffff), 16777619); spec.seed = h | 0; }
     const B = { id, uid: u.id, S, spec, meta, t0: sim.t, state: 'wait', rects: [], inner: null, nIn: 0, tShow: 0, tSolve: 0, tearT: -1, final: null, res: null,
       depth: spec.depth || 4, heat: 0, lastT: -1, lastW: null, seed: (u.id * 131 + id * 7) % 997, info: null, ej: false };
     patches.set(id, B);
@@ -340,7 +341,7 @@ export async function createBlast(game) {
     const M = [1, 0, 0, 0, 1, 0, 0, 0, 1];
     // (a share of cfg.maxDots a frame for each patch drawn: several holes on screen thin out together)
     let nShow = 0; for (const L of byUnit.values()) for (const B of L) if (B.nIn) nShow++;
-    const capEach = cfg.maxDots / Math.max(1, nShow);
+    const capEach = cfg.maxDots * .6 / Math.max(1, nShow);
     for (const [uid, L] of byUnit) {
       const u = sim.units.get(uid), hull = game.structure && game.structure.draws && game.structure.draws(uid);
       if (!hull && (!u || !game.drawn.has(uid))) continue;
@@ -371,12 +372,12 @@ export async function createBlast(game) {
           const o = i * 6, x = I[o], y = I[o + 1], z = I[o + 2], b = I[o + 3], e = I[o + 4], lz = I[o + 5];
           const wx = p0[0] + M[0] * x + M[1] * y + M[2] * z, wy = p0[1] + M[3] * x + M[4] * y + M[5] * z, wz = p0[2] + M[6] * x + M[7] * y + M[8] * z;
           if (wy < .05 && sea) continue;                                    // flooded: under the sea
-          const hs = hsh(i, B.seed);
+          const hs = (Math.imul(i + B.seed, 0x9E3779B1) >>> 0) / 4294967296;
           const torn = (e & 1) !== 0, fr = (e & 2) !== 0;
           // charred steel: dark, the torn edges and frames catching more light; the fire's glow deep inside, flickering
           let c = (.15 + .22 * b) * (fr ? 1.3 : 1) * (.8 + .4 * hs);
           const gw = sat(.3 + .25 * Math.min(4, -lz) / 4);
-          const fl2 = .72 + .28 * Math.sin(tr * (5.3 + 3 * hs) + i * .7);
+          const fl2 = .72 + .28 * FLK[((tr * (40 + 24 * hs)) + i * 5.6) & 255];
           const g = Math.max(fk * (.08 + .7 * gw * gw) * fl2, torn ? heat * .8 : 0);
           const rr = 255 * Math.min(1, c * .95 + .62 * g), gg = 255 * Math.min(1, c * .9 + .36 * g), bb = 255 * Math.min(1, c * .84 + .12 * g);
           sink.dot(wx, wy, wz, size, rr, gg, bb, 1);
@@ -389,12 +390,14 @@ export async function createBlast(game) {
 
   /* the pieces that came loose: dots flying on from where the solver left them (linear drag, gravity), landing on the
      deck when over the hull, sinking when they reach the sea; hot at first, then charred. Model frame, the unit's pose */
-  const DK = .6, GR = 9.81;
+  const DK = .6, GR = 9.81, FLK = Float32Array.from({ length: 256 }, (_, k) => Math.sin(k / 256 * 2 * Math.PI));
   function drawDebris(frame) {
     const sink = frame.sink;
     if (!sink || !sink.cam || R.pcOff || R.style === 'orbital') return 0;
     const cam = sink.cam, eye = cam.eye, f = cam.f, fl = cam.fl || 1300;
-    let drawn = 0;
+    let drawn = 0, nDeb = 0;
+    for (const L of byUnit.values()) for (const B of L) if (B.debris) nDeb++;
+    if (!nDeb) return 0;
     const M = [1, 0, 0, 0, 1, 0, 0, 0, 1];
     for (const [uid, L] of byUnit) {
       const u = sim.units.get(uid), hull = game.structure && game.structure.draws && game.structure.draws(uid);
@@ -413,14 +416,15 @@ export async function createBlast(game) {
         if (zc < -60 || pxm * 20 < 2) continue;
         const e = 1 - Math.exp(-DK * t), hx = e / DK, hy = (GR / DK) * (hx - t) / 1, deckY = B.meta.deckY || 0, hb = B.meta.halfB;
         const hot = Math.exp(-t / 1.6), size = pxm * .12 > 3 ? 3 : pxm * .12 > 1.4 ? 2 : 1;
+        const hbw = hb ? hb(Fr.O[2], deckY) * .98 : 0;              // (the hull's half-beam there: once a patch, not a dot)
         const hl = B.res && B.res.hole, hbb = hl && hl.bb && B.spec.kind === 'deck' ? hl.bb : null, floorY = hl && hl.floor ? hl.floor[1] : deckY;
-        const stride = Math.max(1, Math.ceil(D.n / Math.max(400, cfg.maxDots * .5)));
+        const stride = Math.max(1, Math.ceil(D.n / Math.max(300, cfg.maxDots * .4 / nDeb)));
         const A = D.a;
         for (let i = 0; i < D.n; i += stride) {
           const o = 8 * i, x0 = A[o], y0 = A[o + 1], z0 = A[o + 2];
           let x = x0 + A[o + 3] * hx, y = y0 + A[o + 4] * hx + hy, z = z0 + A[o + 5] * hx;
           // over the hull: it lands on the deck (pieces that started below it stay inside, where they came to rest)
-          const over = hb ? Math.abs(x) < hb(z, deckY) * .98 : false;
+          const over = hbw > 0 && Math.abs(x) < hbw;
           let fade = 1;
           // (over the hole: it falls in, onto the first deck that stands under it)
           let land = deckY;
@@ -429,7 +433,7 @@ export async function createBlast(game) {
           if (over && y < land + .05) { if (y0 >= land - .3) y = land + .05; else { x = x0; y = y0; z = z0; } }
           else if (!over && y < 0) { const ts = t - (y0 > 0 ? Math.max(.1, t * y0 / Math.max(1e-3, y0 - y)) : 0); fade = sat(1 - ts / 1.2); if (fade <= 0) continue; y = Math.max(y, -.6); }
           const wx = p0[0] + M[0] * x + M[1] * y + M[2] * z, wy = p0[1] + M[3] * x + M[4] * y + M[5] * z, wz = p0[2] + M[6] * x + M[7] * y + M[8] * z;
-          const hs = hsh(i, B.seed + 17), b = A[o + 6] * (.75 + .5 * hs), g = hot * (.6 + .4 * hs);
+          const hs = (Math.imul(i + B.seed + 17, 0x9E3779B1) >>> 0) / 4294967296, b = A[o + 6] * (.75 + .5 * hs), g = hot * (.6 + .4 * hs);
           const rr = 255 * Math.min(1, b * .95 + 1.1 * g), gg = 255 * Math.min(1, b * .9 + .55 * g), bb = 255 * Math.min(1, b * .84 + .15 * g);
           sink.dot(wx, wy, wz, size, rr, gg, bb, fade);
           drawn++;
