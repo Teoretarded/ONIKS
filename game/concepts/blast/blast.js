@@ -1315,7 +1315,7 @@ function step() {
 }
 function checkEnd() {
   const s = sim;
-  if (s.solver === 'gpu') gpu.readNodes(true, X, V, FREE);
+  if (s.solver === 'gpu') { if (s.headless) gpu.readNodes(true, X, V, FREE); else if (!gpu.readNodesAsync(X, V, FREE)) return; }
   let v2 = 0, ke = 0; for (let i = 0; i < N; i++) { if (FREE[i]) continue; const q = V[3 * i] ** 2 + V[3 * i + 1] ** 2 + V[3 * i + 2] ** 2; ke += .5 * M[i] * q; if (q > v2) v2 = q; }
   let gas = 0; for (let k = 0; k < GV.length; k++) if (GV[k] < Infinity) gas = Math.max(gas, Math.abs(GP[k]));
   const quiet = s.srcs.every(q => q.F > .98) && s.t - s.lastSrc > .005, vm = Math.sqrt(v2);
@@ -1478,8 +1478,9 @@ let frameT = performance.now(), lastRate = 0;
 const SPEEDS = [0, 1, .1, .01, .001], SPEED_NAMES = ['max', '×1', '×0.1', '×0.01', '×0.001'];
 function draw(now) {
   const rdt = Math.min(.05, (now - frameT) / 1000); frameT = now;
+  if (sim && sim.external && sim.phase === 1) { requestAnimationFrame(draw); return; }   // a scripted run owns the solver
   const spd = SPEEDS[st.spd];
-  if (sim && sim.phase === 1) {
+  if (sim && sim.phase === 1 && !sim.external) {
     const t0 = performance.now(), ts = sim.t, goal = spd ? ts + rdt * spd : Infinity;
     while (performance.now() - t0 < 12 && sim.t < sim.T1 && sim.t < goal) for (let k = 0; k < 10 && sim.t < sim.T1 && sim.t < goal; k++) step();
     lastRate = rdt > 0 ? (sim.t - ts) / rdt : 0;
@@ -1731,8 +1732,8 @@ function runCase(cfg) {
   let free = 0; for (let i = 0; i < N; i++) free += FREE[i];
   const shape = new Float32Array(N);
   for (let i = 0; i < N; i++) shape[i] = FREE[i] ? NaN : Math.hypot(X[3 * i] - R0[3 * i], X[3 * i + 1] - R0[3 * i + 1], X[3 * i + 2] - R0[3 * i + 2]);
-  const res = { areas: areas.map(a => +a.toFixed(2)), byPanel: PAN.map((P, p) => { let a = 0, dmax = 0; for (let c = P.off; c < P.off + P.nu * P.nv; c++) if (CER[c]) a += CAR[c];
-      for (let c = P.off; c < P.off + P.nu * P.nv; c++) for (let q = 0; q < 4; q++) { const i = CN[4 * c + q]; if (shape[i] === shape[i] && shape[i] > dmax) dmax = shape[i]; }
+  const res = { areas: areas.map(a => +a.toFixed(2)), byPanel: PAN.map(P => { let a = 0, dmax = 0; for (let k = P.off; k < P.off + P.nu * P.nv; k++) { const c = CMAP[k]; if (c < 0) continue; if (CER[c]) a += CAR[c];
+      for (let q = 0; q < 4; q++) { const i = CN[4 * c + q]; if (shape[i] === shape[i] && shape[i] > dmax) dmax = shape[i]; } }
       return { name: P.name, torn: +a.toFixed(2), maxDisp: +dmax.toFixed(3) }; }),
     ms: Math.round(cpu), steps, simMs: +(sim.t * 1000).toFixed(1), setMm: Math.round(sim.maxDef * 1000), free, shape, cellsTorn: Uint8Array.from(CER, v => v ? 1 : 0),
     energy: EN && sim.solver === 'cpu' ? energy() : null, gas: GV.map((v, k) => v < Infinity ? Math.round(GP[k]) : 0), sources: sim.SRC.length, holes: sim.holes.length };
@@ -1747,18 +1748,35 @@ function runCase(cfg) {
   Object.assign(st, keep, { grid: cfg.grid ?? keep.grid });
   return res;
 }
+// the same run, yielding to the browser between syncs so the GPU read backs never stall (the fast way to run a case)
+async function runCaseAsync(cfg) {
+  const keep = { ...st };
+  Object.assign(st, cfg);
+  if (cfg.scene && !cfg.aim) { st.aim = cfg.scene === 'plate' ? [0, 0, 0] : cfg.scene === 'burke' && BURKE ? [0, 2.5, BURKE.halfBreadth(0, 2.5)] : [0, 2.2, 0]; st.aimN = [0, 0, 1]; }
+  build(); detonate(); startRun(); sim.headless = false; sim.external = true;
+  const ch = new MessageChannel(), tick = () => new Promise(r => { ch.port1.onmessage = r; ch.port2.postMessage(0); });
+  const t0 = performance.now(); let steps = 0;
+  while (sim.t < sim.T1) { for (let k = 0; k < SYNC && sim.t < sim.T1; k++) { step(); steps++; } await tick(); }
+  const ms = performance.now() - t0; sim.cpu = ms; sim.phase = 2; settle();
+  const res = { ms: Math.round(ms), steps, simMs: +(sim.t * 1000).toFixed(1), setMm: Math.round(sim.maxDef * 1000),
+    byPanel: PAN.map(P => { let a = 0, dmax = 0; for (let c = P.off; c < P.off + P.nu * P.nv; c++) { const cc = CMAP[c]; if (cc < 0) continue; if (CER[cc]) a += CAR[cc];
+      for (let q = 0; q < 4; q++) { const i = CN[4 * cc + q]; if (!FREE[i]) dmax = Math.max(dmax, Math.hypot(X[3 * i] - R0[3 * i], X[3 * i + 1] - R0[3 * i + 1], X[3 * i + 2] - R0[3 * i + 2])); } }
+      return { name: P.name, torn: +a.toFixed(2), maxDisp: +dmax.toFixed(3) }; }) };
+  Object.assign(st, keep, { grid: cfg.grid ?? keep.grid });
+  return res;
+}
 function compare(a, r) {
   let s = 0, n = 0; for (let i = 0; i < a.shape.length; i++) { const x = a.shape[i], y = r.shape[i]; if (x === x && y === y) { s += Math.abs(x - y); n++; } }
   let diff = 0, both = 0; for (let c = 0; c < a.cellsTorn.length; c++) { if (a.cellsTorn[c] !== r.cellsTorn[c]) diff++; else if (a.cellsTorn[c]) both++; }
   return { dispErrMm: +(s / n * 1000).toFixed(2), tornDiffCells: diff, tornBothCells: both };
 }
-window.BLAST = { ver: 31, PROF, st, runCase, compare, cam, build, detonate: () => { detonate(); startRun(); }, get sim() { return sim; }, energy, draw,
+window.BLAST = { ver: 32, PROF, st, runCase, runCaseAsync, compare, cam, build, detonate: () => { detonate(); startRun(); }, get sim() { return sim; }, energy, draw,
   stepN(n) { sim.headless = true; for (let k = 0; k < n && sim.t < sim.T1; k++) step(); return sim.t; },
   model: () => ({ N, NC, NH, NT, S, dt, X, V, R0, M, FREE, CN, CPAN, CH, CMAT, CEF, CSP, CSN, CER, CTE, CDM, CEP, CUT, CFD, CAR, CRC, CNR,
     HN, HC, HKP, HMP, HKS, HMS, HT0, HTP, HTH, HDB, HLN, HTL0, HTPS, HTR, TA, TB, TL0, TLP, TFL, TAR, AK, AF, AC, PAN, GP, GV, OPEN, scene, MATS, EN }),
   pulse, kinneyPs, kinneyIs1, reflect, U_MEAN, U_MAX, tee, SEC,
   gpuProfile(n) { gpu.profile(true); for (let k = 0; k < n; k++) gpu.step(sim.t, dt, 0); gl.finish(); return new Promise(r => setTimeout(() => r(gpu.profile(false)), 300)); },
-  snapshot() { if (sim && sim.solver === 'gpu') { gpu.readNodes(true, X, V, FREE); const cl = gpu.readCells(); for (let c = 0; c < NC; c++) { CER[c] = cl[4 * c] > .5 ? 1 : 0; CTE[c] = cl[4 * c + 1]; CUT[c] = cl[4 * c + 3]; } gpu.readState({ CEP, CDM, TFL, HTP, HTH, HTPS }); } },
+  snapshot() { if (sim && sim.solver === 'gpu') { gpu.readNodes(true, X, V, FREE); const cl = gpu.readCellsFull(); for (let c = 0; c < NC; c++) { CER[c] = cl[4 * c] > .5 ? 1 : 0; CTE[c] = cl[4 * c + 1]; CUT[c] = cl[4 * c + 3]; } gpu.readState({ CEP, CDM, TFL, HTP, HTH, HTPS }); } },
   // CPU vs GPU after the same number of steps: displacement field and eroded cells
   parity(cfg, steps) {
     const keep = { ...st }, res = {};

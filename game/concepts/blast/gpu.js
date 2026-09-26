@@ -311,6 +311,15 @@ void main(){
   o = vec4(F, cnt);
 }`;
 
+// torn cells packed to bytes for a fast read back: flag in alpha, erosion time (0 .. 1.67 s, 0.1 us steps) in rgb
+const PACK_FS = `#version 300 es
+precision highp float; precision highp int; precision highp sampler2D;
+uniform sampler2D uCSt; out vec4 o;
+void main(){ vec4 c = texelFetch(uCSt, ivec2(gl_FragCoord.xy), 0);
+  if (c.x < 0.5) { o = vec4(0.0); return; }
+  int q = int(clamp(c.y, 0.0, 1.67) * 1e7);
+  o = vec4(float(q & 255), float((q >> 8) & 255), float((q >> 16) & 255), 255.0) / 255.0; }`;
+
 const NODE_FS = HEAD + `
 uniform sampler2D uAnc, uFrc, uImp, uCSt, uCS, uPan, uCMap;
 uniform float uAlpha, uG; uniform int uUseImp;
@@ -370,7 +379,7 @@ export function createGPU(gl, M) {
     if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p)); gl.deleteShader(a); gl.deleteShader(b); objs.push(['deleteProgram', p]);
     p.u = {}; const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS); for (let i = 0; i < n; i++) { const u = gl.getActiveUniform(p, i); p.u[u.name.replace('[0]', '')] = gl.getUniformLocation(p, u.name); } return p; };
   const pH = prog(VS, HINGE_FS), pC = prog(VS, CELL_FS), pT = prog(VS, TRUSS_FS), pN = prog(VS, NODE_FS);
-  const pG = prog(VS, GATHER_FS), sK = prog(SC_CONTACT, SCAT_FS);
+  const pG = prog(VS, GATHER_FS), sK = prog(SC_CONTACT, SCAT_FS), pP = prog(VS, PACK_FS);
   const vao = gl.createVertexArray(); objs.push(['deleteVertexArray', vao]);
   const tex = (w, h, data) => { const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
@@ -439,11 +448,18 @@ export function createGPU(gl, M) {
   M.MATS.forEach((m, i) => { matA.set([m.E, m.nu, m.sy, m.H], 4 * i); matB.set([m.D, m.q, m.rho, 0], 4 * i); matC.set([m.Du, m.qu, m.eu, 0], 4 * i); });
   const S0 = new Float32Array(128), S1 = new Float32Array(128), S2 = new Float32Array(128), S3 = new Float32Array(128), S4 = new Float32Array(128);
   let nsrc = 0; const gpu4 = new Float32Array(128);
-  const bind = (p, name, t, unit) => { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, t); gl.uniform1i(p.u[name], unit); };
-  const common = (p, t, h) => { if (p.u.uMatA) gl.uniform4fv(p.u.uMatA, matA); if (p.u.uMatB) gl.uniform4fv(p.u.uMatB, matB); if (p.u.uMatC) gl.uniform4fv(p.u.uMatC, matC);
-    if (p.u.uBeta) gl.uniform1f(p.u.uBeta, M.BETA()); if (p.u.uT) gl.uniform1f(p.u.uT, t); if (p.u.uH) gl.uniform1f(p.u.uH, h); };
+  // sampler units are set once per program; material constants once; loads only when they change
+  const units = new Array(16).fill(null);
+  const bind = (p, name, t, unit) => { if (units[unit] !== t) { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, t); units[unit] = t; }
+    const key = '_s' + name; if (p[key] !== unit) { gl.uniform1i(p.u[name], unit); p[key] = unit; } };
+  const unbindAll = () => units.fill(null);
+  const common = (p, t, h) => {
+    if (!p._const) { if (p.u.uMatA) gl.uniform4fv(p.u.uMatA, matA); if (p.u.uMatB) gl.uniform4fv(p.u.uMatB, matB); if (p.u.uMatC) gl.uniform4fv(p.u.uMatC, matC);
+      if (p.u.uBeta) gl.uniform1f(p.u.uBeta, M.BETA()); p._const = true; }
+    if (p.u.uT && p._t !== t) { gl.uniform1f(p.u.uT, t); p._t = t; } if (p.u.uH && p._h !== h) { gl.uniform1f(p.u.uH, h); p._h = h; } };
+  let loadsDirty = true;
 
-  function upload() {
+  function upload() { unbindAll();
     const s = nodeS[cur];
     const z = n => new Float32Array(Wd * rows(n) * 4);
     for (const t of [s.pos, s.vel, s.anc, con]) { gl.bindTexture(gl.TEXTURE_2D, t); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, Wd, NHr, gl.RGBA, gl.FLOAT, z(N)); }
@@ -456,19 +472,19 @@ export function createGPU(gl, M) {
     gl.deleteTexture(T.cs); T.cs = mkCS();
   }
   function setSources(list) {
-    nsrc = Math.min(32, list.length); S0.fill(0); S1.fill(0); S2.fill(0); S3.fill(0); S4.fill(0);
+    loadsDirty = true; nsrc = Math.min(32, list.length); S0.fill(0); S1.fill(0); S2.fill(0); S3.fill(0); S4.fill(0);
     for (let k = 0; k < nsrc; k++) { const s = list[k];
       S0.set([s.pos[0] - O[0], s.pos[1] - O[1], s.pos[2] - O[2], s.W], 4 * k); S1.set([s.Pm, s.t0, s.space, s.kind], 4 * k);
       S2.set([...(s.ax || [0, 0, 0]), s.gain], 4 * k); S3.set([s.rc, s.vis, s.plane ? 1 : 0, 0], 4 * k);
       if (s.plane) S4.set([s.plane[0], s.plane[1], s.plane[2], s.plane[3] - (s.plane[0] * O[0] + s.plane[1] * O[1] + s.plane[2] * O[2])], 4 * k); }
   }
-  function setGas(GP) { gpu4.fill(0); for (let k = 0; k < Math.min(128, GP.length); k++) gpu4[k] = GP[k]; }
-  function setImpulses(list) {
+  function setGas(GP) { loadsDirty = true; gpu4.fill(0); for (let k = 0; k < Math.min(128, GP.length); k++) gpu4[k] = GP[k]; }
+  function setImpulses(list) { unbindAll();
     const a = new Float32Array(Wd * NHr * 4);
     for (let k = 0; k < list.length; k += 4) { const i = list[k]; a[4 * i] += list[k + 1]; a[4 * i + 1] += list[k + 2]; a[4 * i + 2] += list[k + 3]; }
     gl.bindTexture(gl.TEXTURE_2D, T.imp); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, Wd, NHr, gl.RGBA, gl.FLOAT, a); useImp = 1;
   }
-  function setDamage(CFD) { const a = new Float32Array(Wd * CHr * 4); for (let c = 0; c < NC; c++) a[4 * c] = CFD[c];
+  function setDamage(CFD) { unbindAll(); const a = new Float32Array(Wd * CHr * 4); for (let c = 0; c < NC; c++) a[4 * c] = CFD[c];
     gl.bindTexture(gl.TEXTURE_2D, T.dmg); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, Wd, CHr, gl.RGBA, gl.FLOAT, a); }
 
   function step(t, h, alpha) {
@@ -486,9 +502,10 @@ export function createGPU(gl, M) {
     bind(pC, 'uPos', s.pos, 0); bind(pC, 'uVel', s.vel, 1); bind(pC, 'uNS', T.ns, 2); bind(pC, 'uCS', T.cs, 3);
     for (let k = 0; k < 4; k++) bind(pC, 'uT' + k, cellS[cur].t[k], 4 + k);
     bind(pC, 'uCSt', cellS[cur].s, 8); bind(pC, 'uHSt', hS[nx], 9); bind(pC, 'uDmg', T.dmg, 10); bind(pC, 'uAux', T.aux, 11);
-    gl.uniform4fv(pC.u.uGP, gpu4); gl.uniform4fv(pC.u.uS0, S0); gl.uniform4fv(pC.u.uS1, S1); gl.uniform4fv(pC.u.uS2, S2); gl.uniform4fv(pC.u.uS3, S3); gl.uniform4fv(pC.u.uS4, S4);
-    gl.uniform1i(pC.u.uNS_, nsrc); gl.uniform1i(pC.u.uOUT, M.OUT()); gl.uniform1f(pC.u.uUmax, M.U_MAX); gl.uniform1f(pC.u.uRhoWC, M.RHO_W * M.C_W);
-    gl.uniform1f(pC.u.uP0, M.P0); gl.uniform1f(pC.u.uRhoWg, M.RHO_W * M.G); gl.uniform1f(pC.u.uKs, M.K_SHEAR); gl.uniform1f(pC.u.uS, M.S);
+    if (loadsDirty) { gl.uniform4fv(pC.u.uGP, gpu4); gl.uniform4fv(pC.u.uS0, S0); gl.uniform4fv(pC.u.uS1, S1); gl.uniform4fv(pC.u.uS2, S2); gl.uniform4fv(pC.u.uS3, S3); gl.uniform4fv(pC.u.uS4, S4);
+      gl.uniform1i(pC.u.uNS_, nsrc); loadsDirty = false; }
+    if (!pC._c2) { gl.uniform1i(pC.u.uOUT, M.OUT()); gl.uniform1f(pC.u.uUmax, M.U_MAX); gl.uniform1f(pC.u.uRhoWC, M.RHO_W * M.C_W);
+      gl.uniform1f(pC.u.uP0, M.P0); gl.uniform1f(pC.u.uRhoWg, M.RHO_W * M.G); if (pC.u.uKs) gl.uniform1f(pC.u.uKs, M.K_SHEAR); gl.uniform1f(pC.u.uS, M.S); pC._c2 = true; }
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     // 3. trusses
     tq('members');
@@ -503,7 +520,7 @@ export function createGPU(gl, M) {
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     tq('contact');
     gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
-    gl.useProgram(sK); bind(sK, 'uCon', con, 0); bind(sK, 'uCS', T.cs, 1); gl.uniform1i(sK.u.uN, N); gl.uniform1i(sK.u.uNH, NHr); gl.uniform1f(sK.u.uH, h);
+    gl.useProgram(sK); bind(sK, 'uCon', con, 0); bind(sK, 'uCS', T.cs, 1); if (!sK._c) { gl.uniform1i(sK.u.uN, N); gl.uniform1i(sK.u.uNH, NHr); sK._c = true; } if (sK._h !== h) { gl.uniform1f(sK.u.uH, h); sK._h = h; }
     gl.drawArrays(gl.POINTS, 0, 4 * N);
     gl.disable(gl.BLEND);
     // 5. nodes
@@ -511,7 +528,7 @@ export function createGPU(gl, M) {
     gl.useProgram(pN); gl.bindFramebuffer(gl.FRAMEBUFFER, fNode[nx]); gl.viewport(0, 0, Wd, NHr); common(pN, t, h);
     bind(pN, 'uPos', s.pos, 0); bind(pN, 'uVel', s.vel, 1); bind(pN, 'uNS', T.ns, 2); bind(pN, 'uAnc', s.anc, 3); bind(pN, 'uFrc', frc, 4);
     bind(pN, 'uImp', T.imp, 5); bind(pN, 'uCSt', cellS[nx].s, 6); bind(pN, 'uCS', T.cs, 7); bind(pN, 'uPan', T.pan, 8); bind(pN, 'uCMap', T.cmap, 9);
-    gl.uniform1f(pN.u.uAlpha, alpha); gl.uniform1f(pN.u.uG, M.G); gl.uniform1i(pN.u.uUseImp, useImp);
+    if (pN._a !== alpha) { gl.uniform1f(pN.u.uAlpha, alpha); pN._a = alpha; } if (!pN._g) { gl.uniform1f(pN.u.uG, M.G); pN._g = true; } if (pN._i !== useImp) { gl.uniform1i(pN.u.uUseImp, useImp); pN._i = useImp; }
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     useImp = 0; tqEnd();
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -528,7 +545,18 @@ export function createGPU(gl, M) {
     for (let i = 0; i < N; i++) { X[3 * i] = M.R0[3 * i] + rb[4 * i]; X[3 * i + 1] = M.R0[3 * i + 1] + rb[4 * i + 1]; X[3 * i + 2] = M.R0[3 * i + 2] + rb[4 * i + 2]; FREE[i] = rb[4 * i + 3] > .5 ? 1 : 0; }
     if (withVel) { read(fNode[cur], 1, Wd, NHr, rb); for (let i = 0; i < N; i++) { V[3 * i] = rb[4 * i]; V[3 * i + 1] = rb[4 * i + 1]; V[3 * i + 2] = rb[4 * i + 2]; } }
   }
-  function readCells() { return read(fCell[cur], 4, Wd, CHr, rbC); }
+  // a byte texture for the torn-cell read back
+  const t8 = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t8); gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, Wd, CHr); objs.push(['deleteTexture', t8]);
+  const f8 = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, f8); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t8, 0); gl.bindFramebuffer(gl.FRAMEBUFFER, null); objs.push(['deleteFramebuffer', f8]);
+  const rb8 = new Uint8Array(Wd * CHr * 4);
+  function readCells() { unbindAll();                    // -> rbC as (torn, time) per cell, like the float state
+    gl.bindVertexArray(vao); gl.disable(gl.BLEND); gl.useProgram(pP); gl.bindFramebuffer(gl.FRAMEBUFFER, f8); gl.viewport(0, 0, Wd, CHr);
+    bind(pP, 'uCSt', cellS[cur].s, 0); gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.readPixels(0, 0, Wd, CHr, gl.RGBA, gl.UNSIGNED_BYTE, rb8); gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    for (let c = 0; c < NC; c++) { const o = 4 * c; if (rb8[o + 3]) { rbC[o] = 1; rbC[o + 1] = (rb8[o] | (rb8[o + 1] << 8) | (rb8[o + 2] << 16)) * 1e-7; } else { rbC[o] = 0; rbC[o + 1] = -1; } }
+    return rbC;
+  }
+  function readCellsFull() { return read(fCell[cur], 4, Wd, CHr, rbC); }
   const pbo = gl.createBuffer(); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo); gl.bufferData(gl.PIXEL_PACK_BUFFER, Wd * CHr * 16, gl.STREAM_READ); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
   objs.push(['deleteBuffer', pbo]);
   let fence = null;
@@ -546,13 +574,35 @@ export function createGPU(gl, M) {
     fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0); gl.flush();
     return out;
   }
-  function readState(o) {                   // end of run: plastic strain, damage, member failures, hinge sets
+  // velocities (and positions) without stalling: the previous request's data if its fence has passed
+  const pboN = gl.createBuffer(); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pboN); gl.bufferData(gl.PIXEL_PACK_BUFFER, Wd * NHr * 32, gl.STREAM_READ); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+  objs.push(['deleteBuffer', pboN]);
+  let fenceN = null;
+  function readNodesAsync(X, V, FREE) {
+    let got = false;
+    if (fenceN) {
+      if (gl.clientWaitSync(fenceN, 0, 0) === gl.TIMEOUT_EXPIRED) return false;
+      gl.deleteSync(fenceN); fenceN = null;
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pboN); gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, rb); 
+      for (let i = 0; i < N; i++) { X[3 * i] = M.R0[3 * i] + rb[4 * i]; X[3 * i + 1] = M.R0[3 * i + 1] + rb[4 * i + 1]; X[3 * i + 2] = M.R0[3 * i + 2] + rb[4 * i + 2]; FREE[i] = rb[4 * i + 3] > .5 ? 1 : 0; }
+      gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, Wd * NHr * 16, rb);
+      for (let i = 0; i < N; i++) { V[3 * i] = rb[4 * i]; V[3 * i + 1] = rb[4 * i + 1]; V[3 * i + 2] = rb[4 * i + 2]; }
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null); got = true;
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fNode[cur]); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pboN);
+    gl.readBuffer(gl.COLOR_ATTACHMENT0); gl.readPixels(0, 0, Wd, NHr, gl.RGBA, gl.FLOAT, 0);
+    gl.readBuffer(gl.COLOR_ATTACHMENT1); gl.readPixels(0, 0, Wd, NHr, gl.RGBA, gl.FLOAT, Wd * NHr * 16);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null); gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    fenceN = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0); gl.flush();
+    return got;
+  }
+  function readState(o) { unbindAll();                   // end of run: plastic strain, damage, member failures, hinge sets
     const tmp = new Float32Array(Wd * CHr * 4);
     for (let k = 0; k < 4; k++) { read(fCell[cur], k, Wd, CHr, tmp); for (let c = 0; c < NC; c++) for (let z = 0; z < 4; z++) o.CEP[16 * c + 4 * k + z] = tmp[4 * c + z]; }
     read(fCell[cur], 4, Wd, CHr, tmp); for (let c = 0; c < NC; c++) o.CDM[c] = tmp[4 * c + 2];
     if (NT) { const a = new Float32Array(Wd * THr * 4); read(fTruss[cur], 0, Wd, THr, a); for (let k = 0; k < NT; k++) o.TFL[k] = a[4 * k + 1] > .5 ? 1 : 0; }
     if (NH) { const a = new Float32Array(Wd * HHr * 4); read(fHinge[cur], 0, Wd, HHr, a); for (let k = 0; k < NH; k++) { o.HTP[k] = a[4 * k]; if (o.HTH) o.HTH[k] = a[4 * k + 1]; if (o.HTPS) o.HTPS[k] = a[4 * k + 2]; } }
   }
-  function dispose() { if (fence) gl.deleteSync(fence); for (const [f, o] of objs) try { gl[f](o); } catch (e) {} objs.length = 0; }
-  return { step, profile, upload, setSources, setGas, setImpulses, setDamage, readNodes, readCells, readCellsAsync, readState, dispose, O };
+  function dispose() { if (fence) gl.deleteSync(fence); if (fenceN) gl.deleteSync(fenceN); for (const [f, o] of objs) try { gl[f](o); } catch (e) {} objs.length = 0; }
+  return { step, profile, readCellsFull, readNodesAsync, upload, setSources, setGas, setImpulses, setDamage, readNodes, readCells, readCellsAsync, readState, dispose, O };
 }
