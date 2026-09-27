@@ -64,7 +64,28 @@ Status: OPEN / FIXED? (a fix landed, not re-tested) / PASS / WONTFIX. "run N" = 
 | D2 | ddg_bow, ddg_mid | `ddg_bow_set_a60` (crop), `ddg_bow_set_e12`, `ddg_mid_set_e12` | Hole outline is a set of separate rounded-rectangle windows with strips of intact plating between them (cell-shaped holes, blocky orange rims); grey plating dots still cover much of the hole over the lit interior; fire-lit deck floors inside are hard-edged bright rectangles | OPEN; run 2: ddg_bow a scatter of small square windows along glowing frame lines (`ddg_bow_set_e12`); ddg_mid / cg_side / lcs_kh35 outlines are cell staircases with orange blobs on every step; run 4 same (`qa4/ddg_mid_set_e12`, `qa4/ddg_house_set_e12`: black rectangular slots in the deckhouse roof with bright flat panels between them); run 5: ddg_stern a row of small square / round holes strung along a glowing longitudinal (`qa5/ddg_stern_set_e12`); run 10: ddg_stern still separate square windows strung along a glowing longitudinal (`qa10/ddg_stern_set_e12`); implementer: d8c4198 (hole outline from the interpolated torn field, ragged); petals on by default (618c6d9 / 678b2a4); REOPENED (implementer, `qa44/bow_noint`): on ddg_bow the large bent flap is peppered with sharp dark ~0.5 m squares; the skin texels show no isolated torn cells there (1 of 190), so they are not holes: likely the petal splits drawn from one texel per node (cells on either side of a crack share the texel) or the close-up depth splats; handed to the close-up agent / next round |
 | D1 | battery | - | (tool) 25 m / 12 m close views aimed at the patch origin (`spec.frame.O`), which is not the hole: now aimed at `scars.last(id)` | FIXED in battery |
 
+## Open items (implementer pass after run qa67, owners)
+
+| # | what | owner | note |
+|---|---|---|---|
+| D2 | dark squares on bent flaps (ddg_bow) | close-up agent | petal drawing / depth splats |
+| D43 | lattice / sub-texel fill in holes | close-up agent | |
+| D44 | a long curved ribbon from the hangar's port rim; tent-like flaps with straight ribs (`qa67/ddg_hangar_set_d25`) | close-up agent | petal flap drawing (the solver's reach is capped at ~3 m drawn) |
+| D47 | thin ray from ddg_sheer's flap rim | close-up agent | petal edge drawn along its stretch |
+| D52 | ddg_stern flap drawn as a shaded quad with black squares | close-up agent | |
+| D10, D11, D40 | break-end tear, break-up fires, X-ray framing | break-up / inspect agent | |
+| D45 | white slab standing out of ddg_vls's hole (run 21, 65c0e09) | blast (me) | the thrown stacks box was fixed in 1a69db6; slab to recheck at HEAD |
+| D48 | waterline hole faint from 25 m | blast (me) | readability |
+| D49 | ddg_mid picture 57 m2 vs sim 8.9 | blast (me) | the solver's own tear (walls and decks now solved) is larger than the sim's; sim hole is the minimum shown, not a cap |
+| D46 | salmon strips on the carrier island's top faces | engine / model lighting | present on an unhit carrier; not damage |
+| D20 | flames on an intact carrier flight deck | scars fire (break-up / fx agent) | |
+| D25 | flight-deck hit behind the hangar not in the battery | QA | needs a case |
+| D14 | flooding spread through doors untested | systems / QA | |
+| FIXED? | D3 D17 D22 D23 D42 D47 | QA to confirm | |
+
 ## Runs
+
+- run qa68 (implementer): orphans flown as pieces after the support pass (settleSupport queues their columns): ddg_house, ddg_gundeck, ddg_cookoff qa.js ok with no orphans.
 
 - run qa67 (implementer, f778b7e, petals on, 26 cases): 26/26 qa.js ok (orphans only: house 8); resolve 1.15-3.9 s; solve p95 11.2-24.6 ms (loaded).
 

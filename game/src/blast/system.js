@@ -461,6 +461,12 @@ export async function createBlast(game) {
         for (let j = 0; j <= r.nv; j += rows) { const h = Math.min(rows, r.nv + 1 - j); upQ.push({ r, k: { i0: 0, j0: j, w: r.nu + 1, h, data: r.cpu.subarray(4 * j * (r.nu + 1), 4 * (j + h) * (r.nu + 1)) } }); } }
       for (const b of L) detachScan(b, Infinity);
     }
+    // (dots the drawing leaves out that no piece carries yet (orphans: a rule dropped them whose column no flag change
+    // queued): their columns queued and looked at now, so they fly as pieces instead of vanishing)
+    { const C = connectivity(Md, L, takenOf(B.uid, Md)), D = Md.D;
+      if (C.orphan.length) { const cols = new Set(); for (const i of C.orphan) cols.add((Math.floor(D[7 * i]) + 32768) * 65536 + Math.floor(D[7 * i + 2]) + 32768);
+        for (const b of L) { const P = b.pendCols || (b.pendCols = new Set()); for (const c of cols) P.add(c); detachWork(b, Infinity); }
+        stats.orphansFlown = (stats.orphansFlown || 0) + C.orphan.length; } }
     stats.supportMs = performance.now() - t0;
   }
   /* the surface under a point of unit uid (model frame): the deck under a hole where a patch's plating is dead, inside a
