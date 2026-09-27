@@ -123,14 +123,16 @@ export async function createBlast(game) {
     if (!o.n || Math.abs(o.n[1]) > .7 || !(o.deckY > -50)) return null;
     const ent = entOf(u), Md = ent && modelDots(ent); if (!Md || !Md.n) return null;
     const sx = o.a[0] >= 0 ? 1 : -1, D = Md.D, R = 10, y0 = o.deckY + .4, yT = o.deckY + 7;
-    let wx = null, z0 = 1e9, z1 = -1e9, y1 = -1e9;
+    // (binned by x every 0.5 m: the outermost bin that is a wall (4 m long, 1.5 m high), not a bulwark or a fitting)
+    const bins = new Map();
     eachInColumns(Md, sx > 0 ? 0 : -30, o.a[2] - R, sx > 0 ? 30 : 0, o.a[2] + R, i => { const q = 7 * i;
       if (Md.ins[D[q + 6]] || D[q + 1] < y0 || D[q + 1] > yT || D[q + 3] * sx < .8 || D[q] * sx > Math.abs(o.a[0]) - .8) return;
       const nm = Md.parts[D[q + 6]]; if (nm === 'hull' || nm === 'rails' || nm === 'deck') return;
-      if (wx === null || D[q] * sx > wx * sx + .5) { wx = D[q]; z0 = 1e9; z1 = -1e9; y1 = -1e9; }
-      if (Math.abs(D[q] - wx) < .5) { z0 = Math.min(z0, D[q + 2]); z1 = Math.max(z1, D[q + 2]); y1 = Math.max(y1, D[q + 1]); } });
-    if (wx === null || z1 - z0 < 2 || y1 - o.deckY < 1.5) return null;
-    return { x: wx, z0, z1, y1 };
+      const k = Math.round(D[q] * 2); let e = bins.get(k); if (!e) bins.set(k, e = { x: 0, n: 0, z0: 1e9, z1: -1e9, yl: 1e9, y1: -1e9 });
+      e.x += D[q]; e.n++; e.z0 = Math.min(e.z0, D[q + 2]); e.z1 = Math.max(e.z1, D[q + 2]); e.yl = Math.min(e.yl, D[q + 1]); e.y1 = Math.max(e.y1, D[q + 1]); });
+    let best = null;
+    for (const e of bins.values()) { if (e.n < 30 || e.z1 - e.z0 < 4 || e.y1 - e.yl < 1.5) continue; const x = e.x / e.n; if (!best || x * sx > best.x * sx) best = { x, z0: e.z0, z1: e.z1, y1: e.y1 }; }
+    return best;
   }
   /* a cook-off: the module's contents ({ he, prop, det, fuel, vapour }) -> patch or null */
   function cook(u, mod, o) {
@@ -769,7 +771,7 @@ export async function createBlast(game) {
   const sys = {
     name: 'blast', priority: 12.5, stats, patches, byUnit, cfg,
     get mode() { return mode; }, get err() { return err; }, get client() { return client; },
-    accepts, hit, cook, drop, dropUnit, bodies, floorAt, taken,
+    accepts, hit, cook, drop, dropUnit, bodies, floorAt, taken, wallNear,
     of(id) { return patches.get(id) || null; },
     list(uid) { return byUnit.get(uid) || []; },
     /* the last patch of a unit (the impact tester's readout) */

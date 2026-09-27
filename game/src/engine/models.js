@@ -798,6 +798,9 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
         burn = max(burn, so * so * 0.8);
         // the dent's slope: the normal leans with it
         float gu = mix(t10[ax] - t00[ax], t11[ax] - t01[ax], fy) / S, gv = mix(t01[ax] - t00[ax], t11[ax] - t10[ax], fx) / S;
+        // (a line of the model (a sheer strake, a rail) on plating bent steeper than ~30 deg: it tore off with it, not a
+        // ray drawn out along the bend: QA D47)
+        if (two && length(vec2(gu, gv)) > 0.58) return 1;
         vec3 Uw = ax == 0 ? Z : X, Vw = ax == 1 ? Z : Y;
         // (a cell whose corners were thrown metres apart (the solver's node went, its neighbour held): drawn it is a
         // strip of plating stretched many times its length, a flat card standing up at a deck edge (QA D23). Steel

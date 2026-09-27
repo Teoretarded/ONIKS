@@ -171,7 +171,7 @@ export function classify(B, x, y, z, nx, ny, nz, info, ins) {
       const gu = ((q(i0 + 1, j0, ax) - q(i0, j0, ax)) * (1 - fy) + (q(i0 + 1, j0 + 1, ax) - q(i0, j0 + 1, ax)) * fy) / S;
       const gv = ((q(i0, j0 + 1, ax) - q(i0, j0, ax)) * (1 - fx) + (q(i0 + 1, j0 + 1, ax) - q(i0 + 1, j0, ax)) * fx) / S;
       const lim = 2.2 + .8 * wreckHash(Math.floor(l[0] * 2) * .25 + .37, Math.floor(l[1] * 2) * .25 + .37, Math.floor(l[2] * 2) * .25 + .37);
-      if (!((f00 & 1) || (fN & 2)) && Math.hypot(gu, gv) > lim) return K.COLDROP; }
+      if (!((f00 & 1) || (fN & 2)) && (Math.hypot(gu, gv) > lim || (two && Math.hypot(gu, gv) > .58))) return K.COLDROP; }
     return (f00 & 1) || (fN & 2) ? K.TORN : K.PLATE;
   }
   return ins && !inRect && (l[0] * l[0] + l[1] * l[1] + l[2] * l[2] < 256 || y < .2) ? K.HIDDEN : K.NONE;   // (under the water too: QA D18)
@@ -348,6 +348,8 @@ export function createBodies() {
       const fc = floorAt(b.uid, b.p[0], b.p[1], b.p[2]), foot = b.p[1] - pen;
       const over = !fc.wall && fc.y > -1e8 && fc.y > foot - 1.2;
       if (!over && (b.stuck = (b.stuck || 0) + h) < .8) { const dx = b.p[0] - cx, dz = b.p[2] - cz, l = Math.hypot(dx, dz) || 1; b.v[0] += dx / l * 3 * h * 10; b.v[2] += dz / l * 3 * h * 10; }
+      else if (!over && b.n < 200 && b.stuck < 3) { const dx = b.p[0] - cx, dz = b.p[2] - cz, l = Math.hypot(dx, dz) || 1; b.v[0] += dx / l * 6 * h * 10; b.v[2] += dz / l * 6 * h * 10; b.p[1] += .02; }   // (a small piece on an edge: pushed off harder)
+      else if (!over && b.n < 200) b.gone = true;                                        // (still caught: it breaks up, not left hanging over the edge)
       else if (!over) { b.rest = true; b.v = [0, 0, 0]; b.w = [0, 0, 0]; }            // (wedged: it rests on what it caught)
       else if (Math.hypot(b.v[0], b.v[1], b.v[2]) < .35 && Math.hypot(...b.w) < .25) { b.rest = true; b.v = [0, 0, 0]; b.w = [0, 0, 0]; }
     }
