@@ -322,12 +322,20 @@ void main() {
     // (the plating's splat: a model cell can be larger than the patch's grid (0.25 m) and reach over the tear from an
     // intact centre, where its own dots are torn away: a black cell-sized block, the hole's outline a staircase. The
     // splat is kept to the part of its cell clear of the torn field: its corners tested at 1, 1/2, 1/4 of the cell)
+    // Within ~0.9 m of the tear none at all: the plating there is displaced cell by cell (rolled, dished, its corners
+    // flown), a flat splat at its centre's place stands where its own dots are not)
     if (bk == 0 || bk == 4) {
+      vec3 nw = uR * aNrm.xyz, U1 = normalize(U), V1 = normalize(V);
+      float near = 0.0;
+      for (int q = 0; q < 8; q++) {
+        float a = float(q) * 0.785398;
+        near = max(near, btMk(pu + (U1 * cos(a) + V1 * sin(a)) * 0.9, nw));
+      }
+      if (near > 0.02) { ${CULL} return; }
       float sk = 1.0;
       for (int q = 0; q < 3; q++) {
         vec3 hu = U * (su * 0.5 * sk), hv = V * (sv * 0.5 * sk);
-        vec3 nw = uR * aNrm.xyz;
-        if (max(max(btMk(pu + hu + hv, nw), btMk(pu + hu - hv, nw)), max(btMk(pu - hu + hv, nw), btMk(pu - hu - hv, nw))) < 0.08) break;
+        if (max(max(btMk(pu + hu + hv, nw), btMk(pu + hu - hv, nw)), max(btMk(pu - hu + hv, nw), btMk(pu - hu - hv, nw))) < 0.02) break;
         sk *= 0.5;
       }
       if (sk < 0.2) { ${CULL} return; }
@@ -340,10 +348,12 @@ void main() {
     twoS = bk == 3;
     // (bent plating: the splat is a flat cell at its centre's displacement, the dots follow the bend across it: where
     // the plating is bent steeply (a dent's slope, the lip of a hole) a flat splat stands in front of its neighbours'
-    // dots and prints as a black square. Pushed back by the bend's depth across half the cell; the
+    // dots and prints as a black square. Bent past ~22 deg no splat at all (the dots of a crumpled edge are dense enough,
+    // what shows between them is the wreck behind), less than that smaller and pushed back by the bend's depth; the
     // buckle facets only light the dots (they do not move them) and are left out of the depth pass's tilt)
     float g = length(t0);
-    if (g > 0.04) bendB = min(g, 2.0) * 0.55 * max(su, sv);
+    if (g > 0.4) { ${CULL} return; }
+    if (g > 0.04) { bendB = g * 0.55 * max(su, sv); float sk = 1.0 - g; su *= sk; sv *= sk; }
   }
   float dist = length(p);
   vec3 v = p / max(dist, 1e-4);
