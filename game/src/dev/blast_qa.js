@@ -35,6 +35,9 @@ export const CASES = [
   { id: 'ddg_30mm', type: 'ddg', kind: 'gun30', loc: [10, 5, 5], from: [1, .05, 0], face: 'stbd', burst: 10 },
   { id: 'ddg_cookoff', type: 'ddg', cook: 'vlsF', face: 'deck', loc: [0, 7.4, 39], settle: 20 },
   { id: 'ddg_breakup', type: 'ddg', kind: 'oniks', loc: [10, 3, -5], from: [1, .05, 0], face: 'stbd', dmg: 999, settle: 40 },
+  // flooding: a hole under the water, its spread over time
+  { id: 'ddg_below', type: 'ddg', kind: 'oniks', loc: [9.9, -1.2, -12], from: [1, -.05, 0], face: 'stbd', ff: 180 },
+  { id: 'ddg_wl_ff', type: 'ddg', kind: 'oniks', loc: [10, .8, 20], from: [1, .02, 0], face: 'stbd', ff: 180 },
   // CG-47
   { id: 'cg_side', type: 'cg', kind: 'oniks', loc: [8.4, 4, -10], from: [1, .05, 0], face: 'stbd' },
   { id: 'cg_deck', type: 'cg', kind: 'oniks', loc: [2, 8, 58], from: [.25, 1, .3], face: 'deck' },
@@ -96,7 +99,10 @@ function systems(O, id) {
   for (const m of u.def.modules || []) { const d = u.mods && u.mods[m.id]; if (d > 0) mods.push(`${m.id}:${Math.round(100 * d / m.hp)}%`); }
   const parts = [];
   for (const p in (u.parts || {})) { const v = u.parts[p]; if (typeof v === 'number' && v > 0) parts.push(`${p}:${Math.round(v)}`); }
-  return { hp: Math.round(u.hp), hpMax: u.hpMax, flood: +(u.flood || 0).toFixed(3), fire: +(u.fire || 0).toFixed(1), alive: u.alive, mods, parts };
+  // whatever the systems / flooding model keeps on the unit (names with flood, comp, space, sys, dc), shallow
+  const extra = {};
+  for (const k in u) if (/flood|comp|space|sys|dc|water/i.test(k) && k !== 'flood') { try { extra[k] = JSON.parse(JSON.stringify(u[k], (a, v) => typeof v === 'number' ? +v.toFixed(3) : v)); } catch (e) { extra[k] = String(u[k]); } }
+  return { hp: Math.round(u.hp), hpMax: u.hpMax, flood: +(u.flood || 0).toFixed(3), fire: +(u.fire || 0).toFixed(1), alive: u.alive, mods, parts, extra };
 }
 
 /* an exact view (the orbit camera rides its target on the sea surface and tilts up when low: not usable close to a
@@ -178,6 +184,8 @@ export async function runCase(O, c, o = {}) {
   // settled stills
   for (const [k, tag] of [['a', 'set_a60'], ['b', 'set_b60'], ['d', 'set_d25'], ['e', 'set_e12'], ['w', 'set_w300']]) { await shot(O, id, aim, V[k], `${dir}/${c.id}_${tag}`); row.shots.push(tag); }
   row.sys = systems(O, id);
+  // flooding over time: the sim run ahead (no rendering), the state again and a wide still
+  if (c.ff) { O.ff(c.ff); O.advance(.1, 3); row.sys2 = systems(O, id); await shot(O, id, aim, V.w, `${dir}/${c.id}_ff${c.ff}_w300`); await shot(O, id, aim, V.a, `${dir}/${c.id}_ff${c.ff}_a60`); row.shots.push('ff'); }
   // the floating-dot check, when game/src/blast/qa.js exists
   try {
     const QM = await import('/game/src/blast/qa.js');

@@ -11,6 +11,8 @@ Status: OPEN / FIXED? (a fix landed, not re-tested) / PASS / WONTFIX. "run N" = 
 
 | # | case | still | what's wrong | status |
 |---|---|---|---|---|
+| D32 | ddg_wl_ff | `qa4/ddg_wl_ff_ff180_w300` | (battery) after 180 s run ahead the unit is gone (hp 30, flood .046 before): sunk by the flooding, or taken by the sandbox's own enemies during the fast-forward? Need a quiet map spot / AI off for the flooding cases | OPEN (tool) |
+| D31 | ddg_below | `qa4/ddg_below_set_d25`, `_ff180_a60` | Flooding case: aimed 1.2 m under the water, lands at y 0.1 (good), but the Oniks tears nothing (torn 0, below 0) and the side shows no hole; the sim still floods (.05 -> .11 over 180 s) and engF / engA 100 %: flooding and machinery loss with no hole to show for it, and nothing for the torn-bulkhead / open-door spread to work from | OPEN |
 | D30 | ddg_vls | `qa4/ddg_vls_set_a60`, `_set_b60` | A clean box module (sharp edges, flat faces) sits at the waterline against the starboard side beside the deck hole 3 s after the solve: debris module (boats?) not sinking or not torn | OPEN |
 | D29 | ddg_stern | `qa4/ddg_stern_set_a60`, `_set_d25`, `_set_e12` | Aimed at the starboard quarter (9, 3, -70), the round lands on the flight deck centreline (0.3, 5.8, -54.9); one Oniks and the ship is lost (torn 0, a big orange glow over the stern). The flight deck's plating is smeared into long bright streaks flowing aft (stretched dots) | OPEN |
 | D28 | lhd_deck | `qa3/lhd_deck_set_d25`, `_set_e12` | Oniks into the 20 mm flight deck: 9.4 m2 torn shows as three small square pits with flat-topped fire columns, arranged in a row: brittle, square cell holes, no petals, no lifted / dished deck round them | OPEN |
