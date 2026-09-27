@@ -693,7 +693,17 @@ const FLOW = new Float64Array(512);
 function stepShip(sim, u, S, dt) {
   const L = S.L, n = L.n, W = S.water, H = S.H, sp = S.sp, t = sim.t;
   // doors shut at general quarters (each at its own time)
-  if (S.gq) for (let k = 0; k < L.bn; k++) if (S.door[k] === 1 && t - S.gqT > SHIPK.zebra[0] + hash01(u.id * 977 + 3, k) * (SHIPK.zebra[1] - SHIPK.zebra[0])) S.door[k] = 0;
+  if (S.gq && t - S.gqT < SHIPK.zebra[1] + 1) for (let k = 0; k < L.bn; k++) if (S.door[k] === 1 && t - S.gqT > SHIPK.zebra[0] + hash01(u.id * 977 + 3, k) * (SHIPK.zebra[1] - SHIPK.zebra[0])) S.door[k] = 0;
+  // dry, nothing open to the sea, nothing burning: only the doors and the system graph (casualty power) to mind
+  let wet = false;
+  for (let c = 0; c < n && !wet; c++) if (W[c] > 0) wet = true;
+  for (let i = 0; i < S.holes.length && !wet; i++) { const h = S.holes[i]; if (h.A > .005 && h.y - h.r < seaAt(u, S, h.x, h.z) + 1.5) wet = true; }
+  let burning = false;
+  for (let c = 0; c < n && !burning; c++) if (S.fire[c] > 0) burning = true;
+  if (!wet && !burning) {
+    quiet(sim, u, S, dt, t);
+    return;
+  }
   // heads: a space's water level; a full space passes on the head of what fills it
   for (let c = 0; c < n; c++) H[c] = level(S, c);
   for (let pass = 0; pass < 2; pass++) for (let c = 0; c < n; c++) {
@@ -776,6 +786,11 @@ function stepShip(sim, u, S, dt) {
   if (!u.alive) return;
   fires(sim, u, S, dt);
   control(sim, u, S, dt);
+  quiet(sim, u, S, dt, t);
+}
+/* casualty power, the graph, whether she still needs stepping */
+function quiet(sim, u, S, dt, t) {
+  const sp = S.sp;
   // casualty power: an intact load without its supply gets a temporary cable after a while
   for (let i = 0; i < sp.nN; i++) {
     const nd = sp.nodes[i];
@@ -787,7 +802,7 @@ function stepShip(sim, u, S, dt) {
   // quiet: nothing in her, nothing burning, nothing open
   let waiting = false;
   for (let i = 0; i < sp.nN && !waiting; i++) if (sp.nodes[i].pw && !S.powered[i] && S.cas[i] >= 0 && nodeDamage(u, S, sp.nodes[i]) < 1) waiting = true;
-  if (wsum <= 0 && !waiting && !S.holes.some(h => h.A > .005 && h.sea) && !S.fire.some(f => f > 0) && !(S.gq && t - S.gqT < SHIPK.zebra[1] + 1)) S.active = false;
+  if (!S.water.some(w => w > 0) && !waiting && !S.holes.some(h => h.A > .005 && h.sea) && !S.fire.some(f => f > 0) && !(S.gq && t - S.gqT < SHIPK.zebra[1] + 1)) S.active = false;
 }
 function anyBus(S) { const b = S._busOn; if (!b) return false; for (let i = 0; i < b.length; i++) if (b[i]) return true; return false; }
 function openArea(S, k) {

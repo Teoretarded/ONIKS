@@ -235,7 +235,12 @@ function genSpaces(S, H) {
       const y0 = ys[j], y1 = ys[j + 1], yc = (Math.max(y0, H.keel(zc)) + Math.min(y1, H.deck(zc))) / 2;
       const nm = (S.names || []).find(n => zc >= n[0] && zc <= n[1] && yc >= n[2] && yc <= n[3]);
       const low = j === 0 && S.lv.length > 1 && !S.sub;
-      const base = nm ? { id: nm[4], name: nm[5], use: nm[6] } : low ? { id: 'DB', name: 'Double bottom · tanks', use: 'W' } : { id: 'SP', name: ['Stores', 'Berthing', 'Offices · shops', 'Living spaces'][Math.min(3, j - 1 < 0 ? 0 : j - 1)], use: j <= 1 ? 'A' : 'L' };
+      // unnamed cells by their deck, counted down from the main deck (2nd deck under it: berthing, messes; then the
+      // 3rd; the lower ones stores and platforms; the double bottom's tanks)
+      const fromTop = ys.length - 2 - j, deckN = fromTop + 2;
+      const plain = fromTop === 0 ? ['L', 'Berthing · messes · offices'] : fromTop === 1 ? ['L', 'Berthing · workshops'] : fromTop === 2 ? ['A', 'Stores · workshops'] : ['A', 'Stores · pumps'];
+      const base = nm ? { id: nm[4], name: nm[5], use: nm[6] } : low ? { id: 'DB', name: 'Double bottom · tanks', use: 'W' }
+        : { id: 'SP', name: `${plain[1]} · ${deckN === 2 ? '2nd' : deckN === 3 ? '3rd' : deckN + 'th'} deck`, use: plain[0] };
       const id = `${base.id}${zn}${S.lv.length > 1 ? '-' + (j + 1) : ''}`;
       const wing = S.wing && y0 >= S.wing[0] - 1e-6 && y1 <= S.wing[1] + 1e-6 ? S.wing[2] : 0;
       if (wing) {
