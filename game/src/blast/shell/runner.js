@@ -8,7 +8,7 @@
    (a fence polled or a buffer read is a round trip to Chrome's GPU process, busy with the game's frames). A check run
    (spec.syncReads, WebGL2) reads blocking every sync, as the bench's headless runCase. The snapshots and results are the
    same shape as the lattice runner's (skins in each plate's grid order, through the cell map). */
-import { sceneOf, buildShell, loadShell, commonSync, checkEnd, markDebris, openCell, gpuModel, attachedCell, detachPinned, looseCells, buildTwins, applyGpuSplits, MATS } from './model.js';
+import { sceneOf, buildShell, loadShell, commonSync, checkEnd, markDebris, openCell, gpuModel, attachedCell, detachPinned, looseCells, buildTwins, applyGpuSplits, flapVents, effK, MATS } from './model.js';
 import { createGPU } from './gpu.js';
 import { createWGPU } from './gpu_wgpu.js';
 
@@ -74,9 +74,11 @@ export function createShellRunner(gl, o = {}) {
     const M = R.M, s = M.sim, g = R.gpu, m = s.n - R.LAT;
     if (s.n % 200 === 0) g.requestNodes(s.n);
     if (m > 0 && m % 200 === 0) {
-      const VE = R.VE || (R.VE = { V: new Float64Array(3 * M.N), FREE: new Uint8Array(M.N), U: new Float64Array(3 * M.N) });
+      const VE = R.VE || (R.VE = { V: new Float64Array(3 * M.N), FREE: new Uint8Array(M.N), U: new Float64Array(3 * M.N), K: M.TWIN ? new Float32Array(8 * M.N) : null });
       const tn = now();
-      if (g.nodesOf(m, VE.V, VE.FREE, VE.U)) { const V0 = M.V, F0 = M.FREE; M.V = VE.V; M.FREE = VE.FREE; M.U = VE.U; checkEnd(M); M.V = V0; M.FREE = F0; M.U = null;
+      if (g.nodesOf(m, VE.V, VE.FREE, VE.U, VE.K)) {
+        // (petals: the crack records at this step, for the flaps drawn during the solve and the flaps' vents)
+        if (VE.K) { M.KN = VE.K; flapVents(M, VE.U, VE.K); } const V0 = M.V, F0 = M.FREE; M.V = VE.V; M.FREE = VE.FREE; M.U = VE.U; checkEnd(M); M.V = V0; M.FREE = F0; M.U = null;
         // (bench 03813d8: corner-pinned plating let go; loose plating out of its compartment's wall)
         if (detachPinned(M)) g.setDamage(M.CFD);
         const lo = looseCells(M); if (lo.length && g.gasOff) g.gasOff(lo, M.CVIS); }
@@ -136,7 +138,7 @@ export function createShellRunner(gl, o = {}) {
     try {
       const st = { CEP: M.CEP, CDM: M.CDM, TFL: M.TFL, HTP: M.HTP, HTH: M.HTH, HTPS: M.HTPS, TBP: M.TBP };
       await g.readStateAsync(st);
-      if (st.CRK) M.nSplit = applyGpuSplits(M, st.CRK);
+      if (st.CRK) M.nSplit = applyGpuSplits(M, st.CRK, st.CRK2);
       if (g.flush) await g.flush();
       if (R.state !== 'finishing') return;
       g.readNodes(true, M.X, M.V, M.FREE);
@@ -243,15 +245,10 @@ export function createShellRunner(gl, o = {}) {
         // (petals: a split node's cells beyond the crack are on its twin: each texel drawn from its own cell's corners)
         if (M.CN0 && M.nSplit) { const cc = CM[L.off + mp.cjv[Math.min(j, nv - 1)] * L.nu + mp.ciu[Math.min(i, nu - 1)]];
           if (cc >= 0) { const ef = n => { for (let k = 0; k < 4; k++) if (M.CN0[4 * cc + k] === n) return M.CN[4 * cc + k]; return n; }; n00 = ef(n00); n10 = ef(n10); n01 = ef(n01); n11 = ef(n11); } }
-        else if (M.TWIN && !final) {
-          // (during the solve the CPU does not know the splits: a corner whose twin has moved (split) goes with whichever
-          // of the two keeps the cell's diagonal nearest its rest length: the flap stays with its cell)
-          const pick = (n, o) => { const T = n < M.TWIN.length ? M.TWIN[n] : -1; if (T < 0) return n;
-            const dT = (X[3 * T] - R0[3 * T]) ** 2 + (X[3 * T + 1] - R0[3 * T + 1]) ** 2 + (X[3 * T + 2] - R0[3 * T + 2]) ** 2; if (dT < 1e-8) return n;
-            const L0 = Math.hypot(R0[3 * n] - R0[3 * o], R0[3 * n + 1] - R0[3 * o + 1], R0[3 * n + 2] - R0[3 * o + 2]);
-            const a = Math.abs(Math.hypot(X[3 * n] - X[3 * o], X[3 * n + 1] - X[3 * o + 1], X[3 * n + 2] - X[3 * o + 2]) - L0), b = Math.abs(Math.hypot(X[3 * T] - X[3 * o], X[3 * T + 1] - X[3 * o + 1], X[3 * T + 2] - X[3 * o + 2]) - L0);
-            return b < a ? T : n; };
-          const a00 = pick(n00, n11), a11 = pick(n11, n00), a10 = pick(n10, n01), a01 = pick(n01, n10); n00 = a00; n11 = a11; n10 = a10; n01 = a01;
+        else if (M.KN && !final) {
+          // (during the solve: each texel from its own cell's corners as the crack records last read back have them)
+          const cc = CM[L.off + mp.cjv[Math.min(j, nv - 1)] * L.nu + mp.ciu[Math.min(i, nu - 1)]];
+          if (cc >= 0) { n00 = effK(M, M.KN, cc, n00); n10 = effK(M, M.KN, cc, n10); n01 = effK(M, M.KN, cc, n01); n11 = effK(M, M.KN, cc, n11); }
         }
         const w00 = (1 - fx) * (1 - fy), w10 = fx * (1 - fy), w01 = (1 - fx) * fy, w11 = fx * fy, eb = mp.eu[i] * mp.ev[j];
         for (let q = 0; q < 3; q++) d[o + q] = eb * ((X[3 * n00 + q] - R0[3 * n00 + q]) * w00 + (X[3 * n10 + q] - R0[3 * n10 + q]) * w10 + (X[3 * n01 + q] - R0[3 * n01 + q]) * w01 + (X[3 * n11 + q] - R0[3 * n11 + q]) * w11);

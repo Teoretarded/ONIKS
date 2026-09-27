@@ -1,4 +1,4 @@
-/* (game/concepts/blast/gpu_wgpu.js at commit 03813d8, copied; the changes: gravity on free pieces along the patch's up
+/* (game/concepts/blast/gpu_wgpu.js at commit 3f115d5, copied; the changes: gravity on free pieces along the patch's up
    axis, UPAX; msStep(), the measured time a step for the worker's slices) The blast bench's structural model on WebGPU compute: the same physics as gpu.js (WebGL2) and the CPU reference in
    blast.js, pass for pass (hinges, cells, members, gather, contact scatter, nodes), with the state in three storage
    buffers:
@@ -26,7 +26,7 @@ export async function initWebGPU() {
 
 const WGS = 64;
 const HEAD = (c) => `
-struct Kc { matA: array<vec4f, 8>, matB: array<vec4f, 8>, matC: array<vec4f, 8>, s0: vec4f, s1: vec4f, s2: vec4f }
+struct Kc { matA: array<vec4f, 8>, matB: array<vec4f, 8>, matC: array<vec4f, 8>, s0: vec4f, s1: vec4f, s2: vec4f, s3: vec4f }
 struct Pp { t: f32, h: f32, alpha: f32, nimp: u32, par: u32, q0: u32, q1: u32, q2: u32 }
 struct Ll { gp: array<vec4f, 32>, s0: array<vec4f, 32>, s1: array<vec4f, 32>, s2: array<vec4f, 32>, s3: array<vec4f, 32>, s4: array<vec4f, 32>, s5: array<vec4f, 32>, ns: vec4i }
 @group(0) @binding(0) var<storage, read> ST: array<vec4f>;
@@ -44,13 +44,19 @@ fn CST(c: i32, h: u32) -> vec4f { return DY[clB(h) + 4 * NC + c]; }
 fn mbB(h: u32) -> i32 { return O_MB + i32(h) * NT; }
 fn CSF(mi: i32, ed: f32, ep: f32) -> f32 { let b = KC.matB[mi]; let c = KC.matC[mi]; let f = min(1.0, ep / c.z); return 1.0 + pow(min(ed, 1e4) / mix(b.x, c.x, f), 1.0 / mix(b.y, c.y, f)); }
 fn wrapA(a: f32) -> f32 { return a - 6.283185307 * floor(a / 6.283185307 + 0.5); }
-// petals: the node a cell's corner q is on (q's twin once q has split and the cell lies beyond the crack line)
+// petals: the node a cell's corner q is on: q's first twin once q has split and the cell lies beyond the first crack
+// line; its second twin if a second crack split that piece (q's own, or the first twin's) and the cell lies beyond it
 fn effN(c: i32, q: i32) -> i32 {
   if (PETALS == 0) { return q; }
   let r = ST[O_NS + 5 * q + 1]; let tw = i32(r.w); if (tw < 0) { return q; }
   let k = SC[O_CRK + q]; if (k.w <= 0.0) { return q; }
-  return select(q, tw, dot(ST[O_CS + 11 * c + 9].xyz - r.xyz, k.xyz) > 0.0);
+  let d = ST[O_CS + 11 * c + 9].xyz - r.xyz;
+  var o = select(q, tw, dot(d, k.xyz) > 0.0);
+  let k2 = SC[O_CRK2 + q];
+  if (k2.w > 0.0) { let src = select(q, tw, k2.w > 1.5); if (o == src && dot(d, k2.xyz) > 0.0) { o = tw + 1; } }
+  return o;
 }
+fn nsplit(q: i32) -> i32 { return select(0, 1, SC[O_CRK + q].w > 0.0) + select(0, 1, SC[O_CRK2 + q].w > 0.0); }
 `;
 const SCV = `@group(0) @binding(2) var<storage, read_write> SC: array<vec4f>;\n`;
 
@@ -132,18 +138,19 @@ fn retMap(sp: ptr<function, vec3f>, eb: f32, mA: vec4f, rf: f32) -> vec2f {
 }
 // the edge a cell at its limit cracks along (as blast.js crackEdge): the pair across its larger stretch, the one that
 // continues a crack, else the one nearer the charge; -1: no node left to split
-fn crackEdge(qo: array<i32, 4>, P: array<vec3f, 4>, r1: vec3f, r2: vec3f, r3: vec3f, cc: vec3f) -> i32 {
+fn crackEdge(qo: array<i32, 4>, P: array<vec3f, 4>, r1: vec3f, r2: vec3f, r3: vec3f, cc: vec3f, first: i32) -> i32 {
   var Rv = array<vec3f, 4>(vec3f(0.0), r1, r2, r3);
   let s1 = (length(P[1] - P[0]) + length(P[2] - P[3])) / (length(r1) + length(r2 - r3));
   let s3 = (length(P[3] - P[0]) + length(P[2] - P[1])) / (length(r3) + length(r2 - r1));
   var ca = 3; var cb = 1; if (s3 > s1 + 1e-4) { ca = 0; cb = 2; }
-  if (PRAD == 1) {                                             // radial: along the edges nearer the charge's radius
+  if (first >= 0) { if (first % 2 == 0) { ca = 3; cb = 1; } else { ca = 0; cb = 2; } }
+  if (PRAD == 1 && first < 0) {                                             // radial: along the edges nearer the charge's radius
     let r = cc - KC.s2.xyz; let a1 = abs(dot(r, r1)) / length(r1); let a3 = abs(dot(r, r3)) / length(r3);
     if (abs(a1 - a3) > 1e-3 * length(r)) { if (a1 > a3) { ca = 0; cb = 2; } else { ca = 3; cb = 1; } } }
   var fr = vec2i(0); var sp = vec2i(0);
   for (var j = 0; j < 2; j++) { let e = select(cb, ca, j == 0);
-    for (var z = 0; z < 2; z++) { let o = qo[(e + z) % 4]; let tw = i32(ST[O_NS + 5 * o + 1].w); let s = SC[O_CRK + o].w > 0.0;
-      if (tw >= 0 && !s) { fr[j] += 1; } else if (s) { sp[j] += 1; } } }
+    for (var z = 0; z < 2; z++) { let o = qo[(e + z) % 4]; let tw = i32(ST[O_NS + 5 * o + 1].w); var ns = 0; if (tw >= 0) { ns = nsplit(o); }
+      if (tw >= 0 && ns < 2) { fr[j] += 1; } if (ns > 0) { sp[j] += 1; } } }
   if (fr.x == 0 && fr.y == 0) { return -1; }
   if (fr.x > 0 && fr.y == 0) { return ca; }
   if (fr.y > 0 && fr.x == 0) { return cb; }
@@ -300,10 +307,21 @@ fn crackEdge(qo: array<i32, 4>, P: array<vec3f, 4>, r1: vec3f, r2: vec3f, r3: ve
     var torn = select(0.0, 1.0, PP.q0 == 1u && (acc >= ws || fd <= 0.0 || jmin < c10.w));
     var code = 0.0;
     if (PETALS == 1) {
-      // petals: at the limit, crack an edge first (once); a cracked cell erodes at KC.s2.w x its limit
-      let cracked = cs.x > 0.05; if (cracked) { code = 0.1; }
+      // petals (as blast.js): the state word 0 intact, 0.10 + 0.01 e cracked once along e, 0.15 done cracking, 0.2 + 0.03 e a
+      // first request along e, 0.32 + 0.03 e a second; a cell cracks at its limit, again at KC.s3.x x it (the other
+      // pair), and erodes at KC.s2.w x it
+      var stage = 0; var e1 = -1; let x = cs.x;
+      if (x > 0.095 && x < 0.145) { stage = 1; e1 = i32(round((x - 0.1) / 0.01)); }
+      else if (x >= 0.145 && x < 0.19) { stage = 2; }
+      else if (x >= 0.19 && x < 0.305) { stage = 1; e1 = i32(round((x - 0.2) / 0.03)); }
+      else if (x >= 0.305 && x < 0.45) { stage = 2; }
+      if (stage == 1) { code = 0.1 + 0.01 * f32(e1); } else if (stage == 2) { code = 0.15; }
       if (torn > 0.5 && fd > 0.0 && jmin >= c10.w) {
-        if (!cracked) { let e = crackEdge(qo, P, r1.xyz, r2.xyz, r3.xyz, c9.xyz); if (e >= 0) { torn = 0.0; code = 0.2 + 0.05 * f32(e); } else if (PKEEP == 1) { torn = 0.0; code = 0.1; } }
+        if (stage == 0) { let e = crackEdge(qo, P, r1.xyz, r2.xyz, r3.xyz, c9.xyz, -1); if (e >= 0) { torn = 0.0; code = 0.2 + 0.03 * f32(e); } else if (PKEEP == 1) { torn = 0.0; code = 0.15; } }
+        else if (stage == 1) {
+          if (acc < KC.s3.x * ws || KC.s3.x >= KC.s2.w) { if (acc < KC.s2.w * ws) { torn = 0.0; } }
+          else { let e = crackEdge(qo, P, r1.xyz, r2.xyz, r3.xyz, c9.xyz, e1); code = 0.15;
+            if (e >= 0) { torn = 0.0; code = 0.32 + 0.03 * f32(e); } else if (acc < KC.s2.w * ws) { torn = 0.0; } } }
         else if (acc < KC.s2.w * ws) { torn = 0.0; }
       }
     }
@@ -426,7 +444,8 @@ fn contact(c: i32, hp: u32, r: i32) -> vec3f {
   var p = i; var split = false;
   if (PETALS == 1) { let tw = i32(ST[O_NS + 5 * i + 1].w); if (tw <= -2) { p = -tw - 2; }
     if (tw >= 0 || tw <= -2) { split = SC[O_CRK + p].w > 0.0; }
-    if (p != i && !split) { SC[O_FRC + i] = vec4f(0.0); return; } }
+    if (p != i) { var act = split; if (i != i32(ST[O_NS + 5 * p + 1].w)) { act = SC[O_CRK2 + p].w > 0.0; }
+      if (!act) { SC[O_FRC + i] = vec4f(0.0); return; } } }
   for (var k = 0; k < n0; k++) {
     let e = ADJ(o0 + k); let c = e / 4; let r = e - 4 * c;
     if (split) { if (effN(c, p) != i) { continue; } }
@@ -484,7 +503,8 @@ const NODE = `
   let uH = PP.h;
   var wi = n0.x;
   if (PETALS == 1) { let tw = i32(n1.w);
-    if (tw <= -2) { let kp = SC[O_CRK + (-tw - 2)]; if (kp.w > 0.0) { wi = SC[O_CRK + i].x; } }
+    if (tw <= -2) { let pa = -tw - 2; var act = SC[O_CRK + pa].w > 0.0; if (i != i32(ST[O_NS + 5 * pa + 1].w)) { act = SC[O_CRK2 + pa].w > 0.0; }
+      if (act) { wi = SC[O_CRK + i].x; } }
     else if (tw >= 0) { let kp = SC[O_CRK + i]; if (kp.w > 0.0) { wi = kp.w; } } }
   if (wi > 0.0) {
     let fr = SC[O_FRC + i];
@@ -538,32 +558,44 @@ const NODE = `
 const CRACK = `
 @compute @workgroup_size(${WGS}) fn main(@builtin(global_invocation_id) gid: vec3u) {
   let p = i32(gid.x); if (p >= N) { return; }
-  let r0 = ST[O_NS + 5 * p + 1]; let T = i32(r0.w); if (T < 0) { return; }
-  if (SC[O_CRK + p].w > 0.0) { return; }
+  let r0 = ST[O_NS + 5 * p + 1]; let T1 = i32(r0.w); if (T1 < 0) { return; }
+  let s1 = SC[O_CRK + p].w > 0.0; if (SC[O_CRK2 + p].w > 0.0) { return; }
   let v = PP.par;
   let g0 = ST[O_NS + 5 * p + 3]; let o0 = i32(g0.x); let n0 = i32(g0.y);
   var bc = -1; var be = 0; var br = -1e30;
   for (var k = 0; k < n0; k++) {
     let e = ADJ(o0 + k); let c = e / 4; let r = e - 4 * c;
-    let cs = CST(c, v); if (cs.x < 0.19 || cs.x > 0.5) { continue; }
-    let ed = i32(round((cs.x - 0.2) / 0.05));
-    if (r != ed && r != (ed + 1) % 4) { continue; }
-    if (cs.y > br || (cs.y == br && c < bc)) { br = cs.y; bc = c; be = ed; }
+    let x = CST(c, v).x; var ed = -1;
+    if (x >= 0.19 && x < 0.305) { ed = i32(round((x - 0.2) / 0.03)); } else if (x >= 0.305 && x < 0.45) { ed = i32(round((x - 0.32) / 0.03)); }
+    if (ed < 0 || (r != ed && r != (ed + 1) % 4)) { continue; }
+    let y = CST(c, v).y;
+    if (y > br || (y == br && c < bc)) { br = y; bc = c; be = ed; }
   }
   if (bc < 0) { return; }
   let sb = O_CS + 11 * bc; var Rv = array<vec3f, 4>(vec3f(0.0), ST[sb + 1].xyz, ST[sb + 2].xyz, ST[sb + 3].xyz);
   var n = normalize(cross(Rv[(be + 1) % 4] - Rv[be], normalize(cross(Rv[1], Rv[3]))));
   if (dot(n, vec3f(1.0, 1.37, 1.91)) < 0.0) { n = -n; }             // one orientation (as blast.js)
+  var src = p; if (s1) { src = effN(bc, p); }                       // a second crack splits the asking cell's piece
   var mB = 0.0; var nA = 0; var nB = 0;
   for (var k = 0; k < n0; k++) {
     let e = ADJ(o0 + k); let c = e / 4; let cb = O_CS + 11 * c;
+    if (s1 && effN(c, p) != src) { continue; }
     if (dot(ST[cb + 9].xyz - r0.xyz, n) > 0.0) { nB++; let r1 = ST[cb + 1]; mB += KC.matB[i32(ST[cb + 2].w)].z * r1.w * ST[cb + 7].w * 0.25; } else { nA++; }
   }
   if (nA == 0 || nB == 0) { return; }
-  let wp = ST[O_NS + 5 * p].x; let g1 = ST[O_NS + 5 * p + 4];
-  var wP = wp; if (i32(g1.y) == 0) { let m = 1.0 / wp; wP = 1.0 / max(m - mB, 1e-3 * m); }
-  SC[O_CRK + p] = vec4f(n, wP); SC[O_CRK + T] = vec4f(1.0 / mB, 0.0, 0.0, 1.0);
-  let nb = ndB(v); DY[nb + T] = DY[nb + p]; DY[nb + N + T] = DY[nb + N + p];
+  let mem = i32(ST[O_NS + 5 * p + 4].y) > 0;
+  let nb = ndB(v);
+  if (!s1) {
+    let wp = ST[O_NS + 5 * p].x; var wP = wp; if (!mem) { let m = 1.0 / wp; wP = 1.0 / max(m - mB, 1e-3 * m); }
+    SC[O_CRK + p] = vec4f(n, wP); SC[O_CRK + T1] = vec4f(1.0 / mB, 0.0, 0.0, 1.0);
+    DY[nb + T1] = DY[nb + p]; DY[nb + N + T1] = DY[nb + N + p];
+  } else {
+    let T2 = T1 + 1;
+    if (src == p) { if (!mem) { let k = SC[O_CRK + p]; let m = 1.0 / k.w; SC[O_CRK + p] = vec4f(k.xyz, 1.0 / max(m - mB, 1e-3 * m)); } }
+    else { let k = SC[O_CRK + T1]; let m = 1.0 / k.x; SC[O_CRK + T1] = vec4f(1.0 / max(m - mB, 1e-3 * m), k.yzw); }
+    SC[O_CRK2 + p] = vec4f(n, select(1.0, 2.0, src == T1)); SC[O_CRK + T2] = vec4f(1.0 / mB, 0.0, 0.0, 1.0);
+    DY[nb + T2] = DY[nb + src]; DY[nb + N + T2] = DY[nb + N + src];
+  }
 }`;
 
 // torn cells packed to one word: flag in the top byte, erosion time (0 .. 1.67 s, 0.1 us steps) below
@@ -602,7 +634,7 @@ export function createWGPU(dev, M, opt = {}) {
   const nST = off;
   off = 0; at('O_ND', 6 * N); at('O_CL', 10 * NC); at('O_HT', 2 * NH); at('O_MB', 2 * NT); const nDY = off;
   const MAXIMP = N + 4096;
-  off = 0; at('O_CON', N); at('O_FRC', N); at('O_CF', 3 * NC); at('O_HF', 3 * NH); at('O_MF', 7 * NT); at('O_DMG', NC); at('O_IMP', MAXIMP); at('O_PK', Math.ceil(NC / 4) + 1); at('O_CRK', M.PAR ? N : 1); const nSC = off;
+  off = 0; at('O_CON', N); at('O_FRC', N); at('O_CF', 3 * NC); at('O_HF', 3 * NH); at('O_MF', 7 * NT); at('O_DMG', NC); at('O_IMP', MAXIMP); at('O_PK', Math.ceil(NC / 4) + 1); at('O_CRK', M.PAR ? N : 1); at('O_CRK2', M.PAR ? N : 1); const nSC = off;
   const CONST = { N, NC, NH, NT, OUT: M.OUT(), PETALS: M.PAR ? 1 : 0, PRAD: M.PRAD ? 1 : 0, PKEEP: M.PKEEP ? 1 : 0, UPAX: M.UP === undefined ? 1 : M.UP, ...L };
   const stat = new Float32Array(4 * nST);
   const put = (base, i, T, t, v) => stat.set(v, 4 * (base + i * T + t));
@@ -642,14 +674,14 @@ export function createWGPU(dev, M, opt = {}) {
   const U = GPUBufferUsage, bufs = [];
   const mk = (size, usage) => { const b = dev.createBuffer({ size: Math.ceil(size / 16) * 16, usage }); bufs.push(b); return b; };
   const bST = mk(16 * nST, U.STORAGE | U.COPY_DST), bDY = mk(16 * nDY, U.STORAGE | U.COPY_DST | U.COPY_SRC), bSC = mk(16 * nSC, U.STORAGE | U.COPY_DST | U.COPY_SRC);
-  const bK = mk(432, U.UNIFORM | U.COPY_DST), bL = mk(3600, U.UNIFORM | U.COPY_DST);
+  const bK = mk(448, U.UNIFORM | U.COPY_DST), bL = mk(3600, U.UNIFORM | U.COPY_DST);
   const PSTRIDE = 256, MAXSTEPS = 4096, bP = mk(PSTRIDE * (MAXSTEPS + 1), U.UNIFORM | U.COPY_DST);
   const UPSZ = 1 << 24, bUp = mk(UPSZ, U.COPY_SRC | U.COPY_DST);
   const bHD = mk(4 * (2 * NC + N), U.STORAGE | U.COPY_DST);             // contact lists: heads (2 halves) and links
   dev.queue.writeBuffer(bST, 0, stat);
-  { const k = new Float32Array(108); M.MATS.forEach((m, i) => { k.set([m.E, m.nu, m.sy, m.H], 4 * i); k.set([m.D, m.q, m.rho, 0], 32 + 4 * i); k.set([m.Du, m.qu, m.eu, 0], 64 + 4 * i); });
+  { const k = new Float32Array(112); M.MATS.forEach((m, i) => { k.set([m.E, m.nu, m.sy, m.H], 4 * i); k.set([m.D, m.q, m.rho, 0], 32 + 4 * i); k.set([m.Du, m.qu, m.eu, 0], 64 + 4 * i); });
     k.set([M.BETA(), M.U_MAX, M.RHO_W * M.C_W, M.P0, M.RHO_W * M.G, M.K_SHEAR, M.S, M.G], 96);
-    const C = M.C || [0, 0, 0]; k.set([C[0] - O[0], C[1] - O[1], C[2] - O[2], M.PETK || 1.5], 104); dev.queue.writeBuffer(bK, 0, k); }
+    const C = M.C || [0, 0, 0]; k.set([C[0] - O[0], C[1] - O[1], C[2] - O[2], M.PETK || 1.5, M.PETK2 || 1e30, 0, 0, 0], 104); dev.queue.writeBuffer(bK, 0, k); }
   // ---- pipelines (one layout for all)
   const bgl = dev.createBindGroupLayout({ entries: [
     { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
@@ -707,7 +739,7 @@ export function createWGPU(dev, M, opt = {}) {
   }
   const step = (t, h, alpha, er = true) => steps(1, t, h, alpha, er);
   // ---- read backs: node u+v (current half) and packed torn cells, one set in flight at a time
-  const nodeBytes = 32 * N, pkBytes = 4 * NC;
+  const nodeBytes = 32 * N, pkBytes = 4 * NC, nodeBytesT = nodeBytes + (M.PAR ? 32 * N : 0);
   const stN = dev.createBuffer({ size: Math.ceil(nodeBytes / 16) * 16, usage: U.MAP_READ | U.COPY_DST }), stC = dev.createBuffer({ size: Math.ceil(pkBytes / 16) * 16 + 16, usage: U.MAP_READ | U.COPY_DST });
   bufs.push(stN, stC);
   let reading = false, readSeq = 0, doneSeq = 0, nodeSeq = 0, cellSeq = 0, readWait = null;
@@ -759,12 +791,12 @@ export function createWGPU(dev, M, opt = {}) {
   async function readStateAsync(o) {
     await flush();
     const parts = [[16 * (L.O_CL + cur * 5 * NC), 16 * 5 * NC], [16 * (L.O_MB + cur * NT), 16 * one(NT)], [16 * (L.O_HT + cur * NH), 16 * one(NH)]];
-    const crk = M.PAR ? dev.createBuffer({ size: 16 * N, usage: U.MAP_READ | U.COPY_DST }) : null;
+    const crk = M.PAR ? dev.createBuffer({ size: 32 * N, usage: U.MAP_READ | U.COPY_DST }) : null;
     const tot = parts.reduce((a, p) => a + p[1], 0), sb = dev.createBuffer({ size: tot, usage: U.MAP_READ | U.COPY_DST });
     const e = dev.createCommandEncoder(); let q = 0; for (const [s, n] of parts) { e.copyBufferToBuffer(bDY, s, sb, q, n); q += n; }
-    if (crk) e.copyBufferToBuffer(bSC, 16 * L.O_CRK, crk, 0, 16 * N);
+    if (crk) { e.copyBufferToBuffer(bSC, 16 * L.O_CRK, crk, 0, 16 * N); e.copyBufferToBuffer(bSC, 16 * L.O_CRK2, crk, 16 * N, 16 * N); }
     dev.queue.submit([e.finish()]); await sb.mapAsync(GPUMapMode.READ);
-    if (crk) { await crk.mapAsync(GPUMapMode.READ); o.CRK = new Float32Array(crk.getMappedRange().slice(0)); crk.unmap(); crk.destroy(); }
+    if (crk) { await crk.mapAsync(GPUMapMode.READ); const b = new Float32Array(crk.getMappedRange().slice(0)); o.CRK = b.subarray(0, 4 * N); o.CRK2 = b.subarray(4 * N); crk.unmap(); crk.destroy(); }
     const a = new Float32Array(sb.getMappedRange().slice(0)); sb.unmap(); sb.destroy();
     for (let k = 0; k < 4; k++) for (let c = 0; c < NC; c++) for (let z = 0; z < 4; z++) o.CEP[16 * c + 4 * k + z] = a[4 * (k * NC + c) + z];
     for (let c = 0; c < NC; c++) o.CDM[c] = a[4 * (4 * NC + c) + 2];
@@ -788,15 +820,18 @@ export function createWGPU(dev, M, opt = {}) {
     enc.copyBufferToBuffer(bSC, 16 * L.O_PK, b, 0, pkBytes); tagEntry('c' + tag, b, 'c');
   }
   function requestNodes(tag) {
-    begin(); endPass(); const b = dev.createBuffer({ size: Math.ceil(nodeBytes / 16) * 16, usage: U.MAP_READ | U.COPY_DST });
-    enc.copyBufferToBuffer(bDY, 16 * (L.O_ND + cur * 3 * N), b, 0, nodeBytes); tagEntry('n' + tag, b, 'n');
+    begin(); endPass(); const b = dev.createBuffer({ size: Math.ceil(nodeBytesT / 16) * 16, usage: U.MAP_READ | U.COPY_DST });
+    enc.copyBufferToBuffer(bDY, 16 * (L.O_ND + cur * 3 * N), b, 0, nodeBytes);
+    if (M.PAR) { enc.copyBufferToBuffer(bSC, 16 * L.O_CRK, b, nodeBytes, 16 * N); enc.copyBufferToBuffer(bSC, 16 * L.O_CRK2, b, nodeBytes + 16 * N, 16 * N); }
+    tagEntry('n' + tag, b, 'n');
   }
   function mapTagged() { for (const e of tagged.values()) if (!e.submitted) { e.submitted = true;
-    e.buf.mapAsync(GPUMapMode.READ).then(() => { const r = e.buf.getMappedRange(); e.data = e.kind === 'c' ? new Uint32Array(r.slice(0, 4 * NC)) : new Float32Array(r.slice(0, nodeBytes)); e.buf.unmap(); e.buf.destroy(); e.ready = true; e.resolve(); }); } }
+    e.buf.mapAsync(GPUMapMode.READ).then(() => { const r = e.buf.getMappedRange(); e.data = e.kind === 'c' ? new Uint32Array(r.slice(0, 4 * NC)) : new Float32Array(r.slice(0, nodeBytesT)); e.buf.unmap(); e.buf.destroy(); e.ready = true; e.resolve(); }); } }
   const has = (kind, tag) => { const e = tagged.get(kind + tag); return !e || e.ready; };
   const waitFor = (kind, tag) => { const e = tagged.get(kind + tag); if (!e) return Promise.resolve(); if (!e.submitted) submit(); return e.promise; };
   function cellsOf(tag) { const e = tagged.get('c' + tag); if (!e || !e.ready) return null; tagged.delete('c' + tag); lastPK.set(e.data); return decode(); }
-  function nodesOf(tag, V, FREE, U) { const e = tagged.get('n' + tag); if (!e || !e.ready) return false; tagged.delete('n' + tag); const d = e.data, b = 4 * N;
+  function nodesOf(tag, V, FREE, U, K) { const e = tagged.get('n' + tag); if (!e || !e.ready) return false; tagged.delete('n' + tag); const d = e.data, b = 4 * N;
+    if (K && M.PAR) K.set(d.subarray(8 * N, 16 * N));        // petals: the crack records (first, second) with the nodes
     for (let i = 0; i < N; i++) { FREE[i] = d[4 * i + 3] > .5 ? 1 : 0; V[3 * i] = d[b + 4 * i]; V[3 * i + 1] = d[b + 4 * i + 1]; V[3 * i + 2] = d[b + 4 * i + 2]; }
     if (U) for (let i = 0; i < N; i++) { U[3 * i] = d[4 * i]; U[3 * i + 1] = d[4 * i + 1]; U[3 * i + 2] = d[4 * i + 2]; }
     return true; }

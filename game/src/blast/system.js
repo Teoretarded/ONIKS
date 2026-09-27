@@ -49,7 +49,7 @@ export async function createBlast(game) {
   // ONIKS.game.blast.cfg.solver
   const DEFAULT_SOLVER = typeof navigator !== 'undefined' && navigator.gpu ? 'shell' : 'lattice';
   const q0 = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('blast') : null;
-  const cfg = { watchDist: 4000, upTexels: 6000, maxDots: 5000, on: q0 !== 'off', gpuMs: 3, gpuMsSlow: 5, gpuMsShell: 6, gpuMsShellSlow: 8, detachMs: 1.5, shellS: .25, scatter: .05, latMs: 5, fastEnd: true, petals: true,
+  const cfg = { watchDist: 4000, upTexels: 6000, maxDots: 5000, on: q0 !== 'off', gpuMs: 3, gpuMsSlow: 5, gpuMsShell: 8, gpuMsShellSlow: 10, detachMs: 1.5, shellS: .25, scatter: .05, latMs: 5, fastEnd: true, petals: true,
     solver: q0 === 'shell' || q0 === 'lattice' ? q0 : DEFAULT_SOLVER };
 
   /* ------------------------------------------------------------ the atlas */
@@ -519,7 +519,10 @@ export async function createBlast(game) {
       stats.budget = Math.max(1.5, Math.min(mx, 13.5 - other));
       // (the shell solver's hits take more steps: its share while one is solving, within the same headroom)
       const mxS = game.timeRate < .9 || game.paused ? cfg.gpuMsShellSlow : cfg.gpuMsShell;
-      stats.budgetShell = stats.shellRunning ? Math.max(1.5, Math.min(mxS, 13.5 - other)) : 0;
+      // (two patches solving at once, e.g. a hit and the cook-off it set: more share, so each still settles in ~4-5 s;
+      // the frame guard below cuts it back if the frames run long)
+      const kS = 1 + .6 * Math.max(0, Math.min(2, stats.shellRunning - 1));
+      stats.budgetShell = stats.shellRunning ? Math.max(1.5, Math.min(mxS * kS, (13.5 - other) * kS)) : 0;
       // (frames running long while a solve goes on: the solver's share cut back until they are under ~16 ms again)
       const fs = frameScale(t0);
       stats.budget = Math.max(1, stats.budget * fs); if (stats.budgetShell) stats.budgetShell = Math.max(1, stats.budgetShell * fs);

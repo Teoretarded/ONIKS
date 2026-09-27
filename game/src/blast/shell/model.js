@@ -933,19 +933,21 @@ export function checkEnd(M) {
   const ATT = M.ATT;
   let v2 = 0, ke = 0; for (let i = 0; i < M.N; i++) { if (M.FREE[i] || !ATT[i]) continue; const q = M.V[3 * i] ** 2 + M.V[3 * i + 1] ** 2 + M.V[3 * i + 2] ** 2; ke += .5 * M.M[i] * q; if (q > v2) v2 = q; }
   let gas = 0; for (let k = 0; k < M.GV.length; k++) if (M.GV[k] < Infinity) gas = Math.max(gas, Math.abs(M.GP[k]));
-  let quiet = s.srcs.every(q => q.F > .98) && s.t - s.lastSrc > .005;
+  // (bench 3f115d5: a burning source counts as done once what it has still to burn would add under 20 kPa)
+  const srcDone = q => q.F > .98 || (q.kind === 'burn' && q.Pq * (1 - q.F) < 2e4);
+  let quiet = s.srcs.every(srcDone) && s.t - s.lastSrc > .005;
   // (bench 882692c: the run ends once the gas stops rising and tearing is down to a trickle: the structure has taken
   // what it will take)
   if (!s.gref || s.t - s.gref.t >= .01) { const g = M.GP.slice(), tc = s.cellsTorn || 0;
     s.steady = !!s.gref && tc - s.gref.tc <= .03 * tc && g.every((v, k) => !(M.GV[k] < Infinity) || v <= s.gref.g[k] * 1.02 + 2e3); s.gref = { t: s.t, g, tc }; }
   const gasDone = gas < 2e4 || s.steady;
-  if (s.steady && s.srcs.every(q => q.F > .98)) quiet = true;
+  if (s.steady && s.srcs.every(srcDone)) quiet = true;
   s.kepeak = Math.max(s.kepeak || 0, ke); s.keLast = ke; s.gasLast = gas; s.quietLast = quiet;
   if (!s.relax && quiet && gasDone && s.t > s.tMin && (ke < .05 * s.kepeak || s.t > s.tMin + .1)) { s.relax = true; s.tRelax = s.t; }
   // (the game's shorter horizon, spec.fastEnd: once the gas is out and the burning nearly done (and not before 0.12 s),
   // relax: what still tears after that is plating going on eroding at the fringes of what already went; the bench waits
   // for its kinetic-energy criterion, which a patch with loose plating rarely meets before 0.4 s)
-  if (!s.relax && M.fastEnd && gas < 2e4 && s.t > Math.max(s.tMin + .05, .12) && s.srcs.every(q => q.F > .85)) { s.relax = true; s.tRelax = s.t; }
+  if (!s.relax && M.fastEnd && gas < 2e4 && s.t > Math.max(s.tMin + .05, .12) && s.srcs.every(q => q.F > .85 || srcDone(q))) { s.relax = true; s.tRelax = s.t; }
   if (s.relax && (v2 < .25 || s.t - s.tRelax > .025)) s.T1 = s.t;
   s.vmax = Math.sqrt(v2);
 }
@@ -959,37 +961,52 @@ export function buildTwins(M) {
   for (let c = 0; c < NC; c++) for (let k = 0; k < 4; k++) { const i = CN[4 * c + k]; ncell[i]++; pan[i] = pan[i] === -2 ? M.CPAN[c] : pan[i] === M.CPAN[c] ? pan[i] : -1; }
   for (let h = 0; h < NH; h++) if (!M.HSAME[h]) { pan[M.HN[6 * h]] = -1; pan[M.HN[6 * h + 1]] = -1; }
   const tw = new Int32Array(N0).fill(-1); let nt = 0;
-  for (let i = 0; i < N0; i++) if (pan[i] >= 0 && ncell[i] >= 2 && M.AK[i] === 0 && M.WINV[i] > 0) tw[i] = N0 + nt++;
+  // (petals v2, bench 3f115d5: two twins a node, so it can split twice: a crack can branch or cross)
+  for (let i = 0; i < N0; i++) if (pan[i] >= 0 && ncell[i] >= 2 && M.AK[i] === 0 && M.WINV[i] > 0) { tw[i] = N0 + nt; nt += 2; }
   if (!nt) return 0;
   const N1 = N0 + nt, grow = (A, k, fill) => { const B = new A.constructor(k * N1); B.set(A); if (fill !== undefined) B.fill(fill, k * N0); return B; };
   M.X = grow(M.X, 3); M.R0 = grow(M.R0, 3); M.V = grow(M.V, 3); M.M = grow(M.M, 1); M.WINV = grow(M.WINV, 1); M.FREE = grow(M.FREE, 1);
   M.AK = grow(M.AK, 1); M.AF = grow(M.AF, 1); M.AC = grow(M.AC, 1); M.NKIND = grow(M.NKIND, 1); M.NFRM = grow(M.NFRM, 1); M.NCON = grow(M.NCON, 1);
   M.TBRK = grow(M.TBRK, 1, -1); M.NCC = grow(M.NCC, 4, -1);
   const PARENT = M.PARENT = new Int32Array(N1).fill(-1), R0 = M.R0, X = M.X;
-  for (let i = 0; i < N0; i++) if (tw[i] >= 0) { const T = tw[i]; PARENT[T] = i; for (let q = 0; q < 3; q++) X[3 * T + q] = R0[3 * T + q] = R0[3 * i + q];
+  for (let i = 0; i < N0; i++) if (tw[i] >= 0) for (const T of [tw[i], tw[i] + 1]) { PARENT[T] = i; for (let q = 0; q < 3; q++) X[3 * T + q] = R0[3 * T + q] = R0[3 * i + q];
     M.NKIND[T] = M.NKIND[i]; M.NFRM[T] = M.NFRM[i]; for (let q = 0; q < 4; q++) M.NCC[4 * T + q] = M.NCC[4 * i + q]; }
   M.NCL = Array.from({ length: N0 }, () => []); for (let c = 0; c < NC; c++) for (let k = 0; k < 4; k++) M.NCL[CN[4 * c + k]].push(4 * c + k);
   M.HNL = Array.from({ length: N0 }, () => []); for (let h = 0; h < NH; h++) for (let z = 0; z < 6; z++) M.HNL[M.HN[6 * h + z]].push(6 * h + z);
   M.TWIN = tw; M.SPL = new Uint8Array(N0); M.CN0 = CN.slice(); M.HOFF = new Uint8Array(NH); M.N = N1;
   return nt;
 }
-/* a WebGPU run's splits (its crack normals CRK, x y z w: w > 0 split): the same corner and hinge rewrite on the CPU mesh */
-export function applyGpuSplits(M, CRK) {
+/* a WebGPU run's splits (its crack records: CRK first splits, CRK2 second; x y z the crack normal, w > 0 split; CRK2's w
+   2: the second split is of the first twin's piece): the same corner and hinge rewrite on the CPU mesh (bench
+   applyGpuSplits / splitNode, mesh only) */
+export function applyGpuSplits(M, CRK, CRK2) {
   if (!M.TWIN || !CRK) return 0; let n = 0;
-  const R0 = M.R0, CRC = M.CRC, CN = M.CN, HN = M.HN, HC = M.HC;
-  for (let p = 0; p < M.TWIN.length; p++) {
-    if (M.TWIN[p] < 0 || M.SPL[p] || !(CRK[4 * p + 3] > 0)) continue;
-    const T = M.TWIN[p], nx = CRK[4 * p], ny = CRK[4 * p + 1], nz = CRK[4 * p + 2];
-    const side = c => (CRC[3 * c] - R0[3 * p]) * nx + (CRC[3 * c + 1] - R0[3 * p + 1]) * ny + (CRC[3 * c + 2] - R0[3 * p + 2]) * nz > 0;
-    let nA = 0, nB = 0; for (const e of M.NCL[p]) { if (side(e >> 2)) nB++; else nA++; }
-    if (!nA || !nB) continue;
-    M.SPL[p] = 1; n++;
-    for (const e of M.NCL[p]) if (side(e >> 2)) CN[e] = T;
-    for (const e of M.HNL[p]) { const h = (e / 6) | 0, z = e - 6 * h, c1 = HC[2 * h], c2 = HC[2 * h + 1];
-      if (z < 2) { if (side(c1) !== side(c2)) M.HOFF[h] = 1; else if (side(c1)) HN[e] = T; }
-      else if (side(z < 4 ? c1 : c2)) HN[e] = T; }
-  }
+  for (let p = 0; p < M.TWIN.length; p++) if (M.TWIN[p] >= 0 && !M.SPL[p] && CRK[4 * p + 3] > 0) n += splitMesh(M, p, CRK[4 * p], CRK[4 * p + 1], CRK[4 * p + 2], p);
+  if (CRK2) for (let p = 0; p < M.TWIN.length; p++) if (M.TWIN[p] >= 0 && M.SPL[p] === 1 && CRK2[4 * p + 3] > 0) n += splitMesh(M, p, CRK2[4 * p], CRK2[4 * p + 1], CRK2[4 * p + 2], CRK2[4 * p + 3] > 1.5 ? M.TWIN[p] : p);
   return n;
+}
+function splitMesh(M, p, nx, ny, nz, src) {
+  if (M.SPL[p] >= 2) return 0;
+  if (M.SPL[p] === 0) src = p;
+  const T = M.TWIN[p] + M.SPL[p], R0 = M.R0, CRC = M.CRC, CN = M.CN, HN = M.HN, HC = M.HC;
+  const side = c => (CRC[3 * c] - R0[3 * p]) * nx + (CRC[3 * c + 1] - R0[3 * p + 1]) * ny + (CRC[3 * c + 2] - R0[3 * p + 2]) * nz > 0;
+  let nA = 0, nB = 0; for (const e of M.NCL[p]) { if (CN[e] !== src) continue; if (side(e >> 2)) nB++; else nA++; }
+  if (!nA || !nB) return 0;
+  M.SPL[p]++;
+  for (const e of M.NCL[p]) if (CN[e] === src && side(e >> 2)) CN[e] = T;
+  for (const e of M.HNL[p]) { if (HN[e] !== src) continue; const h = (e / 6) | 0, z = e - 6 * h, c1 = HC[2 * h], c2 = HC[2 * h + 1];
+    if (z < 2) { if (side(c1) !== side(c2)) M.HOFF[h] = 1; else if (side(c1)) HN[e] = T; }
+    else if (side(z < 4 ? c1 : c2)) HN[e] = T; }
+  return 1;
+}
+/* a cell's corner node during a WebGPU run, from the crack records K read back with the nodes (first N, then second N;
+   as gpu_wgpu.js effN) */
+export function effK(M, K, c, q) {
+  const tw = M.TWIN && q < M.TWIN.length ? M.TWIN[q] : -1; if (tw < 0 || !(K[4 * q + 3] > 0)) return q;
+  const R0 = M.R0, CRC = M.CRC, N = M.N, dx = CRC[3 * c] - R0[3 * q], dy = CRC[3 * c + 1] - R0[3 * q + 1], dz = CRC[3 * c + 2] - R0[3 * q + 2], o2 = 4 * (N + q);
+  let o = dx * K[4 * q] + dy * K[4 * q + 1] + dz * K[4 * q + 2] > 0 ? tw : q;
+  if (K[o2 + 3] > 0) { const src = K[o2 + 3] > 1.5 ? tw : q; if (o === src && dx * K[o2] + dy * K[o2 + 1] + dz * K[o2 + 2] > 0) o = tw + 1; }
+  return o;
 }
 /* (bench 03813d8) plating hanging on by corner nodes only (cells meeting another piece at a corner: a pin of zero width
    it swings on, tearing what it hits) is let go: its cells erode as a piece torn off would. -> cells released (CFD = 1) */
@@ -1010,6 +1027,26 @@ export function detachPinned(M) {
   while (q.length) { const x = q.pop(); for (const y of adj.get(x) || []) if (!seen[y]) { seen[y] = 1; if (!root[y]) pinned[y] = 1; q.push(y); } }
   let n = 0; for (let c = 0; c < NC; c++) if (ok(c) && pinned[fd(c)]) { M.CFD[c] = 1; n++; }
   if (n) s.detached = (s.detached || 0) + n;
+  return n;
+}
+/* (bench 3f115d5) petals: a flap bent open (a cell on a split node turned more than 60 deg from its rest plane) vents
+   its area between its two spaces (once). U the displacements and K the crack records of the node read-back */
+export function flapVents(M, U, K) {
+  if (!M.TWIN || !U || !K) return 0;
+  const NC = M.NC, R0 = M.R0, CN = M.CN; if (!M.COPEN) M.COPEN = new Uint8Array(NC);
+  let n = 0;
+  for (let c = 0; c < NC; c++) {
+    if (M.COPEN[c] || M.CKN[c] === 1 || M.CVIS[c] & 16) continue;
+    let any = false; for (let k = 0; k < 4; k++) { const i = CN[4 * c + k]; if (i < M.TWIN.length && M.TWIN[i] >= 0 && K[4 * i + 3] > 0) any = true; }
+    if (!any) continue;
+    const q = [0, 1, 2, 3].map(k => effK(M, K, c, CN[4 * c + k]));
+    const P = (i, k) => R0[3 * i + k] + U[3 * i + k], dA = [0, 1, 2].map(k => P(q[2], k) - P(q[0], k)), dB = [0, 1, 2].map(k => P(q[3], k) - P(q[1], k));
+    const eA = [0, 1, 2].map(k => R0[3 * q[2] + k] - R0[3 * q[0] + k]), eB = [0, 1, 2].map(k => R0[3 * q[3] + k] - R0[3 * q[1] + k]);
+    const cr = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]], nm = v => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
+    const nn = nm(cr(dA, dB)), n0 = nm(cr(eA, eB));
+    if (nn[0] * n0[0] + nn[1] * n0[1] + nn[2] * n0[2] < .5) { M.COPEN[c] = 1; n++; M.sim.openM2 = (M.sim.openM2 || 0) + M.CAR[c];
+      const a = Math.min(M.CSP[c], M.CSN[c]), b = Math.max(M.CSP[c], M.CSN[c]); if (a !== b) M.OPEN.set((a << 8) | b, (M.OPEN.get((a << 8) | b) || 0) + M.CAR[c]); }
+  }
   return n;
 }
 /* (bench 03813d8) plating blown loose (no node joined to the structure) leaves its compartment's wall: its area opens
@@ -1043,5 +1080,5 @@ export function gpuModel(M) {
     TKB: M.TKB, TQB: M.TQB, TB0: M.TB0, TKS: M.TKS, TQS: M.TQS, TS0: M.TS0, TMM: M.TMM, TKC: M.TKC, CKC: M.CKC, KCE: KC_EPS, JMN: JMIN, NLH: M.NLH, NLE: M.NLE,
     TA: M.TA, TB: M.TB, TL0: M.TL0, TAR: M.TAR, TMAT: M.TMAT, TEF: M.TEF, TFIB: M.TFIB, THG: M.THG, NCC: M.NCC, PAN: M.PAN, CMAP: M.CMAP, MATS, TA1, S: M.S,
     OUT: () => M.scene.OUT, csf, nspace: () => M.GV.length, BETA: () => M.BETA, U_MAX, RHO_W, C_W, P0, G, K_SHEAR, UP: M.up,
-    PAR: M.TWIN ? M.PARENT : null, TWIN: M.TWIN, C: M.sim ? M.sim.C : null, PETK: 1.5, PRAD: true, PKEEP: true };
+    PAR: M.TWIN ? M.PARENT : null, TWIN: M.TWIN, C: M.sim ? M.sim.C : null, PETK: 3, PETK2: 1e30, PRAD: false, PKEEP: true };
 }
