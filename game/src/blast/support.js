@@ -299,6 +299,29 @@ export function createBodies() {
   }
   const tmp = [0, 0, 0];
   const rot = (R, x, y, z, o) => { o[0] = R[0] * x + R[1] * y + R[2] * z; o[1] = R[3] * x + R[4] * y + R[5] * z; o[2] = R[6] * x + R[7] * y + R[8] * z; return o; };
+  // the gap under a piece: its lowest points against the surface under each (as blast/qa.js measures it)
+  function restGap(b, floorAt) {
+    let gap = 1e9;
+    for (let q = 0; q < b.low.length; q++) { const i = b.low[q]; rot(b.R, b.rel[4 * i], b.rel[4 * i + 1], b.rel[4 * i + 2], tmp);
+      const f = floorAt(b.uid, b.p[0] + tmp[0], b.p[1] + tmp[1] + .05, b.p[2] + tmp[2]); if (!f.wall && f.y > -1e8) gap = Math.min(gap, b.p[1] + tmp[1] - f.y); }
+    return gap === 1e9 ? 0 : gap;
+  }
+  /* at rest only where it sits on something: a piece held up on a thin edge, a rail or a wall's top (its lowest points
+     over the deck below, not on what caught it) slides and tips off toward its free side; one still caught after a
+     second and a half breaks up (a small one: gone, as debris would be) or, a large one, drops onto what is under it */
+  function tryRest(b, h, floorAt, cx, cz) {
+    const gap = restGap(b, floorAt);
+    if (gap <= .25) { b.rest = true; b.air = 0; b.v = [0, 0, 0]; b.w = [0, 0, 0]; return; }
+    b.air = (b.air || 0) + h; b.idle = 0;
+    if (b.air > 1.5) {
+      if (b.n < 400) { b.gone = true; return; }
+      b.p[1] -= gap - .02; b.rest = true; b.air = 0; b.v = [0, 0, 0]; b.w = [0, 0, 0]; return;   // (settled onto the surface under it)
+    }
+    const dx = b.p[0] - cx, dz = b.p[2] - cz, l = Math.hypot(dx, dz);
+    const ux = l > .05 ? dx / l : Math.cos(b.n * 2.4), uz = l > .05 ? dz / l : Math.sin(b.n * 2.4);
+    b.v[0] += ux * 1.5; b.v[2] += uz * 1.5; b.p[1] += .03;
+    b.w[0] += uz * 1.2; b.w[2] -= ux * 1.2;   // (tips over the edge it caught)
+  }
   function stepClump(b, h, floorAt) {
     if (b.rest) {
       b.still += h;
@@ -350,12 +373,12 @@ export function createBodies() {
       if (!over && (b.stuck = (b.stuck || 0) + h) < .8) { const dx = b.p[0] - cx, dz = b.p[2] - cz, l = Math.hypot(dx, dz) || 1; b.v[0] += dx / l * 3 * h * 10; b.v[2] += dz / l * 3 * h * 10; }
       else if (!over && b.n < 200 && b.stuck < 3) { const dx = b.p[0] - cx, dz = b.p[2] - cz, l = Math.hypot(dx, dz) || 1; b.v[0] += dx / l * 6 * h * 10; b.v[2] += dz / l * 6 * h * 10; b.p[1] += .02; }   // (a small piece on an edge: pushed off harder)
       else if (!over && b.n < 200) b.gone = true;                                        // (still caught: it breaks up, not left hanging over the edge)
-      else if (!over) { b.rest = true; b.v = [0, 0, 0]; b.w = [0, 0, 0]; }            // (wedged: it rests on what it caught)
-      else if (Math.hypot(b.v[0], b.v[1], b.v[2]) < .35 && Math.hypot(...b.w) < .25) { b.rest = true; b.v = [0, 0, 0]; b.w = [0, 0, 0]; }
+      else if (!over) tryRest(b, h, floorAt, cx, cz);                                  // (wedged: it rests on what it caught, if it truly sits on it)
+      else if (Math.hypot(b.v[0], b.v[1], b.v[2]) < .35 && Math.hypot(...b.w) < .25) tryRest(b, h, floorAt, cx, cz);
     }
     // (held where it is for half a second, by a surface or a wall it caught: at rest there)
     if (!b.rest && !b.sea) { const mv = Math.hypot(b.p[0] - p0[0], b.p[1] - p0[1], b.p[2] - p0[2]); b.idle = mv < .01 * h + 1e-4 ? (b.idle || 0) + h : 0;
-      if (b.idle > .5) { b.rest = true; b.v = [0, 0, 0]; b.w = [0, 0, 0]; } }
+      if (b.idle > .5) tryRest(b, h, floorAt, cx, cz); }
   }
   /* each dot of every body in the model frame: cb(uid, B, x, y, z, brightness, heat, fade, i); L: the light in the model
      frame (a clump's dots are lit by their own face as it turns) */

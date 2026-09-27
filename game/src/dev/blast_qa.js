@@ -152,7 +152,8 @@ function exactView(O, id, loc, v) {
   const a = v.yaw, pc = v.pitch, d = v.dist;
   const e = [loc[0] + d * Math.cos(pc) * Math.sin(a), loc[1] + d * Math.sin(pc), loc[2] + d * Math.cos(pc) * Math.cos(a)];
   const eye = w(e); eye[1] = Math.max(eye[1], 1.5);
-  return { eye, look: w(loc) };
+  const look = w(loc); if (![...eye, ...look].every(Number.isFinite)) return null;   // (a pose with a NaN in it: no exact view, QA D53)
+  return { eye, look };
 }
 async function shot(O, id, loc, v, name) {
   const V = exactView(O, id, v.loc || loc, v);

@@ -964,6 +964,8 @@ export class Terrain {
   /* min / max map height over a world rectangle (from the pyramid) */
   rangeOver(x0, z0, x1, z1) {
     const P = this.pyr, inv = 1 / this.cell;
+    // (a rectangle with a NaN in it (a NaN eye for a frame: a unit's pose lost as it breaks up) spans everything, QA D53)
+    if (!(x0 <= x1 && z0 <= z1)) return [-80, 9000];
     let fx0 = (x0 - this.x0) * inv, fx1 = (x1 - this.x0) * inv, fz0 = (z0 - this.z0) * inv, fz1 = (z1 - this.z0) * inv;
     const outside = fx1 < 0 || fz1 < 0 || fx0 > this.cols - 1 || fz0 > this.rows - 1;
     fx0 = Math.max(0, Math.min(this.cols - 1, fx0)); fx1 = Math.max(0, Math.min(this.cols - 1, fx1));
