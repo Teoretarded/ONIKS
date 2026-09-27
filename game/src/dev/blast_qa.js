@@ -220,6 +220,7 @@ export async function runCase(O, c, o = {}) {
       await shot(O, id, aim, V.b, `${dir}/${c.id}_hud_bare`);
       await O.hudShot(`${dir}/${c.id}_hud`);
       const I = g.inspect, IS = g.getSystem && g.getSystem('inspect');
+      O.cam.view = null;
       if (I && I.open) {
         I.open(id); for (let i = 0; i < 90; i++) await frame(O);
         await O.hudShot(`${dir}/${c.id}_inspect`);
