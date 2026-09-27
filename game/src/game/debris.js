@@ -831,7 +831,7 @@ export async function createDebris(game) {
       if (!box) continue;
       // (a part standing over a solved blast patch: the blast system tears it off as crumpled pieces; it is not thrown
       // again whole, as a clean box (QA D45))
-      if (game.blast && game.blast.list && game.blast.list(u.id).some(B => { const F = B.spec.frame, R2 = (B.spec.Rp || 6) + 6, c = box.c; return c && Math.hypot(c[0] - F.O[0], c[2] - F.O[2]) < R2; })) continue;
+      if (game.blast && game.blast.list && game.blast.list(u.id).some(B => { const F = B.spec.frame, R2 = (B.spec.Rp || 6) + 6, c = box.c; const mn = box.mn, mx = box.mx; if (!mn) return c && Math.hypot(c[0] - F.O[0], c[2] - F.O[2]) < R2; const dx = Math.max(mn[0] - F.O[0], 0, F.O[0] - mx[0]), dz = Math.max(mn[2] - F.O[2], 0, F.O[2] - mx[2]); return Math.hypot(dx, dz) < R2; })) continue;   // (any of the part within reach, not its middle: a part spanning the ship (both stacks))
       const plate = isPlate(box.ext);
       const ext = plate ? thicken(box.ext) : box.ext;
       const m = massOf(ext, false, md.rho || 200, 40, false);

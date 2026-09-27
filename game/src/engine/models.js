@@ -292,15 +292,15 @@ float btMk(vec3 p, vec3 n) {
     if (dot(d, d) > 1600.0) continue;     // (a patch spans 28 m at most)
     vec3 l = vec3(dot(d, uBtX[i].xyz), dot(d, uBtY[i].xyz), dot(d, uBtZ[i].xyz));
     float S = uBtY[i].w, band = uBtZ[i].w;
-    for (int k = 0; k < 2; k++) {
-      vec4 P = uBtP[i * 2 + k];
+    for (int k = 0; k < 3; k++) {
+      vec4 P = uBtP[i * 3 + k];
       if (P.x < -0.5) continue;
       int ax = int(P.x + 0.5);
       float off = (ax == 0 ? l.x : ax == 1 ? l.y : l.z) - P.y;
       if (abs(off) > band) continue;
       vec3 A = ax == 0 ? uBtX[i].xyz : ax == 1 ? uBtY[i].xyz : uBtZ[i].xyz;
       if (dot(n, n) > 0.01 && abs(dot(n, A)) <= 0.5) continue;
-      vec4 Q = uBtQ[i * 2 + k];
+      vec4 Q = uBtQ[i * 3 + k];
       float gx = ((ax == 0 ? l.z : l.x) - P.z) / S - 0.5, gy = ((ax == 1 ? l.z : l.y) - P.w) / S - 0.5;
       if (gx < -0.5 || gy < -0.5 || gx > Q.x - 0.5 || gy > Q.y - 0.5) continue;
       int ci = int(floor(gx)), cj = int(floor(gy)), nx = int(Q.x) - 1, ny = int(Q.y) - 1; float fx = gx - float(ci), fy = gy - float(cj);
@@ -565,8 +565,8 @@ uniform vec4 uBtO[${BTMAX}];     // xyz: the patch's origin (RTE), w: the pocket
 uniform vec4 uBtX[${BTMAX}];     // xyz: its local x (world), w: heat of the torn edges (0..1)
 uniform vec4 uBtY[${BTMAX}];     // xyz: local y, w: grid (m)
 uniform vec4 uBtZ[${BTMAX}];     // xyz: local z (the struck plate's outward normal), w: the skin band (m)
-uniform vec4 uBtP[${BTMAX * 2}]; // skin plate k of patch i (i * 2 + k): x axis (-1 none), y plane (local m), z u0, w v0
-uniform vec4 uBtQ[${BTMAX * 2}]; // x nu, y nv (cells), zw its first texel in the atlas
+uniform vec4 uBtP[${BTMAX * 3}]; // skin plate k of patch i (i * 3 + k): x axis (-1 none), y plane (local m), z u0, w v0
+uniform vec4 uBtQ[${BTMAX * 3}]; // x nu, y nv (cells), zw its first texel in the atlas
 uniform highp sampler2D uBtT;
 // (an integer hash of the 0.25 m cell of the patch-local point: blast/support.js wreckHash replays it on the CPU)
 float wreckHash(vec3 p) {
@@ -585,14 +585,14 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
     vec3 l = vec3(dot(d, X), dot(d, Y), dot(d, Z));
     if (dot(l, l) < 256.0) nearP = true;
     float S = uBtY[i].w, band = uBtZ[i].w, heat = uBtX[i].w, D = abs(uBtO[i].w), plugD = uBtO[i].w > 0.0 ? 8.3 : 0.3;   // (w < 0: no interior drawn, the plug at the far wall)
-    for (int k = 0; k < 2; k++) {
-      vec4 P = uBtP[i * 2 + k];
+    for (int k = 0; k < 3; k++) {
+      vec4 P = uBtP[i * 3 + k];
       if (P.x < -0.5) continue;
       int ax = int(P.x + 0.5);
       vec3 A = ax == 0 ? X : ax == 1 ? Y : Z;
       float off = (ax == 0 ? l.x : ax == 1 ? l.y : l.z) - P.y;
       float u = (ax == 0 ? l.z : l.x) - P.z, v = (ax == 1 ? l.z : l.y) - P.w;
-      vec4 Q = uBtQ[i * 2 + k];
+      vec4 Q = uBtQ[i * 3 + k];
       float fi = u / S, fj = v / S;
       if (fi < 0.0 || fj < 0.0 || fi > Q.x || fj > Q.y) {
         // (structure standing just past a deck plate's edge (up to ~3 m, a ragged reach), where the plating along the

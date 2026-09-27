@@ -526,6 +526,7 @@ export async function createStructure(game) {
     }
     return n;
   }
+  const FE = [0, 0, 0];
   function drawBreak(S, B, t, a) {
     const age = t - B.t0, c = B.cut;
     let n = 0, heat = heatOf(c, t);
@@ -537,6 +538,7 @@ export async function createStructure(game) {
       const x = Tm[0] + Rm[2] * c.z, y = Tm[1] + Rm[5] * c.z, z = Tm[2] + Rm[8] * c.z;
       wx += x; wz += z; nw++; hdg = Math.atan2(Rm[2], Rm[8]);
       open = Math.max(open, P === B.A ? P.open1 || 0 : P.open0 || 0);
+      if (y + S.H.deck(c.z) > top) { FE[0] = x; FE[1] = y; FE[2] = z; }   // (the fire burns on the torn end standing highest)
       top = Math.max(top, y + S.H.deck(c.z));
       C5[3] = Rm[0]; C5[4] = Rm[6];
     }
@@ -574,7 +576,8 @@ export async function createStructure(game) {
     // the fire in the break: above the water while the torn ends are up
     if (B.F) {
       const up = top > 1.5 && !S.done;
-      B.F.follow(sim.t, [w[0], Math.max(.5, top - 2), w[2]], hdg, up ? Math.max(.25, heat) : 0);
+      // (on a torn end, not the middle of the gap between the pieces: no flames over open water, QA D11)
+      B.F.follow(sim.t, [FE[0], Math.max(.5, top - 2), FE[2]], hdg, up ? Math.max(.25, heat) : 0);
       if (!up && age > 30) { B.F.stop(sim.t); B.F = null; }
     }
     return n;

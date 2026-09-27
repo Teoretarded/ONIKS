@@ -117,6 +117,18 @@ export function hitSpec(o) {
     const x0 = bigX ? bigX[0] : -sn(Rp), x1 = bigX ? bigX[1] : sn(Rp);
     plates.push({ ax: 2, val: 0, u0: x0, u1: x1, v0: yb, v1: yt, h: tSkin, mat: zoneMat, fu: H.frame, pu, fv: H.long, pv: sn(-a[1]), heavy: 30e-4 * TIE, light: 12e-4 * TIE, tie: TIE, skin: 1 });
     if (topSkin) plates.push({ ax: 1, val: yt, u0: x0, u1: x1, v0: -Dz, v1: 0, h: tDeck, mat: sup ? zoneMat : H.mat, fu: H.frame, pu, fv: 1, pv: 0, heavy: 30e-4 * TIE, light: 10e-4 * TIE, tie: TIE, skin: 1 });
+    // (a superstructure face standing on that deck within reach (a deckhouse wall, system.js wallNear): a plate with
+    // superstructure scantlings from just above the deck (its foot held) to at most 6 m up, so the blast dents and tears
+    // it (QA D23))
+    let wallTop = null;
+    if (topSkin && o.wall) {
+      const wz = sn(toL([o.wall.x, a[1], a[2]])[2]), ua = toL([o.wall.x, a[1], o.wall.z0])[0], ub = toL([o.wall.x, a[1], o.wall.z1])[0];
+      const wu0 = sn(Math.max(x0, Math.min(ua, ub))), wu1 = sn(Math.min(x1, Math.max(ua, ub))), wv0 = sn(yt + .3), wv1 = sn(Math.min(yt + 6, o.wall.y1 - a[1]));
+      if (wz < -.5 && wz > -Dz + .5 && wu1 - wu0 > 2 && wv1 - wv0 > 1.2) {
+        plates.splice(1, 0, { ax: 2, val: wz, u0: wu0, u1: wu1, v0: wv0, v1: wv1, h: H.super / 1000, mat: H.superMat, fu: H.frame, pu, fv: H.long, pv: 0, heavy: 20e-4, light: 8e-4, tie: 1, skin: 1, open: [1, 1, 1, 1], sup: 1, kind: 3 });
+        wallTop = wv1;
+      }
+    }
     // inner decks: the nearest to the hit first (up to 3)
     const inner = levels.map(y => sn(y - a[1])).filter(y => y > yb + S * 2 && y < yt - S * 2 && !(o.open && y + a[1] > o.open[0] - .2 && y + a[1] < o.open[1] + .2)).sort((p, q) => Math.abs(p) - Math.abs(q)).slice(0, o.big ? 4 : 3);
     for (const y of inner) plates.push({ ax: 1, val: y, u0: x0, u1: x1, v0: -Dz, v1: 0, h: tIn, mat: mIn, fu: H.frame, pu, fv: 1, pv: 0, heavy: 20e-4 * TIE, light: 8e-4 * TIE, tie: TIE });
@@ -126,7 +138,7 @@ export function hitSpec(o) {
     xbs.sort((p, q) => Math.abs(p - (o.big ? Cq[0] : 0)) - Math.abs(q - (o.big ? Cq[0] : 0))); xbs.length = Math.min(xbs.length, o.big ? 2 : 1); xbs.sort((p, q) => p - q);
     for (const xb of xbs) plates.push({ ax: 0, val: xb, u0: -Dz, u1: 0, v0: yb, v1: yt, h: tIn, mat: mIn, fu: 0, fv: 1, pv: 0, heavy: 0, light: 8e-4 * TIE, tie: TIE });
     const xb = xbs.length ? xbs[0] : null;
-    box = [x0, yb, -Dz, x1, yt, 0];
+    box = [x0, yb, -Dz, x1, wallTop !== null ? wallTop : yt, 0];
     // the spaces: between the decks (their real levels), either side of the bulkhead, to the far side
     const lv = levels.map(y => sn(y - a[1]));
     const bands = [];

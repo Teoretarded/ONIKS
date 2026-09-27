@@ -120,7 +120,7 @@ export function classify(B, x, y, z, nx, ny, nz, info, ins) {
   const two = nx * nx + ny * ny + nz * nz < .01;
   let k = 0, inRect = false;
   for (const r of B.rects) {
-    if (!r.cpu || k > 1) continue;
+    if (!r.cpu || k > 2) continue;
     k++;
     const ax = r.ax, A = ax === 0 ? F.X : ax === 1 ? F.Y : F.Z;
     const off = l[ax] - r.val, u = (ax === 0 ? l[2] : l[0]) - r.u0, v = (ax === 1 ? l[2] : l[1]) - r.v0;

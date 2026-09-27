@@ -101,7 +101,7 @@ export async function createBlast(game) {
     const H = hullOf(u); if (!H) return null;
     const W = tntOf(o.kind, o.whKg);
     if (!(W > .02)) return null;
-    const spec = hitSpec({ u, H, a: o.a, n: o.n, din: o.din, zone: o.zone, tmm: o.tmm, fz: o.fz, standoff: o.standoff, W: o.fz === 'frag' ? W * .8 : W, deckY: o.deckY, halfB: o.halfB, big: bigPatch() });
+    const spec = hitSpec({ u, H, a: o.a, n: o.n, din: o.din, zone: o.zone, tmm: o.tmm, fz: o.fz, standoff: o.standoff, W: o.fz === 'frag' ? W * .8 : W, deckY: o.deckY, halfB: o.halfB, big: bigPatch(), wall: bigPatch() ? wallNear(u, o) : null });
     if (!spec) return null;
     if (o.band > 0) spec.band = o.band;
     // (the sim's hole for this hit (sim/ship.js, what floods her) centred elsewhere on the plating: the charge moves half
@@ -115,6 +115,22 @@ export async function createBlast(game) {
     const cs = CASING[o.kind] || [W * .8, .02];
     Object.assign(spec.charge, { fill: W, Mc: cs[0], mf: cs[1] });
     return start(u, spec, o.S, { kind: o.kind, W, fz: o.fz, deckY: o.deckY, halfB: o.halfB });
+  }
+  /* the superstructure face standing on the deck over a side hit, within its reach (model frame): the outermost
+     side-facing wall of the deckhouse above the deck at that station -> { x, z0, z1, y1 } or null (spec.js adds it as a
+     plate with superstructure scantlings, so the blast dents and tears it too: QA D23) */
+  function wallNear(u, o) {
+    if (!o.n || Math.abs(o.n[1]) > .7 || !(o.deckY > -50)) return null;
+    const ent = entOf(u), Md = ent && modelDots(ent); if (!Md || !Md.n) return null;
+    const sx = o.a[0] >= 0 ? 1 : -1, D = Md.D, R = 10, y0 = o.deckY + .4, yT = o.deckY + 7;
+    let wx = null, z0 = 1e9, z1 = -1e9, y1 = -1e9;
+    eachInColumns(Md, sx > 0 ? 0 : -30, o.a[2] - R, sx > 0 ? 30 : 0, o.a[2] + R, i => { const q = 7 * i;
+      if (Md.ins[D[q + 6]] || D[q + 1] < y0 || D[q + 1] > yT || D[q + 3] * sx < .8 || D[q] * sx > Math.abs(o.a[0]) - .8) return;
+      const nm = Md.parts[D[q + 6]]; if (nm === 'hull' || nm === 'rails' || nm === 'deck') return;
+      if (wx === null || D[q] * sx > wx * sx + .5) { wx = D[q]; z0 = 1e9; z1 = -1e9; y1 = -1e9; }
+      if (Math.abs(D[q] - wx) < .5) { z0 = Math.min(z0, D[q + 2]); z1 = Math.max(z1, D[q + 2]); y1 = Math.max(y1, D[q + 1]); } });
+    if (wx === null || z1 - z0 < 2 || y1 - o.deckY < 1.5) return null;
+    return { x: wx, z0, z1, y1 };
   }
   /* a cook-off: the module's contents ({ he, prop, det, fuel, vapour }) -> patch or null */
   function cook(u, mod, o) {
@@ -271,7 +287,7 @@ export async function createBlast(game) {
     const F = B.spec.frame, S = B.spec.gridS || S_GRID, cols = new Set(), reach = Md.gen ? 8.5 : .5;
     let k = 0;
     for (const r of B.rects) {
-      if (!r.cpu || k > 1) continue;
+      if (!r.cpu || k > 2) continue;
       k++;
       if (regen && r.dead) r.dead.fill(0);
       const W = r.nu + 1, A = r.ax === 0 ? F.X : r.ax === 1 ? F.Y : F.Z, e0 = A[1] > .7 ? 0 : -(B.spec.depth || 4) - reach, e1 = A[1] > .7 ? 0 : 3;
@@ -302,8 +318,8 @@ export async function createBlast(game) {
     let added = 0; const touched = new Set();
     // (a hole no patch of hers covers: the scars system's analytic hole there, once)
     const covered = h => { for (const b of byUnit.get(B.uid) || []) { const G = b.spec.frame, e = [h.x - G.O[0], h.y - G.O[1], h.z - G.O[2]], q = [0, 1, 2].map(k => { const A = k === 0 ? G.X : k === 1 ? G.Y : G.Z; return e[0] * A[0] + e[1] * A[1] + e[2] * A[2]; });
-      for (const r of b.rects) { const pl2 = b.spec.plates[r.p]; if (!pl2 || !pl2.skin) continue; const S2 = b.spec.gridS || S_GRID, off = q[r.ax] - r.val, cu = ((r.ax === 0 ? q[2] : q[0]) - r.u0) / S2, cv = ((r.ax === 1 ? q[2] : q[1]) - r.v0) / S2;
-        if (Math.abs(off) < 4 && cu > 0 && cv > 0 && cu < r.nu && cv < r.nv) return true; } } return false; };
+      for (const r of b.rects) { const pl2 = b.spec.plates[r.p]; if (!pl2 || !pl2.skin || pl2.sup) continue; const S2 = b.spec.gridS || S_GRID, off = q[r.ax] - r.val, cu = ((r.ax === 0 ? q[2] : q[0]) - r.u0) / S2, cv = ((r.ax === 1 ? q[2] : q[1]) - r.v0) / S2;
+        const Rq = Math.sqrt(h.A / Math.PI) / S2; if (r.p === 0 && Math.abs(off) < 4 && cu > -Rq && cv > -Rq && cu < r.nu + Rq && cv < r.nv + Rq) return true; } } return false; };   // (its disc on the patch's shell plate)
     const done = B.simOut || (B.simOut = new Set());
     for (const h of Hs) {
       if (!(h.A > .05)) continue;
@@ -316,9 +332,12 @@ export async function createBlast(game) {
       const lobe = k => .72 + .5 * ((Math.imul((k & 15) + sd * 16, 0x9E3779B1) >>> 0) / 4294967296);
       for (const r of B.rects) {
         if (!r.cpu) continue;
-        const pl = B.spec.plates[r.p]; if (!pl || !pl.skin) continue;   // (the ship's own shell only)
+        const pl = B.spec.plates[r.p]; if (!pl || !pl.skin || pl.sup || r.p !== 0) continue;   // (the ship's own shell only: the patch's first plate)
         const off = l[r.ax] - r.val; if (Math.abs(off) > 4) continue;   // (the sim's boxes are coarser than the model: a hole up to 4 m off the plating is on it)
-        const cu = ((r.ax === 0 ? l[2] : l[0]) - r.u0) / S, cv = ((r.ax === 1 ? l[2] : l[1]) - r.v0) / S, Rt = R0 * 1.25 / S, W = r.nu + 1;
+        let cu = ((r.ax === 0 ? l[2] : l[0]) - r.u0) / S, cv = ((r.ax === 1 ? l[2] : l[1]) - r.v0) / S; const Rt = R0 * 1.25 / S, W = r.nu + 1;
+        // (a hole centred off the plate's edge (the sim's boxes are coarse: a hole booked at the deck edge): moved in so all
+        // of it is on the plating, whole and seen, not a sliver at the edge)
+        { const mU = Math.min(r.nu / 2, R0 * .9 / S), mV = Math.min(r.nv / 2, R0 * .9 / S); cu = Math.min(r.nu - mU, Math.max(mU, cu)); cv = Math.min(r.nv - mV, Math.max(mV, cv)); }
         // (the solve's own tear there: no more than the sim asks)
         let torn = 0, all = 0;
         for (let j = Math.max(0, Math.floor(cv - Rt * .8)); j <= Math.min(r.nv, Math.ceil(cv + Rt * .8)); j++) for (let i = Math.max(0, Math.floor(cu - Rt * .8)); i <= Math.min(r.nu, Math.ceil(cu + Rt * .8)); i++) {
@@ -474,7 +493,7 @@ export async function createBlast(game) {
     const L = (byUnit.get(uid) || []).filter(B => B.state !== 'fail' && B.rects.some(r => r.ready));
     if (!rec) return;
     if (!L.length) { rec.blast = null; return; }
-    const P = rec.blast || (rec.blast = { n: 0, F: new Float32Array(MAXU * 16), P: new Float32Array(MAXU * 8), Q: new Float32Array(MAXU * 8), list: [] });
+    const P = rec.blast || (rec.blast = { n: 0, F: new Float32Array(MAXU * 16), P: new Float32Array(MAXU * 12), Q: new Float32Array(MAXU * 12), list: [] });
     // the most recent MAXU (older marks keep their scars bookkeeping; a match rarely has more on one hull)
     const use = L.slice(-MAXU);
     P.n = use.length; P.list = use;
@@ -487,8 +506,8 @@ export async function createBlast(game) {
       P.F[o + 12] = F.Z[0]; P.F[o + 13] = F.Z[1]; P.F[o + 14] = F.Z[2]; P.F[o + 15] = Math.max(Math.min(1.6, Math.max(.8, .6 + .08 * (B.spec.Rp || 5))), Math.min(3.5, (B.spec.band || 0) + .35));
       let k = 0;
       for (const r of B.rects) {
-        if (!r.ready || k > 1) continue;
-        const q = (i * 2 + k) * 4;
+        if (!r.ready || k > 2) continue;
+        const q = (i * 3 + k) * 4;
         P.P[q] = r.ax; P.P[q + 1] = r.val; P.P[q + 2] = r.u0; P.P[q + 3] = r.v0;
         P.Q[q] = r.nu; P.Q[q + 1] = r.nv; P.Q[q + 2] = r.x; P.Q[q + 3] = r.y;
         k++;
