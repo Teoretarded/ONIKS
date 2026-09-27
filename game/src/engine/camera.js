@@ -15,6 +15,8 @@
 const DEG = Math.PI / 180;
 const R_EARTH = 6371000;
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+/* every number in the arrays finite */
+const finite = (...A) => { for (const a of A) { if (!a) return false; for (let i = 0; i < a.length; i++) if (!Number.isFinite(a[i])) return false; } return true; };
 const wrapPi = a => { a = (a + Math.PI) % (2 * Math.PI); if (a < 0) a += 2 * Math.PI; return a - Math.PI; };
 
 export class RTSCamera {
@@ -154,6 +156,7 @@ export class RTSCamera {
   /* fly to a target (and optionally dist / yaw / pitch), with a pull-back arc on long moves */
   flyTo(target, o) {
     o = o || {};
+    if (!finite([target[0], target[2]])) { this._bad('flyTo()', target); return; }
     const g = this.goal;
     const from = { target: this.target.slice(), dist: this.dist, yaw: this.yaw, pitch: this.pitch };
     const to = {
@@ -186,6 +189,8 @@ export class RTSCamera {
   /* jump without animation */
   set(o) {
     const g = this.goal;
+    // (a NaN in what is handed in is refused, QA D55)
+    if (!(finite(o.target || [0]) && Number.isFinite((o.dist || 0) + (o.yaw || 0) + (o.pitch || 0)))) { this._bad('set()', o); return; }
     if (o.target) { g.target = o.target.slice(); this.target = o.target.slice(); }
     if (o.dist !== undefined) g.dist = this.dist = clamp(o.dist, this.minDist, this.maxDist);
     if (o.yaw !== undefined) g.yaw = this.yaw = o.yaw;
@@ -257,9 +262,38 @@ export class RTSCamera {
     g.followY = false;
     this.target[1] = dt > 0 && !(this.tight && this.followFn) ? this.target[1] + (gy - this.target[1]) * (1 - Math.exp(-8 * dt)) : gy;
     this._pose();
+    // (an exact view with a NaN in it (a pose lost as a ship breaks up) is refused: the orbit's view stands, QA D55)
+    if (this.view && !finite(this.view.eye, this.view.look)) { this._bad('exact view', this.view); this.view = null; }
     if (this.view) { this._exact(this.view); this.view = null; }
     else if (this.fov0 !== undefined) { this.fov = this.fov0; this.fov0 = undefined; this.fl = (this.H / 2) / Math.tan(this.fov / 2); }
+    this._guard();
     return this;
+  }
+  /* A non-finite value anywhere in the camera's state (a NaN target, distance or follow point handed in) would blank
+     every frame after it (the renderer's view and fade uniforms all go NaN) and stay (the orbit damps toward its goal):
+     back to the last good state instead, the first bad value reported once (QA D55) */
+  _guard() {
+    const g = this.goal, ok = finite(this.eye, this.f, this.r, this.u, this.target, g.target) &&
+      Number.isFinite(this.dist + this.yaw + this.pitch + g.dist + g.yaw + g.pitch + this.fl + this.near + this.far + this.clearance);
+    const K = this._good;
+    if (ok) {
+      if (!K) this._good = { eye: this.eye.slice(), f: this.f.slice(), r: this.r.slice(), u: this.u.slice(), target: this.target.slice(), gt: g.target.slice(), v: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] };
+      const G = this._good;
+      for (let k = 0; k < 3; k++) { G.eye[k] = this.eye[k]; G.f[k] = this.f[k]; G.r[k] = this.r[k]; G.u[k] = this.u[k]; G.target[k] = this.target[k]; G.gt[k] = g.target[k]; }
+      const v = G.v; v[0] = this.dist; v[1] = this.yaw; v[2] = this.pitch; v[3] = g.dist; v[4] = g.yaw; v[5] = g.pitch; v[6] = this.fl; v[7] = this.near; v[8] = this.far; v[9] = this.clearance; v[10] = this.fov;
+      return true;
+    }
+    this._bad('state', { target: this.target, goal: g.target, dist: this.dist, gdist: g.dist, yaw: this.yaw, pitch: this.pitch, eye: this.eye });
+    if (!K) { this.target = [0, 0, 0]; g.target = [0, 0, 0]; this.dist = g.dist = 1500; this.yaw = g.yaw = 0; this.pitch = g.pitch = 35 * DEG; this.fov = 40 * DEG; this._pose(); return false; }
+    this.eye = K.eye.slice(); this.f = K.f.slice(); this.r = K.r.slice(); this.u = K.u.slice(); this.target = K.target.slice(); g.target = K.gt.slice();
+    const v = K.v; this.dist = v[0]; this.yaw = v[1]; this.pitch = v[2]; g.dist = v[3]; g.yaw = v[4]; g.pitch = v[5]; this.fl = v[6]; this.near = v[7]; this.far = v[8]; this.clearance = v[9]; this.fov = v[10];
+    // (whatever handed the bad value in lets go: a follow or a flight toward a NaN point would hand it in again)
+    this.followFn = null; this.fly = null;
+    return false;
+  }
+  _bad(what, v) {
+    this.badViews = (this.badViews || 0) + 1;
+    if (this.badViews === 1) console.warn(`camera: a non-finite ${what}, the last good view kept (QA D55)`, JSON.stringify(v), new Error().stack);
   }
   /* the exact view: eye, look point (no roll); near from the subject distance when given */
   _exact(v) {

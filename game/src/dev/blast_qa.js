@@ -176,7 +176,7 @@ export async function runCase(O, c, o = {}) {
   await frames(O, 30);
   await frames(O, 60, base);
   row.base = [pct(base, .5), pct(base, .95)];
-  const t0 = g.t, s0 = sim.t, u = sim.units.get(id);
+  const t0 = g.t, s0 = sim.t, u = sim.units.get(id), bv0 = O.R.camera.badViews || 0;
   // the hit
   if (c.cook) {
     const m = u.def.modules.find(m => m.id === c.cook), b = m.box, C = m.cook || {};
@@ -225,6 +225,8 @@ export async function runCase(O, c, o = {}) {
   // settled stills
   for (const [k, tag] of [['a', 'set_a60'], ['b', 'set_b60'], ['d', 'set_d25'], ['e', 'set_e12'], ['w', 'set_w300']]) { await shot(O, id, aim, V[k], `${dir}/${c.id}_${tag}`); row.shots.push(tag); }
   row.sys = systems(O, id);
+  // (views the camera refused as non-finite in this case: it kept the last good one, QA D55; the console has the first)
+  row.badViews = (O.R.camera.badViews || 0) - bv0;
   // flooding over time: the sim run ahead (no rendering), the state again and a wide still
   if (c.ff) { const lost = []; const oe = sim.emit.bind(sim); sim.emit = (t, e) => { if (e && (e.unit === id || e.target === id) && lost.length < 40) lost.push([t, +sim.t.toFixed(1), JSON.stringify(e, (a, v) => typeof v === 'number' ? +v.toFixed(3) : v).slice(0, 240)]); return oe(t, e); }; if (c.doors) { const k = 12; for (let i = 0; i < k; i++) { forceDoors(O, id, c.doors); O.ff(c.ff / k); } } else O.ff(c.ff); sim.emit = oe; row.ffEvents = lost; O.advance(.1, 3); row.sys2 = systems(O, id); await shot(O, id, aim, V.w, `${dir}/${c.id}_ff${c.ff}_w300`); await shot(O, id, aim, V.a, `${dir}/${c.id}_ff${c.ff}_a60`); row.shots.push('ff'); }
   // what the player is told: the HUD (its log) and the Inspect view of her with X-ray (systems out, flooded spaces)

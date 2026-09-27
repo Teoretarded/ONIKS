@@ -129,6 +129,8 @@ export class Renderer {
   }
   /* a dynamic light for this frame: p world, radius m, rgb 0..255, intensity (1 ~ a strong flash) */
   light(p, radius, rgb, intensity) {
+    // (a light with a NaN in it would light every dot NaN: the whole frame blank, QA D55)
+    if (!Number.isFinite(p[0] + p[1] + p[2] + radius + (intensity === undefined ? 1 : intensity))) return;
     if (this.lights.length >= 16) {
       let mi = 0; for (let i = 1; i < 16; i++) if (this.lights[i].i < this.lights[mi].i) mi = i;
       if (this.lights[mi].i >= intensity) return;
