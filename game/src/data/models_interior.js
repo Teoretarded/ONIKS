@@ -803,11 +803,11 @@ function hullOf(prims, o) {
     if (x > G[k]) G[k] = x;
   }
   // a station's column: fill the gaps between its lowest and highest cells (the hull's sides are continuous)
-  const lo = new Int16Array(NZ).fill(-1);
+  const lo = new Int16Array(NZ).fill(-1), hi = new Int16Array(NZ).fill(-1);
   for (let zi = 0; zi < NZ; zi++) {
     let a = -1, b = -1;
     for (let yi = 0; yi < NY; yi++) if (G[zi * NY + yi] >= 0) { if (a < 0) a = yi; b = yi; }
-    lo[zi] = a;
+    lo[zi] = a; hi[zi] = b;
     if (a < 0) continue;
     let last = a;
     for (let yi = a + 1; yi <= b; yi++) {
@@ -825,8 +825,10 @@ function hullOf(prims, o) {
     }
     return mix(mix(a, b, tz), mix(c, d, tz), ty);
   };
-  const keel = z => { const zi = Math.max(0, Math.min(NZ - 1, Math.round((z - z0) / dz))); return lo[zi] < 0 ? 0 : y0 + lo[zi] * dy; };
-  return { hb, keel, z0, z1, y0, y1 };
+  const zix = z => Math.max(0, Math.min(NZ - 1, Math.round((z - z0) / dz)));
+  const keel = z => { const zi = zix(z); return lo[zi] < 0 ? 0 : y0 + lo[zi] * dy; };
+  const top = z => { const zi = zix(z); return hi[zi] < 0 ? 0 : y0 + hi[zi] * dy; };
+  return { hb, keel, top, z0, z1, y0, y1 };
 }
 
 /* a generic ship: bulkheads at bz (fwd to aft), decks [{ y, z0, z1, holes }], an inner bottom, the spaces with a kind */
@@ -854,6 +856,10 @@ function genericInterior(H, spec) {
       if (d.hatch !== false && d.below !== undefined) for (const s of [-1, 1]) { const x = s * (spec.passX || 3); if (hz > za + 1 && hz < zb - 1 && S.hbc(hz, d.y) > Math.abs(x) + 1) ladder(P, x, hz + .25, d.y, d.below, false); }
     }
     webFrames(S, P, Z.z0, Z.z1, spec.frameBot, z => spec.bhdTop(z) - .1, spec.frameStep || 2);
+    for (const w of spec.walls || []) {
+      const za = Math.max(Z.z0, w.z0), zb = Math.min(Z.z1, w.z1);
+      if (zb - za > .5) for (const s of [-1, 1]) lWall(P, s * w.x, w.y0, w.y1, za + .05, zb - .05, [], 5.5);
+    }
     if (spec.passY !== undefined && spec.passZ && zc < spec.passZ[1] && zc > spec.passZ[0]) {
       const y0 = spec.passY, x = spec.passX || 3, yt = spec.passTop;
       for (const s of [-1, 1]) {
@@ -870,7 +876,7 @@ function genericInterior(H, spec) {
     genericContents(S, P, B, sp);
     if (!P.length) continue;
     const zs = []; for (let n = zoneOf(B.z1); n <= zoneOf(B.z0); n++) zs.push(n);
-    parts.push(ixPart('ix_' + sp.id, sp.name, P, { zones: zs, zone: zs[0], comp: sp.id, sys: sp.sys || sysOf(sp.id) }));
+    parts.push(ixPart(sp.part || 'ix_' + sp.id, sp.name, P, { zones: zs, zone: zs[0], comp: sp.id, sys: sp.sys || (sp.kind === 'engine' ? 'machinery' : sp.kind === 'magazine' || sp.kind === 'vls' ? 'magazine' : sp.kind === 'berthing' || sp.kind === 'mess' ? 'living' : sp.kind === 'tank' ? 'tank' : sp.kind === 'control' || sp.kind === 'steering' ? 'control' : sysOf(sp.id)) }));
   }
   return { parts, zones: zones.map(z => ({ no: z.no, z0: z.z0, z1: z.z1 })) };
 }
@@ -878,8 +884,13 @@ function genericContents(S, P, B, sp) {
   const y = B.y0, px = sp.passX || 0;
   switch (sp.kind) {
     case 'berthing': {
-      const b2 = O(B, { w: Math.min(B.w, B.x1) });
-      for (let z = B.z0 + 1.4; z < B.z1 - 1.2; z += 2.3) for (let x = Math.max(B.x0, -b2.w) + 1.1; x < Math.min(B.x1, b2.w) - .6; x += 1.45) {
+      // rack rows 1.45 m apart across, 2.3 m along; a big space in berthing blocks of 4 x 4 with cross passages, and at
+      // most ~140 racks a level (the rest of a carrier's berthing is the same again)
+      const b2 = O(B, { w: Math.min(B.w, B.x1) }), W2 = Math.min(B.x1, b2.w) - Math.max(B.x0, -b2.w), L2 = B.z1 - B.z0;
+      const k = Math.max(1, Math.sqrt((W2 / 1.45) * (L2 / 2.3) / 140));
+      const gz = k > 1.2 ? 4 * 2.3 * (k - 1) : 0, gx = k > 1.2 ? 4 * 1.45 * (k - 1) : 0;
+      const zAt = i => B.z0 + 1.4 + i * 2.3 + Math.floor(i / 4) * gz, xAt = j => Math.max(B.x0, -b2.w) + 1.1 + j * 1.45 + Math.floor(j / 4) * gx;
+      for (let i = 0, z = zAt(0); z < B.z1 - 1.2; z = zAt(++i)) for (let j = 0, x = xAt(0); x < Math.min(B.x1, b2.w) - .6; x = xAt(++j)) {
         const ww = Math.min(S.hbc(z - 1, y + 1.8), S.hbc(z + 1, y + 1.8));
         if (Math.abs(x) + .5 > ww || (px && Math.abs(Math.abs(x) - px) < 1.25) || (sp.clearX && Math.abs(x) < sp.clearX)) continue;
         if ((z * 7 + x * 3) % 1 < 0 && sp.sparse) continue;
@@ -888,9 +899,11 @@ function genericContents(S, P, B, sp) {
       }
       break;
     }
-    case 'mess':
-      for (let x = Math.max(B.x0, -B.w) + 1.8; x < Math.min(B.x1, B.w) - 1.5; x += 2.3) { if (px && Math.abs(Math.abs(x) - px) < 1.3) continue; for (let z = B.z0 + 2; z < B.z1 - 1.5; z += 3.2) messTable(P, x, y, z, 2.2); }
+    case 'mess': {
+      const W2 = Math.min(B.x1, B.w) - Math.max(B.x0, -B.w), k = Math.max(1, Math.sqrt((W2 / 2.3) * ((B.z1 - B.z0) / 3.2) / 90));
+      for (let x = Math.max(B.x0, -B.w) + 1.8; x < Math.min(B.x1, B.w) - 1.5; x += 2.3 * k) { if (px && Math.abs(Math.abs(x) - px) < 1.3) continue; for (let z = B.z0 + 2; z < B.z1 - 1.5; z += 3.2 * k) messTable(P, x, y, z, 2.2); }
       break;
+    }
     case 'store':
       for (let x = Math.max(B.x0, -B.w) + .9; x < Math.min(B.x1, B.w) - .8; x += 1.8) shelves(P, x, y, B.z0 + .8, B.z1 - .8, Math.min(2.1, B.y1 - y - .2), .6);
       break;
@@ -898,8 +911,9 @@ function genericContents(S, P, B, sp) {
       tankFill(P, S, B.z0 + .3, B.z1 - .3, B.y0, B.y1, sp.fill || .7, [B.x0, B.x1]);
       break;
     case 'magazine': {
-      const h = Math.min(2.2, B.y1 - y - .3);
-      for (let x = B.x0 + .8; x < B.x1 - .6; x += 1.4) { vol(P, [x - .3, y, B.z0 + .8], [x + .3, y + h, B.z1 - .8], { ds: 3, open: true }); for (let z = B.z0 + 1; z < B.z1 - .9; z += .45) P.push(line([[x, y + .15, z], [x, y + h - .15, z]], fn({ w: .35, ds: .5 }))); }
+      // rack rows; the stowed rounds (closed shells) as short verticals. A big magazine gets wider aisles, fewer marks
+      const h = Math.min(2.2, B.y1 - y - .3), big = (B.x1 - B.x0) * (B.z1 - B.z0) > 250, dx = big ? 2.6 : 1.4, dz = big ? 1.1 : .45;
+      for (let x = B.x0 + .8; x < B.x1 - .6; x += dx) { vol(P, [x - .3, y, B.z0 + .8], [x + .3, y + h, B.z1 - .8], { ds: big ? 4.5 : 3, open: true }); for (let z = B.z0 + 1; z < B.z1 - .9; z += dz) P.push(line([[x, y + .15, z], [x, y + h - .15, z]], fn({ w: .35, ds: .6 }))); }
       break;
     }
     case 'vls':
@@ -917,7 +931,7 @@ function genericContents(S, P, B, sp) {
         else if (e.t === 'turbine') { drum(P, [e.x, e.y, e.z - 3], [e.x, e.y, e.z + 3], 1.3); drum(P, [e.x, e.y, e.z + 3.2], [e.x, e.y, e.z + 6.2], .9); vol(P, [e.x - 1.8, e.y - 2.4, e.z - 3.5], [e.x + 1.8, e.y - 1.3, e.z + 6.5], { ds: 2.4 }); }
         else if (e.t === 'gear') { vol(P, [e.x - 2.6, e.y - 2, e.z - 1.8], [e.x + 2.6, e.y + 1.8, e.z + 1.8], { ds: 1.8 }); P.push(lathe([e.x, e.y, e.z - 1], FZ, [[0, 1.7], [.5, 1.7]], fn({ n: 40, gen: 0 }))); }
         else if (e.t === 'reactor') { P.push(lathe([e.x, e.y, e.z], FY, [[0, 0], [.3, 2.2], [1, 2.6], [6.5, 2.6], [7.3, 2.1], [7.6, 0]], { n: 32, gen: 6, rings: [2, 3], ds: 1.4 })); for (const s of [-1, 1]) drum(P, [e.x + s * 5, e.y, e.z], [e.x + s * 5, e.y + 8, e.z], 1.1); }
-        else if (e.t === 'gen') gtg(P, e.x, e.y, e.z, e.dir || -1, e.up);
+        else if (e.t === 'gen') gtg(P, e.x, e.y, e.z, e.dir || -1, e.up, e.k);
       }
       if (sp.swbd) cabinets(P, sp.swbd[0], sp.swbd[1], 2.1, .8, { face: sp.swbd[2] || 1 });
       for (const p of sp.pumps || []) pump(P, p);
@@ -941,7 +955,11 @@ function genericContents(S, P, B, sp) {
       break;
     }
     case 'vehicle':
-      for (let z = B.z0 + 4; z < B.z1 - 3; z += 7.5) for (let x = B.x0 + 2; x < B.x1 - 1.5; x += 3.6) vol(P, [x - 1.25, y, z - 3], [x + 1.25, y + 2.3, z + 3], { ds: 2.6 });
+      for (const dy of [0].concat(sp.levels || [])) for (let z = B.z0 + 4; z < B.z1 - 3; z += 7.5) for (let x = B.x0 + 2; x < B.x1 - 1.5; x += 3.6) {
+        // parked vehicles: a body and a cab block, lashed down
+        vol(P, [x - 1.25, y + dy, z - 3], [x + 1.25, y + dy + 2.1, z + 1.6], { ds: 3 });
+        vol(P, [x - 1.2, y + dy, z + 1.8], [x + 1.2, y + dy + 1.7, z + 3], { ds: 3, fine: true });
+      }
       break;
     case 'control':
       for (let x = B.x0 + 1.5; x < B.x1 - 1.2; x += 3) for (let z = B.z0 + 1.5; z < B.z1 - 2.5; z += 3.4) cabinets(P, [x, y, z], [x, y, z + 2.4], 1.25, .8, { face: 1 });
@@ -955,118 +973,127 @@ function genericContents(S, P, B, sp) {
   }
 }
 
-/* ---------------------------------------------------------------- class specs */
+/* ---------------------------------------------------------------- class specs
+   Bulkheads, deck levels and the main spaces follow data/ship_layouts.js (GEN: the compartments sim/ship.js floods and
+   burns), so a part ix_<id> is that space; contents sit where the cutaways' closed volumes put the machinery. */
+const vlsMods = zc => { const out = []; for (let m = 0; m < 4; m++) for (const r of [-1, 1]) out.push([(-3 + 2 * m) * 1.05, zc + r * 1.7]); return out; };
 function cgInterior(model) {
-  const prims = hullPrims(model, ['hull', 'below']);
-  const H = hullOf(prims, { s: .6, dz: 2, dy: .5, flareTop: 0 });
-  const D2 = 3.6, D3 = 1.0, P4 = -1.9, IB = -4.8, deck = z => K.CG.deckY(z) - .05;
-  const VF = K.CG.VF, VA = K.CG.VA;
-  const vh = (y, zc, fl) => y > fl ? [{ x0: -4.3, x1: 4.3, z0: zc - 3.5, z1: zc + 3.5 }] : [];
+  const H = hullOf(hullPrims(model, ['hull', 'below']), { s: .6, dz: 2, dy: .5, flareTop: 0 });
+  const IB = -5.1, P4 = -1.6, D3 = 1.2, D2 = 3.9, deck = z => K.CG.deckY(z) - .05, VF = K.CG.VF, VA = K.CG.VA;
+  const hv = (z0, z1, hw) => ({ x0: -hw, x1: hw, z0, z1 });
+  const vls = [hv(47.2, 54.8, 4.6), hv(-64.8, -57.2, 4.6)], mags = [hv(57.2, 66, 6.2), hv(-76, -66, 6.2)];
+  const yf = IB + .5;
   const spec = {
-    zFwd: 86, zAft: -86.4, bz: [72, 63, 56, 46, 36, 26, 18, 9, -12, -19, -38, -46, -56, -66, -76], deckTop: deck, bhdTop: z => deck(z) - .04,
-    frameBot: IB, passY: D2, passTop: 6.0, passX: 2.8, passZ: [-56, 70], doors: [[-2.8, D2], [2.8, D2]],
+    zFwd: 86, zAft: -86.4, bz: [74, 66, 57.2, 46.6, 33, 18, 6, -15, -36.2, -46, -56.2, -66, -76], deckTop: deck, bhdTop: z => deck(z) - .04,
+    frameBot: IB, passY: D2, passTop: 6.0, passX: 2.8, passZ: [-56.2, 66], doors: [[-2.8, D2], [2.8, D2]],
     decks: [
-      { y: IB, z0: -46, z1: 63, ib: true, hatch: false },
-      { y: P4, z0: -76, z1: 72, holes: [{ x0: -9, x1: 9, z0: -38, z1: 9 }], below: IB + .5 },
-      { y: D3, z0: -76, z1: 72, holes: [{ x0: -9, x1: 9, z0: -38, z1: 9 }].concat(vh(D3, VF, -.4), vh(D3, VA, -.4)), below: P4 },
-      { y: D2, z0: -86, z1: 80, holes: vh(D2, VF, -.4).concat(vh(D2, VA, -.4)), below: D3 },
+      { y: IB, z0: -66, z1: 66, ib: true, hatch: false },
+      { y: P4, z0: -76, z1: 74, holes: [hv(-46, 18, 9)].concat(vls, mags), below: IB + .5 },
+      { y: D3, z0: -76, z1: 74, holes: [hv(-36.2, 18, 9)].concat(vls, mags), below: P4 },
+      { y: D2, z0: -86, z1: 80, holes: vls, below: D3 },
     ],
     spaces: [
-      { id: 'MAG5F', name: 'Gun magazine · forward', kind: 'magazine', box: [-4.5, P4, 56, 4.5, D3, 66] },
-      { id: 'VLSF', name: 'Mk 41 VLS · forward · 61 cells', kind: 'vls', box: [-4.3, -.4, VF - 3.5, 4.3, 7, VF + 3.5], y0: deck(VF) - .3, y1: deck(VF) - 7.7, modules: vlsMods(VF) },
-      { id: 'BTHF', name: 'Berthing · forward', kind: 'berthing', box: [-7, D2, 46, 7, 6.4, 63], passX: 2.8 },
-      { id: 'BTH2', name: 'Berthing', kind: 'berthing', box: [-7.5, D3, 26, 7.5, D2, 46] },
-      { id: 'FO3', name: 'Fuel', kind: 'tank', box: [-7, IB, 18, 7, P4, 46], fill: .72 },
-      { id: 'MESS', name: 'Mess · galley', kind: 'mess', box: [-7.8, D2, 9, 7.8, 6.2, 26], passX: 2.8 },
-      { id: 'AMR1', name: 'Auxiliary machinery room 1', kind: 'engine', box: [-7.5, IB, 9, 7.5, D2, 18], engines: [{ t: 'gen', x: 3.2, y: IB + .5, z: 17, dir: -1, up: D2 }], swbd: [[-5.5, IB + .5, 11], [-5.5, IB + .5, 15], 1], pumps: [[-1, IB + .5, 12], [0, IB + .5, 16]] },
-      { id: 'MER1', name: 'Main engine room 1', kind: 'engine', box: [-7.8, IB, -12, 7.8, D2, 9], pumps: [[-5.6, IB + .5, 4], [5.6, IB + .5, 4]], flat: .4, swbd: [[-6, IB + .5, -1], [-6, IB + .5, -4], 1] },
-      { id: 'AMR2', name: 'Auxiliary machinery room 2', kind: 'engine', box: [-7.8, IB, -19, 7.8, D2, -12], engines: [{ t: 'gen', x: -3.2, y: IB + .5, z: -12.6, dir: -1, up: D2 }], pumps: [[3.5, IB + .5, -15], [4.5, IB + .5, -17]] },
-      { id: 'MER2', name: 'Main engine room 2', kind: 'engine', box: [-7.8, IB, -38, 7.8, D2, -19], pumps: [[-5.6, IB + .5, -22], [5.6, IB + .5, -22]], flat: .4, swbd: [[6, IB + .5, -26], [6, IB + .5, -30], -1] },
-      { id: 'BTH3', name: 'Berthing · midships', kind: 'berthing', box: [-7.8, D2, -38, 7.8, 6.1, 9], passX: 2.8 },
-      { id: 'ST4', name: 'Stores · aft', kind: 'store', box: [-7, D3, -56, 7, D2, -46] },
-      { id: 'VLSA', name: 'Mk 41 VLS · aft · 61 cells', kind: 'vls', box: [-4.3, -.4, VA - 3.5, 4.3, 7, VA + 3.5], y0: deck(VA) - .3, y1: deck(VA) - 7.7, modules: vlsMods(VA) },
-      { id: 'MAG5A', name: 'Gun magazine · aft', kind: 'magazine', box: [-4.5, P4, -76, 4.5, D3, -66] },
-      { id: 'STR', name: 'Steering gear room', kind: 'steering', box: [-6, D3, -86, 6, D2, -76], stocks: [[-4.1, -71.5], [4.1, -71.5]] },
-      { id: 'FOA', name: 'Fuel · aft', kind: 'tank', box: [-6.5, IB, -46, 6.5, P4, -38], fill: .65 },
+      { id: 'SON', name: 'Sonar equipment', kind: 'control', box: [-4, P4, 66.5, 4, D2, 73.5] },
+      { id: 'MAGF', name: 'Gun magazine · forward', kind: 'magazine', box: [-4.4, IB + .3, 57.8, 4.4, D2, 65.4] },
+      { id: 'VLSF', name: 'Mk 41 VLS enclosure · forward (61 cells)', kind: 'vls', box: [-4.3, -1.9, VF - 3.5, 4.3, 7, VF + 3.5], y0: deck(VF) - .3, y1: deck(VF) - 7.7, modules: vlsMods(VF) },
+      { id: 'FO', name: 'Fuel · forward', kind: 'tank', box: [-7, IB, 18.2, 7, P4, 46.4], fill: .72 },
+      { id: 'BTH1', name: 'Berthing · forward', kind: 'berthing', box: [-7, D3, 18.5, 7, D2, 46.4], sys: 'living' },
+      { id: 'BTH2', name: 'Berthing · 2nd deck forward', kind: 'berthing', box: [-7.5, D2, 18.5, 7.5, 6.4, 46.4], passX: 2.8, sys: 'living' },
+      { id: 'AMR1', name: 'Auxiliary machinery room 1', kind: 'engine', box: [-7.5, IB, 6, 7.5, D2, 18], engines: [{ t: 'gen', x: 3.2, y: yf, z: 17.4, dir: -1, up: D2 }], swbd: [[-5.8, yf, 8], [-5.8, yf, 12], 1], pumps: [[-1, yf, 9], [0, yf, 15.8]] },
+      { id: 'MER1', name: 'Main engine room 1', kind: 'engine', box: [-7.8, IB, -15, 7.8, D2, 6], pumps: [[-5.6, yf, 4], [5.6, yf, 4], [-5.6, yf, -12]], flat: .4, swbd: [[-6, yf, -1], [-6, yf, -4.5], 1] },
+      { id: 'MESS', name: 'Mess · galley', kind: 'mess', box: [-7.8, D2, -15, 7.8, 6.2, 18], passX: 2.8, sys: 'living' },
+      { id: 'MER2', name: 'Main engine room 2', kind: 'engine', box: [-7.8, IB, -36.2, 7.8, D2, -15], pumps: [[-5.6, yf, -17], [5.6, yf, -17]], flat: .4, swbd: [[6, yf, -24], [6, yf, -28], -1] },
+      { id: 'AMR2', name: 'Auxiliary machinery room 2', kind: 'engine', box: [-7.8, IB, -46, 7.8, D3, -36.2], engines: [{ t: 'gen', x: -3.2, y: yf, z: -36.8, dir: -1, up: D3, k: .78 }], pumps: [[3.5, yf, -38], [4.5, yf, -43]] },
+      { id: 'BTH3', name: 'Berthing · aft', kind: 'berthing', box: [-7.8, D2, -56, 7.8, 6.1, -15], passX: 2.8, sys: 'living' },
+      { id: 'JP5', name: 'JP-5 tanks', kind: 'tank', box: [-6.5, IB, -56.2, 6.5, D3, -46], fill: .65, sys: 'tank' },
+      { id: 'ST', name: 'Stores · aft', kind: 'store', box: [-7, D3, -65.6, 7, D2, -56.6] },
+      { id: 'VLSA', name: 'Mk 41 VLS enclosure · aft (61 cells)', kind: 'vls', box: [-4.3, -1.9, VA - 3.5, 4.3, 7, VA + 3.5], y0: deck(VA) - .3, y1: deck(VA) - 7.7, modules: vlsMods(VA) },
+      { id: 'MAGA', name: 'Gun magazine · aft', kind: 'magazine', box: [-4.4, IB + .3, -75.4, 4.4, D2, -66.6] },
+      { id: 'STR', name: 'Steering gear room', kind: 'steering', box: [-6, D2, -76, 6, 6, -66.4], stocks: [[-4.1, -71.5], [4.1, -71.5]] },
+      { id: 'FH1', name: 'CIC · forward deckhouse', kind: 'control', box: [-6.5, deck(28) + .05, 16, 6.5, 10.3, 41], sys: 'control' },
     ],
   };
   return genericInterior(H, spec);
 }
-const vlsMods = zc => { const out = []; for (let m = 0; m < 4; m++) for (const r of [-1, 1]) out.push([(-3 + 2 * m) * 1.05, zc + r * 1.7]); return out; };
 function lcsInterior(model) {
-  const prims = hullPrims(model, ['hull', 'below']);
-  const H = hullOf(prims, { s: .5, dz: 2, dy: .4, flareTop: 2 });
-  const D2 = 1.6, IB = -2.9, deckT = z => 4.2;
+  const H = hullOf(hullPrims(model, ['hull', 'below']), { s: .5, dz: 2, dy: .4, flareTop: 2 });
+  const IB = -2.8, D0 = 0, D3 = 3.6, top = z => Math.min(H.top(z) - .1, 9.0), yf = IB + .4;
   const spec = {
-    zFwd: 60, zAft: -62, bz: [50, 38, 26, 14, 2, -8, -18, -28, -40, -50], deckTop: deckT, bhdTop: () => 4.1,
-    frameBot: IB, passX: 1.4, doors: [[0, D2]],
-    decks: [{ y: IB, z0: -50, z1: 50, ib: true, hatch: false }, { y: D2, z0: -60, z1: 58, below: IB + .4 }],
+    zFwd: 60, zAft: -62, bz: [52, 40, 28, 16, 0, -8, -22, -36, -44, -52], deckTop: top, bhdTop: top,
+    frameBot: IB, passX: 1.4, doors: [[0, D3]],
+    decks: [
+      { y: IB, z0: -52, z1: 52, ib: true, hatch: false },
+      { y: D0, z0: -60, z1: 58, holes: [{ x0: -6, x1: 6, z0: -36, z1: -8 }], below: IB + .4 },
+      { y: D3, z0: -62, z1: 58, below: D0 },
+    ],
     spaces: [
-      { id: 'MER1', name: 'Diesel engine room · MTU 20V 8000 ×2', kind: 'engine', box: [-3.5, IB, -18, 3.5, D2, -8], pumps: [[0, IB + .4, -17], [0, IB + .4, -9]] },
-      { id: 'MER2', name: 'Gas turbine room · LM2500 ×2', kind: 'engine', box: [-3.5, IB, -40, 3.5, D2, -28], pumps: [[0, IB + .4, -39], [0, IB + .4, -29.5]] },
-      { id: 'AMR', name: 'Auxiliary machinery · generators', kind: 'engine', box: [-3.4, IB, -8, 3.4, D2, 2], engines: [{ t: 'diesel', x: -1.4, y: -1.4, z: -3 }], pumps: [[1.8, IB + .4, -5], [1.8, IB + .4, -1]] },
-      { id: 'BTH', name: 'Berthing', kind: 'berthing', box: [-3.4, D2, 14, 3.4, 4.1, 38] },
-      { id: 'FO', name: 'Fuel', kind: 'tank', box: [-3.2, IB, 2, 3.2, D2, 26], fill: .7 },
-      { id: 'MESS', name: 'Mess · galley', kind: 'mess', box: [-3.4, D2, 2, 3.4, 4.1, 14] },
-      { id: 'ST', name: 'Stores', kind: 'store', box: [-3, D2, 38, 3, 4.1, 50] },
+      { id: 'MMR', name: 'Engine rooms · diesels · gas turbines', kind: 'engine', box: [-3.5, IB, -36, 3.5, D3, -8], pumps: [[0, yf, -21], [0, yf, -23.5], [0, yf, -9.5]], flat: 1.4, swbd: [[-2.6, yf, -18.5], [-2.6, yf, -21.5], 1] },
+      { id: 'JP5', name: 'JP-5 tanks', kind: 'tank', box: [-3, -3.6, -44, 3, D0, -36], fill: .7, sys: 'tank' },
+      { id: 'MAG', name: 'Gun magazine · 57 mm', kind: 'magazine', box: [-2.6, IB + .3, 28.5, 2.6, D3, 39.5] },
+      { id: 'AUX', name: 'Auxiliary machinery · generators', kind: 'engine', box: [-3.4, IB, -8, 3.4, D0, 0], engines: [{ t: 'gen', x: 0, y: yf, z: -.6, dir: -1, up: D0, k: .75 }] },
+      { id: 'BTH', name: 'Berthing', kind: 'berthing', box: [-3.4, D3, 0, 3.4, 8.8, 28], sys: 'living' },
+      { id: 'MESS', name: 'Mess · galley', kind: 'mess', box: [-3.4, D0, 0, 3.4, D3, 16], sys: 'living' },
+      { id: 'FO', name: 'Fuel', kind: 'tank', box: [-3.2, IB, 0, 3.2, D0, 28], fill: .7 },
+      { id: 'ST', name: 'Stores', kind: 'store', box: [-3, D0, 16, 3, D3, 28] },
     ],
   };
   return genericInterior(H, spec);
 }
 function lhdInterior(model) {
-  const prims = hullPrims(model, ['hull', 'below', 'hullBow', 'hullMid', 'hullStern']);
-  const H = hullOf(prims, { s: 1.0, dz: 3, dy: .6, flareTop: 11 });
-  const IB = -5.8, D4 = 1.0, D3 = 5.9, HG = 11.0, W = K.LHD.WELL;
-  const well = y => y > W.y - .1 && y < W.top ? [{ x0: -W.hw - .3, x1: W.hw + .3, z0: W.z0, z1: W.z1 }] : [];
+  const H = hullOf(hullPrims(model, ['hull', 'below', 'hullBow', 'hullMid', 'hullStern']), { s: 1.0, dz: 3, dy: .6, flareTop: 11 });
+  const IB = -6.6, D1 = 1.0, D2 = 10.7, yf = IB + .5, W = K.LHD.WELL;
   const spec = {
-    zFwd: 120, zAft: -128, bz: [108, 94, 80, 64, 48, 32, 14, 4, -17, -40, -48], deckTop: () => HG,
-    // over the machinery the vehicle decks run open fore and aft: the bulkheads stop at the lower vehicle deck there
-    bhdTop: z => z < 9 && z > -49 ? D4 - .03 : HG - .05,
-    frameBot: IB, frameStep: 3, passY: D3, passTop: HG - .1, passX: 11.8, passZ: [14, 80], doors: [[-11.8, D3], [11.8, D3], [-11.8, D4], [11.8, D4]],
+    zFwd: 116, zAft: -126, bz: [104, 90, 76, 64, 50, 36, 20, 4, -18, -40, -55, -70, -85, -100, -115], deckTop: () => D2,
+    // over the vehicle decks and the well the space runs open fore and aft: the bulkheads stop at the 1.0 m deck there
+    bhdTop: z => z < 8 ? D1 - .03 : D2 - .05,
+    frameBot: IB, frameStep: 3, passY: D1, passTop: D2 - .1, passX: 11.8, passZ: [14, 90], doors: [[-11.8, D1], [11.8, D1]],
     decks: [
-      { y: IB, z0: -48, z1: 94, ib: true, hatch: false },
-      { y: D4, z0: -48, z1: 108, holes: [{ x0: -12.5, x1: 12.5, z0: -40, z1: 4 }], below: IB + .5 },
-      { y: D3, z0: -48, z1: 118, holes: well(D3), below: D4 },
+      { y: IB, z0: -85, z1: 104, ib: true, hatch: false },
+      { y: D1, z0: -115, z1: 112, holes: [{ x0: -13, x1: 13, z0: -40, z1: 4 }], below: IB + .5 },
+      { y: 5.9, z0: 14, z1: 90, hatch: false, ds: 4.8 },
+      { y: D2, z0: 14, z1: 114, below: D1 },
     ],
     spaces: [
-      { id: 'BTHT', name: 'Troop berthing', kind: 'berthing', box: [-13, D3, 14, 13, HG, 64], passX: 11.8, levels: [2.4] },
-      { id: 'BTHT2', name: 'Troop berthing · lower', kind: 'berthing', box: [-13, D4, 14, 13, D3, 64] },
-      { id: 'MESS', name: 'Mess decks · galley', kind: 'mess', box: [-13, D3, 64, 13, HG, 80], passX: 11.8 },
-      { id: 'MER1', name: 'Main machinery room 1 · boiler · turbine', kind: 'engine', box: [-12.5, IB, -17, 12.5, D4, 4], engines: [{ t: 'boiler', x: -5, y: IB + .6, z: -3 }, { t: 'turbine', x: 4, y: -3, z: -10 }], swbd: [[-9, IB + .5, -14], [-9, IB + .5, -10], 1], flat: -1.8 },
-      { id: 'MER2', name: 'Main machinery room 2 · boiler · turbine', kind: 'engine', box: [-12.5, IB, -40, 12.5, D4, -19], engines: [{ t: 'boiler', x: 5, y: IB + .6, z: -26 }, { t: 'turbine', x: -4, y: -3, z: -34 }], flat: -1.8, pumps: [[9, IB + .5, -36], [9, IB + .5, -33]] },
-      { id: 'VEH', name: 'Vehicle decks', kind: 'vehicle', box: [-10.5, 5.9, W.z1, 10.5, 10.6, 8] },
-      { id: 'MAG', name: 'Magazines', kind: 'magazine', box: [-10, IB + .3, 94, 10, D4, 108] },
-      { id: 'FO', name: 'Fuel · ballast', kind: 'tank', box: [-12, IB, 32, 12, D4, 80], fill: .6 },
+      { id: 'MMR', name: 'Machinery rooms · boilers · turbines', kind: 'engine', box: [-12.5, IB, -40, 12.5, D1, 4], engines: [{ t: 'boiler', x: -5, y: yf, z: -4 }, { t: 'turbine', x: 4.5, y: -4.2, z: -12 }, { t: 'boiler', x: 5, y: yf, z: -27 }, { t: 'turbine', x: -4.5, y: -4.2, z: -35 }], swbd: [[-9, yf, -16], [-9, yf, -12], 1], flat: -1.8, pumps: [[9, yf, -36], [9, yf, -33]] },
+      { id: 'MAG', name: 'Magazines · missiles and ordnance', kind: 'magazine', box: [-10, IB + .3, 20.5, 10, D1, 63.5] },
+      { id: 'JP5', name: 'JP-5 tanks', kind: 'tank', box: [-10, IB, 64, 10, D1, 90], fill: .7 },
+      { id: 'O2', name: 'Berthing · troops', kind: 'berthing', box: [-13, D1, 14, 13, D2, 90], passX: 11.8, levels: [4.9], sys: 'living' },
+      { id: 'VEH', name: 'Vehicle decks', kind: 'vehicle', box: [-10.5, D1, W.z1, 10.5, 5.6, 8], levels: [4.9] },
+      { id: 'BAL', name: 'Ballast tanks · aft', kind: 'tank', box: [-12, IB, -85, 12, D1 - .3, -55], fill: .5 },
+      { id: 'BOW', name: 'Bow · stores', kind: 'store', box: [-8, D1, 90.5, 8, D2, 103.5] },
+      { id: 'STR', name: 'Steering gear room', kind: 'steering', box: [-12, H.keel(-104) + 3.1, -115, 12, D1 - .1, -100], stocks: [[-7.4, -103.9], [7.4, -103.9]] },
     ],
   };
   return genericInterior(H, spec);
 }
 function cvInterior(model) {
-  const prims = hullPrims(model, ['hullBow', 'hullMid', 'hullStern', 'hull']);
-  const H = hullOf(prims, { s: 1.2, dz: 3, dy: .7, flareTop: 6 });
-  const HGR = 8.3, D2 = 3.4, D3 = -1.2, D4 = -5.4, IB = -9.3;
+  const H = hullOf(hullPrims(model, ['hullBow', 'hullMid', 'hullStern', 'hull']), { s: 1.2, dz: 3, dy: .7, flareTop: 6 });
+  const HGR = 8.3, D2 = 4, D3 = -.5, D4 = -4.8, IB = -9.6, yf = IB + .4, mach = { x0: -14.5, x1: 14.5, z0: -44, z1: 38 };
   const spec = {
-    zFwd: 150, zAft: -155, bz: [140, 124, 110, 98, 84, 70, 56, 38, 21, 2, -8, -25, -44, -62, -76, -90, -104, -120, -136], deckTop: () => HGR, bhdTop: () => HGR - .05,
-    frameBot: IB, frameStep: 3, passY: D2, passTop: HGR - .35, passX: 14, passZ: [-120, 124], doors: [[-14, D2], [14, D2]],
+    zFwd: 160, zAft: -160, bz: [150, 134, 118, 98, 80, 64, 50, 38, 20, 0, -24, -44, -60, -76, -92, -104, -118, -132, -146], deckTop: () => HGR, bhdTop: () => HGR - .05,
+    frameBot: IB, frameStep: 3, passY: D2, passTop: HGR - .35, passX: 14, passZ: [-104, 134], doors: [[-14, D2], [14, D2]],
+    // the side protection: longitudinal bulkheads 5.5 m inboard of the shell over the machinery and magazines
+    walls: [{ x: 14.9, y0: IB, y1: D2, z0: -104, z1: 98 }],
     decks: [
-      { y: IB, z0: -120, z1: 124, ib: true, hatch: false, ds: 3.4 },
-      { y: D4, z0: -136, z1: 140, holes: [{ x0: -16.5, x1: 16.5, z0: -44, z1: 38 }], below: IB + .6, ds: 3.2 },
-      { y: D3, z0: -136, z1: 140, holes: [{ x0: -16.5, x1: 16.5, z0: -44, z1: 38 }], below: D4, ds: 3.2 },
-      { y: D2, z0: -150, z1: 150, below: D3, ds: 3.2 },
+      { y: IB, z0: -132, z1: 134, ib: true, hatch: false, ds: 5.4 },
+      { y: D4, z0: -146, z1: 150, holes: [mach], below: IB + .6, ds: 5 },
+      { y: D3, z0: -146, z1: 150, holes: [mach], below: D4, ds: 5 },
+      { y: D2, z0: -160, z1: 160, below: D3, ds: 5 },
     ],
     spaces: [
-      { id: 'RX1', name: 'Reactor compartment 1 · A4W', kind: 'engine', box: [-12, IB, 22, 12, D2, 38], engines: [{ t: 'reactor', x: 0, y: IB + .4, z: 30 }], sys: 'machinery' },
-      { id: 'RX2', name: 'Reactor compartment 2 · A4W', kind: 'engine', box: [-12, IB, -24, 12, D2, -8], engines: [{ t: 'reactor', x: 0, y: IB + .4, z: -16 }], sys: 'machinery' },
-      { id: 'MMR1', name: 'Main machinery room 1 · steam turbines ×2', kind: 'engine', box: [-16.5, IB, 2, 16.5, D2, 20], engines: [{ t: 'turbine', x: -7, y: -5, z: 8 }, { t: 'turbine', x: 7, y: -5, z: 8 }, { t: 'gear', x: -7, y: -5, z: 17 }, { t: 'gear', x: 7, y: -5, z: 17 }], flat: -2.5, swbd: [[-13, IB + .6, 4], [-13, IB + .6, 7], 1] },
-      { id: 'MMR2', name: 'Main machinery room 2 · steam turbines ×2', kind: 'engine', box: [-16.5, IB, -44, 16.5, D2, -26], engines: [{ t: 'turbine', x: -9, y: -5, z: -38 }, { t: 'turbine', x: 9, y: -5, z: -38 }, { t: 'gear', x: -9, y: -5, z: -29 }, { t: 'gear', x: 9, y: -5, z: -29 }], flat: -2.5 },
-      { id: 'MAGF', name: 'Magazines · forward', kind: 'magazine', box: [-14.5, IB + .3, 56, 14.5, D3, 98] },
-      { id: 'MAGA', name: 'Magazines · aft', kind: 'magazine', box: [-14.5, IB + .3, -104, 14.5, D3, -62] },
-      { id: 'BTHF', name: 'Berthing · forward', kind: 'berthing', box: [-18, D2, 38, 18, HGR, 124], passX: 14 },
-      { id: 'BTHA', name: 'Berthing · aft', kind: 'berthing', box: [-18, D2, -120, 18, HGR, -44], passX: 14 },
-      { id: 'MESS', name: 'Mess decks · galleys', kind: 'mess', box: [-18, D2, -44, 18, HGR, 38], passX: 14 },
-      { id: 'JP5F', name: 'JP-5 · forward', kind: 'tank', box: [-18, IB, 98, 18, D4, 124], fill: .7 },
-      { id: 'JP5A', name: 'JP-5 · aft', kind: 'tank', box: [-18, IB, -120, 18, D4, -104], fill: .7 },
-      { id: 'STR', name: 'Steering gear rooms', kind: 'steering', box: [-14, D3, -152, 14, D2, -136], stocks: [[-9.2, -147], [9.2, -147]] },
+      { id: 'RX1', name: 'Reactor compartment 1 · A4W · main machinery · steam turbines ×2', kind: 'engine', box: [-14.5, IB, 0, 14.5, D2, 38], engines: [{ t: 'reactor', x: 0, y: yf, z: 30 }, { t: 'turbine', x: -7, y: -7.2, z: 6 }, { t: 'turbine', x: 7, y: -7.2, z: 6 }, { t: 'gear', x: -7, y: -7.2, z: 16 }, { t: 'gear', x: 7, y: -7.2, z: 16 }], flat: -2.5, swbd: [[-12.5, yf, 2.5], [-12.5, yf, 7], 1] },
+      { id: 'RX2', name: 'Reactor compartment 2 · A4W', kind: 'engine', box: [-14.5, IB, -24, 14.5, D2, 0], engines: [{ t: 'reactor', x: 0, y: yf, z: -16 }], pumps: [[9, yf, -5], [-9, yf, -5]] },
+      { id: 'MMR1', name: 'Main machinery room · steam turbines ×2', kind: 'engine', box: [-14.5, IB, -44, 14.5, D2, -24], engines: [{ t: 'turbine', x: -9, y: -7.2, z: -40 }, { t: 'turbine', x: 9, y: -7.2, z: -40 }, { t: 'gear', x: -9, y: -7.2, z: -30 }, { t: 'gear', x: 9, y: -7.2, z: -30 }], flat: -2.5 },
+      { id: 'MAGF', name: 'Magazines · forward · bombs and missiles', kind: 'magazine', box: [-14.5, IB + .3, 56, 14.5, D4, 98] },
+      { id: 'MAGF', part: 'ix_MAGF_2', name: 'Magazines · forward · upper', kind: 'magazine', box: [-14.5, D4, 56, 14.5, D3, 98] },
+      { id: 'MAGA', name: 'Magazines · aft · bombs and missiles', kind: 'magazine', box: [-14.5, IB + .3, -104, 14.5, D4, -62] },
+      { id: 'MAGA', part: 'ix_MAGA_2', name: 'Magazines · aft · upper', kind: 'magazine', box: [-14.5, D4, -104, 14.5, D3, -62] },
+      { id: 'JP5F', name: 'JP-5 tanks · forward', kind: 'tank', box: [-16.5, IB, 98, 16.5, D3, 134], fill: .7 },
+      { id: 'JP5A', name: 'JP-5 tanks · aft', kind: 'tank', box: [-16.5, IB, -132, 16.5, D3, -104], fill: .7 },
+      { id: 'D2', name: '2nd deck · berthing · forward', kind: 'berthing', box: [-18, D2, 38, 18, HGR, 134], passX: 14, sys: 'living' },
+      { id: 'D2', part: 'ix_D2_aft', name: '2nd deck · berthing · aft', kind: 'berthing', box: [-18, D2, -104, 18, HGR, -44], passX: 14, sys: 'living' },
+      { id: 'D2', part: 'ix_D2_mess', name: '2nd deck · mess decks · galleys', kind: 'mess', box: [-18, D2, -44, 18, HGR, 38], passX: 14, sys: 'living' },
+      { id: 'AFT', name: 'Steering gear rooms', kind: 'steering', box: [-14, D3, -160, 14, D2, -146], stocks: [[-7, -154.2], [7, -154.2]] },
     ],
   };
   return genericInterior(H, spec);
