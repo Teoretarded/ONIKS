@@ -48,7 +48,7 @@ export async function createBlast(game) {
   // ONIKS.game.blast.cfg.solver
   const DEFAULT_SOLVER = typeof navigator !== 'undefined' && navigator.gpu ? 'shell' : 'lattice';
   const q0 = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('blast') : null;
-  const cfg = { watchDist: 4000, upTexels: 6000, maxDots: 5000, on: q0 !== 'off', gpuMs: 3, gpuMsSlow: 5, gpuMsShell: 6, gpuMsShellSlow: 8, shellS: .25, scatter: .15, latMs: 5,
+  const cfg = { watchDist: 4000, upTexels: 6000, maxDots: 5000, on: q0 !== 'off', gpuMs: 3, gpuMsSlow: 5, gpuMsShell: 6, gpuMsShellSlow: 8, shellS: .25, scatter: .05, latMs: 5,
     solver: q0 === 'shell' || q0 === 'lattice' ? q0 : DEFAULT_SOLVER };
 
   /* ------------------------------------------------------------ the atlas */
@@ -259,16 +259,16 @@ export async function createBlast(game) {
     for (const r of B.rects) {
       if (!r.cpu || k > 1) continue;
       k++;
-      const W = r.nu + 1, A = r.ax === 0 ? F.X : r.ax === 1 ? F.Y : F.Z, reach = A[1] > .7 ? 0 : 3;
+      const W = r.nu + 1, A = r.ax === 0 ? F.X : r.ax === 1 ? F.Y : F.Z, e0 = A[1] > .7 ? 0 : -(B.spec.depth || 4) - .5, e1 = A[1] > .7 ? 0 : 3;
       for (let j = 0; j <= r.nv; j++) for (let i = 0; i <= r.nu; i++) {
-        const t = j * W + i, f = r.cpu[4 * t + 3] | 0;
-        if (!(f & 11) || r.dead[t]) continue;
-        r.dead[t] = 1;
+        const t = j * W + i, f = (r.cpu[4 * t + 3] | 0) & 11;
+        if (!f || r.dead[t] === f) continue;
+        r.dead[t] = f;
         const l = [0, 0, 0]; l[r.ax] = r.val;
         if (r.ax === 0) { l[2] = r.u0 + i * S; l[1] = r.v0 + j * S; } else if (r.ax === 1) { l[0] = r.u0 + i * S; l[2] = r.v0 + j * S; } else { l[0] = r.u0 + i * S; l[1] = r.v0 + j * S; }
-        for (let e = 0; e <= reach; e += 1) {
+        for (let e = e0; e <= e1; e += 1) {
           const x = F.O[0] + F.X[0] * l[0] + F.Y[0] * l[1] + F.Z[0] * l[2] + A[0] * e, z = F.O[2] + F.X[2] * l[0] + F.Y[2] * l[1] + F.Z[2] * l[2] + A[2] * e;
-          cols.add(Math.floor(x) * 65536 + Math.floor(z));
+          for (let a1 = -1; a1 <= 1; a1++) for (let b1 = -1; b1 <= 1; b1++) cols.add((Math.floor(x) + a1) * 65536 + Math.floor(z) + b1);
         }
       }
     }
@@ -312,7 +312,7 @@ export async function createBlast(game) {
       const m = pts.length / 4; vx /= m; vy /= m; vz /= m;
       // (while the solve runs its plating is moving: the piece leaves with it; at the end it just drops)
       let v = running ? [vx / tS, vy / tS, vz / tS] : [0, 0, 0];
-      const sp = Math.hypot(v[0], v[1], v[2]); if (sp > 25) v = v.map(x => x * 25 / sp);
+      const sp = Math.hypot(v[0], v[1], v[2]); if (sp > 14) v = v.map(x => x * 14 / sp);
       if (m < 4) { for (let q = 0; q < pts.length; q += 4) singles.push(pts[q], pts[q + 1], pts[q + 2], v[0], v[1], v[2], pts[q + 3], 0); continue; }
       bodies.clump(B.uid, B, pts, v, .25);
     }
@@ -493,6 +493,9 @@ export async function createBlast(game) {
         // the piece of a broken hull the patch is on (game/structure), else the unit's drawn pose
         const pz = hull && game.structure.poseAt ? game.structure.poseAt(uid, Fr.O[2]) : null;
         let p0;
+        // (a broken hull: each dot rides the piece its own station is on, poses taken a metre of station at a time)
+        const byZ = pz ? new Map() : null;
+        const poseZ = z => { const k = Math.round(z); let q = byZ.get(k); if (q === undefined) { q = game.structure.poseAt(uid, k); byZ.set(k, q); } return q; };
         if (pz) { for (let i = 0; i < 9; i++) M[i] = pz.R[i]; p0 = pz.T; }
         else if (u) { const pose = game.unitPose(u); attitudeM(pose.hdg, pose.pitch || 0, pose.roll || 0, M); p0 = pose.pos; }
         else continue;
@@ -509,7 +512,9 @@ export async function createBlast(game) {
         const fk = B.S && B.S.fire ? B.S.fire.k : 0, heat = heatOf(B, game.t), I = B.inner;
         for (let i = 0; i < B.nIn; i += stride) {
           const o = i * 6, x = I[o], y = I[o + 1], z = I[o + 2], b = I[o + 3], e = I[o + 4], lz = I[o + 5];
-          const wx = p0[0] + M[0] * x + M[1] * y + M[2] * z, wy = p0[1] + M[3] * x + M[4] * y + M[5] * z, wz = p0[2] + M[6] * x + M[7] * y + M[8] * z;
+          let MM = M, pp = p0;
+          if (byZ) { const q = poseZ(z); if (!q) continue; MM = q.R; pp = q.T; }
+          const wx = pp[0] + MM[0] * x + MM[1] * y + MM[2] * z, wy = pp[1] + MM[3] * x + MM[4] * y + MM[5] * z, wz = pp[2] + MM[6] * x + MM[7] * y + MM[8] * z;
           if (wy < .05 && sea) continue;                                    // flooded: under the sea
           const hs = (Math.imul(i + B.seed, 0x9E3779B1) >>> 0) / 4294967296;
           const torn = (e & 1) !== 0, fr = (e & 2) !== 0;
@@ -535,12 +540,12 @@ export async function createBlast(game) {
     if (!sink || !sink.cam || R.pcOff || R.style === 'orbital' || !bodies.list.length) return 0;
     const cam = sink.cam, eye = cam.eye, f = cam.f, fl = cam.fl || 1300;
     const poses = new Map(), M0 = [1, 0, 0, 0, 1, 0, 0, 0, 1];
-    const poseOf = (uid, B) => {
-      const key = uid + ':' + (B ? B.id : 0); let P = poses.get(key); if (P !== undefined) return P;
+    const poseOf = (uid, B, z) => {
+      const key = uid + ':' + Math.round(z / 2); let P = poses.get(key); if (P !== undefined) return P;
       const u = sim.units.get(uid), hull = game.structure && game.structure.draws && game.structure.draws(uid);
       P = null;
       if (hull || (u && game.drawn.has(uid))) {
-        const pz = hull && game.structure.poseAt ? game.structure.poseAt(uid, B ? B.spec.frame.O[2] : 0) : null;
+        const pz = hull && game.structure.poseAt ? game.structure.poseAt(uid, Math.round(z / 2) * 2) : null;
         const M = M0.slice();
         if (pz) { for (let i = 0; i < 9; i++) M[i] = pz.R[i]; P = { M, p: pz.T }; }
         else if (u) { const pose = game.unitPose(u); attitudeM(pose.hdg, pose.pitch || 0, pose.roll || 0, M); P = { M, p: pose.pos }; }
@@ -551,7 +556,7 @@ export async function createBlast(game) {
     const n = bodies.count(), stride = Math.max(1, Math.ceil(n / Math.max(300, cfg.maxDots * .4)));
     let drawn = 0;
     bodies.each((uid, B, x, y, z, b, heat, fade, i) => {
-      const P = poseOf(uid, B); if (!P) return;
+      const P = poseOf(uid, B, z); if (!P) return;
       const M = P.M, p0 = P.p;
       const wx = p0[0] + M[0] * x + M[1] * y + M[2] * z, wy = p0[1] + M[3] * x + M[4] * y + M[5] * z, wz = p0[2] + M[6] * x + M[7] * y + M[8] * z;
       const hs = (Math.imul(i + 7, 0x9E3779B1) >>> 0) / 4294967296, g = heat * (.6 + .4 * hs), bb = b * (.8 + .4 * hs);

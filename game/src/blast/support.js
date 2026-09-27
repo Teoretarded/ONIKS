@@ -30,6 +30,9 @@ export function modelDots(ent) {
     let best = null;
     for (const c of cands) { const k = c.sp < .18 ? 1e3 + (1 / c.sp) : Math.abs(Math.log((c.sp || .3) / .3)); if (!best || k < best.k) best = { c, k }; }
     let X = null; try { X = P.part.xf ? P.part.xf({}) : null; } catch (e) { X = null; }
+    // (a moving part whose rest transform cannot be had is left out: its dots would sit at the model's origin)
+    if (X && !(X.R.every(Number.isFinite) && X.T.every(Number.isFinite))) return;
+    if (P.dyn && P.part.xf && !X) return;
     let shown = true; try { shown = !P.part.show || !!P.part.show({}); } catch (e) { shown = true; }
     if (!shown) return;
     use.push([best.c, X, pi]); n += best.c.n;
@@ -155,11 +158,17 @@ export function createBodies() {
   };
   function stepDots(b, h, floorAt) {
     const P = b.P, st = b.st, kd = Math.exp(-.6 * h);
+    // (what rests is looked at again now and then: the surface under it may have gone since)
+    b.chk = (b.chk || 0) + h; const recheck = b.chk > .4; if (recheck) b.chk = 0;
     let live = 0;
     for (let i = 0; i < b.n; i++) {
       if (st[i] === 2) continue;
       const o = 7 * i;
-      if (st[i] === 1) { live++; continue; }                       // at rest on a surface
+      if (st[i] === 1) {                                           // at rest on a surface
+        live++;
+        if (recheck) { const f = floorAt(b.uid, P[o], P[o + 1] + .05, P[o + 2]); if (!f.wall && P[o + 1] - f.y > .25) st[i] = 0; }
+        continue;
+      }
       live++;
       const px = P[o], py = P[o + 1], pz = P[o + 2];
       let vx = P[o + 3] * kd, vy = P[o + 4] * kd - G * h, vz = P[o + 5] * kd;
@@ -180,7 +189,14 @@ export function createBodies() {
   const tmp = [0, 0, 0];
   const rot = (R, x, y, z, o) => { o[0] = R[0] * x + R[1] * y + R[2] * z; o[1] = R[3] * x + R[4] * y + R[5] * z; o[2] = R[6] * x + R[7] * y + R[8] * z; return o; };
   function stepClump(b, h, floorAt) {
-    if (b.rest) { b.still += h; return; }
+    if (b.rest) {
+      b.still += h;
+      if (b.still > .4) { b.still = 0; let gap = 1e9;
+        for (let q = 0; q < b.low.length; q++) { const i = b.low[q]; rot(b.R, b.rel[4 * i], b.rel[4 * i + 1], b.rel[4 * i + 2], tmp);
+          const f = floorAt(b.uid, b.p[0] + tmp[0], b.p[1] + tmp[1] + .05, b.p[2] + tmp[2]); if (!f.wall && f.y > -1e8) gap = Math.min(gap, b.p[1] + tmp[1] - f.y); }
+        if (gap > .25) b.rest = false; }
+      return;
+    }
     const kd = Math.exp(-.3 * h);
     const p0 = b.p.slice();
     b.v[0] *= kd; b.v[2] *= kd; b.v[1] = b.v[1] * kd - G * h;
@@ -195,13 +211,13 @@ export function createBodies() {
       b.R = N;
     }
     // contacts: the lowest point against the surface under it (walls: back where it was, the push reflected)
-    let pen = -1e9, sea = true, wall = false;
+    let pen = -1e9, sea = true, wall = false, cx = 0, cz = 0;
     for (let q = 0; q < b.low.length; q++) {
       const i = b.low[q]; rot(b.R, b.rel[4 * i], b.rel[4 * i + 1], b.rel[4 * i + 2], tmp);
       const x = b.p[0] + tmp[0], y = b.p[1] + tmp[1], z = b.p[2] + tmp[2];
       const f = floorAt(b.uid, x, y - b.v[1] * h, z);
       if (f.wall) { wall = true; continue; }
-      if (f.y > -1e8) { sea = false; if (f.y - y > pen) pen = f.y - y; }
+      if (f.y > -1e8) { sea = false; if (f.y - y > pen) { pen = f.y - y; cx = x; cz = z; } }
     }
     if (wall) { b.p[0] = p0[0]; b.p[2] = p0[2]; b.v[0] *= -.25; b.v[2] *= -.25; }
     if (sea) {
@@ -210,7 +226,11 @@ export function createBodies() {
       b.p[1] += pen;
       if (b.v[1] < -2) { b.v[1] = -b.v[1] * .12; b.v[0] *= .5; b.v[2] *= .5; b.w = b.w.map(x => x * .5); }
       else { b.v[1] = Math.max(0, b.v[1]); b.v[0] *= .6; b.v[2] *= .6; b.w = b.w.map(x => x * .5); }
-      if (Math.hypot(b.v[0], b.v[1], b.v[2]) < .35 && Math.hypot(...b.w) < .25) { b.rest = true; b.v = [0, 0, 0]; b.w = [0, 0, 0]; }
+      // at rest only if its middle is over a surface near its foot (else it tips off the edge it caught)
+      const fc = floorAt(b.uid, b.p[0], b.p[1], b.p[2]), foot = b.p[1] - pen;
+      const over = !fc.wall && fc.y > -1e8 && fc.y > foot - 1.2;
+      if (!over) { const dx = b.p[0] - cx, dz = b.p[2] - cz, l = Math.hypot(dx, dz) || 1; b.v[0] += dx / l * 3 * h * 10; b.v[2] += dz / l * 3 * h * 10; }
+      else if (Math.hypot(b.v[0], b.v[1], b.v[2]) < .35 && Math.hypot(...b.w) < .25) { b.rest = true; b.v = [0, 0, 0]; b.w = [0, 0, 0]; }
     }
   }
   /* each dot of every body in the model frame: cb(uid, B, x, y, z, brightness, heat, fade) */
