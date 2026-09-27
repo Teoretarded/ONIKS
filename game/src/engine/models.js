@@ -648,6 +648,13 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
           // (torn: the smooth ragged outline, as the plating's own; the nearest texel's flag would cut 0.25 m steps)
           // (the plating under its foot thrown more than 1.5 m: it tears off and falls as a piece, the blast system flies it)
           if (torn || (fN & 10) != 0 || dot(dlb, dlb) > 0.64) return 1;
+          // (the deck under its foot bent steeper than ~25 deg: its base could not take that, it tore off (flown as a
+          // piece); bent less, it rides the bend but its base buckles and shears harder the steeper the bend (QA D23))
+          { float su = mix(t10[ax] - t00[ax], t11[ax] - t01[ax], fy) / S, sv = mix(t01[ax] - t00[ax], t11[ax] - t10[ax], fx) / S, sl = length(vec2(su, sv));
+            if (sl > 0.47) return 1;
+            float kb = clamp((sl - 0.12) / 0.35, 0.0, 1.0) * clamp(1.0 - off / 2.5, 0.0, 1.0);
+            if (kb > 0.0) { vec3 bq = floor(l * 2.5); float b1 = wreckHash(bq + vec3(3.0, 1.0, 9.0)) - 0.5, b2 = wreckHash(bq + vec3(11.0, 4.0, 2.0)) - 0.5;
+              p += (X * b1 + Z * b2) * 0.35 * kb - A * 0.25 * kb * off; burn = max(burn, 0.8 * kb); if (!two) tilt += (X * b2 - Z * b1) * 1.4 * kb; } }
           p += X * dlb.x + Y * dlb.y + Z * dlb.z;
           // (a structure riding a deck bent more than ~0.2 m: its lowest 1.5 m buckled and scorched, as the deck that
           // carried it into the bend; the rest follows as a whole)
