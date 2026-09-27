@@ -717,7 +717,7 @@ export async function createBlast(game) {
     let lightModel = sun;
     for (const b of bodies.list) { const u = sim.units.get(b.uid); if (u) { const pose = game.unitPose(u), M = [1, 0, 0, 0, 1, 0, 0, 0, 1]; attitudeM(pose.hdg, pose.pitch || 0, pose.roll || 0, M);
       lightModel = [M[0] * sun[0] + M[3] * sun[1] + M[6] * sun[2], M[1] * sun[0] + M[4] * sun[1] + M[7] * sun[2], M[2] * sun[0] + M[5] * sun[1] + M[8] * sun[2]]; break; } }
-    let drawn = 0;
+    let drawn = 0, fillLeft = 4000;
     bodies.each((uid, B, x, y, z, b, heat, fade, i) => {
       const P = poseOf(uid, B, z); if (!P) return;
       const M = P.M, p0 = P.p;
@@ -729,7 +729,7 @@ export async function createBlast(game) {
       drawn++;
       // (close up a piece's dots (~0.3 m apart) are filled in round each one, so it reads as a solid torn piece and not
       // a scatter of specks: up to 8 more a dot, within 0.15 m, a little darker)
-      const extra = Math.min(8, Math.floor((.3 * P.pxm / 2.2) ** 2) - 1);
+      const extra = fillLeft > 0 ? Math.min(6, Math.floor((.3 * P.pxm / 2.6) ** 2) - 1, fillLeft) : 0; if (extra > 0) fillLeft -= extra;   // (a budget of 4000 a frame)
       for (let e = 0; e < extra; e++) { const h1 = (Math.imul(i * 9 + e + 11, 0x9E3779B1) >>> 0) / 4294967296 - .5, h2 = (Math.imul(i * 9 + e + 29, 0x85EBCA77) >>> 0) / 4294967296 - .5, h3 = (Math.imul(i * 9 + e + 47, 0xC2B2AE35) >>> 0) / 4294967296 - .5;
         const k2 = .82 + .3 * h3; sink.dot(wx + .3 * h1, wy + .3 * h3 * .5, wz + .3 * h2, size, cr * k2, cg * k2, cb * k2, fade); drawn++; }
     }, stride, lightModel);

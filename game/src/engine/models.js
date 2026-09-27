@@ -628,6 +628,11 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
           // (the plating under its foot thrown more than 1.5 m: it tears off and falls as a piece, the blast system flies it)
           if (torn || (fN & 10) != 0 || dot(dlb, dlb) > 2.25) return 1;
           p += X * dlb.x + Y * dlb.y + Z * dlb.z;
+          // (a structure riding a deck bent more than ~0.2 m: its lowest 1.5 m buckled and scorched, as the deck that
+          // carried it into the bend; the rest follows as a whole)
+          { float dm = length(dlb), hb = clamp(1.0 - off / 1.5, 0.0, 1.0) * clamp((dm - 0.2) / 0.6, 0.0, 1.0);
+            if (hb > 0.0) { vec3 bq = floor(l * 3.0); float b1 = wreckHash(bq) - 0.5, b2 = wreckHash(bq + vec3(7.0, 3.0, 5.0)) - 0.5;
+              p += (X * b1 + Z * b2) * 0.18 * hb; burn = max(burn, 0.7 * hb); if (!two) tilt += (X * b2 - Z * b1) * 0.8 * hb; } }
           // (its underside, seen only from inside through a hole in the deck: the ceiling there)
           if (!two && dot(n, A) < -0.5) gHole = max(gHole, 0.6);
           break;
