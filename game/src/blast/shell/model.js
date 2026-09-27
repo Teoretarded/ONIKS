@@ -920,7 +920,7 @@ export function attachedNodes(M, U) {
   for (let k = 0; k < M.NT; k++) { if (M.TFL[k]) continue; const a = M.TA[k], b = M.TB[k];
     if (U) { const d = Math.hypot(R0[3 * a] + U[3 * a] - R0[3 * b] - U[3 * b], R0[3 * a + 1] + U[3 * a + 1] - R0[3 * b + 1] - U[3 * b + 1], R0[3 * a + 2] + U[3 * a + 2] - R0[3 * b + 2] - U[3 * b + 2]); if (d > 1.5 * M.TL0[k]) continue; }
     un(a, b); }
-  const root = new Uint8Array(N); for (let i = 0; i < N; i++) if (M.AK[i] > 0 || M.WINV[i] === 0) root[fd(i)] = 1;
+  const root = new Uint8Array(N); for (let i = 0; i < N; i++) if (M.AK[i] > 0 || (M.WINV[i] === 0 && !(M.PARENT && M.PARENT[i] >= 0))) root[fd(i)] = 1;
   const a = new Uint8Array(N); for (let i = 0; i < N; i++) a[i] = root[fd(i)];
   return a;
 }
@@ -949,6 +949,48 @@ export function checkEnd(M) {
   if (s.relax && (v2 < .25 || s.t - s.tRelax > .025)) s.T1 = s.t;
   s.vmax = Math.sqrt(v2);
 }
+/* ---- petals (bench 39106f7 / 03813d8, st.petals): a tear runs along cell edges instead of eroding cells. Every node
+   inside a plate (not a junction, not anchored) gets an idle twin; the WebGPU solver splits a node along a crack line
+   (the cells beyond go to the twin, with their share of the mass) when a cell at its limit asks for a crack along one
+   of its edges. The CPU keeps the mesh: buildTwins before the upload, applyGpuSplits from the crack normals read back
+   at the end (the skins then draw each cell from its own corners: the flaps). */
+export function buildTwins(M) {
+  const N0 = M.N, NC = M.NC, NH = M.NH, CN = M.CN, pan = new Int32Array(N0).fill(-2), ncell = new Int32Array(N0);
+  for (let c = 0; c < NC; c++) for (let k = 0; k < 4; k++) { const i = CN[4 * c + k]; ncell[i]++; pan[i] = pan[i] === -2 ? M.CPAN[c] : pan[i] === M.CPAN[c] ? pan[i] : -1; }
+  for (let h = 0; h < NH; h++) if (!M.HSAME[h]) { pan[M.HN[6 * h]] = -1; pan[M.HN[6 * h + 1]] = -1; }
+  const tw = new Int32Array(N0).fill(-1); let nt = 0;
+  for (let i = 0; i < N0; i++) if (pan[i] >= 0 && ncell[i] >= 2 && M.AK[i] === 0 && M.WINV[i] > 0) tw[i] = N0 + nt++;
+  if (!nt) return 0;
+  const N1 = N0 + nt, grow = (A, k, fill) => { const B = new A.constructor(k * N1); B.set(A); if (fill !== undefined) B.fill(fill, k * N0); return B; };
+  M.X = grow(M.X, 3); M.R0 = grow(M.R0, 3); M.V = grow(M.V, 3); M.M = grow(M.M, 1); M.WINV = grow(M.WINV, 1); M.FREE = grow(M.FREE, 1);
+  M.AK = grow(M.AK, 1); M.AF = grow(M.AF, 1); M.AC = grow(M.AC, 1); M.NKIND = grow(M.NKIND, 1); M.NFRM = grow(M.NFRM, 1); M.NCON = grow(M.NCON, 1);
+  M.TBRK = grow(M.TBRK, 1, -1); M.NCC = grow(M.NCC, 4, -1);
+  const PARENT = M.PARENT = new Int32Array(N1).fill(-1), R0 = M.R0, X = M.X;
+  for (let i = 0; i < N0; i++) if (tw[i] >= 0) { const T = tw[i]; PARENT[T] = i; for (let q = 0; q < 3; q++) X[3 * T + q] = R0[3 * T + q] = R0[3 * i + q];
+    M.NKIND[T] = M.NKIND[i]; M.NFRM[T] = M.NFRM[i]; for (let q = 0; q < 4; q++) M.NCC[4 * T + q] = M.NCC[4 * i + q]; }
+  M.NCL = Array.from({ length: N0 }, () => []); for (let c = 0; c < NC; c++) for (let k = 0; k < 4; k++) M.NCL[CN[4 * c + k]].push(4 * c + k);
+  M.HNL = Array.from({ length: N0 }, () => []); for (let h = 0; h < NH; h++) for (let z = 0; z < 6; z++) M.HNL[M.HN[6 * h + z]].push(6 * h + z);
+  M.TWIN = tw; M.SPL = new Uint8Array(N0); M.CN0 = CN.slice(); M.HOFF = new Uint8Array(NH); M.N = N1;
+  return nt;
+}
+/* a WebGPU run's splits (its crack normals CRK, x y z w: w > 0 split): the same corner and hinge rewrite on the CPU mesh */
+export function applyGpuSplits(M, CRK) {
+  if (!M.TWIN || !CRK) return 0; let n = 0;
+  const R0 = M.R0, CRC = M.CRC, CN = M.CN, HN = M.HN, HC = M.HC;
+  for (let p = 0; p < M.TWIN.length; p++) {
+    if (M.TWIN[p] < 0 || M.SPL[p] || !(CRK[4 * p + 3] > 0)) continue;
+    const T = M.TWIN[p], nx = CRK[4 * p], ny = CRK[4 * p + 1], nz = CRK[4 * p + 2];
+    const side = c => (CRC[3 * c] - R0[3 * p]) * nx + (CRC[3 * c + 1] - R0[3 * p + 1]) * ny + (CRC[3 * c + 2] - R0[3 * p + 2]) * nz > 0;
+    let nA = 0, nB = 0; for (const e of M.NCL[p]) { if (side(e >> 2)) nB++; else nA++; }
+    if (!nA || !nB) continue;
+    M.SPL[p] = 1; n++;
+    for (const e of M.NCL[p]) if (side(e >> 2)) CN[e] = T;
+    for (const e of M.HNL[p]) { const h = (e / 6) | 0, z = e - 6 * h, c1 = HC[2 * h], c2 = HC[2 * h + 1];
+      if (z < 2) { if (side(c1) !== side(c2)) M.HOFF[h] = 1; else if (side(c1)) HN[e] = T; }
+      else if (side(z < 4 ? c1 : c2)) HN[e] = T; }
+  }
+  return n;
+}
 /* (bench 03813d8) plating hanging on by corner nodes only (cells meeting another piece at a corner: a pin of zero width
    it swings on, tearing what it hits) is let go: its cells erode as a piece torn off would. -> cells released (CFD = 1) */
 export function detachPinned(M) {
@@ -957,10 +999,10 @@ export function detachPinned(M) {
   for (let c = 0; c < NC; c++) par[c] = c;
   const fd = c => { while (par[c] !== c) { par[c] = par[par[c]]; c = par[c]; } return c; };
   const ok = c => M.CKN[c] !== 1 && !M.CER[c] && M.CFD[c] < 1;
-  for (let h = 0; h < M.NH; h++) { const a = M.HC[2 * h], b = M.HC[2 * h + 1]; if (ok(a) && ok(b)) { const ra = fd(a), rb = fd(b); if (ra !== rb) par[ra] = rb; } }
+  for (let h = 0; h < M.NH; h++) { const a = M.HC[2 * h], b = M.HC[2 * h + 1]; if (!(M.HOFF && M.HOFF[h]) && ok(a) && ok(b)) { const ra = fd(a), rb = fd(b); if (ra !== rb) par[ra] = rb; } }
   const root = new Uint8Array(NC), comps = new Map();
   for (let c = 0; c < NC; c++) { if (!ok(c)) continue; const r = fd(c);
-    for (let k = 0; k < 4; k++) { const i = M.CN[4 * c + k]; if (M.AK[i] > 0 || M.WINV[i] === 0) root[r] = 1;
+    for (let k = 0; k < 4; k++) { const i = M.CN[4 * c + k]; if (M.AK[i] > 0 || (M.WINV[i] === 0 && !(M.PARENT && M.PARENT[i] >= 0))) root[r] = 1;
       let l = comps.get(i); if (!l) comps.set(i, l = []); if (!l.includes(r)) l.push(r); } }
   const adj = new Map(); for (const l of comps.values()) if (l.length > 1) for (const x of l) for (const y of l) if (x !== y) { let a = adj.get(x); if (!a) adj.set(x, a = new Set()); a.add(y); }
   const pinned = new Uint8Array(NC), seen = new Uint8Array(NC), q = [];
@@ -1000,5 +1042,6 @@ export function gpuModel(M) {
     HN: M.HN, HC: M.HC, HKP: M.HKP, HMP: M.HMP, HKS: M.HKS, HMS: M.HMS, HT0: M.HT0, HDB: M.HDB, HTR: M.HTR, HHP: M.HHP, HMAT: M.HMAT, HLN: M.HLN, HTL0: M.HTL0, TBA: M.TBA, TBB: M.TBB, TSC: M.TSC, TCL: M.TCL, TCL2: M.TCL2, TQN: M.TQN, TPRV: M.TPRV, TNXT: M.TNXT,
     TKB: M.TKB, TQB: M.TQB, TB0: M.TB0, TKS: M.TKS, TQS: M.TQS, TS0: M.TS0, TMM: M.TMM, TKC: M.TKC, CKC: M.CKC, KCE: KC_EPS, JMN: JMIN, NLH: M.NLH, NLE: M.NLE,
     TA: M.TA, TB: M.TB, TL0: M.TL0, TAR: M.TAR, TMAT: M.TMAT, TEF: M.TEF, TFIB: M.TFIB, THG: M.THG, NCC: M.NCC, PAN: M.PAN, CMAP: M.CMAP, MATS, TA1, S: M.S,
-    OUT: () => M.scene.OUT, csf, nspace: () => M.GV.length, BETA: () => M.BETA, U_MAX, RHO_W, C_W, P0, G, K_SHEAR, UP: M.up };
+    OUT: () => M.scene.OUT, csf, nspace: () => M.GV.length, BETA: () => M.BETA, U_MAX, RHO_W, C_W, P0, G, K_SHEAR, UP: M.up,
+    PAR: M.TWIN ? M.PARENT : null, TWIN: M.TWIN, C: M.sim ? M.sim.C : null, PETK: 1.5, PRAD: true, PKEEP: true };
 }

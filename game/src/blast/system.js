@@ -49,7 +49,7 @@ export async function createBlast(game) {
   // ONIKS.game.blast.cfg.solver
   const DEFAULT_SOLVER = typeof navigator !== 'undefined' && navigator.gpu ? 'shell' : 'lattice';
   const q0 = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('blast') : null;
-  const cfg = { watchDist: 4000, upTexels: 6000, maxDots: 5000, on: q0 !== 'off', gpuMs: 3, gpuMsSlow: 5, gpuMsShell: 6, gpuMsShellSlow: 8, detachMs: 1.5, shellS: .25, scatter: .05, latMs: 5, fastEnd: true,
+  const cfg = { watchDist: 4000, upTexels: 6000, maxDots: 5000, on: q0 !== 'off', gpuMs: 3, gpuMsSlow: 5, gpuMsShell: 6, gpuMsShellSlow: 8, detachMs: 1.5, shellS: .25, scatter: .05, latMs: 5, fastEnd: true, petals: false,
     solver: q0 === 'shell' || q0 === 'lattice' ? q0 : DEFAULT_SOLVER };
 
   /* ------------------------------------------------------------ the atlas */
@@ -137,7 +137,7 @@ export async function createBlast(game) {
     // (the steel's scatter seeded by the impact's geometry: the same hit on the same class tears the same way)
     // (a ship with an interior (data/models_interior.js) shows it through the hole: no dark far wall in the pocket)
     spec.farWall = !Object.keys(interiorZones(u.def.model, [0, 0, 0], 1e4)).length;
-    if (spec.solver === 'shell') { spec.fastEnd = cfg.fastEnd; spec.latMs = cfg.latMs; spec.scatter = cfg.scatter; let h = 2166136261; for (const v of [...String(u.type)].map(c => c.charCodeAt(0)).concat(spec.frame.O.map(x => Math.round(x * 4)), spec.charge.C.map(x => Math.round(x * 4)))) h = Math.imul(h ^ (v & 0xffff), 16777619); spec.seed = h | 0; }
+    if (spec.solver === 'shell') { spec.petals = !!cfg.petals; spec.fastEnd = cfg.fastEnd; spec.latMs = cfg.latMs; spec.scatter = cfg.scatter; let h = 2166136261; for (const v of [...String(u.type)].map(c => c.charCodeAt(0)).concat(spec.frame.O.map(x => Math.round(x * 4)), spec.charge.C.map(x => Math.round(x * 4)))) h = Math.imul(h ^ (v & 0xffff), 16777619); spec.seed = h | 0; }
     const B = { id, uid: u.id, S, spec, meta, t0: sim.t, state: 'wait', rects: [], inner: null, nIn: 0, tShow: 0, tSolve: 0, tearT: -1, final: null, res: null,
       depth: spec.depth || 4, heat: 0, lastT: -1, lastW: null, seed: (u.id * 131 + id * 7) % 997, info: null, ej: false };
     patches.set(id, B);

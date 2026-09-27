@@ -8,7 +8,7 @@
    (a fence polled or a buffer read is a round trip to Chrome's GPU process, busy with the game's frames). A check run
    (spec.syncReads, WebGL2) reads blocking every sync, as the bench's headless runCase. The snapshots and results are the
    same shape as the lattice runner's (skins in each plate's grid order, through the cell map). */
-import { sceneOf, buildShell, loadShell, commonSync, checkEnd, markDebris, openCell, gpuModel, attachedCell, detachPinned, looseCells, MATS } from './model.js';
+import { sceneOf, buildShell, loadShell, commonSync, checkEnd, markDebris, openCell, gpuModel, attachedCell, detachPinned, looseCells, buildTwins, applyGpuSplits, MATS } from './model.js';
 import { createGPU } from './gpu.js';
 import { createWGPU } from './gpu_wgpu.js';
 
@@ -24,6 +24,8 @@ export function createShellRunner(gl, o = {}) {
     const t0 = now();
     const S = spec.shellS || .25, scene = sceneOf(spec, S), M = buildShell(scene, S);
     M.fastEnd = !!spec.fastEnd;
+    // (petals: idle twin nodes, split on the GPU where a crack runs; WebGPU only)
+    if (spec.petals && o.wg) M.nTwins = buildTwins(M);
     const ch = spec.charge;
     loadShell(M, { C: ch.C, fill: ch.fill !== undefined ? ch.fill : ch.W, Mc: ch.Mc || 0, mf: ch.mf || .03, Wgas: ch.Wgas || 0, vapour: ch.vapour || 0, frags: ch.frags !== false });
     const R = { id, M, spec, gpu: null, state: 'queued', target: 0, watch: spec.watch !== false, lastSnapT: -1, lastSnapMs: 0, tReal0: now(), buildMs: now() - t0, runMs: 0, steps: 0 };
@@ -132,7 +134,9 @@ export function createShellRunner(gl, o = {}) {
   async function finishWG(R) {
     const M = R.M, g = R.gpu;
     try {
-      await g.readStateAsync({ CEP: M.CEP, CDM: M.CDM, TFL: M.TFL, HTP: M.HTP, HTH: M.HTH, HTPS: M.HTPS, TBP: M.TBP });
+      const st = { CEP: M.CEP, CDM: M.CDM, TFL: M.TFL, HTP: M.HTP, HTH: M.HTH, HTPS: M.HTPS, TBP: M.TBP };
+      await g.readStateAsync(st);
+      if (st.CRK) M.nSplit = applyGpuSplits(M, st.CRK);
       if (g.flush) await g.flush();
       if (R.state !== 'finishing') return;
       g.readNodes(true, M.X, M.V, M.FREE);
@@ -234,7 +238,11 @@ export function createShellRunner(gl, o = {}) {
       const skGone = i => final ? gone(i) : 0;
       for (let j = 0; j <= nv; j++) for (let i = 0; i <= nu; i++) {
         const k = j * (nu + 1) + i, o = 4 * k, ic = mp.iu[i], jc = mp.jv[j], fx = mp.fx[i], fy = mp.fy[j];
-        const k00 = jc * Wn + ic, n00 = L.at[k00], n10 = L.at[k00 + 1], n01 = L.at[k00 + Wn], n11 = L.at[k00 + Wn + 1];
+        const k00 = jc * Wn + ic;
+        let n00 = L.at[k00], n10 = L.at[k00 + 1], n01 = L.at[k00 + Wn], n11 = L.at[k00 + Wn + 1];
+        // (petals: a split node's cells beyond the crack are on its twin: each texel drawn from its own cell's corners)
+        if (M.CN0 && M.nSplit) { const cc = CM[L.off + mp.cjv[Math.min(j, nv - 1)] * L.nu + mp.ciu[Math.min(i, nu - 1)]];
+          if (cc >= 0) { const ef = n => { for (let k = 0; k < 4; k++) if (M.CN0[4 * cc + k] === n) return M.CN[4 * cc + k]; return n; }; n00 = ef(n00); n10 = ef(n10); n01 = ef(n01); n11 = ef(n11); } }
         const w00 = (1 - fx) * (1 - fy), w10 = fx * (1 - fy), w01 = (1 - fx) * fy, w11 = fx * fy, eb = mp.eu[i] * mp.ev[j];
         for (let q = 0; q < 3; q++) d[o + q] = eb * ((X[3 * n00 + q] - R0[3 * n00 + q]) * w00 + (X[3 * n10 + q] - R0[3 * n10 + q]) * w10 + (X[3 * n01 + q] - R0[3 * n01 + q]) * w01 + (X[3 * n11 + q] - R0[3 * n11 + q]) * w11);
         const nn = fx < .5 ? (fy < .5 ? n00 : n01) : (fy < .5 ? n10 : n11), kn = fx < .5 ? (fy < .5 ? k00 : k00 + Wn) : (fy < .5 ? k00 + 1 : k00 + Wn + 1);
