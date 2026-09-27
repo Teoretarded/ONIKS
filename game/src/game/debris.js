@@ -829,6 +829,9 @@ export async function createDebris(game) {
       if (!names.length) continue;
       const box = boxOf(ent, names, st);
       if (!box) continue;
+      // (a part standing over a solved blast patch: the blast system tears it off as crumpled pieces; it is not thrown
+      // again whole, as a clean box (QA D45))
+      if (game.blast && game.blast.list && game.blast.list(u.id).some(B => { const F = B.spec.frame, R2 = (B.spec.Rp || 6) + 6, c = box.c; return c && Math.hypot(c[0] - F.O[0], c[2] - F.O[2]) < R2; })) continue;
       const plate = isPlate(box.ext);
       const ext = plate ? thicken(box.ext) : box.ext;
       const m = massOf(ext, false, md.rho || 200, 40, false);
