@@ -3081,4 +3081,16 @@ for (const k of Object.keys(DETAIL.cuts)) {
 }
 Object.assign(E2D, DETAIL.E2D);
 
+/* ================================================================ INTERIORS (data/models_interior.js)
+   Watertight bulkheads and doors, decks, the inner bottom, passages and the main spaces' contents for the DDG (on
+   game/concepts/blast/burke_structure.js), CG, CVN, LHD and LCS: appended to the unit models and the cutaways as
+   inside parts (show = st.xray || st.interior, per watertight zone). INTERIOR.ZONES / COMPS / anatomy / zonesNear. */
+import { installInterior } from './models_interior.js';
+export const INTERIOR = installInterior({
+  CUT0: O(CUT_MODELS), MRGS, mrg, lm2500, GTS, gtXf, ddTrunks, ddShafts, vlsBlock, CG: U3.CG, LHD: LHDM.LHD,
+});
+for (const [k, w] of Object.entries(INTERIOR.wrap)) for (const tab of [UNIT_MODELS, EXTRA_MODELS, CUT_MODELS, ALL_MODELS]) {
+  const f = tab[k]; if (f) tab[k] = () => w(f());
+}
+
 export default EXTRA_MODELS;

@@ -28,7 +28,7 @@
    Helpers: explodeK(w0, e), entryOf(key, part), partOffset(key, part, e), xrayOf(key, st),
    anchorOf(model, entry, st), boundsOf(key, model, st, e), fitView(key, model, st, e, fovY),
    validateAnatomy(key, model). */
-import { TRANSLOADER, DEPOT_SLOTS, DDG, PANTSIR, SUBS, BAL } from './models.js';
+import { TRANSLOADER, DEPOT_SLOTS, DDG, PANTSIR, SUBS, BAL, CUT_MODELS, INTERIOR } from './models.js';
 import { LHD_ANATOMY } from './models_lhd.js';
 import { AMPHIB_ANATOMY } from './models_amphib.js';
 import { UNITS3_ANATOMY } from './models_units3.js';
@@ -720,6 +720,18 @@ ANATOMY.tomahawk = ANATOMY.strike_missile; ANATOMY.sam57e6 = ANATOMY.pantsir_mis
 /* the amphibious units and the third wave: their entries live beside their models (models_lhd.js, models_amphib.js,
    models_units3.js) */
 Object.assign(ANATOMY, LHD_ANATOMY, AMPHIB_ANATOMY, UNITS3_ANATOMY);
+
+/* ship interiors (data/models_interior.js): the cutaways' watertight structure and spaces, grouped by system (bulkheads
+   and decks, machinery, magazines, living spaces, tanks, stores, control). Appended on first read of parts (building
+   a cutaway is not free) */
+for (const k of ['destroyer', 'carrier', 'cg', 'lcs', 'lhd']) {
+  const A = ANATOMY[k];
+  if (!A || !A.model || !CUT_MODELS[A.model] || !INTERIOR) continue;
+  const own = A.parts;
+  let all = null;
+  Object.defineProperty(A, 'parts', { configurable: true, enumerable: true,
+    get() { return all || (all = own.concat(INTERIOR.anatomy(k, CUT_MODELS[A.model]().parts))); } });
+}
 
 /* the transloader's TLC frames (parts tlcR / tlcL / tlcHook), as its model defines them */
 function tlcXfOf(part, st) {
