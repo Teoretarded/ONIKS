@@ -119,6 +119,13 @@ FIXED? confirmed: D3, D17, D22, D42 PASS; D23, D47 reopened. D25 and D14 cases a
 than the sim: ddg_mid 69 / 8.2, ddg_fdeck 125 / 43, ddg_stern 84 / 48) is the main mismatch left.
 
 
+- WebGPU pipelines cached (implementer): patch sizes / offsets moved from baked WGSL constants to a uniform (binding
+  7), pipelines cached by source per device. shell/check.js on the bench box, WebGPU, before / after: contact 2.00 /
+  0 / 0.13 m2 (side / weather deck / decks), set 259 mm, 7250 steps, both; inside 0 / 0.06 / 244.45 / 104.19 m2, set
+  239 mm, 8650 steps, both (identical). First submit done after pipeline set-up: 416-426 ms for a new variant (a
+  deck, a side), 35 ms for a later hit of a known variant (was ~400 ms every hit). Battery qa77: 31/31 qa.js ok,
+  resolve 1.05-4.7 s (cg_deck 4.7: its magazine cook-off on the first run after a load), solve p95 12.1-26.4 ms.
+
 - cg_deck first-hit (implementer): the 4.5-5 s "cold" runs are not a class warm-up. Instrumented (blast.hit / cook
   wrapped): the first cg_deck after a page load gets the hit (W 120) and the sim's forward magazine cook-off (magF,
   W 90) at the same moment, two patches solving at once (wall 6.5-6.9 s); the same case again in the page (the sim's

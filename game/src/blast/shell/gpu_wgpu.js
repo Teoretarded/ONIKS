@@ -26,6 +26,24 @@ export async function initWebGPU() {
 }
 
 const WGS = 64;
+/* the patch's sizes and buffer offsets are read at run time from a small uniform (binding 7), not baked into the
+   WGSL: the shaders' text depends only on the few feature switches (petals, up axis...), so a hit reuses the
+   pipelines compiled for an earlier one (compiling them took ~0.4 s a patch before its first steps; game change) */
+const FEAT = ['PETALS', 'PRAD', 'PKEEP', 'UPAX'];
+const dynOf = c => Object.keys(c).filter(k => !FEAT.includes(k)).sort();
+const CDEF = (c) => {
+  const dyn = dynOf(c);
+  return `struct Szs { v: array<vec4i, 10> }
+@group(0) @binding(7) var<uniform> SZ: Szs;
+${FEAT.map(k => `const ${k}: i32 = ${c[k] | 0};`).join('\n')}
+${dyn.map(k => `var<private> ${k}: i32;`).join('\n')}
+fn initSz() {
+${dyn.map((k, i) => `  ${k} = SZ.v[${i >> 2}][${i & 3}];`).join('\n')}
+}`;
+};
+const szData = (c) => { const dyn = dynOf(c), a = new Int32Array(40); if (dyn.length > 40) throw new Error('blast: too many sizes'); dyn.forEach((k, i) => { a[i] = c[k] | 0; }); return a; };
+// (per device: one bind group layout and the compiled pipelines by their source)
+const PCACHE = new WeakMap();
 const HEAD = (c) => `
 struct Kc { matA: array<vec4f, 8>, matB: array<vec4f, 8>, matC: array<vec4f, 8>, s0: vec4f, s1: vec4f, s2: vec4f, s3: vec4f }
 struct Pp { t: f32, h: f32, alpha: f32, nimp: u32, par: u32, q0: u32, q1: u32, q2: u32 }
@@ -35,7 +53,7 @@ struct Ll { gp: array<vec4f, 32>, s0: array<vec4f, 32>, s1: array<vec4f, 32>, s2
 @group(0) @binding(3) var<uniform> KC: Kc;
 @group(0) @binding(4) var<uniform> PP: Pp;
 @group(0) @binding(5) var<uniform> LL: Ll;
-${Object.entries(c).map(([k, v]) => `const ${k}: i32 = ${v};`).join('\n')}
+${CDEF(c)}
 fn ndB(h: u32) -> i32 { return O_ND + i32(h) * 3 * N; }
 fn UU(i: i32) -> vec3f { return DY[ndB(PP.par) + i].xyz; }
 fn VV(i: i32) -> vec3f { return DY[ndB(PP.par) + N + i].xyz; }
@@ -62,7 +80,7 @@ fn nsplit(q: i32) -> i32 { return select(0, 1, SC[O_CRK + q].w > 0.0) + select(0
 const SCV = `@group(0) @binding(2) var<storage, read_write> SC: array<vec4f>;\n`;
 
 const HINGE = `
-@compute @workgroup_size(${WGS}) fn main(@builtin(global_invocation_id) gid: vec3u) {
+@compute @workgroup_size(${WGS}) fn main(@builtin(global_invocation_id) gid: vec3u) { initSz();
   let k = i32(gid.x); if (k >= NH) { return; }
   let v = PP.par; let w = 1u - v;
   let hb = O_HS + 9 * k;
@@ -161,7 +179,7 @@ fn crackEdge(qo: array<i32, 4>, P: array<vec3f, 4>, r1: vec3f, r2: vec3f, r3: ve
   if (abs(da - db) < 1e-5) { return min(ca, cb); }
   return select(cb, ca, da < db);
 }
-@compute @workgroup_size(${WGS}) fn main(@builtin(global_invocation_id) gid: vec3u) {
+@compute @workgroup_size(${WGS}) fn main(@builtin(global_invocation_id) gid: vec3u) { initSz();
   let c = i32(gid.x); if (c >= NC) { return; }
   let v = PP.par; let w = 1u - v; let cb = clB(v); let cw = clB(w);
   var T: array<vec4f, 4>; for (var k = 0; k < 4; k++) { T[k] = DY[cb + k * NC + c]; }
@@ -339,7 +357,7 @@ var<private> EX: vec3f;
 fn ang(u0: vec3f, v0: vec3f) -> f32 { let u = u0 - dot(u0, EX) * EX; let v = v0 - dot(v0, EX) * EX; return atan2(dot(cross(u, v), EX), dot(u, v)); }
 fn gr(v0: vec3f) -> vec3f { let v = v0 - dot(v0, EX) * EX; return cross(EX, v) / max(dot(v, v), 1e-30); }
 fn dAe(u: vec3f, v: vec3f) -> vec3f { let cx = cross(u, v); let s = dot(EX, cx); let ue = dot(u, EX); let ve = dot(v, EX); let c = dot(u, v) - ue * ve; return (c * cx + s * (ve * u + ue * v)) / max(s * s + c * c, 1e-30); }
-@compute @workgroup_size(${WGS}) fn main(@builtin(global_invocation_id) gid: vec3u) {
+@compute @workgroup_size(${WGS}) fn main(@builtin(global_invocation_id) gid: vec3u) { initSz();
   let k = i32(gid.x); if (k >= NT) { return; }
   let v = PP.par; let w = 1u - v;
   let tb = O_TS + 7 * k;
@@ -435,7 +453,7 @@ fn contact(c: i32, hp: u32, r: i32) -> vec3f {
   let nc = normalize(cross(ST[O_CS + 11 * c + 1].xyz, ST[O_CS + 11 * c + 3].xyz));
   return nc * (f / PP.h);
 }
-@compute @workgroup_size(${WGS}) fn main(@builtin(global_invocation_id) gid: vec3u) {
+@compute @workgroup_size(${WGS}) fn main(@builtin(global_invocation_id) gid: vec3u) { initSz();
   let i = i32(gid.x); if (i >= N) { return; }
   let w = 1u - PP.par;
   let g0 = ST[O_NS + 5 * i + 3]; let g1 = ST[O_NS + 5 * i + 4];
@@ -476,8 +494,8 @@ struct Pp { t: f32, h: f32, alpha: f32, nimp: u32, par: u32, q0: u32, q1: u32, q
 @group(0) @binding(2) var<storage, read_write> SC: array<vec4f>;
 @group(0) @binding(4) var<uniform> PP: Pp;
 @group(0) @binding(6) var<storage, read_write> HA: array<atomic<i32>>;
-${Object.entries(c).map(([k, v]) => `const ${k}: i32 = ${v};`).join('\n')}
-@compute @workgroup_size(${WGS}) fn main(@builtin(global_invocation_id) gid: vec3u) {
+${CDEF(c)}
+@compute @workgroup_size(${WGS}) fn main(@builtin(global_invocation_id) gid: vec3u) { initSz();
   let j = i32(gid.x); if (j >= N) { return; }
   let cx = SC[O_CON + j].x; if (cx < 0.0) { return; }
   let old = atomicExchange(&HA[i32(PP.par) * NC + i32(cx)], j);
@@ -488,14 +506,14 @@ const IMPULSE = (c) => `
 struct Pp { t: f32, h: f32, alpha: f32, nimp: u32, par: u32, q0: u32, q1: u32, q2: u32 }
 @group(0) @binding(2) var<storage, read_write> SC: array<vec4f>;
 @group(0) @binding(4) var<uniform> PP: Pp;
-${Object.entries(c).map(([k, v]) => `const ${k}: i32 = ${v};`).join('\n')}
-@compute @workgroup_size(${WGS}) fn main(@builtin(global_invocation_id) gid: vec3u) {
+${CDEF(c)}
+@compute @workgroup_size(${WGS}) fn main(@builtin(global_invocation_id) gid: vec3u) { initSz();
   let k = i32(gid.x); if (u32(k) >= PP.nimp) { return; }
   let e = SC[O_IMP + k]; let j = i32(e.x);
   SC[O_FRC + j] = SC[O_FRC + j] + vec4f(e.yzw / PP.h, 0.0);
 }`;
 const NODE = `
-@compute @workgroup_size(${WGS}) fn main(@builtin(global_invocation_id) gid: vec3u) {
+@compute @workgroup_size(${WGS}) fn main(@builtin(global_invocation_id) gid: vec3u) { initSz();
   let i = i32(gid.x); if (i >= N) { return; }
   let v = PP.par; let w = 1u - v; let nb = ndB(v); let nw = ndB(w);
   let pos = DY[nb + i]; let vel = DY[nb + N + i]; var anc = DY[nb + 2 * N + i];
@@ -557,7 +575,7 @@ const NODE = `
 // cells beyond the line through it along that edge go to its twin, with their share of the mass (a node members act
 // on keeps its own), and the twin starts from the node's motion
 const CRACK = `
-@compute @workgroup_size(${WGS}) fn main(@builtin(global_invocation_id) gid: vec3u) {
+@compute @workgroup_size(${WGS}) fn main(@builtin(global_invocation_id) gid: vec3u) { initSz();
   let p = i32(gid.x); if (p >= N) { return; }
   let r0 = ST[O_NS + 5 * p + 1]; let T1 = i32(r0.w); if (T1 < 0) { return; }
   let s1 = SC[O_CRK + p].w > 0.0; if (SC[O_CRK2 + p].w > 0.0) { return; }
@@ -605,8 +623,8 @@ struct Pp { t: f32, h: f32, alpha: f32, nimp: u32, par: u32, q0: u32, q1: u32, q
 @group(0) @binding(1) var<storage, read_write> DY: array<vec4f>;
 @group(0) @binding(2) var<storage, read_write> SU: array<u32>;
 @group(0) @binding(4) var<uniform> PP: Pp;
-${Object.entries(c).map(([k, v]) => `const ${k}: i32 = ${v};`).join('\n')}
-@compute @workgroup_size(${WGS}) fn main(@builtin(global_invocation_id) gid: vec3u) {
+${CDEF(c)}
+@compute @workgroup_size(${WGS}) fn main(@builtin(global_invocation_id) gid: vec3u) { initSz();
   let c = i32(gid.x); if (c >= NC) { return; }
   let s = DY[O_CL + i32(PP.par) * 5 * NC + 4 * NC + c];
   var o = 0u; if (s.x >= 0.5) { o = (u32(clamp(s.y, 0.0, 1.67) * 1e7) & 0xFFFFFFu) | 0xFF000000u; }
@@ -684,26 +702,31 @@ export function createWGPU(dev, M, opt = {}) {
     k.set([M.BETA(), M.U_MAX, M.RHO_W * M.C_W, M.P0, M.RHO_W * M.G, M.K_SHEAR, M.S, M.G], 96);
     const C = M.C || [0, 0, 0]; k.set([C[0] - O[0], C[1] - O[1], C[2] - O[2], M.PETK || 1.5, M.PETK2 || 1e30, 0, 0, 0], 104); dev.queue.writeBuffer(bK, 0, k); }
   // ---- pipelines (one layout for all)
-  const bgl = dev.createBindGroupLayout({ entries: [
+  let PC = PCACHE.get(dev);
+  if (!PC) { PC = { pipes: new Map() }; PCACHE.set(dev, PC);
+  PC.bgl = dev.createBindGroupLayout({ entries: [
     { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
     { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
     { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
     { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
     { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: 32 } },
     { binding: 5, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
-    { binding: 6, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } }] });
-  const layout = dev.createPipelineLayout({ bindGroupLayouts: [bgl] });
+    { binding: 6, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+    { binding: 7, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } }] });
+  PC.layout = dev.createPipelineLayout({ bindGroupLayouts: [PC.bgl] }); }
+  const bgl = PC.bgl, layout = PC.layout;
   const errs = [];
-  const pipe = (name, code) => { const m = dev.createShaderModule({ code, label: name });
+  const pipe = (name, code) => { const hit = PC.pipes.get(code); if (hit) return hit; const m = dev.createShaderModule({ code, label: name });
     m.getCompilationInfo().then(i => { for (const e of i.messages) if (e.type === 'error') { errs.push(name + ': ' + e.lineNum + ': ' + e.message); console.error('WGSL', name, e.lineNum, e.message, code.split('\n')[e.lineNum - 1]); } });
-    return dev.createComputePipeline({ layout, compute: { module: m, entryPoint: 'main' }, label: name }); };
+    const pl = dev.createComputePipeline({ layout, compute: { module: m, entryPoint: 'main' }, label: name }); PC.pipes.set(code, pl); return pl; };
+  const bSZ = mk(160, U.UNIFORM | U.COPY_DST); dev.queue.writeBuffer(bSZ, 0, szData(CONST));
   const head = HEAD(CONST) + SCV;
   const pH = pipe('hinges', head + HINGE), pC = pipe('cells', head + CELL), pT = pipe('members', head + TRUSS), pG = pipe('gather', head + GATHER);
   const pK = pipe('link', LINK(CONST)), pI = pipe('impulses', IMPULSE(CONST)), pN = pipe('nodes', head + NODE), pP = pipe('pack', PACK(CONST));
   const pX = M.PAR ? pipe('crack', head + ADJF + CRACK) : null;
   const bg = dev.createBindGroup({ layout: bgl, entries: [
     { binding: 0, resource: { buffer: bST } }, { binding: 1, resource: { buffer: bDY } }, { binding: 2, resource: { buffer: bSC } },
-    { binding: 3, resource: { buffer: bK } }, { binding: 4, resource: { buffer: bP, size: 32 } }, { binding: 5, resource: { buffer: bL } }, { binding: 6, resource: { buffer: bHD } }] });
+    { binding: 3, resource: { buffer: bK } }, { binding: 4, resource: { buffer: bP, size: 32 } }, { binding: 5, resource: { buffer: bL } }, { binding: 6, resource: { buffer: bHD } }, { binding: 7, resource: { buffer: bSZ } }] });
   const wg = n => Math.ceil(Math.max(1, n) / WGS);
   // ---- encoding state
   let cur = 0, enc = null, pass = null, nsteps = 0, upOff = 0, nimp = 0;

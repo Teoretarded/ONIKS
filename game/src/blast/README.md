@@ -112,8 +112,11 @@ hole (D49): the sim hole is the minimum shown, not a cap.
 - Frame guard (`frameScale`): the solver's share drops toward 0.3 while game frames run past ~24 ms, and recovers
   below ~20 ms; the WebGPU queue is kept 2 deep at a small share. Several patches split the budget.
 - Each ship class's CPU dot cloud (~35 ms a cruiser) is built ahead on a frame with no solve running, one class a
-  second, once its model is sampled (`dotsReady`), so a first hit does not pay for it. Every hit compiles its own
-  WebGPU pipelines (the patch's sizes are baked into the WGSL): ~0.4-0.8 s before its first steps land.
+  second, once its model is sampled (`dotsReady`), so a first hit does not pay for it. The WebGPU shaders read the
+  patch's sizes and buffer offsets from a small uniform (binding 7, `CDEF` / `szData` in shell/gpu_wgpu.js) instead
+  of having them baked in, and the pipelines are cached per device by their source: only the feature switches
+  (petals, up axis...) make variants, compiled once a session (~0.4 s each: in practice a side and a deck variant);
+  every later hit starts stepping in ~35 ms.
 - cg_deck's 4.5-5 s runs are not a warm-up: the first cg_deck after a page load draws the sim's magazine cook-off
   (magF, W 90) with the hit, two patches solving at once; later runs (another point in the sim's random stream) do
   not.
