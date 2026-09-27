@@ -98,6 +98,8 @@ FIXED? confirmed: D3, D17, D22, D42 PASS; D23, D47 reopened. D25 and D14 cases a
 than the sim: ddg_mid 69 / 8.2, ddg_fdeck 125 / 43, ddg_stern 84 / 48) is the main mismatch left.
 
 
+- run qa70 (implementer, D48 rim / soot change, 31 cases): 31/31 qa.js ok; resolve 1.15-3.8 s (cg_deck 5.05 under load), solve p95 11.7-24.1 ms (cg_deck 32.1, loaded: three other agents running). D45: no slab in `ddg_vls_set_*`.
+
 - run qa68 (implementer): orphans flown as pieces after the support pass (settleSupport queues their columns): ddg_house, ddg_gundeck, ddg_cookoff qa.js ok with no orphans.
 
 - run qa67 (implementer, f778b7e, petals on, 26 cases): 26/26 qa.js ok (orphans only: house 8); resolve 1.15-3.9 s; solve p95 11.2-24.6 ms (loaded).
