@@ -594,38 +594,7 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
       float u = (ax == 0 ? l.z : l.x) - P.z, v = (ax == 1 ? l.z : l.y) - P.w;
       vec4 Q = uBtQ[i * 2 + k];
       float fi = u / S, fj = v / S;
-      if (fi < 0.0 || fj < 0.0 || fi > Q.x || fj > Q.y) {
-        // (structure standing just past a deck plate's edge, where the plating inside the edge was thrown or torn and
-        // what stood on it went: not a pristine wall cut ruler-straight along the patch's edge (QA D23), but buckled,
-        // scorched and bent toward the gap, the cut ragged)
-        if (A.y > 0.7 && gIn < 0.5 && off > 0.05 && off < 30.0) {
-          float ex = max(max(-fi, fi - Q.x), max(-fj, fj - Q.y)) * S;
-          if (ex < 2.5) {
-            // (the columns just inside the edge: 3 x 3 texels from the edge inward)
-            int ei = clamp(int(fi), 0, int(Q.x) - 1), ej = clamp(int(fj), 0, int(Q.y) - 1);
-            int si = fi < 0.0 ? 1 : fi > Q.x ? -1 : 0, sj = fj < 0.0 ? 1 : fj > Q.y ? -1 : 0;
-            bool went = false;
-            for (int a = 0; a < 3; a++) for (int c = -1; c <= 1; c++) {
-              int ii = clamp(ei + si * a + (si == 0 ? c : 0), 0, int(Q.x) - 1), jj = clamp(ej + sj * a + (sj == 0 ? c : 0), 0, int(Q.y) - 1);
-              vec4 te = texelFetch(uBtT, ivec2(int(Q.z) + ii, int(Q.w) + jj), 0);
-              if ((int(te.w) & 10) != 0 || dot(te.xyz, te.xyz) > 0.64) went = true;
-            }
-            if (went) {
-              float rg = 0.25 + 0.9 * wreckHash(floor(l * 1.6) * 0.25 + 0.21) + 0.25 * wreckHash(l * 2.0);
-              if (ex < rg || (dp && ex < rg + 0.3)) return 1;   // (no splat at the ragged cut)
-              float kb = 1.0 - clamp((ex - rg) / 2.0, 0.0, 1.0);
-              vec3 bq = floor(l * 3.0); float b1 = wreckHash(bq) - 0.5, b2 = wreckHash(bq + vec3(7.0, 3.0, 5.0)) - 0.5;
-              vec3 Ua = ax == 0 ? Z : X, Va = ax == 1 ? Z : Y;
-              vec2 dir = vec2(fi < 0.0 ? 1.0 : fi > Q.x ? -1.0 : 0.0, fj < 0.0 ? 1.0 : fj > Q.y ? -1.0 : 0.0);
-              p += ((Ua * dir.x + Va * dir.y) * 0.35 * kb * clamp(off / 6.0, 0.0, 1.0) + (Ua * b1 + Va * b2) * 0.14 * kb);
-              tilt += (Ua * b2 - Va * b1) * 1.2 * kb;
-              burn = max(burn, 0.75 * kb); hot = max(hot, heat * 0.3 * kb * kb);
-              if (ex < rg + 0.25) { edge = max(edge, 0.6); heatN = max(heatN, heat); }
-            }
-          }
-        }
-        continue;
-      }
+      if (fi < 0.0 || fj < 0.0 || fi > Q.x || fj > Q.y) continue;
       inRect = true;
       bool face = two || abs(dot(n, A)) > 0.5;
       int i0 = min(int(fi), int(Q.x) - 1), j0 = min(int(fj), int(Q.y) - 1);
@@ -808,20 +777,29 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
         // the dent's slope: the normal leans with it
         float gu = mix(t10[ax] - t00[ax], t11[ax] - t01[ax], fy) / S, gv = mix(t01[ax] - t00[ax], t11[ax] - t10[ax], fx) / S;
         vec3 Uw = ax == 0 ? Z : X, Vw = ax == 1 ? Z : Y;
+        // (a cell whose corners were thrown metres apart (the solver's node went, its neighbour held): drawn it is a
+        // strip of plating stretched many times its length, a flat card standing up at a deck edge (QA D23). Steel
+        // does not stretch past ~3x: it tore there. Gone past a ragged limit, its last stretch a hot torn edge)
+        { float sg2 = length(vec2(gu, gv)), lim = 2.2 + 0.8 * wreckHash(floor(l * 2.0) * 0.25 + 0.37);
+          if (sg2 > lim) return 1;
+          if (sg2 > lim - 0.8) { float ek = (sg2 - lim + 0.8) / 0.8; edge = max(edge, 0.7 * ek); heatN = max(heatN, heat); hot = max(hot, heat * 0.5 * ek); burn = max(burn, 0.8 * ek); } }
         tilt -= Uw * gu + Vw * gv;
         // plating strained past yield buckles finer than the grid: facets ~0.3 m catching the light unevenly
         float gs = clamp((length(vec2(gu, gv)) - 0.1) * 1.5, 0.0, 0.5);
         // (a flap thrown open more than ~0.6 m is crumpled plate, not a flat card: rippled along its face (QA D23))
         { float dL2 = length(dl), cr = clamp((dL2 - 0.6) / 1.2, 0.0, 1.0);
+          // (the further it was thrown, the harder it crumpled: up to ~3x the ripple on a flap thrown 3-4 m)
+          float ck = cr * (1.0 + 0.7 * clamp(dL2 - 0.6, 0.0, 3.0));
           if (cr > 0.0) { float a1 = u * 3.1 + v * 1.3 + dL2 * 2.0, b1 = v * 2.7 - u * 0.9, c1 = u * 7.3 - v * 5.9;
             float r1 = sin(a1) * sin(b1), r2 = sin(c1);
-            dl[ax] += (0.12 * r1 + 0.04 * r2) * cr; gs = max(gs, 0.45 * cr);
+            dl[ax] += (0.12 * r1 + 0.04 * r2) * ck; gs = max(gs, 0.5 * cr);
             // (its slope: the light follows the ripples (not a flat card), and the depth pass sees how steep the plate
             // is across a cell: a flat splat on a steep ripple stands in front of its own dots, a grid of dark squares)
-            float ru = (0.12 * (3.1 * cos(a1) * sin(b1) - 0.9 * sin(a1) * cos(b1)) + 0.04 * 7.3 * cos(c1)) * cr;
-            float rv = (0.12 * (1.3 * cos(a1) * sin(b1) + 2.7 * sin(a1) * cos(b1)) - 0.04 * 5.9 * cos(c1)) * cr;
+            float ru = (0.12 * (3.1 * cos(a1) * sin(b1) - 0.9 * sin(a1) * cos(b1)) + 0.04 * 7.3 * cos(c1)) * ck;
+            float rv = (0.12 * (1.3 * cos(a1) * sin(b1) + 2.7 * sin(a1) * cos(b1)) - 0.04 * 5.9 * cos(c1)) * ck;
             tilt -= Uw * ru + Vw * rv;
-            burn = max(burn, 0.35 * cr); gFlap = max(gFlap, cr); } }
+            // (scorched: the blast's side of it charred, streaked along the crumples)
+            burn = max(burn, (0.4 + 0.25 * r1) * cr); gFlap = max(gFlap, cr); } }
         if (gs > 0.04 && !dp) { vec3 q = floor(l * 3.3); float h1 = fract(sin(dot(q, vec3(127.1, 311.7, 74.7))) * 43758.55), h2 = fract(sin(dot(q, vec3(269.5, 183.3, 246.1))) * 43758.55);
           tilt += (Uw * (h1 - 0.5) + Vw * (h2 - 0.5)) * gs; }
       }
