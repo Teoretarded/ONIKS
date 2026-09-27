@@ -163,6 +163,21 @@ void main() {
   vec4 c = toClip(p);
   if (c.w < uCam.w) { ${CULL} return; }
   gl_Position = c;
+  // (inside a holed hull under the waterline, seen through the hole: the sea surface's occluder (terrain depth pass 1)
+  // runs through the ship and would hide it all, black boxes cut at the waterline. Such a dot is drawn at the depth of
+  // the point where its line of sight crosses the sea surface, when that point is inside the hull behind the struck
+  // plate: it passes the sea's depth, the ship's own splats nearer than that still hide it)
+  bool holeWet = false;
+  if (gHole > 0.0 && yw < 0.0 && v.y < -1e-3 && uEyeW.y > 0.0) {
+    vec3 cx = v * (uEyeW.y / -v.y) * 0.995;
+    // (the eye on the struck side, outside; the crossing well inside the plate, not at the waterline's own plating)
+    if (gHoleP.w < -0.5 && dot(cx, gHoleP.xyz) - gHoleP.w < -0.6) {
+      holeWet = true;
+      cx.y -= curveDrop(cx);
+      vec4 c2 = toClip(cx);
+      if (c2.w > uCam.w) gl_Position.z = c2.z / c2.w * c.w;
+    }
+  }
   float xr = uP.y, dmg = uP.z;
   if (uQ.w > 0.0 && hr < uQ.w) { ${CULL} return; }
   if (dmg > 0.0 && hr > 1.0 - dmg * 0.22) { ${CULL} return; }
@@ -221,7 +236,7 @@ void main() {
     b = mix(b, 0.05 + 0.2 * lit, xr);
   }
   b *= mix(1.0, 0.55, clamp(c.w / uMisc.w, 0.0, 1.0)) * uP.x * uQ.z * uMisc.z;
-  if (yw < 0.0) b *= 0.35;
+  if (yw < 0.0 && !holeWet) b *= 0.35;
   // a cutaway's highlights on a knee toward 0.9 (the Anatomy films' interiors and decks top out at ~0.7-0.8): a part
   // brightened over 1 (the interior, the named assemblies) keeps its shading, dotted volumes, never a white block
   if (uDen.w > 0.0 && b > 0.5) b = mix(b, 0.5 + 0.4 * (1.0 - exp((0.5 - b) / 0.4)), uDen.w);
@@ -239,7 +254,7 @@ void main() {
   if (gk > 0.01) rgb = max(mix(rgb, LIME * max(b, 0.95), gk), rgb);
   // charred plating takes little of the light (the fire lights the hull round the hole, the hole stays black); under
   // the water hardly any
-  rgb += lightsAt(p, two ? vec3(0.0) : n) * (0.35 + 0.65 * lit) * uP.x * (1.0 - 0.8 * burn * (1.0 - edge)) * (yw < 0.0 ? 0.15 : 1.0);
+  rgb += lightsAt(p, two ? vec3(0.0) : n) * (0.35 + 0.65 * lit) * uP.x * (1.0 - 0.8 * burn * (1.0 - edge)) * (yw < 0.0 && !holeWet ? 0.15 : 1.0);
   vCol = min(rgb * sub, vec3(1.0));
   // the dot's size from the spacing it keeps on screen (the sub-dots' own), capped (never a blob close up)
   float pe = pxs / (sv > 0.0 ? sqrt(max(need, 1.0)) : max(need, 1.0));
@@ -348,8 +363,8 @@ void main() {
     twoS = bk == 3;
     // (bent plating: the splat is a flat cell at its centre's displacement, the dots follow the bend across it: where
     // the plating is bent steeply (a dent's slope, the lip of a hole) a flat splat stands in front of its neighbours'
-    // dots and prints as a black square. Bent past ~22 deg no splat at all (the dots of a crumpled edge are dense enough,
-    // what shows between them is the wreck behind), less than that smaller and pushed back by the bend's depth; the
+    // dots and prints as a black square. Bent past ~22 deg no splat at all (even a small one prints as a dark square
+    // in a regular grid), less than that smaller and pushed back by the bend's depth; the
     // buckle facets only light the dots (they do not move them) and are left out of the depth pass's tilt)
     float g = length(t0);
     if (g > 0.4) { ${CULL} return; }
@@ -404,6 +419,7 @@ function scarGLSL() {
   return `
 float gIn = 0.0;                   // this part is inside the hull (an interior part, data/models_interior.js: part.inside)
 float gHole = 0.0;                 // (set by blastAt) an interior dot seen through a hole: lit from either side
+vec4 gHoleP = vec4(0.0);           // (set with it) the struck plate's plane: xyz its outward normal, w its offset (RTE)
 // scars: where hits struck this instance, world-aligned, relative to the eye
 uniform vec4 uScA[8];     // xyz: the mark's centre on the surface, w: its radius (m: the hole, the dent, the pockmarks' spread)
 uniform vec4 uScB[8];     // xyz: the surface's outward normal there, w: seed
@@ -626,7 +642,7 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
           else if ((fN & 8) != 0) burn = max(burn, 0.5 * wd);
           p += (X * dlb.x + Y * dlb.y + Z * dlb.z) * wd;
           // (what stands behind a hole is seen from inside its spaces: the walls' far sides lit and splatted too)
-          gHole = max(gHole, 0.3 + 0.7 * wd); if (dp) return 3;
+          gHole = max(gHole, 0.3 + 0.7 * wd); gHoleP = vec4(A, P.y + dot(uBtO[i].xyz, A)); if (dp) return 3;
           break;
         }
         if (off <= -0.05 && off > -D - 0.4) {
@@ -637,13 +653,15 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
           if ((face || two) && ed > 0.6 && (torn || (fN & 10) != 0)) { if (plugD > 1.0) return 1; burn = max(burn, 0.5); hot = max(hot, heat * 0.25); }
           float wd = 1.0 - (-off) / (D + 0.4);
           p += (X * dlb.x + Y * dlb.y + Z * dlb.z) * wd;
-          gHole = max(gHole, 0.3 + 0.7 * wd);
+          gHole = max(gHole, 0.3 + 0.7 * wd); gHoleP = vec4(A, P.y + dot(uBtO[i].xyz, A));
           if (dp) return 3;
           break;
         }
         // (a ship with no interior drawn: her own walls across the pocket, seen from inside through the hole, occlude
         // from either side in the depth pass: a dark inner hull, not the sea through her)
         if (dp && plugD < 1.0 && off <= -0.05 && off > -D - 14.0) return 3;
+        // (the far side of the space behind the hole, seen through it: lit a little from either side)
+        if (!dp && off <= -0.05 && off > -D - 30.0) { gHole = max(gHole, 0.3); gHoleP = vec4(A, P.y + dot(uBtO[i].xyz, A)); }
         continue;
       }
       vec3 dl;
