@@ -594,7 +594,22 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
       float u = (ax == 0 ? l.z : l.x) - P.z, v = (ax == 1 ? l.z : l.y) - P.w;
       vec4 Q = uBtQ[i * 2 + k];
       float fi = u / S, fj = v / S;
-      if (fi < 0.0 || fj < 0.0 || fi > Q.x || fj > Q.y) continue;
+      if (fi < 0.0 || fj < 0.0 || fi > Q.x || fj > Q.y) {
+        // (structure standing just past a deck plate's edge (up to ~3 m, a ragged reach), where the plating along the
+        // edge inside went (torn, gone or thrown): it was standing on the same torn deck, it goes too (the blast system
+        // flies it as crumpled pieces: blast/support.js classify); not a pristine card cut ruler-straight at the edge (QA D23))
+        if (A.y > 0.7 && gIn < 0.5 && off > 0.05 && off < 30.0) {
+          float ex = max(max(-fi, fi - Q.x), max(-fj, fj - Q.y)) * S, rg = 0.8 + 2.2 * wreckHash(floor(l) * 0.25 + 0.13);
+          if (ex < rg) {
+            int ei = clamp(int(fi), 0, int(Q.x)), ej = clamp(int(fj), 0, int(Q.y)), si = fi < 0.0 ? 1 : fi > Q.x ? -1 : 0, sj = fj < 0.0 ? 1 : fj > Q.y ? -1 : 0;
+            bool went = false;
+            for (int a = 0; a < 3; a++) { int ii = clamp(ei + si * a, 0, int(Q.x)), jj = clamp(ej + sj * a, 0, int(Q.y));
+              vec4 te = texelFetch(uBtT, ivec2(int(Q.z) + ii, int(Q.w) + jj), 0); if ((int(te.w) & 11) != 0 || dot(te.xyz, te.xyz) > 0.64) went = true; }
+            if (went) return 1;
+          }
+        }
+        continue;
+      }
       inRect = true;
       bool face = two || abs(dot(n, A)) > 0.5;
       int i0 = min(int(fi), int(Q.x) - 1), j0 = min(int(fj), int(Q.y) - 1);

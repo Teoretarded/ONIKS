@@ -125,7 +125,19 @@ export function classify(B, x, y, z, nx, ny, nz, info, ins) {
     const ax = r.ax, A = ax === 0 ? F.X : ax === 1 ? F.Y : F.Z;
     const off = l[ax] - r.val, u = (ax === 0 ? l[2] : l[0]) - r.u0, v = (ax === 1 ? l[2] : l[1]) - r.v0;
     const fi = u / S, fj = v / S;
-    if (fi < 0 || fj < 0 || fi > r.nu || fj > r.nv) continue;
+    if (fi < 0 || fj < 0 || fi > r.nu || fj > r.nv) {
+      // (as the shader: structure standing up to a ragged ~3 m past a deck plate's edge where the plating inside the edge
+      // went: it goes too, flown as pieces (QA D23))
+      if (A[1] > .7 && !ins && off > .05 && off < 30) {
+        const ex = Math.max(-fi, fi - r.nu, -fj, fj - r.nv) * S, rg = .8 + 2.2 * wreckHash(Math.floor(l[0]) * .25 + .13, Math.floor(l[1]) * .25 + .13, Math.floor(l[2]) * .25 + .13);
+        if (ex < rg) {
+          const T = r.cpu, W = r.nu + 1, ei = Math.min(r.nu, Math.max(0, Math.floor(fi))), ej = Math.min(r.nv, Math.max(0, Math.floor(fj))), si = fi < 0 ? 1 : fi > r.nu ? -1 : 0, sj = fj < 0 ? 1 : fj > r.nv ? -1 : 0;
+          for (let a = 0; a < 3; a++) { const ii = Math.min(r.nu, Math.max(0, ei + si * a)), jj = Math.min(r.nv, Math.max(0, ej + sj * a)), t = 4 * (jj * W + ii);
+            if (((T[t + 3] | 0) & 11) || T[t] ** 2 + T[t + 1] ** 2 + T[t + 2] ** 2 > .64) { if (info) { info.r = r; info.off = off; info.i = ii; info.j = jj; info.up = true; } return K.COLDROP; } }
+        }
+      }
+      continue;
+    }
     inRect = true;
     const face = two || Math.abs(nx * A[0] + ny * A[1] + nz * A[2]) > .5;
     const i0 = Math.min(Math.floor(fi), r.nu - 1), j0 = Math.min(Math.floor(fj), r.nv - 1), fx = fi - i0, fy = fj - j0, W = r.nu + 1;

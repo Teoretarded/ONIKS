@@ -283,7 +283,9 @@ export async function createBlast(game) {
         if (r.ax === 0) { l[2] = r.u0 + i * S; l[1] = r.v0 + j * S; } else if (r.ax === 1) { l[0] = r.u0 + i * S; l[2] = r.v0 + j * S; } else { l[0] = r.u0 + i * S; l[1] = r.v0 + j * S; }
         for (let e = e0; e <= e1; e += 1) {
           const x = F.O[0] + F.X[0] * l[0] + F.Y[0] * l[1] + F.Z[0] * l[2] + A[0] * e, z = F.O[2] + F.X[2] * l[0] + F.Y[2] * l[1] + F.Z[2] * l[2] + A[2] * e;
-          for (let a1 = -1; a1 <= 1; a1++) for (let b1 = -1; b1 <= 1; b1++) cols.add((Math.floor(x) + a1 + 32768) * 65536 + Math.floor(z) + b1 + 32768);
+          // (near a deck plate's edge: 3 m round, what stands just past the edge goes with it, support.js classify)
+          const rc = A[1] > .7 && (i < 12 || j < 12 || i > r.nu - 12 || j > r.nv - 12) ? 3 : 1;
+          for (let a1 = -rc; a1 <= rc; a1++) for (let b1 = -rc; b1 <= rc; b1++) cols.add((Math.floor(x) + a1 + 32768) * 65536 + Math.floor(z) + b1 + 32768);
         }
       }
     }
