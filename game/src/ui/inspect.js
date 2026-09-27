@@ -157,13 +157,15 @@ export async function createInspect(game, ctx) {
     // the camera: fly from where it is to the fitted view (the museum walks glide from the last exhibit)
     subj.refreshDyn(V.st);
     V.fitA = fitOf(V, 0); V.fitE = fitOf(V, 1); V.fitT = 0;
+    // (the slice runs from the end nearer the damage)
+    { const hz = V.kind === 'unit' && V.u ? damageZ(V.u) : null, ax = subj.axis; V.xr.dir = hz !== null && ax && ax.i === 2 && hz > (ax.z0 + ax.z1) / 2 ? -1 : 1; }
     V.cA = V.fitA.c.slice(); V.cE = V.fitE.c.slice(); V.dA = V.fitA.dist; V.dE = V.fitE.dist;
     V.focusLocal = V.fitA.c.slice();
     toWorld(V.R0, V.T0, V.focusLocal, V.focusW);
     const base = V.kind === 'museum' ? 0 : V.hdg;
     V.fly = { t: 0, dur: V.kind === 'museum' && prev ? 1.1 : V.kind === 'museum' ? 2.2 : FLY_IN,
       from: { target: cam.target.slice(), dist: cam.dist, yaw: cam.yaw, pitch: cam.pitch },
-      to: { dist: V.fitA.dist, yaw: holedYaw(V, V.fitA.yaw) + base, pitch: V.fitA.pitch } };
+      to: { dist: V.fitA.dist, yaw: V.fitA.yaw + base, pitch: V.fitA.pitch } };
     const tv = Math.hypot(cam.target[0] - V.focusW[0], cam.target[1] - V.focusW[1], cam.target[2] - V.focusW[2]);
     V.fly.bump = Math.max(0, Math.log(1 + tv / (cam.dist + V.fitA.dist)) * .7);
     V.xr.t0 = Math.max(SCAN_AT, V.fly.dur - .7);           // the slice starts as the camera arrives
@@ -275,7 +277,8 @@ export async function createInspect(game, ctx) {
     const ps = subj.parts.filter(p => p.cls !== 'hidden' || e > 0);
     const b = subj.partsBounds(ps) || [[-1, -1, -1], [1, 1, 1]];
     const vw = (subj.A && subj.A.view) || {};
-    const yaw = vw.yaw === undefined ? .75 : vw.yaw, pitch = vw.pitch === undefined ? .28 : vw.pitch;
+    // (a hurt ship: framed from where she was holed, the fit measured from there)
+    const yaw = holedYaw(V, vw.yaw === undefined ? .75 : vw.yaw), pitch = vw.pitch === undefined ? .28 : vw.pitch;
     const c = [(b[0][0] + b[1][0]) / 2, (b[0][1] + b[1][1]) / 2, (b[0][2] + b[1][2]) / 2];
     const f = [Math.sin(yaw) * Math.cos(pitch), -Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)];
     const rl = Math.hypot(f[2], f[0]) || 1, r = [f[2] / rl, 0, -f[0] / rl];
@@ -435,20 +438,27 @@ export async function createInspect(game, ctx) {
     cam.fly = null;
     cam.followFn = focusFn; cam.followOff = FOLLOW0;
   }
-  // the fitted view's yaw (model-relative), turned to look from the end of a hurt ship she was holed at (the eye sits at
-  // yaw + PI: model x = sin, z = cos)
+  // the fitted view's yaw (model-relative) for a hurt ship: the eye on the side she was holed on, a quarter view from
+  // the end nearer the damage, closer to abeam the nearer amidships the damage lies (the eye sits at yaw + PI: model
+  // x = sin, z = cos), so the view opens on the damage wherever it is (QA D40: a hit at z +20 opened from the stern)
   function holedYaw(V, yaw) {
     if (V.kind !== 'unit' || !V.u) return yaw;
-    const hz = damageZ(V.u); if (hz === null || Math.abs(hz) < 10) return yaw;
-    return Math.cos(yaw + Math.PI) * hz < 0 ? -yaw - Math.PI : yaw;
+    const D = damageAt(V.u); if (!D) return yaw;
+    const e0x = -Math.sin(yaw), e0z = -Math.cos(yaw);                  // the default eye's side and end
+    const sx = Math.abs(D.x) > .5 ? Math.sign(D.x) : Math.sign(e0x) || 1, L = Math.max(20, V.subj && V.subj.axis ? V.subj.axis.L : 150);
+    const sz = Math.abs(D.z) > L * .04 ? Math.sign(D.z) : Math.sign(e0z) || 1;
+    const al = .3 + .55 * sat(Math.abs(D.z) / (L * .3));                // from abeam toward the end (rad)
+    const phi = Math.atan2(sx * Math.cos(al), sz * Math.sin(al));
+    return phi - Math.PI;
   }
-  // the station (model z) of a ship's holes, weighted by their area: the sim's, else the scars; null if unhurt
-  function damageZ(u) {
-    let w = 0, z = 0;
-    const Hs = u.ship && u.ship.holes; if (Hs) for (const h of Hs) if (h.A > .05) { w += h.A; z += h.A * h.z; }
-    if (!w && game.scars) { const rec = game.scars.of(u.id); if (rec) for (const q of rec.list) if (q.r > .2) { w += q.r * q.r; z += q.r * q.r * q.z; } }
-    return w > 0 ? z / w : null;
+  // where a ship's holes are (model x, z), weighted by their area: the sim's, else the scars; null if unhurt
+  function damageAt(u) {
+    let w = 0, x = 0, z = 0;
+    const Hs = u.ship && u.ship.holes; if (Hs) for (const h of Hs) if (h.A > .05) { w += h.A; x += h.A * h.x; z += h.A * h.z; }
+    if (!w && game.scars) { const rec = game.scars.of(u.id); if (rec) for (const q of rec.list) if (q.r > .2) { const a = q.r * q.r; w += a; x += a * q.x; z += a * q.z; } }
+    return w > 0 ? { x: x / w, z: z / w } : null;
   }
+  function damageZ(u) { const D = damageAt(u); return D ? D.z : null; }
   const FOLLOW0 = [0, 0, 0];
   const focusFn = () => S ? S.focusW : null;
 
@@ -524,12 +534,13 @@ export async function createInspect(game, ctx) {
     d.bright = lerp(1, 1.25, V.worldK);
     // the slice: the model's long axis in the world, the front a model coordinate along it
     const ax = subj.axis, xk = V.xr.k, band = Math.max(.06, ax.L * .011), glow = Math.max(.15, ax.L * .03);
-    const zS = ax.z0 - band * 1.5, zE = ax.z1 + glow * 6;
+    // (dir -1: a ship hurt in her fore half opens from the bow, so the slice reaches the damage first: QA D40)
+    const dr = V.xr.dir || 1, zS = dr > 0 ? ax.z0 - band * 1.5 : ax.z1 + band * 1.5, zE = dr > 0 ? ax.z1 + glow * 6 : ax.z0 - glow * 6;
     // fully open / shut: the plane goes far away, so parts that float out of the model's length stay open / shut
-    V.front = xk >= 1 ? zE + 1e5 : xk <= 0 ? zS - 1e5 : lerp(zS, zE, xk);
+    V.front = xk >= 1 ? zE + dr * 1e5 : xk <= 0 ? zS - dr * 1e5 : lerp(zS, zE, xk);
     const G = d.gate;
-    G.n[0] = V.R0[ax.i]; G.n[1] = V.R0[3 + ax.i]; G.n[2] = V.R0[6 + ax.i];
-    G.d = G.n[0] * V.T0[0] + G.n[1] * V.T0[1] + G.n[2] * V.T0[2] + V.front; G.w = band; G.g = glow; G.mode = 0;
+    G.n[0] = dr * V.R0[ax.i]; G.n[1] = dr * V.R0[3 + ax.i]; G.n[2] = dr * V.R0[6 + ax.i];
+    G.d = G.n[0] * V.T0[0] + G.n[1] * V.T0[1] + G.n[2] * V.T0[2] + dr * V.front; G.w = band; G.g = glow; G.mode = 0;
     // parts: explode offsets (partX), hidden parts shown by the slice or lifted out, damage coral / dropped out
     const dmg = damageOf(V);
     d.damage = dmg;
@@ -679,7 +690,7 @@ export async function createInspect(game, ctx) {
       if (!shown(ent, V.st)) continue;
       // appears when the slice reaches its anchor (or when the scan would have finished, or once exploded)
       let ts = V.tags.get(ent);
-      if (!ts) { if ((xk > 0 && front > ent.az) || t > scanEnd || ent.k > .6) V.tags.set(ent, ts = { t0: t }); else continue; }
+      if (!ts) { if ((xk > 0 && (V.xr.dir || 1) * (front - ent.az) > 0) || t > scanEnd || ent.k > .6) V.tags.set(ent, ts = { t0: t }); else continue; }
       const age = t - ts.t0;
       if (!pcam.project(ent.world, s3) || offScreen(s3, W, H)) continue;
       let dm = 0; if (dmg) for (const p of ent.parts) { let v = dmg[p.name] || 0;
@@ -701,7 +712,7 @@ export async function createInspect(game, ctx) {
       q3[0] = c.anc[0]; q3[1] = c.anc[1]; q3[2] = c.anc[2];
       const pp = c.parent ? subj.byName.get(c.parent) : null;
       if (pp) { q3[0] += pp.off[0]; q3[1] += pp.off[1]; q3[2] += pp.off[2]; }
-      if (!c.t0 && xk > 0 && front > c.anc[subj.axis.i]) c.t0 = t;
+      if (!c.t0 && xk > 0 && (V.xr.dir || 1) * (front - c.anc[subj.axis.i]) > 0) c.t0 = t;
       if (!c.t0 || xk <= 0) continue;
       toWorld(V.R0, V.T0, q3, c.world);
       if (!pcam.project(c.world, s3) || offScreen(s3, W, H)) continue;

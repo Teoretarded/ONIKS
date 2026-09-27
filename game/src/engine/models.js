@@ -29,8 +29,8 @@ uniform vec4 uK1;         // its upper cut (same)
 uniform vec4 uKb;         // x torn band (m), y on, z tear wavelength (m), w the hull's axis height (model y, m)
 uniform mat3 uKR;         // the instance's model -> world rotation
 uniform vec3 uKT;         // its origin, relative to the eye
-// (value noise on an integer hash, two octaves and a fine ragged one: an irregular tear, not a sawtooth; game/structure/
-// layout.js jagK is the same function)
+// (value noise on an integer hash, domain-warped, three scales (a long meander, torn tongues, a fine ragged edge): an
+// irregular tear, not a sawtooth; game/structure/layout.js jagK is the same function)
 float jagH(ivec2 c, int s) {
   uint h = (uint(c.x) * 73856093u) ^ (uint(c.y) * 19349663u) ^ (uint(s) * 83492791u);
   h = (h ^ (h >> 13u)) * 1274126177u;
@@ -43,8 +43,9 @@ float jagV(vec2 q, int s) {
 float jagK(vec2 q, float s) {
   int si = int(floor(s * 1000.0));
   vec2 r = q * 3.0 + 4096.0;
-  float v = 0.55 * jagV(r * 0.9, si) + 0.3 * jagV(r * 2.3, si + 7) + 0.15 * jagV(r * 6.1, si + 13);
-  return clamp((v - 0.5) * 3.2, -1.0, 1.0);
+  vec2 u = r + (vec2(jagV(r * 0.23, si + 29), jagV(r * 0.23, si + 31)) - 0.5) * 4.4;
+  float v = 0.5 * jagV(u * 0.12, si) + 0.32 * jagV(u * 0.45, si + 7) + 0.18 * jagV(u * 1.9, si + 13);
+  return clamp((v - 0.5) * 3.0, -1.0, 1.0);
 }
 `;
 
@@ -135,9 +136,14 @@ void main() {
       tk = 1.0 - e; th = lo ? uK0.w : uK1.w;
       if (h4 < 0.3 * tk * tk) { ${CULL} return; }
       vec2 rd = pm.xy - vec2(0.0, uKb.w);
-      float rl = length(rd), cu = tk * tk * uKb.x * (0.2 + 0.6 * h4);
+      // (crumpled: the plating at the tear buckled in patches ~1-2 m across, some bent out, some pushed in, some thrown
+      // along the hull, coherent over the patch rather than a per-dot fuzz; QA D10)
+      int ks = int(floor((lo ? uK0.z : uK1.z) * 1000.0)) + 41;
+      vec2 cq = vec2(pm.x + pm.z * 0.7, pm.y - pm.z * 0.4) * 1.6 + 4096.0;
+      float cn = jagV(cq, ks), cn2 = jagV(cq * 0.55 + 17.0, ks + 3);
+      float rl = length(rd), cu = tk * tk * uKb.x * (0.25 + 0.85 * cn + 0.2 * h4);
       vec2 rn = rl > 1e-3 ? rd / rl : vec2(0.0, 1.0);
-      p += uKR * vec3(rn * cu * 0.6, sg * cu * 0.3);
+      p += uKR * vec3(rn * cu * (cn2 > 0.38 ? 0.75 : -0.55), sg * cu * (0.15 + 0.6 * cn2));
     }
   }
   // level cross-fade: the outgoing level's dots go out, the incoming one's come in, one by one

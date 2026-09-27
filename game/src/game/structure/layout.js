@@ -25,9 +25,12 @@ function jagV(x, y, s) {
   return a + (b - a) * uy;
 }
 export function jagK(x, y, s) {
+  // (QA D10: a warped, three-scale tear: a long meander across the girth (~9 m), torn tongues (~2.4 m) and a fine ragged
+  // edge (~0.5 m), no single dominant frequency and hardly any clamping, so no regular teeth)
   const si = Math.floor(s * 1000), rx = x * 3 + 4096, ry = y * 3 + 4096;
-  const v = .55 * jagV(rx * .9, ry * .9, si) + .3 * jagV(rx * 2.3, ry * 2.3, si + 7) + .15 * jagV(rx * 6.1, ry * 6.1, si + 13);
-  return Math.max(-1, Math.min(1, (v - .5) * 3.2));
+  const ux = rx + (jagV(rx * .23, ry * .23, si + 29) - .5) * 4.4, uy = ry + (jagV(rx * .23, ry * .23, si + 31) - .5) * 4.4;
+  const v = .5 * jagV(ux * .12, uy * .12, si) + .32 * jagV(ux * .45, uy * .45, si + 7) + .18 * jagV(ux * 1.9, uy * 1.9, si + 13);
+  return Math.max(-1, Math.min(1, (v - .5) * 3));
 }
 
 const layouts = new Map();

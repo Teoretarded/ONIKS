@@ -31,7 +31,7 @@
    inside, sized from the event's blast size; 'kill' is followed by 'destroyed'),
    'removed' (the sim is done with her; the pieces carry on).
    createStructure(game) -> system 'structure' (priority 11.5: its events after scars (12), before debris (11)). */
-import { layoutOf, sectionsOf, faceOf, hsh } from './layout.js';
+import { layoutOf, sectionsOf, faceOf, hsh, jagK } from './layout.js';
 import { newPiece, stepShip, splitPiece, dampOf, qMat, matQ, slerpM, ss } from './body.js';
 import { createBreakFx } from './fx.js';
 import { attitudeM } from '../debris/math.js';
@@ -327,6 +327,7 @@ export async function createStructure(game) {
     }, 24, S.seed + j);
     addFx(new Splash({ t0: sim.t, pos: [wp[0], 0, wp[2]], size: Math.min(45, 10 + b * 1.4), seed: S.seed + j * 3, ring: .15 }), 2);
     const F = new Fire({ t0: sim.t, seed: S.seed * 5 + j, size: Math.min(1.1, .35 + H.L / 400), local: [0, 0, 0], spread: [b * .8, 6 + d * .5, 3], ceiling: 700, life: 180, flame: .55, embers: 1.2, lightR: 30, lightI: 1.2, lightRgb: [255, 170, 90], dense: 11 });
+    F.seat(2 * NSEAT); F.sea = true; for (let q = 0; q < 2 * NSEAT; q++) F.SW[q * 7 + 1] = -1e3;   // (seated on the torn ends: drawBreak)
     F.k = 1; addFx(F, 0);
     S.breaks.push({ cut, A, B, t0: t, F, wp: wp.slice(), slick: wp.slice(), seed: S.seed * 3 + j * 17, heat: 1, J, grind: 0 });
     stats.breaks++;
@@ -526,10 +527,47 @@ export async function createStructure(game) {
     }
     return n;
   }
+  /* the two pieces a cut now joins (a piece that broke again is replaced by its halves: the break's own A / B go stale;
+     the ends are the pieces holding the cut as their upper / lower torn end) */
+  const ENDS = [null, null];
+  function endsOf(S, c) {
+    ENDS[0] = ENDS[1] = null;
+    for (const P of S.pieces) { if (P.cut1 === c) ENDS[0] = P; else if (P.cut0 === c) ENDS[1] = P; }
+    return ENDS;
+  }
+  /* the break's fire on the torn ends themselves (QA D11): seats on each end's deck edges, centreline and sides, on the
+     tear (jagK, the same tear the shader cuts), set a little into the piece's own steel; a sunk end or one under the
+     water steams, never a flame over open water or the gap */
+  const SEAT_X = [-.85, 0, .85, -1, 1], SEAT_Y = [1, 1, 1, .45, .45], NSEAT = SEAT_X.length;
+  function seatBreak(S, B, c, a) {
+    const F = B.F, H = S.H, SW = F.SW, E = endsOf(S, c);
+    let hi = -1e9, above = 0;
+    for (let q = 0; q < 2; q++) {
+      const P = E[q], sg = q === 0 ? -1 : 1;
+      if (P) poseOf(P, a, Tm, Rm);
+      for (let k = 0; k < NSEAT; k++) {
+        const o = (q * NSEAT + k) * 7;
+        if (!P || P.sunk) { SW[o] = 0; SW[o + 1] = -1e3; SW[o + 2] = 0; SW[o + 3] = 0; continue; }
+        const b = Math.max(.5, H.beam(c.z)), d = Math.max(2, H.deck(c.z)), x = SEAT_X[k] * b, y = SEAT_Y[k] * d - (SEAT_Y[k] < 1 ? 0 : .3);
+        const z = c.z + c.a * jagK(x / S.wave, y / S.wave, c.s) + sg * (.6 + .25 * c.a);
+        const wx = Tm[0] + Rm[0] * x + Rm[1] * y + Rm[2] * z, wy = Tm[1] + Rm[3] * x + Rm[4] * y + Rm[5] * z, wz = Tm[2] + Rm[6] * x + Rm[7] * y + Rm[8] * z;
+        const tl = Math.hypot(Rm[0], Rm[6]) || 1;
+        SW[o] = wx; SW[o + 1] = wy; SW[o + 2] = wz; SW[o + 3] = Math.max(.4, b * (k < 3 ? .3 : .18));
+        SW[o + 4] = Rm[0] / tl; SW[o + 5] = 0; SW[o + 6] = Rm[6] / tl;
+        if (wy > .25) above++;
+        if (wy > hi) { hi = wy; FE[0] = wx; FE[1] = wy; FE[2] = wz; }
+      }
+    }
+    return above;
+  }
   const FE = [0, 0, 0];
   function drawBreak(S, B, t, a) {
     const age = t - B.t0, c = B.cut;
     let n = 0, heat = heatOf(c, t);
+    // (the pieces the cut joins now: a piece broken again hands its end to its half)
+    const E = endsOf(S, c);
+    if (E[0]) B.A = E[0];
+    if (E[1]) B.B = E[1];
     // the break's point on the water: the midpoint of the two torn ends' waterline, as each piece is drawn now
     let wx = 0, wz = 0, nw = 0, hdg = 0, open = 0, top = -1e9;
     for (const P of [B.A, B.B]) {
@@ -538,7 +576,6 @@ export async function createStructure(game) {
       const x = Tm[0] + Rm[2] * c.z, y = Tm[1] + Rm[5] * c.z, z = Tm[2] + Rm[8] * c.z;
       wx += x; wz += z; nw++; hdg = Math.atan2(Rm[2], Rm[8]);
       open = Math.max(open, P === B.A ? P.open1 || 0 : P.open0 || 0);
-      if (y + S.H.deck(c.z) > top) { FE[0] = x; FE[1] = y; FE[2] = z; }   // (the fire burns on the torn end standing highest)
       top = Math.max(top, y + S.H.deck(c.z));
       C5[3] = Rm[0]; C5[4] = Rm[6];
     }
@@ -575,9 +612,10 @@ export async function createStructure(game) {
     n += bfx.drawSlick(t, B.slick, B.t0, S.H.L, B.seed + 9, WIND, sea, 1 - sat((t - B.t0 - 420) / 120));
     // the fire in the break: above the water while the torn ends are up
     if (B.F) {
-      const up = top > 1.5 && !S.done;
-      // (on a torn end, not the middle of the gap between the pieces: no flames over open water, QA D11)
-      B.F.follow(sim.t, [FE[0], Math.max(.5, top - 2), FE[2]], hdg, up ? Math.max(.25, heat) : 0);
+      // (on the torn ends' own steel, seat by seat: no flames over open water or in the gap, QA D11)
+      if (!B.F.nS) { B.F.seat(2 * NSEAT); B.F.sea = true; }
+      const above = seatBreak(S, B, c, a), up = above > 0 && !S.done;
+      B.F.follow(sim.t, FE, hdg, up ? Math.max(.25, heat) : 0);
       if (!up && age > 30) { B.F.stop(sim.t); B.F = null; }
     }
     return n;
