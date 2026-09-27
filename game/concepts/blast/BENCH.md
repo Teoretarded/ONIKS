@@ -61,7 +61,8 @@ hole grows from there; the 30 kg cases pass (0.004–0.04 %). Letting failed cel
 contact momentum balance (6.6 / 7.3 / 10.3 kN·m at 1 / 2 / 5 steps, before row 15): off by default.
 
 **Energy ledger (CPU).** Work of the loads = kinetic + elastic + plastic (membrane, hinges, members, anchors) +
-damping + boundary radiation + contact + fracture. Plastic work is booked with the mean of last step's and this step's
+damping + boundary radiation + contact + fracture + the end-of-run relaxation (its own line since v35; it was booked
+as damping, which failed verify.html's whole-run check at 32 % "damping": numerical damping is 2.4 %). Plastic work is booked with the mean of last step's and this step's
 returned force over the plastic increment (trapezoid, as the leapfrog kinetic energy); booking it with the trial force
 counted the explicit step's overshoot as dissipation, which moved with dt (AUDIT A2): 120 kg contact, first 4 ms,
 unexplained −3.7 % → +0.5 % at dt and +0.3 % at dt/2, membrane plastic 4.8 / 4.8 %, members 3.4 / 3.2 % (was 6.5 / 5.6
@@ -140,6 +141,13 @@ early (blast) hole converged before too (side at 1 ms: 1.5 / 1.22 / 1.09 / 1.0 m
 verify.html `?quick=1` after these changes: 28 pass, 3 fail, 3 info. The fails are the GPU mirror check under tearing
 (float32 tie-breaks, above) and the two "petals, not cut-outs" checks (v35: 53 % / 92 %; v34: 53 % / 81 % of the torn side thrown loose,
 was 61 / 82 % at the audit); energy near contact, momentum, dt, parity, mesh dish now pass.
+
+The full suite (v35, 39106f7): 39 pass, 7 fail, 4 info (v34, ae3abf6: 36 / 9 / 4). v35 fixed the tearing momentum
+check and "Burke 120 kg contact on the deckhouse"; the whole-run energy check passes with the relaxation on its own
+line (above). Still failing, as in v34: the mirror under tearing, both petals checks, the contact hole's mesh check
+(0.25 / 0.125 / 0.0625 m: 3.2 / 2.8 / 10.4 m² over the whole run: the fine grid's second deck keeps tearing late;
+the 30 ms hole converges, above), Nurick 20 kg (70 % of the fit, rate law, AUDIT A3) and the 120 kg standoff series
+(8 / 4 / 2 / 1 m: 1.4 / 2.5 / 2.0 / 3.9 m², the 4 m case tearing more than 2 m; v34 the same).
 
 **Seam tearing at the frames (AUDIT A1b).** 120 kg at 8 m tore the second deck at every frame station where the
 side frame meets it (the frame's reaction entered the deck at one node: 10 % compression in the first cell). With the
@@ -225,9 +233,42 @@ gains are a queue of its own, cheap encoding and use from a worker, not speed on
 | Burke, P-800 inside MER 1 | 0.125 m | 114 k | 5.64 µs | 44 300 | 250 ms | 16 s |
 | Box, 120 kg, verify.html mesh | 0.0625 m | 345 k | 3.55 µs | | | 68–103 s (audit: 270–450) |
 
-(The table above predates v35's step and run-length changes.) What would cut it further: multi-rate steps (the coarse
-ring at 2 dt), a gather that reads each adjacency record once (by WebGL timer queries at 0.25 m the gather is ~45 % of
-a step, cells ~30 %, hinges and nodes ~10 % each).
+(The table above predates v35's step and run-length changes.) Tried and dropped: a gather that reads each adjacency
+record once (per-corner cell and hinge records, the contact push-back summed in the cell pass): 61–63 → 60–65 µs a step
+at 0.25 m, no gain (by WebGL timer queries the gather is ~45 % of a step, cells ~30 %, hinges and nodes ~10 % each, but
+on WebGPU the step does not shrink with it); time-scaling the gas phase (masses × k², the step × k once the detonation's
+loads are over, loose pieces and the gas in real time): steps / 2–3, but gas-driven tearing is not quasi-static — the
+box inside case tore 170 → 84 → 69 m² at k = 1 / 2 / 4, a VLS burn 572 → 313 → 232 m². Left: multi-rate steps (the
+coarse ring at 2 dt); a cook-off (propellant burning, τ 0.12 s) still runs to the 0.4 s cap.
+
+## Does tearing have a cliff? (v35, generic box)
+
+The game port saw an inside hit tear almost nothing until the compartment's overhead plate gave way, then a lot.
+On the bench's box (120 kg bare, 1.6 m inside the side into the 1650 m³ lower middle space; WebGPU, 0.25 m):
+
+- **Charge** (default plates): torn 1.6 / 20 / 32 / 34 / **96** / 128 / 134 / 156 / 184 / 179 m² at 10 / 20 / 25 / 30 /
+  **35** / 40 / 50 / 60 / 80 / 120 kg. There is a threshold between 30 and 35 kg (quasi-static pressure 124 → 139
+  kPa): the extra tearing is open plating of the floor and the overhead deck (floor 11 → 41 m², overhead 6 → 22), not
+  seams; without the fold knock-down (`kLaw: false`) the same (35 → 133 m²).
+- **Gas alone, rising slowly** (`gasRamp: { P: 4e5, tau: .15 }`, no charge): the decks bulge 0.35 / 0.43 m at 91 kPa,
+  0.65 / 0.94 m at 124 kPa, and tear from ~120 kPa; torn 17 m² at 158 kPa, and the tears keep running while the
+  pressure falls (to 80 kPa by 0.4 s: the gas goes into the closed neighbouring spaces). A 10 m wide deck bulging 0.9 m
+  has a membrane slope of ~0.36 at its supports, ~6.5 % stretch there: the GL limit at 0.5 m. So the threshold is the
+  decks' rupture pressure, and the run-on is a burst under sustained pressure: expected physics, not an artefact.
+- **Overhead plate** (others 12 mm HSLA): torn 64 / 67 / 79 / 148 / 117 / 106 m² at 12 / 11 / 10 / 9 / 8 / 7 mm HSLA,
+  93 / 75 at 9 / 6.5 mm mild; (v34 code, running to its 0.4 s cap: 60 / – / 113 / 150 / 121 / 137, 87 / 85, the side
+  jumping 17 → 47 m²). Which plate gives way first changes where the gas goes, so the split between plates scatters
+  (0.125 m: 10 / 9 / 8 mm HSLA put 62 / 20 / 20 m² in the side, 57 / 56 / 121 in the overhead deck, totals 159–168).
+  Same compartment with the overhead 9 mm HSLA or 6.5 mm mild, others 9 mm HSLA: 26 / 44 m² at 60 kg, 141 / 112 at
+  120, 267 / 365 at 250, 314 / 350 at 500: no jump from the swap.
+
+What was an artefact, and is fixed: runs that never ended because loose or half-loose pieces kept moving (row 16); a
+bare stiffener or a piece of plating hanging on by one node swinging on it as a frictionless pin and tearing what it
+hits (members let go, row 16; pieces joined to the structure by corner nodes only now let go too: `detachPins`); and
+plating blown loose still pushed by its compartment's gas with no opening behind it (a piston: pieces reached 250 m/s
+and smashed the deck above). Such pieces now leave the wall: their area vents between the two spaces and the gas no
+longer acts on them (`looseVent`). With these the runs above are smooth in the charge except at the rupture
+threshold. The v34 bench (and the game port, from 200fe28) had none of the three; the game's cliff is likely there.
 
 ## Petals (option, `petals: true`)
 
@@ -274,8 +315,9 @@ keep their load across the crack only (not erode) — the next steps if the opti
   only, compartments treated as convex boxes for line of sight and reflections; outside line of sight is ray-traced
   on the rest geometry at detonation; inside charges and hole sources see their whole compartment (no shadowing).
   Water shock only from a burst at the waterline (no bubble, no bulk cavitation, no underwater charges).
-- Gas: lumped compartments, isothermal orifice venting (no choking), fixed volumes; products let in once, as
-  their QS pressure. Water: plane-wave radiation pressure only (no added-mass build-up, no hydrostatics, no flooding).
+- Gas: lumped compartments, isothermal orifice venting (no choking), fixed volumes (a bulging deck does not lower the
+  pressure); products let in once, as their QS pressure. The vent area is the torn cells' plus the loose pieces'; an
+  open flap (bent away, still attached) does not vent. Water: plane-wave radiation pressure only (no added-mass build-up, no hydrostatics, no flooding).
 - Fragments: fixed mass per round (approximate public figures), isotropic spray, perforation by a plugging energy
   with a ×2 dynamic shear strength; damage is a net-section area fraction.
 - Boundaries: anchors are isotropic (same stiffness in every direction) with a 2 m continuation length; no
@@ -298,7 +340,8 @@ sustained gas), `patchL`, `fineR`, `uniformGrid`, `noWebEnds`, `noWater`, `wgBat
 `boxZ` (reduced section), `brackets`, `kLaw`, `kComp`, `kBand`, `kEps` (knock-down), `efScale` (failure strain ×),
 `shutVents`, `inDepth` (inside charge depth), `insideLOS`, `latMs` (read-back latency), `noRate`, `lReg` (non-local
 length, 0: off), `erodeEvery`, `endGas` (old end rule), `noStrip`, `endLog`, `petals`, `petalK`, `petalRadial`,
-`petalKeep` (a cell whose edges cannot split stays, cracked);
+`petalKeep` (a cell whose edges cannot split stays, cracked), `plates` ({ name: { h, mat } } per-plate overrides on the
+box), `gasRamp` ({ P, tau }: gas alone in the charge's space), `detachPins`, `looseVent`;
 `BLAST.probe(cfg, times, points, stopAt)` (displacements at points and times, headless or WebGPU);
 results per piece (torn m², max displacement), `energy` (CPU), `nm` (plate). `BLAST.parity(cfg, steps)` (CPU vs
 WebGL), `BLAST.parityA({ ...cfg, pair: ['cpu' | 'gpu' | 'webgpu', ...] }, steps)`, `BLAST.bench(n, backend)`

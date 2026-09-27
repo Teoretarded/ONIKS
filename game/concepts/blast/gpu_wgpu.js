@@ -227,6 +227,7 @@ fn crackEdge(qo: array<i32, 4>, P: array<vec3f, 4>, r1: vec3f, r2: vec3f, r3: ve
     let Av = 0.5 * cross(P[2] - P[0], P[3] - P[1]); let A = max(length(Av), 1e-12); let nn = Av / A;
     let sP = i32(tr[0].w); let sN = i32(tr[1].w);
     var L = (GPa(sN) - GPa(sP)) * Av;
+    if ((i32(c10.x) & 16) != 0) { L = vec3f(0.0); }                   // bit 4: blown loose, out of the compartment's wall
     if (tr[2].w >= 0.0) {
       let so = select(-1.0, 1.0, sP == OUT);
       let vn = dot(0.25 * (Vn[0] + Vn[1] + Vn[2] + Vn[3]), nn) * so;
@@ -829,8 +830,11 @@ export function createWGPU(dev, M, opt = {}) {
     for (const [i, e] of m) { if (k >= n) break; a.set([i, e[0], e[1], e[2]], 4 * k++); }
     if (n) { upload(a, bSC, 16 * L.O_IMP); nimp = n; }
   }
+  function gasOff(list, CVIS) {
+    for (const c of list) { const o = 4 * (L.O_CS + 11 * c + 10); stat[o] = CVIS[c]; upload(stat.subarray(o, o + 4), bST, 4 * o); }
+  }
   function setDamage(CFD) { const a = new Float32Array(4 * NC); for (let c = 0; c < NC; c++) a[4 * c] = CFD[c]; upload(a, bSC, 16 * L.O_DMG); }
   function dispose() { for (const e of tagged.values()) { try { e.buf.destroy(); } catch (x) {} } tagged.clear(); if (enc) { endPass(); enc = null; } for (const b of bufs) try { b.destroy(); } catch (e) {} bufs.length = 0; }
   return { kind: 'webgpu', step, steps, requestCells, cellsOf, requestNodes, nodesOf, has, waitFor, submit, flush, pace, busy, upload: upload0, setSources, setGas, setImpulses, setDamage, readNodes, readNodesAsync, readCells, readCellsAsync,
-    readCellsFull, readState, readStateAsync, readCellStates, dispose, profile: () => ({}), errors: errs, O, batch, setDepth: d => { depth = d; } };
+    readCellsFull, readState, readStateAsync, readCellStates, gasOff, dispose, profile: () => ({}), errors: errs, O, batch, setDepth: d => { depth = d; } };
 }

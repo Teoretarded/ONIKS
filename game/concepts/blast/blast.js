@@ -162,7 +162,9 @@ function rectPiece(P) {
 function sceneBox() {
   // st.boxX / st.boxZ shrink the section (half-length along x, deck width) for grid studies; default 15 / 10 m
   const bx = st.boxX || 15, XA = -bx, XZ = bx, YB = -2, YI = 3.5, YD = 7, ZC = -(st.boxZ || 10), XB = [-10, 5], ZF = -20;
-  const P = (name, kind, o, U, V, h, mat, stiff, open) => ({ name, kind, p00: o, p10: add(o, U), p01: add(o, V), p11: add(add(o, U), V), h, mat, stiff, open });
+  // st.plates: per-plate overrides by name, { 'second deck': { h: .009, mat: 'hsla' } } (thickness m, material key)
+  const P = (name, kind, o, U, V, h, mat, stiff, open) => { const q = st.plates && st.plates[name];
+    return { name, kind, p00: o, p10: add(o, U), p01: add(o, V), p11: add(add(o, U), V), h: q && q.h ? q.h : h, mat: q && q.mat ? MATI[q.mat] : mat, stiff, open }; };
   const sm = MATI[st.mat], mild = MATI.mild;
   const panels = [
     P('side', 0, [XA, YB, 0], [XZ - XA, 0, 0], [0, YD - YB, 0], st.h / 1000, sm,
@@ -1068,6 +1070,7 @@ function detonate() {
     if (W > 0) srcs.push({ c: cc, Pq: qsp(W, GV[cc]), kind: 'det', tau: .002, F: 0 });
     if (Wgas > 0) srcs.push({ c: cc, Pq: qsp(Wgas, GV[cc]), kind: 'burn', tau: .12, F: 0 });
     if (src && src.fuel) srcs.push({ c: cc, Pq: .8e6 * Math.min(1, src.vapour / (GV[cc] * 1.2 / 15)), kind: 'burn', tau: .06, F: 0 });
+    if (st.gasRamp) srcs.push({ c: cc, Pq: st.gasRamp.P, kind: 'burn', tau: st.gasRamp.tau || .1, F: 0 });   // a test: gas alone, rising as 1 - e^(-t/tau)
   }
   const W3 = Math.cbrt(Math.max(W, 1));
   sim = { t: 0, n: 0, phase: 1, W, fill, Mc, Wgas, src, C, cc, rc, inside, prim, SRC: [], holes: [], srcs, WIN: new Float64Array(GV.length),
@@ -1118,7 +1121,7 @@ function detonate() {
     }
   }
   sim.frags = Mc > 0 && st.frags && fill > 0 ? makeFrags(C, fill, Mc) : null;
-  EN = { ext: 0, kin: 0, el: 0, plM: 0, plH: 0, plT: 0, plA: 0, damp: 0, rad: 0, frac: 0, contact: 0, frag: 0, water: 0,
+  EN = { ext: 0, kin: 0, el: 0, plM: 0, plH: 0, plT: 0, plA: 0, damp: 0, relax: 0, rad: 0, frac: 0, contact: 0, frag: 0, water: 0,
     // plastic work: the mean of last step's and this step's (returned) force over the plastic increment (trapezoid, as
     // the kinetic energy): the split no longer counts the explicit step's overshoot as dissipation (AUDIT A2)
     pvh: new Float64Array(NH), pvc: new Float64Array(12 * NC), pvf: new Float64Array(NT), pvb: new Float64Array(NT), pvs: new Float64Array(NT) };
@@ -1473,7 +1476,7 @@ function cellPass(t, h) {
     const Az = .5 * ((X[3 * q2] - X[3 * q0]) * (X[3 * q3 + 1] - X[3 * q1 + 1]) - (X[3 * q2 + 1] - X[3 * q0 + 1]) * (X[3 * q3] - X[3 * q1]));
     const A = Math.hypot(Ax, Ay, Az) || 1e-12, nx = Ax / A, ny = Ay / A, nz = Az / A;
     let Lx = 0, Ly = 0, Lz = 0;
-    const dp = GP[CSN[c]] - GP[CSP[c]];
+    const dp = CVIS[c] & 16 ? 0 : GP[CSN[c]] - GP[CSP[c]];               // bit 4: blown loose, out of the wall
     if (dp !== 0) { Lx += dp * Ax; Ly += dp * Ay; Lz += dp * Az; }
     if (CWET[c] >= 0) {                                   // water behind: radiation pressure, cavitation limit
       const so = CSP[c] === OUT ? 1 : -1;
@@ -1663,7 +1666,7 @@ function nodePass(t, h) {
     // the boundary dashpot, implicit (at the new velocity): stable at any step (explicit, it capped dt at 2 m / c)
     if (AK[i] > 0 && AC[i] > 0) { const r = 1 / (1 + h * w * AC[i]); vx *= r; vy *= r; vz *= r;
       if (EN) EN.rad += AC[i] * (vx * (vx0 + vx) + vy * (vy0 + vy) + vz * (vz0 + vz)) * .5 * h; }
-    if (!FREE[i]) { const dm = 1 - al * h; if (EN) EN.damp += .5 * M[i] * (vx * vx + vy * vy + vz * vz) * (1 - dm * dm); vx *= dm; vy *= dm; vz *= dm; }
+    if (!FREE[i]) { const dm = 1 - al * h; if (EN) EN[sim.relax ? 'relax' : 'damp'] += .5 * M[i] * (vx * vx + vy * vy + vz * vz) * (1 - dm * dm); vx *= dm; vy *= dm; vz *= dm; }
     if (EN) EN.ext += (FL[3 * i] * (vx0 + vx) + FL[3 * i + 1] * (vy0 + vy) + FL[3 * i + 2] * (vz0 + vz)) * .5 * h;
     V[3 * i] = vx; V[3 * i + 1] = vy; V[3 * i + 2] = vz;
     X[3 * i] += vx * h; X[3 * i + 1] += vy * h; X[3 * i + 2] += vz * h;
@@ -1812,11 +1815,50 @@ function step() {
   const m = s.n - LAT; if (m > 0 && m % 200 === 0) checkEnd(m);
 }
 const VEND = { V: null, FREE: null };
+// pieces of plating that hang on by corner nodes only (no intact edge to the rest): a node shared by cells that meet
+// only at a corner is a frictionless pin of zero width, and the piece swings on it (at ~100 m/s for as long as the run
+// lasts) and tears whatever it hits. Such pieces are let go (their cells erode, as a piece torn off would), so a tear
+// that isolates a piece does not keep feeding itself. Pieces joined by an edge (a hinge) to the anchored structure stay.
+let PINUF = null;
+function detachPinned() {
+  if (sim.pinAt === sim.cellsTorn) return;                 // nothing torn since the last look
+  sim.pinAt = sim.cellsTorn;
+  if (!PINUF || PINUF.length !== NC) PINUF = new Int32Array(NC);
+  const par = PINUF; for (let c = 0; c < NC; c++) par[c] = c;
+  const fd = c => { while (par[c] !== c) { par[c] = par[par[c]]; c = par[c]; } return c; };
+  const ok = c => CKN[c] !== 1 && !CER[c] && CFD[c] < 1;
+  for (let h = 0; h < NH; h++) { const a = HC[2 * h], b = HC[2 * h + 1]; if (!HOFF[h] && ok(a) && ok(b)) { const ra = fd(a), rb = fd(b); if (ra !== rb) par[ra] = rb; } }
+  // pieces reachable from the anchored ones through shared nodes only (pins); loose debris is left alone
+  const root = new Uint8Array(NC), comps = new Map();
+  for (let c = 0; c < NC; c++) { if (!ok(c)) continue; const r = fd(c);
+    for (let k = 0; k < 4; k++) { const i = CN[4 * c + k]; if (AK[i] > 0 || (WINV[i] === 0 && !(PARENT && PARENT[i] >= 0))) root[r] = 1;
+      let l = comps.get(i); if (!l) comps.set(i, l = []); if (!l.includes(r)) l.push(r); } }
+  const adj = new Map(); for (const l of comps.values()) if (l.length > 1) for (const x of l) for (const y of l) if (x !== y) { let a = adj.get(x); if (!a) adj.set(x, a = new Set()); a.add(y); }
+  const pinned = new Uint8Array(NC), seen = new Uint8Array(NC), q = [];
+  for (const [x] of adj) if (root[x]) { seen[x] = 1; q.push(x); }
+  while (q.length) { const x = q.pop(); for (const y of adj.get(x) || []) if (!seen[y]) { seen[y] = 1; if (!root[y]) pinned[y] = 1; q.push(y); } }
+  let n = 0; for (let c = 0; c < NC; c++) if (ok(c) && pinned[fd(c)]) { CFD[c] = 1; n++; }
+  if (n) { sim.detached = (sim.detached || 0) + n; if (sim.solver === 'gpu') gpu.setDamage(CFD); }
+}
+// plating blown loose (no longer joined to the structure) leaves its compartment's wall: its area opens between the
+// two spaces (a vent, as a torn cell) and the compartment's gas no longer pushes it (it kept accelerating the piece,
+// a piston with no gap behind it, and the gas kept its pressure). From the attached-node read (every 200 steps)
+function looseCells() {
+  if (!ATT || sim.looseAt === ATT) return; sim.looseAt = ATT;
+  const l = [];
+  for (let c = 0; c < NC; c++) { if (CVIS[c] & 16 || CKN[c] === 1) continue;
+    if (ATT[CN[4 * c]] || ATT[CN[4 * c + 1]] || ATT[CN[4 * c + 2]] || ATT[CN[4 * c + 3]]) continue;
+    CVIS[c] |= 16; l.push(c);
+    const a = Math.min(CSP[c], CSN[c]), b = Math.max(CSP[c], CSN[c]); if (a !== b) OPEN.set((a << 8) | b, (OPEN.get((a << 8) | b) || 0) + CAR[c]); }
+  if (l.length) { sim.loose = (sim.loose || 0) + l.length; if (sim.solver === 'gpu') gpu.gasOff(l, CVIS); }
+}
 function checkEnd(m) {
   const s = sim; let Vd, Fd, Ud;
   if (s.solver === 'gpu') { if (!VEND.V || VEND.V.length !== 3 * N) { VEND.V = new Float64Array(3 * N); VEND.FREE = new Uint8Array(N); VEND.U = new Float64Array(3 * N); } if (!gpu.nodesOf(m, VEND.V, VEND.FREE, VEND.U)) return; Vd = VEND.V; Fd = VEND.FREE; Ud = VEND.U; }
   else { const d = PENDN.get(m); PENDN.delete(m); if (!d) return; Vd = d.V; Fd = d.FREE; Ud = d.U; }
   if (!ATT || m % 1000 === 0) ATT = attachedNodes(Ud);
+  if (st.detachPins !== false) detachPinned();
+  if (st.looseVent !== false) looseCells();
   let v2 = 0, ke = 0; for (let i = 0; i < N; i++) { if (Fd[i] || !ATT[i]) continue; const q = Vd[3 * i] ** 2 + Vd[3 * i + 1] ** 2 + Vd[3 * i + 2] ** 2; ke += .5 * M[i] * q; if (q > v2) v2 = q; }
   let gas = 0; for (let k = 0; k < GV.length; k++) if (GV[k] < Infinity) gas = Math.max(gas, Math.abs(GP[k]));
   let quiet = s.srcs.every(q => q.F > .98) && s.t - s.lastSrc > .005; const vm = Math.sqrt(v2);
@@ -2167,8 +2209,8 @@ function tornByPanel() {
 }
 function energy() {
   const e = EN, input = e.ext + e.frag * 0, pl = e.plM + e.plH + e.plT + e.plA;
-  const out = e.kin + e.el + pl + e.damp + e.rad + e.contact + e.frac;
-  return { input: Math.max(1e-9, input), pl, kin: e.kin, el: e.el, damp: e.damp, contact: e.contact, err: input - out, parts: { ...e } };
+  const out = e.kin + e.el + pl + e.damp + e.relax + e.rad + e.contact + e.frac;   // relax: the end-of-run relaxation (its own line)
+  return { input: Math.max(1e-9, input), pl, kin: e.kin, el: e.el, damp: e.damp, relax: e.relax, contact: e.contact, err: input - out, parts: { ...e } };
 }
 
 /* ------------------------------------------------------------------ input */

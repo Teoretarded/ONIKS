@@ -170,7 +170,7 @@ void main(){
   vec3 xa = texelFetch(uNS, ATW(q[0], 5, 1), 0).xyz + ua;
   vec3 Av = 0.5 * cross(P[2] - P[0], P[3] - P[1]); float A = max(length(Av), 1e-12); vec3 nn = Av / A;
   int sP = int(tr[0].w), sN = int(tr[1].w);
-  vec3 L = (GPa(sN) - GPa(sP)) * Av;
+  vec3 L = ((int(c10.x) & 16) != 0 ? 0.0 : GPa(sN) - GPa(sP)) * Av;   // bit 4: blown loose, out of the compartment's wall
   if (tr[2].w >= 0.0) {
     float so = sP == uOUT ? 1.0 : -1.0;
     float vn = dot(0.25 * (Vn[0] + Vn[1] + Vn[2] + Vn[3]), nn) * so;
@@ -721,6 +721,11 @@ export function createGPU(gl, M) {
     if (NT) { const a = new Float32Array(Wd * THr * 4); read(fTruss[cur], 0, Wd, THr, a); for (let k = 0; k < NT; k++) { o.TFL[k] = a[4 * k] < 0 ? 1 : 0; if (o.TBP) o.TBP[k] = a[4 * k + 3]; } }
     if (NH) { const a = new Float32Array(Wd * HHr * 4); read(fHinge[cur], 0, Wd, HHr, a); for (let k = 0; k < NH; k++) { o.HTP[k] = a[4 * k]; if (o.HTH) o.HTH[k] = a[4 * k + 1]; if (o.HTPS) o.HTPS[k] = a[4 * k + 2]; } }
   }
+  // cells blown loose: no compartment gas on them (their visibility word, bit 4)
+  function gasOff(list, CVIS) {
+    gl.bindTexture(gl.TEXTURE_2D, T.cs);
+    for (const c of list) gl.texSubImage2D(gl.TEXTURE_2D, 0, (c % Wd) * 11 + 10, Math.floor(c / Wd), 1, 1, gl.RGBA, gl.FLOAT, new Float32Array([CVIS[c], M.CKC ? M.CKC[c] : 1, M.KCE || 0, M.JMN === undefined ? .25 : M.JMN]));
+  }
   function dispose() { for (const e of tagged.values()) { try { gl.deleteBuffer(e.b); gl.deleteSync(e.f); } catch (x) {} } tagged.clear(); if (fence) gl.deleteSync(fence); if (fenceN) gl.deleteSync(fenceN); for (const [f, o] of objs) try { gl[f](o); } catch (e) {} objs.length = 0; }
-  return { step, steps, requestCells, cellsOf, requestNodes, nodesOf, has: () => true, waitFor: () => Promise.resolve(), profile, readCellsFull, readNodesAsync, upload, setSources, setGas, setImpulses, setDamage, readNodes, readCells, readCellsAsync, readState, dispose, O };
+  return { step, steps, requestCells, cellsOf, requestNodes, nodesOf, has: () => true, waitFor: () => Promise.resolve(), profile, gasOff, readCellsFull, readNodesAsync, upload, setSources, setGas, setImpulses, setDamage, readNodes, readCells, readCellsAsync, readState, dispose, O };
 }
