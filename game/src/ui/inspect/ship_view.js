@@ -150,8 +150,15 @@ export function createShipView(I) {
     let lit = 0, hurt = 0, dead = 0;
     for (const n of sp.nodes) { const dm = n.mod ? Math.min(1, u.mods[n.mod.id] / n.mod.hp) : S.h[n.i]; if (!S.ok[n.i]) dead++; else if (dm > .05) hurt++; else lit++; }
     out.push([['Systems ', F], [`${sp.nodes.length}`, Wt], [' · lit ', F], [`${lit}`, LIME], [' · damaged ', F], [`${hurt}`, Wt], [' · out ', F], [`${dead}`, dead ? CORAL : Wt]]);
+    // what was wrecked first, then what only lost its power or supply (as a count)
     const lost = [];
-    for (const n of sp.nodes) if (!S.ok[n.i] && n.cls !== 'cable') lost.push(`${short(n.label)}${S.why[n.i] ? ' (' + S.why[n.i] + ')' : ''}`);
+    let nPow = 0;
+    for (const n of sp.nodes) {
+      if (S.ok[n.i] || n.cls === 'cable') continue;
+      if (S.why[n.i] === 'power' || S.why[n.i] === 'supply') { nPow++; continue; }
+      lost.push(`${short(n.label)}${S.why[n.i] ? ' (' + S.why[n.i] + ')' : ''}`);
+    }
+    if (nPow) lost.push(`${nPow} without power or supply`);
     const cw = sp.nodes.filter(n => n.cls === 'cable' && !S.ok[n.i]).length;
     if (cw) lost.push(`${cw} cable way segment${cw > 1 ? 's' : ''}`);
     if (lost.length) out.push([['Out ', F], [lost.slice(0, 4).join(' · ') + (lost.length > 4 ? ` · +${lost.length - 4}` : ''), CORAL]]);

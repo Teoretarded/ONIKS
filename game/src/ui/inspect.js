@@ -854,7 +854,9 @@ export async function createInspect(game, ctx) {
       L.push([rate, [game.timeRate === BULLET && !game.paused ? ' · bullet time · ' : ' · ', F], [`T+${game.fmtTime ? game.fmtTime(sim.t) : sim.t.toFixed(0)}`, F]]);
     }
     for (const segs of IMP.readout(F, Wt)) L.push(segs);
-    if (svOk(V) && (IMP.on || V.xr.k > .5)) {
+    // (her state in the readout whenever she is hurt: water in her, a system out, a fire; the drawing needs the X-ray)
+    const hurt = svOk(V) && (V.u.ship.w > 1 || V.u.ship.ok.includes(0) || V.u.ship.fire.some(f => f > 0));
+    if (svOk(V) && (IMP.on || V.xr.k > .5 || hurt)) {
       if (IMP.on && !IMP.st.simDmg) L.push([['Ship ', F], ['visual strikes leave her spaces and systems as they are', Wt], [' · D sim damage', F]]);
       for (const segs of SV.readout(F, Wt, V.u)) L.push(segs);
     }
