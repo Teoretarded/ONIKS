@@ -22,6 +22,10 @@
                       'control' | 'aviation' | 'deck'
      the unit models also get the cut model's machinery / VLS modules / shaft lines where the cut has them
      (mach, trunks, shaftIn, vlsBF, vlsBA on the DDG), under the same names, gated the same way.
+   Through a hole (for the blast / scars owners): the engine's pocket drop (blastGLSL / scarGLSL: dots behind a torn
+   cell and the plug of pushed-back splats) removes these parts' dots like the hull's; to see them the pocket test has
+   to spare inside parts (part.inside) and the plug has to sit past them, and whoever draws a holed ship sets
+   d.st.interior = interiorZones(key, hole, 8) (INTERIOR.zonesNear).
    Visibility: show(st) = st.xray (Inspect, the hit replay, the museum) || st.interior, where st.interior is true (all
    zones) or { all } or { <zone number>: 1, ... } (only those zones: the systems that open a hole switch on the zones
    round it, interiorZones()). Zero cost while hidden (the engine skips a part whose show() is false before sampling).
@@ -32,7 +36,8 @@
      wrap        { key: model => model with its interior } for destroyer, destroyer_cut, cg, cg_cut, carrier,
                  carrier_cut, lhd, lhd_cut, lcs, lcs_cut
      ZONES       { key: [{ no, z0, z1, name }] } (model frame)
-     COMPS       { key: [{ id, name, zone, box: [x0, y0, z0, x1, y1, z1], sys }] }
+     COMPS       { key: [{ id, name, zone, box: [x0, y0, z0, x1, y1, z1] (bounds of what is drawn), sys }] }
+                 (the spaces themselves: data/ship_layouts.js layoutOf; the DDG's ids are burke's, the others' GEN's)
      anatomy(key, cutParts) -> anatomy entries for the cut model's interior parts (data/anatomy.js appends them)
    interiorZones(key, p, r) -> { zone: 1 } for the zones within r m of model-frame point p (along the length)
    interiorOn(v, zones) -> the gate test used by show() */
