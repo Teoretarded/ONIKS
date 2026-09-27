@@ -1,0 +1,190 @@
+/* Blast QA battery (dev, visual / performance QA of ship hits). In play.html?mode=sandbox&intro=0's console:
+     const Q = await import('/game/src/dev/blast_qa.js');
+     Q.start(ONIKS, { only: ['ddg_bow'] })     // runs in the background (works with the page hidden); window.QA holds progress
+     QA.done, QA.rows                           // one row a case: resolve time, frame p50/p95, torn area, systems, qa check
+     Q.table()                                  // the rows as a markdown table (QA.md)
+   Each case: a fresh unit at a clear spot, the UI hidden, the hit through the sim's own path (dev/scar_lab.js hit), the
+   game driven frame by frame at 60 Hz of game time (each frame GPU-synced and timed; yields between frames so the
+   solver's worker runs), stills at 1 s after the hit (two close angles) and once settled (solve done + debris landed):
+   close 60 m from two angles, a detail 25 m, a wide 300 m -> game/shots/qa/<case>_<tag>.png. The floating-dot check
+   (game/src/blast/qa.js) runs on the settled state when it exists. */
+import { spawn, hit, look } from './scar_lab.js';
+import { kill } from '../sim/damage.js';
+import { removeUnits } from '../game/sandbox.js';
+
+const PI = Math.PI;
+const FACE = { stbd: [PI / 2, .16], port: [-PI / 2, .16], fwd: [0, .16], aft: [PI, .16], deck: [PI / 2, .85], deckP: [-PI / 2, .85] };
+
+/* model frame: +X starboard, +Y up (0 the waterline), +Z bow. from: toward where the round came from */
+export const CASES = [
+  // DDG-51
+  { id: 'ddg_bow', type: 'ddg', kind: 'oniks', loc: [10, 5, 60], from: [1, .05, 0], face: 'stbd' },
+  { id: 'ddg_mid', type: 'ddg', kind: 'oniks', loc: [10, 4, 0], from: [1, .05, 0], face: 'stbd' },
+  { id: 'ddg_wl', type: 'ddg', kind: 'oniks', loc: [10, .8, -10], from: [1, .02, 0], face: 'stbd' },
+  { id: 'ddg_gundeck', type: 'ddg', kind: 'oniks', loc: [3, 9, 61], from: [.25, 1, .35], face: 'deck' },
+  { id: 'ddg_spy', type: 'ddg', kind: 'oniks', loc: [7, 14, 27], from: [1, .1, .6], face: 'stbd' },
+  { id: 'ddg_house', type: 'ddg', kind: 'uran', loc: [9.8, 10, -5], from: [1, .05, 0], face: 'stbd' },
+  { id: 'ddg_mast', type: 'ddg', kind: 'shell', loc: [1, 30, 19], from: [1, .2, 0], face: 'stbd' },
+  { id: 'ddg_vls', type: 'ddg', kind: 'oniks', loc: [0, 6.2, -29], from: [.4, 1, 0], face: 'deck' },
+  { id: 'ddg_hangar', type: 'ddg', kind: 'oniks', loc: [0, 8, -53.5], from: [0, .1, -1], face: 'aft' },
+  { id: 'ddg_stern', type: 'ddg', kind: 'oniks', loc: [9, 3, -70], from: [1, .05, 0], face: 'stbd' },
+  { id: 'ddg_kh35', type: 'ddg', kind: 'uran', loc: [-10, 4, 30], from: [-1, .05, 0], face: 'port' },
+  { id: 'ddg_sm6', type: 'ddg', kind: 'sm6', loc: [10, 6, 10], from: [1, .15, 0], face: 'stbd' },
+  { id: 'ddg_127', type: 'ddg', kind: 'shell', loc: [10, 5, 20], from: [1, .05, 0], face: 'stbd' },
+  { id: 'ddg_30mm', type: 'ddg', kind: 'gun30', loc: [10, 5, 5], from: [1, .05, 0], face: 'stbd', burst: 10 },
+  { id: 'ddg_cookoff', type: 'ddg', cook: 'vlsF', face: 'deck', loc: [0, 7.4, 39], settle: 20 },
+  { id: 'ddg_breakup', type: 'ddg', kind: 'oniks', loc: [10, 3, -5], from: [1, .05, 0], face: 'stbd', dmg: 999, settle: 40 },
+  // CG-47
+  { id: 'cg_side', type: 'cg', kind: 'oniks', loc: [8.4, 4, -10], from: [1, .05, 0], face: 'stbd' },
+  { id: 'cg_deck', type: 'cg', kind: 'oniks', loc: [2, 8, 58], from: [.25, 1, .3], face: 'deck' },
+  // CVN-68
+  { id: 'cvn_side', type: 'carrier', kind: 'oniks', loc: [37, 10, 60], from: [1, .05, 0], face: 'stbd' },
+  { id: 'cvn_deck', type: 'carrier', kind: 'oniks', loc: [0, 19.6, 80], from: [.2, 1, .3], face: 'deckP' },
+  { id: 'cvn_island', type: 'carrier', kind: 'oniks', loc: [21.5, 35, -30], from: [-1, .1, 0], face: 'port' },
+  // LCS-2
+  { id: 'lcs_side', type: 'lcs', kind: 'oniks', loc: [7.2, 5, 40], from: [1, .05, 0], face: 'stbd' },
+  { id: 'lcs_kh35', type: 'lcs', kind: 'uran', loc: [15.8, 6, 0], from: [1, .05, 0], face: 'stbd' },
+  // LHD-1
+  { id: 'lhd_side', type: 'lhd', kind: 'oniks', loc: [15.9, 10, 30], from: [1, .05, 0], face: 'stbd' },
+  { id: 'lhd_deck', type: 'lhd', kind: 'oniks', loc: [0, 18.3, 60], from: [.2, 1, .3], face: 'deck' },
+];
+
+const q = [];
+let chan = null;
+/* yield to the event loop without timers (a hidden page throttles setTimeout to ~1 s) */
+function yieldNow() {
+  if (!chan) { chan = new MessageChannel(); chan.port1.onmessage = () => { const f = q.shift(); f && f(); }; }
+  return new Promise(r => { q.push(r); chan.port2.postMessage(0); });
+}
+const pct = (a, p) => { if (!a.length) return null; const s = a.slice().sort((x, y) => x - y); return +s[Math.min(s.length - 1, Math.floor(s.length * p))].toFixed(2); };
+
+/* one frame of 1/60 s game time: rendered, GPU-synced and timed; then ~16.7 ms of real time handed to the worker */
+async function frame(O, rec) {
+  const gl = O.R.gl, px = new Uint8Array(4), a = performance.now();
+  O.advance(1 / 60, 1);
+  gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+  const ms = performance.now() - a;
+  if (rec) rec.push(ms);
+  while (performance.now() - a < 16.7) await yieldNow();
+  return ms;
+}
+async function frames(O, n, rec) { for (let i = 0; i < n; i++) await frame(O, rec); }
+
+let slot = 0;
+function clearSpot(O) {
+  const sim = O.sim, ref = [...sim.units.values()].find(u => u.def.domain === 'sea') || { pos: [0, 0, 0] };
+  const k = ++slot;
+  return [ref.pos[0] + 3000 + (k % 3) * 1200, ref.pos[2] + 3000 + (Math.floor(k / 3) % 4) * 1200];
+}
+
+function views(c) {
+  const [y0, p0] = FACE[c.face] || FACE.stbd, deck = c.face && c.face.startsWith('deck');
+  return {
+    a: { yaw: y0 + .45, pitch: deck ? .8 : p0, dist: 60 },
+    b: { yaw: y0 - .7, pitch: deck ? .5 : .42, dist: 60 },
+    d: { yaw: y0 + .2, pitch: deck ? .75 : .1, dist: 25 },
+    e: { yaw: y0 + .08, pitch: deck ? 1.1 : .06, dist: 12 },
+    w: { yaw: y0 + .35, pitch: .3, dist: 300 },
+  };
+}
+
+function systems(O, id) {
+  const u = O.sim.units.get(id);
+  if (!u) return null;
+  const mods = [];
+  for (const m of u.def.modules || []) { const d = u.mods && u.mods[m.id]; if (d > 0) mods.push(`${m.id}:${Math.round(100 * d / m.hp)}%`); }
+  const parts = [];
+  for (const p in (u.parts || {})) { const v = u.parts[p]; if (typeof v === 'number' && v > 0) parts.push(`${p}:${Math.round(v)}`); }
+  return { hp: Math.round(u.hp), hpMax: u.hpMax, flood: +(u.flood || 0).toFixed(3), fire: +(u.fire || 0).toFixed(1), alive: u.alive, mods, parts };
+}
+
+async function shot(O, id, loc, v, name) { look(O, id, v.loc || loc, v); await O.still(name, 0, 2); }
+
+export async function runCase(O, c, o = {}) {
+  const g = O.game, sim = O.sim, dir = o.dir || 'qa';
+  const [x, z] = clearSpot(O);
+  const id = spawn(O, c.type, x, z, 0);
+  g.setUiHidden && g.setUiHidden(true);
+  const V = views(c), row = { id: c.id, type: c.type, kind: c.cook ? 'cookoff' : c.kind, shots: [] };
+  look(O, id, c.loc, V.a);
+  const base = [];
+  await frames(O, 30);
+  await frames(O, 60, base);
+  row.base = [pct(base, .5), pct(base, .95)];
+  const t0 = g.t, s0 = sim.t, u = sim.units.get(id);
+  // the hit
+  if (c.cook) {
+    const m = u.def.modules.find(m => m.id === c.cook), b = m.box, C = m.cook || {};
+    const at = [(b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2];
+    u.cook = u.cook || {}; u.cook[m.id] = true; u.mods[m.id] = m.hp;
+    const cs = Math.cos(u.hdg), sn = Math.sin(u.hdg);
+    sim.emit('cookoff', { unit: u.id, type: u.type, side: u.side, module: m.id, label: m.label, part: m.part,
+      pos: [u.pos[0] + at[0] * cs + at[2] * sn, u.pos[1] + at[1], u.pos[2] - at[0] * sn + at[2] * cs], at, size: C.size, out: 'kill', fire: 0, depth: 0 });
+    if (C.out !== 'heavy') { u.hp = -u.hpMax; kill(sim, u, null); }
+    g.dispatchEvents();
+  } else if (c.burst) {
+    for (let i = 0; i < c.burst; i++) {
+      const j = [c.loc[0], c.loc[1] + Math.sin(i * 2.3) * 1.2, c.loc[2] + Math.cos(i * 1.7) * 1.5];
+      hit(O, id, j, c.kind, { from: c.from, dmg: 1 });
+      await frames(O, 3);
+    }
+  } else {
+    hit(O, id, c.loc, c.kind, { from: c.from, dmg: c.dmg });
+  }
+  const B = g.blast && g.blast.last && g.blast.last(id);
+  row.patch = !!B;
+  const SC = g.scars && g.scars.last && g.scars.last(id);
+  const aim = SC && isFinite(SC.x) ? [SC.x, SC.y, SC.z] : c.loc;
+  const rec = [], maxT = o.maxT || 70;
+  let shot1 = false, doneAt = null;
+  while (g.t - t0 < maxT) {
+    await frame(O, rec);
+    const t = g.t - t0;
+    if (!shot1 && t >= 1) {
+      shot1 = true;
+      await shot(O, id, aim, V.a, `${dir}/${c.id}_1s_a60`); await shot(O, id, aim, V.b, `${dir}/${c.id}_1s_b60`);
+      row.shots.push('1s_a60', '1s_b60'); look(O, id, c.loc, V.a);
+    }
+    const solved = !B || B.state === 'done' || B.state === 'fail';
+    if (solved && doneAt === null) doneAt = t;
+    if (doneAt !== null && shot1 && t - doneAt >= (c.settle || 3)) break;
+  }
+  row.resolve = B ? (B.state === 'done' ? +((B.doneT || sim.t) - s0).toFixed(2) : B.state) : null;
+  row.wallMs = B ? Math.round(B.wallMs || 0) : null;
+  row.solve = [pct(rec, .5), pct(rec, .95), rec.length];
+  if (B) Object.assign(row, { torn: +(B.torn || 0).toFixed(2), below: +(B.below || 0).toFixed(2), setMm: Math.round((B.setMax || 0) * 1000), frames: B.res && B.res.framesTorn,
+    byPlate: (B.byPlate || []).map(v => +v.toFixed(2)), W: B.meta && B.meta.W && +B.meta.W.toFixed(1), err: B.err });
+  // settled stills
+  for (const [k, tag] of [['a', 'set_a60'], ['b', 'set_b60'], ['d', 'set_d25'], ['e', 'set_e12'], ['w', 'set_w300']]) { await shot(O, id, aim, V[k], `${dir}/${c.id}_${tag}`); row.shots.push(tag); }
+  row.sys = systems(O, id);
+  // the floating-dot check, when game/src/blast/qa.js exists
+  try {
+    const QM = await import('/game/src/blast/qa.js');
+    const fn = QM.check || QM.floating || QM.run || QM.default;
+    if (fn) row.qa = await fn(O, id);
+  } catch (e) { row.qa = 'n/a'; }
+  row.ms = Math.round(performance.now());
+  if (o.keep !== true) { if (g.blast && g.blast.dropUnit) g.blast.dropUnit(id); removeUnits(g, [id]); }
+  await frames(O, 10);
+  return row;
+}
+
+export function start(O, o = {}) {
+  const list = CASES.filter(c => !o.only || o.only.includes(c.id) || o.only.some(p => p.endsWith('*') && c.id.startsWith(p.slice(0, -1))));
+  const QA = window.QA = { done: false, rows: [], cur: null, err: [], n: list.length };
+  (async () => {
+    for (const c of list) {
+      QA.cur = c.id;
+      try { QA.rows.push(await runCase(O, c, o)); } catch (e) { QA.err.push([c.id, String(e && e.stack || e)]); }
+    }
+    QA.cur = null; QA.done = true;
+    O.game.setUiHidden && O.game.setUiHidden(false);
+  })();
+  return QA;
+}
+
+export function table(rows = window.QA.rows) {
+  const L = ['| case | round | resolve s | solver wall ms | frame p50/p95 ms (base) | torn m2 (below) | set mm | frames | sim: flood / damaged modules | qa |', '|---|---|---|---|---|---|---|---|---|---|'];
+  for (const r of rows) L.push(`| ${r.id} | ${r.kind} | ${r.resolve ?? '-'} | ${r.wallMs ?? '-'} | ${r.solve[0]}/${r.solve[1]} (${r.base[0]}/${r.base[1]}) | ${r.torn ?? '-'} (${r.below ?? '-'}) | ${r.setMm ?? '-'} | ${r.frames ?? '-'} | ${r.sys ? `${r.sys.flood} / ${r.sys.mods.join(' ') || '-'}` : 'gone'} | ${r.qa === undefined ? '-' : typeof r.qa === 'object' ? JSON.stringify(r.qa) : r.qa} |`);
+  return L.join('\n');
+}
