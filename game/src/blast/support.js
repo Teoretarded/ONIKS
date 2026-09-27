@@ -131,18 +131,18 @@ export function classify(B, x, y, z, nx, ny, nz, info, ins) {
     const T = r.cpu, t = (i, j) => T[4 * (j * W + i) + 3] | 0;
     const f00 = t(i0, j0), fN = fx < .5 ? (fy < .5 ? f00 : t(i0, j0 + 1)) : (fy < .5 ? t(i0 + 1, j0) : t(i0 + 1, j0 + 1));
     if (info) { info.r = r; info.off = off; info.i = Math.round(fi); info.j = Math.round(fj); info.up = A[1] > .7; }
-    if (Math.abs(off) > band || !face) {
+    if (Math.abs(off) > band || !face || ins) {
       // (the shader's torn test: the cells' torn flags interpolated at the point against its ragged threshold)
       const torn = tornAt(T, W, r.nu, r.nv, fi, fj, u, v, l);
-      if (off > -.05 && off < (A[1] > .7 ? 30 : 3)) {
+      if (!ins && off > -.05 && off < (A[1] > .7 ? 30 : 3)) {
         // (the plating under its foot thrown more than 1.5 m: what stood on it does not ride along as a clean block, it
         // tears off and falls as a piece: QA D23; as the shader)
         const D2 = k2 => { const q = c => T[4 * c + k2]; const c00 = j0 * W + i0; return (q(c00) * (1 - fx) + q(c00 + 1) * fx) * (1 - fy) + (q(c00 + W) * (1 - fx) + q(c00 + W + 1) * fx) * fy; };
         const big = D2(0) ** 2 + D2(1) ** 2 + D2(2) ** 2 > 2.25;
         return torn || big || (fN & 10) ? K.COLDROP : K.COL; }
-      if (ins && off <= -.05 && off > -D - 8) {
+      if (ins && off < (A[1] > .7 ? 30 : .5) && off > -D - 8) {
         // an interior part: wrecked where the plating over it tore (most of its dots gone, the same hash as the shader's)
-        const wd = Math.max(0, 1 + off / (D + .4));
+        const wd = Math.min(1, Math.max(0, 1 + off / (D + .4)));
         return (torn || (fN & 2)) && wreckHash(l[0] * 3, l[1] * 3, l[2] * 3) < .7 * wd + .2 ? K.BEHINDDROP : K.BEHIND;
       }
       if (off <= -.05 && off > -D - .4) return !B.spec.farWall && face && Math.min(fi, r.nu - fi, fj, r.nv - fj) * S > .6 && (torn || (fN & 10)) ? K.BEHINDDROP : K.BEHIND;   // (no interior drawn: the far side stays, charred)

@@ -259,6 +259,9 @@ export function createShellRunner(gl, o = {}) {
         if (M.TBRK[nn] >= 0) f |= 4;
         d[o + 3] = f + Math.min(.99, so ? so[kn] : M.SOOT[nn]);
         if (!(d[o] === d[o] && d[o + 1] === d[o + 1] && d[o + 2] === d[o + 2])) { d[o] = d[o + 1] = d[o + 2] = 0; d[o + 3] = 2; }
+        // (drawn: a flap bent open reaches at most ~3 m from where its plating was, the tip crumpling in rather than a
+        // long straight ribbon flung over the ship: QA D44; the solve keeps its own)
+        { const dl = Math.hypot(d[o], d[o + 1], d[o + 2]); if (dl > 3) { const k = (3 + Math.log(dl / 3)) / dl; d[o] *= k; d[o + 1] *= k; d[o + 2] *= k; } }
       }
       // unsupported columns (bit 8): what stands on this plating (a gun on the deck, a deckhouse, rails; on a side the
       // fittings on it) needs the plating round its foot: the share of intact plating within 1.5 m (horizontal plating;

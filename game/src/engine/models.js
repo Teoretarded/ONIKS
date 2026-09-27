@@ -616,14 +616,14 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
         thr = 0.5 + (nz - 0.5) * 0.8; torn = mk > thr;
       }
       vec4 t10 = texelFetch(uBtT, b + ivec2(1, 0), 0), t01 = texelFetch(uBtT, b + ivec2(0, 1), 0), t11 = texelFetch(uBtT, b + ivec2(1, 1), 0);
-      if (abs(off) > band || !face) {
-        // not the plating itself: what stands on it (over a deck up to 30 m: a gun, a deckhouse, rails; off a side up to
+      if (abs(off) > band || !face || gIn > 0.5) {
+        // not the plating itself (an interior part never is: its lines along the shell are not the shell): what stands on it (over a deck up to 30 m: a gun, a deckhouse, rails; off a side up to
         // 3 m: its fittings) rides the plating under its foot, and goes where that plating tore, went or lost its support
         // (bit 8: the blast system flies those dots as loose pieces); what is behind it follows it, fading with depth,
         // and is gone behind a hole (the blast system draws what is inside)
         int fN = int((fx < 0.5 ? (fy < 0.5 ? t00 : t01) : (fy < 0.5 ? t10 : t11)).w);
         vec3 dlb = mix(mix(t00.xyz, t10.xyz, fx), mix(t01.xyz, t11.xyz, fx), fy);
-        if (off > -0.05 && off < (A.y > 0.7 ? 30.0 : 3.0)) {
+        if (gIn < 0.5 && off > -0.05 && off < (A.y > 0.7 ? 30.0 : 3.0)) {
           // (torn: the smooth ragged outline, as the plating's own; the nearest texel's flag would cut 0.25 m steps)
           // (the plating under its foot thrown more than 1.5 m: it tears off and falls as a piece, the blast system flies it)
           if (torn || (fN & 10) != 0 || dot(dlb, dlb) > 2.25) return 1;
@@ -637,15 +637,18 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
           if (!two && dot(n, A) < -0.5) gHole = max(gHole, 0.6);
           break;
         }
-        if (off <= -0.05 && gIn > 0.5 && off > -D - 8.0) {
+        if (gIn > 0.5 && off < (A.y > 0.7 ? 30.0 : 0.5) && off > -D - 8.0) {
           // an interior part (bulkheads, decks, machinery...): wrecked where the plating over it tore (most of it gone,
           // the rest charred and pushed with the plating), followed and scorched behind plating that held
-          float wd = max(0.0, 1.0 - (-off) / (D + 0.4));
+          float wd = clamp(1.0 - (-off) / (D + 0.4), 0.0, 1.0);
           // (depth pass: none of a wrecked part's cells splat: its dots are a speckle, a splat is a whole cell, and the
           // survivors' cells would print as black blocks over what is behind)
           if (torn || (fN & 2) != 0) { if (dp || wreckHash(l * 3.0) < 0.7 * wd + 0.2) return 1;   // (per ~8 cm cell: a speckle, not 0.25 m blocks)
             burn = max(burn, 0.5); hot = max(hot, heat * 0.4 * wd); edge = max(edge, 0.35 * wd); heatN = max(heatN, heat); }
           else if ((fN & 8) != 0) burn = max(burn, 0.5 * wd);
+          // (behind the hull's own plating where it held, well clear of the hole: hidden by it, not drawn through it: QA
+          // D37; seen only through the hole, i.e. where the plating over it is torn or near the tear)
+          else if (mk < 0.001) return 1;
           p += (X * dlb.x + Y * dlb.y + Z * dlb.z) * wd;
           // (what stands behind a hole is seen from inside its spaces: the walls' far sides lit and splatted too)
           gHole = max(gHole, 0.3 + 0.7 * wd); gHoleP = vec4(A, P.y + dot(uBtO[i].xyz, A)); if (dp) return 3;
