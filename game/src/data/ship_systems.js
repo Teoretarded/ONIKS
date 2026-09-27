@@ -66,6 +66,8 @@ export const SHIPK = {
   zTearUnder: .5,         // hole radius under the keel for a torpedo, m / kg^1/3
   pGas: 40e3,             // Pa per mm of plating: the gas pressure in a closed space that splits its boundaries
   gasTear: .15,           // share of a boundary torn per unit of gas over-pressure (capped at half)
+  gasReach: 4,           // m / kg^1/3: the gas splits a boundary only this near the charge, less toward it (a long space's far end,
+                          // tens of metres off, holds: the plating nearest the burst gives first and vents it)
   trans: .5,              // a shock keeps this share through a torn boundary or an open door (blast/phys.js DIFF)
   wall: .03,              // ... through intact plating (the plate's own motion)
   tGas: .05,              // s: the quasi-static gas pressure acts this long (it vents)

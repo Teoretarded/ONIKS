@@ -201,7 +201,7 @@ export function shipHit(sim, u, dmg, src, pos, ev) {
       // and the outside
       const ci = L.at(p[0] + dx * .5, p[1] + dy * .5, p[2] + dz * .5);
       if (ci >= 0 && C.H) {
-        const k = L.pair(ci, p[1] < 0 ? SEA : AIR) >= 0 ? L.pair(ci, p[1] < 0 ? SEA : AIR) : L.pair(ci, p[1] < 0 ? AIR : SEA);
+        const k = outK(L, ci, p[0], p[1], p[2], p[1] < 0 ? SEA : AIR);
         if (k >= 0 && S.torn[k] < C.H) { S.torn[k] = Math.max(S.torn[k], C.H); S.tornY[k * 2] = p[1] - .7; S.tornY[k * 2 + 1] = p[1] + .7; makeHole(sim, u, S, ci, k, p[0], p[1], p[2], C.H, L.bB[k]); }
       }
       const k = Math.min(COOK.pen, 1.6); p[0] += dx * k; p[1] += dy * k; p[2] += dz * k;
@@ -251,8 +251,7 @@ function blastAt(sim, u, S, W, F, pen, fz, p, src, depth, skip) {
       }
     }
     c0 = best;
-    if (c0 >= 0) skinK = L.pair(c0, py < 0 ? SEA : AIR);
-    if (skinK < 0 && c0 >= 0) skinK = L.pair(c0, py < 0 ? AIR : SEA);
+    if (c0 >= 0) skinK = outK(L, c0, px, py, pz, py < 0 ? SEA : AIR);
   }
   // 1. gas in the space, boundaries torn, doors blown; the gas reaches the next spaces through what opened, in
   //    proportion to the opening (a door passes little of it, a torn deck most)
@@ -265,7 +264,7 @@ function blastAt(sim, u, S, W, F, pen, fz, p, src, depth, skip) {
     const next = [];
     for (const c of front) {
       const gi = gasIx(c, nG), Pgc = gi >= 0 ? P0 * GASG[gi] : 0;
-      let shA = 0, shK = -1;
+      let shA = 0, shK = -1, shD = 1e9;
       for (const k of L.cb[c]) {
         if (!inside && k !== skinK) continue;                 // a burst outside meets only the plating it struck
         const o = L.bA[k] === c ? L.bB[k] : L.bA[k];
@@ -282,7 +281,10 @@ function blastAt(sim, u, S, W, F, pen, fz, p, src, depth, skip) {
           const rT = zt * W13 * (ring === 0 ? 1 : .6);
           if (d < rT) A = Math.PI * (rT * rT - d * d);
           const pf = SHIPK.pGas * t;
-          if (Pgc > pf) A = Math.max(A, L.bArea[k] * Math.min(.5, SHIPK.gasTear * Pgc / pf));
+          // (the gas splits the plating near the burst, not a boundary at the far end of a long space: within reach, less
+          // with distance)
+          const gR = SHIPK.gasReach * W13, gk = sat(1 - d / gR);
+          if (Pgc > pf && gk > 0) A = Math.max(A, L.bArea[k] * Math.min(.5, SHIPK.gasTear * Pgc / pf) * gk);
           A = Math.min(A, L.bArea[k] * .6);
           yc = Math.max(L.bBox[k * 6 + 1], Math.min(L.bBox[k * 6 + 4], py));
         }
@@ -292,7 +294,7 @@ function blastAt(sim, u, S, W, F, pen, fz, p, src, depth, skip) {
           const r = Math.sqrt(A / Math.PI);
           S.tornY[k * 2] = Math.max(L.bBox[k * 6 + 1], yc - r); S.tornY[k * 2 + 1] = Math.min(L.bBox[k * 6 + 4], yc + r);
           // (a space's shell is several boundaries, split at the waterline: one tear through it a blast)
-          if (o < 0) { if (A > shA) { shA = A; shK = k; } }
+          if (o < 0) { if (shK < 0 || d < shD - .5 || (d < shD + .5 && A > shA)) { shA = A; shK = k; shD = d; } }   // (the nearest of them that failed)
           else if (was < .5 && A >= .5) tornNow.push(k);
         }
         if (o >= 0 && L.bDoor[k] > 0 && S.door[k] !== 2 && P > L.bDoorP[k]) S.door[k] = 2;
@@ -384,6 +386,22 @@ function bndDist(L, k, x, y, z) {
     return Math.hypot(Math.max(0, d), dz);
   }
   return boxDist(L.bBox, k * 6, x, y, z);
+}
+/* the boundary of space c to the outside nearest a point (to 'first', SEA or AIR, else the other): a space has
+   several (its side split at the waterline, its ends, its deck), and a hole goes in the one at hand, not the space's
+   far end (L.pair gives any one of them) */
+function outK(L, c, x, y, z, first) {
+  let best = -1, bd = 1e18;
+  for (const pass of [first, first === SEA ? AIR : SEA]) {
+    for (const k of L.cb[c]) {
+      const o = L.bA[k] === c ? L.bB[k] : L.bA[k];
+      if (o !== pass) continue;
+      const d = bndDist(L, k, x, y, z);
+      if (d < bd) { bd = d; best = k; }
+    }
+    if (best >= 0) return best;
+  }
+  return -1;
 }
 function boxDist(B, o, x, y, z) {
   let dd = 0, v;
@@ -477,7 +495,7 @@ function makeHole(sim, u, S, c, k, px, py, pz, A, out, depth) {
     if (over < .3) continue;
     const c2 = L.at(hx - Math.sign(hx) * .6, edge + dir * .4, hz);
     if (c2 < 0 || c2 === c) continue;
-    const k2 = L.pair(c2, edge + dir * .4 < 0 ? SEA : AIR) >= 0 ? L.pair(c2, edge + dir * .4 < 0 ? SEA : AIR) : L.pair(c2, edge + dir * .4 < 0 ? AIR : SEA);
+    const k2 = outK(L, c2, hx, edge + dir * .4, hz, edge + dir * .4 < 0 ? SEA : AIR);
     if (k2 < 0) continue;
     const share = Math.min(.5, over / (2 * r)), A2 = A * share;
     if (A2 < .05) continue;

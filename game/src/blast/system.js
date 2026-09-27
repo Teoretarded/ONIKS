@@ -313,6 +313,13 @@ export async function createBlast(game) {
   /* the sim's holes (sim/ship.js u.ship.holes: model frame x y z, r, A) are what floods her: where the solve tore less
      than the sim's hole, the hole is opened on the patch's skin to at least the sim's outline (ragged: its radius varies
      round it, the edge bitten texel by texel), so the picture never shows an intact side over a flooding space */
+  // (a sim hole's plating's outward normal: a deck or flat (sim/ship.js bAx 1) faces up or down, out of its space;
+  // else the side it is on)
+  function holeNormal(S, h) {
+    const L = S && S.L;
+    if (L && L.bAx && h.k >= 0 && L.bAx[h.k] === 1) { const o = h.c * 6, yc = L.box ? (L.box[o + 1] + L.box[o + 4]) / 2 : 0; return [0, h.y >= yc ? 1 : -1, 0]; }
+    return [h.x >= 0 ? 1 : -1, 0, 0];
+  }
   function simHoles(B) {
     const u = sim.units.get(B.uid), Hs = u && u.ship && u.ship.holes; if (!Hs || !Hs.length) return 0;
     const F = B.spec.frame, S = B.spec.gridS || S_GRID, O = F.O;
@@ -326,7 +333,7 @@ export async function createBlast(game) {
     for (const h of Hs) {
       if (!(h.A > .05)) continue;
       const hk = h.c + ':' + Math.round(h.z) + ':' + Math.round(h.y);
-      if (!covered(h)) { if (!done.has(hk) && game.scars && game.scars.holeAt) { done.add(hk); const sx = h.x >= 0 ? 1 : -1; try { game.scars.holeAt(B.uid, h.x, h.y, h.z, [sx, 0, 0], Math.sqrt(h.A / Math.PI)); } catch (e) { console.error('blast: sim hole scar', e); } } continue; }
+      if (!covered(h)) { if (!done.has(hk) && game.scars && game.scars.holeAt) { done.add(hk); const nh = holeNormal(u.ship, h); try { game.scars.holeAt(B.uid, h.x, h.y, h.z, nh, Math.sqrt(h.A / Math.PI)); } catch (e) { console.error('blast: sim hole scar', e); } } continue; }
       const key = h.c + ':' + Math.round(h.z * 2) + ':' + Math.round(h.y * 2); if ((seen.get(key) || 0) >= h.A - .05) continue; seen.set(key, h.A);
       const d = [h.x - O[0], h.y - O[1], h.z - O[2]], l = [d[0] * F.X[0] + d[1] * F.X[1] + d[2] * F.X[2], d[0] * F.Y[0] + d[1] * F.Y[1] + d[2] * F.Y[2], d[0] * F.Z[0] + d[1] * F.Z[1] + d[2] * F.Z[2]];
       const R0 = Math.sqrt(h.A / Math.PI), sd = (Math.round(h.z * 7) * 131 + Math.round(h.y * 5) * 17 + h.c) | 0;
@@ -685,6 +692,8 @@ export async function createBlast(game) {
         }
         // the floodwater in the spaces behind the hole (the sim's water level a space), seen through it
         if (u && u.ship && !byZ) drawn += drawWater(sink, u, B, M, p0, size, tr);
+        // the sea pouring in through a hole at the waterline, while the space behind it fills
+        if (u && u.ship && sea && !byZ) drawn += drawInrush(sink, u, B, M, p0, size, tr, pxm, [nwx, nwy, nwz]);
       }
     }
     return drawn;
@@ -718,6 +727,82 @@ export async function createBlast(game) {
         // (dark water, brighter than the steel round it, the fire's glow on it)
         const fg = fireK * (.5 + .5 * FLK[((tr * 30 + x * 9 + z * 7) | 0) & 255]);
         sink.dot(wx, wy, wz, size, Math.min(255, 95 * k + 150 * fg), Math.min(255, 125 * k + 80 * fg), Math.min(255, 150 * k + 30 * fg), 1);
+        n++;
+      }
+    }
+    return n;
+  }
+
+  /* the inrush: where the shell plating is torn open across the waterline and the sea stands higher outside than the
+     water inside (sim/ship.js: the space's head S.H against the sea at the hole), the sea pours in: a white churn on the
+     sea at the opening, a foaming sheet over the torn lower lip falling inward, spray thrown up where it meets the water
+     inside. Strength from the head (orifice flow goes as its square root); gone once the levels meet */
+  function wlCells(B) {
+    const W = B.wlC; if (W && W.gen === B.torn) return W.list;
+    const F = B.spec.frame, S = B.spec.gridS || S_GRID, O = F.O, list = [];
+    for (const r of B.rects) {
+      if (!r.cpu || r.p !== 0) continue;
+      const pl = B.spec.plates[r.p]; if (!pl || !pl.skin || pl.sup) continue;
+      const Wd = r.nu + 1;
+      for (let j = 0; j <= r.nv; j++) for (let i = 0; i <= r.nu; i++) {
+        if (!((r.cpu[4 * (j * Wd + i) + 3] | 0) & 1)) continue;
+        const u = r.u0 + (i + .5) * S, v = r.v0 + (j + .5) * S, q = [0, 0, 0];
+        q[r.ax] = r.val; if (r.ax === 0) { q[2] = u; q[1] = v; } else if (r.ax === 1) { q[0] = u; q[2] = v; } else { q[0] = u; q[1] = v; }
+        const x = O[0] + F.X[0] * q[0] + F.Y[0] * q[1] + F.Z[0] * q[2], y = O[1] + F.X[1] * q[0] + F.Y[1] * q[1] + F.Z[1] * q[2], z = O[2] + F.X[2] * q[0] + F.Y[2] * q[1] + F.Z[2] * q[2];
+        list.push(x, y, z);   // (all of the shell's torn cells: the waterline is picked each frame, she settles and rolls)
+      }
+    }
+    B.wlC = { gen: B.torn, list }; return list;
+  }
+  function drawInrush(sink, u, B, M, p0, size, tr, pxm, nw) {
+    const S = u.ship, Lt = S && S.L; if (!Lt || !S.holes || !S.H) return 0;
+    if (Math.abs(nw[1]) > .6) return 0;   // (a side's plating, not a deck)
+    // the head across the opening: the sea outside over the water inside, for the sim's holes on this patch
+    const Fr = B.spec.frame, bx = B.spec.box, Fo = Fr.O;
+    let head = 0;
+    for (const h of S.holes) {
+      if (!(h.A > .05) || !(h.c >= 0)) continue;
+      const e = [h.x - Fo[0], h.y - Fo[1], h.z - Fo[2]], lx = e[0] * Fr.X[0] + e[1] * Fr.X[1] + e[2] * Fr.X[2], lz = e[0] * Fr.Z[0] + e[1] * Fr.Z[1] + e[2] * Fr.Z[2];
+      if (lx < bx[0] - 4 || lx > bx[3] + 4 || lz < bx[2] - 4 || lz > bx[5] + 4) continue;
+      const wy = p0[1] + M[3] * h.x + M[4] * h.y + M[5] * h.z, sea = h.y - wy;   // (the sea surface at the hole, model frame)
+      if (h.y - (h.r || Math.sqrt(h.A / Math.PI)) > sea) continue;               // (all of it above the sea)
+      const inner = Math.max(S.H[h.c], h.y - (h.r || Math.sqrt(h.A / Math.PI)));
+      head = Math.max(head, sea - inner);
+    }
+    const k = Math.min(1, Math.sqrt(Math.max(0, head)) / 1.1);
+    if (k < .05) return 0;
+    const C = wlCells(B); if (!C.length) return 0;
+    // (dots: a few per torn cell and frame, fewer far off; ~0.1 m apart close up)
+    const per = Math.max(1, Math.min(10, Math.round(2 + 8 * k * Math.min(1, pxm / 25))));
+    const ix = -nw[0], iz = -nw[2], il = Math.hypot(ix, iz) || 1, ux = ix / il, uz = iz / il;   // inward, level
+    let n = 0;
+    for (let c = 0; c < C.length; c += 3) {
+      const x = C[c], y = C[c + 1], z = C[c + 2];
+      const cx = p0[0] + M[0] * x + M[1] * y + M[2] * z, cy = p0[1] + M[3] * x + M[4] * y + M[5] * z, cz = p0[2] + M[6] * x + M[7] * y + M[8] * z;
+      // (only the opening's lower part, from a little above the sea down: the water comes in over the torn lip)
+      if (cy > .45 || cy < -1.2) continue;
+      const hc = (Math.imul(Math.round(x * 8) * 73856093 ^ Math.round(y * 8) * 19349663 ^ Math.round(z * 8) * 83492791, 0x9E3779B1) >>> 0) / 4294967296;
+      for (let m = 0; m < per; m++) {
+        const hm = (Math.imul((c * 16 + m) ^ 0x5bd1e995, 0x85EBCA77) >>> 0) / 4294967296, hn = (Math.imul((c * 16 + m) ^ 0x27d4eb2d, 0x9E3779B1) >>> 0) / 4294967296;
+        const ph = (tr * (.9 + .5 * hm) + hn + hc) % 1;   // (each dot's run through the sheet, repeating)
+        const sd = (hm - .5) * .5;                         // (spread along the plating)
+        const tx = -uz, tz = ux;                           // (along the plating, level)
+        let wx, wy, wz, br;
+        if (m % 3 === 2) {
+          // the churn on the sea outside: white water drawn toward the opening
+          const d = (1 - ph) * (.4 + 1.6 * k) * (.5 + .5 * hn);
+          wx = cx - ux * d + tx * sd * 2.5; wz = cz - uz * d + tz * sd * 2.5; wy = .04 + .06 * Math.sin(tr * 7 + hm * 30);
+          br = .55 + .35 * ph;
+        } else {
+          // the sheet: over the lip and inward, falling to the water inside, thrown up as spray where it lands
+          const d = ph * (1.2 + 2.2 * k), t = d / 3.5;
+          wx = cx + ux * d + tx * sd; wz = cz + uz * d + tz * sd;
+          wy = Math.max(.02, .08 + .25 * k * Math.sin(Math.min(1, ph * 3) * Math.PI) * (1 - ph) - 4.9 * t * t);
+          if (ph > .7) wy += (ph - .7) * 2.2 * k * hn;     // (spray)
+          br = .95 - .45 * ph;
+        }
+        const v = Math.min(255, 255 * br * (.7 + .3 * k)), f = .75 + .25 * Math.sin(tr * 13 + hm * 50);
+        sink.dot(wx, wy, wz, size, v * f, v * f, Math.min(255, v * f * 1.04), 1);
         n++;
       }
     }

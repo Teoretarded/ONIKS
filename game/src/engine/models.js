@@ -114,7 +114,8 @@ void main() {
     if (float(inst) >= need) { ${CULL} return; }
     // what a back face would add is hidden (the depth pass) unless it is an x-ray
     // (on an instance with blast patches they are looked at after them: seen through a hole, the far sides show)
-    if (!two0 && uP.y <= 0.0 && uBtN == 0 && dot(uR * aNrm.xyz, p) > 0.0) { ${CULL} return; }
+    // (only near a patch: the rest of a holed ship culls its back faces as before, QA cg_deck p95)
+    if (!two0 && uP.y <= 0.0 && dot(uR * aNrm.xyz, p) > 0.0 && !btNear(p)) { ${CULL} return; }
     sub = clamp(need - float(inst), 0.0, 1.0);
     vec2 j = aCJ.xy * (1.0 / ${JIT_K.toFixed(1)}), o;
     vec2 h2 = vec2(u01(hash1(hid ^ 0x9e3779b9u)), u01(hash1(hid ^ 0x7f4a7c15u))) - 0.5;
@@ -585,6 +586,14 @@ float wreckHash(vec3 p) {
   uint h = (c.x * 73856093u) ^ (c.y * 19349663u) ^ (c.z * 83492791u);
   h = (h ^ (h >> 13u)) * 1274126177u;
   return float(h >> 8u) / 16777216.0;
+}
+bool btNear(vec3 p) {
+  for (int i = 0; i < ${BTMAX}; i++) {
+    if (i >= uBtN) break;
+    vec3 d = p - uBtO[i].xyz;
+    if (dot(d, d) < 1600.0) return true;   // (a patch spans 28 m at most)
+  }
+  return false;
 }
 int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, inout float edge, inout float heatN, inout vec3 tilt) {
   bool two = dot(n, n) < 0.01;
