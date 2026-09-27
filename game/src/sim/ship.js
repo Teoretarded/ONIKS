@@ -235,6 +235,9 @@ export function shipCook(sim, u, m, dmg, src, depth) {
 
 /* the blast in her: gas and shock, boundaries torn, then every node in reach */
 const GASC = new Int16Array(64), GASG = new Float64Array(64);
+const SHA = [0, 0], SHK = [-1, -1], SHD = [0, 0], SPILL_S = [1, 2], SPILL_D = [0, 2], SQ = [0, 0, 0];
+/* a horizontal boundary (a deck, the bottom): by its axis, or (the bench layout's shell has none) by its box */
+function flat(L, k) { return L.bAx[k] === 1 || (L.bAx[k] < 0 && L.bBox[k * 6 + 4] - L.bBox[k * 6 + 1] < 1); }
 function blastAt(sim, u, S, W, F, pen, fz, p, src, depth, skip) {
   const L = S.L, sp = S.sp, W13 = Math.cbrt(W), px = p[0], py = p[1], pz = p[2];
   let c0 = L.at(px, py, pz);
@@ -264,7 +267,9 @@ function blastAt(sim, u, S, W, F, pen, fz, p, src, depth, skip) {
     const next = [];
     for (const c of front) {
       const gi = gasIx(c, nG), Pgc = gi >= 0 ? P0 * GASG[gi] : 0;
-      let shA = 0, shK = -1, shD = 1e9;
+      // (a space's shell to the outside: its side (split at the waterline: one plane, one tear) and its deck overhead
+      // (or bottom) are two planes: a tear in each, QA D49)
+      SHA[0] = SHA[1] = 0; SHK[0] = SHK[1] = -1; SHD[0] = SHD[1] = 1e9;
       for (const k of L.cb[c]) {
         if (!inside && k !== skinK) continue;                 // a burst outside meets only the plating it struck
         const o = L.bA[k] === c ? L.bB[k] : L.bA[k];
@@ -275,17 +280,20 @@ function blastAt(sim, u, S, W, F, pen, fz, p, src, depth, skip) {
         const Pr = reflect(kinneyPs(Math.max(.05, Z))) * tr;
         const P = Math.max(Pr, Pgc);
         // tearing: the plating within the scaled distance of the charge (inside / outside), or split by the gas
-        let A = 0, yc = py;
+        let A = 0, yc = py, Araw = 0;
         if (ring === 0 || Pgc > 0) {
-          const zt = (inside ? SHIPK.zTearIn : SHIPK.zTearOut) * Math.sqrt(10 / t);
-          const rT = zt * W13 * (ring === 0 ? 1 : .6);
+          // (plating with the sea behind it tears less than plating with air behind it: QA D49, the blast solver's
+          // tears at the waterline against those higher up the side and in the decks)
+          const zt = (inside ? SHIPK.zTearIn : SHIPK.zTearOut) * Math.sqrt(10 / t) * (py > 1 && L.bBox[k * 6 + 1] > -.3 ? SHIPK.zAir : 1);
+          const rT = zt * W13 * (ring === 0 ? 1 : SHIPK.ringTear);
           if (d < rT) A = Math.PI * (rT * rT - d * d);
           const pf = SHIPK.pGas * t;
           // (the gas splits the plating near the burst, not a boundary at the far end of a long space: within reach, less
           // with distance)
           const gR = SHIPK.gasReach * W13, gk = sat(1 - d / gR);
           if (Pgc > pf && gk > 0) A = Math.max(A, L.bArea[k] * Math.min(.5, SHIPK.gasTear * Pgc / pf) * gk);
-          A = Math.min(A, L.bArea[k] * .6);
+          // (the disc as torn: what runs past this boundary's plating goes on into the next space's, makeHole)
+          Araw = A; A = Math.min(A, L.bArea[k] * SHIPK.tearCap);
           yc = Math.max(L.bBox[k * 6 + 1], Math.min(L.bBox[k * 6 + 4], py));
         }
         if (A > S.torn[k] + .05) {
@@ -294,7 +302,7 @@ function blastAt(sim, u, S, W, F, pen, fz, p, src, depth, skip) {
           const r = Math.sqrt(A / Math.PI);
           S.tornY[k * 2] = Math.max(L.bBox[k * 6 + 1], yc - r); S.tornY[k * 2 + 1] = Math.min(L.bBox[k * 6 + 4], yc + r);
           // (a space's shell is several boundaries, split at the waterline: one tear through it a blast)
-          if (o < 0) { if (shK < 0 || d < shD - .5 || (d < shD + .5 && A > shA)) { shA = A; shK = k; shD = d; } }   // (the nearest of them that failed)
+          if (o < 0) { const h = flat(L, k) ? 1 : 0; if (SHK[h] < 0 || d < SHD[h] - .5 || (d < SHD[h] + .5 && A > SHA[h])) { SHA[h] = Math.max(A, Araw); SHK[h] = k; SHD[h] = d; } }   // (the nearest of them that failed)
           else if (was < .5 && A >= .5) tornNow.push(k);
         }
         if (o >= 0 && L.bDoor[k] > 0 && S.door[k] !== 2 && P > L.bDoorP[k]) S.door[k] = 2;
@@ -307,7 +315,7 @@ function blastAt(sim, u, S, W, F, pen, fz, p, src, depth, skip) {
         }
       }
       // a space's shell is several boundaries (split at the waterline): one tear through it a blast, the largest
-      if (shK >= 0 && shellHit.indexOf(c) < 0) { shellHit.push(c); makeHole(sim, u, S, c, shK, px, py, pz, shA, L.bB[shK]); }
+      for (let h = 0; h < 2; h++) if (SHK[h] >= 0 && shellHit.indexOf(c * 2 + h) < 0) { shellHit.push(c * 2 + h); makeHole(sim, u, S, c, SHK[h], px, py, pz, SHA[h], L.bB[SHK[h]]); }
     }
     P0 = inside ? qsp(W, Veff) : 0;
     front.length = 0; for (const c of next) front.push(c);
@@ -488,32 +496,38 @@ function makeHole(sim, u, S, c, k, px, py, pz, A, out, depth) {
   hz = Math.max(bz[o + 2], Math.min(bz[o + 5], pz));
   if (L.bAx[k] === 1 || (bz[o + 4] - bz[o + 1]) < 1) { hy = (bz[o + 1] + bz[o + 4]) / 2; }
   else { hy = Math.max(bz[o + 1], Math.min(bz[o + 4], py)); const hb = L.hb(hz, hy); hx = (px < 0 ? -1 : 1) * (hb > 0 ? hb : Math.abs(px)); }
-  // a tear wider than the space's side runs on into the space above or below (its own plating, its own hole)
-  const y0 = L.box[c * 6 + 1], y1 = L.box[c * 6 + 4];
-  if (!depth && L.bAx[k] !== 1) for (const dir of [-1, 1]) {
-    const edge = dir < 0 ? y0 : y1, over = dir < 0 ? edge - (hy - r) : (hy + r) - edge;
+  // a tear wider than the space's plating runs on into the next space's (its own plating, its own hole): a side's up,
+  // down, fore and aft, a deck's across and fore and aft (QA D49: the blast solver tears a deck hit's disc across the
+  // spaces under it)
+  const fl = flat(L, k), cb = c * 6;
+  if (!depth) for (const ax of fl ? SPILL_D : SPILL_S) for (const dir of [-1, 1]) {
+    const hc = ax === 0 ? hx : ax === 1 ? hy : hz, edge = L.box[cb + ax + (dir < 0 ? 0 : 3)], over = dir < 0 ? edge - (hc - r) : (hc + r) - edge;
     if (over < .3) continue;
-    const c2 = L.at(hx - Math.sign(hx) * .6, edge + dir * .4, hz);
+    // (a point just over the edge, inside the hull: inboard of a side, under / over a deck)
+    const q = SQ; q[0] = fl ? hx : hx - Math.sign(hx) * .6; q[1] = fl ? hy + (hy > (L.box[cb + 1] + L.box[cb + 4]) / 2 ? -.4 : .4) : hy; q[2] = hz; q[ax] = edge + dir * .4;
+    const c2 = L.at(q[0], q[1], q[2]);
     if (c2 < 0 || c2 === c) continue;
-    const k2 = outK(L, c2, hx, edge + dir * .4, hz, edge + dir * .4 < 0 ? SEA : AIR);
-    if (k2 < 0) continue;
+    const k2 = outK(L, c2, fl ? q[0] : hx, fl ? hy : q[1], q[2], (fl ? hy : q[1]) < 0 ? SEA : AIR);
+    if (k2 < 0 || flat(L, k2) !== fl) continue;
     const share = Math.min(.5, over / (2 * r)), A2 = A * share;
     if (A2 < .05) continue;
-    S.torn[k2] = Math.max(S.torn[k2], A2);
-    makeHole(sim, u, S, c2, k2, hx, edge + dir * Math.min(over, r) * .5, hz, A2, L.bB[k2], 1);
+    S.torn[k2] = Math.max(S.torn[k2], Math.min(A2, L.bArea[k2] * SHIPK.tearCap));
+    const m = dir * Math.min(over, r) * .5, e2 = [hx, hy, hz]; e2[ax] = edge + m;
+    makeHole(sim, u, S, c2, k2, e2[0], e2[1], e2[2], A2, L.bB[k2], 1);
     A -= A2; r = Math.sqrt(A / Math.PI);
-    hy = dir < 0 ? Math.max(hy, y0 + r * .8) : Math.min(hy, y1 - r * .8);
+    const lo = L.box[cb + ax] + r * .8, hi = L.box[cb + ax + 3] - r * .8, v = dir < 0 ? Math.max(hc, lo) : Math.min(hc, hi);
+    if (ax === 0) hx = v; else if (ax === 1) hy = v; else hz = v;
   }
   // merge with a hole already in this space's plating nearby (it grows, and reaches lower)
   let h = null;
   for (const o of S.holes) if (o.c === c && Math.hypot(o.x - hx, o.y - hy, o.z - hz) < o.r + r) { h = o; break; }
   if (h) {
-    const A2 = Math.min(L.bArea[k] * .6, Math.max(h.A0, A) + Math.min(h.A0, A) * .5), r2 = Math.sqrt(A2 / Math.PI);
+    const A2 = Math.min(L.bArea[k] * SHIPK.tearCap, Math.max(h.A0, A) + Math.min(h.A0, A) * .5), r2 = Math.sqrt(A2 / Math.PI);
     const lo = Math.min(h.y - h.r, hy - r), hi = Math.max(h.y + h.r, hy + r);
     h.A0 = A2; h.A = Math.max(h.A, A2); h.r = r2; h.y = Math.max(lo + r2, Math.min(hi - r2, (lo + hi) / 2));
-  } else S.holes.push(h = { c, k, x: hx, y: hy, z: hz, r, A, A0: A, sea: false, low: false, told: 0 });
+  } else { A = Math.min(A, L.bArea[k] * SHIPK.tearCap); r = Math.sqrt(A / Math.PI); S.holes.push(h = { c, k, x: hx, y: hy, z: hz, r, A, A0: A, sea: false, low: false, told: 0 }); }
   // (the part of it in this space's side: the space's floor is its lowest point)
-  const bot = Math.max(y0, h.y - h.r);
+  const bot = Math.max(L.box[cb + 1], h.y - h.r);
   h.sea = h.sea || out === SEA || bot < .5;
   if (bot < .5 && h.A0 > (h.told || 0) * 1.5) { h.low = true; h.told = h.A0; sim.emit('compartment', { unit: u.id, side: u.side, comp: L.ids[c], label: L.names[c], state: 'breach', A: +h.A0.toFixed(1), below: bot < 0 }); }
 }

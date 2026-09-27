@@ -62,6 +62,9 @@ export const SHIPK = {
   cd: .6,                 // discharge coefficient of a ragged hole (orifice flow Q = cd A sqrt(2 g h))
   cdIn: .5,               // ... of a door or a torn bulkhead between spaces
   zTearIn: .6,            // plating tears within this scaled distance (m / kg^1/3) of a charge inside a space (10 mm; ~sqrt(10 / t))
+  zAir: 1.25,            // x zTearIn / zTearOut for plating with air behind it (above the waterline: not water-backed)
+  ringTear: .6,           // x the tear radius in the spaces the gas reaches through what opened (the shock through a torn boundary)
+  tearCap: .8,            // at most this share of one boundary's plating torn by one blast
   zTearOut: .18,          // ... of a charge on the outside (contact)
   zTearUnder: .5,         // hole radius under the keel for a torpedo, m / kg^1/3
   pGas: 40e3,             // Pa per mm of plating: the gas pressure in a closed space that splits its boundaries
