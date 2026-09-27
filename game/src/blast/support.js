@@ -1,0 +1,274 @@
+/* What stands on the plating a hit tore, and the loose pieces (game side, render only).
+
+   - modelDots(ent): the model's own dots (the renderer's CPU clouds, ~0.3 m apart, every part at rest) in the model
+     frame, hashed by 1 m columns; and heightfield(ent): the top surface (decks, roofs) the loose pieces land on.
+   - classify(B, x, y, z, nx, ny, nz): what engine/models.js blastAt does with a model dot at that point (the same test on
+     the CPU copy of the patch's skin texels): untouched, plating, column kept or dropped, pocket kept or dropped.
+   - createBodies(): rigid clumps of dots (the model's dots over plating that tore or lost its support, as pieces of
+     their part) and single dots (the solver's loose plating): gravity, drag, landing on the top surface or on the deck
+     under a hole, walls, sinking at sea. Nothing hovers: a body is falling, or at rest on a surface, or gone.
+
+   The floor a body meets is the unit's floorAt(x, y, z) (system.js): the deck under a hole where the patch's plating is
+   dead, else the heightfield where it is not a wall (more than 0.6 m over the body), else the sea. */
+
+const COL = 1;                                   // column hash (m)
+const HF = .5;                                   // heightfield cell (m)
+const DOTS = new Map();                          // model key -> dots
+
+/* the model's dots at rest: x y z nx ny nz part (7 floats), columns (x, z) of COL m */
+export function modelDots(ent) {
+  let M = DOTS.get(ent.key);
+  if (M && M.n) return M;
+  const use = [];
+  let n = 0;
+  ent.parts.forEach((P, pi) => {
+    const cands = [];
+    for (const c of P.clouds || []) if (c && c.pts && c.n) cands.push(c);
+    if (P.lru) for (const m of P.lru) if (m) for (const c of m.values()) if (c && c.pts && c.n) { cands.push(c); break; }
+    if (!cands.length) return;
+    // the level nearest 0.3 m, not finer than 0.18 m (a fine level can be millions of dots)
+    let best = null;
+    for (const c of cands) { const k = c.sp < .18 ? 1e3 + (1 / c.sp) : Math.abs(Math.log((c.sp || .3) / .3)); if (!best || k < best.k) best = { c, k }; }
+    let X = null; try { X = P.part.xf ? P.part.xf({}) : null; } catch (e) { X = null; }
+    let shown = true; try { shown = !P.part.show || !!P.part.show({}); } catch (e) { shown = true; }
+    if (!shown) return;
+    use.push([best.c, X, pi]); n += best.c.n;
+  });
+  if (!n) return { n: 0 };
+  const D = new Float32Array(n * 7), col = new Map();
+  let m = 0, lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9];
+  for (const [cl, X, pi] of use) {
+    const f = cl.pts, by = new Int8Array(f.buffer, f.byteOffset, cl.n * 16);
+    for (let i = 0; i < cl.n; i++, m++) {
+      let x = f[i * 4], y = f[i * 4 + 1], z = f[i * 4 + 2], nx = by[i * 16 + 12] / 127, ny = by[i * 16 + 13] / 127, nz = by[i * 16 + 14] / 127;
+      if (X) {
+        const R = X.R, T = X.T;
+        const x2 = R[0] * x + R[1] * y + R[2] * z + T[0], y2 = R[3] * x + R[4] * y + R[5] * z + T[1], z2 = R[6] * x + R[7] * y + R[8] * z + T[2];
+        const a = R[0] * nx + R[1] * ny + R[2] * nz, b = R[3] * nx + R[4] * ny + R[5] * nz, c = R[6] * nx + R[7] * ny + R[8] * nz;
+        x = x2; y = y2; z = z2; nx = a; ny = b; nz = c;
+      }
+      const o = m * 7; D[o] = x; D[o + 1] = y; D[o + 2] = z; D[o + 3] = nx; D[o + 4] = ny; D[o + 5] = nz; D[o + 6] = pi;
+      if (x < lo[0]) lo[0] = x; if (y < lo[1]) lo[1] = y; if (z < lo[2]) lo[2] = z; if (x > hi[0]) hi[0] = x; if (y > hi[1]) hi[1] = y; if (z > hi[2]) hi[2] = z;
+      const k = Math.floor(x / COL) * 65536 + Math.floor(z / COL); let l = col.get(k); if (!l) col.set(k, l = []); l.push(m);
+    }
+  }
+  const colI = new Map(); for (const [k, l] of col) colI.set(k, Int32Array.from(l));
+  M = { n: m, D, col: colI, lo, hi, parts: ent.parts.map(P => P.name) };
+  // the top surface: the highest up-facing dot a cell (the dyn parts too: a gun's roof is a surface)
+  const nx = Math.ceil((hi[0] - lo[0]) / HF) + 1, nz = Math.ceil((hi[2] - lo[2]) / HF) + 1, top = new Float32Array(nx * nz).fill(-1e9);
+  for (let i = 0; i < m; i++) { const o = i * 7; if (D[o + 4] < .5) continue; const ix = Math.floor((D[o] - lo[0]) / HF), iz = Math.floor((D[o + 2] - lo[2]) / HF), k = iz * nx + ix; if (D[o + 1] > top[k]) top[k] = D[o + 1]; }
+  // (small gaps closed: a cell with no up-facing dot between two that have one takes the lower)
+  const t2 = top.slice();
+  for (let iz = 0; iz < nz; iz++) for (let ix = 0; ix < nx; ix++) { const k = iz * nx + ix; if (top[k] > -1e8) continue;
+    let a = -1e9, b = -1e9; for (let d = 1; d <= 3; d++) { if (ix - d >= 0 && top[k - d] > -1e8 && a < -1e8) a = top[k - d]; if (ix + d < nx && top[k + d] > -1e8 && b < -1e8) b = top[k + d]; }
+    if (a > -1e8 && b > -1e8) t2[k] = Math.min(a, b); }
+  M.hf = { lo, nx, nz, top: t2 };
+  DOTS.set(ent.key, M);
+  return M;
+}
+/* the top surface at (x, z) (model frame), -1e9 off the model */
+export function topAt(M, x, z) {
+  const H = M.hf; if (!H) return -1e9;
+  const ix = Math.floor((x - H.lo[0]) / HF), iz = Math.floor((z - H.lo[2]) / HF);
+  if (ix < 0 || iz < 0 || ix >= H.nx || iz >= H.nz) return -1e9;
+  return H.top[iz * H.nx + ix];
+}
+export function eachInColumns(M, x0, z0, x1, z1, cb) {
+  for (let i = Math.floor(x0 / COL); i <= Math.floor(x1 / COL); i++) for (let j = Math.floor(z0 / COL); j <= Math.floor(z1 / COL); j++) {
+    const l = M.col.get(i * 65536 + j); if (l) for (let q = 0; q < l.length; q++) cb(l[q]);
+  }
+}
+
+/* ---------------------------------------------------------------- the shader's test on the CPU (engine/models.js blastAt) */
+/* B: a patch with its rects (r.cpu: the skin texels, (nu+1) x (nv+1) x 4), B.band, spec.frame (model frame), depth.
+   -> 0 untouched, 1 plating (intact), 2 plating (torn: a petal or gone), 3 column kept, 4 column dropped,
+   5 behind, kept, 6 behind, dropped */
+export const K = { NONE: 0, PLATE: 1, TORN: 2, COL: 3, COLDROP: 4, BEHIND: 5, BEHINDDROP: 6 };
+export function classify(B, x, y, z, nx, ny, nz, info) {
+  const F = B.spec.frame, S = B.spec.gridS || .125, band = B.band || 1, D = B.depth || 4;
+  const dx = x - F.O[0], dy = y - F.O[1], dz = z - F.O[2];
+  const l = [dx * F.X[0] + dy * F.X[1] + dz * F.X[2], dx * F.Y[0] + dy * F.Y[1] + dz * F.Y[2], dx * F.Z[0] + dy * F.Z[1] + dz * F.Z[2]];
+  const two = nx * nx + ny * ny + nz * nz < .01;
+  let k = 0;
+  for (const r of B.rects) {
+    if (!r.cpu || k > 1) continue;
+    k++;
+    const ax = r.ax, A = ax === 0 ? F.X : ax === 1 ? F.Y : F.Z;
+    const off = l[ax] - r.val, u = (ax === 0 ? l[2] : l[0]) - r.u0, v = (ax === 1 ? l[2] : l[1]) - r.v0;
+    const fi = u / S, fj = v / S;
+    if (fi < 0 || fj < 0 || fi > r.nu || fj > r.nv) continue;
+    const face = two || Math.abs(nx * A[0] + ny * A[1] + nz * A[2]) > .5;
+    const i0 = Math.min(Math.floor(fi), r.nu - 1), j0 = Math.min(Math.floor(fj), r.nv - 1), fx = fi - i0, fy = fj - j0, W = r.nu + 1;
+    const T = r.cpu, t = (i, j) => T[4 * (j * W + i) + 3] | 0;
+    const f00 = t(i0, j0), fN = fx < .5 ? (fy < .5 ? f00 : t(i0, j0 + 1)) : (fy < .5 ? t(i0 + 1, j0) : t(i0 + 1, j0 + 1));
+    if (info) { info.r = r; info.off = off; info.i = Math.round(fi); info.j = Math.round(fj); info.up = A[1] > .7; }
+    if (Math.abs(off) > band || !face) {
+      if (off > -.05 && off < (A[1] > .7 ? 30 : 3)) return (fN & 11) ? K.COLDROP : K.COL;
+      if (off <= -.05 && off > -D - .4) return ((f00 & 1) || (fN & 3)) ? K.BEHINDDROP : K.BEHIND;
+      continue;
+    }
+    return (f00 & 1) || (fN & 2) ? K.TORN : K.PLATE;
+  }
+  return K.NONE;
+}
+
+/* ---------------------------------------------------------------- loose pieces */
+const G = 9.81;
+export function createBodies() {
+  const list = [];
+  const sys = { list, dots: 0 };
+  /* a rigid clump: pts (x y z brightness, model frame, at detach), v0, spin */
+  sys.clump = (uid, B, pts, v0, hot) => {
+    const n = pts.length / 4; if (!n) return null;
+    let cx = 0, cy = 0, cz = 0; for (let i = 0; i < n; i++) { cx += pts[4 * i]; cy += pts[4 * i + 1]; cz += pts[4 * i + 2]; }
+    cx /= n; cy /= n; cz /= n;
+    const rel = new Float32Array(n * 4); let lowY = 1e9;
+    for (let i = 0; i < n; i++) { rel[4 * i] = pts[4 * i] - cx; rel[4 * i + 1] = pts[4 * i + 1] - cy; rel[4 * i + 2] = pts[4 * i + 2] - cz; rel[4 * i + 3] = pts[4 * i + 3]; if (rel[4 * i + 1] < lowY) lowY = rel[4 * i + 1]; }
+    // the contact points: the lowest dots and the extremes (at most 24)
+    const idx = [...Array(n).keys()];
+    const pick = new Set();
+    idx.sort((a, b) => rel[4 * a + 1] - rel[4 * b + 1]); for (let q = 0; q < Math.min(12, n); q++) pick.add(idx[Math.floor(q * Math.min(n, Math.max(12, n * .15)) / 12)]);
+    for (const [ax, sg] of [[0, 1], [0, -1], [2, 1], [2, -1], [1, 1], [1, -1]]) { let b = 0; for (let i = 1; i < n; i++) if (sg * rel[4 * i + ax] > sg * rel[4 * b + ax]) b = i; pick.add(b); }
+    const s = (n * 7919 + uid * 131) % 997 / 997;
+    const b = { kind: 'clump', uid, B, p: [cx, cy, cz], v: v0.slice(), w: [(s - .5) * 1.2, (s * 7 % 1 - .5) * .6, (s * 13 % 1 - .5) * 1.2], R: [1, 0, 0, 0, 1, 0, 0, 0, 1],
+      rel, n, low: Int32Array.from(pick), rest: false, gone: false, t: 0, hot: hot || 0, fade: 1, sea: false, still: 0 };
+    list.push(b); return b;
+  };
+  /* single dots (the solver's loose plating): arrays x y z vx vy vz brightness, flags */
+  sys.dotsOf = (uid, B, a, hot) => {
+    const n = a.length / 8; if (!n) return null;
+    const P = new Float32Array(n * 7), st = new Uint8Array(n);
+    for (let i = 0; i < n; i++) { for (let q = 0; q < 6; q++) P[7 * i + q] = a[8 * i + q]; P[7 * i + 6] = a[8 * i + 6]; }
+    const b = { kind: 'dots', uid, B, P, st, n, t: 0, hot: hot === undefined ? 1 : hot, gone: false, rest: false };
+    list.push(b); return b;
+  };
+  /* one step of every body; floorAt(uid, x, y, z) -> the surface under a point (-1e9: open sea) */
+  sys.step = (h, floorAt) => {
+    if (!(h > 0)) return;
+    h = Math.min(h, 1 / 20);
+    for (let bi = list.length - 1; bi >= 0; bi--) {
+      const b = list[bi];
+      if (b.gone) { list.splice(bi, 1); continue; }
+      b.t += h;
+      if (b.kind === 'dots') stepDots(b, h, floorAt); else stepClump(b, h, floorAt);
+    }
+  };
+  function stepDots(b, h, floorAt) {
+    const P = b.P, st = b.st, kd = Math.exp(-.6 * h);
+    let live = 0;
+    for (let i = 0; i < b.n; i++) {
+      if (st[i] === 2) continue;
+      const o = 7 * i;
+      if (st[i] === 1) { live++; continue; }                       // at rest on a surface
+      live++;
+      const px = P[o], py = P[o + 1], pz = P[o + 2];
+      let vx = P[o + 3] * kd, vy = P[o + 4] * kd - G * h, vz = P[o + 5] * kd;
+      let x = px + vx * h, y = py + vy * h, z = pz + vz * h;
+      const f = floorAt(b.uid, x, py, z);
+      if (f.wall) { x = px; z = pz; vx *= -.2; vz *= -.2; }
+      const fl = f.wall ? floorAt(b.uid, px, py, pz).y : f.y;
+      if (fl < -1e8) {                                             // the sea: it sinks
+        if (y < -.2) { vy = Math.max(vy, -2); vx *= .9; vz *= .9; if (y < -2.5) { st[i] = 2; continue; } }
+      } else if (y <= fl + .02) {
+        y = fl + .02;
+        if (vy < -1.5) { vy = -vy * .15; vx *= .5; vz *= .5; } else { vx = vy = vz = 0; st[i] = 1; }
+      }
+      P[o] = x; P[o + 1] = y; P[o + 2] = z; P[o + 3] = vx; P[o + 4] = vy; P[o + 5] = vz;
+    }
+    if (!live) b.gone = true;
+  }
+  const tmp = [0, 0, 0];
+  const rot = (R, x, y, z, o) => { o[0] = R[0] * x + R[1] * y + R[2] * z; o[1] = R[3] * x + R[4] * y + R[5] * z; o[2] = R[6] * x + R[7] * y + R[8] * z; return o; };
+  function stepClump(b, h, floorAt) {
+    if (b.rest) { b.still += h; return; }
+    const kd = Math.exp(-.3 * h);
+    const p0 = b.p.slice();
+    b.v[0] *= kd; b.v[2] *= kd; b.v[1] = b.v[1] * kd - G * h;
+    b.p[0] += b.v[0] * h; b.p[1] += b.v[1] * h; b.p[2] += b.v[2] * h;
+    // spin: R <- exp(w h) R
+    const wx = b.w[0] * h, wy = b.w[1] * h, wz = b.w[2] * h, th = Math.hypot(wx, wy, wz);
+    if (th > 1e-6) {
+      const kx = wx / th, ky = wy / th, kz = wz / th, c = Math.cos(th), s = Math.sin(th), C = 1 - c;
+      const Q = [c + kx * kx * C, kx * ky * C - kz * s, kx * kz * C + ky * s, ky * kx * C + kz * s, c + ky * ky * C, ky * kz * C - kx * s, kz * kx * C - ky * s, kz * ky * C + kx * s, c + kz * kz * C];
+      const R = b.R, N = new Array(9);
+      for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) N[3 * i + j] = Q[3 * i] * R[j] + Q[3 * i + 1] * R[3 + j] + Q[3 * i + 2] * R[6 + j];
+      b.R = N;
+    }
+    // contacts: the lowest point against the surface under it (walls: back where it was, the push reflected)
+    let pen = -1e9, sea = true, wall = false;
+    for (let q = 0; q < b.low.length; q++) {
+      const i = b.low[q]; rot(b.R, b.rel[4 * i], b.rel[4 * i + 1], b.rel[4 * i + 2], tmp);
+      const x = b.p[0] + tmp[0], y = b.p[1] + tmp[1], z = b.p[2] + tmp[2];
+      const f = floorAt(b.uid, x, y - b.v[1] * h, z);
+      if (f.wall) { wall = true; continue; }
+      if (f.y > -1e8) { sea = false; if (f.y - y > pen) pen = f.y - y; }
+    }
+    if (wall) { b.p[0] = p0[0]; b.p[2] = p0[2]; b.v[0] *= -.25; b.v[2] *= -.25; }
+    if (sea) {
+      if (b.p[1] < -.3) { b.sea = true; b.v[1] = Math.max(b.v[1], -1.5); b.v[0] *= .95; b.v[2] *= .95; b.w = b.w.map(x => x * .95); b.fade = Math.max(0, 1 + (b.p[1] + .3) / 3); if (b.fade <= 0) b.gone = true; }
+    } else if (pen > 0) {
+      b.p[1] += pen;
+      if (b.v[1] < -2) { b.v[1] = -b.v[1] * .12; b.v[0] *= .5; b.v[2] *= .5; b.w = b.w.map(x => x * .5); }
+      else { b.v[1] = Math.max(0, b.v[1]); b.v[0] *= .6; b.v[2] *= .6; b.w = b.w.map(x => x * .5); }
+      if (Math.hypot(b.v[0], b.v[1], b.v[2]) < .35 && Math.hypot(...b.w) < .25) { b.rest = true; b.v = [0, 0, 0]; b.w = [0, 0, 0]; }
+    }
+  }
+  /* each dot of every body in the model frame: cb(uid, B, x, y, z, brightness, heat, fade) */
+  sys.each = (cb, stride = 1) => {
+    for (const b of list) {
+      if (b.gone) continue;
+      const heat = b.hot * Math.exp(-b.t / 1.6);
+      if (b.kind === 'dots') { for (let i = 0; i < b.n; i += stride) { if (b.st[i] === 2) continue; const o = 7 * i; cb(b.uid, b.B, b.P[o], b.P[o + 1], b.P[o + 2], b.P[o + 6], heat, 1, i); } continue; }
+      const R = b.R, rel = b.rel;
+      for (let i = 0; i < b.n; i += stride) {
+        const x = rel[4 * i], y = rel[4 * i + 1], z = rel[4 * i + 2];
+        cb(b.uid, b.B, b.p[0] + R[0] * x + R[1] * y + R[2] * z, b.p[1] + R[3] * x + R[4] * y + R[5] * z, b.p[2] + R[6] * x + R[7] * y + R[8] * z, rel[4 * i + 3], heat, b.fade, i);
+      }
+    }
+  };
+  sys.count = () => { let n = 0; for (const b of list) if (!b.gone) n += b.kind === 'dots' ? b.n : b.n; return n; };
+  sys.dropUnit = uid => { for (const b of list) if (b.uid === uid) b.gone = true; };
+  return sys;
+}
+
+/* ---------------------------------------------------------------- connectivity (after a hit settles; qa.js) */
+/* the model's dots round the unit's patches (their boxes and 4 m more) as the shader draws them: which are dropped, and
+   the clusters of kept dots (joined within 0.6 m) that touch nothing that holds them: no untouched dot of the model, no
+   plating, nothing standing within 0.8 m of its plating. -> { dropped: [idx], orphan: [idx] (dropped, not flying),
+   floating: [[idx...]], n } */
+export function connectivity(Md, patches, T) {
+  if (!Md || !Md.n || !patches.length) return { dropped: [], orphan: [], floating: [], n: 0 };
+  const D = Md.D;
+  let lo = [1e9, 1e9], hi = [-1e9, -1e9];
+  for (const B of patches) {
+    const F = B.spec.frame, b = B.spec.box;
+    for (const cx of [b[0], b[3]]) for (const cy of [b[1], b[4]]) for (const cz of [b[2], b[5]]) {
+      const x = F.O[0] + F.X[0] * cx + F.Y[0] * cy + F.Z[0] * cz, z = F.O[2] + F.X[2] * cx + F.Y[2] * cy + F.Z[2] * cz;
+      lo[0] = Math.min(lo[0], x); lo[1] = Math.min(lo[1], z); hi[0] = Math.max(hi[0], x); hi[1] = Math.max(hi[1], z);
+    }
+  }
+  const idx = [], cls = [], info = {};
+  eachInColumns(Md, lo[0] - 4, lo[1] - 4, hi[0] + 4, hi[1] + 4, i => {
+    const o = 7 * i; let c = K.NONE, anch = false;
+    for (const B of patches) { c = classify(B, D[o], D[o + 1], D[o + 2], D[o + 3], D[o + 4], D[o + 5], info); if (c !== K.NONE) { anch = (c === K.COL || c === K.BEHIND) && Math.abs(info.off) < .8; break; } }
+    idx.push(i); cls.push(c === K.NONE || c === K.PLATE || c === K.TORN || anch ? 1 : c === K.COLDROP || c === K.BEHINDDROP ? 2 : 0);
+  });
+  const n = idx.length, par = new Int32Array(n); for (let q = 0; q < n; q++) par[q] = q;
+  const fd = q => { while (par[q] !== q) { par[q] = par[par[q]]; q = par[q]; } return q; };
+  const cell = new Map(), CL = .6, dropped = [], orphan = [];
+  for (let q = 0; q < n; q++) {
+    if (cls[q] === 2) { dropped.push(idx[q]); if (T && !T[idx[q]]) orphan.push(idx[q]); continue; }
+    const o = 7 * idx[q], k = Math.floor(D[o] / CL) + ',' + Math.floor(D[o + 1] / CL) + ',' + Math.floor(D[o + 2] / CL);
+    const l = cell.get(k); if (l) { const a = fd(l), b = fd(q); if (a !== b) par[a] = b; } else cell.set(k, q);
+  }
+  for (const [k, q] of cell) {
+    const [a, b, c] = k.split(',').map(Number);
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+      const m = cell.get((a + dx) + ',' + (b + dy) + ',' + (c + dz)); if (m === undefined) continue; const ra = fd(q), rb = fd(m); if (ra !== rb) par[ra] = rb; }
+  }
+  const anchored = new Set(), groups = new Map();
+  for (let q = 0; q < n; q++) { if (cls[q] === 2) continue; const r = fd(q); if (cls[q] === 1) anchored.add(r); let g = groups.get(r); if (!g) groups.set(r, g = []); g.push(idx[q]); }
+  const floating = [];
+  for (const [r, g] of groups) if (!anchored.has(r)) floating.push(g);
+  return { dropped, orphan, floating, n };
+}

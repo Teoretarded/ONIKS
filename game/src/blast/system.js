@@ -27,6 +27,7 @@ import { hitSpec, cookSpec, hullOf } from './spec.js';
 import { tntOf, S_GRID } from './phys.js';
 import { CASING } from './shell/model.js';
 import { attitudeM } from '../game/debris/math.js';
+import { modelDots, topAt, eachInColumns, classify, connectivity, K as CK, createBodies } from './support.js';
 
 const AW = 2048, AH = 2048;             // the skin atlas (RGBA16F texels: local displacement, flags + soot)
 const MAXU = 6;                          // patches drawn per unit (engine/models.js BTMAX)
@@ -153,7 +154,7 @@ export async function createBlast(game) {
     if (B.S && B.S.blast === B) B.S.blast = null;
     packUnit(B.uid);
   }
-  function dropUnit(uid) { const L = byUnit.get(uid); if (L) for (const B of [...L]) drop(B.id); }
+  function dropUnit(uid) { const L = byUnit.get(uid); if (L) for (const B of [...L]) drop(B.id); bodies.dropUnit(uid); taken.delete(uid); }
 
   /* ------------------------------------------------------------ messages */
   function onMsg(m) {
@@ -170,10 +171,14 @@ export async function createBlast(game) {
       if (!r) {
         const q = allocRect(k.nu + 1, k.nv + 1);
         if (!q) { fail(B, 'atlas full'); return; }
-        r = { p: k.p, ax: k.ax, val: k.val, u0: k.u0, v0: k.v0, nu: k.nu, nv: k.nv, x: q.x, y: q.y, aw: q.w, ah: q.h, ready: false };
+        r = { p: k.p, ax: k.ax, val: k.val, u0: k.u0, v0: k.v0, nu: k.nu, nv: k.nv, x: q.x, y: q.y, aw: q.w, ah: q.h, ready: false,
+          cpu: new Float32Array((k.nu + 1) * (k.nv + 1) * 4), dead: new Uint8Array((k.nu + 1) * (k.nv + 1)) };
         B.rects.push(r);
         upQ.push({ r, clear: true });
       }
+      // (a CPU copy: what stands on the plating is judged from it, support.js)
+      if (r.cut) for (let j = 0; j < k.h; j++) for (let i = 0; i < k.w; i++) if (r.cut[(k.j0 + j) * (k.nu + 1) + k.i0 + i]) { const o = 4 * (j * k.w + i) + 3; if (!((k.data[o] | 0) & 8)) k.data[o] += 8; }
+      for (let j = 0; j < k.h; j++) r.cpu.set(k.data.subarray(4 * j * k.w, 4 * (j + 1) * k.w), 4 * ((k.j0 + j) * (k.nu + 1) + k.i0));
       // in row strips (a frame uploads a few thousand texels at most: no hitch when a big plate arrives)
       const rows = Math.max(1, Math.floor(cfg.upTexels / Math.max(1, k.w)));
       for (let j = 0; j < k.h; j += rows) {
@@ -184,7 +189,8 @@ export async function createBlast(game) {
     if (m.inner) { B.inner = m.inner; B.nIn = m.nIn; }
     B.tSolve = m.t; B.torn = m.tornSkin; B.below = m.tornBelow; B.setMax = m.setMax; B.byPlate = m.byPlate; B.runMs = m.runMs; B.wallMs = m.wallMs; B.steps = m.steps;
     if (m.tornSkin > 0 && B.tearT < 0) B.tearT = sim.t;
-    if (m.final) { B.state = 'done'; B.final = m; B.res = m.results; B.doneT = sim.t; if (m.debris && m.debris.length) B.debris = { a: m.debris, n: m.debris.length / 8, t0: game.t, end: game.t + 40 }; settle(B); }
+    try { detachScan(B); } catch (e) { console.error('blast: detach', e); }
+    if (m.final) { B.state = 'done'; B.final = m; B.res = m.results; B.doneT = sim.t; if (m.debris && m.debris.length) bodies.dotsOf(B.uid, B, m.debris, 1); settle(B); setTimeout(() => { try { settleSupport(B); } catch (e) { console.error('blast: support', e); } }, 0); }
     else if (m.tornSkin > .05 && !B.ej) ejecta(B, m);
   }
 
@@ -236,6 +242,137 @@ export async function createBlast(game) {
     try { game.scars.ejectaAt(u, B.S, r); } catch (e) { console.error('blast: ejecta', e); }
   }
 
+  /* ------------------------------------------------------------ what stood on the plating: loose pieces (support.js) */
+  const bodies = createBodies(), taken = new Map();            // unit -> the model's dots already flying (Uint8Array)
+  const bandOf = B => Math.max(Math.min(1.6, Math.max(.8, .6 + .08 * (B.spec.Rp || 5))), Math.min(3.5, (B.spec.band || 0) + .35));
+  const entOf = u => { try { return ML.get(u.def.model); } catch (e) { return null; } };
+  /* the plating that tore, went or lost its support since the last snapshot: the model's dots over it (the shader leaves
+     them out from now on) fly as pieces of their part */
+  function detachScan(B) {
+    const u = sim.units.get(B.uid); if (!u) return;
+    const ent = entOf(u); if (!ent) return;
+    const Md = modelDots(ent); if (!Md.n) return;
+    B.band = bandOf(B); B.depth = B.spec.depth || 4;
+    let T = taken.get(B.uid); if (!T || T.length !== Md.n) taken.set(B.uid, T = new Uint8Array(Md.n));
+    const F = B.spec.frame, S = B.spec.gridS || S_GRID, cols = new Set();
+    let k = 0;
+    for (const r of B.rects) {
+      if (!r.cpu || k > 1) continue;
+      k++;
+      const W = r.nu + 1, A = r.ax === 0 ? F.X : r.ax === 1 ? F.Y : F.Z, reach = A[1] > .7 ? 0 : 3;
+      for (let j = 0; j <= r.nv; j++) for (let i = 0; i <= r.nu; i++) {
+        const t = j * W + i, f = r.cpu[4 * t + 3] | 0;
+        if (!(f & 11) || r.dead[t]) continue;
+        r.dead[t] = 1;
+        const l = [0, 0, 0]; l[r.ax] = r.val;
+        if (r.ax === 0) { l[2] = r.u0 + i * S; l[1] = r.v0 + j * S; } else if (r.ax === 1) { l[0] = r.u0 + i * S; l[2] = r.v0 + j * S; } else { l[0] = r.u0 + i * S; l[1] = r.v0 + j * S; }
+        for (let e = 0; e <= reach; e += 1) {
+          const x = F.O[0] + F.X[0] * l[0] + F.Y[0] * l[1] + F.Z[0] * l[2] + A[0] * e, z = F.O[2] + F.X[2] * l[0] + F.Y[2] * l[1] + F.Z[2] * l[2] + A[2] * e;
+          cols.add(Math.floor(x) * 65536 + Math.floor(z));
+        }
+      }
+    }
+    if (!cols.size) return;
+    const D = Md.D, pick = [], info = {};
+    for (const key of cols) {
+      const cx = Math.floor(key / 65536), cz = key - cx * 65536;
+      eachInColumns(Md, cx + .5, cz + .5, cx + .5, cz + .5, i => {
+        if (T[i]) return;
+        const o = 7 * i, c = classify(B, D[o], D[o + 1], D[o + 2], D[o + 3], D[o + 4], D[o + 5], info);
+        if (c !== CK.COLDROP && c !== CK.BEHINDDROP) return;
+        T[i] = 1; pick.push(i, info.r, info.i, info.j);
+      });
+    }
+    if (!pick.length) return;
+    // pieces: the dots of one part joined within 0.7 m; each starts where its plating had carried it, moving with it
+    const n = pick.length / 4, par = new Int32Array(n); for (let q = 0; q < n; q++) par[q] = q;
+    const fd = q => { while (par[q] !== q) { par[q] = par[par[q]]; q = par[q]; } return q; };
+    const cell = new Map(), CL = .7;
+    for (let q = 0; q < n; q++) { const o = 7 * pick[4 * q]; const kk = D[o + 6] + ':' + Math.floor(D[o] / CL) + ',' + Math.floor(D[o + 1] / CL) + ',' + Math.floor(D[o + 2] / CL); const l = cell.get(kk); if (l) l.push(q); else cell.set(kk, [q]); }
+    for (const [kk, l] of cell) {
+      const [pp, rest] = kk.split(':'), [a, b2, c] = rest.split(',').map(Number);
+      for (let dx = 0; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) { if (!dx && (dy < 0 || (!dy && dz <= 0))) continue;
+        const m2 = cell.get(pp + ':' + (a + dx) + ',' + (b2 + dy) + ',' + (c + dz)); if (!m2) continue; const ra = fd(l[0]), rb = fd(m2[0]); if (ra !== rb) par[ra] = rb; }
+      for (let q = 1; q < l.length; q++) { const ra = fd(l[0]), rb = fd(l[q]); if (ra !== rb) par[ra] = rb; }
+    }
+    const groups = new Map(); for (let q = 0; q < n; q++) { const r0 = fd(q); let g = groups.get(r0); if (!g) groups.set(r0, g = []); g.push(q); }
+    const tS = Math.max(.02, B.tSolve || .02), running = B.state !== 'done';
+    const singles = [];
+    for (const g of groups.values()) {
+      const stride = Math.max(1, Math.ceil(g.length / 1500)), pts = [];
+      let vx = 0, vy = 0, vz = 0;
+      for (let q = 0; q < g.length; q += stride) {
+        const idx = pick[4 * g[q]], r = pick[4 * g[q] + 1], ti = pick[4 * g[q] + 2], tj = pick[4 * g[q] + 3], o = 7 * idx, t = 4 * (Math.min(r.nv, Math.max(0, tj)) * (r.nu + 1) + Math.min(r.nu, Math.max(0, ti)));
+        const dl = [r.cpu[t], r.cpu[t + 1], r.cpu[t + 2]];
+        const d = [F.X[0] * dl[0] + F.Y[0] * dl[1] + F.Z[0] * dl[2], F.X[1] * dl[0] + F.Y[1] * dl[1] + F.Z[1] * dl[2], F.X[2] * dl[0] + F.Y[2] * dl[1] + F.Z[2] * dl[2]];
+        const so = r.cpu[t + 3] % 1;
+        pts.push(D[o] + d[0], D[o + 1] + d[1], D[o + 2] + d[2], .55 * (1 - .6 * so));
+        vx += d[0]; vy += d[1]; vz += d[2];
+      }
+      const m = pts.length / 4; vx /= m; vy /= m; vz /= m;
+      // (while the solve runs its plating is moving: the piece leaves with it; at the end it just drops)
+      let v = running ? [vx / tS, vy / tS, vz / tS] : [0, 0, 0];
+      const sp = Math.hypot(v[0], v[1], v[2]); if (sp > 25) v = v.map(x => x * 25 / sp);
+      if (m < 4) { for (let q = 0; q < pts.length; q += 4) singles.push(pts[q], pts[q + 1], pts[q + 2], v[0], v[1], v[2], pts[q + 3], 0); continue; }
+      bodies.clump(B.uid, B, pts, v, .25);
+    }
+    if (singles.length) bodies.dotsOf(B.uid, B, Float32Array.from(singles), .25);
+    stats.detached = (stats.detached || 0) + n;
+  }
+  /* after the solve: whatever of the model is left standing with nothing under it (an overhang whose foot went, a mast
+     top over sound plating whose base did not) goes too: its columns are cut (bit 8) and it flies as pieces */
+  function settleSupport(B) {
+    const u = sim.units.get(B.uid); if (!u || B.state !== 'done') return;
+    const ent = entOf(u); if (!ent) return;
+    const Md = modelDots(ent); if (!Md.n) return;
+    const L = (byUnit.get(B.uid) || []).filter(b => b.state === 'done' && b.rects.some(r => r.cpu));
+    const t0 = performance.now(), info = {};
+    for (let it = 0; it < 4; it++) {
+      const C = connectivity(Md, L, taken.get(B.uid));
+      const fl = C.floating.filter(g => g.length > 2);
+      if (!fl.length) break;
+      const D = Md.D, touched = new Set();
+      for (const g of fl) for (const i of g) {
+        const o = 7 * i;
+        for (const b of L) { const c = classify(b, D[o], D[o + 1], D[o + 2], D[o + 3], D[o + 4], D[o + 5], info); if (c === CK.NONE) continue;
+          const r = info.r; if (!r.cut) r.cut = new Uint8Array((r.nu + 1) * (r.nv + 1));
+          const t = Math.max(0, Math.min(r.nv, info.j)) * (r.nu + 1) + Math.max(0, Math.min(r.nu, info.i));
+          if (!r.cut[t]) { r.cut[t] = 1; if (!((r.cpu[4 * t + 3] | 0) & 8)) r.cpu[4 * t + 3] += 8; touched.add(r); }
+          break; }
+      }
+      if (!touched.size) break;
+      for (const r of touched) { const rows = Math.max(1, Math.floor(cfg.upTexels / (r.nu + 1)));
+        for (let j = 0; j <= r.nv; j += rows) { const h = Math.min(rows, r.nv + 1 - j); upQ.push({ r, k: { i0: 0, j0: j, w: r.nu + 1, h, data: r.cpu.subarray(4 * j * (r.nu + 1), 4 * (j + h) * (r.nu + 1)) } }); } }
+      for (const b of L) detachScan(b);
+    }
+    stats.supportMs = performance.now() - t0;
+  }
+  /* the surface under a point of unit uid (model frame): the deck under a hole where a patch's plating is dead, inside a
+     patch's box below its plating the floor of the hole, else the model's top surface (a wall if it is 0.6 m over the
+     point), else the sea (-1e9) */
+  const FL = { y: -1e9, wall: false };
+  function floorAt(uid, x, y, z) {
+    FL.wall = false;
+    const L = byUnit.get(uid), u = sim.units.get(uid);
+    if (L) for (const B of L) {
+      const F = B.spec.frame, dx = x - F.O[0], dy = y - F.O[1], dz = z - F.O[2];
+      const l = [dx * F.X[0] + dy * F.X[1] + dz * F.X[2], dx * F.Y[0] + dy * F.Y[1] + dz * F.Y[2], dx * F.Z[0] + dy * F.Z[1] + dz * F.Z[2]];
+      const bx = B.spec.box, up = B.spec.kind === 'deck' ? 2 : 1, S = B.spec.gridS || S_GRID;
+      const hole = B.res && B.res.hole && B.res.hole.floor ? B.res.hole.floor[1] : F.O[1] + bx[up] * (up === 2 ? F.Z[1] : F.Y[1]);
+      for (const r of B.rects) {
+        if (!r.cpu || r.ax !== up) continue;
+        const u2 = (r.ax === 0 ? l[2] : l[0]) - r.u0, v2 = (r.ax === 1 ? l[2] : l[1]) - r.v0, i = Math.round(u2 / S), j = Math.round(v2 / S);
+        if (i < 0 || j < 0 || i > r.nu || j > r.nv) continue;
+        if ((r.cpu[4 * (j * (r.nu + 1) + i) + 3] | 0) & 11) { FL.y = hole; return FL; }
+      }
+      if (l[0] > bx[0] && l[0] < bx[3] && l[1] > bx[1] && l[1] < bx[4] && l[2] > bx[2] && l[2] < bx[5]) { FL.y = hole; return FL; }
+    }
+    const ent = u ? entOf(u) : null, Md = ent ? modelDots(ent) : null;
+    const top = Md && Md.n ? topAt(Md, x, z) : -1e9;
+    if (top > y + .6) { FL.wall = true; FL.y = top; return FL; }
+    FL.y = top; return FL;
+  }
+
   /* ------------------------------------------------------------ per unit: the uniform pack engine/models.js reads */
   function packUnit(uid) {
     const rec = game.scars && game.scars.of(uid);
@@ -269,6 +406,7 @@ export async function createBlast(game) {
   const TG = {};
   const gone = new Set();                // units the sim removed whose hull game/structure still draws
   let lastSent = 0;
+  let lastBT = null;
   function update() {
     const t0 = performance.now();
     // the solver's share of this frame's GPU time: what the game's own frame leaves of ~13.5 ms (game.quality.gpuMs, the
@@ -329,6 +467,7 @@ export async function createBlast(game) {
     stats.running = run; stats.shellRunning = runS;
     for (const uid of gone) if (!(game.structure && game.structure.draws && game.structure.draws(uid))) { gone.delete(uid); dropUnit(uid); }
     if (any && client && client.mode) { client.targets(TG); for (const k in TG) delete TG[k]; lastSent = game.realT; }
+    { const tt = game.t, h = lastBT === null ? 0 : tt - lastBT; lastBT = tt; if (bodies.list.length && h > 0) bodies.step(h, floorAt); }
     stats.updMs = performance.now() - t0;
   }
 
@@ -391,62 +530,42 @@ export async function createBlast(game) {
   /* the pieces that came loose: dots flying on from where the solver left them (linear drag, gravity), landing on the
      deck when over the hull, sinking when they reach the sea; hot at first, then charred. Model frame, the unit's pose */
   const DK = .6, GR = 9.81, FLK = Float32Array.from({ length: 256 }, (_, k) => Math.sin(k / 256 * 2 * Math.PI));
-  function drawDebris(frame) {
+  function drawBodies(frame) {
     const sink = frame.sink;
-    if (!sink || !sink.cam || R.pcOff || R.style === 'orbital') return 0;
+    if (!sink || !sink.cam || R.pcOff || R.style === 'orbital' || !bodies.list.length) return 0;
     const cam = sink.cam, eye = cam.eye, f = cam.f, fl = cam.fl || 1300;
-    let drawn = 0, nDeb = 0;
-    for (const L of byUnit.values()) for (const B of L) if (B.debris) nDeb++;
-    if (!nDeb) return 0;
-    const M = [1, 0, 0, 0, 1, 0, 0, 0, 1];
-    for (const [uid, L] of byUnit) {
+    const poses = new Map(), M0 = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+    const poseOf = (uid, B) => {
+      const key = uid + ':' + (B ? B.id : 0); let P = poses.get(key); if (P !== undefined) return P;
       const u = sim.units.get(uid), hull = game.structure && game.structure.draws && game.structure.draws(uid);
-      if (!hull && (!u || !game.drawn.has(uid))) continue;
-      for (const B of L) {
-        const D = B.debris; if (!D) continue;
-        const t = game.t - D.t0; if (t > 40) { B.debris = null; continue; }
-        const Fr = B.spec.frame, pz = hull && game.structure.poseAt ? game.structure.poseAt(uid, Fr.O[2]) : null;
-        let p0;
-        if (pz) { for (let i = 0; i < 9; i++) M[i] = pz.R[i]; p0 = pz.T; }
-        else if (u) { const pose = game.unitPose(u); attitudeM(pose.hdg, pose.pitch || 0, pose.roll || 0, M); p0 = pose.pos; }
-        else continue;
-        const cx = p0[0] + M[0] * Fr.O[0] + M[1] * Fr.O[1] + M[2] * Fr.O[2], cy = p0[1] + M[3] * Fr.O[0] + M[4] * Fr.O[1] + M[5] * Fr.O[2], cz = p0[2] + M[6] * Fr.O[0] + M[7] * Fr.O[1] + M[8] * Fr.O[2];
-        const zc = (cx - eye[0]) * f[0] + (cy - eye[1]) * f[1] + (cz - eye[2]) * f[2];
-        const pxm = fl / Math.max(1, zc);
-        if (zc < -60 || pxm * 20 < 2) continue;
-        const e = 1 - Math.exp(-DK * t), hx = e / DK, hy = (GR / DK) * (hx - t) / 1, deckY = B.meta.deckY || 0, hb = B.meta.halfB;
-        const hot = Math.exp(-t / 1.6), size = pxm * .12 > 3 ? 3 : pxm * .12 > 1.4 ? 2 : 1;
-        const hbw = hb ? hb(Fr.O[2], deckY) * .98 : 0;              // (the hull's half-beam there: once a patch, not a dot)
-        const hl = B.res && B.res.hole, hbb = hl && hl.bb && B.spec.kind === 'deck' ? hl.bb : null, floorY = hl && hl.floor ? hl.floor[1] : deckY;
-        const stride = Math.max(1, Math.ceil(D.n / Math.max(300, cfg.maxDots * .4 / nDeb)));
-        const A = D.a;
-        for (let i = 0; i < D.n; i += stride) {
-          const o = 8 * i, x0 = A[o], y0 = A[o + 1], z0 = A[o + 2];
-          let x = x0 + A[o + 3] * hx, y = y0 + A[o + 4] * hx + hy, z = z0 + A[o + 5] * hx;
-          // over the hull: it lands on the deck (pieces that started below it stay inside, where they came to rest)
-          const over = hbw > 0 && Math.abs(x) < hbw;
-          let fade = 1;
-          // (over the hole: it falls in, onto the first deck that stands under it)
-          let land = deckY;
-          if (hbb) { const dx = x - Fr.O[0], dy = y - Fr.O[1], dz = z - Fr.O[2], lu = dx * Fr.X[0] + dy * Fr.X[1] + dz * Fr.X[2], lv = dx * Fr.Y[0] + dy * Fr.Y[1] + dz * Fr.Y[2];
-            if (lu > hbb[0] && lu < hbb[1] && lv > hbb[2] && lv < hbb[3]) land = floorY; }
-          if (over && y < land + .05) { if (y0 >= land - .3) y = land + .05; else { x = x0; y = y0; z = z0; } }
-          else if (!over && y < 0) { const ts = t - (y0 > 0 ? Math.max(.1, t * y0 / Math.max(1e-3, y0 - y)) : 0); fade = sat(1 - ts / 1.2); if (fade <= 0) continue; y = Math.max(y, -.6); }
-          const wx = p0[0] + M[0] * x + M[1] * y + M[2] * z, wy = p0[1] + M[3] * x + M[4] * y + M[5] * z, wz = p0[2] + M[6] * x + M[7] * y + M[8] * z;
-          const hs = (Math.imul(i + B.seed + 17, 0x9E3779B1) >>> 0) / 4294967296, b = A[o + 6] * (.75 + .5 * hs), g = hot * (.6 + .4 * hs);
-          const rr = 255 * Math.min(1, b * .95 + 1.1 * g), gg = 255 * Math.min(1, b * .9 + .55 * g), bb = 255 * Math.min(1, b * .84 + .15 * g);
-          sink.dot(wx, wy, wz, size, rr, gg, bb, fade);
-          drawn++;
-        }
+      P = null;
+      if (hull || (u && game.drawn.has(uid))) {
+        const pz = hull && game.structure.poseAt ? game.structure.poseAt(uid, B ? B.spec.frame.O[2] : 0) : null;
+        const M = M0.slice();
+        if (pz) { for (let i = 0; i < 9; i++) M[i] = pz.R[i]; P = { M, p: pz.T }; }
+        else if (u) { const pose = game.unitPose(u); attitudeM(pose.hdg, pose.pitch || 0, pose.roll || 0, M); P = { M, p: pose.pos }; }
+        if (P) { const c = P.p, zc = (c[0] - eye[0]) * f[0] + (c[1] - eye[1]) * f[1] + (c[2] - eye[2]) * f[2]; P.pxm = fl / Math.max(1, zc); if (zc < -200 || P.pxm * 20 < 2) P = null; }
       }
-    }
+      poses.set(key, P); return P;
+    };
+    const n = bodies.count(), stride = Math.max(1, Math.ceil(n / Math.max(300, cfg.maxDots * .4)));
+    let drawn = 0;
+    bodies.each((uid, B, x, y, z, b, heat, fade, i) => {
+      const P = poseOf(uid, B); if (!P) return;
+      const M = P.M, p0 = P.p;
+      const wx = p0[0] + M[0] * x + M[1] * y + M[2] * z, wy = p0[1] + M[3] * x + M[4] * y + M[5] * z, wz = p0[2] + M[6] * x + M[7] * y + M[8] * z;
+      const hs = (Math.imul(i + 7, 0x9E3779B1) >>> 0) / 4294967296, g = heat * (.6 + .4 * hs), bb = b * (.8 + .4 * hs);
+      const size = P.pxm * .2 > 3 ? 3 : P.pxm * .2 > 1.4 ? 2 : 1;
+      sink.dot(wx, wy, wz, size, 255 * Math.min(1, bb * .95 + 1.1 * g), 255 * Math.min(1, bb * .9 + .55 * g), 255 * Math.min(1, bb * .84 + .15 * g), fade);
+      drawn++;
+    }, stride);
     return drawn;
   }
 
   const sys = {
     name: 'blast', priority: 12.5, stats, patches, byUnit, cfg,
     get mode() { return mode; }, get err() { return err; }, get client() { return client; },
-    accepts, hit, cook, drop, dropUnit,
+    accepts, hit, cook, drop, dropUnit, bodies, floorAt, taken,
     of(id) { return patches.get(id) || null; },
     list(uid) { return byUnit.get(uid) || []; },
     /* the last patch of a unit (the impact tester's readout) */
@@ -460,7 +579,7 @@ export async function createBlast(game) {
     update,
     draw3d(frame) {
       const t0 = performance.now();
-      stats.dots = byUnit.size ? drawInner(frame) + drawDebris(frame) : 0;
+      stats.dots = (byUnit.size ? drawInner(frame) : 0) + drawBodies(frame);
       stats.drawMs = performance.now() - t0;
     },
     dispose() {

@@ -241,6 +241,20 @@ export function createShellRunner(gl, o = {}) {
         d[o + 3] = f + Math.min(.99, so ? so[kn] : M.SOOT[nn]);
         if (!(d[o] === d[o] && d[o + 1] === d[o + 1] && d[o + 2] === d[o + 2])) { d[o] = d[o + 1] = d[o + 2] = 0; d[o + 3] = 2; }
       }
+      // unsupported columns (bit 8): what stands on this plating (a gun on the deck, a deckhouse, rails; on a side the
+      // fittings on it) needs the plating round its foot: the share of intact plating within 1.5 m (horizontal plating;
+      // 0.75 m on a side) under a half, or the plating there torn or gone. The model's dots over them are left out and
+      // the blast system flies them as loose pieces (engine/models.js blastAt, system.js)
+      {
+        const W1 = nu + 1, H1 = nv + 1, rr = Math.max(1, Math.round((L.ax === M.up ? 1.5 : .75) / S)), sat = new Float32Array((W1 + 1) * (H1 + 1));
+        for (let j = 0; j < H1; j++) for (let i = 0; i < W1; i++) { const dead = (d[4 * (j * W1 + i) + 3] | 0) & 3 ? 1 : 0; sat[(j + 1) * (W1 + 1) + i + 1] = dead + sat[j * (W1 + 1) + i + 1] + sat[(j + 1) * (W1 + 1) + i] - sat[j * (W1 + 1) + i]; }
+        for (let j = 0; j < H1; j++) for (let i = 0; i < W1; i++) {
+          const a0 = Math.max(0, i - rr), a1 = Math.min(W1, i + rr + 1), b0 = Math.max(0, j - rr), b1 = Math.min(H1, j + rr + 1);
+          const dead = sat[b1 * (W1 + 1) + a1] - sat[b0 * (W1 + 1) + a1] - sat[b1 * (W1 + 1) + a0] + sat[b0 * (W1 + 1) + a0], n = (a1 - a0) * (b1 - b0);
+          const o = 4 * (j * W1 + i);
+          if (dead > .5 * n) d[o + 3] += 8;
+        }
+      }
       const last = R.lastSkin[p];
       let i0 = nu + 1, i1 = -1, j0 = nv + 1, j1 = -1;
       for (let j = 0; j <= nv; j++) for (let i = 0; i <= nu; i++) {

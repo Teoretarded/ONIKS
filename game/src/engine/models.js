@@ -484,13 +484,27 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
       vec4 t00 = texelFetch(uBtT, b, 0);
       int f00 = int(t00.w);
       bool torn = (f00 & 1) != 0;
+      vec4 t10 = texelFetch(uBtT, b + ivec2(1, 0), 0), t01 = texelFetch(uBtT, b + ivec2(0, 1), 0), t11 = texelFetch(uBtT, b + ivec2(1, 1), 0);
       if (abs(off) > band || !face) {
-        // behind a hole in the struck plate: the model's own surfaces across the pocket are gone (the blast system
-        // draws what is inside)
-        if (k == 0 && torn && face && off < -0.3 && off > -D - 0.4) return 1;
+        // not the plating itself: what stands on it (over a deck up to 30 m: a gun, a deckhouse, rails; off a side up to
+        // 3 m: its fittings) rides the plating under its foot, and goes where that plating tore, went or lost its support
+        // (bit 8: the blast system flies those dots as loose pieces); what is behind it follows it, fading with depth,
+        // and is gone behind a hole (the blast system draws what is inside)
+        int fN = int((fx < 0.5 ? (fy < 0.5 ? t00 : t01) : (fy < 0.5 ? t10 : t11)).w);
+        vec3 dlb = mix(mix(t00.xyz, t10.xyz, fx), mix(t01.xyz, t11.xyz, fx), fy);
+        if (off > -0.05 && off < (A.y > 0.7 ? 30.0 : 3.0)) {
+          if ((fN & 11) != 0) return 1;
+          p += X * dlb.x + Y * dlb.y + Z * dlb.z;
+          break;
+        }
+        if (off <= -0.05 && off > -D - 0.4) {
+          if (torn || (fN & 3) != 0) return 1;
+          float wd = 1.0 - (-off) / (D + 0.4);
+          p += (X * dlb.x + Y * dlb.y + Z * dlb.z) * wd;
+          break;
+        }
         continue;
       }
-      vec4 t10 = texelFetch(uBtT, b + ivec2(1, 0), 0), t01 = texelFetch(uBtT, b + ivec2(0, 1), 0), t11 = texelFetch(uBtT, b + ivec2(1, 1), 0);
       vec3 dl;
       if (torn) {
         // the hole: the depth splat pushed back to the pocket's far end (a plug); the dots ride their quarter's corner
