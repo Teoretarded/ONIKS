@@ -111,8 +111,12 @@ hole (D49): the sim hole is the minimum shown, not a cap.
   worker; a main-side patch watchdog (12 s, 90 s in slow motion) fails a patch that stops reporting.
 - Frame guard (`frameScale`): the solver's share drops toward 0.3 while game frames run past ~24 ms, and recovers
   below ~20 ms; the WebGPU queue is kept 2 deep at a small share. Several patches split the budget.
-- First hit on a class is slower (its CPU dot cloud and interior are built on first use: cg_deck 4.8 s cold vs
-  2.2 s warm).
+- Each ship class's CPU dot cloud (~35 ms a cruiser) is built ahead on a frame with no solve running, one class a
+  second, once its model is sampled (`dotsReady`), so a first hit does not pay for it. Every hit compiles its own
+  WebGPU pipelines (the patch's sizes are baked into the WGSL): ~0.4-0.8 s before its first steps land.
+- cg_deck's 4.5-5 s runs are not a warm-up: the first cg_deck after a page load draws the sim's magazine cook-off
+  (magF, W 90) with the hit, two patches solving at once; later runs (another point in the sim's random stream) do
+  not.
 
 ### QA tools
 - `dev/blast_qa.js`: the battery (31 cases: DDG side / deck / sheer / waterline / superstructure / VLS cook-off /

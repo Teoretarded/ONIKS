@@ -119,6 +119,14 @@ FIXED? confirmed: D3, D17, D22, D42 PASS; D23, D47 reopened. D25 and D14 cases a
 than the sim: ddg_mid 69 / 8.2, ddg_fdeck 125 / 43, ddg_stern 84 / 48) is the main mismatch left.
 
 
+- cg_deck first-hit (implementer): the 4.5-5 s "cold" runs are not a class warm-up. Instrumented (blast.hit / cook
+  wrapped): the first cg_deck after a page load gets the hit (W 120) and the sim's forward magazine cook-off (magF,
+  W 90) at the same moment, two patches solving at once (wall 6.5-6.9 s); the same case again in the page (the sim's
+  random stream moved on) has no cook-off: 1 patch, 2.15-2.3 s. The same cruiser hit elsewhere after it (cgB, cgS):
+  2.5 s. Class-level costs measured: the CPU dot cloud 33-37 ms (now built ahead: blast/system.js, one class a second
+  on a frame with no solve, once the model is sampled); the WebGPU pipelines compile per hit (the patch's sizes are
+  baked in), ~0.4 s a patch before the first steps land, not class-level.
+
 - runs qa75_0 / qa75_1 (implementer, two full batteries back to back after the wedge fix): 31/31 and 31/31 qa.js ok,
   no flags; resolve 0.9-2.8 / 0.85-2.9 s, solve p95 7.8-17.5 / 9.5-16.8 ms (a quieter machine). cg_deck 2.8 s / 16.1 ms
   and 2.9 s / 13.9 ms: back at its re-bench. Its 4.4-5 s runs were the first hit on the cruiser class after a page load

@@ -448,8 +448,8 @@ its tearing petals) tears, dents and curls the steel round each hit in a few sec
 - **Sim fixes found on the way**: a hit's hole went into whichever outside wall of its space came first (a carrier
   hit amidships holed and lit her bow 72 m away); holes now go in the nearest wall, and gas only splits plating near
   the charge. Balance unchanged (coast 54% over 256 AI games).
-- **Speed**: a hit settles in ~1-4 s at 60 fps (the first hit on a ship class ~2 s longer while its model is
-  prepared); a holed ship no longer draws its whole hull twice (cruiser deck hit 32 -> 16 ms p95). Safety nets
+- **Speed**: a hit settles in ~1-4 s at 60 fps (a hit that sets off a magazine takes ~2 s longer: two blasts solve at once;
+  each ship class's dot cloud is built ahead while idle); a holed ship no longer draws its whole hull twice (cruiser deck hit 32 -> 16 ms p95). Safety nets
   against a stuck or crashed GPU solve, and a NaN camera crash during a break-up guarded at its sources.
 - **QA**: a 31-case battery with stills at 12 / 25 / 60 / 300 m, run after every change (the last three full runs clean);
   the reviewers' list and every run are in `game/src/blast/QA.md`; how it all works in `game/src/blast/README.md`.

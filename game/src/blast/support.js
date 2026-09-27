@@ -52,6 +52,14 @@ export function modelDots(ent) {
   DOTS.set(ent.key, M);
   return growInside(ent, M);
 }
+/* ready to be built: every outside part the dots would take has a cloud sampled (built earlier, a part not yet
+   sampled would be left out for good) */
+export function dotsReady(ent) {
+  if (DOTS.has(ent.key)) return true;
+  for (const P of ent.parts) { if (P.part.inside || P.dyn) continue; if (!cloudOf(P)) return false; }
+  return true;
+}
+export const dotsBuilt = key => DOTS.has(key);
 /* the cloud nearest 0.3 m a part has (not finer than 0.18 m: a fine level can be millions of dots) */
 function cloudOf(P) {
   const cands = [];

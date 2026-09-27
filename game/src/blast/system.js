@@ -28,7 +28,7 @@ import { tntOf, S_GRID } from './phys.js';
 import { CASING } from './shell/model.js';
 import { attitudeM } from '../game/debris/math.js';
 import { interiorZones } from '../data/models_interior.js';
-import { modelDots, topAt, eachInColumns, classify, connectivity, K as CK, createBodies } from './support.js';
+import { modelDots, dotsReady, dotsBuilt, topAt, eachInColumns, classify, connectivity, K as CK, createBodies } from './support.js';
 
 const AW = 2048, AH = 2048;             // the skin atlas (RGBA16F texels: local displacement, flags + soot)
 const MAXU = 6;                          // patches drawn per unit (engine/models.js BTMAX)
@@ -550,6 +550,7 @@ export async function createBlast(game) {
     return fScale;
   }
   let lastRT = null;
+  let preTick = 0;
   function update() {
     const t0 = performance.now();
     // (a watchdog: a patch the solver has not answered for 12 s of the game's running time is given up: its analytic
@@ -620,6 +621,10 @@ export async function createBlast(game) {
       }
     }
     stats.running = run; stats.shellRunning = runS;
+    // (each ship class's CPU dot cloud built ahead, once its model is sampled, one class a second on a frame with no
+    // solve running: the first hit on a class does not pay for it (~30 ms a cruiser))
+    if (!run && ++preTick % 60 === 0) { for (const u of sim.units.values()) { if (!u.alive || !u.def || u.def.domain !== 'sea' || !u.ship) continue;
+      const ent = entOf(u); if (!ent || !ent.key || dotsBuilt(ent.key)) continue; if (dotsReady(ent)) { const t = performance.now(); modelDots(ent); stats.prebuiltMs = performance.now() - t; stats.prebuilt = (stats.prebuilt || 0) + 1; break; } } }
     for (const uid of gone) if (!(game.structure && game.structure.draws && game.structure.draws(uid))) { gone.delete(uid); dropUnit(uid); }
     if (any && client && client.mode) { client.targets(TG); for (const k in TG) delete TG[k]; lastSent = game.realT; }
     // (the sim's holes grow as she floods and as later hits land: looked at again every ~second)
