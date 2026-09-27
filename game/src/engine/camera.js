@@ -15,8 +15,8 @@
 const DEG = Math.PI / 180;
 const R_EARTH = 6371000;
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
-/* every number in the arrays finite */
-const finite = (...A) => { for (const a of A) { if (!a) return false; for (let i = 0; i < a.length; i++) if (!Number.isFinite(a[i])) return false; } return true; };
+/* every number in the arrays finite and within 10,000 km (a runaway pose handed in is finite, and as blank a frame) */
+const finite = (...A) => { for (const a of A) { if (!a) return false; for (let i = 0; i < a.length; i++) if (!(Math.abs(a[i]) < 1e7)) return false; } return true; };
 const wrapPi = a => { a = (a + Math.PI) % (2 * Math.PI); if (a < 0) a += 2 * Math.PI; return a - Math.PI; };
 
 export class RTSCamera {
@@ -274,7 +274,7 @@ export class RTSCamera {
      back to the last good state instead, the first bad value reported once (QA D55) */
   _guard() {
     const g = this.goal, ok = finite(this.eye, this.f, this.r, this.u, this.target, g.target) &&
-      Number.isFinite(this.dist + this.yaw + this.pitch + g.dist + g.yaw + g.pitch + this.fl + this.near + this.far + this.clearance);
+      Number.isFinite(this.dist + this.yaw + this.pitch + g.dist + g.yaw + g.pitch + this.fl + this.near + this.clearance) && this.far < 1e9;
     const K = this._good;
     if (ok) {
       if (!K) this._good = { eye: this.eye.slice(), f: this.f.slice(), r: this.r.slice(), u: this.u.slice(), target: this.target.slice(), gt: g.target.slice(), v: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] };

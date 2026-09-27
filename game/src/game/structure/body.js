@@ -110,8 +110,14 @@ export function stepShip(S, h, sea, t, bed) {
     const dx = B.p[0] + rbx - A.p[0] - rax, dy = B.p[1] + rby - A.p[1] - ray, dz = B.p[2] + rbz - A.p[2] - raz;
     const vax = A.v[0] + A.w[1] * raz - A.w[2] * ray, vay = A.v[1] + A.w[2] * rax - A.w[0] * raz, vaz = A.v[2] + A.w[0] * ray - A.w[1] * rax;
     const vbx = B.v[0] + B.w[1] * rbz - B.w[2] * rby, vby = B.v[1] + B.w[2] * rbx - B.w[0] * rbz, vbz = B.v[2] + B.w[0] * rby - B.w[1] * rbx;
-    const c = J.c * k / J.k;
-    const fx = k * dx + c * (vbx - vax), fy = k * dy + c * (vby - vay), fz = k * dz + c * (vbz - vaz);
+    let c = J.c * k / J.k;
+    // (explicit steps: a spring stiffer than the lighter end can follow in a step (a one-section piece, its inertia
+    // about the hinge small) grows each step instead of pulling back: the piece flew off to 1e250 m, a blank frame
+    // behind it, QA D55. Held to what the lighter end's mass and inertia about the hinge can take)
+    const ra2 = rax * rax + ray * ray + raz * raz, rb2 = rbx * rbx + rby * rby + rbz * rbz;
+    const me = Math.min(A.m, B.m, Math.min(A.I[0], A.I[1], A.I[2]) / Math.max(1, ra2), Math.min(B.I[0], B.I[1], B.I[2]) / Math.max(1, rb2));
+    const kk = Math.min(k, .2 * me / (h * h)); c = Math.min(c * kk / k, .4 * me / h);
+    const fx = kk * dx + c * (vbx - vax), fy = kk * dy + c * (vby - vay), fz = kk * dz + c * (vbz - vaz);
     J.gap = Math.hypot(dx, dy, dz);
     A.fx += fx; A.fy += fy; A.fz += fz; A.tx += ray * fz - raz * fy; A.ty += raz * fx - rax * fz; A.tz += rax * fy - ray * fx;
     B.fx -= fx; B.fy -= fy; B.fz -= fz; B.tx -= rby * fz - rbz * fy; B.ty -= rbz * fx - rbx * fz; B.tz -= rbx * fy - rby * fx;
@@ -193,8 +199,10 @@ export function stepShip(S, h, sea, t, bed) {
       const gy = bed(P.p[0], P.p[2]);
       if (low < gy) { P.p[1] += Math.min(1, gy - low); if (P.v[1] < 0) P.v[1] = 0; const k = Math.exp(-h * 1.5); P.v[0] *= k; P.v[2] *= k; P.w[0] *= k; P.w[1] *= k; P.w[2] *= k; P.aground = true; }
     }
-    // (a step that went non-finite (a degenerate piece): back to the last good state, at rest, never a NaN pose)
-    if (!(Number.isFinite(P.p[0] + P.p[1] + P.p[2]) && Number.isFinite(P.q[0] + P.q[1] + P.q[2] + P.q[3]))) {
+    // (a step that went non-finite or ran away (a degenerate piece, a spring it could not follow: faster than 150 m/s
+    // or 6 rad/s, or 50 m in a step): back to the last good state, at rest, never a NaN or runaway pose, QA D53 / D55)
+    if (!(Number.isFinite(P.p[0] + P.p[1] + P.p[2]) && Number.isFinite(P.q[0] + P.q[1] + P.q[2] + P.q[3])) ||
+        Math.hypot(P.v[0], P.v[1], P.v[2]) > 150 || Math.hypot(P.w[0], P.w[1], P.w[2]) > 6 || Math.hypot(P.p[0] - P.pp[0], P.p[1] - P.pp[1], P.p[2] - P.pp[2]) > 50) {
       for (let k = 0; k < 3; k++) { P.p[k] = Number.isFinite(P.pp[k]) ? P.pp[k] : 0; P.v[k] = 0; P.w[k] = 0; }
       for (let k = 0; k < 4; k++) P.q[k] = Number.isFinite(P.pq[k]) ? P.pq[k] : k === 0 ? 1 : 0;
     }
