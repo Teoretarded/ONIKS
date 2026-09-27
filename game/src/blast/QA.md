@@ -11,9 +11,9 @@ Status: OPEN / FIXED? (a fix landed, not re-tested) / PASS / WONTFIX. "run N" = 
 
 | # | case | still | what's wrong | status |
 |---|---|---|---|---|
-| D44 | ddg_hangar | `qa11/ddg_hangar_set_d25`, `_set_e12` | New with the petals (7516007 / 618c6d9): long straight hairlines radiating outward from the hangar opening in a fan over both sides and the sky (tens of rays, 5-15 m long): stretched petal dots / splats flung to far positions. Also ddg_spy's bridge shows a few such straight streaks (`qa11/ddg_spy_set_e12`, upper right) | OPEN |
+| D44 | ddg_hangar | `qa11/ddg_hangar_set_d25`, `_set_e12` | New with the petals (7516007 / 618c6d9): long straight hairlines radiating outward from the hangar opening in a fan over both sides and the sky (tens of rays, 5-15 m long): stretched petal dots / splats flung to far positions. Also ddg_spy's bridge shows a few such straight streaks (`qa11/ddg_spy_set_e12`, upper right) | PARTIAL; run 12 (678b2a4 petals v2): the fan of hairlines is gone; instead long curled shreds 8-12 m arc up and over the hangar roof from the opening, drawn as streaky ribbons with straight hairline edges (`qa12/ddg_hangar_set_d25`, `_set_e12`): petals too long for a 120 kg charge on 6 mm aluminium, and the ribbons read as stretched dots |
 | D43 | ddg_mid, cvn_side | `qa8/ddg_mid_set_e12`, `qa8/cvn_side_set_e12` | The holes the sim now opens on the skin (618660a) are filled with a regular lattice of dark crosses with orange rims (a grid ~0.5 m pitch) instead of an open hole with the interior behind: reads as a mesh screen / pattern; the outline is a cell staircase. ddg_mid also draws 42 m2 against the sim's 21 | PARTIAL; run 11 (618c6d9 petals on): the mesh fill is gone in ddg_mid: a dark opening with frames and a deck edge inside (`qa11/ddg_mid_set_e12`); outline still stepped at the corners |
-| D42 | cvn_side | `qa8/cvn_side_set_e12`, `_set_d25` | Round the carrier's side hole a regular lattice of short glowing orange dashes (frame and longitudinal lines lit in a grid ~2 m pitch) over intact plating, reaching ~15 m from the hole: reads as a pattern, not heat or scorch | OPEN |
+| D42 | cvn_side | `qa8/cvn_side_set_e12`, `_set_d25` | Round the carrier's side hole a regular lattice of short glowing orange dashes (frame and longitudinal lines lit in a grid ~2 m pitch) over intact plating, reaching ~15 m from the hole: reads as a pattern, not heat or scorch | PASS; run 12 (1f403c9): no grid; a ragged dark hole with a scorched rim and frames inside (`qa12/cvn_side_set_e12`) |
 | D41 | ddg_wl_ff | `qa7/ddg_wl_ff_hud.png` | Engagement log lines run past the panel's right edge and are cut mid-word ('HOLED BELOW TH', 'REFRIGERATED STOR', 'SCAN SONAR C') | OPEN (systems UI) |
 | D40 | ddg_wl_ff | `qa7/ddg_wl_ff_xray.png` | X-ray after a hit forward (z +20, REF6 / BTH6 / AMR1 flooding, GTG1, SWBD1 out): the view frames the stern; the tags list STERN · FLIGHT DECK and SHAFTS x2 as DESTROYED (the sim has neither out) and nothing of the flooded spaces or the systems out; three tags are garbled glyph runs ('UPTA x x x.x . - . \|. \| \|', '7 : : - -', 'LM250 = = \ \ \ + + +', 'MK 41 VLS . =+') | OPEN (systems / interior UI); run 8 same: X-ray frames the stern and tags 'STERN · - \|- \| \| DESTROYED' after a forward hit (`qa8/ddg_wl_ff_inspect.png`) |
 | D39 | ddg_mid | `qa5/ddg_mid_set_d25`, `_set_e12` | Oniks inside amidships (120 kg TNT-eq, delayed fuze) now tears 2.7 m2: a thin horizontal slit ~12 m long along a longitudinal, with the frames glowing through: reads as a crack, not the blown-out hole the sim books (11 m2) and the charge makes (run 4: 59 m2) | OPEN; run 6: ddg_mid now tears 0 (no slit either) |
@@ -57,6 +57,12 @@ Status: OPEN / FIXED? (a fix landed, not re-tested) / PASS / WONTFIX. "run N" = 
 | D1 | battery | - | (tool) 25 m / 12 m close views aimed at the patch origin (`spec.frame.O`), which is not the hole: now aimed at `scars.last(id)` | FIXED in battery |
 
 ## Runs
+
+### Run 12 (HEAD 1f403c9: petals v2, stiffener scorch)
+
+qa.js ok on all 27. Resolve 1.2-4.4 s (cg_deck 5.8); synced p95 8.6-16 ms on the DDG / CG, 24-33 ms on lcs_kh35, lhd_side,
+lhd_deck, cvn_island (their baselines 8-30: load). D42 PASS; D44 partial (the fan gone, over-long curled shreds instead).
+
 
 ### Run 11 (HEAD 618c6d9: petals ported and on)
 
