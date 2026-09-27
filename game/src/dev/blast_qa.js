@@ -11,6 +11,7 @@
 import { spawn, hit, look } from './scar_lab.js';
 import { kill } from '../sim/damage.js';
 import { removeUnits } from '../game/sandbox.js';
+import { attitude } from '../engine/models.js';
 
 const PI = Math.PI;
 const FACE = { stbd: [PI / 2, .16], port: [-PI / 2, .16], fwd: [0, .16], aft: [PI, .16], deck: [PI / 2, .85], deckP: [-PI / 2, .85] };
@@ -38,7 +39,7 @@ export const CASES = [
   { id: 'cg_side', type: 'cg', kind: 'oniks', loc: [8.4, 4, -10], from: [1, .05, 0], face: 'stbd' },
   { id: 'cg_deck', type: 'cg', kind: 'oniks', loc: [2, 8, 58], from: [.25, 1, .3], face: 'deck' },
   // CVN-68
-  { id: 'cvn_side', type: 'carrier', kind: 'oniks', loc: [37, 10, 60], from: [1, .05, 0], face: 'stbd' },
+  { id: 'cvn_side', type: 'carrier', kind: 'oniks', loc: [30, 8, 110], from: [1, .05, 0], face: 'stbd' },
   { id: 'cvn_deck', type: 'carrier', kind: 'oniks', loc: [0, 19.6, 80], from: [.2, 1, .3], face: 'deckP' },
   { id: 'cvn_island', type: 'carrier', kind: 'oniks', loc: [21.5, 35, -30], from: [-1, .1, 0], face: 'port' },
   // LCS-2
@@ -98,7 +99,26 @@ function systems(O, id) {
   return { hp: Math.round(u.hp), hpMax: u.hpMax, flood: +(u.flood || 0).toFixed(3), fire: +(u.fire || 0).toFixed(1), alive: u.alive, mods, parts };
 }
 
-async function shot(O, id, loc, v, name) { look(O, id, v.loc || loc, v); await O.still(name, 0, 2); }
+/* an exact view (the orbit camera rides its target on the sea surface and tilts up when low: not usable close to a
+   hull): the eye at dist from the model-frame point, from yaw (model frame: 0 from ahead, PI/2 from starboard) and
+   pitch above, looking at the point; the unit's full pose (list, trim, sinking) */
+function exactView(O, id, loc, v) {
+  const u = O.sim.units.get(id); if (!u) return null;
+  const P = O.game.unitPose ? O.game.unitPose(u) : { pos: u.pos, hdg: u.hdg };
+  const M = attitude(P.hdg, P.pitch || 0, P.roll || 0), p0 = P.pos;
+  const w = q => [p0[0] + M[0] * q[0] + M[1] * q[1] + M[2] * q[2], p0[1] + M[3] * q[0] + M[4] * q[1] + M[5] * q[2], p0[2] + M[6] * q[0] + M[7] * q[1] + M[8] * q[2]];
+  const a = v.yaw, pc = v.pitch, d = v.dist;
+  const e = [loc[0] + d * Math.cos(pc) * Math.sin(a), loc[1] + d * Math.sin(pc), loc[2] + d * Math.cos(pc) * Math.cos(a)];
+  const eye = w(e); eye[1] = Math.max(eye[1], 1.5);
+  return { eye, look: w(loc) };
+}
+async function shot(O, id, loc, v, name) {
+  const V = exactView(O, id, v.loc || loc, v);
+  look(O, id, v.loc || loc, { yaw: 0, pitch: .3, dist: Math.max(40, v.dist) });
+  if (V) for (let i = 0; i < 4; i++) { O.cam.view = V; O.advance(0, 1); }
+  if (V) O.cam.view = V;
+  await O.still(name, 0, 0);
+}
 
 export async function runCase(O, c, o = {}) {
   const g = O.game, sim = O.sim, dir = o.dir || 'qa';
@@ -135,6 +155,7 @@ export async function runCase(O, c, o = {}) {
   row.patch = !!B;
   const SC = g.scars && g.scars.last && g.scars.last(id);
   const aim = SC && isFinite(SC.x) ? [SC.x, SC.y, SC.z] : c.loc;
+  row.at = aim.map(v => +v.toFixed(1));
   const rec = [], maxT = o.maxT || 70;
   let shot1 = false, doneAt = null;
   while (g.t - t0 < maxT) {
@@ -160,9 +181,10 @@ export async function runCase(O, c, o = {}) {
   // the floating-dot check, when game/src/blast/qa.js exists
   try {
     const QM = await import('/game/src/blast/qa.js');
-    const fn = QM.check || QM.floating || QM.run || QM.default;
-    if (fn) row.qa = await fn(O, id);
-  } catch (e) { row.qa = 'n/a'; }
+    const r = QM.check(O, { unit: id }), k = {};
+    for (const f of r.flags || []) k[f.kind] = (k[f.kind] || 0) + (f.n || 1);
+    row.qa = { ok: r.ok, k, flags: (r.flags || []).slice(0, 12), stats: r.stats, err: r.err };
+  } catch (e) { row.qa = 'n/a: ' + (e && e.message); }
   row.ms = Math.round(performance.now());
   if (o.keep !== true) { if (g.blast && g.blast.dropUnit) g.blast.dropUnit(id); removeUnits(g, [id]); }
   await frames(O, 10);
@@ -185,6 +207,6 @@ export function start(O, o = {}) {
 
 export function table(rows = window.QA.rows) {
   const L = ['| case | round | resolve s | solver wall ms | frame p50/p95 ms (base) | torn m2 (below) | set mm | frames | sim: flood / damaged modules | qa |', '|---|---|---|---|---|---|---|---|---|---|'];
-  for (const r of rows) L.push(`| ${r.id} | ${r.kind} | ${r.resolve ?? '-'} | ${r.wallMs ?? '-'} | ${r.solve[0]}/${r.solve[1]} (${r.base[0]}/${r.base[1]}) | ${r.torn ?? '-'} (${r.below ?? '-'}) | ${r.setMm ?? '-'} | ${r.frames ?? '-'} | ${r.sys ? `${r.sys.flood} / ${r.sys.mods.join(' ') || '-'}` : 'gone'} | ${r.qa === undefined ? '-' : typeof r.qa === 'object' ? JSON.stringify(r.qa) : r.qa} |`);
+  for (const r of rows) L.push(`| ${r.id} | ${r.kind} | ${r.resolve ?? '-'} | ${r.wallMs ?? '-'} | ${r.solve[0]}/${r.solve[1]} (${r.base[0]}/${r.base[1]}) | ${r.torn ?? '-'} (${r.below ?? '-'}) | ${r.setMm ?? '-'} | ${r.frames ?? '-'} | ${r.sys ? `${r.sys.flood} / ${r.sys.mods.join(' ') || '-'}` : 'gone'} | ${r.qa === undefined ? '-' : typeof r.qa === 'object' ? (r.qa.ok ? 'ok' : JSON.stringify(r.qa.k)) : r.qa} |`);
   return L.join('\n');
 }
