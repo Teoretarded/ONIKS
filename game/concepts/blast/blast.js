@@ -2364,7 +2364,7 @@ async function runCaseAsync(cfg) {
     byPanel: PAN.map(P => { let a = 0, dmax = 0; for (let c = P.off; c < P.off + P.nu * P.nv; c++) { const cc = CMAP[c]; if (cc < 0) continue; if (CER[cc]) a += CAR[cc];
       for (let q = 0; q < 4; q++) { const i = CN[4 * cc + q]; if (!FREE[i]) dmax = Math.max(dmax, Math.hypot(X[3 * i] - R0[3 * i], X[3 * i + 1] - R0[3 * i + 1], X[3 * i + 2] - R0[3 * i + 2])); } }
       return { name: P.name, torn: +a.toFixed(2), maxDisp: +dmax.toFixed(3) }; }) };
-  restoreSt(keep, { grid: cfg.grid ?? keep.grid });
+  restoreSt(keep, { grid: cfg.grid ?? keep.grid }); asyncRun = false;   // (a scripted run after this one blocks again)
   return res;
 }
 function compare(a, r) {

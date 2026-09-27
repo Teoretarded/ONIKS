@@ -1,4 +1,4 @@
-# Blast bench: model, checks, results (v35, 2026-09-27)
+# Blast bench: model, checks, results (v36, 2026-09-27)
 
 Test page: `game/concepts/blast/index.html` (served by `tools/serve_game.py`). Scenes: **Section · 30 m** (a
 destroyer side section: side, weather deck, second deck, platform deck, two bulkheads), **Arleigh Burke** (a patch
@@ -54,11 +54,13 @@ struck cell's corners by the bilinear weights of the point hit (was a quarter ea
 charge on the frame line stays symmetric to round-off (1e-15 m) until the waves reach the section's bulkheads, which
 are not symmetric (x = −10 and 5 m). The member failure used the bending of the segment's own node from this step and
 its neighbour's from the last, and the bending at a node was owned by the segment to its right: both broke the mirror
-under a contact charge (fixed). verify.html's `mirror 120 kg contact, GPU 0.125` still fails (6.5 %; 4.6 % at 11cab80
-as well): on the GPU, mirrored cells reach the erosion limit within float32 round-off and tear a step apart, and the
-hole grows from there; the 30 kg cases pass (0.004–0.04 %). Letting failed cells erode only every Nth step
-(`erodeEvery`) holds the pair together (2.8 % and no mismatched pairs at 25 steps) but the batched release worsens the
-contact momentum balance (6.6 / 7.3 / 10.3 kN·m at 1 / 2 / 5 steps, before row 15): off by default.
+under a contact charge (fixed). verify.html's `mirror 120 kg contact, GPU 0.125` failed (5–6 % at 2 ms) and was taken
+for float32 tie-breaks. It is not: the CPU in double gives the same 5.37 % at 2 ms (GPU 5.32 %), with every torn cell
+paired on both sides, and the asymmetry grows from 0.14 % at 1 ms to 2.1 % at 1.5 ms: the section's bulkheads (x = −10
+and 5 m, not mirrors of each other) send the charge's plate waves back into the checked panel from ~1.5 ms. Erosion
+windows (`erodeEvery`, which pair near-ties in time) change nothing there (5.3 %, and with row 15 no longer upset the
+momentum check). The check now reads the tearing case at 1 ms (GPU 0.125: 0.14 %), and a CPU 0.25 tearing case was
+added (0.88 % at 2 ms).
 
 **Energy ledger (CPU).** Work of the loads = kinetic + elastic + plastic (membrane, hinges, members, anchors) +
 damping + boundary radiation + contact + fracture + the end-of-run relaxation (its own line since v35; it was booked
@@ -142,7 +144,7 @@ verify.html `?quick=1` after these changes: 28 pass, 3 fail, 3 info. The fails a
 (float32 tie-breaks, above) and the two "petals, not cut-outs" checks (v35: 53 % / 92 %; v34: 53 % / 81 % of the torn side thrown loose,
 was 61 / 82 % at the audit); energy near contact, momentum, dt, parity, mesh dish now pass.
 
-The full suite (v35, 39106f7): 39 pass, 7 fail, 4 info (v34, ae3abf6: 36 / 9 / 4); v35 final: 40 / 6 / 4. v35 fixed the tearing momentum
+The full suite (v35, 39106f7): 39 pass, 7 fail, 4 info (v34, ae3abf6: 36 / 9 / 4); v35 final: 40 / 6 / 4; v36: 43 / 4 / 4 (mirror, 1200 kg petals and the Burke cases pass; still failing: the contact hole's whole-run mesh check, Nurick 20 kg and the standoff series, below, and 5000 kg petals). v35 fixed the tearing momentum
 check and "Burke 120 kg contact on the deckhouse"; the whole-run energy check passes with the relaxation on its own
 line (above). Still failing, as in v34: the mirror under tearing, both petals checks, the contact hole's mesh check
 (0.25 / 0.125 / 0.0625 m: 3.2 / 2.8 / 10.4 m² over the whole run: the fine grid's second deck keeps tearing late;
@@ -273,6 +275,27 @@ and smashed the deck above). Such pieces now leave the wall: their area vents be
 longer acts on them (`looseVent`). With these the runs above are smooth in the charge except at the rupture
 threshold. The v34 bench (and the game port, from 200fe28) had none of the three; the game's cliff is likely there.
 
+## The two remaining validation fails (v36)
+
+**Nurick rig 20 kg at 2 m** (2.5 × 0.75 m, 6 mm mild, clamped; φ 16.9, Er 18.6): dish 35 mm against Nurick–Martin's
+50 mm, just outside the check's ±30 %. The test is set up right: the pulse (~1–2 ms) is short against the panel's period
+(~20 ms), the energy ratio is well into the plastic range and the check only judges φ ≤ 28, Er ≥ 10. It is the model:
+with the rate law off the same rig gives 86–101 % of the fit (AUDIT A3), and against measured localised tests (Langdon
+et al., 4 mm plates) the model gives 64 % of the deflection per unit impulse. The Cowper–Symonds constants move from the
+initial-yield set (D 40.4 /s, q 5) to the large-strain one only over 20 % strain, so a plate dished a few h keeps
+nearly the initial-yield rate hardening (~1.7 × at 10 /s). Not changed here (it moves every calibration); the next
+step is to ramp to the large-strain constants over a few % strain and re-run A1/A3.
+
+**120 kg standoff series** (8 / 4 / 2 / 1 m, 0.125 m): the struck side tears monotonically (0.03 / 0.19 / 0.58 / 1.3 m²);
+what breaks the series is the second deck, 1.6 / 2.5 / 2.1 / 2.2 m², all within 0.44 m of its junction with the side
+and clustered at the frame stations (x = −5, −2.5, 0, 2.5, 10), from ~12 ms. 120 kg at 8 m should not tear the deck at
+all. It is the fold knock-down (row 11): deck cells within 0.6 m of the side carry 12 % of their compressive yield at
+0.125 m, and the frames' end reactions crush them at the frame stations under any side load; with `kLaw: false` the
+deck tears 0.16 / 0.47 m² at 8 / 2 m. Dropping the brackets from the seam test (their legs extend the band round each
+frame) changed little (1.38 m² at 8 m). A model issue: the knock-down stands in for folding the grid cannot resolve
+under a side push, and it also acts on local frame reactions; it wants a trigger (the adjoining plate's in-plane push)
+rather than any compression. Not changed here (it is A1's calibration).
+
 ## Petals (option, `petals: true`)
 
 Cells used to go away when they failed, so a hole is a patch of missing cells with loose pieces round it. With petals a
@@ -295,9 +318,9 @@ mostly eroded.
 
 `BLAST.petalReport()` (after a run; the struck plate): eroded, loose (cut out: pieces no longer joined) and bent-open
 (attached cells turned over 45°) area; petal share = bent-open / (bent-open + loose + eroded), cut-out share = loose /
-(bent-open + loose); `petals` is true for a petal share ≥ 0.35 with a cut-out share ≤ 0.3. (verify.html's "petals, not
-cut-outs" counts torn nodes, which twins inflate, and runs without petals; the bench's own check is this.) Box, bare
-contact charges, WebGPU:
+(bent-open + loose); `petals` is true for a petal share ≥ 0.35 with a cut-out share ≤ 0.3. verify.html's two "petals,
+not cut-outs" checks (1200 and 5000 kg contact, 0.125 m) now run the case with petals on (WebGPU) and judge this
+(they counted torn nodes of a run without petals). Box, bare contact charges, WebGPU:
 
 | Case | Eroded | Loose | Bent open | Petal share | Cut-out share |
 |---|---|---|---|---|---|
@@ -309,8 +332,11 @@ contact charges, WebGPU:
 | 1200 kg, 0.25 m, petals | 15.1 | 0.4 | 16.4 | 0.51 | 0.02 |
 | 1200 kg, 0.125 m, no petals | 18.2 | 2.5 | 2.0 | 0.09 | 0.56 |
 | 1200 kg, 0.125 m, petals | 16.8 | 3.3 | 12.7 | 0.39 | 0.21 |
+| 5000 kg, 0.125 m, petals | 40.6 | 64.5 | 23.7 | 0.18 | 0.73 |
 
-The eroded middle of a large contact hole is the breach itself (cells past 3 × their limit: 1200 kg on 10 mm HSLA);
+At 5000 kg the side is shattered over ~8 m (verify's "nothing pristine within 8.5 m" passes): pieces bounded by cracks
+fly off, and the petals check fails there; a hole that size would not petal cleanly either, but the cut-out share
+(0.73) is probably high (a node splits at most twice, and cracks then close into loops). The eroded middle of a large contact hole is the breach itself (cells past 3 × their limit: 1200 kg on 10 mm HSLA);
 round it the plating opens as bent-back petals and few pieces are cut out. With petals less plating erodes elsewhere
 (1200 kg, all plates: 204 → 82 m² eroded) because tears are cracks, and 265 m² of flaps are bent open (vented).
 Inside 120 kg: 179 m² eroded without petals; with them 52 eroded and 225 bent open.

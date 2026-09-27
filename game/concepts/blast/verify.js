@@ -293,7 +293,10 @@ check('symmetry', 'symmetry', false, async () => {
   const aim = pan.pt, n = pan.n;
   for (const [nm, c, solver, grid, tEnd] of [['30 kg @ 2 m, GPU 0.125, early', C_(30, 'standoff', { standoff: 2 }), 'gpu', .125, 3e-3],
     ['30 kg @ 2 m, CPU 0.25, early', C_(30, 'standoff', { standoff: 2 }), 'cpu', .25, 3e-3],
-    ['120 kg contact, GPU 0.125, early (tearing)', C_(120, 'contact'), 'gpu', .125, 2e-3],
+    // (tearing: at 1 ms, before the section's bulkheads, 5 and 10 m off the charge and not mirrors of each other, send
+    // their waves back: at 2 ms the CPU in double and the GPU give the same 5.3 % asymmetry, with every torn cell paired)
+    ['120 kg contact, GPU 0.125, early (tearing)', C_(120, 'contact'), 'gpu', .125, 1e-3],
+    ['120 kg contact, CPU 0.25, early (tearing)', C_(120, 'contact'), 'cpu', .25, 1e-3],
     ['30 kg @ 2 m, GPU 0.125, final', C_(30, 'standoff', { standoff: 2 }), 'gpu', .125, 0]]) {
     const R = await run({ ...c, aim, aimN: n, solver, grid }, { tEnd });
     const pn = panelAt(aim), key = new Map(), S = R.S;
@@ -476,6 +479,18 @@ function petals(R, hitPl, C) {
     if (r > rh && r < rh + 1) { nb++; if (dmag(R, i) > 5 * R.nodeH[i]) band++; } }
   return { rh, tot, loose, rim, band, nb };
 }
+// petals (the bench's option, WebGPU): of the plating the hole opened on the struck plate, how much is bent back and
+// still attached against how much was cut out or eroded (BLAST.petalReport: area, not torn nodes). It rebuilds the
+// model, so it runs after everything else has used the plain run
+async function petalCheck(tag, W, grid) {
+  const cfg = C_(W, 'contact'), B = window.BLAST;
+  if (!B || !B.petalReport || !B.webgpu || !B.webgpu()) { record('user', `${tag}: petals, not cut-outs`, null, 'needs the bench\'s petals option on WebGPU: skipped'); return; }
+  const t0 = performance.now();
+  await B.runCaseAsync({ ...cfg, solver: 'gpu', backend: 'webgpu', grid, petals: true });
+  const p = B.petalReport();
+  record('user', `${tag}: petals, not cut-outs`, !!p.petals,
+    `petals on (WebGPU, ${grid} m), struck plate ${p.plate}: eroded ${fmt(p.erodedM2, 1)} m², cut out ${fmt(p.looseM2, 1)} m², bent back and attached ${fmt(p.flapM2, 1)} m² · petal share ${fmt(p.petalShare, 2)} (pass ≥ 0.35), cut-out share ${fmt(p.cutoutShare, 2)} (pass ≤ 0.3) · ${p.splits} nodes split (${p.secondSplits} twice) · ${fmt((performance.now() - t0) / 1000, 1)} s`);
+}
 async function userContact(tag, W, grid, extra = {}) {
   const cfg = C_(W, 'contact', { ...extra });
   const R = await run({ ...cfg, solver: 'gpu', grid }), v = V(), A = v.st.aim, n = v.st.aimN;
@@ -483,9 +498,6 @@ async function userContact(tag, W, grid, extra = {}) {
   const rep = regionReport(R, behindOf(R, A, n, hitPl, 2.5), .05), hit = (rep.n - rep.pristine) / Math.max(rep.n, 1);
   record('user', `${tag}: structure behind`, rep.n > 0 && hit >= .5,                     // torn, blown loose or set > 50 mm all count as a response
     `hull torn ${fmt(R.hullM2, 2)} m² · plating of other plates within 2.5 m behind the hit: ${rep.n} nodes, torn ${rep.torn} (${rep.loose} thrown loose), set > 50 mm ${rep.n - rep.torn - rep.pristine}, under 50 mm ${rep.pristine} · ${Object.entries(rep.byPl).map(([p, b]) => `${plName(R, p)}: ${b.n} nodes, torn ${b.torn}, max set ${fmt(b.max * 1000, 0)} mm`).join('; ')} · gas ${R.gp.filter((p, k) => R.gv[k] < Infinity).map(p => fmt(p / 1e3, 0)).join('/')} kPa · ${fmt(R.ms / 1000, 1)} s`);
-  const pe = petals(R, hitPl, R.C);
-  record('user', `${tag}: petals, not cut-outs`, pe.tot > 0 && pe.loose / pe.tot <= .5 && pe.rim >= .25 * pe.rh && pe.nb > 0 && pe.band / pe.nb > .5,
-    `hole radius (90 % of the torn plating) ${fmt(pe.rh, 2)} m · ${pe.tot} torn nodes on the struck plate, ${fmt(100 * pe.loose / Math.max(pe.tot, 1), 0)}% thrown loose, attached rim moved up to ${fmt(pe.rim, 2)} m · intact ring 1 m outside the hole: ${fmt(100 * pe.band / Math.max(pe.nb, 1), 0)}% set > 5h`);
   return R;
 }
 check('user1200', 'user', false, async () => {
@@ -496,6 +508,7 @@ check('user1200', 'user', false, async () => {
   const v = V(), A = v.st.aim, n = v.st.aimN, hitPl = E.nodePl[nearestNode(E, A, i => E.nodePl[i] >= 0)], beh = behindOf(E, A, n, hitPl, 2.5);
   let nb = 0, loaded = 0, imax = 0; for (let i = 0; i < E.N; i++) { if (E.fix[i] || E.nodePl[i] < 0 || !beh(i)) continue; nb++; if (pr.P.impN[i] > 0) loaded++; imax = Math.max(imax, pr.P.impN[i]); }
   record('user', '1200 kg contact: load reaches it (CPU 0.25, 4 ms)', nb > 0 && loaded / nb > .5, `${loaded}/${nb} nodes behind the hit received load (max ${fmt(imax, 0)} N·s on one node) · gas ${E.gp.filter((p, k) => E.gv[k] < Infinity).map(p => fmt(p / 1e3, 0)).join('/')} kPa at 4 ms`);
+  await petalCheck('1200 kg contact', 1200, .125);
 });
 check('user5000', 'user', false, async () => {
   const W = 5000, R = await userContact('5000 kg contact', W, .125);
@@ -504,6 +517,7 @@ check('user5000', 'user', false, async () => {
   const rep = regionReport(R, within, i => 2 * R.nodeH[i]);
   record('user', '5000 kg contact: nothing pristine in reach', rep.n > 0 && rep.pristine / rep.n < .05,
     `within ${fmt(reach, 1)} m of the charge (Z < 0.5, ≥ 1 m from the boundary anchors): ${rep.n} nodes, torn ${rep.torn} (${rep.loose} loose), set < 2h ${rep.pristine} = ${fmt(100 * rep.pristine / Math.max(rep.n, 1), 1)}% · ${Object.entries(rep.byPl).map(([p, b]) => `${plName(R, p)}: ${b.n}, torn ${b.torn}, pristine ${b.pristine}`).join('; ')}`);
+  await petalCheck('5000 kg contact', 5000, .125);
 });
 
 // Burke (when the bench can build it): aim points from the ship's data, same criteria
