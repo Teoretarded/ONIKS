@@ -273,6 +273,7 @@ void main() {
   // scars: the splats follow the bent plating; a hole's own splats are pushed back to the far end of the pocket
   // behind it (a plug: what is inside shows, the far side of the hull and the sea do not)
   gIn = uP.x;
+  bool twoS = false;
   if (uScN > 0) {
     float b0 = 0.0, h0 = 0.0, e0 = 0.0, n0 = 0.0;
     if (scarAt(p, uR * aNrm.xyz, hash1(uint(gl_VertexID) * 747796405u + 2891336453u), true, b0, h0, e0, n0) == 1) { ${CULL} return; }
@@ -283,12 +284,13 @@ void main() {
     if (bk == 1) { ${CULL} return; }
     // (a plug's splat is widened: seen at an angle through the hole, the far end of the pocket is wider than the hole)
     if (bk == 2) { su *= 2.5; sv *= 2.5; }
+    twoS = bk == 3;
   }
   float dist = length(p);
   vec3 v = p / max(dist, 1e-4);
   float fac;
   if (dot(aNrm.xyz, aNrm.xyz) < 0.01) { vec3 n2 = cross(U, V); fac = abs(dot(n2, v)) / max(1e-4, length(n2)); }
-  else { float dn = dot(uR * aNrm.xyz, v); if (dn > -0.02) { ${CULL} return; } fac = -dn; }
+  else { float dn = dot(uR * aNrm.xyz, v); if (dn > -0.02 && !twoS) { ${CULL} return; } fac = abs(dn); }
   if (fac < 0.03) { ${CULL} return; }
   vec3 pc = p; pc.y -= curveDrop(pc);
   vec4 c = uVP * vec4(pc, 1.0);
@@ -477,7 +479,7 @@ uniform vec4 uBtZ[${BTMAX}];     // xyz: local z (the struck plate's outward nor
 uniform vec4 uBtP[${BTMAX * 2}]; // skin plate k of patch i (i * 2 + k): x axis (-1 none), y plane (local m), z u0, w v0
 uniform vec4 uBtQ[${BTMAX * 2}]; // x nu, y nv (cells), zw its first texel in the atlas
 uniform highp sampler2D uBtT;
-// (an integer hash of the 0.25 m cell: blast/support.js wreckHash replays it exactly on the CPU)
+// (an integer hash of the 0.25 m cell of the patch-local point: blast/support.js wreckHash replays it on the CPU)
 float wreckHash(vec3 p) {
   uvec3 c = uvec3(ivec3(floor(p * 4.0)) + 65536);
   uint h = (c.x * 73856093u) ^ (c.y * 19349663u) ^ (c.z * 83492791u);
@@ -508,7 +510,11 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
       ivec2 b = ivec2(int(Q.z) + i0, int(Q.w) + j0);
       vec4 t00 = texelFetch(uBtT, b, 0);
       int f00 = int(t00.w);
-      bool torn = (f00 & 1) != 0;
+      // (torn or not is read a little off the point, by a hash of its 0.125 m cell: the hole's outline is ragged inside a
+      // texel, not the texel grid's staircase)
+      vec3 pq = floor(l * 8.0) * 0.5;
+      int ti = clamp(int(floor(fi + (wreckHash(pq) - 0.5) * 0.9)), 0, int(Q.x) - 1), tj = clamp(int(floor(fj + (wreckHash(pq + vec3(17.0, 5.0, 11.0)) - 0.5) * 0.9)), 0, int(Q.y) - 1);
+      bool torn = (int(texelFetch(uBtT, ivec2(int(Q.z) + ti, int(Q.w) + tj), 0).w) & 1) != 0;
       vec4 t10 = texelFetch(uBtT, b + ivec2(1, 0), 0), t01 = texelFetch(uBtT, b + ivec2(0, 1), 0), t11 = texelFetch(uBtT, b + ivec2(1, 1), 0);
       if (abs(off) > band || !face) {
         // not the plating itself: what stands on it (over a deck up to 30 m: a gun, a deckhouse, rails; off a side up to
@@ -526,7 +532,7 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
           // an interior part (bulkheads, decks, machinery...): wrecked where the plating over it tore (most of it gone,
           // the rest charred and pushed with the plating), followed and scorched behind plating that held
           float wd = max(0.0, 1.0 - (-off) / (D + 0.4));
-          if (torn || (fN & 3) != 0) { if (wreckHash(p) < 0.7 * wd + 0.2) return 1; burn = max(burn, 0.85); }
+          if (torn || (fN & 3) != 0) { if (wreckHash(l) < 0.7 * wd + 0.2) return 1; burn = max(burn, 0.85); }
           else if ((fN & 8) != 0) burn = max(burn, 0.5 * wd);
           p += (X * dlb.x + Y * dlb.y + Z * dlb.z) * wd;
           break;
@@ -535,11 +541,16 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
           // (not at the plate's edges: the ship's shell or bulkhead the plate meets there stands on its own)
           float ed = min(min(fi, Q.x - fi), min(fj, Q.y - fj)) * S;
           // (and only the surfaces facing the plate, or lines: the ship's shell and walls across the pocket stay)
-          if ((face || two) && ed > 0.6 && (torn || (fN & 11) != 0)) return 1;
+          // (a ship with no interior drawn keeps them, charred: they are the far side of the hole, not the sea)
+          if ((face || two) && ed > 0.6 && (torn || (fN & 11) != 0)) { if (plugD > 1.0) return 1; burn = max(burn, 0.9); }
           float wd = 1.0 - (-off) / (D + 0.4);
           p += (X * dlb.x + Y * dlb.y + Z * dlb.z) * wd;
+          if (dp && plugD < 1.0) return 3;
           break;
         }
+        // (a ship with no interior drawn: her own walls across the pocket, seen from inside through the hole, occlude
+        // from either side in the depth pass: a dark inner hull, not the sea through her)
+        if (dp && plugD < 1.0 && off <= -0.05 && off > -D - 14.0) return 3;
         continue;
       }
       vec3 dl;
@@ -556,7 +567,7 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
         // (a torn cell's plating: shreds hanging off its corner, ragged (each dot its own share drawn in) and curled the
         // way the corner went, as the petals the grid is too coarse to tear)
         vec2 r0 = vec2(fx, fy) - vec2(lx ? 0.0 : 1.0, ly ? 0.0 : 1.0);
-        float hq = fract(sin(dot(floor(p * 7.3), vec3(12.99, 78.23, 37.71))) * 43758.55);
+        float hq = fract(sin(dot(floor(l * 7.3), vec3(12.99, 78.23, 37.71))) * 43758.55);
         vec2 o = r0 * S * -mix(0.15, 0.6, hq);
         dl = tc.xyz + (ax == 2 ? vec3(o.x, o.y, 0.0) : ax == 1 ? vec3(o.x, 0.0, o.y) : vec3(0.0, o.y, o.x));
         float dn = tc[ax], rr = dot(r0, r0), cu = sign(dn) * min(abs(dn) * 0.9, S * 1.4);
@@ -580,8 +591,8 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
           if (j0 > 0 && (int(texelFetch(uBtT, b - ivec2(0, 1), 0).w) & 1) != 0) dmin = min(dmin, fy);
           if (j0 < int(Q.y) - 1 && (int(t01.w) & 1) != 0) dmin = min(dmin, 1.0 - fy);
           if (dmin < 0.6) {
-            vec3 q = floor(p * 5.0);
-            float hn = fract(sin(dot(q, vec3(41.3, 289.1, 97.7))) * 43758.55), hj = fract(sin(dot(floor(p * 1.6), vec3(12.9, 78.2, 37.7))) * 43758.55);
+            vec3 q = floor(l * 5.0);
+            float hn = fract(sin(dot(q, vec3(41.3, 289.1, 97.7))) * 43758.55), hj = fract(sin(dot(floor(l * 1.6), vec3(12.9, 78.2, 37.7))) * 43758.55);
             if (dmin < 0.55 * hj * (0.6 + 0.4 * hn)) return 1;
             edge = max(edge, 0.7 * (1.0 - dmin / 0.6)); heatN = max(heatN, heat); hot = max(hot, heat * 0.5 * (1.0 - dmin / 0.6));
           }
@@ -598,7 +609,7 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
         tilt -= Uw * gu + Vw * gv;
         // plating strained past yield buckles finer than the grid: facets ~0.3 m catching the light unevenly
         float gs = clamp((length(vec2(gu, gv)) - 0.1) * 1.5, 0.0, 0.5);
-        if (gs > 0.04) { vec3 q = floor(p * 3.3); float h1 = fract(sin(dot(q, vec3(127.1, 311.7, 74.7))) * 43758.55), h2 = fract(sin(dot(q, vec3(269.5, 183.3, 246.1))) * 43758.55);
+        if (gs > 0.04) { vec3 q = floor(l * 3.3); float h1 = fract(sin(dot(q, vec3(127.1, 311.7, 74.7))) * 43758.55), h2 = fract(sin(dot(q, vec3(269.5, 183.3, 246.1))) * 43758.55);
           tilt += (Uw * (h1 - 0.5) + Vw * (h2 - 0.5)) * gs; }
       }
       p += X * dl.x + Y * dl.y + Z * dl.z;

@@ -565,7 +565,14 @@ class FxSystem {
         let k = f.k;
         if (u.alive) { const hp = u.hp / u.hpMax; k = Math.max(k * .9995, sat((.85 - hp) * 1.4)); }
         else if (dom === 'sea') k = u.dying < .8 ? 1 : Math.max(0, 1 - (u.dying - .8) / .17);
-        f.k = k; f.follow(t, u.pos, u.hdg, this.seeUnit(u) && !drown ? k : 0);
+        // (a broken hull (game/structure): the fire rides the piece its seat is on, out where there is none)
+        const gs = this.game && this.game.structure, brk = gs && gs.draws && gs.draws(u.id) && gs.poseAt;
+        let fp = u.pos, fk = k;
+        if (brk) { const L0 = f.loc || [0, 0, 0], mx = L0[2], my = L0[1], mz = L0[0], q = gs.poseAt(u.id, Math.round(mz));   // (loc: along, up, across)
+          if (!q) fk = 0; else { const c = Math.cos(u.hdg), sn = Math.sin(u.hdg), R = q.R, T = q.T;
+            const wx = T[0] + R[0] * mx + R[1] * my + R[2] * mz, wy = T[1] + R[3] * mx + R[4] * my + R[5] * mz, wz = T[2] + R[6] * mx + R[7] * my + R[8] * mz;
+            fp = [wx - (sn * L0[0] + c * L0[2]), wy - L0[1], wz - (c * L0[0] - sn * L0[2])]; } }
+        f.k = k; f.follow(t, fp, u.hdg, this.seeUnit(u) && !drown ? fk : 0);
         if (dom === 'sea' && !u.alive && u.dying > .97) f.stop(t);
       } else if (u.alive && u.hp < u.hpMax * .55 && dom !== 'air' && !drown && this.hitAt.has(u.id) && !this.scarred()) {
         this.startFire(u, t, null, dom === 'sea' ? (u.def.size[0] > 200 ? 1.2 : .8) : .25, u.id * 17);

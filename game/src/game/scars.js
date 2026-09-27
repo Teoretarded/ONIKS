@@ -837,12 +837,16 @@ export function createScars(game) {
         if (F) {
           // the seats carried with the full pose (roll, pitch, list, sinking); the smoke leaves from the highest one
           const Z = S.seats, n = Z.length / 7, SW = F.SW;
+          // (a broken hull (game/structure): each seat rides the piece its station is on; none there: out)
+          const brk = game.structure && game.structure.draws && game.structure.draws(id) && game.structure.poseAt;
           let hi = -1e9, hx = 0, hz = 0, above = 0;
           for (let j = 0; j < n; j++) {
             const x = Z[j * 7], y = Z[j * 7 + 1], z = Z[j * 7 + 2], tx = Z[j * 7 + 4], ty = Z[j * 7 + 5], tz = Z[j * 7 + 6];
-            const wx = p0[0] + M[0] * x + M[1] * y + M[2] * z, wy = p0[1] + M[3] * x + M[4] * y + M[5] * z, wz = p0[2] + M[6] * x + M[7] * y + M[8] * z;
+            let Mj = M, pj = p0;
+            if (brk) { const q = game.structure.poseAt(id, Math.round(z)); if (!q) { SW[j * 7] = p0[0]; SW[j * 7 + 1] = -1e3; SW[j * 7 + 2] = p0[2]; SW[j * 7 + 3] = 0; continue; } Mj = q.R; pj = q.T; }
+            const wx = pj[0] + Mj[0] * x + Mj[1] * y + Mj[2] * z, wy = pj[1] + Mj[3] * x + Mj[4] * y + Mj[5] * z, wz = pj[2] + Mj[6] * x + Mj[7] * y + Mj[8] * z;
             SW[j * 7] = wx; SW[j * 7 + 1] = wy; SW[j * 7 + 2] = wz; SW[j * 7 + 3] = Z[j * 7 + 3];
-            SW[j * 7 + 4] = M[0] * tx + M[1] * ty + M[2] * tz; SW[j * 7 + 5] = M[3] * tx + M[4] * ty + M[5] * tz; SW[j * 7 + 6] = M[6] * tx + M[7] * ty + M[8] * tz;
+            SW[j * 7 + 4] = Mj[0] * tx + Mj[1] * ty + Mj[2] * tz; SW[j * 7 + 5] = Mj[3] * tx + Mj[4] * ty + Mj[5] * tz; SW[j * 7 + 6] = Mj[6] * tx + Mj[7] * ty + Mj[8] * tz;
             if (!S.sea || wy > .25) above++;
             if (wy > hi) { hi = wy; hx = wx; hz = wz; }
           }
@@ -911,6 +915,19 @@ export function createScars(game) {
       const x = S.hx !== undefined ? S.hx : S.x, y = S.hy !== undefined ? S.hy : S.y, z = S.hz !== undefined ? S.hz : S.z;
       const c = [pose.pos[0] + M[0] * x + M[1] * y + M[2] * z, pose.pos[1] + M[3] * x + M[4] * y + M[5] * z, pose.pos[2] + M[6] * x + M[7] * y + M[8] * z];
       ejecta(u, ent, st, Object.assign({}, S, { x, y, z, r }), M, pose, c);
+    },
+    /* a hole the sim made where no blast patch covers it (sim/ship.js u.ship.holes, a tear run on into the next space):
+       an analytic hole of radius r (model frame, outward normal n), its pocket and interior as for an unsolved hit */
+    holeAt(id, x, y, z, n, r) {
+      const u = sim.units.get(id); if (!u || !R.models.has(u.def.model) || !(r > .2)) return null;
+      const ent = R.models.get(u.def.model), st = stOf(u), rec = recOf(u);
+      for (const P of rec.list) if (holeLike(P.kind) && Math.hypot(P.x - x, P.y - y, P.z - z) < Math.max(P.r, r) * .8) return null;
+      const G = gridOf(ent, st), deckY = G ? G.deckY : u.def.size[2] * .3, sea = u.def.domain === 'sea';
+      const S = { x, y, z, nx: n[0], ny: n[1], nz: n[2], kind: 'hole', r, r0: r, reach: Math.min(3.2, 2.4 + .1 * r), pet: .42, sg: 1, np: 0, W: 20, px: 1, fz: 'in',
+        t: plateOf(u, 'side'), zone: 'side', t0: sim.t, seed: (id * 131 + Math.round(z * 7) + (S_N++)) % 997, sea, wl: sea && y < 1.8, fire: null, merged: 0, deckY, D: 0, inn: null, nIn: 0, seats: null, sim: true };
+      const P = addScar(u, S, ent, st);
+      if (P === S) build(u, S, ent, st);
+      return P;
     },
     rebuild(id, S) {
       const u = sim.units.get(id); if (!u || !R.models.has(u.def.model)) return;

@@ -46,7 +46,7 @@ export const CASES = [
   { id: 'cvn_deck', type: 'carrier', kind: 'oniks', loc: [0, 19.6, 80], from: [.2, 1, .3], face: 'deckP' },
   { id: 'cvn_island', type: 'carrier', kind: 'oniks', loc: [21.5, 35, -30], from: [-1, .1, 0], face: 'port' },
   // LCS-2
-  { id: 'lcs_side', type: 'lcs', kind: 'oniks', loc: [7.2, 5, 40], from: [1, .05, 0], face: 'stbd' },
+  { id: 'lcs_side', type: 'lcs', kind: 'oniks', loc: [4.2, 4, 40], from: [1, .05, 0], face: 'stbd' },
   { id: 'lcs_kh35', type: 'lcs', kind: 'uran', loc: [15.8, 6, 0], from: [1, .05, 0], face: 'stbd' },
   // LHD-1
   { id: 'lhd_side', type: 'lhd', kind: 'oniks', loc: [15.9, 10, 30], from: [1, .05, 0], face: 'stbd' },

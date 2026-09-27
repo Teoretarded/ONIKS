@@ -104,6 +104,14 @@ export async function createBlast(game) {
     const spec = hitSpec({ u, H, a: o.a, n: o.n, din: o.din, zone: o.zone, tmm: o.tmm, fz: o.fz, standoff: o.standoff, W: o.fz === 'frag' ? W * .8 : W, deckY: o.deckY, halfB: o.halfB, big: bigPatch() });
     if (!spec) return null;
     if (o.band > 0) spec.band = o.band;
+    // (the sim's hole for this hit (sim/ship.js, what floods her) centred elsewhere on the plating: the charge moves half
+    // way toward it along the plate, so the solved tear and the sim's hole are one)
+    const Hs = u.ship && u.ship.holes;
+    if (Hs && Hs.length && o.fz === 'in') {
+      let best = null; for (const h of Hs) if (Math.hypot(h.x - o.a[0], h.y - o.a[1], h.z - o.a[2]) < 8 && (!best || h.A > best.A)) best = h;
+      if (best) { const F = spec.frame, d = [best.x - F.O[0], best.y - F.O[1], best.z - F.O[2]], lx = d[0] * F.X[0] + d[1] * F.X[1] + d[2] * F.X[2], ly = d[0] * F.Y[0] + d[1] * F.Y[1] + d[2] * F.Y[2], C = spec.charge.C, b = spec.box;
+        if (Math.hypot(lx, ly) > 1) { C[0] = Math.max(b[0] + .5, Math.min(b[3] - .5, C[0] + .5 * lx)); C[1] = Math.max(b[1] + .3, Math.min(b[4] - .3, C[1] + .5 * ly)); spec.simSeed = [lx, ly]; } }
+    }
     const cs = CASING[o.kind] || [W * .8, .02];
     Object.assign(spec.charge, { fill: W, Mc: cs[0], mf: cs[1] });
     return start(u, spec, o.S, { kind: o.kind, W, fz: o.fz, deckY: o.deckY, halfB: o.halfB });
@@ -289,8 +297,15 @@ export async function createBlast(game) {
     const F = B.spec.frame, S = B.spec.gridS || S_GRID, O = F.O;
     const seen = B.simSeen || (B.simSeen = new Map());
     let added = 0; const touched = new Set();
+    // (a hole no patch of hers covers: the scars system's analytic hole there, once)
+    const covered = h => { for (const b of byUnit.get(B.uid) || []) { const G = b.spec.frame, e = [h.x - G.O[0], h.y - G.O[1], h.z - G.O[2]], q = [0, 1, 2].map(k => { const A = k === 0 ? G.X : k === 1 ? G.Y : G.Z; return e[0] * A[0] + e[1] * A[1] + e[2] * A[2]; });
+      for (const r of b.rects) { const S2 = b.spec.gridS || S_GRID, off = q[r.ax] - r.val, cu = ((r.ax === 0 ? q[2] : q[0]) - r.u0) / S2, cv = ((r.ax === 1 ? q[2] : q[1]) - r.v0) / S2;
+        if (Math.abs(off) < 2 && cu > 0 && cv > 0 && cu < r.nu && cv < r.nv) return true; } } return false; };
+    const done = B.simOut || (B.simOut = new Set());
     for (const h of Hs) {
       if (!(h.A > .05)) continue;
+      const hk = h.c + ':' + Math.round(h.z) + ':' + Math.round(h.y);
+      if (!covered(h)) { if (!done.has(hk) && game.scars && game.scars.holeAt) { done.add(hk); const sx = h.x >= 0 ? 1 : -1; try { game.scars.holeAt(B.uid, h.x, h.y, h.z, [sx, 0, 0], Math.sqrt(h.A / Math.PI)); } catch (e) { console.error('blast: sim hole scar', e); } } continue; }
       const key = h.c + ':' + Math.round(h.z * 2) + ':' + Math.round(h.y * 2); if ((seen.get(key) || 0) >= h.A - .05) continue; seen.set(key, h.A);
       const d = [h.x - O[0], h.y - O[1], h.z - O[2]], l = [d[0] * F.X[0] + d[1] * F.X[1] + d[2] * F.X[2], d[0] * F.Y[0] + d[1] * F.Y[1] + d[2] * F.Y[2], d[0] * F.Z[0] + d[1] * F.Z[1] + d[2] * F.Z[2]];
       const R0 = Math.sqrt(h.A / Math.PI), sd = (Math.round(h.z * 7) * 131 + Math.round(h.y * 5) * 17 + h.c) | 0;
@@ -580,7 +595,8 @@ export async function createBlast(game) {
       if (rec && rec.vis === false) continue;
       const sea = !u || u.def.domain === 'sea';
       for (const B of L) {
-        if (!B.inner || !B.nIn) continue;
+        // (a patch with no inner dots of its own still shows the floodwater behind a hole the sim opened)
+        if ((!B.inner || !B.nIn) && !(u && u.ship && (B.torn || 0) > .05)) continue;
         const Fr = B.spec.frame;
         // the piece of a broken hull the patch is on (game/structure), else the unit's drawn pose
         const pz = hull && game.structure.poseAt ? game.structure.poseAt(uid, Fr.O[2]) : null;
@@ -602,7 +618,7 @@ export async function createBlast(game) {
         const px = (B.spec.gridS || S_GRID) * 1.4 * pxm, stride = Math.max(px >= 1.6 ? 1 : Math.min(40, Math.ceil((1.6 / px) ** 2)), Math.ceil(B.nIn / capEach));
         const size = px > 9 ? 3 : px > 4 ? 2 : 1;
         const fk = B.S && B.S.fire ? B.S.fire.k : 0, heat = heatOf(B, game.t), I = B.inner;
-        for (let i = 0; i < B.nIn; i += stride) {
+        for (let i = 0; i < (I ? B.nIn : 0); i += stride) {
           const o = i * 6, x = I[o], y = I[o + 1], z = I[o + 2], b = I[o + 3], e = I[o + 4], lz = I[o + 5];
           let MM = M, pp = p0;
           if (byZ) { const q = poseZ(z); if (!q) continue; MM = q.R; pp = q.T; }
@@ -642,12 +658,14 @@ export async function createBlast(game) {
       if (ax1 - ax0 < .5 || az1 - az0 < .5) continue;
       const lv = Math.min(b[o + 4] - .1, b[o + 1] + S.water[c] / Math.max(1e-6, (Lt.perm ? Lt.perm[c] : .85) * (Lt.floorA ? Lt.floorA[c] : (b[o + 3] - b[o]) * (b[o + 5] - b[o + 2]))));
       if (!(lv > b[o + 1] + .05)) continue;
-      const st = .35;
-      for (let x = ax0 + st * .5; x < ax1; x += st) for (let z = az0 + st * .5; z < az1; z += st) {
-        const h = (Math.imul(Math.round(x * 20) * 73856093 ^ Math.round(z * 20) * 19349663, 0x9E3779B1) >>> 0) / 4294967296;
-        const y = lv + .04 * Math.sin(tr * 1.3 + x * 1.7 + z * 1.1 + h * 6.3);
+      const st = .28;
+      for (let x0 = ax0 + st * .5; x0 < ax1; x0 += st) for (let z0 = az0 + st * .5; z0 < az1; z0 += st) {
+        // (scattered, not a lattice: each dot jittered in its cell; the surface heaves a little and glints now and then)
+        const hh = Math.imul(Math.round(x0 * 20) * 73856093 ^ Math.round(z0 * 20) * 19349663, 0x9E3779B1) >>> 0, h = hh / 4294967296, h2 = (Math.imul(hh ^ (hh >>> 15), 0x85EBCA77) >>> 0) / 4294967296;
+        const x = x0 + (h - .5) * st, z = z0 + (h2 - .5) * st;
+        const y = lv + .05 * Math.sin(tr * 1.3 + x * 1.7 + z * 1.1 + h * 6.3);
         const wx = p0[0] + M[0] * x + M[1] * y + M[2] * z, wy = p0[1] + M[3] * x + M[4] * y + M[5] * z, wz = p0[2] + M[6] * x + M[7] * y + M[8] * z;
-        const k = .75 + .5 * h;
+        const gl = Math.max(0, Math.sin(tr * (1.1 + h2) + h * 40)) ** 12, k = .55 + .6 * h2 + 1.4 * gl;
         sink.dot(wx, wy, wz, size, 62 * k, 84 * k, 98 * k, 1);
         n++;
       }

@@ -136,9 +136,9 @@ export function classify(B, x, y, z, nx, ny, nz, info, ins) {
       if (ins && off <= -.05 && off > -D - 8) {
         // an interior part: wrecked where the plating over it tore (most of its dots gone, the same hash as the shader's)
         const wd = Math.max(0, 1 + off / (D + .4));
-        return ((f00 & 1) || (fN & 3)) && wreckHash(x, y, z) < .7 * wd + .2 ? K.BEHINDDROP : K.BEHIND;
+        return ((f00 & 1) || (fN & 3)) && wreckHash(l[0], l[1], l[2]) < .7 * wd + .2 ? K.BEHINDDROP : K.BEHIND;
       }
-      if (off <= -.05 && off > -D - .4) return face && Math.min(fi, r.nu - fi, fj, r.nv - fj) * S > .6 && ((f00 & 1) || (fN & 11)) ? K.BEHINDDROP : K.BEHIND;
+      if (off <= -.05 && off > -D - .4) return !B.spec.farWall && face && Math.min(fi, r.nu - fi, fj, r.nv - fj) * S > .6 && ((f00 & 1) || (fN & 11)) ? K.BEHINDDROP : K.BEHIND;   // (no interior drawn: the far side stays, charred)
       continue;
     }
     if ((f00 & 1) && two) return K.COLDROP;                       // (a line over the hole goes with its plating)
