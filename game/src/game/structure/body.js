@@ -65,12 +65,12 @@ export function newPiece(S, i0, i1) {
 export function massOf(P) {
   const S = P.S, L = S.L, sec = L.sec;
   let m = 0, z = 0;
-  for (let i = P.i0; i <= P.i1; i++) { m += sec[i].m; z += sec[i].m * sec[i].zc; }
+  for (let i = P.i0; i <= P.i1; i++) { m += sec[i].m; z += sec[i].m * sec[i].zg; }
   z /= m;
   P.m = m; P.cm[0] = 0; P.cm[1] = L.yG; P.cm[2] = z;
   let Ix = 0, Iy = 0, Iz = 0;
   for (let i = P.i0; i <= P.i1; i++) {
-    const s = sec[i], lx = 2 * S.H.beam(s.zc), ly = S.H.deck(s.zc) + S.H.keel(s.zc), lz = s.len, dz = s.zc - z;
+    const s = sec[i], lx = 2 * S.H.beam(s.zc), ly = S.H.deck(s.zc) + S.H.keel(s.zc), lz = s.len, dz = s.zg - z;
     s.Ix = s.m / 12 * (ly * ly + lz * lz);
     Ix += s.Ix + s.m * dz * dz;
     Iy += s.m / 12 * (lx * lx + lz * lz) + s.m * dz * dz;
@@ -160,7 +160,7 @@ export function stepShip(S, h, sea, t, bed) {
         msx += cy * dz - cz * fy; msy += cz * dx - cx * dz; msz += cx * fy - cy * dx;
       }
       // gravity at the section's centre of mass
-      const gx = R[2] * zc, gz = R[8] * zc;              // (the section's centre of mass is at the piece's height)
+      const zg = s.zg - cm[2], gx = R[2] * zg, gz = R[8] * zg;   // (the section's centre of mass is at the piece's height)
       const wgt = -s.m * G;
       fsy += wgt; msx += -gz * wgt; msz += gx * wgt;
       FS[i * 3] = fsx; FS[i * 3 + 1] = fsy; FS[i * 3 + 2] = fsz;
@@ -205,7 +205,7 @@ function bending(P, S, t) {
     const jx = R[2] * zj, jy = R[5] * zj, jz = R[8] * zj;            // the joint relative to the COM (world)
     let Mx = 0, My = 0, Mz = 0;
     for (let i = j; i <= P.i1; i++) {
-      const s = sec[i], zs = s.zc - cm[2];
+      const s = sec[i], zs = s.zg - cm[2];
       const rx = R[2] * zs, ry = R[5] * zs, rz = R[8] * zs;
       // external: the moment about the COM less the force's about the joint
       const fx = FS[i * 3], fy = FS[i * 3 + 1], fz = FS[i * 3 + 2];

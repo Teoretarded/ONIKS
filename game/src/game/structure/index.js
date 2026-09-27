@@ -43,7 +43,11 @@ const G = 9.81, RHO = 1025;
 const sat = v => v < 0 ? 0 : v > 1 ? 1 : v;
 const K_M = 1 / 12;                // the girder's ultimate moment as a share of displacement x g x length (intact: a destroyer ~1.2 GN m)
 const LEAK = .0012;                // a lost ship's slow leak (fraction of a compartment per s)
-const OPEN = .02;                  // an open torn end under the water (fraction per s: decks and bulkheads in the way)
+const OPEN = .006;                 // an open torn end under the water, past the compartment it opens (fraction per s:
+                                   // the next bulkheads and decks in the way: the section in ~3 min)
+const OPEN_F = .035;               // the compartment the tear opens, straight to the sea (its share of the section in
+                                   // ~20-40 s)
+const CMP = 14;                    // a watertight compartment's length (m): what an open end floods at once
 
 export async function createStructure(game) {
   const sim = game.sim, R = game.R, T = R.terrain, bus = game.bus;
@@ -274,8 +278,11 @@ export async function createStructure(game) {
       for (let i = P.i0; i <= P.i1; i++) for (let sd = 0; sd < 2; sd++) {
         const c = i * 2 + sd;
         let r = LEAK;
-        if (i === P.i0) r += OPEN * openLo;
-        if (i === P.i1) r += OPEN * openHi;
+        // (an open end: the compartment behind the tear fills fast, up to its share of the section; beyond it the
+        // bulkheads hold it back and the rest follows over minutes, so the halves float and settle, not drop)
+        const cap = Math.min(.9, CMP / Math.max(1, L.sec[i].len));
+        if (i === P.i0 && openLo > 0) r += (f[c] < cap ? OPEN_F : OPEN) * openLo;
+        if (i === P.i1 && openHi > 0) r += (f[c] < cap ? OPEN_F : OPEN) * openHi;
         if (i > P.i0) r += .005 * Math.max(0, f[c - 2] - .55);
         if (i < P.i1) r += .005 * Math.max(0, f[c + 2] - .55);
         r += .006 * Math.max(0, f[c ^ 1] - f[c]);
@@ -313,8 +320,10 @@ export async function createStructure(game) {
     A.v[0] -= Rm[2] * pz; A.v[1] -= Rm[5] * pz; A.v[2] -= Rm[8] * pz;
     B.v[0] += Rm[2] * pz; B.v[1] += Rm[5] * pz; B.v[2] += Rm[8] * pz;
     A.lastFail = B.lastFail = t;
-    // the torn compartments open to the sea at once
-    for (const i of [j - 1, j]) for (let sd = 0; sd < 2; sd++) S.flood[i * 2 + sd] = Math.max(S.flood[i * 2 + sd], .35);
+    // the torn compartments: the blast's share of them open at once (the rest through the open ends: flood())
+    for (const i of [j - 1, j]) for (let sd = 0; sd < 2; sd++) S.flood[i * 2 + sd] = Math.max(S.flood[i * 2 + sd], .1);
+    // broken, her pieces heave and pitch against water rushing through open ends: heavier damping than a whole hull
+    if (!S.dampBr) { dampOf(S.L, .5); S.dampBr = true; }
     S.lastBreak = t;
     // the moment: sparks round the girth, the water thrown up, a fire in the break, the slick, the director
     const Tm = [P.p[0] - (Rm[0] * P.cm[0] + Rm[1] * P.cm[1] + Rm[2] * P.cm[2]), P.p[1] - (Rm[3] * P.cm[0] + Rm[4] * P.cm[1] + Rm[5] * P.cm[2]), P.p[2] - (Rm[6] * P.cm[0] + Rm[7] * P.cm[1] + Rm[8] * P.cm[2])];

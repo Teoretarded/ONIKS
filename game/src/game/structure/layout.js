@@ -164,7 +164,10 @@ export function sectionsOf(H, def, focus) {
         V += A * Math.max(0, -Math.min(-.2, bot));
       }
     }
-    sec.push({ i, z0: a, z1: b, zc: (a + b) / 2, cols, V0: V, m: 0, len: b - a });
+    // (zg: where the section's weight acts: its buoyancy's centre at the design draught, so each section floats level
+    // on its own and a piece broken off trims as its hull form says, not about the slab's middle)
+    let zw = 0; for (const c of cols) zw += c.A * Math.max(0, -Math.min(-.2, c.yb)) * c.z;
+    sec.push({ i, z0: a, z1: b, zc: (a + b) / 2, zg: V > 0 ? zw / V : (a + b) / 2, cols, V0: V, m: 0, len: b - a });
     Vtot += V;
   }
   // the masses: each section's share of the displacement as its buoyancy at the design draught (level trim, no
