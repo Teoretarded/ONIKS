@@ -216,7 +216,8 @@ void main() {
       b *= 0.55 + 0.45 * b;
       // (seen through a hole, the spaces inside keep a little light of their own: walls, decks and ceilings read as
       // dotted structure, never black blocks; the fire adds to it below)
-      if (gHole > 0.0) b = max(b, gHole * (0.13 + 0.1 * fac));
+      if (gHole > 0.0 && !gFar) b = max(b, gHole * (0.13 + 0.1 * fac));
+      if (gFar) b *= 0.4;                // (the far side: in the shadow of the space, read as a dim wall)
       lit = b;
       rim = fac < 0.18 ? 1.0 - fac / 0.18 : 0.0; rim *= rim;
     }
@@ -419,6 +420,7 @@ function scarGLSL() {
   return `
 float gIn = 0.0;                   // this part is inside the hull (an interior part, data/models_interior.js: part.inside)
 float gHole = 0.0;                 // (set by blastAt) an interior dot seen through a hole: lit from either side
+bool gFar = false;                 // (set with it) only the far side of the space: lit from inside, dimmed
 vec4 gHoleP = vec4(0.0);           // (set with it) the struck plate's plane: xyz its outward normal, w its offset (RTE)
 // scars: where hits struck this instance, world-aligned, relative to the eye
 uniform vec4 uScA[8];     // xyz: the mark's centre on the surface, w: its radius (m: the hole, the dent, the pockmarks' spread)
@@ -574,11 +576,13 @@ float wreckHash(vec3 p) {
 }
 int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, inout float edge, inout float heatN, inout vec3 tilt) {
   bool two = dot(n, n) < 0.01;
+  bool inRect = false, nearP = false;   // (an interior part near a patch but on none of its plates: behind structure the patch does not model)
   for (int i = 0; i < ${BTMAX}; i++) {
     if (i >= uBtN) break;
     vec3 X = uBtX[i].xyz, Y = uBtY[i].xyz, Z = uBtZ[i].xyz;
     vec3 d = p - uBtO[i].xyz;
     vec3 l = vec3(dot(d, X), dot(d, Y), dot(d, Z));
+    if (dot(l, l) < 256.0) nearP = true;
     float S = uBtY[i].w, band = uBtZ[i].w, heat = uBtX[i].w, D = abs(uBtO[i].w), plugD = uBtO[i].w > 0.0 ? 8.3 : 0.3;   // (w < 0: no interior drawn, the plug at the far wall)
     for (int k = 0; k < 2; k++) {
       vec4 P = uBtP[i * 2 + k];
@@ -590,6 +594,7 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
       vec4 Q = uBtQ[i * 2 + k];
       float fi = u / S, fj = v / S;
       if (fi < 0.0 || fj < 0.0 || fi > Q.x || fj > Q.y) continue;
+      inRect = true;
       bool face = two || abs(dot(n, A)) > 0.5;
       int i0 = min(int(fi), int(Q.x) - 1), j0 = min(int(fj), int(Q.y) - 1);
       float fx = fi - float(i0), fy = fj - float(j0);
@@ -626,7 +631,7 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
         if (gIn < 0.5 && off > -0.05 && off < (A.y > 0.7 ? 30.0 : 3.0)) {
           // (torn: the smooth ragged outline, as the plating's own; the nearest texel's flag would cut 0.25 m steps)
           // (the plating under its foot thrown more than 1.5 m: it tears off and falls as a piece, the blast system flies it)
-          if (torn || (fN & 10) != 0 || dot(dlb, dlb) > 2.25) return 1;
+          if (torn || (fN & 10) != 0 || dot(dlb, dlb) > 0.64) return 1;
           p += X * dlb.x + Y * dlb.y + Z * dlb.z;
           // (a structure riding a deck bent more than ~0.2 m: its lowest 1.5 m buckled and scorched, as the deck that
           // carried it into the bend; the rest follows as a whole)
@@ -666,18 +671,37 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
           if (dp) return 3;
           break;
         }
-        // (a ship with no interior drawn: her own walls across the pocket, seen from inside through the hole, occlude
+        // (any ship: her own walls across and beyond the pocket, seen from inside through the hole, occlude
         // from either side in the depth pass: a dark inner hull, not the sea through her)
-        if (dp && plugD < 1.0 && off <= -0.05 && off > -D - 14.0) return 3;
-        // (the far side of the space behind the hole, seen through it: lit a little from either side)
-        if (!dp && off <= -0.05 && off > -D - 30.0) { gHole = max(gHole, 0.3); gHoleP = vec4(A, P.y + dot(uBtO[i].xyz, A)); }
+        if (dp && off <= -0.05 && off > -D - 14.0) return 3;
+        // (the far side of the space behind the hole, seen through it: dim, as it is lit; only the sea's occluder
+        // is kept from hiding it below the waterline)
+        // (only where the line of sight to it crosses the plate through its torn field: seen through the hole)
+        if (!dp && off <= -0.05 && off > -D - 30.0 && gHole <= 0.0) {
+          vec3 le = -vec3(dot(uBtO[i].xyz, X), dot(uBtO[i].xyz, Y), dot(uBtO[i].xyz, Z));
+          float oe = (ax == 0 ? le.x : ax == 1 ? le.y : le.z) - P.y;
+          if (oe > 0.0) {
+            vec3 lc = le + (l - le) * (oe / (oe - off));
+            float gx = ((ax == 0 ? lc.z : lc.x) - P.z) / S - 0.5, gy = ((ax == 1 ? lc.z : lc.y) - P.w) / S - 0.5;
+            if (gx > -0.5 && gy > -0.5 && gx < Q.x - 0.5 && gy < Q.y - 0.5) {
+              int ci = int(floor(gx)), cj = int(floor(gy)), nx = int(Q.x) - 1, ny = int(Q.y) - 1; float ax2 = gx - float(ci), ay2 = gy - float(cj);
+              #define TC(a, c) float(int(texelFetch(uBtT, ivec2(int(Q.z) + clamp(a, 0, nx), int(Q.w) + clamp(c, 0, ny)), 0).w) & 1)
+              float mc = mix(mix(TC(ci, cj), TC(ci + 1, cj), ax2), mix(TC(ci, cj + 1), TC(ci + 1, cj + 1), ax2), ay2);
+              #undef TC
+              if (mc > 0.3) { gHole = 0.3; gFar = true; gHoleP = vec4(A, P.y + dot(uBtO[i].xyz, A)); }
+            }
+          }
+        }
         continue;
       }
       vec3 dl;
       if (torn) {
         // the hole: the depth splat pushed back to the pocket's far end (a plug); the dots ride their quarter's corner
         // (petals bent the blast's way), gone with it if it went
-        if (dp) { p -= A * (D + plugD); return 2; }
+        // (a ship with an interior drawn: no plug. Widened and pushed 14 m back it printed as a grid of black cell-sized
+        // blocks over whatever stands further in (a hangar's far end, the superstructure's decks); her own walls across
+        // and beyond the pocket splat from both sides instead (below), so the far side still hides the sea)
+        if (dp) { if (plugD > 1.0) return 1; p -= A * (D + plugD); return 2; }
         bool lx = fx < 0.5, ly = fy < 0.5;
         vec4 tc = lx ? (ly ? t00 : t01) : (ly ? t10 : t11);
         if ((int(tc.w) & 2) != 0) return 1;
@@ -755,6 +779,10 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
         tilt -= Uw * gu + Vw * gv;
         // plating strained past yield buckles finer than the grid: facets ~0.3 m catching the light unevenly
         float gs = clamp((length(vec2(gu, gv)) - 0.1) * 1.5, 0.0, 0.5);
+        // (a flap thrown open more than ~0.6 m is crumpled plate, not a flat card: rippled along its face (QA D23))
+        { float dL2 = length(dl), cr = clamp((dL2 - 0.6) / 1.2, 0.0, 1.0);
+          if (cr > 0.0) { float r1 = sin(u * 3.1 + v * 1.3 + dL2 * 2.0) * sin(v * 2.7 - u * 0.9), r2 = sin(u * 7.3 - v * 5.9);
+            dl[ax] += (0.12 * r1 + 0.04 * r2) * cr; gs = max(gs, 0.45 * cr); } }
         if (gs > 0.04 && !dp) { vec3 q = floor(l * 3.3); float h1 = fract(sin(dot(q, vec3(127.1, 311.7, 74.7))) * 43758.55), h2 = fract(sin(dot(q, vec3(269.5, 183.3, 246.1))) * 43758.55);
           tilt += (Uw * (h1 - 0.5) + Vw * (h2 - 0.5)) * gs; }
       }
@@ -762,6 +790,9 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
       break;
     }
   }
+  // (interior dots near a patch but over none of its plates (a deckhouse wall above the side patch, a far bulkhead):
+  // not seen through a hole, so not drawn through the structure in front of them: QA D37)
+  if (gIn > 0.5 && nearP && !inRect) return 1;
   return 0;
 }
 `;

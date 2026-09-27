@@ -21,6 +21,7 @@ export const CASES = [
   // DDG-51
   { id: 'ddg_bow', type: 'ddg', kind: 'oniks', loc: [10, 5, 60], from: [1, .05, 0], face: 'stbd' },
   { id: 'ddg_mid', type: 'ddg', kind: 'oniks', loc: [10, 4, 0], from: [1, .05, 0], face: 'stbd' },
+  { id: 'ddg_sheer', type: 'ddg', kind: 'oniks', loc: [10, 6.6, -5], from: [1, .05, 0], face: 'stbd' },
   { id: 'ddg_wl', type: 'ddg', kind: 'oniks', loc: [10, .8, -10], from: [1, .02, 0], face: 'stbd' },
   { id: 'ddg_gundeck', type: 'ddg', kind: 'oniks', loc: [3, 9, 61], from: [.25, 1, .35], face: 'deck' },
   { id: 'ddg_spy', type: 'ddg', kind: 'oniks', loc: [7, 14, 27], from: [1, .1, .6], face: 'stbd' },

@@ -121,7 +121,13 @@ async function paint(c, el, alpha) {
       c.fillStyle = cs.color; c.globalAlpha = a; c.textBaseline = 'middle';
       const q = rs[0], txt = s.replace(/\s+/g, ' '), y = q.top + q.height / 2 + fs * .04;
       if (cs.textShadow && cs.textShadow !== 'none') { c.shadowColor = 'rgba(11,12,10,1)'; c.shadowBlur = 4 * z * K; c.shadowOffsetX = 20000 * K; c.fillText(txt, q.left - 20000, y); c.fillText(txt, q.left - 20000, y); c.shadowBlur = 0; c.shadowOffsetX = 0; c.shadowColor = 'transparent'; }
-      c.fillText(txt, q.left, y);
+      // (wrapped text: one line per client rect, words filled to each rect's width)
+      if (rs.length > 1) { const ws = txt.split(' '); let wi = 0;
+        for (let li = 0; li < rs.length && wi < ws.length; li++) { const R2 = rs[li]; let line = ws[wi++];
+          while (wi < ws.length && c.measureText(line + ' ' + ws[wi]).width <= R2.width + 1) line += ' ' + ws[wi++];
+          if (li === rs.length - 1) while (wi < ws.length) line += ' ' + ws[wi++];
+          c.fillText(line, R2.left, R2.top + R2.height / 2 + fs * .04); } }
+      else c.fillText(txt, q.left, y);
       c.letterSpacing = '0px';
     } else if (n.nodeType === 1) await paint(c, n, a);
   }

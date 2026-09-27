@@ -138,7 +138,7 @@ export function classify(B, x, y, z, nx, ny, nz, info, ins) {
         // (the plating under its foot thrown more than 1.5 m: what stood on it does not ride along as a clean block, it
         // tears off and falls as a piece: QA D23; as the shader)
         const D2 = k2 => { const q = c => T[4 * c + k2]; const c00 = j0 * W + i0; return (q(c00) * (1 - fx) + q(c00 + 1) * fx) * (1 - fy) + (q(c00 + W) * (1 - fx) + q(c00 + W + 1) * fx) * fy; };
-        const big = D2(0) ** 2 + D2(1) ** 2 + D2(2) ** 2 > 2.25;
+        const big = D2(0) ** 2 + D2(1) ** 2 + D2(2) ** 2 > .64;
         return torn || big || (fN & 10) ? K.COLDROP : K.COL; }
       if (ins && off < (A[1] > .7 ? 30 : .5) && off > -D - 8) {
         // an interior part: wrecked where the plating over it tore (most of its dots gone, the same hash as the shader's)

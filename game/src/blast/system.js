@@ -275,7 +275,7 @@ export async function createBlast(game) {
       if (regen && r.dead) r.dead.fill(0);
       const W = r.nu + 1, A = r.ax === 0 ? F.X : r.ax === 1 ? F.Y : F.Z, e0 = A[1] > .7 ? 0 : -(B.spec.depth || 4) - reach, e1 = A[1] > .7 ? 0 : 3;
       for (let j = 0; j <= r.nv; j++) for (let i = 0; i <= r.nu; i++) {
-        const t = j * W + i, C4 = r.cpu, f = ((C4[4 * t + 3] | 0) & 11) | (C4[4 * t] ** 2 + C4[4 * t + 1] ** 2 + C4[4 * t + 2] ** 2 > 2.25 ? 16 : 0);   // (16: thrown > 1.5 m)
+        const t = j * W + i, C4 = r.cpu, f = ((C4[4 * t + 3] | 0) & 11) | (C4[4 * t] ** 2 + C4[4 * t + 1] ** 2 + C4[4 * t + 2] ** 2 > .64 ? 16 : 0);   // (16: thrown > 0.8 m)
         if (!f || r.dead[t] === f) continue;
         r.dead[t] = f;
         const l = [0, 0, 0]; l[r.ax] = r.val;
