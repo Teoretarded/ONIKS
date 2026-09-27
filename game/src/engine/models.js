@@ -794,6 +794,16 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
           }
         }
         dl = mix(mix(t00.xyz, t10.xyz, fx), mix(t01.xyz, t11.xyz, fx), fy);
+        // (a thin sliver of intact plating between torn cells, thrown more than ~0.5 m: it cannot hold a curl on its
+        // own, it tore away with them (drawn it was a long curved ribbon hanging off a hole's rim, QA D44))
+        if (dot(dl, dl) > 0.25) {
+          int nOk = 0;
+          for (int a = -2; a <= 2; a++) for (int c = -2; c <= 2; c++) {
+            int ii = clamp(i0 + a, 0, int(Q.x) - 1), jj = clamp(j0 + c, 0, int(Q.y) - 1);
+            if ((int(texelFetch(uBtT, ivec2(int(Q.z) + ii, int(Q.w) + jj), 0).w) & 1) == 0) nOk++;
+          }
+          if (nOk < 12 || (dot(dl, dl) > 1.0 && nOk < 16)) return 1;
+        }
         // (the torn edge where the smooth field meets its threshold: hot, then charred)
         if (mk > 0.001) { float ek = clamp(1.0 - (thr - mk) / 0.22, 0.0, 1.0); edge = max(edge, 0.85 * ek); heatN = max(heatN, heat); hot = max(hot, heat * 0.6 * ek); burn = max(burn, 0.9 * ek); }
         // (plating at a hole's edge: the torn cells' corners fly off, it does not stretch after them)
