@@ -112,13 +112,13 @@ export function eachInColumns(M, x0, z0, x1, z1, cb) {
 /* B: a patch with its rects (r.cpu: the skin texels, (nu+1) x (nv+1) x 4), B.band, spec.frame (model frame), depth.
    -> 0 untouched, 1 plating (intact), 2 plating (torn: a petal or gone), 3 column kept, 4 column dropped,
    5 behind, kept, 6 behind, dropped */
-export const K = { NONE: 0, PLATE: 1, TORN: 2, COL: 3, COLDROP: 4, BEHIND: 5, BEHINDDROP: 6 };
+export const K = { NONE: 0, PLATE: 1, TORN: 2, COL: 3, COLDROP: 4, BEHIND: 5, BEHINDDROP: 6, HIDDEN: 7 };   // (7: an interior dot near a patch on none of its plates: not drawn, as the shader)
 export function classify(B, x, y, z, nx, ny, nz, info, ins) {
   const F = B.spec.frame, S = B.spec.gridS || .125, band = B.band || 1, D = B.depth || 4;
   const dx = x - F.O[0], dy = y - F.O[1], dz = z - F.O[2];
   const l = [dx * F.X[0] + dy * F.X[1] + dz * F.X[2], dx * F.Y[0] + dy * F.Y[1] + dz * F.Y[2], dx * F.Z[0] + dy * F.Z[1] + dz * F.Z[2]];
   const two = nx * nx + ny * ny + nz * nz < .01;
-  let k = 0;
+  let k = 0, inRect = false;
   for (const r of B.rects) {
     if (!r.cpu || k > 1) continue;
     k++;
@@ -126,6 +126,7 @@ export function classify(B, x, y, z, nx, ny, nz, info, ins) {
     const off = l[ax] - r.val, u = (ax === 0 ? l[2] : l[0]) - r.u0, v = (ax === 1 ? l[2] : l[1]) - r.v0;
     const fi = u / S, fj = v / S;
     if (fi < 0 || fj < 0 || fi > r.nu || fj > r.nv) continue;
+    inRect = true;
     const face = two || Math.abs(nx * A[0] + ny * A[1] + nz * A[2]) > .5;
     const i0 = Math.min(Math.floor(fi), r.nu - 1), j0 = Math.min(Math.floor(fj), r.nv - 1), fx = fi - i0, fy = fj - j0, W = r.nu + 1;
     const T = r.cpu, t = (i, j) => T[4 * (j * W + i) + 3] | 0;
@@ -151,7 +152,7 @@ export function classify(B, x, y, z, nx, ny, nz, info, ins) {
     if ((f00 & 1) && two) return K.COLDROP;                       // (a line over the hole goes with its plating)
     return (f00 & 1) || (fN & 2) ? K.TORN : K.PLATE;
   }
-  return K.NONE;
+  return ins && l[0] * l[0] + l[1] * l[1] + l[2] * l[2] < 256 && !inRect ? K.HIDDEN : K.NONE;
 }
 
 /* engine/models.js blastAt's torn test: the cells' torn flags (bit 1) bilinear at the point (through the cell centres,
@@ -381,6 +382,7 @@ export function connectivity(Md, patches, T) {
     const ins = Md.ins && Md.ins[D[o + 6]];
     for (const B of patches) { c = classify(B, D[o], D[o + 1], D[o + 2], D[o + 3], D[o + 4], D[o + 5], info, ins); if (c !== K.NONE) { anch = (c === K.COL || c === K.BEHIND) && (Math.abs(info.off) < .8 || (ins && c === K.BEHIND));
       if (info.up && (c === K.COL || c === K.BEHIND)) { const r = info.r, t = Math.max(0, Math.min(r.nv, info.j)) * (r.nu + 1) + Math.max(0, Math.min(r.nu, info.i)); dead = (r.cpu[4 * t + 3] | 0) & 3 ? 1 : 0; } break; } }
+    if (c === K.HIDDEN) return;
     idx.push(i); over.push(dead); cls.push(c === K.NONE || c === K.PLATE || c === K.TORN || anch ? 1 : c === K.COLDROP || c === K.BEHINDDROP ? 2 : 0);
   });
   const n = idx.length, par = new Int32Array(n); for (let q = 0; q < n; q++) par[q] = q;

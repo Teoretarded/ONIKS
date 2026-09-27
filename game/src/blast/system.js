@@ -425,7 +425,7 @@ export async function createBlast(game) {
       const D = Md.D, touched = new Set();
       for (const g of fl) for (const i of g) {
         const o = 7 * i;
-        for (const b of L) { const c = classify(b, D[o], D[o + 1], D[o + 2], D[o + 3], D[o + 4], D[o + 5], info, Md.ins && Md.ins[D[o + 6]]); if (c === CK.NONE) continue;
+        for (const b of L) { const c = classify(b, D[o], D[o + 1], D[o + 2], D[o + 3], D[o + 4], D[o + 5], info, Md.ins && Md.ins[D[o + 6]]); if (c === CK.NONE || c === CK.HIDDEN) continue;
           const r = info.r; if (!r.cut) r.cut = new Uint8Array((r.nu + 1) * (r.nv + 1));
           const t = Math.max(0, Math.min(r.nv, info.j)) * (r.nu + 1) + Math.max(0, Math.min(r.nu, info.i));
           if (!r.cut[t]) { r.cut[t] = 1; if (!((r.cpu[4 * t + 3] | 0) & 8)) r.cpu[4 * t + 3] += 8; touched.add(r); }

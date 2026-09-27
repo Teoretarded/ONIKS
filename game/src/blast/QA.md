@@ -60,6 +60,8 @@ Status: OPEN / FIXED? (a fix landed, not re-tested) / PASS / WONTFIX. "run N" = 
 
 ## Runs
 
+- run qa48 (implementer, e983fd8 + CPU interior-hiding mirror, petals on, 26 cases with ddg_sheer): 26/26 qa.js ok (orphans only: gundeck 5); resolve 1.15-4.45 s; solve p95 7.4-12.4 ms except cvn_island 17.7 and lhd_deck 21.9 (baselines 11.6 / 7.9).
+
 ### Run 17 (HEAD 02741f0: interior parts never ride as shell, hidden behind held plating; 8d1c2e7 debris not thrown whole over a patch)
 
 qa.js ok on all 27. Resolve 1.2-4.3 s (cg_deck 5.8); synced p95 7.8-18.8 ms while solving (baseline 3.6-16.8). Holes
