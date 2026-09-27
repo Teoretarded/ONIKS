@@ -1,4 +1,4 @@
-# Blast bench: model, checks, results (v34, 2026-09-26)
+# Blast bench: model, checks, results (v35, 2026-09-27)
 
 Test page: `game/concepts/blast/index.html` (served by `tools/serve_game.py`). Scenes: **Section · 30 m** (a
 destroyer side section: side, weather deck, second deck, platform deck, two bulkheads), **Arleigh Burke** (a patch
@@ -19,11 +19,14 @@ runs; the three run the same passes and agree to 0.01–0.05 %. Machine: AMD RX 
 | 6 | Kinney–Graham with Z ≥ 0.053: contact impulse ~6× low | Near field: the detonation products carry W·U (U = mean speed of a homologous Gurney sphere, TNT E_G = 2.98 MJ/kg); a surface element gets W U cos²α / 4πR² (products stagnate), arriving from R/u_max with a t⁻⁵ tail. The larger of this and the air shock applies (crossover near Z ≈ 0.6, where the swept air mass equals the charge) | Gurney 1943; Cooper 1996 |
 | 7 | Inside: direct shock + QS pressure only | First-order image sources across every wall of the compartment (weakened by the torn share of that wall); outside, the sea surface reflects | image-charge method |
 | 8 | Bonds: EPP, compression capped at 0.12 fy; "bending" a one-sided Laplacian spring (not conservative, stiffness ∝ 1/S²); frames/stiffeners as ties to fixed anchors | Membrane: 4 crossed constant-strain triangles per cell, corotational, plane-stress J2 (Simo–Taylor return map), linear hardening, Cowper–Symonds (constants moving from initial-yield to large-strain values, Jones 1989). Bending: dihedral hinges on every shared edge (Bridson/Tamstorf–Grinspun gradients), plastic moment σy h²/4 per length reduced by membrane utilisation (M/Mp + (N/Np)² = 1); plate junctions are hinges too. Stiffeners: axial members + a shear-limited (Timoshenko-type) beam on the member's own line: bending as the angle between the chords to the nodes m cells either side (m = round(0.75 d / S), base ~1.5 × the section depth, k = EI/(m² S), cap Mp/m), plus the shear of each segment against the chord around it (G A_w, cap τy A_w). The angles are taken about axes in the plating: for the bending at a node, the line between the plating nodes across it on either side; for a segment's shear, the line between the far corners of the cells on either side; their gradients run through those axes too, so the member exerts no net moment, and nothing prefers one side or one end (the bending at a node needs both segments there, a segment fails on the larger start-of-step bending strain of its two nodes). Where a member runs into a perpendicular plate (a frame at a deck), in-plane web-end ties (area A_w) carry its end reaction into that plate over the web depth. Fail at the GL strain of the web. Compression to full yield; buckling comes from the geometry, with hungry-horse imperfections min(0.1 β² t, b/200) between stiffeners | Simo & Taylor 1986; Grinspun et al. 2003; Jones 2012; Smith et al. 1988 |
-| 9 | Mass scaling ×64 in the gas phase | None. Stable step node by node (Gershgorin); the few nodes stiffer than the 0.2th percentile get extra mass (added mass 1e-10 … 3e-4 of the total, reported per build) | |
+| 9 | Mass scaling ×64 in the gas phase | None. Step 1.4 × the Gershgorin bound (was 0.75 ×; the row sums overstate the membranes' top frequency ~2 ×, the frames' are near exact and go unstable at 2 ×); boundary dashpots implicit (explicit, they went unstable at 1.5 ×); the stiffness damping kept at its old absolute value. The few nodes stiffer than the 0.2th percentile get extra mass (added mass 1e-10 … 3e-4 of the total, reported per build) | |
 | 10 | Fragments drawn only (kick from the render loop); seams double stiffness; mass/area per plate edge | Casing fragments: Gurney velocity (cylinder), Fisher/Fano blast reduction W(0.2 + 0.8/(1 + M/C)), deterministic spray ray-traced through the structure with air drag; each impact perforates (Recht–Ipson plugging) or embeds, passes its momentum, and holes the plate (net-section damage, erosion at 100 %). Mass, area, stiffness assembled per cell, so seams and edges get exactly their share. Water-backed plating (radiation pressure ρ_w c_w v_n, cavitation limit). A burst at the waterline also drives a water shock: the charge's share below or within 2 charge radii above the surface (½ at the surface) as an equivalent charge just under it; Cole's similitude (Pm = 52.4 MPa (W^⅓/R)^1.13, θ = 0.084 ms W^⅓ (W^⅓/R)^−0.23), cut off when the free surface's relief (negative image) arrives, (1 + cos) × incident on wet plating in view through the water; with the radiation term this is Taylor's plate. Loose pieces found by connectivity | Recht & Ipson 1963; Fisher 1953; Taylor 1941; Cole 1948 |
 | 11 | — | Folding a coarse grid cannot resolve: the side's push folds the deck edge at the seam, which needs cells of ~1/10 of the fold length (H = 0.9 (b² t)^⅓, b = 1 m: 0.17 m for 6.5 mm). Plating and members within 0.6 m of a junction between plates at an angle get a compressive knock-down of their yield (weighted by the trial stress's compression, ramped in over 0.4 % plastic strain), tabled against S/H: 0.03 / 0.12 / 0.15 / 0.4 / 1 at S/H = 1.49 / 0.74 / 0.37 / 0.19 / 0.09 (0.25 / 0.125 / 0.0625 / 0.031 / 0.016 m for the 6.5 mm deck). Section frames have brackets (a square of web plate, legs ~ the frame's depth) where they meet the decks | calibrated here (grid convergence below) |
 | 12 | Openings always open | The scene's own openings are open; hatches (1 m², 50 kPa), watertight doors (1.3 m², 100 kPa), ventilation trunks (≤ 1.2 m², 30 kPa) and weather doors (1.5 m², 70 kPa) are shut until the pressure across them reaches that (condition Zebra; the game's ventsOf) | public damage-control figures |
 | 13 | Read-backs used when they arrive | Torn cells (every sync) and the attached structure's motion (every 200 steps) are used a fixed ~1 ms later (a whole number of syncs) on the CPU, WebGL2 and WebGPU alike; a hole source that appears late delivers what it owed on its first step. Runs are deterministic: async WebGPU, async WebGL2 and headless runs end on the same step with the same result | |
+| 14 | Each cell erodes on its own failure strain (GL at its own size) | Non-local: a cell fails when the failure ratio (damage + bending strain over the GL strain), averaged over a square of side max(0.2 m, 2 cells) round it (area-weighted over the cells of the same piece it overlaps, their last-step ratios), reaches 1; the GL strain is taken at that length. No per-grid factor | regularisation over a fixed length |
+| 15 | Membrane force P = R S (Biot stress rotated) | The exact first Piola stress of W(U): P = R (S − k J), k = (U12 (S22 − S11) + S12 (U11 − U22)) / tr U. P = R S left a net moment wherever stress and stretch were not coaxial (plastic flow, shear): 6.6–14 kN·m in the tearing momentum check, now 1.6e-7 N·m | |
+| 16 | Run to 0.25 s (0.4 s with gas) unless the attached structure's motion died down with the gas under 20 kPa | Ends once the loads are done, the gas has stopped rising (10 ms, each compartment) and tearing is down to under 3 % of the torn cells per 10 ms, and the attached structure's kinetic energy is under 5 % of its peak: then the usual relax. Attachment is read from the GPU's node read-back (a member stretched past 1.5 × counts as broken). A member whose end node has no intact cell left is let go (a bare stiffener hung on as a frictionless pin and kept flailing) | |
 
 Also fixed on the way: the GPU hinges never yielded in the first rewrite (a material uniform was only set when a
 shader used both material blocks: infinite rate factor) — the game port copied that version (446c6a3); GPU node
@@ -42,15 +45,20 @@ erosion produces.
 **Forces are energy gradients.** Finite differences of the element energies against the element forces (cells,
 hinges, members incl. the members' pull on their plating cell's corners) agree to 1e-6 (`BLAST.fdCheck`). Internal
 forces sum to 7e-8 N and their moment to 0.13 N·m against 26 MN of load (1015 N·m while the member angles used a
-fixed axis; verify.html `momentum`).
+fixed axis; verify.html `momentum`). With tearing (120 kg contact, first 3 ms) the moment was 6.6–14 kN·m (the check's
+limit 6.5–7.4, so it passed or failed with the tear pattern): the membrane force was not the exact derivative of its
+energy (row 15); now 1.6e-7 N·m. `BLAST.torqueBy()` gives each pass's net moment. The contact push-back acts on the
+struck cell's corners by the bilinear weights of the point hit (was a quarter each: a lever arm of up to half a cell).
 
 **Symmetry.** A mirror-symmetric displacement gives exactly mirror-symmetric member forces, and the CPU run of a
 charge on the frame line stays symmetric to round-off (1e-15 m) until the waves reach the section's bulkheads, which
 are not symmetric (x = −10 and 5 m). The member failure used the bending of the segment's own node from this step and
 its neighbour's from the last, and the bending at a node was owned by the segment to its right: both broke the mirror
-under a contact charge (fixed). verify.html's `mirror 120 kg contact, GPU 0.125` still fails (5–6 %; 4.6 % at 11cab80
+under a contact charge (fixed). verify.html's `mirror 120 kg contact, GPU 0.125` still fails (6.5 %; 4.6 % at 11cab80
 as well): on the GPU, mirrored cells reach the erosion limit within float32 round-off and tear a step apart, and the
-hole grows from there; the 30 kg cases pass (0.004–0.02 %).
+hole grows from there; the 30 kg cases pass (0.004–0.04 %). Letting failed cells erode only every Nth step
+(`erodeEvery`) holds the pair together (2.8 % and no mismatched pairs at 25 steps) but the batched release worsens the
+contact momentum balance (6.6 / 7.3 / 10.3 kN·m at 1 / 2 / 5 steps, before row 15): off by default.
 
 **Energy ledger (CPU).** Work of the loads = kinetic + elastic + plastic (membrane, hinges, members, anchors) +
 damping + boundary radiation + contact + fracture. Plastic work is booked with the mean of last step's and this step's
@@ -122,13 +130,15 @@ set): dish 234 / 180 / 192 mm, 0.125 vs 0.0625 6 % — PASS (was 80 / 111 / 173,
 calibrated on deck-edge folding under a side push (6.5–10 mm plating, mild/HSLA); folding elsewhere (bulkheads under
 gas, decks crushed from above) uses the same table unverified.
 
-The contact hole is not converged, and not monotonic: full section 5.6 / 4.0 / 10.8 m² at 0.25 / 0.125 / 0.0625 m
-(side 3.7 / 2.0 / 3.6, second deck 2.1 / 1.4 / 6.5); reduced section down to 0.031 m: 4.9 / 2.7 / 4.9 / 3.5 m² (side
-3.7 / 2.1 / 3.4 / 2.3, second deck 1.2 / 0.6 / 1.2 / 0.9). Tearing scatters ±30 % from grid to grid around the 0.031 m
-value; 0.25 m tears ~40 % more than 0.031 m. Not calibrated (a single fine value would be fitting noise).
+The contact hole (120 kg contact, torn at 30 ms) was not converged: ±30 % from grid to grid and 0.25 m ~50 % high.
+With the non-local failure (row 14) it is: reduced section (x ±5 m, decks 4 m) 2.56 / 2.14 / 2.51 / 2.47 m² at 0.25 /
+0.125 / 0.0625 / 0.031 m (side 2.19 / 1.80 / 1.73 / 1.71, second deck 0.38 / 0.34 / 0.76 / 0.70); full section 2.44 /
+2.16 / 2.49 m² at 0.25 / 0.125 / 0.0625 m. Each cell on its own (`lReg: 0`) gives 4.38 / 2.2 / 2.5 m²; at 0.25 m the
+excess did not respond to the failure strain (× 2 still left 2.9 m²), only to averaging over more than one cell. The
+early (blast) hole converged before too (side at 1 ms: 1.5 / 1.22 / 1.09 / 1.0 m²).
 
 verify.html `?quick=1` after these changes: 28 pass, 3 fail, 3 info. The fails are the GPU mirror check under tearing
-(float32 tie-breaks, above) and the two "petals, not cut-outs" checks (53 % / 81 % of the torn side thrown loose,
+(float32 tie-breaks, above) and the two "petals, not cut-outs" checks (v35: 53 % / 92 %; v34: 53 % / 81 % of the torn side thrown loose,
 was 61 / 82 % at the audit); energy near contact, momentum, dt, parity, mesh dish now pass.
 
 **Seam tearing at the frames (AUDIT A1b).** 120 kg at 8 m tore the second deck at every frame station where the
@@ -144,8 +154,7 @@ at 0.125 m (first cells at ~9–10 ms, half by ~19 ms: the gas, not the shock), 
 on both grids; the rest is the WT bulkheads (53 m²), the second deck below (~25 m²), the shell and the main deck
 (~7 m²) bursting. The shut openings barely matter (the first, a ventilation trunk, goes at 0.3 ms; 1–1.5 m² against
 ~100 m² of holes). So the extent is physical (≈ 1 MPa on 6–10 mm plating), and on the bench it is not a seam or
-frame-end artefact; the roof is not cut free along its seams here. By 400 ms the gas has burst through ~500 m² of the
-patch. Found on the way: an inside charge on the Burke never pressurised its compartment (the outside space is index 0
+frame-end artefact; the roof is not cut free along its seams here. Found on the way: an inside charge on the Burke never pressurised its compartment (the outside space is index 0
 there, and the gas source was only made for spaces below it); the game's shell/model.js has the same test (`cc < sc.OUT`).
 
 ## The user's cases
@@ -170,10 +179,30 @@ Arleigh Burke, GPU, 0.25 m, contact at the waterline amidships (starboard, x 0, 
 
 ## Cost
 
-**Step.** dt is the stiffest node's (Gershgorin, 0.75 of it), a few stiff joins mass-scaled. At 0.125 m it was set by
-the deep frames' Euler–Bernoulli bending over 0.125 m elements (grid frequency ∝ 1/S²): 3.42 µs on the box. The
-shear-limited member (bending over the base m S either side, shear of each segment) lifts it to **6.48 µs** (box) and
-5.64 µs (Burke, graded); 0.0625 m 0.85 → 3.55 µs; 0.25 m unchanged (12.27 / 11.85 µs, membranes).
+**Step.** dt is 1.4 × the stiffest node's Gershgorin bound (was 0.75 ×), a few stiff joins mass-scaled. At 0.125 m it
+was set by the deep frames' Euler–Bernoulli bending over 0.125 m elements (grid frequency ∝ 1/S²): 3.42 µs on the box.
+The shear-limited member (bending over the base m S either side, shear of each segment) lifted it to 6.48 µs (box) and
+5.64 µs (Burke, graded); 0.0625 m 0.85 → 3.55 µs. Now box 0.25 m 22.9 µs (was 12.3), 0.125 m 12.1 µs (was 6.48). The
+limit found by trying: 2 × goes unstable at the frames, 1.5 × was unstable only at the anchors' dashpots (explicit;
+now implicit). Accuracy: 30 kg at 2 m, displacements at 2–40 ms within 1–2 % of 0.75 ×; verify.html's dt vs dt/2 and
+energy checks pass.
+
+**Run length.** Inside cases used to run to the 0.4 s cap: pieces hanging by one corner node or a bare stiffener spin on
+it as frictionless pins (at ~100 m/s for 0.3 s) and kept the "attached motion" test, the "no new sources" clock and
+the tearing going (0.15 → 0.2 k m² between 0.14 and 0.4 s in the box inside case). Row 16 ends such runs at ~0.2 s.
+
+Before / after (box, WebGPU, this machine with other work on it; walls ±40 %):
+
+| Case | Grid | Steps before → after | Simulated | Wall before → after | Torn |
+|---|---|---|---|---|---|
+| 120 kg + 130 kg casing, contact | 0.25 m | 13 275 → 7 250 | 163 → 166 ms | 0.9–1.9 → 0.8–1.1 s | 2.1 → 2.1 m² |
+| 120 kg + 130 kg casing, inside | 0.25 m | 32 608 → 9 850 | 400 → 226 ms | 2.7–3.3 → 1.3–2.2 s | 197 → 170 m² |
+| same, contact | 0.125 m | 24 950 → 13 475 | 162 → 163 ms | 10.1 → 6.4 s | 2.3 → 2.1 m² |
+| same, inside | 0.125 m | 61 757 → 16 475 | 400 → 199 ms | 21.0 → 6.1 s | 165 → 158 m² |
+
+The inside case's torn area drops by what the spinning pieces nibbled off late (13 %). Runs with few steps per sync
+are held back by the read-back latency (at `latMs` 1 ms WebGPU waits on its mapAsync copies); the game's 5 ms latency
+gives the GPU longer batches.
 
 **Per-step overhead.** WebGL2: every texture sits on its own unit for the run (texture arrays for the ping-pong state:
 nodes, cells, hinges, members, element forces) and each program has an even and an odd version with its samplers
@@ -196,11 +225,32 @@ gains are a queue of its own, cheap encoding and use from a worker, not speed on
 | Burke, P-800 inside MER 1 | 0.125 m | 114 k | 5.64 µs | 44 300 | 250 ms | 16 s |
 | Box, 120 kg, verify.html mesh | 0.0625 m | 345 k | 3.55 µs | | | 68–103 s (audit: 270–450) |
 
-Targets (P-800 contact ≤ ~1 s, inside ≤ ~4 s): met at 0.25 m (with a 80 ms relax, contact 0.9 s); at 0.125 m ~10×
-off, and verify.html's convergence check passes at no grid yet (above). What would cut it further: multi-rate steps
-(the coarse ring at 2 dt), a gather that reads each adjacency record once, a shorter horizon (deck tearing continues
-under the products' gas pressure: relaxing at 70 ms instead of the natural end (250 ms here) loses 5 % of the side and
-11 % of the second-deck tearing, at 40 ms 70 % of the deck's).
+(The table above predates v35's step and run-length changes.) What would cut it further: multi-rate steps (the coarse
+ring at 2 dt), a gather that reads each adjacency record once (by WebGL timer queries at 0.25 m the gather is ~45 % of
+a step, cells ~30 %, hinges and nodes ~10 % each).
+
+## Petals (option, `petals: true`)
+
+Cells used to go away when they failed, so a hole is a patch of missing cells with loose pieces round it. With petals a
+tear runs along cell edges instead: every node inside a plate (not on a junction, not anchored) has an idle twin; a
+cell at its failure limit asks for a crack along one of its edges (the pair nearer the charge's radius, so cracks run
+radially; the one that continues a crack, else the one nearer the charge); at the next step each node on that edge
+splits: the cells beyond the crack line move to its twin with their share of the mass (a node members act on keeps its
+own), hinges across the line stop, and the twin starts from the node's motion. A cracked cell erodes at 1.5 × its limit
+(`petalK`), and crushing (area < 0.25) and fragment damage erode as before. Each node splits once. CPU and WebGPU
+(`gpu_wgpu.js`: a crack pass at the start of each step, the cell, hinge, gather, node and contact passes resolve a
+split node's corners by their cell's side); WebGL2 runs ignore it. CPU vs WebGPU with petals: 120 kg contact 300 steps
+1.0e-4, 1200 kg 2.7e-4 (L2), the same nodes split and the same cells eroded (without petals 8.7e-5 / 2.3e-4).
+
+Cost at 0.25 m (box, 21.8 k nodes → 42.1 k with twins): 85 vs 69 µs a step on WebGPU (+24 %), builds unchanged.
+
+Effect (box, 0.25 m, WebGPU): 120 kg contact: attached side plating moved over 0.5 m 0 → 1.6 m², eroded side 2.2 →
+2.1 m², 114 nodes split. 1200 kg contact: 5.5 → 7.8 m² of flaps, eroded side 15.4 → 19.8 m², 6.5 k splits. The flaps are
+there; the centre of a large hole still goes (crushed cells erode), and cracks also cut more pieces loose: by
+verify.html's "petals, not cut-outs" measure the loose share of the torn nodes rises (1200 kg: 34 → 64 % at 0.25 m,
+52 → 71 % at 0.125 m), so it still fails. What it would take: nodes that split more than once (a crack star at the
+hole's centre), crack tips that turn with the local principal stretch instead of the radius, and cracked cells that
+keep their load across the crack only (not erode) — the next steps if the option is wanted.
 
 ## Approximations still in the model
 
@@ -235,7 +285,7 @@ under the products' gas pressure: relaxing at 70 ms instead of the natural end (
   relaxation damp it. Runs are deterministic (row 13).
 - The unresolved-folding knock-down (row 11) is a calibration, not a fold model: it makes 0.125 m within ~10 % and
   0.25 m within ~10–25 % of a 0.0156 m grid on deck-edge folding under a side push; other folding modes use it
-  unverified. The contact hole is still grid-sensitive (fold strain over one cell).
+  unverified. The contact hole converges with the non-local failure (row 14).
 - Read-backs are used ~1 ms after the step they describe (hole sources, vents and fragments see new holes that late;
   a late hole source delivers the impulse it owed at once).
 
@@ -246,11 +296,13 @@ under the products' gas pressure: relaxing at 70 ms instead of the natural end (
 'webgpu' | 'webgl', h, mat, plate: [a, b] }` plus knobs `relaxAt` (fixed relax time), `relaxGas` (relax under
 sustained gas), `patchL`, `fineR`, `uniformGrid`, `noWebEnds`, `noWater`, `wgBatch`, `wgDepth`, `dtK`, `betaK`, `boxX`,
 `boxZ` (reduced section), `brackets`, `kLaw`, `kComp`, `kBand`, `kEps` (knock-down), `efScale` (failure strain ×),
-`shutVents`, `inDepth` (inside charge depth), `insideLOS`, `latMs` (read-back latency), `noRate`;
+`shutVents`, `inDepth` (inside charge depth), `insideLOS`, `latMs` (read-back latency), `noRate`, `lReg` (non-local
+length, 0: off), `erodeEvery`, `endGas` (old end rule), `noStrip`, `endLog`, `petals`, `petalK`, `petalRadial`,
+`petalKeep` (a cell whose edges cannot split stays, cracked);
 `BLAST.probe(cfg, times, points, stopAt)` (displacements at points and times, headless or WebGPU);
 results per piece (torn m², max displacement), `energy` (CPU), `nm` (plate). `BLAST.parity(cfg, steps)` (CPU vs
 WebGL), `BLAST.parityA({ ...cfg, pair: ['cpu' | 'gpu' | 'webgpu', ...] }, steps)`, `BLAST.bench(n, backend)`
 (steps/s), `BLAST.stress(iters, draws)` (a heavy WebGL scene alongside; 0 stops it), `BLAST.fdCheck(node, 'cell' |
-'hinge' | 'truss')`, `BLAST.gpuProfile(n)` (WebGL timer queries), `BLAST.model()` (all arrays: cells `CN`, `CER`,
+'hinge' | 'truss')`, `BLAST.torqueBy()`, `BLAST.forceAt(node)` (each pass's net moment / force on a node), `BLAST.gpuProfile(n)` (WebGL timer queries), `BLAST.model()` (all arrays: cells `CN`, `CER`,
 `CDM`, `CEP`; hinges `HN`, `HTP`, `HTPS`; members `TA`, `TB`, `TFL`, `TBA`, `TBB`, `TSC`, `TCL`; pieces `PAN`, `CMAP`;
 `scene`).

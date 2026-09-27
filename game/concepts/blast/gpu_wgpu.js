@@ -25,7 +25,7 @@ export async function initWebGPU() {
 
 const WGS = 64;
 const HEAD = (c) => `
-struct Kc { matA: array<vec4f, 8>, matB: array<vec4f, 8>, matC: array<vec4f, 8>, s0: vec4f, s1: vec4f }
+struct Kc { matA: array<vec4f, 8>, matB: array<vec4f, 8>, matC: array<vec4f, 8>, s0: vec4f, s1: vec4f, s2: vec4f }
 struct Pp { t: f32, h: f32, alpha: f32, nimp: u32, par: u32, q0: u32, q1: u32, q2: u32 }
 struct Ll { gp: array<vec4f, 32>, s0: array<vec4f, 32>, s1: array<vec4f, 32>, s2: array<vec4f, 32>, s3: array<vec4f, 32>, s4: array<vec4f, 32>, s5: array<vec4f, 32>, ns: vec4i }
 @group(0) @binding(0) var<storage, read> ST: array<vec4f>;
@@ -43,6 +43,13 @@ fn CST(c: i32, h: u32) -> vec4f { return DY[clB(h) + 4 * NC + c]; }
 fn mbB(h: u32) -> i32 { return O_MB + i32(h) * NT; }
 fn CSF(mi: i32, ed: f32, ep: f32) -> f32 { let b = KC.matB[mi]; let c = KC.matC[mi]; let f = min(1.0, ep / c.z); return 1.0 + pow(min(ed, 1e4) / mix(b.x, c.x, f), 1.0 / mix(b.y, c.y, f)); }
 fn wrapA(a: f32) -> f32 { return a - 6.283185307 * floor(a / 6.283185307 + 0.5); }
+// petals: the node a cell's corner q is on (q's twin once q has split and the cell lies beyond the crack line)
+fn effN(c: i32, q: i32) -> i32 {
+  if (PETALS == 0) { return q; }
+  let r = ST[O_NS + 5 * q + 1]; let tw = i32(r.w); if (tw < 0) { return q; }
+  let k = SC[O_CRK + q]; if (k.w <= 0.0) { return q; }
+  return select(q, tw, dot(ST[O_CS + 11 * c + 9].xyz - r.xyz, k.xyz) > 0.0);
+}
 `;
 const SCV = `@group(0) @binding(2) var<storage, read_write> SC: array<vec4f>;\n`;
 
@@ -59,7 +66,12 @@ const HINGE = `
     let c1 = i32(h1.z); let c2 = i32(h1.w);
     let s1 = CST(c1, v); let s2 = CST(c2, v);
     if (s1.x > 0.5 || s2.x > 0.5) { break; }
-    let i3 = i32(h0.x); let i4 = i32(h0.y); let a1 = i32(h0.z); let b1 = i32(h0.w); let a2 = i32(h1.x); let b2 = i32(h1.y);
+    var i3 = i32(h0.x); var i4 = i32(h0.y); var a1 = i32(h0.z); var b1 = i32(h0.w); var a2 = i32(h1.x); var b2 = i32(h1.y);
+    if (PETALS == 1) {
+      let j3 = effN(c1, i3); let j4 = effN(c1, i4);
+      if (j3 != effN(c2, i3) || j4 != effN(c2, i4)) { break; }       // the crack runs along this edge
+      i3 = j3; i4 = j4; a1 = effN(c1, a1); b1 = effN(c1, b1); a2 = effN(c2, a2); b2 = effN(c2, b2);
+    }
     let r0 = ST[hb + 5]; let r1 = ST[hb + 6]; let r2 = ST[hb + 7];
     let d3 = UU(i3);
     let E = r0.xyz + UU(i4) - d3; let lE = length(E); let e = E / lE;
@@ -117,6 +129,29 @@ fn retMap(sp: ptr<function, vec3f>, eb: f32, mA: vec4f, rf: f32) -> vec2f {
   *sp = vec3f((t1 - t2) * 0.70710678, (t1 + t2) * 0.70710678, t3);
   return vec2f(g, sqrt(t1 * t1 / 3.0 + t2 * t2 + 2.0 * t3 * t3));
 }
+// the edge a cell at its limit cracks along (as blast.js crackEdge): the pair across its larger stretch, the one that
+// continues a crack, else the one nearer the charge; -1: no node left to split
+fn crackEdge(qo: array<i32, 4>, P: array<vec3f, 4>, r1: vec3f, r2: vec3f, r3: vec3f, cc: vec3f) -> i32 {
+  var Rv = array<vec3f, 4>(vec3f(0.0), r1, r2, r3);
+  let s1 = (length(P[1] - P[0]) + length(P[2] - P[3])) / (length(r1) + length(r2 - r3));
+  let s3 = (length(P[3] - P[0]) + length(P[2] - P[1])) / (length(r3) + length(r2 - r1));
+  var ca = 3; var cb = 1; if (s3 > s1 + 1e-4) { ca = 0; cb = 2; }
+  if (PRAD == 1) {                                             // radial: along the edges nearer the charge's radius
+    let r = cc - KC.s2.xyz; let a1 = abs(dot(r, r1)) / length(r1); let a3 = abs(dot(r, r3)) / length(r3);
+    if (abs(a1 - a3) > 1e-3 * length(r)) { if (a1 > a3) { ca = 0; cb = 2; } else { ca = 3; cb = 1; } } }
+  var fr = vec2i(0); var sp = vec2i(0);
+  for (var j = 0; j < 2; j++) { let e = select(cb, ca, j == 0);
+    for (var z = 0; z < 2; z++) { let o = qo[(e + z) % 4]; let tw = i32(ST[O_NS + 5 * o + 1].w); let s = SC[O_CRK + o].w > 0.0;
+      if (tw >= 0 && !s) { fr[j] += 1; } else if (s) { sp[j] += 1; } } }
+  if (fr.x == 0 && fr.y == 0) { return -1; }
+  if (fr.x > 0 && fr.y == 0) { return ca; }
+  if (fr.y > 0 && fr.x == 0) { return cb; }
+  if (sp.x != sp.y) { return select(cb, ca, sp.x > sp.y); }
+  let x0 = ST[O_NS + 5 * qo[0] + 1].xyz; let C = KC.s2.xyz;
+  let da = length(x0 + 0.5 * (Rv[ca] + Rv[(ca + 1) % 4]) - C); let db = length(x0 + 0.5 * (Rv[cb] + Rv[(cb + 1) % 4]) - C);
+  if (abs(da - db) < 1e-5) { return min(ca, cb); }
+  return select(cb, ca, da < db);
+}
 @compute @workgroup_size(${WGS}) fn main(@builtin(global_invocation_id) gid: vec3u) {
   let c = i32(gid.x); if (c >= NC) { return; }
   let v = PP.par; let w = 1u - v; let cb = clB(v); let cw = clB(w);
@@ -133,6 +168,7 @@ fn retMap(sp: ptr<function, vec3f>, eb: f32, mA: vec4f, rf: f32) -> vec2f {
     var tr: array<vec4f, 4>; tr[0] = ST[sb + 4]; tr[1] = ST[sb + 5]; tr[2] = ST[sb + 6]; tr[3] = ST[sb + 7];
     let hg = ST[sb + 8]; let c9 = ST[sb + 9]; let c10 = ST[sb + 10];
     var q: array<i32, 4>; q[0] = i32(c0.x); q[1] = i32(c0.y); q[2] = i32(c0.z); q[3] = i32(c0.w);
+    var qo = q; if (PETALS == 1) { for (var k = 0; k < 4; k++) { q[k] = effN(c, q[k]); } }
     let ua = UU(q[0]);
     var P: array<vec3f, 4>; P[0] = vec3f(0.0); P[1] = r1.xyz + UU(q[1]) - ua; P[2] = r2.xyz + UU(q[2]) - ua; P[3] = r3.xyz + UU(q[3]) - ua;
     var Vn: array<vec3f, 4>; for (var k = 0; k < 4; k++) { Vn[k] = VV(q[k]); }
@@ -259,8 +295,17 @@ fn retMap(sp: ptr<function, vec3f>, eb: f32, mA: vec4f, rf: f32) -> vec2f {
     let rat = (Dd + eb) / r3.w; let nh = ST[O_NLH + c]; let no = i32(nh.x); let ncn = i32(nh.y);
     var ws = nh.z; var acc = nh.z * rat;
     for (var k = 0; k < ncn; k++) { let e = ST[O_NL + no + k]; let sj = CST(i32(e.x), v); if (sj.x < 0.5) { acc += e.y * sj.y; ws += e.y; } }
-    let torn = select(0.0, 1.0, PP.q0 == 1u && (acc >= ws || fd <= 0.0 || jmin < c10.w));
-    oC = vec4f(torn, select(rat, uT, torn > 0.5), Dd, min(1.0, util));
+    var torn = select(0.0, 1.0, PP.q0 == 1u && (acc >= ws || fd <= 0.0 || jmin < c10.w));
+    var code = 0.0;
+    if (PETALS == 1) {
+      // petals: at the limit, crack an edge first (once); a cracked cell erodes at KC.s2.w x its limit
+      let cracked = cs.x > 0.05; if (cracked) { code = 0.1; }
+      if (torn > 0.5 && fd > 0.0 && jmin >= c10.w) {
+        if (!cracked) { let e = crackEdge(qo, P, r1.xyz, r2.xyz, r3.xyz, c9.xyz); if (e >= 0) { torn = 0.0; code = 0.2 + 0.05 * f32(e); } else if (PKEEP == 1) { torn = 0.0; code = 0.1; } }
+        else if (acc < KC.s2.w * ws) { torn = 0.0; }
+      }
+    }
+    oC = vec4f(max(torn, code), select(rat, uT, torn > 0.5), Dd, min(1.0, util));
     break;
   }
   for (var k = 0; k < 4; k++) { DY[cw + k * NC + c] = o[k]; }
@@ -351,9 +396,11 @@ fn dAe(u: vec3f, v: vec3f) -> vec3f { let cx = cross(u, v); let s = dot(EX, cx);
   SC[O_MF + 4 * NT + k] = vec4f(F[5].yz, F[6].xy); SC[O_MF + 5 * NT + k] = vec4f(F[6].z, F[7]); SC[O_MF + 6 * NT + k] = vec4f(F[8], 0.0);
 }`;
 
+const ADJF = `fn ADJ(k: i32) -> i32 { return i32(ST[O_ADJ + (k >> 2u)][k & 3]); }
+`;
 const GATHER = `
 @group(0) @binding(6) var<storage, read_write> HD: array<i32>;
-fn ADJ(k: i32) -> i32 { return i32(ST[O_ADJ + (k >> 2u)][k & 3]); }
+${ADJF}
 // the contact push-back on cell c's corners: the nodes that hit it last step (a list), summed in node order
 fn contact(c: i32, hp: u32, r: i32) -> vec3f {
   var js: array<i32, 8>; var n = 0; var j = HD[i32(hp) * NC + c];
@@ -373,8 +420,14 @@ fn contact(c: i32, hp: u32, r: i32) -> vec3f {
   let g0 = ST[O_NS + 5 * i + 3]; let g1 = ST[O_NS + 5 * i + 4];
   var F = vec3f(0.0); var cnt = 0.0;
   let o0 = i32(g0.x); let n0 = i32(g0.y); let o1 = i32(g0.z); let n1 = i32(g0.w); let o2 = i32(g1.x); let n2 = i32(g1.y);
+  // petals: p the node whose lists these are (a twin reads its parent's), split: entries are sorted by their cell's side
+  var p = i; var split = false;
+  if (PETALS == 1) { let tw = i32(ST[O_NS + 5 * i + 1].w); if (tw <= -2) { p = -tw - 2; }
+    if (tw >= 0 || tw <= -2) { split = SC[O_CRK + p].w > 0.0; }
+    if (p != i && !split) { SC[O_FRC + i] = vec4f(0.0); return; } }
   for (var k = 0; k < n0; k++) {
     let e = ADJ(o0 + k); let c = e / 4; let r = e - 4 * c;
+    if (split) { if (effN(c, p) != i) { continue; } }
     if (r == 0) { F += SC[O_CF + c].xyz; }
     else if (r == 1) { F += vec3f(SC[O_CF + c].w, SC[O_CF + NC + c].xy); }
     else if (r == 2) { F += vec3f(SC[O_CF + NC + c].zw, SC[O_CF + 2 * NC + c].x); }
@@ -383,6 +436,7 @@ fn contact(c: i32, hp: u32, r: i32) -> vec3f {
     if (CST(c, w).x < 0.5) { cnt += 1.0; } }
   for (var k = 0; k < n1; k++) {
     let e = ADJ(o1 + k); let h = e / 8; let r = e - 8 * h;
+    if (split) { let hc = ST[O_HS + 9 * h + 1]; let hcell = select(i32(hc.w), i32(hc.z), r < 4); if (effN(hcell, p) != i) { continue; } }
     if (r == 0) { F += SC[O_HF + h].xyz; }
     else if (r == 1) { F += vec3f(SC[O_HF + h].w, SC[O_HF + NH + h].xy); }
     else if (r < 4) { F += 0.5 * vec3f(SC[O_HF + NH + h].zw, SC[O_HF + 2 * NH + h].x); }
@@ -426,7 +480,11 @@ const NODE = `
   let n0 = ST[O_NS + 5 * i]; let n1 = ST[O_NS + 5 * i + 1]; let n2 = ST[O_NS + 5 * i + 2];
   var oPos = pos; var oVel = vel; var oCon = vec4f(-1.0, 0.0, 0.0, 0.0);
   let uH = PP.h;
-  if (n0.x > 0.0) {
+  var wi = n0.x;
+  if (PETALS == 1) { let tw = i32(n1.w);
+    if (tw <= -2) { let kp = SC[O_CRK + (-tw - 2)]; if (kp.w > 0.0) { wi = SC[O_CRK + i].x; } }
+    else if (tw >= 0) { let kp = SC[O_CRK + i]; if (kp.w > 0.0) { wi = kp.w; } } }
+  if (wi > 0.0) {
     let fr = SC[O_FRC + i];
     var F = fr.xyz; var u = pos.xyz; var vv = vel.xyz;
     var free_ = pos.w;
@@ -435,8 +493,8 @@ const NODE = `
       let d = u - anc.xyz; let dl = length(d);
       if (dl > 1e-12) { var f = n0.y * dl; if (f > n0.z) { anc = vec4f(u - d * (n0.z / n0.y / dl), anc.w); f = n0.z; } F -= d / dl * f; }
     }
-    vv = vv + F * (uH * n0.x);
-    if (n0.y > 0.0) { vv /= 1.0 + uH * n0.x * n0.w; }   // the boundary dashpot, implicit (stable at any step)
+    vv = vv + F * (uH * wi);
+    if (n0.y > 0.0) { vv /= 1.0 + uH * wi * n0.w; }   // the boundary dashpot, implicit (stable at any step)
     if (free_ > 0.5) { vv.y -= KC.s1.w * uH; } else { vv *= 1.0 - PP.alpha * uH; }
     u += vv * uH;
     // contact: the other panels near this node (planar maps); stop against an intact cell, push it back next step
@@ -456,19 +514,54 @@ const NODE = `
       if (CST(c, w).x > 0.5) { continue; }
       let cc = ST[O_CS + 11 * c];
       var pl = 0.0; var vc = 0.0;
-      for (var q = 0; q < 4; q++) { let j = i32(cc[q]); pl += dot(XR(j) - o, n); vc += dot(VV(j), n); }
+      for (var q = 0; q < 4; q++) { let j = effN(c, i32(cc[q])); pl += dot(XR(j) - o, n); vc += dot(VV(j), n); }
       pl *= 0.25; vc *= 0.25;
       let gap = (cur - pl) * sd; if (gap > 0.015) { continue; }
       u += n * ((0.015 - gap) * sd);
       let rel = (dot(vv, n) - vc) * sd;
       if (rel < 0.0) { let dv = -rel * sd; vv += n * dv;
         let r1 = ST[O_CS + 11 * c + 1].xyz; let r3 = ST[O_CS + 11 * c + 3].xyz; let xr = n1.xyz + u - ST[O_NS + 5 * i32(cc.x) + 1].xyz;
-        oCon = vec4f(f32(c), -dv / n0.x * dot(n, normalize(cross(r1, r3))), clamp(dot(xr, r1) / dot(r1, r1), 0.0, 1.0), clamp(dot(xr, r3) / dot(r3, r3), 0.0, 1.0)); }
+        oCon = vec4f(f32(c), -dv / wi * dot(n, normalize(cross(r1, r3))), clamp(dot(xr, r1) / dot(r1, r1), 0.0, 1.0), clamp(dot(xr, r3) / dot(r3, r3), 0.0, 1.0)); }
       break;
     }
     oPos = vec4f(u, free_); oVel = vec4f(vv, 0.0);
   }
   DY[nw + i] = oPos; DY[nw + N + i] = oVel; DY[nw + 2 * N + i] = anc; SC[O_CON + i] = oCon;
+}`;
+
+// petals, at the start of a step: a node with a twin, not yet split, takes the crack request (last step's cell states)
+// of the largest failure ratio (then the lowest cell) among its cells whose requested edge it is on, and splits: the
+// cells beyond the line through it along that edge go to its twin, with their share of the mass (a node members act
+// on keeps its own), and the twin starts from the node's motion
+const CRACK = `
+@compute @workgroup_size(${WGS}) fn main(@builtin(global_invocation_id) gid: vec3u) {
+  let p = i32(gid.x); if (p >= N) { return; }
+  let r0 = ST[O_NS + 5 * p + 1]; let T = i32(r0.w); if (T < 0) { return; }
+  if (SC[O_CRK + p].w > 0.0) { return; }
+  let v = PP.par;
+  let g0 = ST[O_NS + 5 * p + 3]; let o0 = i32(g0.x); let n0 = i32(g0.y);
+  var bc = -1; var be = 0; var br = -1e30;
+  for (var k = 0; k < n0; k++) {
+    let e = ADJ(o0 + k); let c = e / 4; let r = e - 4 * c;
+    let cs = CST(c, v); if (cs.x < 0.19 || cs.x > 0.5) { continue; }
+    let ed = i32(round((cs.x - 0.2) / 0.05));
+    if (r != ed && r != (ed + 1) % 4) { continue; }
+    if (cs.y > br || (cs.y == br && c < bc)) { br = cs.y; bc = c; be = ed; }
+  }
+  if (bc < 0) { return; }
+  let sb = O_CS + 11 * bc; var Rv = array<vec3f, 4>(vec3f(0.0), ST[sb + 1].xyz, ST[sb + 2].xyz, ST[sb + 3].xyz);
+  var n = normalize(cross(Rv[(be + 1) % 4] - Rv[be], normalize(cross(Rv[1], Rv[3]))));
+  if (dot(n, vec3f(1.0, 1.37, 1.91)) < 0.0) { n = -n; }             // one orientation (as blast.js)
+  var mB = 0.0; var nA = 0; var nB = 0;
+  for (var k = 0; k < n0; k++) {
+    let e = ADJ(o0 + k); let c = e / 4; let cb = O_CS + 11 * c;
+    if (dot(ST[cb + 9].xyz - r0.xyz, n) > 0.0) { nB++; let r1 = ST[cb + 1]; mB += KC.matB[i32(ST[cb + 2].w)].z * r1.w * ST[cb + 7].w * 0.25; } else { nA++; }
+  }
+  if (nA == 0 || nB == 0) { return; }
+  let wp = ST[O_NS + 5 * p].x; let g1 = ST[O_NS + 5 * p + 4];
+  var wP = wp; if (i32(g1.y) == 0) { let m = 1.0 / wp; wP = 1.0 / max(m - mB, 1e-3 * m); }
+  SC[O_CRK + p] = vec4f(n, wP); SC[O_CRK + T] = vec4f(1.0 / mB, 0.0, 0.0, 1.0);
+  let nb = ndB(v); DY[nb + T] = DY[nb + p]; DY[nb + N + T] = DY[nb + N + p];
 }`;
 
 // torn cells packed to one word: flag in the top byte, erosion time (0 .. 1.67 s, 0.1 us steps) below
@@ -507,13 +600,18 @@ export function createWGPU(dev, M, opt = {}) {
   const nST = off;
   off = 0; at('O_ND', 6 * N); at('O_CL', 10 * NC); at('O_HT', 2 * NH); at('O_MB', 2 * NT); const nDY = off;
   const MAXIMP = N + 4096;
-  off = 0; at('O_CON', N); at('O_FRC', N); at('O_CF', 3 * NC); at('O_HF', 3 * NH); at('O_MF', 7 * NT); at('O_DMG', NC); at('O_IMP', MAXIMP); at('O_PK', Math.ceil(NC / 4) + 1); const nSC = off;
-  const CONST = { N, NC, NH, NT, OUT: M.OUT(), ...L };
+  off = 0; at('O_CON', N); at('O_FRC', N); at('O_CF', 3 * NC); at('O_HF', 3 * NH); at('O_MF', 7 * NT); at('O_DMG', NC); at('O_IMP', MAXIMP); at('O_PK', Math.ceil(NC / 4) + 1); at('O_CRK', M.PAR ? N : 1); const nSC = off;
+  const CONST = { N, NC, NH, NT, OUT: M.OUT(), PETALS: M.PAR ? 1 : 0, PRAD: M.PRAD ? 1 : 0, PKEEP: M.PKEEP ? 1 : 0, ...L };
   const stat = new Float32Array(4 * nST);
   const put = (base, i, T, t, v) => stat.set(v, 4 * (base + i * T + t));
   for (let i = 0; i < N; i++) { const p = (t, v) => put(L.O_NS, i, 5, t, v);
     p(0, [M.WINV[i], M.AK[i], M.AF[i], M.AC[i]]); p(1, [R(i, 0), R(i, 1), R(i, 2), 0]); p(2, [0, 1, 2, 3].map(k => M.NCC[4 * i + k]));
     p(3, [adjOff[0][i], adjL[0][i].length, adjOff[1][i], adjL[1][i].length]); p(4, [adjOff[2][i], adjL[2][i].length, 0, 0]); }
+  // petals: n1.w = the twin (parents), -(parent + 2) (twins, which read their parent's cell and hinge lists), -1
+  if (M.PAR) for (let i = 0; i < N; i++) { const pa = M.PAR[i];
+    if (pa >= 0) { stat[4 * (L.O_NS + 5 * i + 1) + 3] = -(pa + 2); put(L.O_NS, i, 5, 3, [adjOff[0][pa], adjL[0][pa].length, adjOff[1][pa], adjL[1][pa].length]); put(L.O_NS, i, 5, 4, [0, 0, 0, 0]); }
+    else stat[4 * (L.O_NS + 5 * i + 1) + 3] = i < M.TWIN.length ? M.TWIN[i] : -1; }
+  else for (let i = 0; i < N; i++) stat[4 * (L.O_NS + 5 * i + 1) + 3] = -1;
   const fillCS = () => { for (let c = 0; c < NC; c++) { const p = (t, v) => put(L.O_CS, c, 11, t, v);
     const q = [0, 1, 2, 3].map(k => M.CN[4 * c + k]), rv = k => [0, 1, 2].map(z => M.R0[3 * q[k] + z] - M.R0[3 * q[0] + z]);
     p(0, q); p(1, [...rv(1), M.CH[c]]); p(2, [...rv(2), M.CMAT[c]]); p(3, [...rv(3), M.CEF[c]]);
@@ -542,13 +640,14 @@ export function createWGPU(dev, M, opt = {}) {
   const U = GPUBufferUsage, bufs = [];
   const mk = (size, usage) => { const b = dev.createBuffer({ size: Math.ceil(size / 16) * 16, usage }); bufs.push(b); return b; };
   const bST = mk(16 * nST, U.STORAGE | U.COPY_DST), bDY = mk(16 * nDY, U.STORAGE | U.COPY_DST | U.COPY_SRC), bSC = mk(16 * nSC, U.STORAGE | U.COPY_DST | U.COPY_SRC);
-  const bK = mk(416, U.UNIFORM | U.COPY_DST), bL = mk(3600, U.UNIFORM | U.COPY_DST);
+  const bK = mk(432, U.UNIFORM | U.COPY_DST), bL = mk(3600, U.UNIFORM | U.COPY_DST);
   const PSTRIDE = 256, MAXSTEPS = 4096, bP = mk(PSTRIDE * (MAXSTEPS + 1), U.UNIFORM | U.COPY_DST);
   const UPSZ = 1 << 24, bUp = mk(UPSZ, U.COPY_SRC | U.COPY_DST);
   const bHD = mk(4 * (2 * NC + N), U.STORAGE | U.COPY_DST);             // contact lists: heads (2 halves) and links
   dev.queue.writeBuffer(bST, 0, stat);
-  { const k = new Float32Array(104); M.MATS.forEach((m, i) => { k.set([m.E, m.nu, m.sy, m.H], 4 * i); k.set([m.D, m.q, m.rho, 0], 32 + 4 * i); k.set([m.Du, m.qu, m.eu, 0], 64 + 4 * i); });
-    k.set([M.BETA(), M.U_MAX, M.RHO_W * M.C_W, M.P0, M.RHO_W * M.G, M.K_SHEAR, M.S, M.G], 96); dev.queue.writeBuffer(bK, 0, k); }
+  { const k = new Float32Array(108); M.MATS.forEach((m, i) => { k.set([m.E, m.nu, m.sy, m.H], 4 * i); k.set([m.D, m.q, m.rho, 0], 32 + 4 * i); k.set([m.Du, m.qu, m.eu, 0], 64 + 4 * i); });
+    k.set([M.BETA(), M.U_MAX, M.RHO_W * M.C_W, M.P0, M.RHO_W * M.G, M.K_SHEAR, M.S, M.G], 96);
+    const C = M.C || [0, 0, 0]; k.set([C[0] - O[0], C[1] - O[1], C[2] - O[2], M.PETK || 1.5], 104); dev.queue.writeBuffer(bK, 0, k); }
   // ---- pipelines (one layout for all)
   const bgl = dev.createBindGroupLayout({ entries: [
     { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
@@ -566,6 +665,7 @@ export function createWGPU(dev, M, opt = {}) {
   const head = HEAD(CONST) + SCV;
   const pH = pipe('hinges', head + HINGE), pC = pipe('cells', head + CELL), pT = pipe('members', head + TRUSS), pG = pipe('gather', head + GATHER);
   const pK = pipe('link', LINK(CONST)), pI = pipe('impulses', IMPULSE(CONST)), pN = pipe('nodes', head + NODE), pP = pipe('pack', PACK(CONST));
+  const pX = M.PAR ? pipe('crack', head + ADJF + CRACK) : null;
   const bg = dev.createBindGroup({ layout: bgl, entries: [
     { binding: 0, resource: { buffer: bST } }, { binding: 1, resource: { buffer: bDY } }, { binding: 2, resource: { buffer: bSC } },
     { binding: 3, resource: { buffer: bK } }, { binding: 4, resource: { buffer: bP, size: 32 } }, { binding: 5, resource: { buffer: bL } }, { binding: 6, resource: { buffer: bHD } }] });
@@ -591,6 +691,7 @@ export function createWGPU(dev, M, opt = {}) {
       if (!pass) pass = enc.beginComputePass();
       const o = nsteps * PSTRIDE / 4; parF[o] = t; parF[o + 1] = h; parF[o + 2] = alpha; parU[o + 3] = nimp; parU[o + 4] = cur; parU[o + 5] = er ? 1 : 0;
       pass.setBindGroup(0, bg, [nsteps * PSTRIDE]);
+      if (pX) { pass.setPipeline(pX); pass.dispatchWorkgroups(wg(N)); }
       pass.setPipeline(pH); pass.dispatchWorkgroups(wg(NH));
       pass.setPipeline(pC); pass.dispatchWorkgroups(wg(NC));
       if (NT) { pass.setPipeline(pT); pass.dispatchWorkgroups(wg(NT)); }
@@ -655,9 +756,12 @@ export function createWGPU(dev, M, opt = {}) {
   async function readStateAsync(o) {
     await flush();
     const parts = [[16 * (L.O_CL + cur * 5 * NC), 16 * 5 * NC], [16 * (L.O_MB + cur * NT), 16 * one(NT)], [16 * (L.O_HT + cur * NH), 16 * one(NH)]];
+    const crk = M.PAR ? dev.createBuffer({ size: 16 * N, usage: U.MAP_READ | U.COPY_DST }) : null;
     const tot = parts.reduce((a, p) => a + p[1], 0), sb = dev.createBuffer({ size: tot, usage: U.MAP_READ | U.COPY_DST });
     const e = dev.createCommandEncoder(); let q = 0; for (const [s, n] of parts) { e.copyBufferToBuffer(bDY, s, sb, q, n); q += n; }
+    if (crk) e.copyBufferToBuffer(bSC, 16 * L.O_CRK, crk, 0, 16 * N);
     dev.queue.submit([e.finish()]); await sb.mapAsync(GPUMapMode.READ);
+    if (crk) { await crk.mapAsync(GPUMapMode.READ); o.CRK = new Float32Array(crk.getMappedRange().slice(0)); crk.unmap(); crk.destroy(); }
     const a = new Float32Array(sb.getMappedRange().slice(0)); sb.unmap(); sb.destroy();
     for (let k = 0; k < 4; k++) for (let c = 0; c < NC; c++) for (let z = 0; z < 4; z++) o.CEP[16 * c + 4 * k + z] = a[4 * (k * NC + c) + z];
     for (let c = 0; c < NC; c++) o.CDM[c] = a[4 * (4 * NC + c) + 2];
@@ -666,6 +770,10 @@ export function createWGPU(dev, M, opt = {}) {
     stateCache = o;
   }
   let stateCache = null;
+  // debug: the cell states (torn / crack code, failure ratio, damage, utilisation) of the current half
+  async function readCellStates() { await flush(); const sb = dev.createBuffer({ size: 16 * NC, usage: U.MAP_READ | U.COPY_DST }), e = dev.createCommandEncoder();
+    e.copyBufferToBuffer(bDY, 16 * (L.O_CL + cur * 5 * NC + 4 * NC), sb, 0, 16 * NC); dev.queue.submit([e.finish()]); await sb.mapAsync(GPUMapMode.READ);
+    const a = new Float32Array(sb.getMappedRange().slice(0)); sb.unmap(); sb.destroy(); return a; }
   // tagged read-backs: copies of this step's torn cells / node motion, taken at this point of the command stream and
   // mapped after the submit; the run asks for them a fixed number of steps later (waiting if they aren't mapped yet)
   const tagged = new Map();
@@ -724,5 +832,5 @@ export function createWGPU(dev, M, opt = {}) {
   function setDamage(CFD) { const a = new Float32Array(4 * NC); for (let c = 0; c < NC; c++) a[4 * c] = CFD[c]; upload(a, bSC, 16 * L.O_DMG); }
   function dispose() { for (const e of tagged.values()) { try { e.buf.destroy(); } catch (x) {} } tagged.clear(); if (enc) { endPass(); enc = null; } for (const b of bufs) try { b.destroy(); } catch (e) {} bufs.length = 0; }
   return { kind: 'webgpu', step, steps, requestCells, cellsOf, requestNodes, nodesOf, has, waitFor, submit, flush, pace, busy, upload: upload0, setSources, setGas, setImpulses, setDamage, readNodes, readNodesAsync, readCells, readCellsAsync,
-    readCellsFull, readState, readStateAsync, dispose, profile: () => ({}), errors: errs, O, batch, setDepth: d => { depth = d; } };
+    readCellsFull, readState, readStateAsync, readCellStates, dispose, profile: () => ({}), errors: errs, O, batch, setDepth: d => { depth = d; } };
 }

@@ -766,9 +766,9 @@ function build() {
 // charge); at the next step each node of that edge splits: the cells on the far side of the crack line move to the
 // twin (with their share of the mass), hinges across the line stop, the others follow their cells. A cracked cell that
 // goes on to 1.5 x its limit erodes (as does one whose edges can split no further). Members stay on the parent node.
-let TWIN = null, PARENT = null, SPL = null, HOFF = null, CCR = null, NCL = null, HNL = null, CN0 = null, HN0 = null, M0 = null, N0T = 0;
+let TWIN = null, PARENT = null, SPL = null, MEMN = null, HOFF = null, CCR = null, NCL = null, HNL = null, CN0 = null, HN0 = null, M0 = null, N0T = 0;
 const PCR = [];
-const PETK = () => st.petalK || 1.5;
+const PKEEP = () => st.petalKeep !== false, PETK = () => st.petalK || 1.5, PRAD = () => st.petalRadial !== false;
 function buildTwins() {
   TWIN = PARENT = SPL = NCL = HNL = CN0 = HN0 = M0 = null; HOFF = new Uint8Array(NH); CCR = new Uint8Array(NC); PCR.length = 0; N0T = N;
   if (!st.petals) return;
@@ -786,6 +786,9 @@ function buildTwins() {
     NKIND[T] = NKIND[i]; NFRM[T] = NFRM[i]; for (let q = 0; q < 4; q++) NCC[4 * T + q] = NCC[4 * i + q]; }
   NCL = Array.from({ length: N0 }, () => []); for (let c = 0; c < NC; c++) for (let k = 0; k < 4; k++) NCL[CN[4 * c + k]].push(4 * c + k);
   HNL = Array.from({ length: N0 }, () => []); for (let h = 0; h < NH; h++) for (let z = 0; z < 6; z++) HNL[HN[6 * h + z]].push(6 * h + z);
+  MEMN = new Uint8Array(N0);
+  for (let t = 0; t < NT; t++) { for (const i of [TA[t], TB[t], TBA[t], TBB[t], TSC[t]]) if (i >= 0) MEMN[i] = 1;
+    if (TCL[t] >= 0 && (TBA[t] >= 0 || TSC[t] >= 0)) for (let z = 0; z < 4; z++) if (TQN[4 * t + z] >= 0) MEMN[TQN[4 * t + z]] = 1; }
   TWIN = tw; SPL = new Uint8Array(N0); CN0 = CN.slice(); HN0 = HN.slice(); M0 = M.slice(); N = N1;
 }
 // back to the unsplit mesh (a new run on the same build)
@@ -800,7 +803,12 @@ const orig = q => PARENT && PARENT[q] >= 0 ? PARENT[q] : q;
 function crackEdge(c) {
   const q = [0, 1, 2, 3].map(k => CN[4 * c + k]), L = (a, b, P) => Math.hypot(P[3 * q[b]] - P[3 * q[a]], P[3 * q[b] + 1] - P[3 * q[a] + 1], P[3 * q[b] + 2] - P[3 * q[a] + 2]);
   const s1 = (L(0, 1, X) + L(3, 2, X)) / (L(0, 1, R0) + L(3, 2, R0)), s3 = (L(0, 3, X) + L(1, 2, X)) / (L(0, 3, R0) + L(1, 2, R0));
-  const cand = s1 >= s3 ? [3, 1] : [0, 2];                  // stretched along 0-1: the crack runs along 0-3 / 1-2
+  let cand = s3 > s1 + 1e-4 ? [0, 2] : [3, 1];              // stretched along 0-1: the crack runs along 0-3 / 1-2 (a tie: that too)
+  if (PRAD()) {                                              // radial: the crack runs along the edges nearer the charge's radius
+    const o = orig(q[0]), a = orig(q[1]), b = orig(q[3]), C = sim.C, r = [CRC[3 * c] - C[0], CRC[3 * c + 1] - C[1], CRC[3 * c + 2] - C[2]];
+    const e1 = [R0[3 * a] - R0[3 * o], R0[3 * a + 1] - R0[3 * o + 1], R0[3 * a + 2] - R0[3 * o + 2]], e3 = [R0[3 * b] - R0[3 * o], R0[3 * b + 1] - R0[3 * o + 1], R0[3 * b + 2] - R0[3 * o + 2]];
+    const a1 = Math.abs(dot(r, e1)) / len(e1), a3 = Math.abs(dot(r, e3)) / len(e3);
+    if (Math.abs(a1 - a3) > 1e-3 * len(r)) cand = a1 > a3 ? [0, 2] : [3, 1]; }     // (on a diagonal: the stretch decides)
   const free = k => { let f = 0, sp = 0; for (const z of [k, (k + 1) % 4]) { const o = orig(q[z]); if (TWIN[o] >= 0 && !SPL[o]) f++; else if (SPL[o]) sp++; } return [f, sp]; };
   const C = sim.C, dC = k => { const a = orig(q[k]), b = orig(q[(k + 1) % 4]); return Math.hypot((R0[3 * a] + R0[3 * b]) / 2 - C[0], (R0[3 * a + 1] + R0[3 * b + 1]) / 2 - C[1], (R0[3 * a + 2] + R0[3 * b + 2]) / 2 - C[2]); };
   const [fa, sa] = free(cand[0]), [fb, sb] = free(cand[1]);
@@ -809,21 +817,31 @@ function crackEdge(c) {
   if (fb && !fa) return cand[1];
   if (sa !== sb) return sa > sb ? cand[0] : cand[1];
   const da = dC(cand[0]), db = dC(cand[1]);
-  return Math.abs(da - db) < 1e-9 ? Math.min(cand[0], cand[1]) : da < db ? cand[0] : cand[1];
+  return Math.abs(da - db) < 1e-5 ? Math.min(cand[0], cand[1]) : da < db ? cand[0] : cand[1];
 }
-// the requests of the last step: split the edge's nodes (largest failure ratio first)
+// the requests of the last step: each node on a requested edge takes the request of the largest failure ratio (then
+// the lowest cell index) and splits along that edge (as the GPU: node by node)
 function applyCracks() {
   if (!PCR.length) return;
-  const req = []; for (let k = 0; k < PCR.length; k += 3) req.push([PCR[k], PCR[k + 1], PCR[k + 2]]); PCR.length = 0;
-  req.sort((a, b) => b[2] - a[2] || a[0] - b[0]);
-  for (const [c, e] of req) {
-    if (CER[c]) continue;
-    const a = orig(CN[4 * c + e]), b = orig(CN[4 * c + (e + 1) % 4]);
-    const ed = [R0[3 * b] - R0[3 * a], R0[3 * b + 1] - R0[3 * a + 1], R0[3 * b + 2] - R0[3 * a + 2]], n = nrm(cross(ed, cellN(c)));
-    for (const p of [a, b]) if (TWIN[p] >= 0 && !SPL[p]) splitNode(p, n);
-  }
+  const best = new Map();
+  for (let k = 0; k < PCR.length; k += 3) { const c = PCR[k], e = PCR[k + 1], r = PCR[k + 2];
+    for (const z of [e, (e + 1) % 4]) { const p = orig(CN[4 * c + z]); if (TWIN[p] < 0 || SPL[p]) continue;
+      const o = best.get(p); if (!o || r > o[2] || (r === o[2] && c < o[0])) best.set(p, [c, e, r]); } }
+  PCR.length = 0;
+  const todo = [...best.entries()].sort((a, b) => a[0] - b[0]);
+  const nrmOf = new Map(); for (const [p, [c, e]] of todo) { const a = orig(CN0[4 * c + e]), b = orig(CN0[4 * c + (e + 1) % 4]);
+    const n = nrm(cross([R0[3 * b] - R0[3 * a], R0[3 * b + 1] - R0[3 * a + 1], R0[3 * b + 2] - R0[3 * a + 2]], cellN0(c)));
+    nrmOf.set(p, n[0] + 1.37 * n[1] + 1.91 * n[2] < 0 ? mul(n, -1) : n); }      // one orientation: the twin takes the same side whichever cell asked
+  for (const [p] of todo) splitNode(p, nrmOf.get(p));
 }
-function splitNode(p, n) {
+// a cell's rest normal from its original corners
+function cellN0(c) { const q0 = CN0[4 * c], q1 = CN0[4 * c + 1], q3 = CN0[4 * c + 3];
+  return nrm(cross([R0[3 * q1] - R0[3 * q0], R0[3 * q1 + 1] - R0[3 * q0 + 1], R0[3 * q1 + 2] - R0[3 * q0 + 2]], [R0[3 * q3] - R0[3 * q0], R0[3 * q3 + 1] - R0[3 * q0 + 1], R0[3 * q3 + 2] - R0[3 * q0 + 2]])); }
+// a GPU run's splits (its crack normals, read back at the end): the same corner and hinge rewrite on the CPU's mesh
+function applyGpuSplits(CRK) {
+  for (let p = 0; p < N0T; p++) if (TWIN[p] >= 0 && !SPL[p] && CRK[4 * p + 3] > 0) splitNode(p, [CRK[4 * p], CRK[4 * p + 1], CRK[4 * p + 2]], true);
+}
+function splitNode(p, n, meshOnly = false) {
   const T = TWIN[p], side = c => (CRC[3 * c] - R0[3 * p]) * n[0] + (CRC[3 * c + 1] - R0[3 * p + 1]) * n[1] + (CRC[3 * c + 2] - R0[3 * p + 2]) * n[2] > 0;
   let mB = 0, nB = 0, nA = 0;
   for (const e of NCL[p]) { const c = e >> 2; if (side(c)) { nB++; mB += MATS[CMAT[c]].rho * CH[c] * CAR[c] / 4; } else nA++; }
@@ -833,9 +851,9 @@ function splitNode(p, n) {
   for (const e of HNL[p]) { const h = (e / 6) | 0, z = e - 6 * h, c1 = HC[2 * h], c2 = HC[2 * h + 1];
     if (z < 2) { if (side(c1) !== side(c2)) HOFF[h] = 1; else if (side(c1)) HN[e] = T; }
     else if (side(z < 4 ? c1 : c2)) HN[e] = T; }
+  if (meshOnly) return;
   // mass: the far side's cells take their share; a node carrying members keeps its own (their stiffness stays there)
-  let mem = false; for (let k = 0; k < NT && !mem; k++) if (TA[k] === p || TB[k] === p) mem = true;
-  M[T] = mB; WINV[T] = 1 / mB; if (!mem) { M[p] = Math.max(M[p] - mB, 1e-3 * M[p]); WINV[p] = 1 / M[p]; }
+  M[T] = mB; WINV[T] = 1 / mB; if (!MEMN[p]) { M[p] = Math.max(M[p] - mB, 1e-3 * M[p]); WINV[p] = 1 / M[p]; }
   for (let q = 0; q < 3; q++) { X[3 * T + q] = X[3 * p + q]; V[3 * T + q] = V[3 * p + q]; }
   FREE[T] = 0; TBRK[T] = TBRK[p];
 }
@@ -1491,7 +1509,7 @@ function cellPass(t, h) {
     for (let k = NLH[4 * c], e = k + NLH[4 * c + 1]; k < e; k++) { const j = NLE[2 * k]; if (!CERS[j]) { acc += NLE[2 * k + 1] * CRATP[j]; ws += NLE[2 * k + 1]; } }
     let fail = ERODE && (acc >= ws || CFD[c] >= 1 || jmin < JMIN());
     if (fail && TWIN && CFD[c] < 1 && jmin >= JMIN()) {                  // petals: crack an edge first (once)
-      if (!CCR[c]) { const e = crackEdge(c); if (e >= 0) { CCR[c] = 1; PCR.push(c, e, acc / ws); fail = false; } }
+      if (!CCR[c]) { const e = crackEdge(c); if (e >= 0) { CCR[c] = 1; PCR.push(c, e, rat); fail = false; } else if (PKEEP()) { CCR[c] = 1; fail = false; } }
       else if (acc < PETK() * ws) fail = false;
     }
     if (fail) { CER[c] = 1; CTE[c] = t; if (EN) EN.frac += eel - eel0; }
@@ -1629,6 +1647,7 @@ function nodePass(t, h) {
   IMPN.length = 0;
   XO.set(X); VO.set(V);
   for (let i = 0; i < N; i++) {
+    if (PARENT && PARENT[i] >= 0 && !SPL[PARENT[i]]) continue;       // an idle twin
     let fx = F[3 * i], fy = F[3 * i + 1], fz = F[3 * i + 2];
     const vx0 = V[3 * i], vy0 = V[3 * i + 1], vz0 = V[3 * i + 2];
     if (AK[i] > 0) {
@@ -1773,7 +1792,8 @@ function commonSync(t, torn) {
 function gpuModel() {
   return { N, NC, NH, NT, R0, M, WINV, AK, AF, AC, CN, CH, CMAT, CEF, CKC, KCE: KC_EPS(), JMN: JMIN(), NLH, NLE, CSP, CSN, CWET, CAR, CTR, CHG, CDB, CRC, CVIS: () => CVIS,
     HN, HC, HKP, HMP, HKS, HMS, HT0, HDB, HTR, HHP, HMAT, HLN, HTL0, TBA, TBB, TSC, TCL, TCL2, TQN, TPRV, TNXT, TKC, TKB, TQB, TB0, TKS, TQS, TS0, TMM, TA, TB, TL0, TAR, TMAT, TEF, TFIB, THG, NCC, PAN, CMAP, MATS: st.noRate ? MATS.map(m => ({ ...m, D: 1e30, Du: 1e30 })) : MATS, TA1, S,
-    OUT: () => scene.OUT, csf, nspace: () => GV.length, BETA: () => BETA, U_MAX, RHO_W, C_W, P0, G, K_SHEAR };
+    OUT: () => scene.OUT, csf, nspace: () => GV.length, BETA: () => BETA, U_MAX, RHO_W, C_W, P0, G, K_SHEAR,
+    PAR: TWIN ? PARENT : null, TWIN, C: sim ? sim.C : null, PETK: PETK(), PRAD: PRAD(), PKEEP: PKEEP() };
 }
 let gpuT = 0;
 function stepGPU() { gpuAdvance(); if (sim.n % SYNC === 0) syncStep(); }
@@ -1820,7 +1840,7 @@ function checkEnd(m) {
 // WebGPU end of run: wait for the queue, then everything settle() reads (it reads the backend's copies)
 // yield to the browser (a message, not a timer: not throttled in a hidden tab)
 const tick0 = (() => { const ch = new MessageChannel(), q = []; ch.port1.onmessage = () => q.shift()(); return () => new Promise(r => { q.push(r); ch.port2.postMessage(0); }); })();
-async function finishWG() { await gpu.readStateAsync({ CEP, CDM, TFL, HTP, HTH, HTPS, TBP }); gpu.readNodes(true, X, V, FREE); }
+async function finishWG() { const o = { CEP, CDM, TFL, HTP, HTH, HTPS, TBP }; await gpu.readStateAsync(o); gpu.readNodes(true, X, V, FREE); if (TWIN && o.CRK) applyGpuSplits(o.CRK); }
 // a GPU step whose sync reads see this very step (the WebGL2 path's sync mode), for WebGPU: waits at every sync
 async function stepExact() { const w = gpuWait(); if (w) { gpu.submit(); await w; } step(); }
 function settle() {
@@ -2278,7 +2298,7 @@ function compare(a, r) {
 }
 window.BLAST = { ver: 33, get backend() { return gpu ? gpu.kind || 'webgl' : null; }, webgpu: () => !!WG, PROF, st, runCase, runCaseAsync, compare, cam, build, detonate: () => { asyncRun = false; detonate(); startRun(); }, get sim() { return sim; }, energy, draw,
   stepN(n) { sim.headless = true; for (let k = 0; k < n && sim.t < sim.T1; k++) step(); return sim.t; },
-  model: () => ({ N, NC, NH, NT, S, dt, X, V, R0, M, FREE, F, FL, TWIN, PARENT, SPL, HOFF, CCR, CN, CPAN, CH, CMAT, CEF, CSP, CSN, CER, CTE, CDM, CEP, CUT, CFD, CAR, CRC, CNR,
+  model: () => ({ N, NC, NH, NT, S, dt, X, V, R0, M, FREE, F, FL, TWIN, PARENT, SPL, HOFF, CCR, CPB, PCR, CRAT, CRATP, NLH, NLE, gpu: () => gpu, CN, CPAN, CH, CMAT, CEF, CSP, CSN, CER, CTE, CDM, CEP, CUT, CFD, CAR, CRC, CNR,
     HN, HC, HKP, HMP, HKS, HMS, HT0, HTP, HTH, HDB, HLN, HTL0, HTPS, HTR, TBA, TBB, TSC, TCL, TCL2, TQN, TPRV, TNXT, TKC, CKC, CSD, TKB, TQB, TB0, TKS, TQS, TS0, TBP, TSP, TMM, TFIB, TA, TB, TL0, TLP, TFL, TAR, AK, AF, AC, PAN, GP, GV, OPEN, scene, MATS, EN }),
   pulse, kinneyPs, kinneyIs1, reflect, U_MEAN, U_MAX, tee, SEC,
   rawSteps(n) { const t0 = performance.now(); for (let k = 0; k < n; k++) gpu.step(sim.t, dt, 0); const t1 = performance.now(); gl.finish(); return [t1 - t0, performance.now() - t0]; },
@@ -2317,12 +2337,19 @@ window.BLAST = { ver: 33, get backend() { return gpu ? gpu.kind || 'webgl' : nul
       if (sv !== 'cpu') { if (isWG()) await finishWG(); gpu.readNodes(true, X, V, FREE); const cl = gpu.readCells(); for (let c = 0; c < NC; c++) CER[c] = cl[4 * c] > .5 ? 1 : 0; gpu.readState({ CEP, CDM, TFL, HTP, HTH, HTPS, TBP }); }
       const d = new Float64Array(3 * N); for (let i = 0; i < 3 * N; i++) d[i] = X[i] - R0[i];
       let ebS = 0, hpS = 0, cdS = 0, tf = 0; for (let k = 0; k < 4 * NC; k++) ebS += CEP[4 * k + 3]; for (let k = 0; k < NH; k++) hpS += Math.abs(HTP[k]); for (let c = 0; c < NC; c++) cdS += CDM[c]; for (let k = 0; k < NT; k++) tf += TFL[k];
-      res[key] = { sv, d, er: Uint8Array.from(CER, v => v ? 1 : 0), ms: performance.now() - t0, st: { ebS, hpS, cdS, tf } };
+      let spl = null;
+      if (TWIN) { if (sv === 'cpu') { spl = []; for (let p = 0; p < N0T; p++) if (SPL[p]) spl.push(p); }
+        else { const o = { CEP: CEP.slice(), CDM: CDM.slice(), TFL: TFL.slice(), HTP: HTP.slice() }; await gpu.readStateAsync(o); spl = []; if (o.CRK) for (let p = 0; p < N0T; p++) if (o.CRK[4 * p + 3] > 0) spl.push(p); } }
+      res[key] = { sv, d, er: Uint8Array.from(CER, v => v ? 1 : 0), ms: performance.now() - t0, st: { ebS, hpS, cdS, tf }, spl };
     }
     restoreSt(keep);
     let s1 = 0, s2 = 0, mx = 0; for (let i = 0; i < 3 * N; i++) { const a = res.a.d[i], b = res.b.d[i]; s1 += (a - b) ** 2; s2 += a * a; mx = Math.max(mx, Math.abs(a)); }
     let diff = 0, both = 0; for (let c = 0; c < NC; c++) { if (res.a.er[c] !== res.b.er[c]) diff++; else if (res.a.er[c]) both++; }
-    return { pair, relL2: Math.sqrt(s1 / s2), maxDispMm: mx * 1000, erodedBoth: both, erodedDiff: diff, ms: [Math.round(res.a.ms), Math.round(res.b.ms)], states: [res.a.st, res.b.st] };
+    let splits = null; if (res.a.spl && res.b.spl) { const A = new Set(res.a.spl), Bs = new Set(res.b.spl); splits = { a: A.size, b: Bs.size, onlyA: res.a.spl.filter(p => !Bs.has(p)).slice(0, 8), onlyB: res.b.spl.filter(p => !A.has(p)).slice(0, 8) }; }
+    window.__parA = res;
+    let wi = 0, wd = 0; for (let i = 0; i < N; i++) { const d = Math.hypot(res.a.d[3 * i] - res.b.d[3 * i], res.a.d[3 * i + 1] - res.b.d[3 * i + 1], res.a.d[3 * i + 2] - res.b.d[3 * i + 2]); if (d > wd) { wd = d; wi = i; } }
+    return { pair, relL2: Math.sqrt(s1 / s2), maxDispMm: mx * 1000, erodedBoth: both, erodedDiff: diff, ms: [Math.round(res.a.ms), Math.round(res.b.ms)], states: [res.a.st, res.b.st], splits,
+      worst: { i: wi, mm: +(wd * 1000).toFixed(2), a: [0, 1, 2].map(q => +(res.a.d[3 * wi + q] * 1000).toFixed(1)), b: [0, 1, 2].map(q => +(res.b.d[3 * wi + q] * 1000).toFixed(1)), par: PARENT ? PARENT[wi] : -1, twin: TWIN && wi < N0T ? TWIN[wi] : -1 } };
   },
   // steps/s of a backend on the current model: n steps, timed to the end of the GPU work
   async bench(n, backend) {
@@ -2373,6 +2400,14 @@ window.BLAST = { ver: 33, get backend() { return gpu ? gpu.kind || 'webgl' : nul
     w.postMessage({ cv, it: iters, nd: draws }, [cv]); w.onmessage = e => { w.ms = e.data; }; window.__stress = w; return w;
   },
   // finite-difference check of the element forces against their energies (debug)
+  // each pass's force on node i (debug; state restored)
+  forceAt(i) {
+    const saveEN = EN; EN = null; const keep = [HTP.slice(), CEP.slice(), CDM.slice(), CUT.slice(), TLP.slice(), TEB.slice(), CER.slice()];
+    const hps = HTPS.slice(), tbp = TBP.slice(), tsp = TSP.slice(); const restore = () => { TBP.set(tbp); TSP.set(tsp); HTPS.set(hps); HTP.set(keep[0]); CEP.set(keep[1]); CDM.set(keep[2]); CUT.set(keep[3]); TLP.set(keep[4]); TEB.set(keep[5]); CER.set(keep[6]); };
+    const Fs = F.slice(), FLs = FL.slice(), pcr = PCR.slice(), ccr = CCR ? CCR.slice() : null, out = {};
+    for (const [k, P] of Object.entries({ hinge: hingePass, cell: cellPass, truss: trussPass })) { F.fill(0); FL.fill(0); P(sim.t, dt); restore(); out[k] = [F[3 * i], F[3 * i + 1], F[3 * i + 2]].map(v => +v.toFixed(0)); }
+    F.set(Fs); FL.set(FLs); PCR.length = 0; PCR.push(...pcr); if (ccr) CCR.set(ccr); EN = saveEN; return out;
+  },
   // net moment of each pass's internal forces about the charge (debug; state restored), with and without velocities
   torqueBy() {
     const saveEN = EN; EN = null; const keep = [HTP.slice(), CEP.slice(), CDM.slice(), CUT.slice(), TLP.slice(), TEB.slice(), CER.slice()];
