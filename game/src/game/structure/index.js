@@ -491,8 +491,12 @@ export async function createStructure(game) {
           // (each side of the break its own face: the frames and deck edges set back into that piece's steel)
           const lo = c === P.cut1, fk = lo ? 'faceLo' : 'faceHi';
           if (!c[fk]) { c.sp = Math.max(.14, S.H.L / 700);   /* (dense enough to read as lines close up; drawFace thins it with distance) */ c[fk] = faceOf(S.H, c.z, c.a, c.s, S.wave, c.sp, lo ? -1 : 1); }
+          // (the face shows only as the ends come apart: while they still meet, the torn face stands inside her, seen
+          // only through a hole in the deck at the break as tall streaks of fire-lit frame lines, QA D54)
+          const fo = faceOpen(S, P, c, a);
+          if (fo <= 0) continue;
           let fire = 0; for (const B of S.breaks) if (B.cut === c && B.F) fire = Math.min(1, B.F.k * 1.6);
-          dots += bfx.drawFace(c[fk], Rm, Tm, heatOf(c, t), Math.max(1, dist), S.seed, c.sp, fire);
+          dots += bfx.drawFace(c[fk], Rm, Tm, heatOf(c, t), Math.max(1, dist), S.seed, c.sp, fire, fo, sea);
         }
       }
       // at each break: foam where the open ends meet the water, steam, the fire, the slick
@@ -500,6 +504,21 @@ export async function createStructure(game) {
     }
     dots += bfx.drawSparks(t, sea);
     return dots;
+  }
+  /* how far a cut's two ends have come apart, as drawn (0 while they meet, 1 at 3 m and more): the gap between the
+     cut's middle (deck and keel) as each end carries it; an end gone (sunk, or no other piece) counts as open */
+  const GT = [0, 0, 0], GR = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  function faceOpen(S, P, c, a) {
+    const E = endsOf(S, c), Q = E[0] === P ? E[1] : E[0];
+    if (!Q || Q.sunk) return 1;
+    poseOf(Q, a, GT, GR);
+    let g = 0;
+    for (const y of [S.H.deck(c.z) * .9, -S.H.keel(c.z) * .5]) {
+      const ax = Tm[0] + Rm[1] * y + Rm[2] * c.z, ay = Tm[1] + Rm[4] * y + Rm[5] * c.z, az = Tm[2] + Rm[7] * y + Rm[8] * c.z;
+      const bx = GT[0] + GR[1] * y + GR[2] * c.z, by = GT[1] + GR[4] * y + GR[5] * c.z, bz = GT[2] + GR[7] * y + GR[8] * c.z;
+      g = Math.max(g, Math.hypot(ax - bx, ay - by, az - bz));
+    }
+    return sat((g - .8) / 2.2);
   }
   /* where a piece cuts the water, as it is drawn now: a churned white line along its waterline (round the section at
      stations along it), stronger as it moves through the water (settling, rolling, going down: air bursting out) */

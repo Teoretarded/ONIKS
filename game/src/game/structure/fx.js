@@ -127,7 +127,7 @@ export function createBreakFx(game) {
   /* the torn face's inside: points F (model frame [x y z kind] x n) through a piece's model transform (Rm, Tm), heat
      0..1, fire 0..1 (the break's fire burning on it: the frames and decks lit warm, flickering); only the dots above
      the water (the rest is under the sea's occluder anyway) */
-  function drawFace(F, Rm, Tm, heat, d, seed, sp, fire = 0) {
+  function drawFace(F, Rm, Tm, heat, d, seed, sp, fire = 0, k = 1, seaY = null) {
     const fx = R.fx, n = F.length / 4;
     if (!n || d > 8000) return 0;
     // no closer than ~2.5 px on screen
@@ -136,7 +136,10 @@ export function createBreakFx(game) {
     const sz = pxm > 12 ? 2.6 : pxm > 3 ? 2.2 : 1.6, tq = Math.floor(performance.now() / 90);
     for (let i = 0; i < n; i += step) {
       const x = F[i * 4], y = F[i * 4 + 1], z = F[i * 4 + 2], kind = F[i * 4 + 3];
+      // (thinned in as the ends come apart: k; none under the sea)
+      if (k < 1 && hsh(i, seed + 7) > k) continue;
       const wx = Tm[0] + Rm[0] * x + Rm[1] * y + Rm[2] * z, wy = Tm[1] + Rm[3] * x + Rm[4] * y + Rm[5] * z, wz = Tm[2] + Rm[6] * x + Rm[7] * y + Rm[8] * z;
+      if (seaY && wy < seaY(wx, wz) - .3) continue;
       const h = heat * (.6 + .4 * hsh(i, seed));
       // (decks and frames read clearly from the usual angles: deck edges brightest, the frames close under them, the
       // shell a step down; lit warm by the break's fire, flickering; QA D10)
