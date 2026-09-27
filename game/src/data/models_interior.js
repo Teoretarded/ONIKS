@@ -113,7 +113,7 @@ function cabinets(P, a, b, h, d, o) {
   const along = Math.abs(b[2] - a[2]) > Math.abs(b[0] - a[0]);
   const lo = along ? [a[0] - d / 2, a[1], Math.min(a[2], b[2])] : [Math.min(a[0], b[0]), a[1], a[2] - d / 2];
   const hi = along ? [a[0] + d / 2, a[1] + h, Math.max(a[2], b[2])] : [Math.max(a[0], b[0]), a[1] + h, a[2] + d / 2];
-  vol(P, lo, hi, { ds: o.ds || 2.4 });
+  vol(P, lo, hi, { ds: o.ds || 2.4, de: o.de });
   const L = along ? hi[2] - lo[2] : hi[0] - lo[0], n = Math.max(1, Math.round(L / (o.w || .8)));
   const face = o.face || 1;   // which long face the doors are on (+1 / -1 across)
   for (let i = 1; i < n; i++) {
@@ -160,9 +160,13 @@ function gtg(P, x, y, z0, dir, yUp, k) {
 /* a three-high berthing rack (1.95 x 0.72), along z at x, floor y */
 function rack(P, x, y, z, along) {
   const hl = .98, hw = .36, ax = along ? [hw, hl] : [hl, hw];
-  for (const h of [.3, .95, 1.6]) P.push(box([x - ax[0], y + h, z - ax[1]], [x + ax[0], y + h + .16, z + ax[1]], { bottom: true, ds: 2.8 }));
-  for (const sx of [-1, 1]) for (const sz of [-1, 1]) P.push(line([[x + sx * ax[0], y, z + sz * ax[1]], [x + sx * ax[0], y + 1.95, z + sz * ax[1]]], fn({ w: .4, ds: .7 })));
-  P.push(box([x - ax[0], y, z - ax[1]], [x + ax[0], y + .28, z + ax[1]], fn({ ds: 2.2 })));
+  // three bunks: each a mattress (its top, sparse) and its rim (fine); four posts; the locker pan under the lowest
+  for (const h of [.46, 1.11, 1.76]) {
+    const c = [[x - ax[0], y + h, z - ax[1]], [x + ax[0], y + h, z - ax[1]], [x + ax[0], y + h, z + ax[1]], [x - ax[0], y + h, z + ax[1]]];
+    P.push(panel(c, { ds: 3 }), line(c.concat([c[0]]), fn({ w: .4, ds: .8 })));
+  }
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) P.push(line([[x + sx * ax[0], y, z + sz * ax[1]], [x + sx * ax[0], y + 1.95, z + sz * ax[1]]], fn({ w: .35, ds: 1.0 })));
+  P.push(box([x - ax[0], y, z - ax[1]], [x + ax[0], y + .28, z + ax[1]], fn({ ds: 3.4 })));
 }
 /* a mess table with its benches (along z), floor y */
 function messTable(P, x, y, z, L) {
@@ -299,10 +303,64 @@ function webFrames(S, P, z0, z1, yBot, yTop, step) {
     for (const s of [-1, 1]) {
       const pts = [];
       for (let y = Math.max(yBot, S.keel(z) + .1); y <= yt; y += .5) { const w = S.hbc(z, y); if (w > .1) pts.push([s * (w - .12), y, z]); }
-      if (pts.length > 2) P.push(line(pts, fn({ w: .35, ds: DS.frame })));
+      const lo = pts.filter(p => p[1] <= 0), hi = pts.filter(p => p[1] >= -.5);
+      if (lo.length > 2) P.push(line(lo, fn({ w: .3, ds: DS.frame * 1.9 })));
+      if (hi.length > 2) P.push(line(hi, fn({ w: .35, ds: DS.frame })));
     }
   }
 }
+/* the outfit a hole in the side shows first, along the shell of a space z0..z1, y0 (floor) .. y1 (overhead): the frames
+   in between the structure's (every frame here), a cable tray under the overhead following the shell and vertical
+   cable risers, a ventilation duct with its diffusers, lockers against the shell, overhead light fittings.
+   o.lockers false: no lockers (machinery, tanks), o.clear: |x| kept clear (a VLS enclosure) */
+function shellOutfit(S, P, z0, z1, y0, y1, o) {
+  o = o || {};
+  const yt = y1 - .35, yd = y1 - .55, h = y1 - y0;
+  if (h < 1.6 || z1 - z0 < 1.5) return;
+  const Z = []; for (let z = z0 + .15; z < z1 - .15; z += 1.22) Z.push(z); Z.push(z1 - .15);
+  for (const s of [-1, 1]) {
+    // cable tray under the overhead following the shell, three bundles in it
+    for (let i = 0; i < Z.length - 1; i++) {
+      const wa = S.hbc(Z[i], yt), wb = S.hbc(Z[i + 1], yt);
+      if (wa < 1.2 || wb < 1.2 || (o.clear && Math.min(wa, wb) - .9 < o.clear)) continue;
+      // (light: plates sparse, edges fine, so the outfit reads as a second layer behind the structure)
+      { const a = [s * (wa - .5), yt, Z[i]], b = [s * (wb - .5), yt, Z[i + 1]];
+        quad(P, [a[0] - .21, yt, a[2]], [a[0] + .21, yt, a[2]], [b[0] + .21, yt, b[2]], [b[0] - .21, yt, b[2]], 3.6);
+        for (const u of [-.21, .21]) P.push(line([[a[0] + u, yt + .07, a[2]], [b[0] + u, yt + .07, b[2]]], fn({ w: .35, ds: .8 }))); }
+      // the duct beside it: a rectangular trunk, its edges dense
+      const xa = s * (wa - 1.25), xb = s * (wb - 1.25);
+      quad(P, [xa - .28, yd - .18, Z[i]], [xa + .28, yd - .18, Z[i]], [xb + .28, yd - .18, Z[i + 1]], [xb - .28, yd - .18, Z[i + 1]], 5);
+      for (const [dx, dy] of [[-.28, -.18], [.28, -.18], [-.28, .18], [.28, .18]]) P.push(line([[xa + dx, yd + dy, Z[i]], [xb + dx, yd + dy, Z[i + 1]]], fn({ w: .35, ds: .9 })));
+      if (i % 3 === 1) {       // a diffuser
+        const zc = (Z[i] + Z[i + 1]) / 2, xc = (xa + xb) / 2;
+        P.push(box([xc - .2, yd - .38, zc - .2], [xc + .2, yd - .18, zc + .2], fn({ ds: .9 })));
+      }
+      if (i % 2 === 0) {       // a light fitting
+        const zc = Z[i] + .6, xc = s * Math.max(.8, wa * .45);
+        P.push(line([[xc - .6, y1 - .08, zc], [xc + .6, y1 - .08, zc]], fn({ w: .6, ds: .4 })));
+      }
+    }
+    // vertical cable risers every third frame
+    for (let k = Math.ceil(z0 / 7.32); k * 7.32 < z1 - .5; k++) {
+      const z = k * 7.32 + 1.22; if (z <= z0 + .3 || z >= z1 - .3) continue;
+      const w = S.hbc(z, (y0 + y1) / 2); if (w < 1.5) continue;
+      const x = s * (w - .25), ya = y0 + .15, yb = yt;
+      quad(P, [x, ya, z - .15], [x, ya, z + .15], [x, yb, z + .15], [x, yb, z - .15], 3.2);
+      P.push(line([[x, ya, z - .15], [x, yb, z - .15]], fn({ w: .35, ds: .8 })), line([[x, ya, z + .15], [x, yb, z + .15]], fn({ w: .35, ds: .8 })));
+    }
+    // lockers against the shell
+    if (o.lockers !== false) for (let z = z0 + 1.6; z < z1 - 2; z += 4.9) {
+      const w = Math.min(S.hbc(z, y0 + .3), S.hbc(z + 1.2, y0 + .3)); if (w < 2.2 || (o.clear && w - .9 < o.clear)) continue;
+      cabinets(P, [s * (w - .45), y0, z], [s * (w - .45), y0, z + 1.2], Math.min(1.8, h - .4), .5, { w: .4, face: -s, ds: 3.6, de: .9 });
+    }
+  }
+}
+/* a damage-control / fire station by a watertight door: the locker and a hose reel on the bulkhead */
+function dcStation(P, x, y, z, sgn) {
+  vol(P, [x - .9, y + .1, z + sgn * .05], [x - .45, y + 1.5, z + sgn * .4], { ds: 1.8, fine: true });
+  P.push(lathe([x + .75, y + 1.2, z + sgn * .12], [0, 0, sgn], [[0, .32], [.22, .32]], fn({ n: 14, gen: 2, rings: [0, 1], caps: true, ds: 1.2 })));
+}
+
 /* the double bottom under an inner bottom at yIB: floors every other frame (the bottom shell to the tank top), the
    centre vertical keel */
 function doubleBottom(S, P, z0, z1, yIB) {
@@ -395,6 +453,7 @@ const DD = (() => {
     VD13: 'Void', FDS13: 'Flight deck support · stores', APK: 'Aft peak tank', STR: 'Steering gear room',
     FHF: 'CIC · deckhouse forward', FHA: 'Equipment rooms · deckhouse', SPY01: 'SPY house · 01 level · array equipment',
     SPY02: 'SPY house · 02 level · array equipment', SPY03: 'Pilot house · 03 level', MH: 'Midships deckhouse · intakes',
+    HGR: 'Hangars · lockers · benches · overhead trays',
   };
   return { XB, XS, deckY, halfBreadth, keel, fx, LV, BK, ZN, VLS, NAMES };
 })();
@@ -423,7 +482,7 @@ function ddZone(S, Z) {
     const holes = doors.map(([x, y]) => wtDoorHole(x, y));
     for (const v of DD.VLS) if (z > v.z0 + .05 && z < v.z1 - .05) holes.push({ x0: -v.hw, x1: v.hw, y0: v.floor, y1: deckAt(z) });
     tBulkhead(S, P, z, -99, deckAt(z) - .04, holes);
-    for (const [x, y] of doors) wtDoor(P, x, y, z, -1);
+    for (const [x, y] of doors) { wtDoor(P, x, y, z, -1); dcStation(P, x + (x > 0 ? -1.1 : 1.1), y, z, -1); }
   }
   // the zone's decks (burke levels), trimmed to the hull, round the VLS enclosure, with scuttles over the passage
   const hatchZ = zc + (Z.no % 2 ? 1.2 : -1.2);
@@ -746,6 +805,24 @@ function ddHouse() {
     }
     Object.assign(out, PS);
   }
+  { // the twin hangars (aft house, fr 47..51): tool lockers and benches on the outer walls, trays and ducts overhead,
+    // hose reels; the RSD tracks and the walls are the hangar's own part
+    const P = [], z0 = -52.8, z1 = -36.6, top = z => DD.deckY(z) + 5.45;
+    for (const s of [-1, 1]) {
+      const xo = s * 7.1;
+      cabinets(P, [xo, y0(-51), -52.4], [xo, y0(-51), -48.2], 1.9, .55, { w: .6, face: -s, ds: 2.4 });
+      cabinets(P, [xo, y0(-42), -41.5], [xo, y0(-42), -38.2], 1.9, .55, { w: .6, face: -s, ds: 2.4 });
+      P.push(box([xo - s * .9, y0(-45) + .85, -46.8], [xo - s * .1, y0(-45) + .9, -43.6], { ds: 1.3 }));
+      vol(P, [Math.min(xo - s * .8, xo - s * .1), y0(-45), -46.6], [Math.max(xo - s * .8, xo - s * .1), y0(-45) + .8, -43.8], { ds: 2.6, fine: true });
+      tray(P, [s * 6.6, top(z1) - .35, z1], [s * 6.6, top(z0) - .35, z0], .45);
+      tray(P, [s * 1.3, top(z1) - .35, z1], [s * 1.3, top(z0) - .35, z0], .35);
+      const xd = s * 4.8;
+      vol(P, [xd - .35, top(z1) - .75, z0 + .3], [xd + .35, top(z1) - .35, z1 - .3], { ds: 3, open: true });
+      for (let z = z0 + 1.5; z < z1 - 1; z += 4) P.push(line([[s * 2.6, top(z) - .06, z], [s * 5.4, top(z) - .06, z]], fn({ w: .6, ds: .4 })));
+      dcStation(P, s * 5.8, y0(-37), z1 - .1, -1);
+    }
+    out.HGR = P;
+  }
   { // midships deckhouse: the gas turbines' intake plenums and demisters under the stacks
     const P = [];
     for (const zc of [2.2, -17.0]) for (const s of [-1, 1]) vol(P, [s * 1.2, y0(zc - 2.6), zc - 3.9], [s * 4.6, 9.6, zc - 1.3], { ds: 2.6 });
@@ -765,12 +842,17 @@ function ddInterior(cut) {
     for (const id of Z.c) {
       if (id === 'DB' || id === 'VD13') continue;
       const C = ddContents(S, Z, id);
+      if (!/^(FPK|APK|FO|JP|MAG|AMR|MER|DB|CHAIN)/.test(id)) {
+        const B = ddBox(S, Z, id);
+        if (B.y1 > .5) shellOutfit(S, C, Z.z0 + .1, Z.z1 - .1, B.y0, B.y1 - .03, { clear: (Z.no === 4 || Z.no === 10) && B.y0 > -1 ? 4.7 : 0, lockers: !/^(PAS|GLR|STR|WNDL)/.test(id) });
+      }
+      if (/^(AMR|MER)/.test(id)) { const B = ddBox(S, Z, id); shellOutfit(S, C, Z.z0 + .1, Z.z1 - .1, .25, B.y1 - .03, { lockers: false }); }
       if (!C.length) continue;
       parts.push(ixPart('ix_' + id, DD.NAMES[id] || id, C, { zones: [Z.no], zone: Z.no, comp: id, sys: sysOf(id) }));
     }
   }
   const H = ddHouse();
-  for (const [id, zs] of [['FHF', [5, 6]], ['FHA', [6, 7]], ['SPY01', [5, 6, 7]], ['SPY02', [5, 6, 7]], ['SPY03', [5, 6]], ['MH', [7, 8, 9]]]) parts.push(ixPart('ix_' + id, DD.NAMES[id], H[id], { zones: zs, zone: zs[0], comp: id, sys: id === 'MH' ? 'machinery' : 'control' }));
+  for (const [id, zs] of [['FHF', [5, 6]], ['FHA', [6, 7]], ['SPY01', [5, 6, 7]], ['SPY02', [5, 6, 7]], ['SPY03', [5, 6]], ['MH', [7, 8, 9]], ['HGR', [11, 12]]]) parts.push(ixPart('ix_' + id, DD.NAMES[id], H[id], { zones: zs, zone: zs[0], comp: id === 'HGR' ? 'HGP' : id, sys: id === 'MH' ? 'machinery' : id === 'HGR' ? 'aviation' : 'control' }));
   if (!cut && K) {
     // the unit model: the cutaway's machinery, VLS modules and shaft lines, under the cutaway's names
     let mach = [];
@@ -865,6 +947,10 @@ function genericInterior(H, spec) {
       const za = Math.max(Z.z0, w.z0), zb = Math.min(Z.z1, w.z1);
       if (zb - za > .5) for (const s of [-1, 1]) lWall(P, s * w.x, w.y0, w.y1, za + .05, zb - .05, [], 5.5);
     }
+    for (const [a0, a1, y0, y1] of spec.outfit || []) {
+      const za = Math.max(Z.z0, a0), zb = Math.min(Z.z1, a1);
+      if (zb - za > 2) shellOutfit(S, P, za + .1, zb - .1, y0, y1, {});
+    }
     if (spec.passY !== undefined && spec.passZ && zc < spec.passZ[1] && zc > spec.passZ[0]) {
       const y0 = spec.passY, x = spec.passX || 3, yt = spec.passTop;
       for (const s of [-1, 1]) {
@@ -883,7 +969,7 @@ function genericInterior(H, spec) {
     const zs = []; for (let n = zoneOf(B.z1); n <= zoneOf(B.z0); n++) zs.push(n);
     parts.push(ixPart(sp.part || 'ix_' + sp.id, sp.name, P, { zones: zs, zone: zs[0], comp: sp.id, sys: sp.sys || (sp.kind === 'engine' ? 'machinery' : sp.kind === 'magazine' || sp.kind === 'vls' ? 'magazine' : sp.kind === 'berthing' || sp.kind === 'mess' ? 'living' : sp.kind === 'tank' ? 'tank' : sp.kind === 'control' || sp.kind === 'steering' ? 'control' : sysOf(sp.id)) }));
   }
-  return { parts, zones: zones.map(z => ({ no: z.no, z0: z.z0, z1: z.z1 })) };
+  return { parts, zones: zones.map(z => ({ no: z.no, z0: z.z0, z1: z.z1 })), S, spec };
 }
 function genericContents(S, P, B, sp) {
   const y = B.y0, px = sp.passX || 0;
@@ -991,6 +1077,7 @@ function cgInterior(model) {
   const spec = {
     zFwd: 86, zAft: -86.4, bz: [74, 66, 57.2, 46.6, 33, 18, 6, -15, -36.2, -46, -56.2, -66, -76], deckTop: deck, bhdTop: z => deck(z) - .04,
     frameBot: IB, passY: D2, passTop: 6.0, passX: 2.8, passZ: [-56.2, 66], doors: [[-2.8, D2], [2.8, D2]],
+    outfit: [[-66, 74, D3, D2], [-76, 80, D2, 6.0]],
     decks: [
       { y: IB, z0: -66, z1: 66, ib: true, hatch: false },
       { y: P4, z0: -76, z1: 74, holes: [hv(-46, 18, 9)].concat(vls, mags), below: IB + .5 },
@@ -1026,6 +1113,7 @@ function lcsInterior(model) {
   const spec = {
     zFwd: 60, zAft: -62, bz: [52, 40, 28, 16, 0, -8, -22, -36, -44, -52], deckTop: top, bhdTop: top,
     frameBot: IB, passX: 1.4, doors: [[0, D3]],
+    outfit: [[-52, 52, D3, 8.8]],
     decks: [
       { y: IB, z0: -52, z1: 52, ib: true, hatch: false },
       { y: D0, z0: -60, z1: 58, holes: [{ x0: -6, x1: 6, z0: -36, z1: -8 }], below: IB + .4 },
@@ -1052,6 +1140,7 @@ function lhdInterior(model) {
     // over the vehicle decks and the well the space runs open fore and aft: the bulkheads stop at the 1.0 m deck there
     bhdTop: z => z < 8 ? D1 - .03 : D2 - .05,
     frameBot: IB, frameStep: 3, passY: D1, passTop: D2 - .1, passX: 11.8, passZ: [14, 90], doors: [[-11.8, D1], [11.8, D1]],
+    outfit: [[14, 104, D1, D2 - .1]],
     decks: [
       { y: IB, z0: -85, z1: 104, ib: true, hatch: false },
       { y: D1, z0: -115, z1: 112, holes: [{ x0: -13, x1: 13, z0: -40, z1: 4 }], below: IB + .5 },
@@ -1077,6 +1166,7 @@ function cvInterior(model) {
   const spec = {
     zFwd: 160, zAft: -160, bz: [150, 134, 118, 98, 80, 64, 50, 38, 20, 0, -24, -44, -60, -76, -92, -104, -118, -132, -146], deckTop: () => HGR, bhdTop: () => HGR - .05,
     frameBot: IB, frameStep: 3, passY: D2, passTop: HGR - .35, passX: 14, passZ: [-104, 134], doors: [[-14, D2], [14, D2]],
+    outfit: [[-146, 150, D2, HGR - .05]],
     // the side protection: longitudinal bulkheads 5.5 m inboard of the shell over the machinery and magazines
     walls: [{ x: 14.9, y0: IB, y1: D2, z0: -104, z1: 98 }],
     decks: [
@@ -1122,15 +1212,17 @@ function build(key, cut) {
     if (key === 'destroyer') {
       base = ddInterior(true);
       ZONES.destroyer = DD.ZN.map(z => ({ no: z.no, z0: z.z0, z1: z.z1, name: 'Zone ' + z.no }));
+      CTX.destroyer = ddCtx();
     } else {
       const f = { cg: cgInterior, lcs: lcsInterior, lhd: lhdInterior, carrier: cvInterior }[key];
       const cutF = K.CUT0[key + '_cut'];
       if (!f || !cutF) return [];
       const cm = cutF();
       const r = f(cm);
-      base = r.parts; ZONES[key] = r.zones;
+      base = r.parts; ZONES[key] = r.zones; CTX[key] = genCtx(r); DECKS[key] = CTX[key].decks;
     }
-    COMPS[key] = base.filter(p => p.comp).map(p => ({ id: p.comp, name: p.label, zone: p.zone, sys: p.sys, box: boxOf(p) }));
+    tagParts(key, base);
+    COMPS[key] = base.filter(p => p.comp).map(p => ({ id: p.comp, name: p.label, zone: p.zone, sys: p.sys, box: boxOf(p), support: p.support }));
     CACHE.set(key, base);
   }
   let parts = base;
@@ -1145,6 +1237,7 @@ function build(key, cut) {
       });
       parts = base.concat(extra);
     }
+    tagParts(key, parts);
   }
   CACHE.set(ck, parts);
   return parts;
@@ -1153,20 +1246,119 @@ function boxOf(p) {
   const [a, b] = GEO.bounds(p);
   return a[0] <= b[0] ? [a[0], a[1], a[2], b[0], b[1], b[2]].map(v => Math.round(v * 100) / 100) : null;
 }
+/* one source per space: where this file fills a space, the cutaway's own closed volumes for it (and the dense VLS
+   module blocks) thin to their outlines: their plates k times sparser, lines kept */
+const LIGHT = {
+  destroyer: { vlsBF: 3, vlsBA: 3, hangarIn: 2.2 }, cg: { vlsB: 3.5, mach: 1.6 }, lcs: { mach: 1.5, bay: 2.5 },
+  lhd: { machinery: 3.5, berthing: 4, vehicle: 3, hangar: 1.6 }, carrier: { magazines: 4, machinery: 3.5, reactors: 3, hangar: 1.6 },
+};
+const lighten = (prims, k) => prims.map(pr => pr && pr.t !== 'line' && pr.pts !== false ? O(pr, { ds: (pr.ds || 1) * k }) : pr);
+function lightParts(key, parts, cut) {
+  const L = LIGHT[key] || {};
+  return parts.map(p => L[p.name] && p.prims && (cut || p.name !== 'hangarIn') ? O(p, { prims: lighten(p.prims, L[p.name]) }) : p);
+}
 /* the model with its interior parts appended (the exterior untouched; a part the model already has is kept as it is) */
 function withInterior(key, cut) {
   return model => {
     const have = new Set(model.parts.map(p => p.name));
-    const add = build(key, cut).filter(p => !have.has(p.name));
-    return O(model, { parts: model.parts.concat(add), interior: true });
+    const add = lightParts(key, build(key, cut).filter(p => !have.has(p.name)), cut);
+    if (CTX[key]) tagParts(key, model.parts.filter(p => p.inside && !p.dyn));
+    return O(model, { parts: lightParts(key, model.parts, cut).concat(add), interior: true });
   };
 }
 export function installInterior(kit) {
   K = kit;
   const wrap = {};
   for (const k of ['destroyer', 'cg', 'lcs', 'lhd', 'carrier']) { wrap[k] = withInterior(k, false); wrap[k + '_cut'] = withInterior(k, true); }
-  return { wrap, ZONES, COMPS, anatomy: anatomyOf, zonesNear: interiorZones, build };
+  return { wrap, ZONES, COMPS, DECKS, anatomy: anatomyOf, zonesNear: interiorZones, supportOf, build };
 }
+/* ================================================================ supports: what each interior piece stands on
+   So a piece can fall (or go with it) when its support is torn. Every interior prim carries pr.sup, a string:
+     'D:<deck>'   stands on that deck (the floor under it)          'O:<deck>'  hangs from the deck over it (trays, ducts,
+     'B:<bhd>'    is fixed to that transverse bulkhead              'S'         is fixed to the side shell (frames, risers)
+     'X:<deck>'   IS that deck or flat (plating, its beams, hatch coamings)      lights, pipes under the overhead)
+     'X:<bhd>'    IS that bulkhead (plate, stiffeners, doors)         'X:L'       a longitudinal wall / partition
+   Decks: 'IB' inner bottom, then (DDG) 'P4' 'VF' 'D3' 'D2' 'PF', deckhouse levels '01' '02' '03', or (other classes)
+   'Y<height>' ('Y3.9'); 'MAIN' the main / hangar deck over the top. Bulkheads: 'fr<frame>' (DDG) or 'z<z>'.
+   part.support = the deck most of the part stands on ({ deck, y }), part.supports = { code: prims }.
+   DECKS[key] = [{ id, y, z0, z1 }] the decks (model frame), for mapping a torn plate to a code. supportOf(pr) parses one.
+   Classified from each prim's bounds against the class's decks and bulkheads (geometry, not hand-placed). */
+const CTX = {}, DECKS = {};
+const r2 = v => Math.round(v * 100) / 100;
+function ddCtx() {
+  const S = ddSpec(), LVID = { '-5.1': 'IB', '-1.6': 'P4', '-0.4': 'VF', '1.2': 'D3', '3.9': 'D2', '6.8': 'PF', '10.3': '01', '13.03': '02', '15.94': '03', '19.4': 'SPYR' };
+  const bz = DD.BK.map(k => ({ z: DD.fx(k), id: 'fr' + k }));
+  const zoneAt = z => DD.ZN.find(Z => z <= Z.z1 + .01 && z >= Z.z0 - .01) || DD.ZN[DD.ZN.length - 1];
+  const levels = z => {
+    const Z = zoneAt(z), L = Z.lv.map(y => ({ y, id: LVID[String(y)] || 'Y' + y }));
+    for (const v of DD.VLS) if (z >= v.z0 && z <= v.z1 && !L.some(q => q.y === v.floor)) L.push({ y: v.floor, id: LVID[String(v.floor)] });
+    L.push({ y: DD.deckY(z), id: 'MAIN' });
+    for (const y of [10.3, 13.03, 15.94]) if (y > DD.deckY(z) + .5) L.push({ y, id: LVID[String(y)] });
+    return L.sort((a, b) => a.y - b.y);
+  };
+  DECKS.destroyer = [];
+  for (const Z of DD.ZN) for (const y of Z.lv) DECKS.destroyer.push({ id: LVID[String(y)], y, z0: r2(Z.z0), z1: r2(Z.z1) });
+  DECKS.destroyer.push({ id: 'VF', y: -.4, z0: r2(DD.VLS[0].z0), z1: r2(DD.VLS[0].z1) }, { id: 'MAIN', y: null, z0: -77.6, z1: 77.6 });
+  return { S, bz, levels, deckId: y => LVID[String(r2(y))] || null };
+}
+function genCtx(r) {
+  const { S, spec } = r, ys = [...new Set(spec.decks.map(d => d.y))].sort((a, b) => a - b), ib = spec.decks.find(d => d.ib);
+  const idOf = y => ib && Math.abs(y - ib.y) < .01 ? 'IB' : 'Y' + (Math.round(y * 10) / 10);
+  const levels = z => {
+    const L = spec.decks.filter(d => (d.z0 === undefined || z >= d.z0 - .5) && (d.z1 === undefined || z <= d.z1 + .5)).map(d => ({ y: d.y, id: idOf(d.y) }));
+    L.push({ y: spec.deckTop(z), id: 'MAIN' });
+    return L.sort((a, b) => a.y - b.y);
+  };
+  return { S, bz: spec.bz.map(z => ({ z, id: 'z' + z })), levels, deckId: y => ys.some(v => Math.abs(v - y) < .01) ? idOf(y) : null, decks: spec.decks.map(d => ({ id: idOf(d.y), y: d.y, z0: d.z0, z1: d.z1 })) };
+}
+const _bp = { prims: [null] };
+function primBounds(pr) { _bp.prims[0] = pr; try { const [a, b] = GEO.bounds(_bp); return a[0] <= b[0] ? [a, b] : null; } catch (e) { return null; } }
+function supCode(C, pr) {
+  const B = primBounds(pr); if (!B) return null;
+  const [a, b] = B, dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2], zc = (a[2] + b[2]) / 2, yc = (a[1] + b[1]) / 2;
+  const big = Math.max(dx, dy, dz) > 1.4;
+  const nearB = C.bz.reduce((m, q) => Math.abs(q.z - zc) < Math.abs(m ? m.z - zc : 1e9) ? q : m, null);
+  // structure itself
+  if (big && dy < .06) { const id = C.deckId(yc); if (id) return 'X:' + id; }
+  if (big && dz < .06 && nearB && Math.abs(nearB.z - zc) < .12) return 'X:' + nearB.id;
+  if (big && dx < .06 && (pr.t === 'panel')) return 'X:L';
+  // frames and risers on the side shell (tall and thin, along the plating)
+  if (dy > 1.2 && dz < .4) { const w = C.S.hbc(zc, yc); if (w > 0 && Math.max(Math.abs(a[0]), Math.abs(b[0])) > w - .5 && dx < w * .8) return 'S'; }
+  const L = C.levels(zc);
+  let floor = L[0], over = L[L.length - 1];
+  for (const q of L) { if (q.y <= a[1] + .3) floor = q; }
+  for (let i = L.length - 1; i >= 0; i--) if (L[i].y >= b[1] - .3) over = L[i];
+  if (a[1] - floor.y < .4) return 'D:' + floor.id;
+  if (over.y - b[1] < .75 && over.y > b[1] - .3) return 'O:' + over.id;
+  if (nearB && Math.abs(nearB.z - zc) < .9 && dz < 1.2) return 'B:' + nearB.id;
+  const w = C.S.hbc(zc, yc);
+  if (w > 0 && Math.max(Math.abs(a[0]), Math.abs(b[0])) > w - 1.0) return 'S';
+  return 'D:' + floor.id;
+}
+function tagParts(key, parts) {
+  const C = CTX[key]; if (!C) return;
+  for (const p of parts) {
+    if (!p.inside || p.dyn || !p.prims || p.support) continue;
+    const cnt = {}, deck = {};
+    for (const pr of p.prims) {
+      if (!pr) continue;
+      if (pr.sup === undefined) pr.sup = supCode(C, pr);
+      if (!pr.sup) continue;
+      cnt[pr.sup] = (cnt[pr.sup] || 0) + 1;
+      if (pr.sup[0] === 'D') deck[pr.sup.slice(2)] = (deck[pr.sup.slice(2)] || 0) + 1;
+    }
+    const top = Object.entries(deck).sort((x, y) => y[1] - x[1])[0];
+    p.supports = cnt;
+    p.support = top ? { deck: top[0], y: (C.levels((boxOf(p) || [0, 0, 0, 0, 0, 0])[2] / 2 + (boxOf(p) || [0, 0, 0, 0, 0, 0])[5] / 2).find(q => q.id === top[0]) || {}).y } : null;
+  }
+}
+/* 'D:D3' -> { kind: 'deck', id: 'D3' } ('O' overhead, 'B' bulkhead, 'S' shell, 'X' the structure itself) */
+export function supportOf(pr) {
+  const c = pr && pr.sup; if (!c) return null;
+  const k = { D: 'deck', O: 'overhead', B: 'bulkhead', S: 'shell', X: 'self' }[c[0]];
+  return { kind: k, id: c.length > 2 ? c.slice(2) : null };
+}
+
 /* the zones within r m (along the length) of a model-frame point */
 export function interiorZones(key, p, r) {
   const Z = ZONES[key], out = {};
