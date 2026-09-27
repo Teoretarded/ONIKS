@@ -121,14 +121,58 @@ export function createLog(game, hud, parent) {
         }
         break;
       }
-      // a module destroyed (sim/damage.js): the ones one hit takes out merge into one line
+      // a module destroyed (sim/damage.js): the ones one hit takes out merge into one line (a ship with a subdivision
+      // reports through 'system' instead: its modules are nodes of her system graph, sim/ship.js)
       case 'module': {
         if (e.side !== side) break;
         const u = sim.units.get(e.unit);
-        if (!u) break;
+        if (!u || u.ship) break;
         const key = 'M' + u.id, r = merge(key, 1.5), nm = short(e.label || e.module);
         if (r) { if (!r.mods.includes(nm)) r.mods.push(nm); r.text = `${unitRef(u)} · ${r.mods.join(', ')} out`; r.t = sim.t; dirty = true; }
         else add('Dmg', `${unitRef(u)} · ${nm} out`, 'c', key).mods = [nm];
+        break;
+      }
+      // a ship's systems (sim/ship.js): what one hit (or a fire, the water, a lost supply) took out merges into one
+      // line with the capabilities it cost ('DDG 2 · Main switchboard 1, Fire pump 3 out · RADAR SM6 off'); back on line
+      case 'system': {
+        if (e.side !== side) break;
+        const u = sim.units.get(e.unit);
+        if (!u) break;
+        const cable = e.cls === 'cable';
+        const nm = e.node ? (cable ? 'cable way' : short(e.label)) : null;
+        if (e.state === 'out') {
+          const key = 'S' + u.id, r = merge(key, 2);
+          const why = e.why === 'power' ? 'no power' : e.why === 'supply' ? '' : e.why;
+          const item = nm ? nm + (why && why !== 'blast' && why !== 'frag' ? ` (${why})` : '') : null;
+          const row = r || add('Sys', '', 'c', key);
+          if (!row.mods) { row.mods = []; row.caps = []; row.nCable = 0; }
+          if (cable) row.nCable++; else if (item && !row.mods.includes(item)) row.mods.push(item);
+          for (const k of e.caps || []) if (!row.caps.includes(k)) row.caps.push(k);
+          const list = row.mods.slice(0, 3).concat(row.mods.length > 3 ? [`+${row.mods.length - 3}`] : []).concat(row.nCable ? [`${row.nCable} cable way${row.nCable > 1 ? 's' : ''}`] : []);
+          row.text = `${unitRef(u)} · ${list.join(', ')} out${row.caps.length ? ' · ' + row.caps.join(' ').toUpperCase() + ' off' : ''}`;
+          row.t = sim.t; dirty = true;
+        } else if (e.caps && e.caps.length) add('Sys', `${unitRef(u)} · ${e.caps.join(' ').toUpperCase()} back${nm ? ' · ' + nm : ''}`, 'l');
+        break;
+      }
+      // her spaces: breached below the waterline, flooded, a fire (merged per ship); she founders or capsizes
+      case 'compartment': {
+        if (e.side !== side) break;
+        const u = sim.units.get(e.unit);
+        if (!u) break;
+        const nm = short(e.label);
+        if (e.state === 'breach' && e.below) add('Flood', `${unitRef(u)} · ${nm} · holed below the waterline · ${e.A} m²`, 'c');
+        else if (e.state === 'flooded') add('Flood', `${unitRef(u)} · ${nm} flooded`, 'c');
+        else if (e.state === 'fire') {
+          const key = 'F' + u.id, r = merge(key, 3);
+          if (r) { if (!r.mods.includes(nm)) r.mods.push(nm); r.text = `${unitRef(u)} · fire · ${r.mods.slice(0, 3).join(', ')}${r.mods.length > 3 ? ` +${r.mods.length - 3}` : ''}`; r.t = sim.t; dirty = true; }
+          else add('Fire', `${unitRef(u)} · fire · ${nm}`, 'c', key).mods = [nm];
+        }
+        break;
+      }
+      case 'foundered': {
+        const u = sim.units.get(e.unit);
+        if (!u) break;
+        if (e.side === side) add('Lost', `${unitRef(u)} · ${e.why === 'capsized' ? 'capsized' : 'foundered'} · ${e.w} m³ in her`, 'c');
         break;
       }
       // what a module held went up: the unit is lost ('kill') or burning ('heavy')

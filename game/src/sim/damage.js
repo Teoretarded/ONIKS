@@ -8,6 +8,7 @@ import { COOK, HULL_SLOW } from '../data/modules.js';
 import { DT } from './consts.js';
 import { ground, clamp } from './util.js';
 import { bodyOf, pointUnit, toWorld } from './bodies.js';
+import { shipHit, shipCook } from './ship.js';
 
 /* hit (weapons.js): { part, part2, pos } where it struck: the part whose box the round entered (sim/bodies.js), the
    nearest other part (the spill-over) and the struck point (world). Optional: reach (m, the charge's reach; default
@@ -20,7 +21,8 @@ export function applyDamage(sim, u, dmg, src, hit) {
   const ev = sim.events[sim.events.length - 1];
   const vel = ev && ev.type === 'hit' && ev.target === u.id && ev.vel && !ev.burst && !ev.blast ? ev.vel : null;
   u.hp -= dmg;
-  if (d.domain === 'sea') floodHit(sim, u, dmg, src);
+  // a ship with a subdivision (sim/ship.js) floods through the holes the charge tears; the others by the old rule
+  if (d.domain === 'sea' && !u.ship) floodHit(sim, u, dmg, src);
   // the hit lands on one part; some of it spreads to a second part (the visual damage)
   const hitPart = hit && hit.part && d.parts[hit.part] ? hit.part : pickPart(d, r);
   hurtPart(sim, u, hitPart, dmg / u.hpMax * 2.2);
@@ -29,8 +31,12 @@ export function applyDamage(sim, u, dmg, src, hit) {
     if (!p2) { p2 = pickPart(d, r); if (p2 === hitPart) p2 = pickPart(d, r); }
     if (p2 !== hitPart) hurtPart(sim, u, p2, dmg / u.hpMax * .8);
   }
-  // the charge: the modules it reaches
-  if (d.modules.length) {
+  // the charge: the modules it reaches (a ship with a subdivision: its spaces, boundaries and systems, sim/ship.js)
+  if (u.ship) {
+    let wp = hit && hit.pos;
+    if (!wp) { partCentre(d, hitPart, MP); wp = toWorld(u, MP[0], MP[1], MP[2], [0, 0, 0]); }
+    shipHit(sim, u, dmg, src, wp, ev && ev.type === 'hit' && ev.target === u.id ? ev : null);
+  } else if (d.modules.length) {
     if (hit && hit.pos) burstAt(sim, u, dmg, hit.pos, hit.reach, src, vel);
     else { partCentre(d, hitPart, MP); burstIn(sim, u, dmg, MP[0], MP[1], MP[2], hit && hit.reach, src, 0, 0); }
   }
@@ -71,7 +77,7 @@ function hurtPart(sim, u, p, amount) {
   const before = u.parts[p];
   u.parts[p] = Math.min(1, before + amount);
   if (before < 1 && u.parts[p] >= 1) {
-    if (p === 'hull' && HULL_SLOW[u.type]) u.slowK *= HULL_SLOW[u.type];
+    if (p === 'hull' && HULL_SLOW[u.type]) mulSlow(u, HULL_SLOW[u.type]);
     const ds = modsIn(u, p);
     sim.emit('part', { unit: u.id, side: u.side, part: p, label: u.def.parts[p].label, disables: ds, pos: u.pos.slice() });
   }
@@ -139,7 +145,11 @@ function burstIn(sim, u, dmg, x, y, z, reach, src, depth, skin) {
   }
 }
 
-function hurtModule(sim, u, m, add, src, depth) {
+/* a speed factor that stays (u.slowB: destroyed engines, wheels, a wrecked hull), times the ship's systems' (u.sysK:
+   the power left on her shafts, the drag of her floodwater: sim/ship.js) */
+function mulSlow(u, f) { u.slowB *= f; u.slowK = u.slowB * u.sysK; }
+
+export function hurtModule(sim, u, m, add, src, depth) {
   if (add <= 0) return;
   const before = u.mods[m.id], after = before + add;
   const armed = m.cook && !(u.cook && u.cook[m.id]) && loaded(u, m.cook.ammo);   // before the module's loss empties it
@@ -161,15 +171,19 @@ function loaded(u, a) {
 }
 
 /* a module destroyed: what it carried is off (a group's once every module of the group is destroyed) */
-function moduleOut(sim, u, m) {
+export function moduleOut(sim, u, m) {
   let all = true;
   if (m.group) for (const g of u.def.modules) if (g.group === m.group && u.mods[g.id] < g.hp) { all = false; break; }
-  if (m.disables && all) for (const k of m.disables) u.off[k] = true;
+  // a ship with a system graph: what it switches off is the graph's (sim/ship.js caps), and its shafts' engines are
+  // the graph's propulsion (the speed goes with the power left)
+  const S = u.ship;
+  if (m.disables && all && !S) for (const k of m.disables) u.off[k] = true;
   if (m.lose) for (const k in m.lose) {
     if (k === 'cargo') u.cargo = Math.max(0, u.cargo - m.lose[k]);
     else if (u.ammo[k] !== undefined) u.ammo[k] = Math.floor(u.ammo[k] * (1 - m.lose[k]));
   }
-  if (m.slow) u.slowK *= m.slow;
+  if (m.slow && !(S && S.sp.propMods.has(m.id))) mulSlow(u, m.slow);
+  if (S) S.dirty = true;
   if (u.off.radar && u.radarOn) sim.setRadar(u, false, true);
   sim.emit('module', { unit: u.id, side: u.side, module: m.id, label: m.label, part: m.part, disables: all && m.disables || [], pos: modPos(u, m) });
   if (m.fatal) u.hp = Math.min(u.hp, 0);
@@ -195,9 +209,12 @@ function cookoff(sim, u, m, src, depth) {
     return;
   }
   u.hp -= C.dmg || 0;
-  if (u.def.domain === 'sea') u.flood = Math.min(.5, (u.flood || 0) + (C.dmg || 0) / u.hpMax * .3);
+  if (u.def.domain === 'sea' && !u.ship) u.flood = Math.min(.5, (u.flood || 0) + (C.dmg || 0) / u.hpMax * .3);
   if (C.fire) { u.fire = Math.max(u.fire, C.fire); u.fireRate = Math.max(u.fireRate, C.burn || 0); }
-  if (depth < COOK.depth && C.dmg) burstIn(sim, u, C.dmg, cx, cy, cz, C.size * COOK.chainR, src, depth + 1, 0);
+  if (depth < COOK.depth && C.dmg) {
+    if (u.ship) shipCook(sim, u, m, C.dmg, src, depth + 1);
+    else burstIn(sim, u, C.dmg, cx, cy, cz, C.size * COOK.chainR, src, depth + 1, 0);
+  }
   if (u.hp <= 0) kill(sim, u, src);
 }
 

@@ -25,6 +25,7 @@ import * as O from './inspect/overlay.js';
 import { SHORT, TRACK, status } from '../game/labels.js';
 import { MUSEUM_KEYS, groupOf, attachPaletteRow } from './inspect/museum.js';
 import { createImpact } from './inspect/impact.js';
+import { createShipView } from './inspect/ship_view.js';
 
 const TAU = Math.PI * 2;
 const sat = v => v < 0 ? 0 : v > 1 ? 1 : v;
@@ -71,6 +72,9 @@ export async function createInspect(game, ctx) {
   /* the impact test (sandbox, a unit open: B): ui/inspect/impact.js */
   const IMP = createImpact({ game, sim, R, cam, O, pcam, state: () => S });
   const impOk = V => V && V.kind === 'unit' && game.mode === 'sandbox';
+  /* a ship's compartments, water, fires and systems (sim/ship.js) over the X-ray and the impact test */
+  const SV = createShipView({ game, sim, O, pcam });
+  const svOk = V => V && V.kind === 'unit' && V.u && V.u.ship && (V.u.side === game.side || !sim.fog);
 
   function subjectOf(key) {
     if (!subjects.has(key)) {
@@ -624,6 +628,11 @@ export async function createInspect(game, ctx) {
     }
     if (!mb) for (const p of subj.parts) mb = subj.partBox(p, V.R0, V.T0, pcam, mb);
     V.mbox = mb;
+    // the ship's insides: once the slice has opened her (X-ray), or in the impact test
+    if (svOk(V) && V.ex.e < .05) {
+      const k = IMP.on ? 1 : ss(.55, 1, V.xr.k);
+      if (k > .01) SV.draw2d(ctx, W, H, A * k, V, IMP.on ? 'impact' : 'xray');
+    }
     const readBottom = drawReadout(ctx, W, H, A);
     drawTags(ctx, W, H, A, readBottom);
     drawSlice(ctx, W, H, A);
@@ -842,6 +851,7 @@ export async function createInspect(game, ctx) {
       L.push([rate, [game.timeRate === BULLET && !game.paused ? ' · bullet time · ' : ' · ', F], [`T+${game.fmtTime ? game.fmtTime(sim.t) : sim.t.toFixed(0)}`, F]]);
     }
     for (const segs of IMP.readout(F, Wt)) L.push(segs);
+    if (svOk(V) && (IMP.on || V.xr.k > .5)) for (const segs of SV.readout(F, Wt, V.u)) L.push(segs);
     if (V.lostT) L.push([[V.lostWhy, CORAL]]);
     for (const segs of L) { O.runs(ctx, x, y, segs, { size: 11.5, a: A }); y += 21; }
     return y;

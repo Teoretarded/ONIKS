@@ -10,6 +10,8 @@ import { senseTick, resolveScans, esmTick, sonarTick, getContact } from './senso
 import { depthGoal } from './subs.js';
 import { weaponsTick, stepProjectiles, launch } from './weapons.js';
 import { stepDying } from './damage.js';
+import { shipInit, stepShips } from './ship.js';
+import { SHIPK } from '../data/ship_systems.js';
 import { economyTick, buy, checkResult } from './economy.js';
 import { Weather } from './weather.js';
 import { AI } from './ai.js';
@@ -130,6 +132,7 @@ export class Sim {
       hp: def.hp, hpMax: def.hp, alive: true, dying: 0,
       st: {}, orders: [], ammo: {}, cooldowns: { scan: 0 }, radarOn: !!(def.sensors.radar), deployed: !!def.static,
       parts: {}, off: {}, mods: {}, slowK: 1, fire: 0, fireRate: 0, cook: null,   // modules and cook-offs (damage.js)
+      slowB: 1, sysK: 1, steerK: 1, ship: undefined,                          // speed factors; a ship's subdivision and systems (ship.js)
       hold: !!o.hold, path: null, wi: 0, goal: null, orbitR: 0, altT: def.altDef || 0, spdCap: 0, blocked: 0,
       dep: 0, depT: 0, elev: 0, elevT: 0, mast: 0, mastT: 0, caps: [0, 0],
       antA: 0, antW: 0, antT: 0, tYaw: 0, tPitch: 0, aimB: null, aimP: 0,
@@ -169,6 +172,7 @@ export class Sim {
       if (cv && cv.alive) { u.aboard = u.aboardOf = cv.id; u.pos = cv.pos.slice(); u.prev = cv.pos.slice(); u.speed = 0; u.hdg = cv.hdg; }
     }
     if (def.hq) this.sides[side].hadHq = true;
+    shipInit(this, u);
     this.units.set(id, u);
     this._dirty = true;
     def.modelState(u, this.t);
@@ -258,6 +262,7 @@ export class Sim {
     if (tick % SENSE_EVERY === 2) weaponsTick(this);
     stepProjectiles(this);
     stepDying(this);
+    if (tick % SHIPK.step === 3) stepShips(this);
     this.weather.step(DT);
     for (const side of SIDES) { const S = this.sides[side]; if (S.scanCd > 0) S.scanCd = Math.max(0, S.scanCd - DT); }
     for (let i = 0; i < list.length; i++) { const u = list[i]; u.def.modelState(u, t); }

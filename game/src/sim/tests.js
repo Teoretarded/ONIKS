@@ -12,6 +12,7 @@ import { PROJ } from '../data/units.js';
 import { launch, fireGun, spinout } from './weapons.js';
 import { segUnit, HIT, bodyOf, toWorld } from './bodies.js';
 import { applyDamage } from './damage.js';
+import { layoutOf, shipSpec, shipRefresh } from './ship.js';
 
 const Q = new URLSearchParams(location.search);
 const out = document.getElementById('out');
@@ -950,6 +951,126 @@ async function main() {
     ok(vmax > 40 * 0.5144, `top speed ${fmt(vmax / 0.5144)} kn`);
     ok(u.def.air && u.def.air.types.includes('helo'), 'no helicopter deck');
     return `${fmt(vmax / 0.5144)} kn after 150 s`;
+  });
+
+
+  /* ---------------------------------------------------------------- ships: compartments, systems, flooding (ship.js) */
+  await test('ship subdivision: every class builds (the DDG from the blast bench); points find their spaces', async () => {
+    const info = [];
+    for (const type of ['ddg', 'cg', 'carrier', 'lhd', 'lcs', 'ssn', 'ssk']) {
+      const L = layoutOf(type), sp = shipSpec(type);
+      ok(L && sp, `${type}: no layout`);
+      let bh = 0, hull = 0;
+      const zs = [];
+      for (let k = 0; k < L.bn; k++) if (L.bKind[k] === 'bulkhead') { bh++; const z = (L.bBox[k * 6 + 2] + L.bBox[k * 6 + 5]) / 2; if (!zs.some(v => Math.abs(v - z) < 1)) zs.push(z); }
+      for (let c = 0; c < L.n; c++) if (L.kind[c] !== 'house') hull += L.vol[c];
+      ok(L.n >= 5 && zs.length >= 2, `${type}: ${L.n} spaces, ${zs.length} bulkhead planes`);
+      ok(L.hydro.Awp > 0 && L.hydro.GML > 0 && L.hydro.reserve > 0, `${type}: hydrostatics ${JSON.stringify(L.hydro)}`);
+      info.push(`${type} ${L.n}/${zs.length}`);
+      // every system node sits somewhere real; a unit of the class spawns with everything working
+      const s = new Sim(map(), { seed: 1, fog: false });
+      const u = s.spawn(type, 'fleet', -60000, 0, { hdg: 0 });
+      ok(u.ship, `${type}: no ship state`);
+      const bad = u.ship.sp.nodes.filter(n => !u.ship.ok[n.i]).map(n => n.id);
+      ok(!bad.length, `${type}: out at spawn: ${bad.join(' ')}`);
+      ok(Object.values(u.ship.caps).every(Boolean), `${type}: a capability off at spawn`);
+      const nodesIn = u.ship.sp.nodes.filter(n => !n.mod && !n.pts && n.comp < 0).map(n => n.id);
+      ok(!nodesIn.length, `${type}: supporting systems outside her spaces: ${nodesIn.join(' ')}`);
+    }
+    const D = layoutOf('ddg');
+    ok(D.n === 82, `DDG ${D.n} spaces (the bench: 82)`);
+    ok(D.ids[D.at(0, -2, 0)] === 'MER1' && D.ids[D.at(0, -2, -20)] === 'MER2' && D.ids[D.at(0, 3, 38)] === 'VLSF', 'DDG: points in the wrong spaces');
+    ok(D.at(0, -3, 90) === -1 && D.at(0, 30, 0) === -2, 'DDG: outside is not the sea / air');
+    return info.join(' · ');
+  });
+
+  await test('ship hits: engine room, switchboard, waterline, deckhouse, keel; deterministic; cost', async () => {
+    const P = await import('./ship_probe.js');
+    // an Oniks into the engine room at the waterline: that room and its machinery, it floods, the rest of her works
+    const a = P.strike({ type: 'ddg', kind: 'oniks', at: [9.5, 1.5, 0], from: 'stbd', marks: [60, 300] });
+    const A1 = a.at[0].sum, u = a.u;
+    ok(A1.out.includes('engF') && A1.w > 500, `engine room: out ${A1.out.join(' ')}, water ${fmt(A1.w, 0)} m3`);
+    ok(!A1.out.includes('vlsF') && !A1.out.includes('gtg3') && A1.caps.radar, `engine room hit reached forward / aft: ${A1.out.join(' ')}`);
+    ok(u.alive && A1.prop > .5 && A1.prop < 1, `one shaft left: prop ${fmt(A1.prop, 2)}`);
+    ok(A1.sink > .1 && A1.sink < 3, `sinkage ${fmt(A1.sink, 2)} m`);
+    // at the forward switchboard: it and its generator, forward power lost (no power), casualty power brings it back
+    const b = P.strike({ type: 'ddg', kind: 'oniks', at: [9.2, 2, 14], from: 'stbd', marks: [30, 400] });
+    const B0 = b.at[0].sum, B1 = b.at[1].sum;
+    ok(B0.out.includes('swbd1') && b.log.some(l => l.includes('(power)')), `switchboard hit: ${B0.out.join(' ')}`);
+    ok(B1.caps.radar && B1.caps.sm6, `casualty power did not bring the radar back: ${B1.out.join(' ')}`);
+    // a 5" round on the deckhouse: a small hole, no water
+    const c = P.strike({ type: 'ddg', kind: 'shell', at: [8.2, 8, 25], from: 'stbd', marks: [60] });
+    ok(c.at[0].sum.w === 0 && c.at[0].sum.out.length <= 3, `5-inch: water ${c.at[0].sum.w}, out ${c.at[0].sum.out.join(' ')}`);
+    // a torpedo under the keel amidships: the bottom open under two or three spaces, water fast
+    const d = P.strike({ type: 'ddg', hits: [{ kind: 't53', at: [0, -8, -5], under: true, from: 'above' }], marks: [60, 300] });
+    ok(d.at[0].sum.w > 1500 || !d.u.alive, `torpedo: ${fmt(d.at[0].sum.w, 0)} m3 after a minute`);
+    // the same strike, the same result
+    const a2 = P.strike({ type: 'ddg', kind: 'oniks', at: [9.5, 1.5, 0], from: 'stbd', marks: [60, 300] });
+    ok(a2.text.replace(/[\d.]+ ms/, '') === a.text.replace(/[\d.]+ ms/, ''), 'not deterministic');
+    const ms = [a, b, c, a2].reduce((s, r) => s + r.ms, 0) / 4;
+    ok(ms < 3, `a hit took ${fmt(ms, 2)} ms`);
+    return `engine room: ${fmt(A1.w, 0)} m3, prop ${fmt(A1.prop, 2)}, sink ${fmt(A1.sink, 2)} m · switchboard: ${B0.out.length} out, back after casualty power · torpedo ${fmt(d.at[0].sum.w, 0)} m3 · ${fmt(ms, 2)} ms a hit`;
+  });
+
+  await test('ship flooding: intact bulkheads hold, torn ones pass the water, pumps win small leaks, she founders', async () => {
+    const s = new Sim(map(), { seed: 2, fog: false });
+    const u = s.spawn('ddg', 'fleet', -60000, 0, { hdg: 0 });
+    u.lastFire = 0; await run(s, 20 * 130);                       // general quarters: the doors are shut
+    const S = u.ship, L = S.L, ix = id => L.ids.indexOf(id);
+    const mer1 = ix('MER1'), mer2 = ix('MER2'), amr1 = ix('AMR1');
+    // a 2 m2 hole low in the engine room's side
+    const k = L.pair(mer1, -1);
+    S.torn[k] = 2; S.holes.push({ c: mer1, k, x: 9, y: -3, z: 0, r: .8, A: 2, A0: 2, sea: true }); S.active = true;
+    await run(s, 20 * 240);
+    const cap1 = L.vol[mer1] * L.perm[mer1];
+    ok(S.water[mer1] > cap1 * .5, `engine room ${fmt(S.water[mer1], 0)} of ${fmt(cap1, 0)} m3`);
+    ok(S.water[mer2] < 1 && S.water[amr1] < 1, `through intact bulkheads: MER2 ${fmt(S.water[mer2], 1)}, AMR1 ${fmt(S.water[amr1], 1)}`);
+    // the bulkhead aft torn: the water goes on
+    const kb = L.pair(mer1, mer2);
+    S.torn[kb] = 6; S.tornY[kb * 2] = -4.8; S.tornY[kb * 2 + 1] = -1; S.shore[kb] = 0;
+    await run(s, 20 * 120);
+    ok(S.water[mer2] > 100, `torn bulkhead: MER2 ${fmt(S.water[mer2], 0)} m3`);
+    const w1 = S.w, list1 = S.list, trim1 = S.trim;
+    // pumps win a small leak in a dry space (a 0.03 m2 hole: the eductors keep it down)
+    const s2 = new Sim(map(), { seed: 2, fog: false }), u2 = s2.spawn('ddg', 'fleet', -60000, 0, { hdg: 0 });
+    const S2 = u2.ship;
+    const st5 = S2.L.ids.indexOf('ST5');
+    S2.holes.push({ c: st5, k: S2.L.pair(st5, -1), x: 8, y: -.8, z: 32, r: .1, A: .03, A0: .03, sea: true }); S2.active = true;
+    await run(s2, 20 * 300);
+    ok(S2.water[st5] < S2.L.vol[st5] * S2.L.perm[st5] * .2, `small leak: ${fmt(S2.water[st5], 0)} m3 in the stores`);
+    // enough open below the water: she founders (or capsizes), the sinking by her flooded end
+    const s3 = new Sim(map(), { seed: 2, fog: false }), u3 = s3.spawn('ddg', 'fleet', -60000, 0, { hdg: 0 });
+    const S3 = u3.ship, L3 = S3.L;
+    for (const id of ['MER1', 'MER2', 'AMR1', 'AMR2', 'FO11', 'ST10']) {
+      const c = L3.ids.indexOf(id), kk = L3.pair(c, -1);
+      S3.holes.push({ c, k: kk, x: 8, y: -3, z: (L3.box[c * 6 + 2] + L3.box[c * 6 + 5]) / 2, r: 1.5, A: 7, A0: 7, sea: true });
+    }
+    for (let q = 0; q < L3.bn; q++) if (L3.bKind[q] === 'bulkhead' && L3.bBox[q * 6 + 2] < 20 && L3.bBox[q * 6 + 5] > -44) { S3.torn[q] = 10; S3.tornY[q * 2] = -5; S3.tornY[q * 2 + 1] = 0; }
+    S3.active = true;
+    let fnd = null;
+    await run(s3, 20 * 600, () => { for (const e of s3.drainEvents()) if (e.type === 'foundered') fnd = e; return !u3.alive; });
+    ok(fnd && !u3.alive, `still afloat with ${fmt(S3.w, 0)} m3, list ${fmt(S3.list * 57.3, 1)}°, fb ${fmt(S3.fb, 2)}`);
+    return `engine room ${fmt(S.water[mer1], 0)} m3 held by its bulkheads; torn aft: ${fmt(w1, 0)} m3, list ${fmt(list1 * 57.3, 1)}°, trim ${fmt(trim1 * 57.3, 2)}° · leak pumped · ${fnd.why} with ${fnd.w} m3`;
+  });
+
+  await test('ship systems: redundant power, cable ways by route, casualty power; speed and steering follow', async () => {
+    const s = new Sim(map(), { seed: 4, fog: false });
+    const u = s.spawn('ddg', 'fleet', -60000, 0, { hdg: 0 });
+    const S = u.ship, sp = S.sp, id = k => sp.byId.get(k).i;
+    // one switchboard lost: the others carry her through the cross-ties
+    S.h[id('swbd1')] = 1; shipRefresh(s, u);
+    ok(S.ok[id('cic')] && S.ok[id('spyProc')] && S.caps.radar, 'one switchboard took the combat system down');
+    // and the cable ways forward of it cut on both sides: forward is dark
+    for (const n of sp.nodes) if (n.cls === 'cable' && n.pts[2] >= 9 && n.pts[5] <= 20) S.h[n.i] = 1;
+    shipRefresh(s, u);
+    ok(!S.ok[id('cic')] && !S.caps.radar && S.why[id('cic')] === 'power', `forward still lit: cic ${S.ok[id('cic')]} (${S.why[id('cic')]})`);
+    // casualty power after its time
+    await run(s, 20 * 260);
+    ok(S.ok[id('cic')] && S.caps.radar, 'casualty power not rigged');
+    // propulsion: one engine room out -> the power left on one shaft; the steering gear out -> emergency steering
+    S.h[id('lube1')] = 1; S.h[id('steer')] = 1; shipRefresh(s, u);
+    ok(S.prop > .7 && S.prop < .85 && u.steerK < .5, `prop ${fmt(S.prop, 2)}, steering ${u.steerK}`);
+    return `SB1 lost: lit; forward cable ways cut: dark (power) · casualty power back · one shaft ${fmt(S.prop, 2)} · steering x${u.steerK}`;
   });
 
   await test('damage modules: where a hit lands matters; cook-offs are seeded, kill small units, burn big ships', async () => {

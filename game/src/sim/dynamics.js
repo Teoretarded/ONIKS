@@ -137,7 +137,7 @@ function shipP(d) {
 function driveShip(sim, u, vT, turnTo, dist, last) {
   const d = u.def, P = shipP(d), v0 = u.speed, a0 = d.accel || .1, cr = a0 / (d.speed * d.speed);
   let r = u.yawR || 0, rc = 0;
-  const Tn = P.yawT * P.L / Math.max(v0, 3), rMax = Math.max(v0, .3) / P.R;
+  const Tn = P.yawT * P.L / Math.max(v0, 3), rMax = Math.max(v0, .3) / P.R * u.steerK;   // steering gear lost: emergency steering
   if (turnTo !== null) {
     const e = wrapPi(angTo(u.hdg, turnTo) + (u.avH || 0));
     // the helmsman: rudder for the error, met with counter-rudder as she swings (critically damped on T / 3)
@@ -174,7 +174,8 @@ export function attitudeShip(sim, u) {
   }
   // flooding while afloat (damage.js): a list toward the damaged side, trim by the damaged end; the pumps gain slowly
   let list = 0, trim = 0;
-  if (u.flood > 0) {
+  if (u.ship) { list = u.ship.list; trim = u.ship.trim; }          // a ship with a subdivision: her floodwater (ship.js)
+  else if (u.flood > 0) {
     u.flood = Math.max(0, u.flood - .0006 * DT);
     list = (u.fSide || 0) * .14 * u.flood; trim = -(u.fEnd || 0) * .04 * u.flood;
   }
@@ -198,7 +199,7 @@ export function attitudeShip(sim, u) {
     u.squat = sq + (.015 * P.L * Fn2 * sh - sq) * DT / 4;
     u.trimS = tS + (.06 * Fn2 * sh - tS) * DT / 4;
     u.bow = Math.min(.03 * P.L, .2 * v * v / (2 * G)) * (1 + (sh - 1) * .5);
-    u.pos[1] = -u.squat - (d.sub ? u.depth - d.draught : 0) - (d.well ? d.well.ballast * (u.well || 0) : 0);
+    u.pos[1] = -u.squat - (d.sub ? u.depth - d.draught : 0) - (d.well ? d.well.ballast * (u.well || 0) : 0) - (u.ship ? u.ship.sink : 0);
     u.pitch = u.trimS + trim; u.roll = u.heel;
   }
   u.list = list; u.trim = trim;

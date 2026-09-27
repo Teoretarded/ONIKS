@@ -37,6 +37,7 @@ import { createBreakFx } from './fx.js';
 import { attitudeM } from '../debris/math.js';
 import { WH } from '../scars.js';
 import { Splash, Fire } from '../../fx/lib/impact.js';
+import { floodShare } from '../../sim/ship.js';
 
 const G = 9.81, RHO = 1025;
 const sat = v => v < 0 ? 0 : v > 1 ? 1 : v;
@@ -147,13 +148,26 @@ export async function createStructure(game) {
       armor: H.L > 240 ? .45 : 1,          // a carrier's (an LHD's) girder: heavy plating, deep, many decks
       wave: Math.max(1.2, H.L / 48), band: Math.max(.8, H.L / 85), amp: Math.max(1, H.L / 45), yc: (H.top * .6 - H.T) / 2,
     };
-    for (const h of hits) { damageGirder(S, h); addHole(S, h); }
+    // a ship with a subdivision (sim/ship.js): her holes are the ones the sim tore (the openings in her plating, where
+    // they are, how big), and the water already in her goes into the sections that hold those spaces; the others:
+    // holes estimated from the hits, the sim's flood share spread over them
+    const SH = u.ship;
+    for (const h of hits) { damageGirder(S, h); if (!SH) addHole(S, h); }
+    if (SH) for (const o of SH.holes) {
+      if (o.A <= .005) continue;
+      const r = Math.sqrt(o.A / Math.PI);
+      addHole(S, { x: o.x, y: o.y, z: o.z, r: r / .8, W: 0, under: o.y + r < -1.5, inside: false, t: sim.t });
+    }
     S.hitsSeen = hits.slice();
     setCaps(S);
     S.bubble = hits.some(h => h.under && sim.t - h.t < 2) ? hits.filter(h => h.under).reduce((a, h) => Math.max(a, h.W), 0) : 0;
-    // the water already in her (the sim's flooding) where the holes are
-    const f0 = Math.min(.5, (u.flood || 0) * .8);
-    if (f0 > 0) for (const o of S.holes) S.flood[o.c] = Math.max(S.flood[o.c], Math.min(.9, f0 * o.k));
+    // the water already in her (the sim's flooding)
+    if (SH) {
+      for (let i = 0; i < n; i++) for (let sd = 0; sd < 2; sd++) S.flood[i * 2 + sd] = Math.min(.9, floodShare(u, L.zc[i], L.zc[i + 1], sd ? 1 : -1));
+    } else {
+      const f0 = Math.min(.5, (u.flood || 0) * .8);
+      if (f0 > 0) for (const o of S.holes) S.flood[o.c] = Math.max(S.flood[o.c], Math.min(.9, f0 * o.k));
+    }
     // one piece, where she is drawn now, with her way on
     const pose = base(u), P = newPiece(S, 0, n - 1);
     attitudeM(pose.hdg, pose.pitch || 0, pose.roll || 0, M9);

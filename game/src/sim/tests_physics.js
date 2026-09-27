@@ -224,13 +224,14 @@ export async function physicsTests({ test, run, ok, fmt, map }) {
   await test('physics: a ship hit on the starboard bow lists to starboard, goes down by the bow; a wreck slides off a steep slope', async () => {
     const sim = new Sim(map(), { seed: 8, fog: false });
     const u = sim.spawn('ddg', 'fleet', -50000, 0, { hdg: 0 });
-    // a hit on the starboard bow, as weapons.js reports it, then the killing damage
-    const p = [u.pos[0] + 9, 4, u.pos[2] + 55];
-    sim.emit('hit', { pos: p, target: u.id, kind: 'oniks', side: 'coast' });
-    applyDamage(sim, u, u.hp * .6, null);
+    // a hit on the starboard bow at the waterline, as weapons.js reports it (it tears her below the water: sim/ship.js
+    // floods the spaces behind the hole), then the killing damage
+    const p = [u.pos[0] + 7.5, -.5, u.pos[2] + 45];
+    sim.emit('hit', { pos: p, target: u.id, kind: 'oniks', side: 'coast', vel: [-700, 0, 0] });
+    applyDamage(sim, u, u.hp * .6, null, { part: 'hull', pos: p });
     let listA = 0;
-    await run(sim, 20 * 30, () => { listA = Math.max(listA, u.list || 0); });
-    ok(u.alive && listA > .02, `afloat and hit: list ${fmt(listA * 57.3, 1)} deg (want a few degrees to starboard)`);
+    await run(sim, 20 * 90, () => { listA = Math.max(listA, u.list || 0); });
+    ok(u.alive && listA > .01, `afloat and hit: list ${fmt(listA * 57.3, 1)} deg (want a degree or more to starboard)`);
     sim.emit('hit', { pos: p, target: u.id, kind: 'oniks', side: 'coast' });
     applyDamage(sim, u, u.hp + 40, null);
     ok(!u.alive, 'not sunk');
