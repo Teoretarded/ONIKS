@@ -152,6 +152,8 @@ export function shipInit(sim, u) {
     gq: false, gqT: -1e9, lastHit: -1e9, lastThreat: -1e9, nextThreat: 0, dirty: true, active: false, cf: false, cfMark: new Uint8Array(L.n),
     flagged: new Uint8Array(L.n), prop: 1, steerK: 1, floodK: 1, lost: false, hits: 0, blastMs: 0,
   };
+  // (the class's layout and spec are shared and fixed: kept out of state walks, tools/sim.mjs deep hash)
+  Object.defineProperty(S, 'sp', { enumerable: false }); Object.defineProperty(S, 'L', { enumerable: false });
   for (const k of sp.capNames) S.caps[k] = true;
   // cruising (Yoke): some doors and hatches stand open
   for (let k = 0; k < L.bn; k++) if (L.bDoor[k] > 0 && hash01(u.id * 131 + 7, k) < SHIPK.yokeOpen) S.door[k] = 1;
