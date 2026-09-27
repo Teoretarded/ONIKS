@@ -23,7 +23,7 @@ export const HULL = {
   alu:     { mat: 'alu', belt: 8, side: 7, deck: 7, super: 5, superMat: 'alu', inner: 5, innerMat: 'alu', frame: 1.2, long: .5, deckH: 2.6, bhd: 10, tie: .6 },
   amphib:  { mat: 'hsla', belt: 14, side: 12, deck: 20, super: 8, superMat: 'mild', inner: 8, innerMat: 'mild', frame: 2.4, long: .8, deckH: 2.8, bhd: 14, tie: 1.4,
     levels: [0, -1.3, -7.7] },
-  carrier: { mat: 'hsla', belt: 25, side: 22, deck: 45, super: 10, superMat: 'hsla', inner: 12, innerMat: 'hsla', frame: 1.8, long: .9, deckH: 2.9, bhd: 16, tie: 2.5,
+  carrier: { mat: 'hsla', belt: 25, side: 22, deck: 45, super: 10, superMat: 'hts', inner: 12, innerMat: 'hsla', frame: 1.8, long: .9, deckH: 2.9, bhd: 16, tie: 2.5,
     levels: [0, -3.2, -11.6] },
   craft:   { mat: 'alu', belt: 5, side: 5, deck: 5, super: 4, superMat: 'alu', inner: 4, innerMat: 'alu', frame: 1, long: .5, deckH: 2.2, bhd: 6, tie: .4 },
   sub:     { mat: 'hsla', belt: 35, side: 35, deck: 35, super: 12, superMat: 'hsla', inner: 10, innerMat: 'hsla', frame: .75, long: .75, deckH: 2.6, bhd: 12, tie: 2 },
@@ -74,6 +74,9 @@ export function hitSpec(o) {
   const sn = v => Math.round(v / S) * S;
   const zoneMat = o.zone === 'super' ? H.superMat : H.mat;
   const tSkin = (o.tmm || H[o.zone] || H.side) / 1000;
+  // (a hit in the superstructure (a deckhouse, a carrier's island): its own light scantlings, not the hull's: the roof
+  // over it and the decks and bulkheads inside are superstructure plating, not the flight deck and the hull's decks)
+  const sup = o.zone === 'super', TIE = sup ? Math.min(1, H.tie) : H.tie, tDeck = (sup ? H.super : H.deck) / 1000, tIn = (sup ? Math.max(4, H.super * .7) : H.inner) / 1000, mIn = sup ? (H.superMat === 'alu' ? 'alu' : 'mild') : H.innerMat;   // (inside a deckhouse: mild steel decks and partitions)
   const along = X[2];                                   // local x per model z (side patches; deck: 1)
   const pu = sn(-a[2] * (Math.abs(along) > .3 ? Math.sign(along) : 1));   // frames at model z = k frame
   const plates = [];
@@ -91,7 +94,7 @@ export function hitSpec(o) {
   const bz = [];
   for (let k = Math.floor((a[2] - Rp) / H.bhd) - 1; k <= Math.ceil((a[2] + Rp) / H.bhd) + 1; k++) bz.push(k * H.bhd + H.bhd * .5);
   if (!deck) {
-    const Dz = sn(clamp(2 * hb * .9, 1.5, 6)), Dv = clamp(2 * hb, 2, 14);
+    const Dz = sn(clamp(2 * hb * .9, 1.5, 6)), Dv = clamp(sup ? Math.min(2 * hb, 10) : 2 * hb, 2, 14);   // (a deckhouse's spaces: ~10 m across at most, not the hull's beam)
     depth = Dz;
     let yb = sn(-.75 * Rp), yt = sn(.75 * Rp);
     let bigX = null;
@@ -112,16 +115,16 @@ export function hitSpec(o) {
     if (main > -1 && main < yt + 1.2) { yt = sn(main); topSkin = true; }
     if (yt - yb < 2) { yb = yt - sn(2); }
     const x0 = bigX ? bigX[0] : -sn(Rp), x1 = bigX ? bigX[1] : sn(Rp);
-    plates.push({ ax: 2, val: 0, u0: x0, u1: x1, v0: yb, v1: yt, h: tSkin, mat: zoneMat, fu: H.frame, pu, fv: H.long, pv: sn(-a[1]), heavy: 30e-4 * H.tie, light: 12e-4 * H.tie, tie: H.tie, skin: 1 });
-    if (topSkin) plates.push({ ax: 1, val: yt, u0: x0, u1: x1, v0: -Dz, v1: 0, h: H.deck / 1000, mat: H.mat, fu: H.frame, pu, fv: 1, pv: 0, heavy: 30e-4 * H.tie, light: 10e-4 * H.tie, tie: H.tie, skin: 1 });
+    plates.push({ ax: 2, val: 0, u0: x0, u1: x1, v0: yb, v1: yt, h: tSkin, mat: zoneMat, fu: H.frame, pu, fv: H.long, pv: sn(-a[1]), heavy: 30e-4 * TIE, light: 12e-4 * TIE, tie: TIE, skin: 1 });
+    if (topSkin) plates.push({ ax: 1, val: yt, u0: x0, u1: x1, v0: -Dz, v1: 0, h: tDeck, mat: sup ? zoneMat : H.mat, fu: H.frame, pu, fv: 1, pv: 0, heavy: 30e-4 * TIE, light: 10e-4 * TIE, tie: TIE, skin: 1 });
     // inner decks: the nearest to the hit first (up to 3)
     const inner = levels.map(y => sn(y - a[1])).filter(y => y > yb + S * 2 && y < yt - S * 2 && !(o.open && y + a[1] > o.open[0] - .2 && y + a[1] < o.open[1] + .2)).sort((p, q) => Math.abs(p) - Math.abs(q)).slice(0, o.big ? 4 : 3);
-    for (const y of inner) plates.push({ ax: 1, val: y, u0: x0, u1: x1, v0: -Dz, v1: 0, h: H.inner / 1000, mat: H.innerMat, fu: H.frame, pu, fv: 1, pv: 0, heavy: 20e-4 * H.tie, light: 8e-4 * H.tie, tie: H.tie });
+    for (const y of inner) plates.push({ ax: 1, val: y, u0: x0, u1: x1, v0: -Dz, v1: 0, h: tIn, mat: mIn, fu: H.frame, pu, fv: 1, pv: 0, heavy: 20e-4 * TIE, light: 8e-4 * TIE, tie: TIE });
     // the transverse bulkheads inside the patch: the nearest (big: the two nearest, the compartment's)
     const xbs = [];
     if (Math.abs(along) > .3) for (const z of bz) { const x = sn((z - a[2]) / along); if (x > x0 + (o.big ? .4 : 1) && x < x1 - (o.big ? .4 : 1)) xbs.push(x); }
     xbs.sort((p, q) => Math.abs(p - (o.big ? Cq[0] : 0)) - Math.abs(q - (o.big ? Cq[0] : 0))); xbs.length = Math.min(xbs.length, o.big ? 2 : 1); xbs.sort((p, q) => p - q);
-    for (const xb of xbs) plates.push({ ax: 0, val: xb, u0: -Dz, u1: 0, v0: yb, v1: yt, h: H.inner / 1000, mat: H.innerMat, fu: 0, fv: 1, pv: 0, heavy: 0, light: 8e-4 * H.tie, tie: H.tie });
+    for (const xb of xbs) plates.push({ ax: 0, val: xb, u0: -Dz, u1: 0, v0: yb, v1: yt, h: tIn, mat: mIn, fu: 0, fv: 1, pv: 0, heavy: 0, light: 8e-4 * TIE, tie: TIE });
     const xb = xbs.length ? xbs[0] : null;
     box = [x0, yb, -Dz, x1, yt, 0];
     // the spaces: between the decks (their real levels), either side of the bulkhead, to the far side

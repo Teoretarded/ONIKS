@@ -275,7 +275,7 @@ export async function createBlast(game) {
       if (regen && r.dead) r.dead.fill(0);
       const W = r.nu + 1, A = r.ax === 0 ? F.X : r.ax === 1 ? F.Y : F.Z, e0 = A[1] > .7 ? 0 : -(B.spec.depth || 4) - reach, e1 = A[1] > .7 ? 0 : 3;
       for (let j = 0; j <= r.nv; j++) for (let i = 0; i <= r.nu; i++) {
-        const t = j * W + i, f = (r.cpu[4 * t + 3] | 0) & 11;
+        const t = j * W + i, C4 = r.cpu, f = ((C4[4 * t + 3] | 0) & 11) | (C4[4 * t] ** 2 + C4[4 * t + 1] ** 2 + C4[4 * t + 2] ** 2 > 2.25 ? 16 : 0);   // (16: thrown > 1.5 m)
         if (!f || r.dead[t] === f) continue;
         r.dead[t] = f;
         const l = [0, 0, 0]; l[r.ax] = r.val;
@@ -707,7 +707,11 @@ export async function createBlast(game) {
       }
       poses.set(key, P); return P;
     };
-    const n = bodies.count(), stride = Math.max(1, Math.ceil(n / Math.max(300, cfg.maxDots * .4)));
+    // (each piece as dense as it needs on screen: a near one in full (its dots ~0.3 m apart about 1.6 px), far ones
+    // thinned; the total held near 14000 dots)
+    const n = bodies.count(), kAll = Math.max(1, n / 14000);
+    const stride = b => { const P = poseOf(b.uid, b.B, b.kind === 'clump' ? b.p[2] : 0); if (!P) return 0;
+      const px = .3 * P.pxm; return Math.max(1, Math.round(Math.min(40, Math.max(1, (1.6 / Math.max(.05, px)) ** 2)) * (px > 2.5 ? 1 : kAll))); };
     // (the moon in the model frame of the first unit drawn: the ships roll little)
     const sun = R.sun || [-.5, .62, -.6];
     let lightModel = sun;
@@ -720,8 +724,14 @@ export async function createBlast(game) {
       const wx = p0[0] + M[0] * x + M[1] * y + M[2] * z, wy = p0[1] + M[3] * x + M[4] * y + M[5] * z, wz = p0[2] + M[6] * x + M[7] * y + M[8] * z;
       const hs = (Math.imul(i + 7, 0x9E3779B1) >>> 0) / 4294967296, g = heat * (.6 + .4 * hs), bb = b * (.8 + .4 * hs);
       const size = P.pxm * .2 > 3 ? 3 : P.pxm * .2 > 1.4 ? 2 : 1;
-      sink.dot(wx, wy, wz, size, 255 * Math.min(1, bb * .95 + 1.1 * g), 255 * Math.min(1, bb * .9 + .55 * g), 255 * Math.min(1, bb * .84 + .15 * g), fade);
+      const cr = 255 * Math.min(1, bb * .95 + 1.1 * g), cg = 255 * Math.min(1, bb * .9 + .55 * g), cb = 255 * Math.min(1, bb * .84 + .15 * g);
+      sink.dot(wx, wy, wz, size, cr, cg, cb, fade);
       drawn++;
+      // (close up a piece's dots (~0.3 m apart) are filled in round each one, so it reads as a solid torn piece and not
+      // a scatter of specks: up to 8 more a dot, within 0.15 m, a little darker)
+      const extra = Math.min(8, Math.floor((.3 * P.pxm / 2.2) ** 2) - 1);
+      for (let e = 0; e < extra; e++) { const h1 = (Math.imul(i * 9 + e + 11, 0x9E3779B1) >>> 0) / 4294967296 - .5, h2 = (Math.imul(i * 9 + e + 29, 0x85EBCA77) >>> 0) / 4294967296 - .5, h3 = (Math.imul(i * 9 + e + 47, 0xC2B2AE35) >>> 0) / 4294967296 - .5;
+        const k2 = .82 + .3 * h3; sink.dot(wx + .3 * h1, wy + .3 * h3 * .5, wz + .3 * h2, size, cr * k2, cg * k2, cb * k2, fade); drawn++; }
     }, stride, lightModel);
     return drawn;
   }

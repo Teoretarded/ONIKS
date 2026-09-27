@@ -625,7 +625,8 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
         vec3 dlb = mix(mix(t00.xyz, t10.xyz, fx), mix(t01.xyz, t11.xyz, fx), fy);
         if (off > -0.05 && off < (A.y > 0.7 ? 30.0 : 3.0)) {
           // (torn: the smooth ragged outline, as the plating's own; the nearest texel's flag would cut 0.25 m steps)
-          if (torn || (fN & 10) != 0) return 1;
+          // (the plating under its foot thrown more than 1.5 m: it tears off and falls as a piece, the blast system flies it)
+          if (torn || (fN & 10) != 0 || dot(dlb, dlb) > 2.25) return 1;
           p += X * dlb.x + Y * dlb.y + Z * dlb.z;
           // (its underside, seen only from inside through a hole in the deck: the ceiling there)
           if (!two && dot(n, A) < -0.5) gHole = max(gHole, 0.6);

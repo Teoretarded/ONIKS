@@ -134,7 +134,12 @@ export function classify(B, x, y, z, nx, ny, nz, info, ins) {
     if (Math.abs(off) > band || !face) {
       // (the shader's torn test: the cells' torn flags interpolated at the point against its ragged threshold)
       const torn = tornAt(T, W, r.nu, r.nv, fi, fj, u, v, l);
-      if (off > -.05 && off < (A[1] > .7 ? 30 : 3)) return torn || (fN & 10) ? K.COLDROP : K.COL;
+      if (off > -.05 && off < (A[1] > .7 ? 30 : 3)) {
+        // (the plating under its foot thrown more than 1.5 m: what stood on it does not ride along as a clean block, it
+        // tears off and falls as a piece: QA D23; as the shader)
+        const D2 = k2 => { const q = c => T[4 * c + k2]; const c00 = j0 * W + i0; return (q(c00) * (1 - fx) + q(c00 + 1) * fx) * (1 - fy) + (q(c00 + W) * (1 - fx) + q(c00 + W + 1) * fx) * fy; };
+        const big = D2(0) ** 2 + D2(1) ** 2 + D2(2) ** 2 > 2.25;
+        return torn || big || (fN & 10) ? K.COLDROP : K.COL; }
       if (ins && off <= -.05 && off > -D - 8) {
         // an interior part: wrecked where the plating over it tore (most of its dots gone, the same hash as the shader's)
         const wd = Math.max(0, 1 + off / (D + .4));
@@ -329,9 +334,10 @@ export function createBodies() {
   }
   /* each dot of every body in the model frame: cb(uid, B, x, y, z, brightness, heat, fade, i); L: the light in the model
      frame (a clump's dots are lit by their own face as it turns) */
-  sys.each = (cb, stride = 1, L = null) => {
+  sys.each = (cb, strideIn = 1, L = null) => {
     for (const b of list) {
       if (b.gone) continue;
+      const stride = typeof strideIn === 'function' ? strideIn(b) : strideIn; if (!(stride > 0)) continue;
       const heat = b.hot * Math.exp(-b.t / 1.6);
       if (b.kind === 'dots') { for (let i = 0; i < b.n; i += stride) { if (b.st[i] === 2) continue; const o = 7 * i; cb(b.uid, b.B, b.P[o], b.P[o + 1], b.P[o + 2], b.P[o + 6], heat, 1, i); } continue; }
       const R = b.R, rel = b.rel;
