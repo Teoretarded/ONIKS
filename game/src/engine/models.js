@@ -284,6 +284,7 @@ void main() {
     if (bk == 1) { ${CULL} return; }
     // (a plug's splat is widened: seen at an angle through the hole, the far end of the pocket is wider than the hole)
     if (bk == 2) { su *= 2.5; sv *= 2.5; }
+    if (bk == 4) { su *= 0.4; sv *= 0.4; }
     twoS = bk == 3;
   }
   float dist = length(p);
@@ -616,6 +617,8 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
         if (mk > 0.001) { float ek = clamp(1.0 - (thr - mk) / 0.22, 0.0, 1.0); edge = max(edge, 0.85 * ek); heatN = max(heatN, heat); hot = max(hot, heat * 0.6 * ek); burn = max(burn, 0.9 * ek); }
         // (plating at a hole's edge: the torn cells' corners fly off, it does not stretch after them)
         if (mk > 0.001) { float dL = length(dl); if (dL > 0.8) dl *= 0.8 / dL; }
+        // (depth pass: the plating's splats at a hole's edge are small, so the hole's outline is the dots', not the splat grid's)
+        if (dp && mk > 0.001) { p += X * dl.x + Y * dl.y + Z * dl.z; return 4; }
         // a torn edge: its corners' flags, fading across the cell
         float e = mix(mix(float((f00 & 4) >> 2), float((int(t10.w) & 4) >> 2), fx), mix(float((int(t01.w) & 4) >> 2), float((int(t11.w) & 4) >> 2), fx), fy);
         if (e > 0.3) { edge = max(edge, 0.8 * e); heatN = max(heatN, heat); hot = max(hot, heat * 0.55 * e); }
