@@ -14,7 +14,7 @@ import { removeUnits } from '../game/sandbox.js';
 import { attitude } from '../engine/models.js';
 
 const PI = Math.PI;
-const FACE = { stbd: [PI / 2, .16], port: [-PI / 2, .16], fwd: [0, .16], aft: [PI, .16], deck: [PI / 2, .85], deckP: [-PI / 2, .85] };
+const FACE = { stbd: [PI / 2, .16], port: [-PI / 2, .16], fwd: [0, .16], aft: [PI, .16], deck: [PI / 2, .85], deckP: [-PI / 2, .85], deckA: [PI, .85] };
 
 /* model frame: +X starboard, +Y up (0 the waterline), +Z bow. from: toward where the round came from */
 export const CASES = [
@@ -38,6 +38,10 @@ export const CASES = [
   { id: 'ddg_breakup', type: 'ddg', kind: 'oniks', loc: [10, 3, -5], from: [1, .05, 0], face: 'stbd', dmg: 999, settle: 40 },
   // flooding: a hole under the water, its spread over time
   { id: 'ddg_below', type: 'ddg', kind: 'oniks', loc: [9.9, -1.2, -12], from: [1, -.05, 0], face: 'stbd', ff: 180 },
+  { id: 'ddg_fdeck', type: 'ddg', kind: 'oniks', loc: [0, 5.8, -62], from: [.2, 1, -.3], face: 'deckA' },
+  // D14: the same hole under the water, doors forced open vs watertight doors held shut, 180 s run ahead
+  { id: 'ddg_doors_open', type: 'ddg', kind: 'oniks', loc: [9.9, -1.2, -12], from: [1, -.05, 0], face: 'stbd', ff: 180, doors: 'open' },
+  { id: 'ddg_doors_shut', type: 'ddg', kind: 'oniks', loc: [9.9, -1.2, -12], from: [1, -.05, 0], face: 'stbd', ff: 180, doors: 'shut' },
   { id: 'ddg_wl_ff', type: 'ddg', kind: 'oniks', loc: [10, .8, 20], from: [1, .02, 0], face: 'stbd', ff: 180 },
   // CG-47
   { id: 'cg_side', type: 'cg', kind: 'oniks', loc: [8.4, 4, -10], from: [1, .05, 0], face: 'stbd' },
@@ -75,6 +79,14 @@ async function frame(O, rec) {
 }
 async function frames(O, n, rec) { for (let i = 0; i < n; i++) await frame(O, rec); }
 
+/* D14 cases: every door in the ship's subdivision forced open (1) or shut (0) */
+function forceDoors(O, id, how) {
+  const u = O.sim.units.get(id), S = u && u.ship; if (!S || !S.L) return 0;
+  let n = 0;
+  for (let k = 0; k < S.L.bn; k++) if (S.L.bDoor[k] > 0) { S.door[k] = how === 'open' ? 1 : 0; n++; }
+  S.active = true;
+  return n;
+}
 let slot = 0;
 function clearSpot(O) {
   // open water away from the other side: the fleet ship furthest from the coast side's units, then 3 km further out
@@ -182,6 +194,7 @@ export async function runCase(O, c, o = {}) {
     }
   } else {
     hit(O, id, c.loc, c.kind, { from: c.from, dmg: c.dmg });
+    if (c.doors) row.doorsForced = forceDoors(O, id, c.doors);
   }
   const B = g.blast && g.blast.last && g.blast.last(id);
   row.patch = !!B;
@@ -212,7 +225,7 @@ export async function runCase(O, c, o = {}) {
   for (const [k, tag] of [['a', 'set_a60'], ['b', 'set_b60'], ['d', 'set_d25'], ['e', 'set_e12'], ['w', 'set_w300']]) { await shot(O, id, aim, V[k], `${dir}/${c.id}_${tag}`); row.shots.push(tag); }
   row.sys = systems(O, id);
   // flooding over time: the sim run ahead (no rendering), the state again and a wide still
-  if (c.ff) { const lost = []; const oe = sim.emit.bind(sim); sim.emit = (t, e) => { if (e && (e.unit === id || e.target === id) && lost.length < 40) lost.push([t, +sim.t.toFixed(1), JSON.stringify(e, (a, v) => typeof v === 'number' ? +v.toFixed(3) : v).slice(0, 240)]); return oe(t, e); }; O.ff(c.ff); sim.emit = oe; row.ffEvents = lost; O.advance(.1, 3); row.sys2 = systems(O, id); await shot(O, id, aim, V.w, `${dir}/${c.id}_ff${c.ff}_w300`); await shot(O, id, aim, V.a, `${dir}/${c.id}_ff${c.ff}_a60`); row.shots.push('ff'); }
+  if (c.ff) { const lost = []; const oe = sim.emit.bind(sim); sim.emit = (t, e) => { if (e && (e.unit === id || e.target === id) && lost.length < 40) lost.push([t, +sim.t.toFixed(1), JSON.stringify(e, (a, v) => typeof v === 'number' ? +v.toFixed(3) : v).slice(0, 240)]); return oe(t, e); }; if (c.doors) { const k = 12; for (let i = 0; i < k; i++) { forceDoors(O, id, c.doors); O.ff(c.ff / k); } } else O.ff(c.ff); sim.emit = oe; row.ffEvents = lost; O.advance(.1, 3); row.sys2 = systems(O, id); await shot(O, id, aim, V.w, `${dir}/${c.id}_ff${c.ff}_w300`); await shot(O, id, aim, V.a, `${dir}/${c.id}_ff${c.ff}_a60`); row.shots.push('ff'); }
   // what the player is told: the HUD (its log) and the Inspect view of her with X-ray (systems out, flooded spaces)
   if (c.ff || o.hud) {
     try {
@@ -225,7 +238,13 @@ export async function runCase(O, c, o = {}) {
       if (I && I.open) {
         I.open(id); for (let i = 0; i < 90; i++) await frame(O);
         await O.hudShot(`${dir}/${c.id}_inspect`);
-        if (IS && IS.onKey) { IS.onKey({ code: 'KeyX', key: 'x', preventDefault() {}, stopPropagation() {} }); for (let i = 0; i < 90; i++) await frame(O); await O.hudShot(`${dir}/${c.id}_xray`); }
+        // the X-ray: on by default when Inspect opens (X toggles it: pressed only if it is off), shot once the slice has
+        // run the length of her and the tags have condensed (~1 s after)
+        const XS = () => I.state && I.state.xr;
+        if (IS && IS.onKey && XS() && !XS().on) IS.onKey({ code: 'KeyX', key: 'x', preventDefault() {}, stopPropagation() {} });
+        for (let i = 0; i < 900 && !(XS() && XS().k >= 1); i++) await frame(O);
+        for (let i = 0; i < 75; i++) await frame(O);
+        await O.hudShot(`${dir}/${c.id}_xray`);
         I.close(); for (let i = 0; i < 150; i++) await frame(O);
       }
       row.shots.push('hud', 'inspect', 'xray');
