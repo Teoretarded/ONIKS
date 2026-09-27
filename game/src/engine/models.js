@@ -134,7 +134,7 @@ void main() {
   }
   // scars (game/scars.js): the plating dished, bulged, bent, holed, charred where hits struck; the model's own dots in
   // the pocket behind a hole gone (scars.js draws what is inside)
-  float burn = 0.0, hot = 0.0, edge = 0.0, heatN = 0.0;
+  float burn = 0.0, hot = 0.0, edge = 0.0, heatN = 0.0; gIn = uX.z;
   if (uScN > 0 && scarAt(p, uR * aNrm.xyz, hid, false, burn, hot, edge, heatN) == 1) { ${CULL} return; }
   // blast patches (game/src/blast): the plating as the solver left it
   vec3 btTilt = vec3(0.0);
@@ -224,7 +224,7 @@ void main() {
   vCol = min(rgb * sub, vec3(1.0));
   // the dot's size from the spacing it keeps on screen (the sub-dots' own), capped (never a blob close up)
   float pe = pxs / (sv > 0.0 ? sqrt(max(need, 1.0)) : max(need, 1.0));
-  gl_PointSize = dotPx(min(max(pe, uDen.x) * (0.8 + 0.4 * hr), uSub.z) * (edge > 0.0 ? 1.6 : 1.0));
+  gl_PointSize = dotPx(min(max(pe, uDen.x) * (0.8 + 0.4 * hr), uSub.z) * (edge > 0.0 ? 1.0 + 0.3 * edge : 1.0));
 }
 `;
 
@@ -260,6 +260,7 @@ void main() {
   }
   // scars: the splats follow the bent plating; a hole's own splats are pushed back to the far end of the pocket
   // behind it (a plug: what is inside shows, the far side of the hull and the sea do not)
+  gIn = uP.x;
   if (uScN > 0) {
     float b0 = 0.0, h0 = 0.0, e0 = 0.0, n0 = 0.0;
     if (scarAt(p, uR * aNrm.xyz, hash1(uint(gl_VertexID) * 747796405u + 2891336453u), true, b0, h0, e0, n0) == 1) { ${CULL} return; }
@@ -315,6 +316,7 @@ void main() {
 const SC0 = new Float32Array(32);
 function scarGLSL() {
   return `
+float gIn = 0.0;                   // this part is inside the hull (an interior part, data/models_interior.js: part.inside)
 // scars: where hits struck this instance, world-aligned, relative to the eye
 uniform vec4 uScA[8];     // xyz: the mark's centre on the surface, w: its radius (m: the hole, the dent, the pockmarks' spread)
 uniform vec4 uScB[8];     // xyz: the surface's outward normal there, w: seed
@@ -397,7 +399,8 @@ int scarAt(inout vec3 p, vec3 n, uint hid, bool dp, inout float burn, inout floa
     // the model's own surfaces across the pocket behind it (a far wall, a deck inside a deck hole): gone, scars.js draws
     // the inside (what is beyond, the far side, is behind the plug); plating along the pocket (a hull side under a deck
     // hole, a deck over a side hole) stays
-    if (lq < 1.05 && al < -0.3 && al > -K.y - 0.4 && abs(dot(n, nn)) > 0.6) return 1;
+    // (an interior part is spared: charred where it is close to the hole)
+    if (lq < 1.05 && al < -0.3 && al > -K.y - 0.4 && abs(dot(n, nn)) > 0.6) { if (gIn < 0.5) return 1; burn = max(burn, 0.6); }
     if (q < 1.0) {
       if (dp) { p -= nn * (K.y + 0.3); return 2; }
       // the hole: gone, a few torn dots left bent the blast's way
@@ -497,10 +500,20 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
           p += X * dlb.x + Y * dlb.y + Z * dlb.z;
           break;
         }
+        if (off <= -0.05 && gIn > 0.5 && off > -D - 8.0) {
+          // an interior part (bulkheads, decks, machinery...): wrecked where the plating over it tore (most of it gone,
+          // the rest charred and pushed with the plating), followed and scorched behind plating that held
+          float wd = max(0.0, 1.0 - (-off) / (D + 0.4));
+          if (torn || (fN & 3) != 0) { if (fract(sin(dot(floor(p * 4.0), vec3(12.99, 78.23, 37.71))) * 43758.55) < 0.7 * wd + 0.2) return 1; burn = max(burn, 0.85); }
+          else if ((fN & 8) != 0) burn = max(burn, 0.5 * wd);
+          p += (X * dlb.x + Y * dlb.y + Z * dlb.z) * wd;
+          break;
+        }
         if (off <= -0.05 && off > -D - 0.4) {
           // (not at the plate's edges: the ship's shell or bulkhead the plate meets there stands on its own)
           float ed = min(min(fi, Q.x - fi), min(fj, Q.y - fj)) * S;
-          if (ed > 0.6 && (torn || (fN & 11) != 0)) return 1;
+          // (and only the surfaces facing the plate, or lines: the ship's shell and walls across the pocket stay)
+          if ((face || two) && ed > 0.6 && (torn || (fN & 11) != 0)) return 1;
           float wd = 1.0 - (-off) / (D + 0.4);
           p += (X * dlb.x + Y * dlb.y + Z * dlb.z) * wd;
           break;
@@ -511,10 +524,13 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
       if (torn) {
         // the hole: the depth splat pushed back to the pocket's far end (a plug); the dots ride their quarter's corner
         // (petals bent the blast's way), gone with it if it went
-        if (dp) { p -= A * (D + 0.3); return 2; }
+        if (dp) { p -= A * (D + 8.3); return 2; }
         bool lx = fx < 0.5, ly = fy < 0.5;
         vec4 tc = lx ? (ly ? t00 : t01) : (ly ? t10 : t11);
         if ((int(tc.w) & 2) != 0) return 1;
+        // (a line of the model over the hole (the sheer, a rail's foot): not plating, it goes with the plating it ran on;
+        // the blast system flies it)
+        if (two) return 1;
         // (a torn cell's plating: shreds hanging off its corner, ragged (each dot its own share drawn in) and curled the
         // way the corner went, as the petals the grid is too coarse to tear)
         vec2 r0 = vec2(fx, fy) - vec2(lx ? 0.0 : 1.0, ly ? 0.0 : 1.0);
@@ -527,7 +543,7 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
         { vec3 Ua = ax == 0 ? Z : X, Va = ax == 1 ? Z : Y; tilt -= (Ua * r0.x + Va * r0.y) * (cu * 3.2 / S); }
         // (a shred hangs off its corner: past a ragged length it is gone)
         if (length(r0) > mix(0.35, 0.8, fract(hq * 7.13))) return 1;
-        edge = max(edge, 0.85); heatN = max(heatN, heat); hot = max(hot, heat * 0.9); burn = max(burn, 0.85);
+        heatN = max(heatN, heat); hot = max(hot, heat * 0.9); burn = max(burn, 0.85);
         // a petal bent over: its face leans with it (from the cell's corners, while none of them went)
         if ((int(t00.w) & 2) == 0 && (int(t10.w) & 2) == 0 && (int(t01.w) & 2) == 0 && (int(t11.w) & 2) == 0) {
           float gu = mix(t10[ax] - t00[ax], t11[ax] - t01[ax], fy) / S, gv = mix(t01[ax] - t00[ax], t11[ax] - t10[ax], fx) / S;
@@ -1269,7 +1285,7 @@ export class ModelLib {
       const r = this._rec(), m = r.m;
       m[0] = Rp[0]; m[1] = Rp[3]; m[2] = Rp[6]; m[3] = Rp[1]; m[4] = Rp[4]; m[5] = Rp[7]; m[6] = Rp[2]; m[7] = Rp[5]; m[8] = Rp[8];
       r.t[0] = Tp[0] - eye[0]; r.t[1] = Tp[1] - eye[1]; r.t[2] = Tp[2] - eye[2];
-      r.cl = cl; r.cl2 = cl2; r.k = k; r.pa = pa; r.pd = pd; r.rad = Pt.rad; r.dyn = Pt.dyn;
+      r.cl = cl; r.cl2 = cl2; r.k = k; r.pa = pa; r.pd = pd; r.rad = Pt.rad; r.dyn = Pt.dyn; r.inside = !!part.inside;
       slabRec(r, K, R0, T0, eye);
       r.xr = d.partXray && d.partXray[Pt.name] !== undefined ? d.partXray[Pt.name] : (d.xray || 0);
       // the coral part tint only in a cutaway (Inspect, the hit replay: a cue there), and never on a unit with hit marks:
@@ -1398,7 +1414,7 @@ export class ModelLib {
       const cl = r.cl2 && r.cl2.sp < r.cl.sp ? r.cl2 : r.cl;
       gl.uniformMatrix3fv(u.uR, false, r.m);
       gl.uniform3f(u.uT, r.t[0], r.t[1], r.t[2]);
-      gl.uniform4f(u.uP, 0, this.occBias, 0, cl.sp);
+      gl.uniform4f(u.uP, r.inside ? 1 : 0, this.occBias, 0, cl.sp);
       n += this._drawCloud(cl, r, frame, true);
     }
     this.stats.occ += n;
@@ -1438,7 +1454,7 @@ export class ModelLib {
         const fl = Math.min(1, (cl.sp / spMax) * (cl.sp / spMax));
         gl.uniform4f(u.uP, r.pa, r.xr, r.dm, cl.sp);
         gl.uniform4f(u.uDen, r.den[0], r.den[1], Math.max(r.den[2], fl), r.den[3]);
-        gl.uniform4f(u.uX, r.k, r.k < 1 ? (c ? -1 : 1) : 0, 0, 0);
+        gl.uniform4f(u.uX, r.k, r.k < 1 ? (c ? -1 : 1) : 0, r.inside ? 1 : 0, 0);
         this._ns = !sub;
         drawn += this._drawCloud(cl, r, frame, false);
         this._ns = false;

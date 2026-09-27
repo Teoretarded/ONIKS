@@ -27,6 +27,7 @@ import { hitSpec, cookSpec, hullOf } from './spec.js';
 import { tntOf, S_GRID } from './phys.js';
 import { CASING } from './shell/model.js';
 import { attitudeM } from '../game/debris/math.js';
+import { interiorZones } from '../data/models_interior.js';
 import { modelDots, topAt, eachInColumns, classify, connectivity, K as CK, createBodies } from './support.js';
 
 const AW = 2048, AH = 2048;             // the skin atlas (RGBA16F texels: local displacement, flags + soot)
@@ -48,7 +49,7 @@ export async function createBlast(game) {
   // ONIKS.game.blast.cfg.solver
   const DEFAULT_SOLVER = typeof navigator !== 'undefined' && navigator.gpu ? 'shell' : 'lattice';
   const q0 = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('blast') : null;
-  const cfg = { watchDist: 4000, upTexels: 6000, maxDots: 5000, on: q0 !== 'off', gpuMs: 3, gpuMsSlow: 5, gpuMsShell: 6, gpuMsShellSlow: 8, shellS: .25, scatter: .05, latMs: 5, fastEnd: true,
+  const cfg = { watchDist: 4000, upTexels: 6000, maxDots: 5000, on: q0 !== 'off', gpuMs: 3, gpuMsSlow: 5, gpuMsShell: 6, gpuMsShellSlow: 8, detachMs: 1.5, shellS: .25, scatter: .05, latMs: 5, fastEnd: true,
     solver: q0 === 'shell' || q0 === 'lattice' ? q0 : DEFAULT_SOLVER };
 
   /* ------------------------------------------------------------ the atlas */
@@ -126,6 +127,8 @@ export async function createBlast(game) {
     spec.solver = client && client.mode === 'main' ? 'lattice' : cfg.solver;
     spec.gridS = spec.solver === 'shell' ? (spec.shellS = cfg.shellS) : S_GRID;
     // (the steel's scatter seeded by the impact's geometry: the same hit on the same class tears the same way)
+    // (a ship with an interior (data/models_interior.js) shows it through the hole: no dark far wall in the pocket)
+    spec.farWall = !Object.keys(interiorZones(u.def.model, [0, 0, 0], 1e4)).length;
     if (spec.solver === 'shell') { spec.fastEnd = cfg.fastEnd; spec.latMs = cfg.latMs; spec.scatter = cfg.scatter; let h = 2166136261; for (const v of [...String(u.type)].map(c => c.charCodeAt(0)).concat(spec.frame.O.map(x => Math.round(x * 4)), spec.charge.C.map(x => Math.round(x * 4)))) h = Math.imul(h ^ (v & 0xffff), 16777619); spec.seed = h | 0; }
     const B = { id, uid: u.id, S, spec, meta, t0: sim.t, state: 'wait', rects: [], inner: null, nIn: 0, tShow: 0, tSolve: 0, tearT: -1, final: null, res: null,
       depth: spec.depth || 4, heat: 0, lastT: -1, lastW: null, seed: (u.id * 131 + id * 7) % 997, info: null, ej: false };
@@ -203,7 +206,7 @@ export async function createBlast(game) {
       const A = B.torn || 0;
       S.bA = A; S.bSet = B.setMax;
       if (A > .02) { S.kind = A > 8 ? 'rupture' : 'hole'; S.r = Math.max(.2, Math.sqrt(A / Math.PI)); if (res && res.hole) { S.hx = res.hole.c[0]; S.hy = res.hole.c[1]; S.hz = res.hole.c[2]; } }
-      else { S.kind = 'dent'; S.r = Math.max(.3, (B.setMax || 0) * 8); }
+      else { S.kind = 'dent'; S.r = Math.max(.3, (B.setMax || 0) * 8); if (S.fire && !(B.byPlate || []).some(x => x > .05)) { try { S.fire.stop(sim.t); } catch (e) { /* */ } S.fire = null; } }   // (no hole anywhere: no fire burning on intact plating)
       // the fire's seats: on the torn rim (its upper part for a side) and on the deck inside
       if (res && res.hole && res.rim && res.rim.length) {
         const F = B.spec.frame, deck = B.spec.kind === 'deck', rim = res.rim, seats = [], c = res.hole.c;
@@ -248,7 +251,7 @@ export async function createBlast(game) {
   const entOf = u => { try { return ML.get(u.def.model); } catch (e) { return null; } };
   /* the plating that tore, went or lost its support since the last snapshot: the model's dots over it (the shader leaves
      them out from now on) fly as pieces of their part */
-  function detachScan(B) {
+  function detachScan(B, budgetMs) {
     const u = sim.units.get(B.uid); if (!u) return;
     const ent = entOf(u); if (!ent) return;
     const Md = modelDots(ent); if (!Md.n) return;
@@ -268,14 +271,26 @@ export async function createBlast(game) {
         if (r.ax === 0) { l[2] = r.u0 + i * S; l[1] = r.v0 + j * S; } else if (r.ax === 1) { l[0] = r.u0 + i * S; l[2] = r.v0 + j * S; } else { l[0] = r.u0 + i * S; l[1] = r.v0 + j * S; }
         for (let e = e0; e <= e1; e += 1) {
           const x = F.O[0] + F.X[0] * l[0] + F.Y[0] * l[1] + F.Z[0] * l[2] + A[0] * e, z = F.O[2] + F.X[2] * l[0] + F.Y[2] * l[1] + F.Z[2] * l[2] + A[2] * e;
-          for (let a1 = -1; a1 <= 1; a1++) for (let b1 = -1; b1 <= 1; b1++) cols.add((Math.floor(x) + a1) * 65536 + Math.floor(z) + b1);
+          for (let a1 = -1; a1 <= 1; a1++) for (let b1 = -1; b1 <= 1; b1++) cols.add((Math.floor(x) + a1 + 32768) * 65536 + Math.floor(z) + b1 + 32768);
         }
       }
     }
-    if (!cols.size) return;
+    if (cols.size) { const P = B.pendCols || (B.pendCols = new Set()); for (const c of cols) P.add(c); pendDetach.add(B); }
+    if (budgetMs !== undefined) detachWork(B, budgetMs);
+  }
+  /* the columns waiting to be looked at, a time budget a frame (a patch's plating going can touch thousands of dots) */
+  const pendDetach = new Set();
+  function detachWork(B, budgetMs) {
+    const P = B.pendCols; if (!P || !P.size) { pendDetach.delete(B); return; }
+    const u = sim.units.get(B.uid); if (!u) { pendDetach.delete(B); return; }
+    const ent = entOf(u), Md = ent && modelDots(ent); if (!Md || !Md.n) return;
+    const T = taken.get(B.uid), F = B.spec.frame, t0 = performance.now();
     const D = Md.D, pick = [], info = {};
-    for (const key of cols) {
-      const cx = Math.floor(key / 65536), cz = key - cx * 65536;
+    let nc = 0;
+    for (const key of P) {
+      if (nc && nc % 4 === 0 && performance.now() - t0 > budgetMs) break;
+      P.delete(key); nc++;
+      const cx = Math.floor(key / 65536) - 32768, cz = key % 65536 - 32768;
       eachInColumns(Md, cx + .5, cz + .5, cx + .5, cz + .5, i => {
         if (T[i]) return;
         const o = 7 * i, c = classify(B, D[o], D[o + 1], D[o + 2], D[o + 3], D[o + 4], D[o + 5], info);
@@ -283,6 +298,7 @@ export async function createBlast(game) {
         T[i] = 1; pick.push(i, info.r, info.i, info.j);
       });
     }
+    if (!P.size) pendDetach.delete(B);
     if (!pick.length) return;
     // pieces: the dots of one part joined within 0.7 m; each starts where its plating had carried it, moving with it
     const n = pick.length / 4, par = new Int32Array(n); for (let q = 0; q < n; q++) par[q] = q;
@@ -295,7 +311,8 @@ export async function createBlast(game) {
         const m2 = cell.get(kk + dx * 16777216 + dy * 4096 + dz); if (!m2) continue; const ra = fd(l[0]), rb = fd(m2[0]); if (ra !== rb) par[ra] = rb; }
       for (let q = 1; q < l.length; q++) { const ra = fd(l[0]), rb = fd(l[q]); if (ra !== rb) par[ra] = rb; }
     }
-    const groups = new Map(); for (let q = 0; q < n; q++) { const r0 = fd(q); let g = groups.get(r0); if (!g) groups.set(r0, g = []); g.push(q); }
+    // (and cut at 4 m: a torn-away stretch of structure breaks up, it does not leave as one clean block)
+    const groups = new Map(); for (let q = 0; q < n; q++) { const o = 7 * pick[4 * q], r0 = fd(q) * 4096 + ((Math.floor(D[o] / 4) & 15) * 256 + (Math.floor(D[o + 1] / 4) & 15) * 16 + (Math.floor(D[o + 2] / 4) & 15)); let g = groups.get(r0); if (!g) groups.set(r0, g = []); g.push(q); }
     const tS = Math.max(.02, B.tSolve || .02), running = B.state !== 'done';
     const singles = [];
     for (const g of groups.values()) {
@@ -306,14 +323,15 @@ export async function createBlast(game) {
         const dl = [r.cpu[t], r.cpu[t + 1], r.cpu[t + 2]];
         const d = [F.X[0] * dl[0] + F.Y[0] * dl[1] + F.Z[0] * dl[2], F.X[1] * dl[0] + F.Y[1] * dl[1] + F.Z[1] * dl[2], F.X[2] * dl[0] + F.Y[2] * dl[1] + F.Z[2] * dl[2]];
         const so = r.cpu[t + 3] % 1;
-        pts.push(D[o] + d[0], D[o + 1] + d[1], D[o + 2] + d[2], .55 * (1 - .6 * so));
+        // (steel that went through the blast: charred grey, darker where the soot lay)
+        pts.push(D[o] + d[0], D[o + 1] + d[1], D[o + 2] + d[2], .34 * (1 - .6 * so), D[o + 3], D[o + 4], D[o + 5]);
         vx += d[0]; vy += d[1]; vz += d[2];
       }
-      const m = pts.length / 4; vx /= m; vy /= m; vz /= m;
+      const m = pts.length / 7; vx /= m; vy /= m; vz /= m;
       // (while the solve runs its plating is moving: the piece leaves with it; at the end it just drops)
       let v = running ? [vx / tS, vy / tS, vz / tS] : [0, 0, 0];
       const sp = Math.hypot(v[0], v[1], v[2]); if (sp > 14) v = v.map(x => x * 14 / sp);
-      if (m < 4) { for (let q = 0; q < pts.length; q += 4) singles.push(pts[q], pts[q + 1], pts[q + 2], v[0], v[1], v[2], pts[q + 3], 0); continue; }
+      if (m < 4) { for (let q = 0; q < pts.length; q += 7) singles.push(pts[q], pts[q + 1], pts[q + 2], v[0], v[1], v[2], pts[q + 3], 0); continue; }
       bodies.clump(B.uid, B, pts, v, .25);
     }
     if (singles.length) bodies.dotsOf(B.uid, B, Float32Array.from(singles), .25);
@@ -327,6 +345,7 @@ export async function createBlast(game) {
     const Md = modelDots(ent); if (!Md.n) return;
     const L = (byUnit.get(B.uid) || []).filter(b => b.state === 'done' && b.rects.some(r => r.cpu));
     const t0 = performance.now(), info = {};
+    for (const b of L) detachWork(b, Infinity);
     for (let it = 0; it < 4; it++) {
       const C = connectivity(Md, L, taken.get(B.uid));
       const fl = C.floating.filter(g => g.length > 2);
@@ -343,7 +362,7 @@ export async function createBlast(game) {
       if (!touched.size) break;
       for (const r of touched) { const rows = Math.max(1, Math.floor(cfg.upTexels / (r.nu + 1)));
         for (let j = 0; j <= r.nv; j += rows) { const h = Math.min(rows, r.nv + 1 - j); upQ.push({ r, k: { i0: 0, j0: j, w: r.nu + 1, h, data: r.cpu.subarray(4 * j * (r.nu + 1), 4 * (j + h) * (r.nu + 1)) } }); } }
-      for (const b of L) detachScan(b);
+      for (const b of L) detachScan(b, Infinity);
     }
     stats.supportMs = performance.now() - t0;
   }
@@ -467,6 +486,7 @@ export async function createBlast(game) {
     stats.running = run; stats.shellRunning = runS;
     for (const uid of gone) if (!(game.structure && game.structure.draws && game.structure.draws(uid))) { gone.delete(uid); dropUnit(uid); }
     if (any && client && client.mode) { client.targets(TG); for (const k in TG) delete TG[k]; lastSent = game.realT; }
+    if (pendDetach.size) { const td = performance.now(); for (const B of [...pendDetach]) { try { detachWork(B, cfg.detachMs); } catch (e) { console.error('blast: detach', e); pendDetach.delete(B); } if (performance.now() - td > cfg.detachMs) break; } stats.detachWorkMs = performance.now() - td; }
     { const tt = game.t, h = lastBT === null ? 0 : tt - lastBT; lastBT = tt; if (bodies.list.length && h > 0) bodies.step(h, floorAt); }
     stats.updMs = performance.now() - t0;
   }
@@ -554,6 +574,11 @@ export async function createBlast(game) {
       poses.set(key, P); return P;
     };
     const n = bodies.count(), stride = Math.max(1, Math.ceil(n / Math.max(300, cfg.maxDots * .4)));
+    // (the moon in the model frame of the first unit drawn: the ships roll little)
+    const sun = R.sun || [-.5, .62, -.6];
+    let lightModel = sun;
+    for (const b of bodies.list) { const u = sim.units.get(b.uid); if (u) { const pose = game.unitPose(u), M = [1, 0, 0, 0, 1, 0, 0, 0, 1]; attitudeM(pose.hdg, pose.pitch || 0, pose.roll || 0, M);
+      lightModel = [M[0] * sun[0] + M[3] * sun[1] + M[6] * sun[2], M[1] * sun[0] + M[4] * sun[1] + M[7] * sun[2], M[2] * sun[0] + M[5] * sun[1] + M[8] * sun[2]]; break; } }
     let drawn = 0;
     bodies.each((uid, B, x, y, z, b, heat, fade, i) => {
       const P = poseOf(uid, B, z); if (!P) return;
@@ -563,7 +588,7 @@ export async function createBlast(game) {
       const size = P.pxm * .2 > 3 ? 3 : P.pxm * .2 > 1.4 ? 2 : 1;
       sink.dot(wx, wy, wz, size, 255 * Math.min(1, bb * .95 + 1.1 * g), 255 * Math.min(1, bb * .9 + .55 * g), 255 * Math.min(1, bb * .84 + .15 * g), fade);
       drawn++;
-    }, stride);
+    }, stride, lightModel);
     return drawn;
   }
 

@@ -64,6 +64,7 @@
 import { Fire } from '../fx/lib/impact.js';
 import { attitudeM } from './debris/math.js';
 import { MODULES } from '../data/modules.js';
+import { interiorZones } from '../data/models_interior.js';
 
 /* warhead (kg): public figures, rounded */
 export const WH = { oniks: 250, kalibr: 200, tlam: 450, slam: 360, uran: 145, hellfire: 9, kornet: 7, shell: 3.6, shell130: 3.6,
@@ -219,18 +220,25 @@ export function createScars(game) {
   /* the hit carried along the round's path onto the model's surface: the first dot along the path within rs of it,
      facing the round (else the nearest dot). h, din: model frame (din: the round's direction of travel) */
   function snap(ent, st, h, din, rs, out) {
-    let bs = 1e9, fb = 1e9, found = false;
+    let bs = 1e9, fb = 1e9, found = false, rr = rs;
     const o = out;
     const along = (x, y, z, nx, ny, nz) => {
       const vx = x - h[0], vy = y - h[1], vz = z - h[2];
       const s = vx * din[0] + vy * din[1] + vz * din[2], d2 = vx * vx + vy * vy + vz * vz;
       const two = nx * nx + ny * ny + nz * nz < .01;
-      if (s > -12 && s < 36 && d2 - s * s < rs * rs && (two || nx * din[0] + ny * din[1] + nz * din[2] < .25)) {
+      if (s > -12 && s < 36 && d2 - s * s < rr * rr && (two || nx * din[0] + ny * din[1] + nz * din[2] < .25)) {
         if (s < bs) { bs = s; found = true; o[0] = x; o[1] = y; o[2] = z; o[3] = two ? -din[0] : nx; o[4] = two ? -din[1] : ny; o[5] = two ? -din[2] : nz; }
       }
     };
-    for (let s0 = -12; s0 <= 36 && !found; s0 += 3) eachDot(ent, st, along, h[0] + din[0] * s0, h[1] + din[1] * s0, h[2] + din[2] * s0, rs + 1.6);
-    if (found) return true;
+    // a narrow cylinder round the path first (0.45 m: on a flared side the wide one met the plating ~2 m above the path
+    // first and the hit landed at the deck edge), the wide one only if nothing is that close to the path
+    const Gs = gridOf(ent, st), rn = Math.max(.45, Gs ? Gs.sp * .75 : .45);
+    for (const r0 of rs > rn ? [rn, rs] : [rs]) {
+      rr = r0;
+      for (let s0 = -12; s0 <= 36 && !found; s0 += 3) eachDot(ent, st, along, h[0] + din[0] * s0, h[1] + din[1] * s0, h[2] + din[2] * s0, rr + 1.6);
+      if (found) return true;
+    }
+    rr = rs;
     eachDot(ent, st, (x, y, z, nx, ny, nz) => {
       const d2 = (x - h[0]) ** 2 + (y - h[1]) ** 2 + (z - h[2]) ** 2, two = nx * nx + ny * ny + nz * nz < .01;
       if (d2 < fb) { fb = d2; o[0] = x; o[1] = y; o[2] = z; o[3] = two ? -din[0] : nx; o[4] = two ? -din[1] : ny; o[5] = two ? -din[2] : nz; }
@@ -415,6 +423,20 @@ export function createScars(game) {
     if (ys.length < 6) return null;
     ys.sort((p, q) => p - q);
     return ys[Math.floor(ys.length * .5)];
+  }
+  /* a holed ship shows her interior round the holes (data/models_interior.js: the zones within 8 m along her length of
+     each hole): d.st gets interior: { zone: 1 } (a copy, kept while her state object is the same) */
+  function showInterior(d, rec) {
+    let z = null;
+    for (const S of rec.list) {
+      const holed = (S.blast && ((S.blast.torn || 0) > .05 || (S.blast.byPlate || []).some(a => a > .05))) || S.kind === 'hole' || S.kind === 'rupture';
+      if (!holed) continue;
+      const zz = interiorZones(d.key, [S.x, S.y, S.z], 8); for (const k in zz) (z || (z = {}))[k] = 1;
+    }
+    if (!z) return;
+    const key = Object.keys(z).join(',');
+    if (!rec.stI || rec.stI.base !== d.st || rec.stI.key !== key) rec.stI = { base: d.st, key, st: Object.assign({}, d.st || {}, { interior: z }) };
+    d.st = rec.stI.st;
   }
   function halfBFn(u, G) {
     const env = G && G.env, B = u.def.size[1] / 2;
@@ -944,7 +966,7 @@ export function createScars(game) {
     update,
     draw3d(frame) {
       const t0 = performance.now();
-      for (const [id, rec] of recs) { const d = game.drawn.get(id); if (d) d.scars = rec.n ? rec : null; }
+      for (const [id, rec] of recs) { const d = game.drawn.get(id); if (d) { d.scars = rec.n ? rec : null; if (rec.n) showInterior(d, rec); } }
       if (!R.pcOff && groups.length) stats.ejecta = drawEjecta(frame);
       else stats.ejecta = 0;
       stats.inside = !R.pcOff && R.style !== 'orbital' ? drawInside(frame) : 0;

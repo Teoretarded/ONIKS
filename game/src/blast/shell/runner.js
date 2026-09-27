@@ -329,7 +329,7 @@ export function createShellRunner(gl, o = {}) {
       const nn = L0.n;
       for (let k = 0; k < L0.at.length; k++) {
         const n = L0.at[k];
-        if (!M.NFRM[n] || gone(n)) continue;
+        if (!M.NFRM[n] || gone(n) || M.TBRK[n] >= 0) continue;          // (under plating that tore: no web hangs there on its own)
         const u = R0[3 * n + ua], v = R0[3 * n + va];
         if (u < x0 || u > x1 || v < y0 || v > y1) continue;
         const w = M.NFRM[n] === 2 ? .4 : .18, so = M.SOOT[n], e = M.TBRK[n] >= 0 ? 1 : 0, sg = s.C[L0.ax] < L0.val ? -1 : -1;
@@ -337,7 +337,7 @@ export function createShellRunner(gl, o = {}) {
       }
       // the far side of the pocket (what the patch does not model: the next bulkhead / the ship's far side, dark, charred):
       // a hole never shows the sea through the ship
-      { const bx = sp.box, depth = L0.ax === 2 ? bx[2] : L0.ax === 1 ? bx[1] : bx[0], st2 = Math.max(.3, Math.sqrt((x1 - x0) * (y1 - y0) / 900));
+      if (sp.farWall !== false) { const bx = sp.box, depth = L0.ax === 2 ? bx[2] : L0.ax === 1 ? bx[1] : bx[0], st2 = Math.max(.3, Math.sqrt((x1 - x0) * (y1 - y0) / 900));
         for (let a2 = x0; a2 <= x1; a2 += st2) for (let b2 = y0; b2 <= y1; b2 += st2) {
           const h = Math.imul((a2 * 97 + b2 * 13) * 16 | 0, 0x9E3779B1) >>> 0, j1 = (h & 1023) / 1023 - .5, j2 = ((h >>> 10) & 1023) / 1023 - .5;
           const p = [0, 0, 0]; p[L0.ax] = depth + .05; p[ua] = a2 + j1 * st2; p[va] = b2 + j2 * st2;

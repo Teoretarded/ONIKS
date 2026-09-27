@@ -107,9 +107,10 @@ export function classify(B, x, y, z, nx, ny, nz, info) {
     if (info) { info.r = r; info.off = off; info.i = Math.round(fi); info.j = Math.round(fj); info.up = A[1] > .7; }
     if (Math.abs(off) > band || !face) {
       if (off > -.05 && off < (A[1] > .7 ? 30 : 3)) return (fN & 11) ? K.COLDROP : K.COL;
-      if (off <= -.05 && off > -D - .4) return Math.min(fi, r.nu - fi, fj, r.nv - fj) * S > .6 && ((f00 & 1) || (fN & 11)) ? K.BEHINDDROP : K.BEHIND;
+      if (off <= -.05 && off > -D - .4) return face && Math.min(fi, r.nu - fi, fj, r.nv - fj) * S > .6 && ((f00 & 1) || (fN & 11)) ? K.BEHINDDROP : K.BEHIND;
       continue;
     }
+    if ((f00 & 1) && two) return K.COLDROP;                       // (a line over the hole goes with its plating)
     return (f00 & 1) || (fN & 2) ? K.TORN : K.PLATE;
   }
   return K.NONE;
@@ -120,21 +121,29 @@ const G = 9.81;
 export function createBodies() {
   const list = [];
   const sys = { list, dots: 0 };
-  /* a rigid clump: pts (x y z brightness, model frame, at detach), v0, spin */
+  /* a rigid clump: pts (x y z brightness nx ny nz, model frame, at detach), v0, spin */
   sys.clump = (uid, B, pts, v0, hot) => {
-    const n = pts.length / 4; if (!n) return null;
-    let cx = 0, cy = 0, cz = 0; for (let i = 0; i < n; i++) { cx += pts[4 * i]; cy += pts[4 * i + 1]; cz += pts[4 * i + 2]; }
+    const n = pts.length / 7; if (!n) return null;
+    let cx = 0, cy = 0, cz = 0; for (let i = 0; i < n; i++) { cx += pts[7 * i]; cy += pts[7 * i + 1]; cz += pts[7 * i + 2]; }
     cx /= n; cy /= n; cz /= n;
-    const rel = new Float32Array(n * 4); let lowY = 1e9;
-    for (let i = 0; i < n; i++) { rel[4 * i] = pts[4 * i] - cx; rel[4 * i + 1] = pts[4 * i + 1] - cy; rel[4 * i + 2] = pts[4 * i + 2] - cz; rel[4 * i + 3] = pts[4 * i + 3]; if (rel[4 * i + 1] < lowY) lowY = rel[4 * i + 1]; }
+    const rel = new Float32Array(n * 4), nrm = new Int8Array(n * 3); let lowY = 1e9;
+    for (let i = 0; i < n; i++) { rel[4 * i] = pts[7 * i] - cx; rel[4 * i + 1] = pts[7 * i + 1] - cy; rel[4 * i + 2] = pts[7 * i + 2] - cz; rel[4 * i + 3] = pts[7 * i + 3]; if (rel[4 * i + 1] < lowY) lowY = rel[4 * i + 1];
+      nrm[3 * i] = Math.round(pts[7 * i + 4] * 127); nrm[3 * i + 1] = Math.round(pts[7 * i + 5] * 127); nrm[3 * i + 2] = Math.round(pts[7 * i + 6] * 127); }
     // the contact points: the lowest dots and the extremes (at most 24)
     const idx = [...Array(n).keys()];
     const pick = new Set();
     idx.sort((a, b) => rel[4 * a + 1] - rel[4 * b + 1]); for (let q = 0; q < Math.min(12, n); q++) pick.add(idx[Math.floor(q * Math.min(n, Math.max(12, n * .15)) / 12)]);
     for (const [ax, sg] of [[0, 1], [0, -1], [2, 1], [2, -1], [1, 1], [1, -1]]) { let b = 0; for (let i = 1; i < n; i++) if (sg * rel[4 * i + ax] > sg * rel[4 * b + ax]) b = i; pick.add(b); }
     const s = (n * 7919 + uid * 131) % 997 / 997;
+    // crumpled: a piece that tore away is bent and dented (folds ~1 m, up to 0.3 m deep, along its own faces)
+    { let ex = 0; for (let i = 0; i < n; i++) ex = Math.max(ex, Math.abs(rel[4 * i]), Math.abs(rel[4 * i + 1]), Math.abs(rel[4 * i + 2]));
+      const A = Math.min(.3, .06 + .05 * ex);
+      for (let i = 0; i < n; i++) { const x = rel[4 * i], y = rel[4 * i + 1], z = rel[4 * i + 2];
+        const w = A * (Math.sin(x * 2.1 + s * 6.3) * Math.sin(z * 1.7 + y * 1.3 + s * 3.1) + .5 * Math.sin((x + z) * 4.3 + s * 9.7));
+        const a = nrm[3 * i] / 127, c = nrm[3 * i + 1] / 127, d = nrm[3 * i + 2] / 127;
+        if (a * a + c * c + d * d > .01) { rel[4 * i] += a * w; rel[4 * i + 1] += c * w; rel[4 * i + 2] += d * w; } else { rel[4 * i + 1] += w; } } }
     const b = { kind: 'clump', uid, B, p: [cx, cy, cz], v: v0.slice(), w: [(s - .5) * 1.2, (s * 7 % 1 - .5) * .6, (s * 13 % 1 - .5) * 1.2], R: [1, 0, 0, 0, 1, 0, 0, 0, 1],
-      rel, n, low: Int32Array.from(pick), rest: false, gone: false, t: 0, hot: hot || 0, fade: 1, sea: false, still: 0 };
+      rel, nrm, n, low: Int32Array.from(pick), rest: false, gone: false, t: 0, hot: hot || 0, fade: 1, sea: false, still: 0 };
     list.push(b); return b;
   };
   /* single dots (the solver's loose plating): arrays x y z vx vy vz brightness, flags */
@@ -234,16 +243,22 @@ export function createBodies() {
       else if (Math.hypot(b.v[0], b.v[1], b.v[2]) < .35 && Math.hypot(...b.w) < .25) { b.rest = true; b.v = [0, 0, 0]; b.w = [0, 0, 0]; }
     }
   }
-  /* each dot of every body in the model frame: cb(uid, B, x, y, z, brightness, heat, fade) */
-  sys.each = (cb, stride = 1) => {
+  /* each dot of every body in the model frame: cb(uid, B, x, y, z, brightness, heat, fade, i); L: the light in the model
+     frame (a clump's dots are lit by their own face as it turns) */
+  sys.each = (cb, stride = 1, L = null) => {
     for (const b of list) {
       if (b.gone) continue;
       const heat = b.hot * Math.exp(-b.t / 1.6);
       if (b.kind === 'dots') { for (let i = 0; i < b.n; i += stride) { if (b.st[i] === 2) continue; const o = 7 * i; cb(b.uid, b.B, b.P[o], b.P[o + 1], b.P[o + 2], b.P[o + 6], heat, 1, i); } continue; }
       const R = b.R, rel = b.rel;
+      const N = b.nrm;
       for (let i = 0; i < b.n; i += stride) {
         const x = rel[4 * i], y = rel[4 * i + 1], z = rel[4 * i + 2];
-        cb(b.uid, b.B, b.p[0] + R[0] * x + R[1] * y + R[2] * z, b.p[1] + R[3] * x + R[4] * y + R[5] * z, b.p[2] + R[6] * x + R[7] * y + R[8] * z, rel[4 * i + 3], heat, b.fade, i);
+        let lit = 1;
+        if (L && N) { const a = N[3 * i] / 127, c = N[3 * i + 1] / 127, d = N[3 * i + 2] / 127;
+          if (a * a + c * c + d * d > .01) { const lx = R[0] * a + R[1] * c + R[2] * d, ly = R[3] * a + R[4] * c + R[5] * d, lz = R[6] * a + R[7] * c + R[8] * d;
+            lit = .22 + .78 * Math.abs(lx * L[0] + ly * L[1] + lz * L[2]); } }
+        cb(b.uid, b.B, b.p[0] + R[0] * x + R[1] * y + R[2] * z, b.p[1] + R[3] * x + R[4] * y + R[5] * z, b.p[2] + R[6] * x + R[7] * y + R[8] * z, rel[4 * i + 3] * lit, heat, b.fade, i);
       }
     }
   };
@@ -269,11 +284,12 @@ export function connectivity(Md, patches, T) {
       lo[0] = Math.min(lo[0], x); lo[1] = Math.min(lo[1], z); hi[0] = Math.max(hi[0], x); hi[1] = Math.max(hi[1], z);
     }
   }
-  const idx = [], cls = [], info = {};
+  const idx = [], cls = [], over = [], info = {};
   eachInColumns(Md, lo[0] - 4, lo[1] - 4, hi[0] + 4, hi[1] + 4, i => {
-    const o = 7 * i; let c = K.NONE, anch = false;
-    for (const B of patches) { c = classify(B, D[o], D[o + 1], D[o + 2], D[o + 3], D[o + 4], D[o + 5], info); if (c !== K.NONE) { anch = (c === K.COL || c === K.BEHIND) && Math.abs(info.off) < .8; break; } }
-    idx.push(i); cls.push(c === K.NONE || c === K.PLATE || c === K.TORN || anch ? 1 : c === K.COLDROP || c === K.BEHINDDROP ? 2 : 0);
+    const o = 7 * i; let c = K.NONE, anch = false, dead = 0;
+    for (const B of patches) { c = classify(B, D[o], D[o + 1], D[o + 2], D[o + 3], D[o + 4], D[o + 5], info); if (c !== K.NONE) { anch = (c === K.COL || c === K.BEHIND) && Math.abs(info.off) < .8;
+      if (info.up && (c === K.COL || c === K.BEHIND)) { const r = info.r, t = Math.max(0, Math.min(r.nv, info.j)) * (r.nu + 1) + Math.max(0, Math.min(r.nu, info.i)); dead = (r.cpu[4 * t + 3] | 0) & 3 ? 1 : 0; } break; } }
+    idx.push(i); over.push(dead); cls.push(c === K.NONE || c === K.PLATE || c === K.TORN || anch ? 1 : c === K.COLDROP || c === K.BEHINDDROP ? 2 : 0);
   });
   const n = idx.length, par = new Int32Array(n); for (let q = 0; q < n; q++) par[q] = q;
   const fd = q => { while (par[q] !== q) { par[q] = par[par[q]]; q = par[q]; } return q; };
@@ -288,9 +304,17 @@ export function connectivity(Md, patches, T) {
       if (!dx && (dy < 0 || (!dy && dz <= 0))) continue;
       const m = cell.get(k + dx * 16777216 + dy * 4096 + dz); if (m === undefined) continue; const ra = fd(q), rb = fd(m); if (ra !== rb) par[ra] = rb; }
   }
-  const anchored = new Set(), groups = new Map();
-  for (let q = 0; q < n; q++) { if (cls[q] === 2) continue; const r = fd(q); if (cls[q] === 1) anchored.add(r); let g = groups.get(r); if (!g) groups.set(r, g = []); g.push(idx[q]); }
-  const floating = [];
-  for (const [r, g] of groups) if (!anchored.has(r)) floating.push(g);
-  return { dropped, orphan, floating, n };
+  const anchored = new Set(), groups = new Map(), aY = new Map(), deadN = new Map();
+  for (let q = 0; q < n; q++) { if (cls[q] === 2) continue; const r = fd(q); if (cls[q] === 1) { anchored.add(r); aY.set(r, Math.min(aY.has(r) ? aY.get(r) : 1e9, D[7 * idx[q] + 1])); }
+    if (over[q]) deadN.set(r, (deadN.get(r) || 0) + 1);
+    let g = groups.get(r); if (!g) groups.set(r, g = []); g.push(idx[q]); }
+  const floating = [], hanging = [];
+  for (const [r, g] of groups) {
+    if (!anchored.has(r)) { floating.push(g); continue; }
+    // anchored, but only from well above while dots of it are over dead plating (a part hanging into a hole from its top)
+    const dn = deadN.get(r) || 0; if (dn < 20) continue;
+    let minY = 1e9; for (const i of g) if (D[7 * i + 1] < minY) minY = D[7 * i + 1];
+    if (aY.get(r) > minY + 1.5) hanging.push(g);
+  }
+  return { dropped, orphan, floating, hanging, n };
 }

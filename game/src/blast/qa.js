@@ -9,6 +9,9 @@
                   (they vanished instead of falling: not floating, reported so it can be fixed)
      'hovering'   a loose piece (a clump of the model or the solver's plating) neither falling nor at rest on a surface
      'resting-air' a piece at rest more than 0.35 m over the surface under it
+     'hanging'    a cluster of the model's dots held only from 1.5 m or more above its foot while 20 or more of its dots
+                  stand over torn plating (a part left hanging into a hole from its top: a frame, a davit, a sheer line)
+     'big-piece'  a loose piece more than 8 m from its middle to its edge (a whole section taken as one block)
    The model's dots are the renderer's CPU clouds at ~0.3 m (support.js modelDots); the shader's test is replayed on the
    CPU copy of each patch's skin texels (support.js classify). */
 import { modelDots, connectivity } from './support.js';
@@ -30,6 +33,7 @@ export function check(O, o = {}) {
     stats.dotsNear += C.n; stats.dropped += C.dropped.length; stats.carried += C.dropped.length - C.orphan.length;
     const at = l => { let x = 0, y = 0, z = 0; for (const i of l) { x += D[7 * i]; y += D[7 * i + 1]; z += D[7 * i + 2]; } return [x / l.length, y / l.length, z / l.length].map(v => +v.toFixed(2)); };
     for (const grp of C.floating) flags.push({ kind: 'floating', unit: uid, n: grp.length, at: at(grp), what: Md.parts[D[7 * grp[0] + 6]] });
+    for (const grp of C.hanging) flags.push({ kind: 'hanging', unit: uid, n: grp.length, at: at(grp), what: Md.parts[D[7 * grp[0] + 6]] });
     if (C.orphan.length) flags.push({ kind: 'orphan', unit: uid, n: C.orphan.length, at: at(C.orphan), what: [...new Set(C.orphan.slice(0, 50).map(i => Md.parts[D[7 * i + 6]]))].join(',') });
   }
   // the loose pieces
@@ -40,6 +44,8 @@ export function check(O, o = {}) {
       if (B2.sea) continue;
       const moving = Math.hypot(...B2.v) > .05 || !B2.rest && B2.t < 1;
       const gap = clumpGap(b, B2);
+      let ex = 0; for (let i = 0; i < B2.n; i++) ex = Math.max(ex, Math.hypot(B2.rel[4 * i], B2.rel[4 * i + 1], B2.rel[4 * i + 2]));
+      if (ex > 8) flags.push({ kind: 'big-piece', unit: B2.uid, n: B2.n, at: B2.p.map(v => +v.toFixed(2)), extent: +ex.toFixed(1) });
       if (B2.rest && gap > .35) flags.push({ kind: 'resting-air', unit: B2.uid, n: B2.n, at: B2.p.map(v => +v.toFixed(2)), gap: +gap.toFixed(2) });
       else if (!B2.rest && !moving) flags.push({ kind: 'hovering', unit: B2.uid, n: B2.n, at: B2.p.map(v => +v.toFixed(2)) });
     } else {
@@ -52,7 +58,7 @@ export function check(O, o = {}) {
       if (bad) flags.push({ kind: 'resting-air', unit: B2.uid, n: bad, at: where, what: 'solver plating' });
     }
   }
-  const hard = flags.filter(f => f.kind === 'floating' || f.kind === 'hovering' || f.kind === 'resting-air');
+  const hard = flags.filter(f => f.kind === 'floating' || f.kind === 'hovering' || f.kind === 'resting-air' || f.kind === 'hanging' || f.kind === 'big-piece');
   return { ok: hard.length === 0, flags, stats };
 }
 function clumpGap(b, B2) {
