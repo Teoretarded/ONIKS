@@ -1,4 +1,4 @@
-/* (game/concepts/blast/gpu_wgpu.js at commit 200fe28, copied; the one change: gravity on free pieces along the patch's up
+/* (game/concepts/blast/gpu_wgpu.js at commit ae3abf6, copied; the one change: gravity on free pieces along the patch's up
    axis, UPAX) The blast bench's structural model on WebGPU compute: the same physics as gpu.js (WebGL2) and the CPU reference in
    blast.js, pass for pass (hinges, cells, members, gather, contact scatter, nodes), with the state in three storage
    buffers:
@@ -256,8 +256,11 @@ fn retMap(sp: ptr<function, vec3f>, eb: f32, mA: vec4f, rf: f32) -> vec2f {
     // fracture
     var eb = 0.0; var H: array<i32, 4>; H[0] = i32(hg.x); H[1] = i32(hg.y); H[2] = i32(hg.z); H[3] = i32(hg.w);
     for (var k = 0; k < 4; k++) { if (H[k] >= 0) { let hs = DY[O_HT + i32(w) * NH + H[k]]; eb = max(eb, abs(hs.x) * r1.w / (2.0 * c9.w)); } }
-    let torn = select(0.0, 1.0, Dd + eb >= r3.w || fd <= 0.0 || jmin < c10.w);
-    oC = vec4f(torn, select(-1.0, uT, torn > 0.5), Dd, min(1.0, util));
+    let rat = (Dd + eb) / r3.w; let nh = ST[O_NLH + c]; let no = i32(nh.x); let ncn = i32(nh.y);
+    var ws = nh.z; var acc = nh.z * rat;
+    for (var k = 0; k < ncn; k++) { let e = ST[O_NL + no + k]; let sj = CST(i32(e.x), v); if (sj.x < 0.5) { acc += e.y * sj.y; ws += e.y; } }
+    let torn = select(0.0, 1.0, PP.q0 == 1u && (acc >= ws || fd <= 0.0 || jmin < c10.w));
+    oC = vec4f(torn, select(rat, uT, torn > 0.5), Dd, min(1.0, util));
     break;
   }
   for (var k = 0; k < 4; k++) { DY[cw + k * NC + c] = o[k]; }
@@ -491,7 +494,7 @@ export function createWGPU(dev, M, opt = {}) {
   for (let q = 0; q < 3; q++) for (let i = 0; i < N; i++) { adjOff[q][i] = flat.length; for (const e of adjL[q][i]) flat.push(e); }
   const NP = Math.max(1, M.PAN.length), NCM = M.CMAP.length, NADJ = Math.ceil(flat.length / 4);
   const L = {}; let off = 0; const at = (k, n) => { L[k] = off; off += one(n); };
-  at('O_NS', 5 * N); at('O_CS', 11 * NC); at('O_HS', 9 * NH); at('O_TS', 7 * NT); at('O_PAN', 5 * NP); at('O_CMAP', NCM); at('O_ADJ', NADJ); at('O_AUX', 2048);
+  at('O_NS', 5 * N); at('O_CS', 11 * NC); at('O_HS', 9 * NH); at('O_TS', 7 * NT); at('O_PAN', 5 * NP); at('O_CMAP', NCM); at('O_ADJ', NADJ); at('O_AUX', 2048); at('O_NLH', NC); at('O_NL', M.NLE ? M.NLE.length / 2 : 1);
   const nST = off;
   off = 0; at('O_ND', 6 * N); at('O_CL', 10 * NC); at('O_HT', 2 * NH); at('O_MB', 2 * NT); const nDY = off;
   const MAXIMP = N + 4096;
@@ -524,6 +527,8 @@ export function createWGPU(dev, M, opt = {}) {
   for (let k = 0; k < NCM; k++) stat[4 * (L.O_CMAP + k)] = M.CMAP[k];
   stat.set(flat, 4 * L.O_ADJ);
   for (let k = 0; k < 2048; k++) stat[4 * (L.O_AUX + k)] = M.TA1[k];
+  for (let c = 0; c < NC; c++) { if (M.NLH) stat.set(M.NLH.subarray(4 * c, 4 * c + 4), 4 * (L.O_NLH + c)); else stat[4 * (L.O_NLH + c) + 2] = 1; }
+  if (M.NLE) for (let k = 0; k < M.NLE.length / 2; k++) { stat[4 * (L.O_NL + k)] = M.NLE[2 * k]; stat[4 * (L.O_NL + k) + 1] = M.NLE[2 * k + 1]; }
   // ---- buffers
   const U = GPUBufferUsage, bufs = [];
   const mk = (size, usage) => { const b = dev.createBuffer({ size: Math.ceil(size / 16) * 16, usage }); bufs.push(b); return b; };
@@ -569,13 +574,13 @@ export function createWGPU(dev, M, opt = {}) {
     begin(); endPass();
     dev.queue.writeBuffer(bUp, upOff, data.buffer, data.byteOffset, bytes);
     enc.copyBufferToBuffer(bUp, upOff, dst, dstOff, Math.ceil(bytes / 4) * 4); upOff += sz; };
-  function steps(n, t, h, alpha) {
+  function steps(n, t, h, alpha, er = true) {
     for (let s = 0; s < n; s++, t += h) {
       if (nsteps >= MAXSTEPS) submit();
       begin();
       if (loadsDirty) { upload(loads, bL, 0); loadsDirty = false; }
       if (!pass) pass = enc.beginComputePass();
-      const o = nsteps * PSTRIDE / 4; parF[o] = t; parF[o + 1] = h; parF[o + 2] = alpha; parU[o + 3] = nimp; parU[o + 4] = cur;
+      const o = nsteps * PSTRIDE / 4; parF[o] = t; parF[o + 1] = h; parF[o + 2] = alpha; parU[o + 3] = nimp; parU[o + 4] = cur; parU[o + 5] = er ? 1 : 0;
       pass.setBindGroup(0, bg, [nsteps * PSTRIDE]);
       pass.setPipeline(pH); pass.dispatchWorkgroups(wg(NH));
       pass.setPipeline(pC); pass.dispatchWorkgroups(wg(NC));
@@ -588,7 +593,7 @@ export function createWGPU(dev, M, opt = {}) {
       if (nsteps >= batch) submit();
     }
   }
-  const step = (t, h, alpha) => steps(1, t, h, alpha);
+  const step = (t, h, alpha, er = true) => steps(1, t, h, alpha, er);
   // ---- read backs: node u+v (current half) and packed torn cells, one set in flight at a time
   const nodeBytes = 32 * N, pkBytes = 4 * NC;
   const stN = dev.createBuffer({ size: Math.ceil(nodeBytes / 16) * 16, usage: U.MAP_READ | U.COPY_DST }), stC = dev.createBuffer({ size: Math.ceil(pkBytes / 16) * 16 + 16, usage: U.MAP_READ | U.COPY_DST });
@@ -680,7 +685,6 @@ export function createWGPU(dev, M, opt = {}) {
     if (enc) submit();
     const z = new Float32Array(4 * nDY);
     for (let i = 0; i < N; i++) { /* pos, vel, anchor: zero */ }
-    for (let c = 0; c < NC; c++) z[4 * (L.O_CL + cur * 5 * NC + 4 * NC + c) + 1] = -1;
     for (let k = 0; k < NT; k++) z[4 * (L.O_MB + cur * NT + k)] = M.TL0[k];
     dev.queue.writeBuffer(bDY, 0, z);
     const s = new Float32Array(4 * nSC); for (let i = 0; i < N; i++) s[4 * (L.O_CON + i)] = -1;

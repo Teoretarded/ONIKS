@@ -1,4 +1,4 @@
-/* The blast bench's shell model on the GPU, WebGL2 (game/concepts/blast/gpu.js at commit 200fe28, copied; the one change:
+/* The blast bench's shell model on the GPU, WebGL2 (game/concepts/blast/gpu.js at commit ae3abf6, copied; the one change:
    gravity on free pieces along the patch's up axis, uUp). RGBA32F, the same physics as the bench's CPU reference, pass
    for pass:
      0. clear the node force accumulator; scatter last step's contact push-back into it
@@ -69,7 +69,7 @@ void main(){
 }`;
 
 const CELL_FS = HEAD + `
-uniform sampler2D uCS, uHSt, uDmg, uAux;
+uniform sampler2D uCS, uHSt, uDmg, uAux, uNLH, uNL; uniform float uEr;
 uniform vec4 uGP[32];
 uniform vec4 uS0[32], uS1[32], uS2[32], uS3[32], uS4[32], uS5[32]; uniform int uNS_;
 uniform int uOUT; uniform float uUmax, uRhoWC, uP0, uRhoWg, uKs, uS;
@@ -236,8 +236,12 @@ void main(){
   float eb = 0.0; int H[4]; H[0] = int(hg.x); H[1] = int(hg.y); H[2] = int(hg.z); H[3] = int(hg.w);
   vec4 hs[4];
   for (int k = 0; k < 4; k++) { hs[k] = H[k] >= 0 ? texelFetch(uHSt, AT(H[k]), 0) : vec4(0.0); if (H[k] >= 0) eb = max(eb, abs(hs[k].x) * r1.w / (2.0 * c9.w)); }
-  float torn = (Dd + eb >= r3.w || fd <= 0.0 || jmin < c10.w) ? 1.0 : 0.0;
-  oC = vec4(torn, torn > 0.5 ? uT : -1.0, Dd, min(1.0, util));
+  // non-local failure: the ratio averaged over the cell's neighbours (last step's ratios of the intact ones)
+  float rat = (Dd + eb) / r3.w; vec4 nh = texelFetch(uNLH, p, 0); int no = int(nh.x), nc = int(nh.y);
+  float ws = nh.z, acc = nh.z * rat;
+  for (int k = 0; k < 512; k++) { if (k >= nc) break; vec4 e = texelFetch(uNL, AT(no + k), 0); vec4 sj = CST(AT(int(e.x))); if (sj.x < 0.5) { acc += e.y * sj.y; ws += e.y; } }
+  float torn = uEr > 0.5 && (acc >= ws || fd <= 0.0 || jmin < c10.w) ? 1.0 : 0.0;
+  oC = vec4(torn, torn > 0.5 ? uT : rat, Dd, min(1.0, util));
 }`;
 
 const TRUSS_FS = HEAD + `
@@ -441,9 +445,9 @@ export function createGPU(gl, M) {
   const objs = [];
   // every texture sits on its own unit for the whole run and every program's samplers point at fixed units (the
   // ping-pong halves have an even and an odd program), so a step is only useProgram / bindFramebuffer / draw
-  const U = { ns: 0, cs: 1, hs: 2, ts: 3, aux: 4, dmg: 5, imp: 6, pan: 7, cmap: 8, adj: 9, nd: 10, con: 12, frc: 13, ca: 14, cf: 16, hst: 17, hf: 19, ma: 20, mf: 22 };
+  const U = { ns: 0, cs: 1, hs: 2, ts: 3, aux: 4, dmg: 5, imp: 6, pan: 7, cmap: 8, adj: 9, nd: 10, con: 12, frc: 13, ca: 14, cf: 16, hst: 17, hf: 19, ma: 20, mf: 22, nlh: 23, nl: 24 };
   const SCR = Math.min(31, gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS) - 1);
-  if (SCR < 23) throw new Error('too few texture units');
+  if (SCR < 25) throw new Error('too few texture units');
   gl.activeTexture(gl.TEXTURE0 + SCR);
   const sh = (t, s) => { const o = gl.createShader(t); gl.shaderSource(o, s); gl.compileShader(o); if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o) + '\n' + s.split('\n').map((l, i) => (i + 1) + ': ' + l).join('\n')); return o; };
   const prog = (vs, fs, units) => { const p = gl.createProgram(), a = sh(gl.VERTEX_SHADER, vs), b = sh(gl.FRAGMENT_SHADER, fs); gl.attachShader(p, a); gl.attachShader(p, b); gl.linkProgram(p);
@@ -452,7 +456,7 @@ export function createGPU(gl, M) {
     gl.useProgram(p);
     for (const k in units) if (p.u[k]) gl.uniform1i(p.u[k], units[k]);
     return p; };
-  const stat = { uNS: U.ns, uCS: U.cs, uHS: U.hs, uTS: U.ts, uAux: U.aux, uDmg: U.dmg, uImp: U.imp, uPan: U.pan, uCMap: U.cmap, uAdj: U.adj, uCon: U.con, uFrc: U.frc, uCF: U.cf, uHF: U.hf, uMF: U.mf };
+  const stat = { uNS: U.ns, uCS: U.cs, uHS: U.hs, uTS: U.ts, uAux: U.aux, uDmg: U.dmg, uImp: U.imp, uPan: U.pan, uCMap: U.cmap, uAdj: U.adj, uCon: U.con, uFrc: U.frc, uCF: U.cf, uHF: U.hf, uMF: U.mf, uNLH: U.nlh, uNL: U.nl };
   const V2 = f => [f(0, 1), f(1, 0)];                                   // (current half, next half)
   const pH = V2((v, w) => prog(VS, HINGE_FS, { ...stat, uNd: U.nd + v, uCA: U.ca + v, uHSt: U.hst + v }));
   const pC = V2((v, w) => prog(VS, CELL_FS, { ...stat, uNd: U.nd + v, uCA: U.ca + v, uHSt: U.hst + w }));
@@ -520,6 +524,8 @@ export function createGPU(gl, M) {
   { const n = M.CMAP.length, a = new Float32Array(Wd * rows(n) * 4).fill(-1); for (let k = 0; k < n; k++) a[4 * k] = M.CMAP[k]; T.cmap = tex(Wd, rows(n), a); }
   const aux = new Float32Array(2048 * 4); for (let k = 0; k < 2048; k++) aux[4 * k] = M.TA1[k]; T.aux = tex(2048, 1, aux);
   T.dmg = tex(Wd, CHr, null); T.imp = tex(Wd, NHr, null);
+  { const a = new Float32Array(Wd * CHr * 4); if (M.NLH) a.set(M.NLH); else for (let c = 0; c < NC; c++) a[4 * c + 2] = 1; T.nlh = tex(Wd, CHr, a);
+    const ne = M.NLE ? M.NLE.length / 2 : 0, b = new Float32Array(Wd * rows(ne) * 4); for (let k = 0; k < ne; k++) { b[4 * k] = M.NLE[2 * k]; b[4 * k + 1] = M.NLE[2 * k + 1]; } T.nl = tex(Wd, rows(ne), b); }
   // dynamic, ping-pong halves: nodes (u, v, anchor), cells (4 triangles' plastic state, cell state), hinges, members (2)
   const nodeA = [texA(Wd, NHr, 3), texA(Wd, NHr, 3)], con = tex(Wd, NHr, null), frc = tex(Wd, NHr, null);
   const cellA = [texA(Wd, CHr, 5), texA(Wd, CHr, 5)], cF = texA(Wd, CHr, 3);
@@ -529,7 +535,7 @@ export function createGPU(gl, M) {
   const fCell = cellA.map(a => fbo([...Ly(a, 5), ...Ly(cF, 3)])), fHinge = hS.map(s => fbo([[s, 0], ...Ly(hF, 3)])), fTruss = memA.map(a => fbo([[a, 0], ...Ly(mF, 7)]));
   const UNITS = [[U.ns, T.ns], [U.cs, T.cs], [U.hs, T.hs], [U.ts, T.ts], [U.aux, T.aux], [U.dmg, T.dmg], [U.imp, T.imp], [U.pan, T.pan], [U.cmap, T.cmap], [U.adj, T.adj],
     [U.nd, nodeA[0]], [U.nd + 1, nodeA[1]], [U.con, con], [U.frc, frc], [U.ca, cellA[0]], [U.ca + 1, cellA[1]], [U.cf, cF], [U.hst, hS[0]], [U.hst + 1, hS[1]], [U.hf, hF],
-    [U.ma, memA[0]], [U.ma + 1, memA[1]], [U.mf, mF]];
+    [U.ma, memA[0]], [U.ma + 1, memA[1]], [U.mf, mF], [U.nlh, T.nlh], [U.nl, T.nl]];
   function bindAll() { for (const [u, t] of UNITS) { gl.activeTexture(gl.TEXTURE0 + u); gl.bindTexture(t.arr ? gl.TEXTURE_2D_ARRAY : gl.TEXTURE_2D, t); } gl.activeTexture(gl.TEXTURE0 + SCR); }
   bindAll();
   let cur = 0, useImp = 0;
@@ -554,7 +560,7 @@ export function createGPU(gl, M) {
     const zN = z(N); for (let l = 0; l < 3; l++) subA(nodeA[cur], l, NHr, zN);
     { const c = z(N); for (let i = 0; i < N; i++) c[4 * i] = -1; sub2(con, Wd, NHr, c); }
     const zC = z(NC); for (let l = 0; l < 4; l++) subA(cellA[cur], l, CHr, zC); sub2(T.dmg, Wd, CHr, zC);
-    { const c = z(NC); for (let k = 0; k < NC; k++) c[4 * k + 1] = -1; subA(cellA[cur], 4, CHr, c); }
+    subA(cellA[cur], 4, CHr, zC);   // state: intact, failure ratio 0
     sub2(hS[cur], Wd, HHr, z(NH));
     { const c = z(NT); for (let k = 0; k < NT; k++) c[4 * k] = M.TL0[k]; subA(memA[cur], 0, THr, c); }
     // line-of-sight bits are known now (detonation): refresh the cell statics
@@ -583,7 +589,7 @@ export function createGPU(gl, M) {
   let vpH = -1;
   const pass = (p, f) => { gl.useProgram(p); gl.bindFramebuffer(gl.FRAMEBUFFER, f); if (vpH !== f.h) { gl.viewport(0, 0, Wd, f.h); vpH = f.h; } };
   // n steps of h from t; the GL state other code may have changed is set once per call
-  function steps(n, t, h, alpha) {
+  function steps(n, t, h, alpha, er = true) {
     gl.bindVertexArray(vao); gl.disable(gl.DEPTH_TEST); gl.disable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE); vpH = -1;
     for (let s = 0; s < n; s++, t += h) {
       const v = cur, w = 1 - cur;
@@ -593,6 +599,7 @@ export function createGPU(gl, M) {
       tq('cells'); p = pC[v]; pass(p, fCell[w]); common(p, t, h);
       if (dirty[v]) { const u = p.u; gl.uniform4fv(u.uGP, gpu4); gl.uniform4fv(u.uS0, SRC[0]); gl.uniform4fv(u.uS1, SRC[1]); gl.uniform4fv(u.uS2, SRC[2]); gl.uniform4fv(u.uS3, SRC[3]);
         gl.uniform4fv(u.uS4, SRC[4]); gl.uniform4fv(u.uS5, SRC[5]); gl.uniform1i(u.uNS_, nsrc); dirty[v] = false; }
+      if (p._er !== er) { gl.uniform1f(p.u.uEr, er ? 1 : 0); p._er = er; }
       if (!p._c2) { gl.uniform1i(p.u.uOUT, M.OUT()); gl.uniform1f(p.u.uUmax, M.U_MAX); gl.uniform1f(p.u.uRhoWC, M.RHO_W * M.C_W);
         gl.uniform1f(p.u.uP0, M.P0); gl.uniform1f(p.u.uRhoWg, M.RHO_W * M.G); if (p.u.uKs) gl.uniform1f(p.u.uKs, M.K_SHEAR); gl.uniform1f(p.u.uS, M.S); p._c2 = true; }
       gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -615,7 +622,7 @@ export function createGPU(gl, M) {
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
-  const step = (t, h, alpha) => steps(1, t, h, alpha);
+  const step = (t, h, alpha, er = true) => steps(1, t, h, alpha, er);
   function profile(on) { if (on) { prof = { q: null }; pending.length = 0; return; }
     const out = {}; for (const [n, q] of pending) { if (gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE)) out[n] = (out[n] || 0) + gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6; gl.deleteQuery(q); }
     pending.length = 0; prof = null; return out; }

@@ -1,4 +1,4 @@
-/* The blast bench's shell model (game/concepts/blast/blast.js at commit 200fe28), ported for the game: the same
+/* The blast bench's shell model (game/concepts/blast/blast.js at commit ae3abf6), ported for the game: the same
    physics, from a scene built out of a patch spec (blast/spec.js) instead of the bench's test box. No DOM, no GL.
 
    Structure: every quad cell is 4 crossed CST membranes (corotational, plane-stress J2 + linear hardening + Cowper-
@@ -33,6 +33,9 @@ export const csf = (m, ed, ep) => { const f = Math.min(1, ep / m.eu), D = m.D + 
 /* the compressive knock-down near plate junctions (bench cb79b1f): tabled against S / fold length, ramped in over 0.4 %
    plastic strain; a cell squashed to a quarter of its area erodes */
 const JMIN = .25, KC_EPS = .004, KBAND = .6;
+/* failure judged on the damage averaged over a square round the cell, side max(0.2 m, 2 cells), with the GL strain for
+   that length (bench ae3abf6: grid-converged holes) */
+const LREG = .2, lrOf = lc => Math.max(LREG, 2 * lc);
 const KC_TAB = [[.093, 1], [.186, .4], [.372, .15], [.744, .12], [1.49, .03]];
 function kcLaw(S_, t) {
   const x = S_ / (.9 * Math.cbrt(t || .0065)), T = KC_TAB;
@@ -348,7 +351,7 @@ export function buildShell(scene, S) {
     const av = mul(cross(sub(P[2], P[0]), sub(P[3], P[1])), .5);
     CAR[c] = len(av); CNR.set(nrm(av), 3 * c);
     CRC.set(mul(add(add(P[0], P[1]), add(P[2], P[3])), .25), 3 * c);
-    CEF[c] = glf(MATS[CMAT[c]], CH[c], Math.sqrt(CAR[c]));
+    CEF[c] = glf(MATS[CMAT[c]], CH[c], Math.max(Math.sqrt(CAR[c]), lrOf(Math.sqrt(CAR[c]))));
     // (the game's patches: the steel's scatter, seeded per cell: tears start at the weaker spots and run, rather than a
     // whole panel letting go along its perfect edges at once; the bench's check box runs without it)
     if (scene.scatter) { let h = Math.imul(c + 1, 0x9E3779B1) ^ (scene.seed | 0); h = Math.imul(h ^ (h >>> 15), 0x85EBCA77); h ^= h >>> 13; CEF[c] *= 1 + scene.scatter * (((h >>> 0) / 4294967296) * 2 - 1); }
@@ -369,6 +372,30 @@ export function buildShell(scene, S) {
     seamDist = (x, y, z) => { let d = Infinity; for (let p = -1; p <= 1; p++) for (let q = -1; q <= 1; q++) for (let e = -1; e <= 1; e++) { const l = hb.get((Math.floor(x / HB) + p) + ',' + (Math.floor(y / HB) + q) + ',' + (Math.floor(z / HB) + e)); if (!l) continue;
       for (const i of l) d = Math.min(d, Math.hypot(R0[3 * i] - x, R0[3 * i + 1] - y, R0[3 * i + 2] - z)); } return d; };
     for (let c = 0; c < NC; c++) M.CKC[c] = compKnock(S, CH[c], Math.sqrt(CAR[c]), seamDist(CRC[3 * c], CRC[3 * c + 1], CRC[3 * c + 2]));
+  }
+  // non-local failure (bench ae3abf6): each cell's neighbours (same piece) inside the square of side lrOf(cell) round it,
+  // the area of their overlap as weight (the cell's own weight in NLH[4c+2])
+  {
+    let reach = .25; for (let c = 0; c < NC; c++) { const lc = Math.sqrt(CAR[c]); reach = Math.max(reach, lrOf(lc) / 2 + lc); }
+    const hb = new Map(), HB = reach, key = (x, y, z) => Math.floor(x / HB) + ',' + Math.floor(y / HB) + ',' + Math.floor(z / HB);
+    for (let c = 0; c < NC; c++) { const k = key(CRC[3 * c], CRC[3 * c + 1], CRC[3 * c + 2]); (hb.get(k) || hb.set(k, []).get(k)).push(c); }
+    const NLH = M.NLH = new Float32Array(4 * NC), ids = [], ws = [];
+    for (let c = 0; c < NC; c++) {
+      const lc = Math.sqrt(CAR[c]), Lr = lrOf(lc); NLH[4 * c] = ids.length; NLH[4 * c + 2] = Lr > 0 ? Math.min(lc, Lr) ** 2 : lc * lc;
+      if (!(Lr > lc)) continue;
+      const q0 = CN[4 * c], q1 = CN[4 * c + 1], ex = nrm(sub([R0[3 * q1], R0[3 * q1 + 1], R0[3 * q1 + 2]], [R0[3 * q0], R0[3 * q0 + 1], R0[3 * q0 + 2]])),
+        nn = [CNR[3 * c], CNR[3 * c + 1], CNR[3 * c + 2]], ey = cross(nn, ex), x0 = CRC[3 * c], y0 = CRC[3 * c + 1], z0 = CRC[3 * c + 2];
+      for (let a1 = -1; a1 <= 1; a1++) for (let b1 = -1; b1 <= 1; b1++) for (let e1 = -1; e1 <= 1; e1++) {
+        const l = hb.get((Math.floor(x0 / HB) + a1) + ',' + (Math.floor(y0 / HB) + b1) + ',' + (Math.floor(z0 / HB) + e1)); if (!l) continue;
+        for (const j of l) { if (j === c || M.CPAN[j] !== M.CPAN[c]) continue;
+          const d = [CRC[3 * j] - x0, CRC[3 * j + 1] - y0, CRC[3 * j + 2] - z0], lj = Math.sqrt(CAR[j]);
+          if (Math.abs(dot(d, nn)) > lc) continue;
+          const x = dot(d, ex), y = dot(d, ey);
+          const ox = Math.min(x + lj / 2, Lr / 2) - Math.max(x - lj / 2, -Lr / 2), oy = Math.min(y + lj / 2, Lr / 2) - Math.max(y - lj / 2, -Lr / 2);
+          if (ox > 1e-6 && oy > 1e-6) { ids.push(j); ws.push(ox * oy); } } }
+      NLH[4 * c + 1] = ids.length - NLH[4 * c];
+    }
+    const NLE = M.NLE = new Float32Array(2 * ids.length); for (let k = 0; k < ids.length; k++) { NLE[2 * k] = ids[k]; NLE[2 * k + 1] = ws[k]; }
   }
   // ---- 7. hinges: every edge shared by two or more cells, one hinge per pair of cells
   const hn = [], hc = [], hkp = [], hmp = [], ht0 = [], hdb = [], hhp = [], hmat = [], hsame = [], hOfEdge = new Map();
@@ -923,7 +950,7 @@ export function gpuModel(M) {
   return { N: M.N, NC: M.NC, NH: M.NH, NT: M.NT, R0: M.R0, M: M.M, WINV: M.WINV, AK: M.AK, AF: M.AF, AC: M.AC, CN: M.CN, CH: M.CH, CMAT: M.CMAT, CEF: M.CEF,
     CSP: M.CSP, CSN: M.CSN, CWET: M.CWET, CAR: M.CAR, CTR: M.CTR, CHG: M.CHG, CDB: M.CDB, CRC: M.CRC, CVIS: () => M.CVIS,
     HN: M.HN, HC: M.HC, HKP: M.HKP, HMP: M.HMP, HKS: M.HKS, HMS: M.HMS, HT0: M.HT0, HDB: M.HDB, HTR: M.HTR, HHP: M.HHP, HMAT: M.HMAT, HLN: M.HLN, HTL0: M.HTL0, TBA: M.TBA, TBB: M.TBB, TSC: M.TSC, TCL: M.TCL, TCL2: M.TCL2, TQN: M.TQN, TPRV: M.TPRV, TNXT: M.TNXT,
-    TKB: M.TKB, TQB: M.TQB, TB0: M.TB0, TKS: M.TKS, TQS: M.TQS, TS0: M.TS0, TMM: M.TMM, TKC: M.TKC, CKC: M.CKC, KCE: KC_EPS, JMN: JMIN,
+    TKB: M.TKB, TQB: M.TQB, TB0: M.TB0, TKS: M.TKS, TQS: M.TQS, TS0: M.TS0, TMM: M.TMM, TKC: M.TKC, CKC: M.CKC, KCE: KC_EPS, JMN: JMIN, NLH: M.NLH, NLE: M.NLE,
     TA: M.TA, TB: M.TB, TL0: M.TL0, TAR: M.TAR, TMAT: M.TMAT, TEF: M.TEF, TFIB: M.TFIB, THG: M.THG, NCC: M.NCC, PAN: M.PAN, CMAP: M.CMAP, MATS, TA1, S: M.S,
     OUT: () => M.scene.OUT, csf, nspace: () => M.GV.length, BETA: () => M.BETA, U_MAX, RHO_W, C_W, P0, G, K_SHEAR, UP: M.up };
 }
