@@ -149,7 +149,7 @@ export function shipInit(sim, u) {
     holes: [], h: new Float32Array(sp.nN), ok: new Uint8Array(sp.nN).fill(1), why: new Array(sp.nN).fill(''), cas: new Float32Array(sp.nN),
     caps: {}, powered: new Uint8Array(sp.nN).fill(1), jn: null,
     sink: 0, list: 0, trim: 0, gm: L.hydro.GM, w: 0, xw: 0, zw: 0,
-    gq: false, gqT: -1e9, lastHit: -1e9, lastThreat: -1e9, nextThreat: 0, dirty: true, active: false,
+    gq: false, gqT: -1e9, lastHit: -1e9, lastThreat: -1e9, nextThreat: 0, dirty: true, active: false, cf: false, cfMark: new Uint8Array(L.n),
     flagged: new Uint8Array(L.n), prop: 1, steerK: 1, floodK: 1, lost: false, hits: 0, blastMs: 0,
   };
   for (const k of sp.capNames) S.caps[k] = true;
@@ -737,7 +737,7 @@ function stepShip(sim, u, S, dt) {
   let Qp = pumps * SHIPK.pump;
   if (Qp > 0) {
     for (let pass = 0; pass < 2 && Qp > 1e-6; pass++) for (let c = 0; c < n && Qp > 1e-6; c++) {
-      if (W[c] <= 0) continue;
+      if (W[c] <= 0 || S.cfMark[c]) continue;                       // (not the tanks counter-flooded on purpose)
       const leak = fl[c] > 0;
       if (pass === 0 && leak) continue;
       const q = Math.min(Qp, W[c] / dt + fl[c]);
@@ -933,6 +933,24 @@ function control(sim, u, S, dt) {
     if (torn > .05 && torn < 6) { S.shore[k] = Math.min(S.torn[k], S.shore[k] + SHIPK.shore * dt); teams--; }
     else if (S.door[k] === 2) { S.door[k] = 0; teams--; }            // a blown door wedged and shored shut
   }
+  // counter-flooding: a list past SHIPK.cfList with metacentric height to spare: flood an intact tank or void low on the
+  // other side (her buoyancy for her uprightness) until she is back under half of it
+  if (!L.sub && S.gm > .3 && Math.abs(S.list) > (S.cf ? SHIPK.cfList * .5 : SHIPK.cfList)) {
+    const side = -Math.sign(S.list);
+    let best = -1, bv = 0;
+    for (let c = 0; c < L.n; c++) {
+      const o = c * 6, xc = (L.box[o] + L.box[o + 3]) / 2;
+      if (xc * side < 1 || L.kind[c] === 'house' || (L.kind[c] !== 'tank' && L.kind[c] !== 'void')) continue;
+      if (S.holes.some(h => h.c === c && h.A > .005)) continue;
+      const room = L.vol[c] * L.perm[c] - S.water[c];
+      if (room > bv) { bv = room; best = c; }
+    }
+    if (best >= 0) {
+      if (!S.cf) sim.emit('compartment', { unit: u.id, side: u.side, comp: L.ids[best], label: L.names[best], state: 'counterflood' });
+      S.cf = true; S.cfMark[best] = 1;
+      S.water[best] = Math.min(L.vol[best] * L.perm[best], S.water[best] + SHIPK.cfRate * dt);
+    }
+  } else S.cf = false;
 }
 
 /* ================================================================== readouts (UI, tests) */

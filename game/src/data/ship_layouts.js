@@ -39,8 +39,9 @@ const lerpT = (T, z) => {                       // piecewise linear table [[z, v
 };
 
 /* floodable share of a space by use (the rest is machinery, stores, tank contents: public damage-stability practice,
-   coarse): full fuel and water tanks take little floodwater (their contents are displaced only through vents) */
-export const PERM = { E: .85, M: .6, F: .1, J: .1, W: .1, V: .95, L: .95, A: .6, Q: .9, C: .9, T: .95, H: .95, K: .97, X: .95 };
+   coarse): full fuel tanks take little floodwater (their contents are displaced only through vents); the double bottom's
+   water and ballast tanks are about half empty (the room damage control counter-floods into) */
+export const PERM = { E: .85, M: .6, F: .1, J: .1, W: .5, V: .95, L: .95, A: .6, Q: .9, C: .9, T: .95, H: .95, K: .97, X: .95 };
 /* openings (condition Zebra shut; they let go at these pressures: as game/src/blast/spec.js ventsOf) */
 export const OPENINGS = {
   door: { area: 1.3, p: 100e3 },                // a watertight door in a transverse bulkhead (at and above the DC deck)

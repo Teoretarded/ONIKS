@@ -1050,7 +1050,16 @@ async function main() {
     let fnd = null;
     await run(s3, 20 * 600, () => { for (const e of s3.drainEvents()) if (e.type === 'foundered') fnd = e; return !u3.alive; });
     ok(fnd && !u3.alive, `still afloat with ${fmt(S3.w, 0)} m3, list ${fmt(S3.list * 57.3, 1)}°, fb ${fmt(S3.fb, 2)}`);
-    return `engine room ${fmt(S.water[mer1], 0)} m3 held by its bulkheads; torn aft: ${fmt(w1, 0)} m3, list ${fmt(list1 * 57.3, 1)}°, trim ${fmt(trim1 * 57.3, 2)}° · leak pumped · ${fnd.why} with ${fnd.w} m3`;
+    // a carrier flooded down one side (her starboard protection wings): damage control counter-floods the other side
+    const s4 = new Sim(map(), { seed: 2, fog: false }), u4 = s4.spawn('carrier', 'fleet', -60000, 0, { hdg: 0 }), S4 = u4.ship, L4 = S4.L;
+    let nw = 0;
+    for (let c = 0; c < L4.n && nw < 10; c++) if (L4.ids[c].endsWith('S') && L4.kind[c] === 'void') { S4.water[c] = L4.vol[c] * L4.perm[c]; nw++; }
+    S4.active = true;
+    await run(s4, 20 * 10);
+    const l0 = S4.list;
+    await run(s4, 20 * 600);
+    ok(l0 > .07 && S4.list < l0 * .75, `counter-flooding: list ${fmt(l0 * 57.3, 1)}° -> ${fmt(S4.list * 57.3, 1)}°`);
+    return `engine room ${fmt(S.water[mer1], 0)} m3 held by its bulkheads; torn aft: ${fmt(w1, 0)} m3, list ${fmt(list1 * 57.3, 1)}°, trim ${fmt(trim1 * 57.3, 2)}° · leak pumped · ${fnd.why} with ${fnd.w} m3 · CVN counter-flooded ${fmt(l0 * 57.3, 1)}° -> ${fmt(S4.list * 57.3, 1)}°`;
   });
 
   await test('ship systems: redundant power, cable ways by route, casualty power; speed and steering follow', async () => {

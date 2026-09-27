@@ -1,5 +1,7 @@
 /* The engagement log (the Ring film's, top right): short timestamped lines from sim events, only what the player's
-   side can know. Six rows, the newest bright, older ones fading. Repeated launches from one unit merge into one line. */
+   side can know. Six rows, the newest bright, older ones fading. Repeated launches from one unit merge into one line.
+   Own ships (sim/ship.js): the systems a hit took out and the capabilities lost with them (one line a hit), spaces
+   holed below the waterline, flooded, burning; a ship that founders or capsizes. */
 import { CLASSIFY, PROJ } from '../../data/units.js';
 import { clock, esc, unitRef, trackRef, PNAME, WNAME, km, brg } from './fmt.js';
 
@@ -8,6 +10,12 @@ const HEAD = { coast: 'K300P Bastion-P', fleet: 'CSG · CVN-68' };
 const DEF_KINDS = new Set(['sam', 'sm6', 'pdms', 'aam', 'sam48', 'ram']);
 /* a module's label for a log line: its first two fields ('Mk 41 VLS · aft · 64 cells' -> 'Mk 41 VLS · aft') */
 const short = s => String(s).split(' · ').slice(0, 2).join(' · ');
+/* a ship system's or space's name, short (the log is one line): its first field, the usual abbreviations */
+const ABBR = [[/^Gas turbine generator/, 'GTG'], [/^Ship service (turbine|diesel) generators?/, 'SSG'], [/^Main switchboard/, 'SWBD'], [/^Switchboard/, 'SWBD'],
+  [/^Combat information centre/, 'CIC'], [/^Chilled water plant/, 'CHW plant'], [/^Fire pumps?/, 'FP'], [/^Main reduction gear/, 'MRG'], [/^Lube oil service/, 'LO pump'],
+  [/^Auxiliary machinery room/, 'AMR'], [/^Main engine room/, 'MER'], [/^Engine room/, 'ER'], [/^Main machinery room/, 'MMR'], [/^CRP hydraulics/, 'CRP hyd'],
+  [/^Emergency diesel generators/, 'EDG'], [/^Steering gear/, 'Steering gear']];
+const brief = s => { let t = String(s).split(' · ')[0]; for (const [re, r] of ABBR) t = t.replace(re, r); return t; };
 
 export function createLog(game, hud, parent) {
   const { sim } = game;
@@ -139,17 +147,23 @@ export function createLog(game, hud, parent) {
         const u = sim.units.get(e.unit);
         if (!u) break;
         const cable = e.cls === 'cable';
-        const nm = e.node ? (cable ? 'cable way' : short(e.label)) : null;
+        const nm = e.node ? (cable ? 'cable way' : brief(e.label)) : null;
         if (e.state === 'out') {
+          // what was wrecked by name (the first two), what only lost its power or supply as a count
           const key = 'S' + u.id, r = merge(key, 2);
-          const why = e.why === 'power' ? 'no power' : e.why === 'supply' ? '' : e.why;
-          const item = nm ? nm + (why && why !== 'blast' && why !== 'frag' ? ` (${why})` : '') : null;
           const row = r || add('Sys', '', 'c', key);
-          if (!row.mods) { row.mods = []; row.caps = []; row.nCable = 0; }
-          if (cable) row.nCable++; else if (item && !row.mods.includes(item)) row.mods.push(item);
+          if (!row.mods) { row.mods = []; row.caps = []; row.nCable = 0; row.nPow = 0; }
+          if (cable) row.nCable++;
+          else if (e.why === 'power' || e.why === 'supply') row.nPow++;
+          else if (nm && !row.mods.includes(nm)) row.mods.push(nm + (e.why === 'fire' || e.why === 'flood' ? ` (${e.why})` : ''));
           for (const k of e.caps || []) if (!row.caps.includes(k)) row.caps.push(k);
-          const list = row.mods.slice(0, 3).concat(row.mods.length > 3 ? [`+${row.mods.length - 3}`] : []).concat(row.nCable ? [`${row.nCable} cable way${row.nCable > 1 ? 's' : ''}`] : []);
-          row.text = `${unitRef(u)} · ${list.join(', ')} out${row.caps.length ? ' · ' + row.caps.join(' ').toUpperCase() + ' off' : ''}`;
+          // what she can no longer do first (the line is cut at the panel's edge), then what is out
+          const bits = [];
+          if (row.caps.length) bits.push(row.caps.join(' ').toUpperCase() + ' off');
+          if (row.mods.length) bits.push(row.mods.slice(0, 2).join(', ') + (row.mods.length > 2 ? ` +${row.mods.length - 2}` : '') + ' out');
+          if (row.nPow) bits.push(`${row.nPow} unpowered`);
+          if (row.nCable && !row.mods.length) bits.push(`${row.nCable} cable way${row.nCable > 1 ? 's' : ''} cut`);
+          row.text = `${unitRef(u)} · ${bits.join(' · ')}`;
           row.t = sim.t; dirty = true;
         } else if (e.caps && e.caps.length) add('Sys', `${unitRef(u)} · ${e.caps.join(' ').toUpperCase()} back${nm ? ' · ' + nm : ''}`, 'l');
         break;
@@ -159,9 +173,14 @@ export function createLog(game, hud, parent) {
         if (e.side !== side) break;
         const u = sim.units.get(e.unit);
         if (!u) break;
-        const nm = short(e.label);
-        if (e.state === 'breach' && e.below) add('Flood', `${unitRef(u)} · ${nm} · holed below the waterline · ${e.A} m²`, 'c');
+        const nm = brief(e.label);
+        if (e.state === 'breach' && e.below) {
+          const key = 'B' + u.id + e.comp, r = merge(key, 5);
+          if (r) { r.text = `${unitRef(u)} · ${nm} holed below the waterline · ${e.A} m²`; r.t = sim.t; dirty = true; }
+          else add('Flood', `${unitRef(u)} · ${nm} holed below the waterline · ${e.A} m²`, 'c', key);
+        }
         else if (e.state === 'flooded') add('Flood', `${unitRef(u)} · ${nm} flooded`, 'c');
+        else if (e.state === 'counterflood') add('DC', `${unitRef(u)} · counter-flooding ${nm} against the list`, '');
         else if (e.state === 'fire') {
           const key = 'F' + u.id, r = merge(key, 3);
           if (r) { if (!r.mods.includes(nm)) r.mods.push(nm); r.text = `${unitRef(u)} · fire · ${r.mods.slice(0, 3).join(', ')}${r.mods.length > 3 ? ` +${r.mods.length - 3}` : ''}`; r.t = sim.t; dirty = true; }

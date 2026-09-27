@@ -87,6 +87,8 @@ export const SHIPK = {
   shore: .05,             // m^2/s a team shores of a torn bulkhead or a blown door
   pump: .065,             // m^3/s per live fire pump (eductors)
   casualty: 240,          // s to rig casualty power to an intact load that lost its supply
+  cfList: .07,            // rad: a list past this, and damage control counter-floods a tank or void on the other side
+  cfRate: 1.5,            // m^3/s through the counter-flooding valves
   zebra: [15, 120],       // s: open doors are shut this long after she goes to general quarters (per door, fixed)
   yokeOpen: .35,          // share of doors and hatches open in cruising condition (Yoke)
   gqHold: 900,            // s without firing, being hit or a threat near: back to Yoke

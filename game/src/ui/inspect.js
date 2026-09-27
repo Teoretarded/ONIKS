@@ -8,6 +8,9 @@
           left or right drag orbit · wheel zoom · click a tag (or a part) to frame it, click empty space to
           frame the whole · H hide the tags · Esc or I leave (the camera flies back, time and the world return).
           B (sandbox, a unit): the impact test (ui/inspect/impact.js): strike it with any round in the game.
+          A ship (sim/ship.js): once the X-ray has opened her, and in the impact test, her compartments (hairlines),
+          the water in them, fires, the holes in her plating and her systems (lit / damaged / out) are drawn over her,
+          with her flooding, stability, power and what is out in the readout (ui/inspect/ship_view.js).
    Time:  combat / campaign pause while inspecting; sandbox keeps running (settings.inspectPause overrides);
           a round in flight drops the game to bullet time x0.05, shown on screen.
 
@@ -851,7 +854,10 @@ export async function createInspect(game, ctx) {
       L.push([rate, [game.timeRate === BULLET && !game.paused ? ' · bullet time · ' : ' · ', F], [`T+${game.fmtTime ? game.fmtTime(sim.t) : sim.t.toFixed(0)}`, F]]);
     }
     for (const segs of IMP.readout(F, Wt)) L.push(segs);
-    if (svOk(V) && (IMP.on || V.xr.k > .5)) for (const segs of SV.readout(F, Wt, V.u)) L.push(segs);
+    if (svOk(V) && (IMP.on || V.xr.k > .5)) {
+      if (IMP.on && !IMP.st.simDmg) L.push([['Ship ', F], ['visual strikes leave her spaces and systems as they are', Wt], [' · D sim damage', F]]);
+      for (const segs of SV.readout(F, Wt, V.u)) L.push(segs);
+    }
     if (V.lostT) L.push([[V.lostWhy, CORAL]]);
     for (const segs of L) { O.runs(ctx, x, y, segs, { size: 11.5, a: A }); y += 21; }
     return y;

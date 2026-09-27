@@ -359,11 +359,12 @@ the charge to `shipHit`, and her flooding comes only from the holes it tears.
   ('foundered' event, then `destroyed`). Fires grow, burn what is in their space (`TOL.fire` s at full), spread through
   open or torn boundaries after `fireSpread`, go out under water. Damage control (`SHIPK.teams`): fires worst first
   (the firemain: x4 slower without it), plugs holes a team can reach (up to 1.5 m2, not deeper than 4 m), shores torn
-  bulkheads and blown doors round the flooded spaces. General quarters (she has fired, been hit, a hostile round
+  bulkheads and blown doors round the flooded spaces, counter-floods a tank or void on the high side past `cfList` of
+  list (with metacentric height to spare; the pumps leave it). General quarters (she has fired, been hit, a hostile round
   within 20 km): the doors open in cruising (`yokeOpen`) shut over `zebra` s; 15 quiet minutes and they open again.
 - **Events**: `system` { unit, side, node, label, cls, state 'out' | 'restored', why ('blast' | 'frag' | 'fire' | 'flood'
   | 'shock' | 'power' | 'supply'), caps (tokens lost / back with it), pos }, `compartment` { unit, side, comp, label,
-  state 'breach' (A m2, below) | 'torn' | 'flooding' | 'flooded' | 'dry' | 'fire' | 'fireout' }, `foundered` { unit,
+  state 'breach' (A m2, below) | 'torn' | 'flooding' | 'flooded' | 'dry' | 'fire' | 'fireout' | 'counterflood' }, `foundered` { unit,
   side, why 'foundered' | 'capsized', w (m3) }. Readouts: `shipSummary(u)`, `floodShare(u, z0, z1, side)` (game/structure
   seeds her sections' flooding from it), `shipRefresh(sim, u)`. Console / tests: `sim/ship_probe.js` `strike({ type,
   kind, at, from, secs })` -> the log of one hit and the minutes after it.
