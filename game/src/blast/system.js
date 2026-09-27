@@ -189,7 +189,7 @@ export async function createBlast(game) {
     if (m.inner) { B.inner = m.inner; B.nIn = m.nIn; }
     B.tSolve = m.t; B.torn = m.tornSkin; B.below = m.tornBelow; B.setMax = m.setMax; B.byPlate = m.byPlate; B.runMs = m.runMs; B.wallMs = m.wallMs; B.steps = m.steps;
     if (m.tornSkin > 0 && B.tearT < 0) B.tearT = sim.t;
-    try { detachScan(B); } catch (e) { console.error('blast: detach', e); }
+    { const td = performance.now(); try { detachScan(B); } catch (e) { console.error('blast: detach', e); } const dd = performance.now() - td; stats.detachMs = Math.max(stats.detachMs || 0, dd); }
     if (m.final) { B.state = 'done'; B.final = m; B.res = m.results; B.doneT = sim.t; if (m.debris && m.debris.length) bodies.dotsOf(B.uid, B, m.debris, 1); settle(B); setTimeout(() => { try { settleSupport(B); } catch (e) { console.error('blast: support', e); } }, 0); }
     else if (m.tornSkin > .05 && !B.ej) ejecta(B, m);
   }
@@ -288,11 +288,11 @@ export async function createBlast(game) {
     const n = pick.length / 4, par = new Int32Array(n); for (let q = 0; q < n; q++) par[q] = q;
     const fd = q => { while (par[q] !== q) { par[q] = par[par[q]]; q = par[q]; } return q; };
     const cell = new Map(), CL = .7;
-    for (let q = 0; q < n; q++) { const o = 7 * pick[4 * q]; const kk = D[o + 6] + ':' + Math.floor(D[o] / CL) + ',' + Math.floor(D[o + 1] / CL) + ',' + Math.floor(D[o + 2] / CL); const l = cell.get(kk); if (l) l.push(q); else cell.set(kk, [q]); }
+    const ck = (p, a, b2, c) => (((p * 4096 + a + 2048) * 4096 + b2 + 2048) * 4096 + c + 2048);
+    for (let q = 0; q < n; q++) { const o = 7 * pick[4 * q]; const kk = ck(D[o + 6], Math.floor(D[o] / CL), Math.floor(D[o + 1] / CL), Math.floor(D[o + 2] / CL)); const l = cell.get(kk); if (l) l.push(q); else cell.set(kk, [q]); }
     for (const [kk, l] of cell) {
-      const [pp, rest] = kk.split(':'), [a, b2, c] = rest.split(',').map(Number);
       for (let dx = 0; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) { if (!dx && (dy < 0 || (!dy && dz <= 0))) continue;
-        const m2 = cell.get(pp + ':' + (a + dx) + ',' + (b2 + dy) + ',' + (c + dz)); if (!m2) continue; const ra = fd(l[0]), rb = fd(m2[0]); if (ra !== rb) par[ra] = rb; }
+        const m2 = cell.get(kk + dx * 16777216 + dy * 4096 + dz); if (!m2) continue; const ra = fd(l[0]), rb = fd(m2[0]); if (ra !== rb) par[ra] = rb; }
       for (let q = 1; q < l.length; q++) { const ra = fd(l[0]), rb = fd(l[q]); if (ra !== rb) par[ra] = rb; }
     }
     const groups = new Map(); for (let q = 0; q < n; q++) { const r0 = fd(q); let g = groups.get(r0); if (!g) groups.set(r0, g = []); g.push(q); }

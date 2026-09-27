@@ -498,7 +498,9 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
           break;
         }
         if (off <= -0.05 && off > -D - 0.4) {
-          if (torn || (fN & 3) != 0) return 1;
+          // (not at the plate's edges: the ship's shell or bulkhead the plate meets there stands on its own)
+          float ed = min(min(fi, Q.x - fi), min(fj, Q.y - fj)) * S;
+          if (ed > 0.6 && (torn || (fN & 11) != 0)) return 1;
           float wd = 1.0 - (-off) / (D + 0.4);
           p += (X * dlb.x + Y * dlb.y + Z * dlb.z) * wd;
           break;

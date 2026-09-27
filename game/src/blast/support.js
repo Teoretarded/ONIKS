@@ -107,7 +107,7 @@ export function classify(B, x, y, z, nx, ny, nz, info) {
     if (info) { info.r = r; info.off = off; info.i = Math.round(fi); info.j = Math.round(fj); info.up = A[1] > .7; }
     if (Math.abs(off) > band || !face) {
       if (off > -.05 && off < (A[1] > .7 ? 30 : 3)) return (fN & 11) ? K.COLDROP : K.COL;
-      if (off <= -.05 && off > -D - .4) return ((f00 & 1) || (fN & 3)) ? K.BEHINDDROP : K.BEHIND;
+      if (off <= -.05 && off > -D - .4) return Math.min(fi, r.nu - fi, fj, r.nv - fj) * S > .6 && ((f00 & 1) || (fN & 11)) ? K.BEHINDDROP : K.BEHIND;
       continue;
     }
     return (f00 & 1) || (fN & 2) ? K.TORN : K.PLATE;
@@ -257,6 +257,7 @@ export function createBodies() {
    the clusters of kept dots (joined within 0.6 m) that touch nothing that holds them: no untouched dot of the model, no
    plating, nothing standing within 0.8 m of its plating. -> { dropped: [idx], orphan: [idx] (dropped, not flying),
    floating: [[idx...]], n } */
+const ck3 = (a, b, c) => ((a + 2048) * 4096 + (b + 2048)) * 4096 + (c + 2048);
 export function connectivity(Md, patches, T) {
   if (!Md || !Md.n || !patches.length) return { dropped: [], orphan: [], floating: [], n: 0 };
   const D = Md.D;
@@ -279,13 +280,13 @@ export function connectivity(Md, patches, T) {
   const cell = new Map(), CL = .6, dropped = [], orphan = [];
   for (let q = 0; q < n; q++) {
     if (cls[q] === 2) { dropped.push(idx[q]); if (T && !T[idx[q]]) orphan.push(idx[q]); continue; }
-    const o = 7 * idx[q], k = Math.floor(D[o] / CL) + ',' + Math.floor(D[o + 1] / CL) + ',' + Math.floor(D[o + 2] / CL);
+    const o = 7 * idx[q], k = ck3(Math.floor(D[o] / CL), Math.floor(D[o + 1] / CL), Math.floor(D[o + 2] / CL));
     const l = cell.get(k); if (l) { const a = fd(l), b = fd(q); if (a !== b) par[a] = b; } else cell.set(k, q);
   }
   for (const [k, q] of cell) {
-    const [a, b, c] = k.split(',').map(Number);
-    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
-      const m = cell.get((a + dx) + ',' + (b + dy) + ',' + (c + dz)); if (m === undefined) continue; const ra = fd(q), rb = fd(m); if (ra !== rb) par[ra] = rb; }
+    for (let dx = 0; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+      if (!dx && (dy < 0 || (!dy && dz <= 0))) continue;
+      const m = cell.get(k + dx * 16777216 + dy * 4096 + dz); if (m === undefined) continue; const ra = fd(q), rb = fd(m); if (ra !== rb) par[ra] = rb; }
   }
   const anchored = new Set(), groups = new Map();
   for (let q = 0; q < n; q++) { if (cls[q] === 2) continue; const r = fd(q); if (cls[q] === 1) anchored.add(r); let g = groups.get(r); if (!g) groups.set(r, g = []); g.push(idx[q]); }
