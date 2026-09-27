@@ -152,7 +152,7 @@ export function classify(B, x, y, z, nx, ny, nz, info, ins) {
     if ((f00 & 1) && two) return K.COLDROP;                       // (a line over the hole goes with its plating)
     return (f00 & 1) || (fN & 2) ? K.TORN : K.PLATE;
   }
-  return ins && l[0] * l[0] + l[1] * l[1] + l[2] * l[2] < 256 && !inRect ? K.HIDDEN : K.NONE;
+  return ins && !inRect && (l[0] * l[0] + l[1] * l[1] + l[2] * l[2] < 256 || y < .2) ? K.HIDDEN : K.NONE;   // (under the water too: QA D18)
 }
 
 /* engine/models.js blastAt's torn test: the cells' torn flags (bit 1) bilinear at the point (through the cell centres,

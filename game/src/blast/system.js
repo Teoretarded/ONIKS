@@ -299,8 +299,8 @@ export async function createBlast(game) {
     let added = 0; const touched = new Set();
     // (a hole no patch of hers covers: the scars system's analytic hole there, once)
     const covered = h => { for (const b of byUnit.get(B.uid) || []) { const G = b.spec.frame, e = [h.x - G.O[0], h.y - G.O[1], h.z - G.O[2]], q = [0, 1, 2].map(k => { const A = k === 0 ? G.X : k === 1 ? G.Y : G.Z; return e[0] * A[0] + e[1] * A[1] + e[2] * A[2]; });
-      for (const r of b.rects) { const S2 = b.spec.gridS || S_GRID, off = q[r.ax] - r.val, cu = ((r.ax === 0 ? q[2] : q[0]) - r.u0) / S2, cv = ((r.ax === 1 ? q[2] : q[1]) - r.v0) / S2;
-        if (Math.abs(off) < 2 && cu > 0 && cv > 0 && cu < r.nu && cv < r.nv) return true; } } return false; };
+      for (const r of b.rects) { const pl2 = b.spec.plates[r.p]; if (!pl2 || !pl2.skin) continue; const S2 = b.spec.gridS || S_GRID, off = q[r.ax] - r.val, cu = ((r.ax === 0 ? q[2] : q[0]) - r.u0) / S2, cv = ((r.ax === 1 ? q[2] : q[1]) - r.v0) / S2;
+        if (Math.abs(off) < 4 && cu > 0 && cv > 0 && cu < r.nu && cv < r.nv) return true; } } return false; };
     const done = B.simOut || (B.simOut = new Set());
     for (const h of Hs) {
       if (!(h.A > .05)) continue;
@@ -313,7 +313,8 @@ export async function createBlast(game) {
       const lobe = k => .72 + .5 * ((Math.imul((k & 15) + sd * 16, 0x9E3779B1) >>> 0) / 4294967296);
       for (const r of B.rects) {
         if (!r.cpu) continue;
-        const off = l[r.ax] - r.val; if (Math.abs(off) > 2) continue;
+        const pl = B.spec.plates[r.p]; if (!pl || !pl.skin) continue;   // (the ship's own shell only)
+        const off = l[r.ax] - r.val; if (Math.abs(off) > 4) continue;   // (the sim's boxes are coarser than the model: a hole up to 4 m off the plating is on it)
         const cu = ((r.ax === 0 ? l[2] : l[0]) - r.u0) / S, cv = ((r.ax === 1 ? l[2] : l[1]) - r.v0) / S, Rt = R0 * 1.25 / S, W = r.nu + 1;
         // (the solve's own tear there: no more than the sim asks)
         let torn = 0, all = 0;
