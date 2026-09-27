@@ -76,9 +76,16 @@ async function frames(O, n, rec) { for (let i = 0; i < n; i++) await frame(O, re
 
 let slot = 0;
 function clearSpot(O) {
-  const sim = O.sim, ref = [...sim.units.values()].find(u => u.def.domain === 'sea') || { pos: [0, 0, 0] };
-  const k = ++slot;
-  return [ref.pos[0] + 3000 + (k % 3) * 1200, ref.pos[2] + 3000 + (Math.floor(k / 3) % 4) * 1200];
+  // open water away from the other side: the fleet ship furthest from the coast side's units, then 3 km further out
+  const sim = O.sim, all = [...sim.units.values()];
+  const coast = all.filter(u => u.side === 'coast' && u.alive);
+  const cx = coast.reduce((a, u) => a + u.pos[0], 0) / Math.max(1, coast.length), cz = coast.reduce((a, u) => a + u.pos[2], 0) / Math.max(1, coast.length);
+  const sea = all.filter(u => u.def.domain === 'sea' && u.side !== 'coast');
+  let ref = sea[0] || { pos: [0, 0, 0] }, bd = -1;
+  for (const u of sea) { const d = Math.hypot(u.pos[0] - cx, u.pos[2] - cz); if (d > bd) { bd = d; ref = u; } }
+  const dx = ref.pos[0] - cx, dz = ref.pos[2] - cz, l = Math.hypot(dx, dz) || 1;
+  const k = ++slot, ox = ref.pos[0] + dx / l * 3000, oz = ref.pos[2] + dz / l * 3000;
+  return [ox + (k % 3) * 1200 * (-dz / l), oz + (k % 3) * 1200 * (dx / l) + Math.floor(k / 3) % 4 * 0];
 }
 
 function views(c) {
@@ -101,8 +108,24 @@ function systems(O, id) {
   for (const p in (u.parts || {})) { const v = u.parts[p]; if (typeof v === 'number' && v > 0) parts.push(`${p}:${Math.round(v)}`); }
   // whatever the systems / flooding model keeps on the unit (names with flood, comp, space, sys, dc), shallow
   const extra = {};
-  for (const k in u) if (/flood|comp|space|sys|dc|water/i.test(k) && k !== 'flood') { try { extra[k] = JSON.parse(JSON.stringify(u[k], (a, v) => typeof v === 'number' ? +v.toFixed(3) : v)); } catch (e) { extra[k] = String(u[k]); } }
-  return { hp: Math.round(u.hp), hpMax: u.hpMax, flood: +(u.flood || 0).toFixed(3), fire: +(u.fire || 0).toFixed(1), alive: u.alive, mods, parts, extra };
+  for (const k in u) if (/flood|comp|space|sys|dc|water/i.test(k) && k !== 'flood' && k !== 'ship') { try { extra[k] = JSON.parse(JSON.stringify(u[k], (a, v) => typeof v === 'number' ? +v.toFixed(3) : v)); } catch (e) { extra[k] = String(u[k]); } }
+  // the ship model (sim/ship.js: compartments, systems, flooding) when she has one
+  let ship = null;
+  const S = u.ship;
+  if (S && S.L) {
+    const L = S.L, wet = [], fire = [];
+    for (let c = 0; c < L.n; c++) {
+      const cap = L.vol[c] * L.perm[c];
+      if (S.water[c] > .5) wet.push(`${L.ids[c]}:${Math.round(100 * S.water[c] / Math.max(1, cap))}%`);
+      if (S.fire[c] > 0) fire.push(L.ids[c]);
+    }
+    const out = S.sp ? S.sp.nodes.filter(n => !S.ok[n.i]).map(n => n.id) : [];
+    const torn = []; if (S.torn) for (let k = 0; k < S.torn.length; k++) if (S.torn[k] > 0) torn.push(`${L.bA ? L.ids[L.bA[k]] : k}>${L.bB && L.bB[k] >= 0 ? L.ids[L.bB[k]] : 'x'}:${S.torn[k].toFixed(1)}`);
+    const doors = S.door ? [...S.door].filter(v => v > 0).length : 0;
+    ship = { holes: (S.holes || []).map(h => `${L.ids[h.c]} y${h.y.toFixed(1)} ${h.A.toFixed(1)}m2${h.sea ? ' sea' : ''}`), wet, fire, out, torn, doorsOpen: doors,
+      w: Math.round(S.w || 0), sink: +(S.sink || 0).toFixed(2), list: +((S.list || 0) * 57.3).toFixed(1), trim: +((S.trim || 0) * 57.3).toFixed(2), prop: S.prop, caps: S.caps };
+  }
+  return { hp: Math.round(u.hp), hpMax: u.hpMax, flood: +(u.flood || 0).toFixed(3), fire: +(u.fire || 0).toFixed(1), alive: u.alive, mods, parts, extra, ship };
 }
 
 /* an exact view (the orbit camera rides its target on the sea surface and tilts up when low: not usable close to a
@@ -185,7 +208,7 @@ export async function runCase(O, c, o = {}) {
   for (const [k, tag] of [['a', 'set_a60'], ['b', 'set_b60'], ['d', 'set_d25'], ['e', 'set_e12'], ['w', 'set_w300']]) { await shot(O, id, aim, V[k], `${dir}/${c.id}_${tag}`); row.shots.push(tag); }
   row.sys = systems(O, id);
   // flooding over time: the sim run ahead (no rendering), the state again and a wide still
-  if (c.ff) { O.ff(c.ff); O.advance(.1, 3); row.sys2 = systems(O, id); await shot(O, id, aim, V.w, `${dir}/${c.id}_ff${c.ff}_w300`); await shot(O, id, aim, V.a, `${dir}/${c.id}_ff${c.ff}_a60`); row.shots.push('ff'); }
+  if (c.ff) { const lost = []; const oe = sim.emit.bind(sim); sim.emit = (t, e) => { if (e && (e.unit === id || e.target === id) && lost.length < 40) lost.push([t, +sim.t.toFixed(1), JSON.stringify(e, (a, v) => typeof v === 'number' ? +v.toFixed(3) : v).slice(0, 240)]); return oe(t, e); }; O.ff(c.ff); sim.emit = oe; row.ffEvents = lost; O.advance(.1, 3); row.sys2 = systems(O, id); await shot(O, id, aim, V.w, `${dir}/${c.id}_ff${c.ff}_w300`); await shot(O, id, aim, V.a, `${dir}/${c.id}_ff${c.ff}_a60`); row.shots.push('ff'); }
   // the floating-dot check, when game/src/blast/qa.js exists
   try {
     const QM = await import('/game/src/blast/qa.js');
