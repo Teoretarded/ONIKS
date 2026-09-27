@@ -159,7 +159,7 @@ export function classify(B, x, y, z, nx, ny, nz, info, ins) {
         // (the plating under its foot thrown more than 1.5 m: what stood on it does not ride along as a clean block, it
         // tears off and falls as a piece: QA D23; as the shader)
         const D2 = k2 => { const q = c => T[4 * c + k2]; const c00 = j0 * W + i0; return (q(c00) * (1 - fx) + q(c00 + 1) * fx) * (1 - fy) + (q(c00 + W) * (1 - fx) + q(c00 + W + 1) * fx) * fy; };
-        const big = D2(0) ** 2 + D2(1) ** 2 + D2(2) ** 2 > .64;
+        const big = D2(0) ** 2 + D2(1) ** 2 + D2(2) ** 2 > (A[1] > .7 ? .64 : .16);   // (0.4 m beside a side's plating, QA D23)
         // (as the shader: the deck under its foot bent steeper than ~25 deg: torn off)
         const q2 = (i, j) => T[4 * (Math.min(r.nv, j) * W + Math.min(r.nu, i)) + ax];
         const su = ((q2(i0 + 1, j0) - q2(i0, j0)) * (1 - fy) + (q2(i0 + 1, j0 + 1) - q2(i0, j0 + 1)) * fy) / S, sv = ((q2(i0, j0 + 1) - q2(i0, j0)) * (1 - fx) + (q2(i0 + 1, j0 + 1) - q2(i0 + 1, j0)) * fx) / S;

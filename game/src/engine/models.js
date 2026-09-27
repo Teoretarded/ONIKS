@@ -667,7 +667,9 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
         if (gIn < 0.5 && off > -0.05 && off < (A.y > 0.7 ? 30.0 : 3.0)) {
           // (torn: the smooth ragged outline, as the plating's own; the nearest texel's flag would cut 0.25 m steps)
           // (the plating under its foot thrown more than 1.5 m: it tears off and falls as a piece, the blast system flies it)
-          if (torn || (fN & 10) != 0 || dot(dlb, dlb) > 0.64) return 1;
+          // (beside a side's plating (its fittings, the deckhouse edge over it) the limit is 0.4 m: past it the foot was
+          // drawn skewed out with the bend under an upright that stood intact above it, a white card, QA D23)
+          if (torn || (fN & 10) != 0 || dot(dlb, dlb) > (A.y > 0.7 ? 0.64 : 0.16)) return 1;
           // (the deck under its foot bent steeper than ~25 deg: its base could not take that, it tore off (flown as a
           // piece); bent less, it rides the bend but its base buckles and shears harder the steeper the bend (QA D23))
           { float su = mix(t10[ax] - t00[ax], t11[ax] - t01[ax], fy) / S, sv = mix(t01[ax] - t00[ax], t11[ax] - t10[ax], fx) / S, sl = length(vec2(su, sv));
