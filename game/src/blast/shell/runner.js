@@ -243,6 +243,16 @@ export function createShellRunner(gl, o = {}) {
         // (petals: a split node's cells beyond the crack are on its twin: each texel drawn from its own cell's corners)
         if (M.CN0 && M.nSplit) { const cc = CM[L.off + mp.cjv[Math.min(j, nv - 1)] * L.nu + mp.ciu[Math.min(i, nu - 1)]];
           if (cc >= 0) { const ef = n => { for (let k = 0; k < 4; k++) if (M.CN0[4 * cc + k] === n) return M.CN[4 * cc + k]; return n; }; n00 = ef(n00); n10 = ef(n10); n01 = ef(n01); n11 = ef(n11); } }
+        else if (M.TWIN && !final) {
+          // (during the solve the CPU does not know the splits: a corner whose twin has moved (split) goes with whichever
+          // of the two keeps the cell's diagonal nearest its rest length: the flap stays with its cell)
+          const pick = (n, o) => { const T = n < M.TWIN.length ? M.TWIN[n] : -1; if (T < 0) return n;
+            const dT = (X[3 * T] - R0[3 * T]) ** 2 + (X[3 * T + 1] - R0[3 * T + 1]) ** 2 + (X[3 * T + 2] - R0[3 * T + 2]) ** 2; if (dT < 1e-8) return n;
+            const L0 = Math.hypot(R0[3 * n] - R0[3 * o], R0[3 * n + 1] - R0[3 * o + 1], R0[3 * n + 2] - R0[3 * o + 2]);
+            const a = Math.abs(Math.hypot(X[3 * n] - X[3 * o], X[3 * n + 1] - X[3 * o + 1], X[3 * n + 2] - X[3 * o + 2]) - L0), b = Math.abs(Math.hypot(X[3 * T] - X[3 * o], X[3 * T + 1] - X[3 * o + 1], X[3 * T + 2] - X[3 * o + 2]) - L0);
+            return b < a ? T : n; };
+          const a00 = pick(n00, n11), a11 = pick(n11, n00), a10 = pick(n10, n01), a01 = pick(n01, n10); n00 = a00; n11 = a11; n10 = a10; n01 = a01;
+        }
         const w00 = (1 - fx) * (1 - fy), w10 = fx * (1 - fy), w01 = (1 - fx) * fy, w11 = fx * fy, eb = mp.eu[i] * mp.ev[j];
         for (let q = 0; q < 3; q++) d[o + q] = eb * ((X[3 * n00 + q] - R0[3 * n00 + q]) * w00 + (X[3 * n10 + q] - R0[3 * n10 + q]) * w10 + (X[3 * n01 + q] - R0[3 * n01 + q]) * w01 + (X[3 * n11 + q] - R0[3 * n11 + q]) * w11);
         const nn = fx < .5 ? (fy < .5 ? n00 : n01) : (fy < .5 ? n10 : n11), kn = fx < .5 ? (fy < .5 ? k00 : k00 + Wn) : (fy < .5 ? k00 + 1 : k00 + Wn + 1);

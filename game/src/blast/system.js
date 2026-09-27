@@ -49,7 +49,7 @@ export async function createBlast(game) {
   // ONIKS.game.blast.cfg.solver
   const DEFAULT_SOLVER = typeof navigator !== 'undefined' && navigator.gpu ? 'shell' : 'lattice';
   const q0 = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('blast') : null;
-  const cfg = { watchDist: 4000, upTexels: 6000, maxDots: 5000, on: q0 !== 'off', gpuMs: 3, gpuMsSlow: 5, gpuMsShell: 6, gpuMsShellSlow: 8, detachMs: 1.5, shellS: .25, scatter: .05, latMs: 5, fastEnd: true, petals: false,
+  const cfg = { watchDist: 4000, upTexels: 6000, maxDots: 5000, on: q0 !== 'off', gpuMs: 3, gpuMsSlow: 5, gpuMsShell: 6, gpuMsShellSlow: 8, detachMs: 1.5, shellS: .25, scatter: .05, latMs: 5, fastEnd: true, petals: true,
     solver: q0 === 'shell' || q0 === 'lattice' ? q0 : DEFAULT_SOLVER };
 
   /* ------------------------------------------------------------ the atlas */
@@ -417,7 +417,7 @@ export async function createBlast(game) {
     for (const b of L) detachWork(b, Infinity);
     for (let it = 0; it < 4; it++) {
       const C = connectivity(Md, L, takenOf(B.uid, Md));
-      const fl = C.floating.filter(g => g.length > 2);
+      const fl = C.floating;   // (single dots too: nothing left hanging in the air)
       if (!fl.length) break;
       const D = Md.D, touched = new Set();
       for (const g of fl) for (const i of g) {

@@ -60,7 +60,7 @@ function slice(ms, msShell) {
   // the shell solver on WebGPU: its own queue, paced by what it has in flight (one command buffer: a slice a frame); a
   // step ~10 us + 3 ns a node of GPU (the bench's timer queries: 97 us on its 31k-cell patch, GPU-bound)
   if (shell && shell.busy && shell.stats.backend === 'webgpu') {
-    let nodes = 0; for (const R of shell.pats.values()) if (R.state === 'run') nodes += R.M.N;
+    let nodes = 0; for (const R of shell.pats.values()) if (R.state === 'run') nodes += R.M.N - .8 * (R.M.nTwins || 0);   // (idle twins cost little: the petals pass is ~+24 % a step, bench)
     // (the queue kept short while the game's frames run long (the main thread cut the share): a deep queue of solver
     // work sits in front of the game's own frame on the GPU)
     const dq = (msShell || ms) < 3 ? 2 : cfg.wgDepth || 8;
