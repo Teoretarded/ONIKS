@@ -257,12 +257,13 @@ function blastAt(sim, u, S, W, F, pen, fz, p, src, depth, skip) {
   let nG = 0, Veff = 0;
   if (c0 >= 0 && inside) { GASC[nG] = c0; GASG[nG++] = 1; Veff = L.vol[c0]; }
   let P0 = inside ? qsp(W, Veff) : 0;
-  const tornNow = [];
+  const tornNow = [], shellHit = [];
   const front = c0 >= 0 ? [c0] : [];
   for (let ring = 0; ring < 3 && front.length; ring++) {
     const next = [];
     for (const c of front) {
       const gi = gasIx(c, nG), Pgc = gi >= 0 ? P0 * GASG[gi] : 0;
+      let shA = 0, shK = -1;
       for (const k of L.cb[c]) {
         if (!inside && k !== skinK) continue;                 // a burst outside meets only the plating it struck
         const o = L.bA[k] === c ? L.bB[k] : L.bA[k];
@@ -288,7 +289,8 @@ function blastAt(sim, u, S, W, F, pen, fz, p, src, depth, skip) {
           S.torn[k] = A; S.shore[k] = Math.min(S.shore[k], A * .5);
           const r = Math.sqrt(A / Math.PI);
           S.tornY[k * 2] = Math.max(L.bBox[k * 6 + 1], yc - r); S.tornY[k * 2 + 1] = Math.min(L.bBox[k * 6 + 4], yc + r);
-          if (o < 0) makeHole(sim, u, S, c, k, px, py, pz, A, o);
+          // (a space's shell is several boundaries, split at the waterline: one tear through it a blast)
+          if (o < 0) { if (A > shA) { shA = A; shK = k; } }
           else if (was < .5 && A >= .5) tornNow.push(k);
         }
         if (o >= 0 && L.bDoor[k] > 0 && S.door[k] !== 2 && P > L.bDoorP[k]) S.door[k] = 2;
@@ -300,6 +302,8 @@ function blastAt(sim, u, S, W, F, pen, fz, p, src, depth, skip) {
           else if (go >= 0 && g > GASG[go]) { Veff += (g - GASG[go]) * L.vol[o]; GASG[go] = g; }
         }
       }
+      // a space's shell is several boundaries (split at the waterline): one tear through it a blast, the largest
+      if (shK >= 0 && shellHit.indexOf(c) < 0) { shellHit.push(c); makeHole(sim, u, S, c, shK, px, py, pz, shA, L.bB[shK]); }
     }
     P0 = inside ? qsp(W, Veff) : 0;
     front.length = 0; for (const c of next) front.push(c);
