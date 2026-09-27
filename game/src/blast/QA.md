@@ -11,13 +11,13 @@ Status: OPEN / FIXED? (a fix landed, not re-tested) / PASS / WONTFIX. "run N" = 
 
 | # | case | still | what's wrong | status |
 |---|---|---|---|---|
-| D39 | ddg_mid | `qa5/ddg_mid_set_d25`, `_set_e12` | Oniks inside amidships (120 kg TNT-eq, delayed fuze) now tears 2.7 m2: a thin horizontal slit ~12 m long along a longitudinal, with the frames glowing through: reads as a crack, not the blown-out hole the sim books (11 m2) and the charge makes (run 4: 59 m2) | OPEN |
-| D38 | ddg_vls | `qa5/ddg_vls_set_a60`, `_set_b60`, `_set_d25` | Black silhouettes: after the aft-VLS deck hit, the stacks and deckhouse blocks by the hole are drawn as flat black shapes with no dots (their depth kept, their dots dropped), hiding what is behind them. qa.js: 107 `big-piece` flags (ddg_vls), 26 on lcs_side | OPEN |
-| D37 | all DDG cases | `qa5/ddg_wl_set_a60`, `_1s_b60`, `qa5/ddg_mid_1s_a60` | New since the interiors (b044a49 / b959230): a grid of thin white lines on the intact hull side (verticals every few frames, a horizontal at the 4th deck / waterline) and on the deckhouse: the interior's bulkheads, decks and outfit drawn through intact plating (Inspect off, X-ray off); in `qa5/ddg_mid_set_d25` they hang below the waterline under the hull. Also a davit-like upright piece standing in the water against the hull (`qa5/ddg_wl_set_e12`) | OPEN (interior agent) |
-| D36 | ddg_wl_ff | `qa4/ddg_wl_ff_inspect.png`, `_hud.png` | Systems not reported: 180 s after the hit (9 systems out incl. engine room 1, GTG1, SWBD1, fire pumps; 6 spaces wet, sink 1.1 m, speed cap) the Inspect panel shows only the class card (speed 0.0 kn, mass, no damage, no systems out, no flooding, no list); the HUD likewise. (The systems agent's ui/inspect.js and hud/log.js are still uncommitted: re-check when they land.) Also `inspect.close()` left Inspect open for the plain HUD still | OPEN (systems agent); run 5 (4fa59c1 landed): Inspect still shows only the class card, nothing of 6-9 systems out, 5 spaces wet, 1.1 m sinkage (`qa5/ddg_wl_ff_inspect.png`) |
+| D39 | ddg_mid | `qa5/ddg_mid_set_d25`, `_set_e12` | Oniks inside amidships (120 kg TNT-eq, delayed fuze) now tears 2.7 m2: a thin horizontal slit ~12 m long along a longitudinal, with the frames glowing through: reads as a crack, not the blown-out hole the sim books (11 m2) and the charge makes (run 4: 59 m2) | OPEN; run 6: ddg_mid now tears 0 (no slit either) |
+| D38 | ddg_vls | `qa5/ddg_vls_set_a60`, `_set_b60`, `_set_d25` | Black silhouettes: after the aft-VLS deck hit, the stacks and deckhouse blocks by the hole are drawn as flat black shapes with no dots (their depth kept, their dots dropped), hiding what is behind them. qa.js: 107 `big-piece` flags (ddg_vls), 26 on lcs_side | OPEN; run 6 same (`qa6/ddg_vls_set_b60`, `_set_d25`: black silhouettes of the stacks and of blocks round the hole); qa.js no longer flags big-piece |
+| D37 | all DDG cases | `qa5/ddg_wl_set_a60`, `_1s_b60`, `qa5/ddg_mid_1s_a60` | New since the interiors (b044a49 / b959230): a grid of thin white lines on the intact hull side (verticals every few frames, a horizontal at the 4th deck / waterline) and on the deckhouse: the interior's bulkheads, decks and outfit drawn through intact plating (Inspect off, X-ray off); in `qa5/ddg_mid_set_d25` they hang below the waterline under the hull. Also a davit-like upright piece standing in the water against the hull (`qa5/ddg_wl_set_e12`) | OPEN (interior agent); run 6 same (`qa6/ddg_mid_1s_b60`, `_set_d25`) |
+| D36 | ddg_wl_ff | `qa4/ddg_wl_ff_inspect.png`, `_hud.png` | Systems not reported: 180 s after the hit (9 systems out incl. engine room 1, GTG1, SWBD1, fire pumps; 6 spaces wet, sink 1.1 m, speed cap) the Inspect panel shows only the class card (speed 0.0 kn, mass, no damage, no systems out, no flooding, no list); the HUD likewise. (The systems agent's ui/inspect.js and hud/log.js are still uncommitted: re-check when they land.) Also `inspect.close()` left Inspect open for the plain HUD still | OPEN (systems agent); run 5 (4fa59c1 landed): Inspect still shows only the class card, nothing of 6-9 systems out, 5 spaces wet, 1.1 m sinkage (`qa5/ddg_wl_ff_inspect.png`); run 6 same |
 | D35 | ddg_wl_ff | (sim state, 180 s after) | Systems: fires listed burning in REF6 (Refrigerated stores) while REF6 is 100 % flooded; `system engF out why 'frag'` and an AMR1 'fire' + 'fireout' in the same tick ~80 s after the only hit (no new hit event): a late fragment knock-out / fire flicker from nothing | PASS; run 5: no fire left in flooded spaces, no late knock-outs in 180 s |
 | D34 | ddg_below, ddg_wl_ff | (sim state) | Flooding spread: PASS on the sim's side. ddg_wl_ff: sea holes in REF6 / BTH6 / AMR1, water reaches only the spaces behind torn boundaries (REF6>FO6, >ST5, AMR1>REF6, BTH6>REF6) and MER1 later (43 %), 53 doors open at the hit, 9 after general quarters; sink 1.14 m, trim -0.9 deg after 180 s; ddg_below: MER2 holed 37.8 m2 at y -1.1, floods to 65 % in 180 s and stays in MER2, engines, GTG2, SWBD2, lube, CPP out | PASS (sim) |
-| D33 | ddg_below, ddg_wl_ff, all side hits | `qa4/ddg_below_set_d25`, `qa4/ddg_wl_ff_set_e12` | Sim and picture disagree: the sim's ship model makes a 37.8 m2 sea hole (ddg_below) and three sea holes 10-19 m2 (ddg_wl_ff) while the blast solver tears 0 m2 there and the side is intact in the stills. The player sees an intact hull flooding. Either the solver has to tear what the sim holes (the same charge on the same plating) or the sim's hole should come from the solver (structure.refine) | OPEN (integration + systems); run 5: worse now the hits land low: ddg_wl sim hole MER2 30.2 m2 at the waterline, picture torn 0 (intact side); ddg_mid sim 11.2 m2, picture 2.7 m2 (a thin slit); ddg_hangar sim 36 m2 in 3 spaces, picture 0; carrier side / deck / island sim 19 / 46 / 65 m2, picture 0 on all three |
+| D33 | ddg_below, ddg_wl_ff, all side hits | `qa4/ddg_below_set_d25`, `qa4/ddg_wl_ff_set_e12` | Sim and picture disagree: the sim's ship model makes a 37.8 m2 sea hole (ddg_below) and three sea holes 10-19 m2 (ddg_wl_ff) while the blast solver tears 0 m2 there and the side is intact in the stills. The player sees an intact hull flooding. Either the solver has to tear what the sim holes (the same charge on the same plating) or the sim's hole should come from the solver (structure.refine) | OPEN (integration + systems); run 5: worse now the hits land low: ddg_wl sim hole MER2 30.2 m2 at the waterline, picture torn 0 (intact side); ddg_mid sim 11.2 m2, picture 2.7 m2 (a thin slit); ddg_hangar sim 36 m2 in 3 spaces, picture 0; carrier side / deck / island sim 19 / 46 / 65 m2, picture 0 on all three; run 6 (4dd386f, 75bf3a2): still: ddg_mid sim 10.2 m2 / picture 0 (side intact, `qa6/ddg_mid_set_d25`); ddg_wl sim 27.9 sea / picture 0.3; ddg_kh35 sim 13.5 / picture 0; hangar 35 / 0; carrier 17-55 / 0; ddg_spy agrees (sim 41.6, picture 35.4: a readable hole with the bridge interior behind, `qa6/ddg_spy_set_e12`) |
 | D32 | ddg_wl_ff | `qa4/ddg_wl_ff_ff180_w300` | (battery) after 180 s run ahead the unit is gone (hp 30, flood .046 before): sunk by the flooding, or taken by the sandbox's own enemies during the fast-forward? Need a quiet map spot / AI off for the flooding cases | FIXED in battery: the spot is now 3 km beyond the fleet ship furthest from the coast side; the ship lives the 180 s |
 | D31 | ddg_below | `qa4/ddg_below_set_d25`, `_ff180_a60` | Flooding case: aimed 1.2 m under the water, lands at y 0.1 (good), but the Oniks tears nothing (torn 0, below 0) and the side shows no hole; the sim still floods (.05 -> .11 over 180 s) and engF / engA 100 %: flooding and machinery loss with no hole to show for it, and nothing for the torn-bulkhead / open-door spread to work from | OPEN |
 | D30 | ddg_vls | `qa4/ddg_vls_set_a60`, `_set_b60` | A clean box module (sharp edges, flat faces) sits at the waterline against the starboard side beside the deck hole 3 s after the solve: debris module (boats?) not sinking or not torn | OPEN; run 5 same (`qa5/ddg_vls_set_b60`) |
@@ -52,6 +52,39 @@ Status: OPEN / FIXED? (a fix landed, not re-tested) / PASS / WONTFIX. "run N" = 
 | D1 | battery | - | (tool) 25 m / 12 m close views aimed at the patch origin (`spec.frame.O`), which is not the hole: now aimed at `scars.last(id)` | FIXED in battery |
 
 ## Runs
+
+### Run 6 (HEAD 75bf3a2: interior parts in the support map; 4dd386f entry holes, tears into the next level)
+
+Solves much shorter (resolve 0.8-3.3 s), but the synced frame p95 jumped on several DDG cases while the hit solves
+(ddg_wl 39, gundeck 51, spy 52, mast 38 ms) with other agents' tabs loading the GPU (baselines p95 up to 66 ms: noisy,
+re-bench quietly). qa.js ok on all 27. Same open: D2, D30, D33 (the picture tears far less than the sim), D36, D37, D38.
+Better: ddg_spy (a readable ragged hole, the bridge's interior behind it).
+
+| case | resolve s | p50/p95 (base) | torn m2 | sim holes m2 | qa |
+|---|---|---|---|---|---|
+| ddg_bow | 1.15 | 6.3/14.8 (3.4/13.7) | 9.6 | 52.9 | ok |
+| ddg_mid | 1.35 | 6.8/21.8 (3.4/10.3) | 0 | 10.2 | ok |
+| ddg_wl | 1.70 | 18.3/39.4 (3.5/4.3) | 0.31 | 27.9 sea | ok |
+| ddg_gundeck | 0.90 | 6.6/50.6 (17.7/20.7) | 111 | 47.0 | ok |
+| ddg_spy | 1.90 | 9.3/51.6 (16.7/66.2) | 35.4 | 41.6 | ok |
+| ddg_house | 1.00 | 8.5/19.2 | 16.6 | 23.3 | ok |
+| ddg_mast | 1.00 | 5.4/38.0 | 0 | - | ok |
+| ddg_vls | 1.85 | 7.4/26.8 | 224.8 | 16.6 | ok |
+| ddg_hangar | 1.45 | 6.4/19.9 | 0 | 35.4 | ok |
+| ddg_stern | 1.25 | 5.5/19.5 | 46.9 | 70.1 | ok |
+| ddg_kh35 | 1.20 | 6.6/19.0 | 0 | 13.5 | ok |
+| ddg_sm6 | 0.85 | 5.5/16.5 | 0.75 | - | ok |
+| ddg_127 | 0.80 | 5.2/15.0 | 0.25 | - | ok |
+| ddg_cookoff | 3.25 | 11.6/23.3 | 241.7 | (lost) | ok |
+| ddg_breakup | 1.45 | 5.8/9.1 | 0.25 | 21.0 (lost) | ok |
+| ddg_below | 1.55 | 7.2/13.6 | 0 | 28.6 sea | ok |
+| ddg_wl_ff | 1.70 | 9.4/13.3 | 0 | 21.1 | ok |
+| cg_side | 1.20 | 7.6/10.7 | 2.6 | 13.2 | ok |
+| cg_deck | 2.90 | 13.6/17.4 | 173.5 | 48.2 (lost) | ok |
+| cvn_side / deck / island | 1.3 / 1.45 / 1.0 | 8.5/11.7, 7.5/11.1, 12.2/14.9 | 0 / 0 / 0 | 17.0 / 42.2 / 55.2 | ok |
+| lcs_side / lcs_kh35 | 2.15 / 1.70 | 9.9/13.3, 7.8/10.6 | 91.9 / 69.2 | 75.6 (lost) / 91.1 | ok |
+| lhd_side / lhd_deck | 1.35 / 1.25 | 9.9/12.3, 13.0/15.4 | 0.88 / 12.1 | 15.1 / 36.9 | ok |
+
 
 ### Run 5 (HEAD 4fa59c1: sim/ship.js compartments + systems, 24ef151 narrow-first snap and interior parts, b959230 outfit)
 
