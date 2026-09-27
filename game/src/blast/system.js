@@ -488,7 +488,10 @@ export async function createBlast(game) {
       }
     });
   }
-  function heatOf(B, t) { if (B.tearT < 0) return B.state === 'done' ? 0 : 0; const a = t - B.tearT; return a < 0 ? 0 : .04 + .96 * Math.exp(-a / 9); }
+  function heatOf(B, t) {
+    // (the tear cools over ~10 s; while the fire in the hole burns its rim keeps an ember glow, lit from inside)
+    const fk = B.S && B.S.fire ? B.S.fire.k || 0 : 0, ember = .32 * Math.min(1, fk * 1.5);
+    if (B.tearT < 0) return (B.torn || 0) > .05 ? ember : 0; const a = t - B.tearT; return a < 0 ? 0 : Math.max(ember, .04 + .96 * Math.exp(-a / 9)); }
 
   /* ------------------------------------------------------------ per frame */
   const TG = {};
@@ -627,10 +630,11 @@ export async function createBlast(game) {
           const hs = (Math.imul(i + B.seed, 0x9E3779B1) >>> 0) / 4294967296;
           const torn = (e & 1) !== 0, fr = (e & 2) !== 0;
           // charred steel: dark, the torn edges and frames catching more light; the fire's glow deep inside, flickering
-          let c = (.15 + .22 * b) * (fr ? 1.3 : 1) * (.8 + .4 * hs);
-          const gw = sat(.3 + .25 * Math.min(4, -lz) / 4);
+          // (readable: steel catching the fire's light, its edges and frames brighter; the glow strongest deep in the hole)
+          let c = (.26 + .34 * b) * (fr ? 1.35 : 1) * (.8 + .4 * hs);
+          const gw = sat(.45 + .3 * Math.min(4, -lz) / 4);
           const fl2 = .72 + .28 * FLK[((tr * (40 + 24 * hs)) + i * 5.6) & 255];
-          const g = Math.max(fk * (.08 + .7 * gw * gw) * fl2, torn ? heat * .8 : 0);
+          const g = Math.max(Math.max(fk, .35 * heat) * (.25 + .95 * gw * gw) * fl2, torn ? heat * .9 : 0);
           const rr = 255 * Math.min(1, c * .95 + .62 * g), gg = 255 * Math.min(1, c * .9 + .36 * g), bb = 255 * Math.min(1, c * .84 + .12 * g);
           sink.dot(wx, wy, wz, size, rr, gg, bb, 1);
           drawn++;
@@ -646,6 +650,7 @@ export async function createBlast(game) {
      (sim/ship.js: water[c] m^3 over the space's floor area and permeability), within reach of the hole */
   function drawWater(sink, u, B, M, p0, size, tr) {
     const S = u.ship, Lt = S && S.L; if (!Lt || !S.water) return 0;
+    const fireK = B.S && B.S.fire ? Math.min(1, B.S.fire.k || 0) : 0;
     const Fr = B.spec.frame, bx = B.spec.box, Fo = Fr.O;
     // the patch's reach (model frame, x z): the box's corners
     let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
@@ -666,7 +671,9 @@ export async function createBlast(game) {
         const y = lv + .05 * Math.sin(tr * 1.3 + x * 1.7 + z * 1.1 + h * 6.3);
         const wx = p0[0] + M[0] * x + M[1] * y + M[2] * z, wy = p0[1] + M[3] * x + M[4] * y + M[5] * z, wz = p0[2] + M[6] * x + M[7] * y + M[8] * z;
         const gl = Math.max(0, Math.sin(tr * (1.1 + h2) + h * 40)) ** 12, k = .55 + .6 * h2 + 1.4 * gl;
-        sink.dot(wx, wy, wz, size, 62 * k, 84 * k, 98 * k, 1);
+        // (dark water, brighter than the steel round it, the fire's glow on it)
+        const fg = fireK * (.5 + .5 * FLK[((tr * 30 + x * 9 + z * 7) | 0) & 255]);
+        sink.dot(wx, wy, wz, size, Math.min(255, 95 * k + 150 * fg), Math.min(255, 125 * k + 80 * fg), Math.min(255, 150 * k + 30 * fg), 1);
         n++;
       }
     }

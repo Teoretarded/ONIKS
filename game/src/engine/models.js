@@ -151,7 +151,7 @@ void main() {
   // blast patches (game/src/blast): the plating as the solver left it
   vec3 btTilt = vec3(0.0);
   if (uBtN > 0 && blastAt(p, uR * aNrm.xyz, false, burn, hot, edge, heatN, btTilt) == 1) { ${CULL} return; }
-  if (burn > 0.0 && edge <= 0.0 && u01(hash1(hid ^ 0x1b873593u)) < burn * 0.5) { ${CULL} return; }
+  if (burn > 0.0 && edge <= 0.0 && u01(hash1(hid ^ 0x1b873593u)) < burn * 0.35) { ${CULL} return; }
   // the torn edge of a section: a bright ragged rim, glowing while the break is fresh, charred behind it
   if (tk > 0.0) { if (tk > 0.6) { edge = max(edge, tk); heatN = max(heatN, th); } hot = max(hot, th * tk * tk * 0.8); burn = max(burn, 0.55 * tk * (1.0 - tk)); }
   float yw = p.y + uEyeW.y;
@@ -220,7 +220,7 @@ void main() {
   if (uDen.w > 0.0 && b > 0.5) b = mix(b, 0.5 + 0.4 * (1.0 - exp((0.5 - b) / 0.4)), uDen.w);
   vec3 col = mix(WH, uTint.rgb, uTint.a * mix(uQ.y, 1.0, rim));
   if (dmg > 0.0) col = mix(col, CORAL, min(1.0, dmg * 1.1));
-  if (burn > 0.0) { col = mix(col, vec3(0.62, 0.6, 0.56), burn); b *= 1.0 - 0.94 * burn; }
+  if (burn > 0.0) { col = mix(col, vec3(0.62, 0.6, 0.56), burn); b *= 1.0 - 0.72 * burn; }   // (charred, still readable)
   // the torn edge: glowing while hot (warm white to amber), then a charred grey ring
   if (edge > 0.0) { float hk = clamp((heatN - 0.06) / 0.6, 0.0, 1.0); b = max(b, edge * (0.36 + 0.64 * hk) * (0.75 + 0.3 * hr)); col = mix(col, mix(vec3(0.55, 0.53, 0.5), vec3(1.0, 0.72, 0.42), hk), edge); }
   vec2 sc = scanAt(p);
@@ -510,11 +510,25 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
       ivec2 b = ivec2(int(Q.z) + i0, int(Q.w) + j0);
       vec4 t00 = texelFetch(uBtT, b, 0);
       int f00 = int(t00.w);
-      // (torn or not is read a little off the point, by a hash of its 0.125 m cell: the hole's outline is ragged inside a
-      // texel, not the texel grid's staircase)
-      vec3 pq = floor(l * 8.0) * 0.5;
-      int ti = clamp(int(floor(fi + (wreckHash(pq) - 0.5) * 0.9)), 0, int(Q.x) - 1), tj = clamp(int(floor(fj + (wreckHash(pq + vec3(17.0, 5.0, 11.0)) - 0.5) * 0.9)), 0, int(Q.y) - 1);
-      bool torn = (int(texelFetch(uBtT, ivec2(int(Q.z) + ti, int(Q.w) + tj), 0).w) & 1) != 0;
+      // (torn or not: the cells' torn flags interpolated at the point (a smooth field through the cell centres) against a
+      // ragged threshold (value noise ~0.35 m and a fine grain at the dot's scale): the hole's outline runs smooth and
+      // torn between the texels, never the grid's staircase)
+      float mk, thr = 0.5;
+      {
+        float gx = fi - 0.5, gy = fj - 0.5; int ci = int(floor(gx)), cj = int(floor(gy)); float ax2 = gx - float(ci), ay2 = gy - float(cj);
+        int nx = int(Q.x) - 1, ny = int(Q.y) - 1;
+        #define TC(a, c) float(int(texelFetch(uBtT, ivec2(int(Q.z) + clamp(a, 0, nx), int(Q.w) + clamp(c, 0, ny)), 0).w) & 1)
+        mk = mix(mix(TC(ci, cj), TC(ci + 1, cj), ax2), mix(TC(ci, cj + 1), TC(ci + 1, cj + 1), ax2), ay2);
+        #undef TC
+      }
+      bool torn = mk > 0.999;
+      if (mk > 0.001 && mk < 0.999) {
+        vec2 q = vec2(u, v) * 2.8; vec2 qi = floor(q), qf = q - qi, qs = qf * qf * (3.0 - 2.0 * qf);
+        float n00 = wreckHash(vec3(qi, 3.0) * 0.25 + 0.01), n10 = wreckHash(vec3(qi + vec2(1.0, 0.0), 3.0) * 0.25 + 0.01);
+        float n01 = wreckHash(vec3(qi + vec2(0.0, 1.0), 3.0) * 0.25 + 0.01), n11 = wreckHash(vec3(qi + vec2(1.0, 1.0), 3.0) * 0.25 + 0.01);
+        float nz = mix(mix(n00, n10, qs.x), mix(n01, n11, qs.x), qs.y) * 0.7 + wreckHash(floor(l * 16.0) * 0.25 + 0.01) * 0.3;
+        thr = 0.5 + (nz - 0.5) * 0.8; torn = mk > thr;
+      }
       vec4 t10 = texelFetch(uBtT, b + ivec2(1, 0), 0), t01 = texelFetch(uBtT, b + ivec2(0, 1), 0), t11 = texelFetch(uBtT, b + ivec2(1, 1), 0);
       if (abs(off) > band || !face) {
         // not the plating itself: what stands on it (over a deck up to 30 m: a gun, a deckhouse, rails; off a side up to
@@ -532,7 +546,8 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
           // an interior part (bulkheads, decks, machinery...): wrecked where the plating over it tore (most of it gone,
           // the rest charred and pushed with the plating), followed and scorched behind plating that held
           float wd = max(0.0, 1.0 - (-off) / (D + 0.4));
-          if (torn || (fN & 3) != 0) { if (wreckHash(l) < 0.7 * wd + 0.2) return 1; burn = max(burn, 0.85); }
+          if (torn || (fN & 3) != 0) { if (wreckHash(l * 3.0) < 0.7 * wd + 0.2) return 1;   // (per ~8 cm cell: a speckle, not 0.25 m blocks)
+            burn = max(burn, 0.5); hot = max(hot, heat * 0.4 * wd); edge = max(edge, 0.35 * wd); heatN = max(heatN, heat); }
           else if ((fN & 8) != 0) burn = max(burn, 0.5 * wd);
           p += (X * dlb.x + Y * dlb.y + Z * dlb.z) * wd;
           break;
@@ -542,7 +557,7 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
           float ed = min(min(fi, Q.x - fi), min(fj, Q.y - fj)) * S;
           // (and only the surfaces facing the plate, or lines: the ship's shell and walls across the pocket stay)
           // (a ship with no interior drawn keeps them, charred: they are the far side of the hole, not the sea)
-          if ((face || two) && ed > 0.6 && (torn || (fN & 11) != 0)) { if (plugD > 1.0) return 1; burn = max(burn, 0.9); }
+          if ((face || two) && ed > 0.6 && (torn || (fN & 11) != 0)) { if (plugD > 1.0) return 1; burn = max(burn, 0.5); hot = max(hot, heat * 0.25); }
           float wd = 1.0 - (-off) / (D + 0.4);
           p += (X * dlb.x + Y * dlb.y + Z * dlb.z) * wd;
           if (dp && plugD < 1.0) return 3;
@@ -593,11 +608,14 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
           if (dmin < 0.6) {
             vec3 q = floor(l * 5.0);
             float hn = fract(sin(dot(q, vec3(41.3, 289.1, 97.7))) * 43758.55), hj = fract(sin(dot(floor(l * 1.6), vec3(12.9, 78.2, 37.7))) * 43758.55);
-            if (dmin < 0.55 * hj * (0.6 + 0.4 * hn)) return 1;
             edge = max(edge, 0.7 * (1.0 - dmin / 0.6)); heatN = max(heatN, heat); hot = max(hot, heat * 0.5 * (1.0 - dmin / 0.6));
           }
         }
         dl = mix(mix(t00.xyz, t10.xyz, fx), mix(t01.xyz, t11.xyz, fx), fy);
+        // (the torn edge where the smooth field meets its threshold: hot, then charred)
+        if (mk > 0.001) { float ek = clamp(1.0 - (thr - mk) / 0.22, 0.0, 1.0); edge = max(edge, 0.85 * ek); heatN = max(heatN, heat); hot = max(hot, heat * 0.6 * ek); burn = max(burn, 0.9 * ek); }
+        // (plating at a hole's edge: the torn cells' corners fly off, it does not stretch after them)
+        if (mk > 0.001) { float dL = length(dl); if (dL > 0.8) dl *= 0.8 / dL; }
         // a torn edge: its corners' flags, fading across the cell
         float e = mix(mix(float((f00 & 4) >> 2), float((int(t10.w) & 4) >> 2), fx), mix(float((int(t01.w) & 4) >> 2), float((int(t11.w) & 4) >> 2), fx), fy);
         if (e > 0.3) { edge = max(edge, 0.8 * e); heatN = max(heatN, heat); hot = max(hot, heat * 0.55 * e); }

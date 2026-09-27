@@ -341,7 +341,7 @@ export function createShellRunner(gl, o = {}) {
         for (let a2 = x0; a2 <= x1; a2 += st2) for (let b2 = y0; b2 <= y1; b2 += st2) {
           const h = Math.imul((a2 * 97 + b2 * 13) * 16 | 0, 0x9E3779B1) >>> 0, j1 = (h & 1023) / 1023 - .5, j2 = ((h >>> 10) & 1023) / 1023 - .5;
           const p = [0, 0, 0]; p[L0.ax] = depth + .05; p[ua] = a2 + j1 * st2; p[va] = b2 + j2 * st2;
-          push(p[0], p[1], p[2], .07, 0); } }
+          push(p[0], p[1], p[2], .3, 2); } }
       inner = A.subarray(0, nIn * 6).slice();
       tr.push(inner.buffer);
     }
