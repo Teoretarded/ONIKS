@@ -508,7 +508,7 @@ export async function createBlast(game) {
     const dt = lastF ? now - lastF : 0; lastF = now;
     if (!(dt > 0) || dt > 200) return fScale;
     fHi = Math.max(dt, fHi * .93);
-    fScale = fHi > 17 ? Math.max(.3, fScale * .85) : fHi < 15 ? Math.min(1, fScale * 1.04) : fScale;
+    fScale = fHi > 24 ? Math.max(.3, fScale * .85) : fHi < 20 ? Math.min(1, fScale * 1.04) : fScale;   // (cut back only on missed frames (~25 ms at 60 Hz), not the jitter round 16.7)
     stats.frameScale = fScale;
     return fScale;
   }

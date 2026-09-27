@@ -150,6 +150,13 @@ export function classify(B, x, y, z, nx, ny, nz, info, ins) {
       continue;
     }
     if ((f00 & 1) && two) return K.COLDROP;                       // (a line over the hole goes with its plating)
+    // (as the shader (engine/models.js, 4d84aaa): plating stretched past ~2.2-3x across its cell tore there: its dots fly
+    // as pieces, they do not just vanish)
+    { const q = (i, j, c) => T[4 * (Math.min(r.nv, j) * W + Math.min(r.nu, i)) + c];
+      const gu = ((q(i0 + 1, j0, ax) - q(i0, j0, ax)) * (1 - fy) + (q(i0 + 1, j0 + 1, ax) - q(i0, j0 + 1, ax)) * fy) / S;
+      const gv = ((q(i0, j0 + 1, ax) - q(i0, j0, ax)) * (1 - fx) + (q(i0 + 1, j0 + 1, ax) - q(i0 + 1, j0, ax)) * fx) / S;
+      const lim = 2.2 + .8 * wreckHash(Math.floor(l[0] * 2) * .25 + .37, Math.floor(l[1] * 2) * .25 + .37, Math.floor(l[2] * 2) * .25 + .37);
+      if (!((f00 & 1) || (fN & 2)) && Math.hypot(gu, gv) > lim) return K.COLDROP; }
     return (f00 & 1) || (fN & 2) ? K.TORN : K.PLATE;
   }
   return ins && !inRect && (l[0] * l[0] + l[1] * l[1] + l[2] * l[2] < 256 || y < .2) ? K.HIDDEN : K.NONE;   // (under the water too: QA D18)
