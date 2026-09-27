@@ -179,7 +179,11 @@ export function createLog(game, hud, parent) {
           if (r) { r.text = `${unitRef(u)} · ${nm} holed below the waterline · ${e.A} m²`; r.t = sim.t; dirty = true; }
           else add('Flood', `${unitRef(u)} · ${nm} holed below the waterline · ${e.A} m²`, 'c', key);
         }
-        else if (e.state === 'flooded') add('Flood', `${unitRef(u)} · ${nm} flooded`, 'c');
+        else if (e.state === 'flooded') {
+          const key = 'Q' + u.id, r = merge(key, 30);
+          if (r) { if (!r.mods.includes(nm)) r.mods.push(nm); r.text = `${unitRef(u)} · flooded · ${r.mods.slice(0, 2).join(', ')}${r.mods.length > 2 ? ` +${r.mods.length - 2}` : ''}`; r.t = sim.t; dirty = true; }
+          else add('Flood', `${unitRef(u)} · flooded · ${nm}`, 'c', key).mods = [nm];
+        }
         else if (e.state === 'counterflood') add('DC', `${unitRef(u)} · counter-flooding ${nm} against the list`, '');
         else if (e.state === 'fire') {
           const key = 'F' + u.id, r = merge(key, 3);

@@ -113,17 +113,25 @@ export function createShipView(I) {
       if (fl > .03 || S.fire[c] > 0) hot.push([c, fl + S.fire[c]]);
     }
     hot.sort((a, b) => b[1] - a[1]);
-    let n = 0;
+    // the worst few, in a column above the model (sorted left to right), leaders down to their spaces
+    const tags = [];
     for (const [c] of hot) {
-      if (n >= 6) break;
+      if (tags.length >= 6) break;
       const o = c * 6, b = L.box;
       if (!proj(V, (b[o] + b[o + 3]) / 2, b[o + 4], (b[o + 2] + b[o + 5]) / 2, Q)) continue;
-      const cap = L.vol[c] * L.perm[c], fl = cap > 0 ? S.water[c] / cap : 0;
-      const val = `${fl > .03 ? Math.round(fl * 100) + ' % water' : ''}${fl > .03 && S.fire[c] > 0 ? ' · ' : ''}${S.fire[c] > 0 ? 'fire' : ''}`;
-      const x = Q[0] + 14 + (n % 2) * 8, y = Q[1] - 38 - n * 4;
-      O.leader(ctx, Q[0], Q[1], x, y + 10, S.fire[c] > 0 ? CORAL : '#FFFFFF', .7 * A);
-      O.tag(ctx, x + 4, y, L.nums[c] || L.ids[c], L.names[c], val, { kind: S.fire[c] > 0 ? 'coral' : 'white', a: A, size: 10 });
-      n++;
+      tags.push({ c, x: Q[0], y: Q[1] });
+    }
+    if (tags.length) {
+      tags.sort((a, b) => a.x - b.x);
+      const top = Math.min(...tags.map(t => t.y)) - 40 - tags.length * 19;
+      tags.forEach((tg, i) => {
+        const c = tg.c, cap = L.vol[c] * L.perm[c], fl = cap > 0 ? S.water[c] / cap : 0;
+        const val = `${fl > .03 ? Math.round(fl * 100) + ' % water' : ''}${fl > .03 && S.fire[c] > 0 ? ' · ' : ''}${S.fire[c] > 0 ? 'fire' : ''}`;
+        const x = tg.x + 18, y = top + i * 19;
+        O.leader(ctx, tg.x, tg.y, x, y + 10, S.fire[c] > 0 ? CORAL : '#FFFFFF', .6 * A);
+        O.adot(ctx, tg.x, tg.y, S.fire[c] > 0 ? CORAL : '#FFFFFF', A);
+        O.tag(ctx, x + 4, y, L.nums[c] || L.ids[c], L.names[c], val, { kind: S.fire[c] > 0 ? 'coral' : 'white', a: A, size: 10 });
+      });
     }
   }
 
