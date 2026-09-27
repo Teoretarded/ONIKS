@@ -173,6 +173,7 @@ export async function createBlast(game) {
     const B = patches.get(m.id);
     if (m.type === 'dead') { mode = null; for (const b of patches.values()) if (b.state !== 'done') fail(b, 'worker died'); return; }
     if (!B) return;
+    B.silent = 0;
     if (m.type === 'built') { B.info = m.info; if (B.state === 'wait') B.state = 'run'; return; }
     if (m.type === 'fail' || m.type === 'error') { fail(B, m.err || 'solver'); return; }
     if (m.type !== 'state') return;
@@ -512,8 +513,15 @@ export async function createBlast(game) {
     stats.frameScale = fScale;
     return fScale;
   }
+  let lastRT = null;
   function update() {
     const t0 = performance.now();
+    // (a watchdog: a patch the solver has not answered for 12 s of the game's running time is given up: its analytic
+    // mark stands, the solver is told to drop it; nothing in the game waits on it)
+    { const rt = game.realT || 0, dR = lastRT === null ? 0 : Math.min(.1, Math.max(0, rt - lastRT)); lastRT = rt;
+      const lim = game.timeRate < .5 ? 90 : 12;   // (slow motion: the solve is paced to the shown time)
+      if (dR > 0 && !game.paused) for (const B of patches.values()) if (B.state === 'wait' || B.state === 'run') { B.silent = (B.silent || 0) + dR;
+        if (B.silent > lim) { try { if (client && client.drop) client.drop(B.id); } catch (e) { /* */ } fail(B, 'no answer from the solver for 12 s'); } } }
     // the solver's share of this frame's GPU time: what the game's own frame leaves of ~13.5 ms (game.quality.gpuMs, the
     // perf guard's measure, which counts the solver too: its last share is taken back out), within 1.5 .. gpuMs (more
     // in slow motion, when the plate is watched tearing)

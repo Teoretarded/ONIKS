@@ -1,5 +1,6 @@
 /* (game/concepts/blast/gpu_wgpu.js at commit 3f115d5, copied; the changes: gravity on free pieces along the patch's up
-   axis, UPAX; msStep(), the measured time a step for the worker's slices) The blast bench's structural model on WebGPU compute: the same physics as gpu.js (WebGL2) and the CPU reference in
+   axis, UPAX; msStep(), the measured time a step for the worker's slices; failed read-back maps resolve as empty instead of
+   hanging the run) The blast bench's structural model on WebGPU compute: the same physics as gpu.js (WebGL2) and the CPU reference in
    blast.js, pass for pass (hinges, cells, members, gather, contact scatter, nodes), with the state in three storage
    buffers:
      ST  statics (node, cell, hinge, member records; panels, cell map, adjacency, arrival table), read only
@@ -760,12 +761,13 @@ export function createWGPU(dev, M, opt = {}) {
     if (nsteps || wantRead) dev.queue.writeBuffer(bP, 0, par, 0, PSTRIDE * (nsteps + 1));
     const ns = nsteps, ts = performance.now(), alone = inflight === 0;
     dev.queue.submit([enc.finish()]); enc = null; pass = null; mapTagged();
-    inflight++; dev.queue.onSubmittedWorkDone().then(() => { inflight--; while (waiters.length && inflight < depth) waiters.shift()(); if (alone && ns >= 4) { const m = (performance.now() - ts) / ns; msStep = msStep ? msStep * .7 + m * .3 : m; } });
+    inflight++; dev.queue.onSubmittedWorkDone().catch(() => {}).then(() => { inflight--; while (waiters.length && inflight < depth) waiters.shift()(); if (alone && ns >= 4) { const m = (performance.now() - ts) / ns; msStep = msStep ? msStep * .7 + m * .3 : m; } });
     if (wantRead) {
       reading = true; const seq = ++readSeq;
       readWait = Promise.all([stN.mapAsync(GPUMapMode.READ), stC.mapAsync(GPUMapMode.READ)]).then(() => {
         lastN.set(new Float32Array(stN.getMappedRange(), 0, 8 * N)); lastPK.set(new Uint32Array(stC.getMappedRange(), 0, NC));
-        stN.unmap(); stC.unmap(); reading = false; doneSeq = seq; return seq; });
+        stN.unmap(); stC.unmap(); reading = false; doneSeq = seq; return seq; })
+        .catch(err => { reading = false; errs.push('read: ' + (err && err.message || err)); return seq; });   // (game: a failed map never blocks the run)
       return readWait;
     }
     return null;
@@ -826,11 +828,12 @@ export function createWGPU(dev, M, opt = {}) {
     tagEntry('n' + tag, b, 'n');
   }
   function mapTagged() { for (const e of tagged.values()) if (!e.submitted) { e.submitted = true;
-    e.buf.mapAsync(GPUMapMode.READ).then(() => { const r = e.buf.getMappedRange(); e.data = e.kind === 'c' ? new Uint32Array(r.slice(0, 4 * NC)) : new Float32Array(r.slice(0, nodeBytesT)); e.buf.unmap(); e.buf.destroy(); e.ready = true; e.resolve(); }); } }
+    e.buf.mapAsync(GPUMapMode.READ).then(() => { const r = e.buf.getMappedRange(); e.data = e.kind === 'c' ? new Uint32Array(r.slice(0, 4 * NC)) : new Float32Array(r.slice(0, nodeBytesT)); e.buf.unmap(); e.buf.destroy(); e.ready = true; e.resolve(); })
+      .catch(err => { e.data = null; e.ready = true; errs.push('tagged read: ' + (err && err.message || err)); e.resolve(); }); } }   // (game: a failed map reads as nothing, never a wait)
   const has = (kind, tag) => { const e = tagged.get(kind + tag); return !e || e.ready; };
   const waitFor = (kind, tag) => { const e = tagged.get(kind + tag); if (!e) return Promise.resolve(); if (!e.submitted) submit(); return e.promise; };
-  function cellsOf(tag) { const e = tagged.get('c' + tag); if (!e || !e.ready) return null; tagged.delete('c' + tag); lastPK.set(e.data); return decode(); }
-  function nodesOf(tag, V, FREE, U, K) { const e = tagged.get('n' + tag); if (!e || !e.ready) return false; tagged.delete('n' + tag); const d = e.data, b = 4 * N;
+  function cellsOf(tag) { const e = tagged.get('c' + tag); if (!e || !e.ready) return null; tagged.delete('c' + tag); if (!e.data) return null; lastPK.set(e.data); return decode(); }
+  function nodesOf(tag, V, FREE, U, K) { const e = tagged.get('n' + tag); if (!e || !e.ready) return false; tagged.delete('n' + tag); if (!e.data) return false; const d = e.data, b = 4 * N;
     if (K && M.PAR) K.set(d.subarray(8 * N, 16 * N));        // petals: the crack records (first, second) with the nodes
     for (let i = 0; i < N; i++) { FREE[i] = d[4 * i + 3] > .5 ? 1 : 0; V[3 * i] = d[b + 4 * i]; V[3 * i + 1] = d[b + 4 * i + 1]; V[3 * i + 2] = d[b + 4 * i + 2]; }
     if (U) for (let i = 0; i < N; i++) { U[3 * i] = d[4 * i]; U[3 * i + 1] = d[4 * i + 1]; U[3 * i + 2] = d[4 * i + 2]; }

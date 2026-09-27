@@ -89,6 +89,7 @@ export function createShellRunner(gl, o = {}) {
   function pump(stepsMax = 24) {
     stats.pumps++;
     const out = [];
+    { const tf = now(); for (const R of pats.values()) if (R.state === 'finishing') { if (R.finT === undefined) R.finT = tf; else if (tf - R.finT > 8000) { R.state = 'failed'; R.err = 'end-of-run read never came'; stats.stalls = (stats.stalls || 0) + 1; } } }
     for (const R of pats.values()) if (R.state === 'failed' && !R.sentFail) { R.sentFail = true; out.push({ type: 'fail', id: R.id, err: R.err }); }
     for (const R of pats.values()) if (R.state === 'final') { out.push(R.finalMsg); pats.delete(R.id); }
     const run = [...pats.values()].filter(R => R.state === 'run');
@@ -114,6 +115,13 @@ export function createShellRunner(gl, o = {}) {
       if (R.wg) g.submit();
       if (s.t >= s.T1) R.state = 'finish';
     }
+    // (a watchdog: a patch that should be stepping but has not moved for 6 s of wall time and 60 pumps (a read-back that
+    // never came, a queue that never drained) is given up: the game falls back to its analytic mark, nothing waits on it)
+    const tw = now();
+    for (const R of run) { const st = R.M.sim.t;
+      if (R.progMs === undefined || st > R.lastT) { R.lastT = st; R.progMs = tw; R.stallPumps = 0; continue; }
+      if (st < R.target) { R.stallPumps = (R.stallPumps || 0) + 1;
+        if (R.stallPumps > 60 && tw - R.progMs > 6000) { R.state = 'failed'; R.err = 'stalled at ' + (st * 1e3).toFixed(1) + ' ms (no progress for 6 s)'; stats.stalls = (stats.stalls || 0) + 1; } } }
     stats.steps = did; stats.gpuSteps += did;
     const dtMs = now() - t0; stats.pumpMs = dtMs;
     for (const R of run) R.runMs += dtMs / run.length;
