@@ -192,6 +192,12 @@ export function createBodies() {
         const curl = e * e * (.35 + .4 * hsh(i, 2));                     // curled outward, as a petal
         if (!two) { rel[4 * i] += a * (w + curl); rel[4 * i + 1] += c * (w + curl) - curl * .3; rel[4 * i + 2] += d * (w + curl); } else { rel[4 * i + 1] += w; }
         rel[4 * i + 3] *= .45 + .55 * Math.min(1, hf / 2.5);             // scorched near the tear, fading up
+        // (crumpled faces: each ~0.5 m facet leans its own way, so the light breaks up over the piece instead of one flat
+        // sheen; and no brighter than the ship it came from)
+        if (!two) { const fx = Math.floor(x * 2), fy = Math.floor(y * 2), fz = Math.floor(z * 2), h1 = hsh(fx * 73 + fy * 19 + fz * 7, 3) - .5, h2 = hsh(fx * 31 + fy * 57 + fz * 13, 4) - .5, h3 = hsh(fx * 11 + fy * 5 + fz * 89, 5) - .5;
+          let na = a + .9 * h1, nb = c + .9 * h2, nc = d + .9 * h3; const nl = Math.hypot(na, nb, nc) || 1;
+          nrm[3 * i] = Math.round(na / nl * 127); nrm[3 * i + 1] = Math.round(nb / nl * 127); nrm[3 * i + 2] = Math.round(nc / nl * 127); }
+        rel[4 * i + 3] *= .72;
       } }
     const b = { kind: 'clump', uid, B, p: [cx, cy, cz], v: v0.slice(), w: [(s - .5) * 1.2, (s * 7 % 1 - .5) * .6, (s * 13 % 1 - .5) * 1.2], R: [1, 0, 0, 0, 1, 0, 0, 0, 1],
       rel, nrm, n, low: Int32Array.from(pick), rest: false, gone: false, t: 0, hot: hot || 0, fade: 1, sea: false, still: 0 };

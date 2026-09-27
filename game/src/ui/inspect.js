@@ -163,7 +163,7 @@ export async function createInspect(game, ctx) {
     const base = V.kind === 'museum' ? 0 : V.hdg;
     V.fly = { t: 0, dur: V.kind === 'museum' && prev ? 1.1 : V.kind === 'museum' ? 2.2 : FLY_IN,
       from: { target: cam.target.slice(), dist: cam.dist, yaw: cam.yaw, pitch: cam.pitch },
-      to: { dist: V.fitA.dist, yaw: V.fitA.yaw + base, pitch: V.fitA.pitch } };
+      to: { dist: V.fitA.dist, yaw: holedYaw(V, V.fitA.yaw) + base, pitch: V.fitA.pitch } };
     const tv = Math.hypot(cam.target[0] - V.focusW[0], cam.target[1] - V.focusW[1], cam.target[2] - V.focusW[2]);
     V.fly.bump = Math.max(0, Math.log(1 + tv / (cam.dist + V.fitA.dist)) * .7);
     V.xr.t0 = Math.max(SCAN_AT, V.fly.dur - .7);           // the slice starts as the camera arrives
@@ -434,6 +434,13 @@ export async function createInspect(game, ctx) {
     }
     cam.fly = null;
     cam.followFn = focusFn; cam.followOff = FOLLOW0;
+  }
+  // the fitted view's yaw (model-relative), turned to look from the end of a hurt ship she was holed at (the eye sits at
+  // yaw + PI: model x = sin, z = cos)
+  function holedYaw(V, yaw) {
+    if (V.kind !== 'unit' || !V.u) return yaw;
+    const hz = damageZ(V.u); if (hz === null || Math.abs(hz) < 10) return yaw;
+    return Math.cos(yaw + Math.PI) * hz < 0 ? -yaw - Math.PI : yaw;
   }
   // the station (model z) of a ship's holes, weighted by their area: the sim's, else the scars; null if unhurt
   function damageZ(u) {
