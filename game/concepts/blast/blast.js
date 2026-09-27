@@ -733,7 +733,9 @@ function build() {
   let added = 0, total = 0;
   for (let i = 0; i < N; i++) { total += M[i]; const need = kn[i] * dtT * dtT; if (M[i] > 0 && WINV[i] > 0 && need > M[i]) { added += need - M[i]; M[i] = need; WINV[i] = 1 / need; } }
   scene.massAdded = added / total;
-  dt = (st.dtK || .75) * dtT; BETA = (st.betaK ?? .033) * dt;
+  // 1.4 x the Gershgorin bound: its row sums overstate the membranes' top frequency ~2x; the members' (frames) are near
+  // exact, and go unstable at 2 x (boundary dashpots, explicit, went at 1.5 x: now implicit). Was 0.75 x.
+  dt = (st.dtK || 1.4) * dtT; BETA = (st.betaK ?? .033) * .75 * dtT;   // the stiffness damping as before (not tied to the step)
   // ---- contact candidates: planar pieces whose plane passes within 1.5 m of the node (not its own)
   NCC = new Int32Array(4 * N).fill(-1);
   const bucket = new Map(), BK = 3;
@@ -751,10 +753,91 @@ function build() {
       NCC[4 * i + k++] = q;
     }
   }
+  buildTwins();
   scene.snapped = snapped; scene.unsnapped = unsnapped; scene.dropped = dropped; scene.key = patchKey();
   buildGrid();
   DOTS_PER = [18, 10, 8, 8, 8].map(d => Math.max(2, Math.round(d * (S / .25) ** 2)));
   sim = null; gpu = null; EN = null; CU = null;
+}
+
+// ---- petals (st.petals): a tear runs along cell edges instead of eroding cells. Every node inside a plate (not on a
+// junction, not anchored) gets a twin, idle until a crack reaches it; a cell at its failure limit asks for a crack along
+// one of its edges (the pair across its larger stretch; the one that continues a crack, else the one nearer the
+// charge); at the next step each node of that edge splits: the cells on the far side of the crack line move to the
+// twin (with their share of the mass), hinges across the line stop, the others follow their cells. A cracked cell that
+// goes on to 1.5 x its limit erodes (as does one whose edges can split no further). Members stay on the parent node.
+let TWIN = null, PARENT = null, SPL = null, HOFF = null, CCR = null, NCL = null, HNL = null, CN0 = null, HN0 = null, M0 = null, N0T = 0;
+const PCR = [];
+const PETK = () => st.petalK || 1.5;
+function buildTwins() {
+  TWIN = PARENT = SPL = NCL = HNL = CN0 = HN0 = M0 = null; HOFF = new Uint8Array(NH); CCR = new Uint8Array(NC); PCR.length = 0; N0T = N;
+  if (!st.petals) return;
+  const N0 = N, pan = new Int32Array(N0).fill(-2), ncell = new Int32Array(N0);
+  for (let c = 0; c < NC; c++) for (let k = 0; k < 4; k++) { const i = CN[4 * c + k]; ncell[i]++; pan[i] = pan[i] === -2 ? CPAN[c] : pan[i] === CPAN[c] ? pan[i] : -1; }
+  for (let h = 0; h < NH; h++) if (!HSAME[h]) { pan[HN[6 * h]] = -1; pan[HN[6 * h + 1]] = -1; }   // junctions stay whole
+  const tw = new Int32Array(N0).fill(-1); let nt = 0;
+  for (let i = 0; i < N0; i++) if (pan[i] >= 0 && ncell[i] >= 2 && AK[i] === 0 && WINV[i] > 0) tw[i] = N0 + nt++;
+  if (!nt) return;
+  const N1 = N0 + nt, grow = (A, k, fill) => { const B = new A.constructor(k * N1); B.set(A); if (fill !== undefined) B.fill(fill, k * N0); return B; };
+  X = grow(X, 3); R0 = grow(R0, 3); V = grow(V, 3); ANC = grow(ANC, 3); M = grow(M, 1); WINV = grow(WINV, 1); FREE = grow(FREE, 1); AK = grow(AK, 1); AF = grow(AF, 1); AC = grow(AC, 1);
+  NKIND = grow(NKIND, 1); NFRM = grow(NFRM, 1); NCON = grow(NCON, 1); TBRK = grow(TBRK, 1, -1); NCC = grow(NCC, 4, -1);
+  PARENT = new Int32Array(N1).fill(-1);
+  for (let i = 0; i < N0; i++) if (tw[i] >= 0) { const T = tw[i]; PARENT[T] = i; for (let q = 0; q < 3; q++) X[3 * T + q] = R0[3 * T + q] = ANC[3 * T + q] = R0[3 * i + q];
+    NKIND[T] = NKIND[i]; NFRM[T] = NFRM[i]; for (let q = 0; q < 4; q++) NCC[4 * T + q] = NCC[4 * i + q]; }
+  NCL = Array.from({ length: N0 }, () => []); for (let c = 0; c < NC; c++) for (let k = 0; k < 4; k++) NCL[CN[4 * c + k]].push(4 * c + k);
+  HNL = Array.from({ length: N0 }, () => []); for (let h = 0; h < NH; h++) for (let z = 0; z < 6; z++) HNL[HN[6 * h + z]].push(6 * h + z);
+  TWIN = tw; SPL = new Uint8Array(N0); CN0 = CN.slice(); HN0 = HN.slice(); M0 = M.slice(); N = N1;
+}
+// back to the unsplit mesh (a new run on the same build)
+function resetTwins() {
+  if (!TWIN) return;
+  CN.set(CN0); HN.set(HN0); M.set(M0); SPL.fill(0); HOFF.fill(0); CCR.fill(0); PCR.length = 0;
+  for (let i = 0; i < N0T; i++) if (M[i] > 0 && WINV[i] > 0) WINV[i] = 1 / M[i];
+  for (let i = N0T; i < N; i++) { for (let q = 0; q < 3; q++) { X[3 * i + q] = R0[3 * i + q]; V[3 * i + q] = 0; } FREE[i] = 0; M[i] = 0; WINV[i] = 0; }
+}
+const orig = q => PARENT && PARENT[q] >= 0 ? PARENT[q] : q;
+// a cell at its limit: the edge to crack (0..3: corners k, k+1), or -1
+function crackEdge(c) {
+  const q = [0, 1, 2, 3].map(k => CN[4 * c + k]), L = (a, b, P) => Math.hypot(P[3 * q[b]] - P[3 * q[a]], P[3 * q[b] + 1] - P[3 * q[a] + 1], P[3 * q[b] + 2] - P[3 * q[a] + 2]);
+  const s1 = (L(0, 1, X) + L(3, 2, X)) / (L(0, 1, R0) + L(3, 2, R0)), s3 = (L(0, 3, X) + L(1, 2, X)) / (L(0, 3, R0) + L(1, 2, R0));
+  const cand = s1 >= s3 ? [3, 1] : [0, 2];                  // stretched along 0-1: the crack runs along 0-3 / 1-2
+  const free = k => { let f = 0, sp = 0; for (const z of [k, (k + 1) % 4]) { const o = orig(q[z]); if (TWIN[o] >= 0 && !SPL[o]) f++; else if (SPL[o]) sp++; } return [f, sp]; };
+  const C = sim.C, dC = k => { const a = orig(q[k]), b = orig(q[(k + 1) % 4]); return Math.hypot((R0[3 * a] + R0[3 * b]) / 2 - C[0], (R0[3 * a + 1] + R0[3 * b + 1]) / 2 - C[1], (R0[3 * a + 2] + R0[3 * b + 2]) / 2 - C[2]); };
+  const [fa, sa] = free(cand[0]), [fb, sb] = free(cand[1]);
+  if (!fa && !fb) return -1;
+  if (fa && !fb) return cand[0];
+  if (fb && !fa) return cand[1];
+  if (sa !== sb) return sa > sb ? cand[0] : cand[1];
+  const da = dC(cand[0]), db = dC(cand[1]);
+  return Math.abs(da - db) < 1e-9 ? Math.min(cand[0], cand[1]) : da < db ? cand[0] : cand[1];
+}
+// the requests of the last step: split the edge's nodes (largest failure ratio first)
+function applyCracks() {
+  if (!PCR.length) return;
+  const req = []; for (let k = 0; k < PCR.length; k += 3) req.push([PCR[k], PCR[k + 1], PCR[k + 2]]); PCR.length = 0;
+  req.sort((a, b) => b[2] - a[2] || a[0] - b[0]);
+  for (const [c, e] of req) {
+    if (CER[c]) continue;
+    const a = orig(CN[4 * c + e]), b = orig(CN[4 * c + (e + 1) % 4]);
+    const ed = [R0[3 * b] - R0[3 * a], R0[3 * b + 1] - R0[3 * a + 1], R0[3 * b + 2] - R0[3 * a + 2]], n = nrm(cross(ed, cellN(c)));
+    for (const p of [a, b]) if (TWIN[p] >= 0 && !SPL[p]) splitNode(p, n);
+  }
+}
+function splitNode(p, n) {
+  const T = TWIN[p], side = c => (CRC[3 * c] - R0[3 * p]) * n[0] + (CRC[3 * c + 1] - R0[3 * p + 1]) * n[1] + (CRC[3 * c + 2] - R0[3 * p + 2]) * n[2] > 0;
+  let mB = 0, nB = 0, nA = 0;
+  for (const e of NCL[p]) { const c = e >> 2; if (side(c)) { nB++; mB += MATS[CMAT[c]].rho * CH[c] * CAR[c] / 4; } else nA++; }
+  if (!nA || !nB) return;                                   // the line misses the node's cells: nothing to split
+  SPL[p] = 1;
+  for (const e of NCL[p]) { const c = e >> 2; if (side(c)) CN[e] = T; }
+  for (const e of HNL[p]) { const h = (e / 6) | 0, z = e - 6 * h, c1 = HC[2 * h], c2 = HC[2 * h + 1];
+    if (z < 2) { if (side(c1) !== side(c2)) HOFF[h] = 1; else if (side(c1)) HN[e] = T; }
+    else if (side(z < 4 ? c1 : c2)) HN[e] = T; }
+  // mass: the far side's cells take their share; a node carrying members keeps its own (their stiffness stays there)
+  let mem = false; for (let k = 0; k < NT && !mem; k++) if (TA[k] === p || TB[k] === p) mem = true;
+  M[T] = mB; WINV[T] = 1 / mB; if (!mem) { M[p] = Math.max(M[p] - mB, 1e-3 * M[p]); WINV[p] = 1 / M[p]; }
+  for (let q = 0; q < 3; q++) { X[3 * T + q] = X[3 * p + q]; V[3 * T + q] = V[3 * p + q]; }
+  FREE[T] = 0; TBRK[T] = TBRK[p];
 }
 
 // dihedral angle geometry of a hinge (edge x3-x4, flaps = midpoints of the far edges)
@@ -1131,7 +1214,7 @@ function rebuildSources(t) {
   for (const q of imgs) if (list.length < 32) list.push(q);
   // sources that are new (not in the last list) remember when they came: their first step delivers what they owed
   const seen = s.srcSeen || (s.srcSeen = new Set());
-  for (const q of list) { if (!seen.has(q.key)) { q.tAdd = t; seen.add(q.key); } else q.tAdd = 0; }
+  for (const q of list) { if (!seen.has(q.key)) { q.tAdd = t; seen.add(q.key); if (st.endLog && t > 0) (s.newSrc || (s.newSrc = [])).push([+(t * 1e3).toFixed(1), q.key, q.kind, +(q.t0 * 1e3).toFixed(1), +q.W.toFixed(3), Math.round(q.Pm)]); } else q.tAdd = 0; }
   s.SRC = list; s.holes = [...holes.values()];
 }
 // the torn share of a compartment wall (cells of that compartment lying on the plane)
@@ -1213,7 +1296,7 @@ function hingePass(t, h) {
   let eel = 0;
   for (let k = 0; k < NH; k++) {
     const c1 = HC[2 * k], c2 = HC[2 * k + 1];
-    if (CER[c1] || CER[c2]) { HTH[k] = 0; if (EN && HEL[k]) { EN.frac += HEL[k]; HEL[k] = 0; } continue; }
+    if (CER[c1] || CER[c2] || HOFF[k]) { HTH[k] = 0; if (EN && HEL[k]) { EN.frac += HEL[k]; HEL[k] = 0; } continue; }
     const i3 = HN[6 * k], i4 = HN[6 * k + 1], a1 = HN[6 * k + 2], b1 = HN[6 * k + 3], a2 = HN[6 * k + 4], b2 = HN[6 * k + 5];
     const x3x = X[3 * i3], x3y = X[3 * i3 + 1], x3z = X[3 * i3 + 2];
     const Ex = X[3 * i4] - x3x, Ey = X[3 * i4 + 1] - x3y, Ez = X[3 * i4 + 2] - x3z, lE = Math.hypot(Ex, Ey, Ez);
@@ -1354,7 +1437,10 @@ function cellPass(t, h) {
       if (EN) EN.damp += vol * h * (v11 * Dr11 + v22 * Dr22 + 2 * v12 * Dr12);
       const S11 = s11 + v11, S22 = s22 + v22, S12 = s12 + v12;
       // P = R S; H = -vol P Dm^-T
-      const P11 = co * S11 - si * S12, P12 = co * S12 - si * S22, P21 = si * S11 + co * S12, P22 = si * S12 + co * S22;
+      // exact first Piola stress of W(U), F = R U: P = R (S - k J), k = (U12 (S22 - S11) + S12 (U11 - U22)) / tr U (J the
+      // quarter turn); P = R S alone left a net moment wherever S and U are not coaxial (plastic flow, shear)
+      const kq = (U12 * (S22 - S11) + S12 * (U11 - U22)) / (U11 + U22);
+      const P11 = co * S11 - si * (S12 - kq), P12 = co * (S12 + kq) - si * S22, P21 = si * S11 + co * (S12 - kq), P22 = si * (S12 + kq) + co * S22;
       const k1 = 1 / L12, k2 = -P3x / (L12 * P3y), k3 = 1 / P3y;
       const f2x = -vol * (P11 * k1 + P12 * k2), f2y = -vol * (P21 * k1 + P22 * k2), f3x = -vol * P12 * k3, f3y = -vol * P22 * k3;
       const T0 = T[0], T1 = T[1], T2 = T[2];
@@ -1403,7 +1489,12 @@ function cellPass(t, h) {
     const rat = (CDM[c] + eb) / CEF[c]; CRAT[c] = rat;
     let ws = NLH[4 * c + 2], acc = ws * rat;
     for (let k = NLH[4 * c], e = k + NLH[4 * c + 1]; k < e; k++) { const j = NLE[2 * k]; if (!CERS[j]) { acc += NLE[2 * k + 1] * CRATP[j]; ws += NLE[2 * k + 1]; } }
-    if (ERODE && (acc >= ws || CFD[c] >= 1 || jmin < JMIN())) { CER[c] = 1; CTE[c] = t; if (EN) EN.frac += eel - eel0; }
+    let fail = ERODE && (acc >= ws || CFD[c] >= 1 || jmin < JMIN());
+    if (fail && TWIN && CFD[c] < 1 && jmin >= JMIN()) {                  // petals: crack an edge first (once)
+      if (!CCR[c]) { const e = crackEdge(c); if (e >= 0) { CCR[c] = 1; PCR.push(c, e, acc / ws); fail = false; } }
+      else if (acc < PETK() * ws) fail = false;
+    }
+    if (fail) { CER[c] = 1; CTE[c] = t; if (EN) EN.frac += eel - eel0; }
   }
   return eel;
 }
@@ -1515,7 +1606,10 @@ function trussPass(t, h) {
     }
     // a segment fails on its stretch plus the larger plastic bending strain at its two nodes (either end alike, both
     // taken at the start of the step, so neither end is ahead)
-    if (Math.max(0, Math.log(TLP[k] / L0)) + Math.max(Math.abs(TBPS[k]), TNXT[k] >= 0 ? Math.abs(TBPS[TNXT[k]]) : 0) * TFIB[k] >= TEF[k]) { TFL[k] = 1; if (EN) EN.frac += .5 * fa * fa / kk + ebend; }
+    // or is stripped: an end node with no intact cell left (a bare stiffener has no plating to bend about: it would hang
+    // as a frictionless pin) lets the member go
+    const strip = !st.noStrip && CELLN && (CELLN[a] === 0 || CELLN[b] === 0);
+    if (strip || Math.max(0, Math.log(TLP[k] / L0)) + Math.max(Math.abs(TBPS[k]), TNXT[k] >= 0 ? Math.abs(TBPS[TNXT[k]]) : 0) * TFIB[k] >= TEF[k]) { TFL[k] = 1; if (EN) EN.frac += .5 * fa * fa / kk + ebend; }
   }
   return eel;
 }
@@ -1524,8 +1618,11 @@ function nodePass(t, h) {
   const s = sim, al = s.relax ? 250 : s.alpha;
   let eel = 0, ek = 0;
   // contact push-back from the previous step
-  for (let k = 0; k < CPB.length; k += 5) { const c = CPB[k], J = CPB[k + 1], nx = CPB[k + 2], ny = CPB[k + 3], nz = CPB[k + 4];
-    for (let q = 0; q < 4; q++) { const i = CN[4 * c + q]; F[3 * i] += J / 4 / h * nx; F[3 * i + 1] += J / 4 / h * ny; F[3 * i + 2] += J / 4 / h * nz; } }
+  // (on the corners by the bilinear weights of the point hit, along the cell's rest normal: the push-back acts where the
+  // node stopped, so contact adds no moment beyond the gap)
+  for (let k = 0; k < CPB.length; k += 4) { const c = CPB[k], J = CPB[k + 1], a = CPB[k + 2], b = CPB[k + 3], nc = cellN(c);
+    const w = [(1 - a) * (1 - b), a * (1 - b), a * b, (1 - a) * b];
+    for (let q = 0; q < 4; q++) { const i = CN[4 * c + q], f = J * w[q] / h; F[3 * i] += f * nc[0]; F[3 * i + 1] += f * nc[1]; F[3 * i + 2] += f * nc[2]; } }
   CPB.length = 0;
   for (let k = 0; k < IMPN.length; k += 4) { const i = IMPN[k]; F[3 * i] += IMPN[k + 1] / h; F[3 * i + 1] += IMPN[k + 2] / h; F[3 * i + 2] += IMPN[k + 3] / h;
     FL[3 * i] += IMPN[k + 1] / h; FL[3 * i + 1] += IMPN[k + 2] / h; FL[3 * i + 2] += IMPN[k + 3] / h; }
@@ -1541,11 +1638,12 @@ function nodePass(t, h) {
           if (EN) EN.plA += .5 * (f + AF[i]) * Math.hypot(nax - ANC[3 * i], nay - ANC[3 * i + 1], naz - ANC[3 * i + 2]);
           ANC[3 * i] = nax; ANC[3 * i + 1] = nay; ANC[3 * i + 2] = naz; f = AF[i]; }
         fx -= dx / d * f; fy -= dy / d * f; fz -= dz / d * f; eel += .5 * f * f / AK[i]; }
-      fx -= AC[i] * vx0; fy -= AC[i] * vy0; fz -= AC[i] * vz0;
-      if (EN) EN.rad += AC[i] * (vx0 * vx0 + vy0 * vy0 + vz0 * vz0) * h;
     }
     const w = WINV[i];
     let vx = vx0 + fx * h * w, vy = vy0 + fy * h * w - (FREE[i] ? G * h : 0), vz = vz0 + fz * h * w;
+    // the boundary dashpot, implicit (at the new velocity): stable at any step (explicit, it capped dt at 2 m / c)
+    if (AK[i] > 0 && AC[i] > 0) { const r = 1 / (1 + h * w * AC[i]); vx *= r; vy *= r; vz *= r;
+      if (EN) EN.rad += AC[i] * (vx * (vx0 + vx) + vy * (vy0 + vy) + vz * (vz0 + vz)) * .5 * h; }
     if (!FREE[i]) { const dm = 1 - al * h; if (EN) EN.damp += .5 * M[i] * (vx * vx + vy * vy + vz * vz) * (1 - dm * dm); vx *= dm; vy *= dm; vz *= dm; }
     if (EN) EN.ext += (FL[3 * i] * (vx0 + vx) + FL[3 * i + 1] * (vy0 + vy) + FL[3 * i + 2] * (vz0 + vz)) * .5 * h;
     V[3 * i] = vx; V[3 * i + 1] = vy; V[3 * i + 2] = vz;
@@ -1555,6 +1653,9 @@ function nodePass(t, h) {
   }
   return [eel, ek];
 }
+// a cell's rest normal (corner 0 -> 1 x corner 0 -> 3)
+function cellN(c) { const q0 = CN[4 * c], q1 = CN[4 * c + 1], q3 = CN[4 * c + 3];
+  return nrm(cross([R0[3 * q1] - R0[3 * q0], R0[3 * q1 + 1] - R0[3 * q0 + 1], R0[3 * q1 + 2] - R0[3 * q0 + 2]], [R0[3 * q3] - R0[3 * q0], R0[3 * q3 + 1] - R0[3 * q0 + 1], R0[3 * q3 + 2] - R0[3 * q0 + 2]])); }
 // a node that reaches another panel's intact cell stops there (inelastic) and pushes the cell back next step
 function contact(i, h) {
   for (let k = 0; k < 4; k++) {
@@ -1578,7 +1679,10 @@ function contact(i, h) {
     const vn = V[3 * i] * P.n[0] + V[3 * i + 1] * P.n[1] + V[3 * i + 2] * P.n[2], rel = (vn - vc) * sd;
     if (rel < 0) {
       const dv = -rel * sd; V[3 * i] += P.n[0] * dv; V[3 * i + 1] += P.n[1] * dv; V[3 * i + 2] += P.n[2] * dv;
-      CPB.push(c, -dv * M[i], P.n[0], P.n[1], P.n[2]);
+      const nc = cellN(c), q0 = CN[4 * c], q1 = CN[4 * c + 1], q3 = CN[4 * c + 3];
+      const r1 = [R0[3 * q1] - R0[3 * q0], R0[3 * q1 + 1] - R0[3 * q0 + 1], R0[3 * q1 + 2] - R0[3 * q0 + 2]], r3 = [R0[3 * q3] - R0[3 * q0], R0[3 * q3 + 1] - R0[3 * q0 + 1], R0[3 * q3 + 2] - R0[3 * q0 + 2]];
+      const xr = [X[3 * i] - R0[3 * q0], X[3 * i + 1] - R0[3 * q0 + 1], X[3 * i + 2] - R0[3 * q0 + 2]], cl = x => Math.min(1, Math.max(0, x));
+      CPB.push(c, -dv * M[i] * dot(P.n, nc), cl(dot(xr, r1) / dot(r1, r1)), cl(dot(xr, r3) / dot(r3, r3)));
       if (EN) EN.contact += .5 * M[i] * rel * rel;
     }
     break;
@@ -1589,6 +1693,7 @@ function stepCPU() {
   const s = sim, t = s.t, h = dt;
   F.fill(0); FL.fill(0);
   ERODE = erodeNow(s.n + 1);
+  if (TWIN) applyCracks();
   const e1 = hingePass(t, h), e2 = cellPass(t, h), e3 = trussPass(t, h);
   markFree();                                          // free pieces: nodes no intact element holds
   const [e4, ek] = nodePass(t, h);
@@ -1596,13 +1701,15 @@ function stepCPU() {
   s.t += h; s.n++;
   if (s.n % SYNC === 0) syncStep();
 }
-let CNT = null;
+let CNT = null, CELLN = null;
 function markFree() {
   if (!CNT || CNT.length !== N) CNT = new Int32Array(N);
+  if (!CELLN || CELLN.length !== N) CELLN = new Int32Array(N);
   const cnt = CNT; cnt.fill(0);
   for (let c = 0; c < NC; c++) if (!CER[c]) for (let k = 0; k < 4; k++) cnt[CN[4 * c + k]]++;
+  CELLN.set(cnt);
   for (let k = 0; k < NT; k++) if (!TFL[k]) { cnt[TA[k]]++; cnt[TB[k]]++; }
-  for (let i = 0; i < N; i++) if (!cnt[i] && !FREE[i] && AK[i] === 0) FREE[i] = 1;
+  for (let i = 0; i < N; i++) if (!cnt[i] && !FREE[i] && AK[i] === 0 && !(PARENT && PARENT[i] >= 0 && !SPL[PARENT[i]])) FREE[i] = 1;
 }
 // nodes still joined (through intact cells and members) to the fixed structure; flying debris is not. The end-of-run
 // test and the "quiet" clock look at these only (debris that keeps eroding or tumbling does not hold the run open)
@@ -1611,12 +1718,16 @@ let ATT = null;
 // motion every 200 steps), on the CPU, on WebGL2 (blocking or not) and on WebGPU alike: a run's course and its end
 // don't depend on when a GPU copy happens to complete (deterministic). CKN: torn cells the loads/vents/fragments know.
 let CKN = null, LAT = 50; const PENDC = new Map(), PENDN = new Map();
-function attachedNodes() {
+// nodes still joined to the ship (anchors) through intact cells and members; U (displacements, from a GPU run's read
+// back, where member failures are only read at the end): a member stretched past 1.5 x its length counts as broken
+function attachedNodes(U) {
   const par = new Int32Array(N); for (let i = 0; i < N; i++) par[i] = i;
   const fd = i => { while (par[i] !== i) { par[i] = par[par[i]]; i = par[i]; } return i; }, un = (a, b) => { a = fd(a); b = fd(b); if (a !== b) par[a] = b; };
   for (let c = 0; c < NC; c++) if (CKN[c] !== 1) { const a = CN[4 * c]; for (let k = 1; k < 4; k++) un(a, CN[4 * c + k]); }
-  for (let k = 0; k < NT; k++) if (!TFL[k]) un(TA[k], TB[k]);
-  const root = new Uint8Array(N); for (let i = 0; i < N; i++) if (AK[i] > 0 || WINV[i] === 0) root[fd(i)] = 1;
+  for (let k = 0; k < NT; k++) { if (TFL[k]) continue; const a = TA[k], b = TB[k];
+    if (U) { const d = Math.hypot(R0[3 * a] + U[3 * a] - R0[3 * b] - U[3 * b], R0[3 * a + 1] + U[3 * a + 1] - R0[3 * b + 1] - U[3 * b + 1], R0[3 * a + 2] + U[3 * a + 2] - R0[3 * b + 2] - U[3 * b + 2]); if (d > 1.5 * TL0[k]) continue; }
+    un(a, b); }
+  const root = new Uint8Array(N); for (let i = 0; i < N; i++) if (AK[i] > 0 || (WINV[i] === 0 && !(PARENT && PARENT[i] >= 0))) root[fd(i)] = 1;
   const a = new Uint8Array(N); for (let i = 0; i < N; i++) a[i] = root[fd(i)];
   return a;
 }
@@ -1638,7 +1749,7 @@ function syncStep() {
 }
 // the structure's motion for the end-of-run test: noted every 200 steps, used LAT steps later
 function noteNodes() {
-  const s = sim; if (s.solver === 'gpu') gpu.requestNodes(s.n); else PENDN.set(s.n, { V: V.slice(), FREE: FREE.slice() });
+  const s = sim; if (s.solver === 'gpu') gpu.requestNodes(s.n); else { const U = new Float64Array(3 * N); for (let i = 0; i < 3 * N; i++) U[i] = X[i] - R0[i]; PENDN.set(s.n, { V: V.slice(), FREE: FREE.slice(), U }); }
 }
 // a GPU run that reads back asynchronously (WebGPU) waits here before a step that needs a copy not yet mapped
 function gpuWait() {
@@ -1682,17 +1793,26 @@ function step() {
 }
 const VEND = { V: null, FREE: null };
 function checkEnd(m) {
-  const s = sim; let Vd, Fd;
-  if (s.solver === 'gpu') { if (!VEND.V || VEND.V.length !== 3 * N) { VEND.V = new Float64Array(3 * N); VEND.FREE = new Uint8Array(N); } gpu.nodesOf(m, VEND.V, VEND.FREE); Vd = VEND.V; Fd = VEND.FREE; }
-  else { const d = PENDN.get(m); PENDN.delete(m); if (!d) return; Vd = d.V; Fd = d.FREE; }
-  if (!ATT || m % 1000 === 0) ATT = attachedNodes();
+  const s = sim; let Vd, Fd, Ud;
+  if (s.solver === 'gpu') { if (!VEND.V || VEND.V.length !== 3 * N) { VEND.V = new Float64Array(3 * N); VEND.FREE = new Uint8Array(N); VEND.U = new Float64Array(3 * N); } if (!gpu.nodesOf(m, VEND.V, VEND.FREE, VEND.U)) return; Vd = VEND.V; Fd = VEND.FREE; Ud = VEND.U; }
+  else { const d = PENDN.get(m); PENDN.delete(m); if (!d) return; Vd = d.V; Fd = d.FREE; Ud = d.U; }
+  if (!ATT || m % 1000 === 0) ATT = attachedNodes(Ud);
   let v2 = 0, ke = 0; for (let i = 0; i < N; i++) { if (Fd[i] || !ATT[i]) continue; const q = Vd[3 * i] ** 2 + Vd[3 * i + 1] ** 2 + Vd[3 * i + 2] ** 2; ke += .5 * M[i] * q; if (q > v2) v2 = q; }
   let gas = 0; for (let k = 0; k < GV.length; k++) if (GV[k] < Infinity) gas = Math.max(gas, Math.abs(GP[k]));
-  const quiet = s.srcs.every(q => q.F > .98) && s.t - s.lastSrc > .005, vm = Math.sqrt(v2);
+  let quiet = s.srcs.every(q => q.F > .98) && s.t - s.lastSrc > .005; const vm = Math.sqrt(v2);
   s.kepeak = Math.max(s.kepeak || 0, ke);
+  // the gas no longer rising (over the last 10 ms, compartment by compartment) and tearing down to a trickle (under 3 %
+  // of the torn cells in that time: pieces hanging by a corner node spin on it as frictionless pins and nibble at the
+  // plating for as long as the run lasts): the structure has taken what it will take (st.endGas: the old rule, gas
+  // below 20 kPa)
+  if (!s.gref || s.t - s.gref.t >= .01) { const g = GP.slice(), tc = s.cellsTorn;
+    s.steady = !!s.gref && tc - s.gref.tc <= .03 * tc && g.every((v, k) => !(GV[k] < Infinity) || v <= s.gref.g[k] * 1.02 + 2e3); s.gref = { t: s.t, g, tc }; }
+  const gasDone = gas < 2e4 || (!st.endGas && s.steady);
+  if (!st.endGas && s.steady && s.srcs.every(q => q.F > .98)) quiet = true;   // late holes' sources carry next to nothing
+  if (st.endLog) (s.endLog || (s.endLog = [])).push([+(s.t * 1e3).toFixed(1), +(ke / s.kepeak).toFixed(4), Math.round(vm), Math.round(gas / 1e3), s.cellsTorn, s.steady ? 1 : 0, quiet ? 1 : 0]);
   // loads over and the structure's kinetic energy down to 5 % of its peak: settle the remaining elastic ringing with
   // strong damping (dynamic relaxation) to read the permanent set
-  if (!s.relax && (st.relaxAt ? s.t >= st.relaxAt : quiet && (st.relaxGas || gas < 2e4) && s.t > s.tMin && (ke < .05 * s.kepeak || s.t > s.tMin + .1))) { s.relax = true; s.tRelax = s.t; }
+  if (!s.relax && (st.relaxAt ? s.t >= st.relaxAt : quiet && (st.relaxGas || gasDone) && s.t > s.tMin && (ke < .05 * s.kepeak || s.t > s.tMin + .1))) { s.relax = true; s.tRelax = s.t; }
   if (s.relax && (v2 < .25 || s.t - s.tRelax > .025)) s.T1 = s.t;
   s.vmax = vm;
 }
@@ -1713,7 +1833,7 @@ function settle() {
   for (let c = 0; c < NC; c++) if (!CER[c]) { const a = CN[4 * c]; for (let k = 1; k < 4; k++) un(a, CN[4 * c + k]); }
   for (let k = 0; k < NT; k++) if (!TFL[k]) un(TA[k], TB[k]);
   const root = new Uint8Array(N); for (let i = 0; i < N; i++) if (AK[i] > 0) root[fd(i)] = 1;
-  let debris = 0; for (let i = 0; i < N; i++) if (!root[fd(i)] && !FREE[i]) { FREE[i] = 1; debris++; }
+  let debris = 0; for (let i = 0; i < N; i++) if (!root[fd(i)] && !FREE[i] && !(PARENT && PARENT[i] >= 0 && !SPL[PARENT[i]])) { FREE[i] = 1; debris++; }
   s.debris = debris;
   for (let i = 0; i < N; i++) if (!FREE[i]) V[3 * i] = V[3 * i + 1] = V[3 * i + 2] = 0;
   let md = 0;
@@ -1729,7 +1849,7 @@ function ballistic(h) {
     if (X[3 * i + 1] < scene.waterline - .2 && scene.spaceAt([X[3 * i], X[3 * i + 1] + .3, X[3 * i + 2]]) === scene.OUT) { V[3 * i] = V[3 * i + 1] = V[3 * i + 2] = 0; X[3 * i + 1] = -60; }
   }
 }
-function startRun() { ATT = null; PENDC.clear(); PENDN.clear(); VEND.V = null; F = new Float64Array(3 * N); FL = new Float64Array(3 * N); XO = new Float64Array(3 * N); VO = new Float64Array(3 * N); CPB.length = 0; IMPN.length = 0; }
+function startRun() { resetTwins(); ATT = null; CELLN = null; PENDC.clear(); PENDN.clear(); VEND.V = null; F = new Float64Array(3 * N); FL = new Float64Array(3 * N); XO = new Float64Array(3 * N); VO = new Float64Array(3 * N); CPB.length = 0; IMPN.length = 0; }
 
 /* ------------------------------------------------------------------ the whole ship (Burke): picking and context */
 let SHIP = null;
@@ -2158,7 +2278,7 @@ function compare(a, r) {
 }
 window.BLAST = { ver: 33, get backend() { return gpu ? gpu.kind || 'webgl' : null; }, webgpu: () => !!WG, PROF, st, runCase, runCaseAsync, compare, cam, build, detonate: () => { asyncRun = false; detonate(); startRun(); }, get sim() { return sim; }, energy, draw,
   stepN(n) { sim.headless = true; for (let k = 0; k < n && sim.t < sim.T1; k++) step(); return sim.t; },
-  model: () => ({ N, NC, NH, NT, S, dt, X, V, R0, M, FREE, CN, CPAN, CH, CMAT, CEF, CSP, CSN, CER, CTE, CDM, CEP, CUT, CFD, CAR, CRC, CNR,
+  model: () => ({ N, NC, NH, NT, S, dt, X, V, R0, M, FREE, F, FL, TWIN, PARENT, SPL, HOFF, CCR, CN, CPAN, CH, CMAT, CEF, CSP, CSN, CER, CTE, CDM, CEP, CUT, CFD, CAR, CRC, CNR,
     HN, HC, HKP, HMP, HKS, HMS, HT0, HTP, HTH, HDB, HLN, HTL0, HTPS, HTR, TBA, TBB, TSC, TCL, TCL2, TQN, TPRV, TNXT, TKC, CKC, CSD, TKB, TQB, TB0, TKS, TQS, TS0, TBP, TSP, TMM, TFIB, TA, TB, TL0, TLP, TFL, TAR, AK, AF, AC, PAN, GP, GV, OPEN, scene, MATS, EN }),
   pulse, kinneyPs, kinneyIs1, reflect, U_MEAN, U_MAX, tee, SEC,
   rawSteps(n) { const t0 = performance.now(); for (let k = 0; k < n; k++) gpu.step(sim.t, dt, 0); const t1 = performance.now(); gl.finish(); return [t1 - t0, performance.now() - t0]; },
@@ -2253,6 +2373,18 @@ window.BLAST = { ver: 33, get backend() { return gpu ? gpu.kind || 'webgl' : nul
     w.postMessage({ cv, it: iters, nd: draws }, [cv]); w.onmessage = e => { w.ms = e.data; }; window.__stress = w; return w;
   },
   // finite-difference check of the element forces against their energies (debug)
+  // net moment of each pass's internal forces about the charge (debug; state restored), with and without velocities
+  torqueBy() {
+    const saveEN = EN; EN = null; const keep = [HTP.slice(), CEP.slice(), CDM.slice(), CUT.slice(), TLP.slice(), TEB.slice(), CER.slice()];
+    const hps = HTPS.slice(), tbp = TBP.slice(), tsp = TSP.slice(); const restore = () => { TBP.set(tbp); TSP.set(tsp); HTPS.set(hps); HTP.set(keep[0]); CEP.set(keep[1]); CDM.set(keep[2]); CUT.set(keep[3]); TLP.set(keep[4]); TEB.set(keep[5]); CER.set(keep[6]); };
+    const Fs = F.slice(), FLs = FL.slice(), SRC = sim.SRC, Vs = V.slice(), C = sim.C, out = {};
+    for (const vz of [false, true]) { if (vz) V.fill(0);
+      for (const [k, P] of Object.entries({ hinge: hingePass, cell: cellPass, truss: trussPass })) { sim.SRC = []; F.fill(0); FL.fill(0); P(sim.t, dt); restore();
+        let mx = 0, my = 0, mz = 0, fs = 0; for (let i = 0; i < N; i++) { const ix = F[3 * i] - FL[3 * i], iy = F[3 * i + 1] - FL[3 * i + 1], iz = F[3 * i + 2] - FL[3 * i + 2], rx = X[3 * i] - C[0], ry = X[3 * i + 1] - C[1], rz = X[3 * i + 2] - C[2];
+          mx += ry * iz - rz * iy; my += rz * ix - rx * iz; mz += rx * iy - ry * ix; fs += Math.abs(ix) + Math.abs(iy) + Math.abs(iz); }
+        out[k + (vz ? '0' : '')] = [Math.round(Math.hypot(mx, my, mz)), fs.toExponential(2)]; } }
+    V.set(Vs); F.set(Fs); FL.set(FLs); sim.SRC = SRC; EN = saveEN; return out;
+  },
   fdCheck(node, pass, eps = 1e-6) {
     const P = { hinge: hingePass, cell: cellPass, truss: trussPass }[pass];
     const saveEN = EN; EN = null; const keep = [HTP.slice(), CEP.slice(), CDM.slice(), CUT.slice(), TLP.slice(), TEB.slice(), CER.slice()];

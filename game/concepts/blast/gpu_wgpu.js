@@ -178,7 +178,8 @@ fn retMap(sp: ptr<function, vec3f>, eb: f32, mA: vec4f, rf: f32) -> vec2f {
       let Dr11 = co * co * D11 + 2.0 * co * si * D12 + si * si * D22; let Dr22 = si * si * D11 - 2.0 * co * si * D12 + co * co * D22; let Dr12 = (co * co - si * si) * D12 + co * si * (D22 - D11);
       let bt = KC.s0.x;
       let S11 = s.x + bt * Ep * (Dr11 + nu * Dr22); let S22 = s.y + bt * Ep * (Dr22 + nu * Dr11); let S12 = s.z + bt * 2.0 * Gm * Dr12;
-      let P11 = co * S11 - si * S12; let P12 = co * S12 - si * S22; let P21 = si * S11 + co * S12; let P22 = si * S12 + co * S22;
+      let kq = (U12 * (S22 - S11) + S12 * (U11 - U22)) / (U11 + U22);   // exact P = R (S - k J) (no net moment)
+      let P11 = co * S11 - si * (S12 - kq); let P12 = co * (S12 + kq) - si * S22; let P21 = si * S11 + co * (S12 - kq); let P22 = si * (S12 + kq) + co * S22;
       let vol = A0 * hh * fd; let k1 = 1.0 / L12; let k2 = -P3x / (L12 * P3y); let k3 = 1.0 / P3y;
       let f2x = -vol * (P11 * k1 + P12 * k2); let f2y = -vol * (P21 * k1 + P22 * k2); let f3x = -vol * P12 * k3; let f3y = -vol * P22 * k3;
       let g2 = f2x * e1 + f2y * e2; let g3 = f3x * e1 + f3y * e2;
@@ -338,7 +339,10 @@ fn dAe(u: vec3f, v: vec3f) -> vec3f { let cx = cross(u, v); let s = dot(EX, cx);
       }
     }
     let nx = i32(t5.z); var tbn = 0.0; if (nx >= 0) { tbn = abs(DY[mbB(v) + nx].w); }
-    let failed = max(0.0, log(Lp / L0)) + max(abs(st.w), tbn) * t1.z >= t1.y;
+    // stripped: an end node with no intact cell left (last step's gather: members only) lets the member go
+    let wa = SC[O_FRC + a].w; let wb = SC[O_FRC + b].w;
+    let strip = (wa > 0.0 && wa < 0.5) || (wb > 0.0 && wb < 0.5);
+    let failed = strip || max(0.0, log(Lp / L0)) + max(abs(st.w), tbn) * t1.z >= t1.y;
     oSt = vec4f(select(Lp, -Lp, failed), tsp, eb, tbp);
     break;
   }
@@ -351,13 +355,17 @@ const GATHER = `
 @group(0) @binding(6) var<storage, read_write> HD: array<i32>;
 fn ADJ(k: i32) -> i32 { return i32(ST[O_ADJ + (k >> 2u)][k & 3]); }
 // the contact push-back on cell c's corners: the nodes that hit it last step (a list), summed in node order
-fn contact(c: i32, hp: u32) -> vec3f {
+fn contact(c: i32, hp: u32, r: i32) -> vec3f {
   var js: array<i32, 8>; var n = 0; var j = HD[i32(hp) * NC + c];
   loop { if (j < 0 || n >= 8) { break; } js[n] = j; n++; j = HD[2 * NC + j]; }
   if (n == 0) { return vec3f(0.0); }
   for (var a = 1; a < n; a++) { let x = js[a]; var b = a - 1; loop { if (b < 0 || js[b] <= x) { break; } js[b + 1] = js[b]; b--; } js[b + 1] = x; }
-  var f = vec3f(0.0); for (var a = 0; a < n; a++) { f += SC[O_CON + js[a]].yzw; }
-  return f * (0.25 / PP.h);
+  // bilinear weights of the point hit (corner r), along the cell's rest normal
+  var f = 0.0; for (var a = 0; a < n; a++) { let e = SC[O_CON + js[a]]; let u = e.z; let v = e.w;
+    var wr = (1.0 - u) * (1.0 - v); if (r == 1) { wr = u * (1.0 - v); } else if (r == 2) { wr = u * v; } else if (r == 3) { wr = (1.0 - u) * v; }
+    f += e.y * wr; }
+  let nc = normalize(cross(ST[O_CS + 11 * c + 1].xyz, ST[O_CS + 11 * c + 3].xyz));
+  return nc * (f / PP.h);
 }
 @compute @workgroup_size(${WGS}) fn main(@builtin(global_invocation_id) gid: vec3u) {
   let i = i32(gid.x); if (i >= N) { return; }
@@ -371,7 +379,7 @@ fn contact(c: i32, hp: u32) -> vec3f {
     else if (r == 1) { F += vec3f(SC[O_CF + c].w, SC[O_CF + NC + c].xy); }
     else if (r == 2) { F += vec3f(SC[O_CF + NC + c].zw, SC[O_CF + 2 * NC + c].x); }
     else { F += SC[O_CF + 2 * NC + c].yzw; }
-    F += contact(c, w);
+    F += contact(c, w, r);
     if (CST(c, w).x < 0.5) { cnt += 1.0; } }
   for (var k = 0; k < n1; k++) {
     let e = ADJ(o1 + k); let h = e / 8; let r = e - 8 * h;
@@ -382,7 +390,7 @@ fn contact(c: i32, hp: u32) -> vec3f {
   for (var k = 0; k < n2; k++) {
     let e = ADJ(o2 + k); let t = e / 16; let r = e - 16 * t; let f = 3 * r;
     F += vec3f(SC[O_MF + (f >> 2u) * NT + t][f & 3], SC[O_MF + ((f + 1) >> 2u) * NT + t][(f + 1) & 3], SC[O_MF + ((f + 2) >> 2u) * NT + t][(f + 2) & 3]);
-    if (r < 2 && DY[mbB(w) + t].x > 0.0) { cnt += 1.0; } }
+    if (r < 2 && DY[mbB(w) + t].x > 0.0) { cnt += 1.0 / 64.0; } }   // cells count 1, members 1/64
   SC[O_FRC + i] = vec4f(F, cnt);
 }`;
 
@@ -422,13 +430,13 @@ const NODE = `
     let fr = SC[O_FRC + i];
     var F = fr.xyz; var u = pos.xyz; var vv = vel.xyz;
     var free_ = pos.w;
-    if (fr.w < 0.5 && n0.y <= 0.0) { free_ = 1.0; }
+    if (fr.w <= 0.0 && n0.y <= 0.0) { free_ = 1.0; }
     if (n0.y > 0.0) {
       let d = u - anc.xyz; let dl = length(d);
       if (dl > 1e-12) { var f = n0.y * dl; if (f > n0.z) { anc = vec4f(u - d * (n0.z / n0.y / dl), anc.w); f = n0.z; } F -= d / dl * f; }
-      F -= n0.w * vv;
     }
     vv = vv + F * (uH * n0.x);
+    if (n0.y > 0.0) { vv /= 1.0 + uH * n0.x * n0.w; }   // the boundary dashpot, implicit (stable at any step)
     if (free_ > 0.5) { vv.y -= KC.s1.w * uH; } else { vv *= 1.0 - PP.alpha * uH; }
     u += vv * uH;
     // contact: the other panels near this node (planar maps); stop against an intact cell, push it back next step
@@ -453,7 +461,9 @@ const NODE = `
       let gap = (cur - pl) * sd; if (gap > 0.015) { continue; }
       u += n * ((0.015 - gap) * sd);
       let rel = (dot(vv, n) - vc) * sd;
-      if (rel < 0.0) { let dv = -rel * sd; vv += n * dv; oCon = vec4f(f32(c), -dv / n0.x * n); }
+      if (rel < 0.0) { let dv = -rel * sd; vv += n * dv;
+        let r1 = ST[O_CS + 11 * c + 1].xyz; let r3 = ST[O_CS + 11 * c + 3].xyz; let xr = n1.xyz + u - ST[O_NS + 5 * i32(cc.x) + 1].xyz;
+        oCon = vec4f(f32(c), -dv / n0.x * dot(n, normalize(cross(r1, r3))), clamp(dot(xr, r1) / dot(r1, r1), 0.0, 1.0), clamp(dot(xr, r3) / dot(r3, r3), 0.0, 1.0)); }
       break;
     }
     oPos = vec4f(u, free_); oVel = vec4f(vv, 0.0);
@@ -675,8 +685,10 @@ export function createWGPU(dev, M, opt = {}) {
   const has = (kind, tag) => { const e = tagged.get(kind + tag); return !e || e.ready; };
   const waitFor = (kind, tag) => { const e = tagged.get(kind + tag); if (!e) return Promise.resolve(); if (!e.submitted) submit(); return e.promise; };
   function cellsOf(tag) { const e = tagged.get('c' + tag); if (!e || !e.ready) return null; tagged.delete('c' + tag); lastPK.set(e.data); return decode(); }
-  function nodesOf(tag, V, FREE) { const e = tagged.get('n' + tag); if (!e || !e.ready) return false; tagged.delete('n' + tag); const d = e.data, b = 4 * N;
-    for (let i = 0; i < N; i++) { FREE[i] = d[4 * i + 3] > .5 ? 1 : 0; V[3 * i] = d[b + 4 * i]; V[3 * i + 1] = d[b + 4 * i + 1]; V[3 * i + 2] = d[b + 4 * i + 2]; } return true; }
+  function nodesOf(tag, V, FREE, U) { const e = tagged.get('n' + tag); if (!e || !e.ready) return false; tagged.delete('n' + tag); const d = e.data, b = 4 * N;
+    for (let i = 0; i < N; i++) { FREE[i] = d[4 * i + 3] > .5 ? 1 : 0; V[3 * i] = d[b + 4 * i]; V[3 * i + 1] = d[b + 4 * i + 1]; V[3 * i + 2] = d[b + 4 * i + 2]; }
+    if (U) for (let i = 0; i < N; i++) { U[3 * i] = d[4 * i]; U[3 * i + 1] = d[4 * i + 1]; U[3 * i + 2] = d[4 * i + 2]; }
+    return true; }
   function readState(o) { if (stateCache && stateCache !== o) for (const k in o) if (stateCache[k] && o[k] && o[k] !== stateCache[k]) o[k].set(stateCache[k]); }
   function readCellsFull() { const a = decode(); return a; }
   // ---- initial state (detonation), loads, impulses, damage
