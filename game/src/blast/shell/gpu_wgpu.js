@@ -1,5 +1,5 @@
-/* (game/concepts/blast/gpu_wgpu.js at commit 882692c, copied; the one change: gravity on free pieces along the patch's up
-   axis, UPAX) The blast bench's structural model on WebGPU compute: the same physics as gpu.js (WebGL2) and the CPU reference in
+/* (game/concepts/blast/gpu_wgpu.js at commit 882692c, copied; the changes: gravity on free pieces along the patch's up
+   axis, UPAX; msStep(), the measured time a step for the worker's slices) The blast bench's structural model on WebGPU compute: the same physics as gpu.js (WebGL2) and the CPU reference in
    blast.js, pass for pass (hinges, cells, members, gather, contact scatter, nodes), with the state in three storage
    buffers:
      ST  statics (node, cell, hinge, member records; panels, cell map, adjacency, arrival table), read only
@@ -488,7 +488,7 @@ ${Object.entries(c).map(([k, v]) => `const ${k}: i32 = ${v};`).join('\n')}
 
 export function createWGPU(dev, M, opt = {}) {
   const { N, NC, NH, NT } = M;
-  const batch = opt.batch || 100; let depth = opt.depth || 3;
+  const batch = opt.batch || 100; let depth = opt.depth || 3, msStep = 0;   // (game: msStep, the measured wall time a step, submit to done)
   const one = n => Math.max(1, n);
   // local origin: the middle of the model (keeps float32 coordinates small)
   const O = [0, 0, 0]; { const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9]; for (let i = 0; i < N; i++) for (let q = 0; q < 3; q++) { const v = M.R0[3 * i + q]; if (!Number.isFinite(v)) continue; lo[q] = Math.min(lo[q], v); hi[q] = Math.max(hi[q], v); } for (let q = 0; q < 3; q++) O[q] = (lo[q] + hi[q]) / 2; }
@@ -624,8 +624,9 @@ export function createWGPU(dev, M, opt = {}) {
     if (wantRead) addRead();
     endPass();
     if (nsteps || wantRead) dev.queue.writeBuffer(bP, 0, par, 0, PSTRIDE * (nsteps + 1));
+    const ns = nsteps, ts = performance.now(), alone = inflight === 0;
     dev.queue.submit([enc.finish()]); enc = null; pass = null; mapTagged();
-    inflight++; dev.queue.onSubmittedWorkDone().then(() => { inflight--; while (waiters.length && inflight < depth) waiters.shift()(); });
+    inflight++; dev.queue.onSubmittedWorkDone().then(() => { inflight--; while (waiters.length && inflight < depth) waiters.shift()(); if (alone && ns >= 4) { const m = (performance.now() - ts) / ns; msStep = msStep ? msStep * .7 + m * .3 : m; } });
     if (wantRead) {
       reading = true; const seq = ++readSeq;
       readWait = Promise.all([stN.mapAsync(GPUMapMode.READ), stC.mapAsync(GPUMapMode.READ)]).then(() => {
@@ -725,5 +726,5 @@ export function createWGPU(dev, M, opt = {}) {
   function setDamage(CFD) { const a = new Float32Array(4 * NC); for (let c = 0; c < NC; c++) a[4 * c] = CFD[c]; upload(a, bSC, 16 * L.O_DMG); }
   function dispose() { for (const e of tagged.values()) { try { e.buf.destroy(); } catch (x) {} } tagged.clear(); if (enc) { endPass(); enc = null; } for (const b of bufs) try { b.destroy(); } catch (e) {} bufs.length = 0; }
   return { kind: 'webgpu', step, steps, requestCells, cellsOf, requestNodes, nodesOf, has, waitFor, submit, flush, pace, busy, upload: upload0, setSources, setGas, setImpulses, setDamage, readNodes, readNodesAsync, readCells, readCellsAsync,
-    readCellsFull, readState, readStateAsync, dispose, profile: () => ({}), errors: errs, O, batch, setDepth: d => { depth = d; } };
+    readCellsFull, readState, readStateAsync, dispose, profile: () => ({}), errors: errs, O, batch, setDepth: d => { depth = d; }, msStep: () => msStep };
 }

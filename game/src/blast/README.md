@@ -71,6 +71,13 @@ with sub-grid buckle facets; the structure behind a hole as jittered charred dot
   instance); the inner structure near a hole (decks, the bulkhead, the frames' webs) as charred dots lit by the fire;
   fires re-seated on the torn rim and the deck inside when it settles; ejecta when the plating tears. The final state
   stays for the match, in the model frame: it rides game/structure's pieces (`poseAt`) when the ship breaks.
+- **The sim's holes** (sim/ship.js `u.ship.holes`, what floods her) are authoritative: where the solve tore less than
+  the sim's hole, the patch's skin is opened to at least the sim's outline when it settles (ragged: 12 lobes and a
+  per-texel bite; `simHoles`, looked at again every second as the sim's holes grow). The floodwater in the spaces
+  behind a hole is drawn at the sim's water level (`drawWater`). A ship with no interior (data/models_interior.js) has
+  the hole's depth plug at the pocket's far wall, widened, so no sea or sky shows through the ship.
+- **Frame time**: the solver's share is cut (to 0.3 of it) while the game's frames run past ~17 ms, and the WebGPU
+  queue is kept 2 deep when the share is small (a deep queue of solver work sits in front of the game's frame).
 - **Fed back**: `game.structure.refine(id, t, { A, below, frames, work, ... })`: the solved torn area (its share
   under the water floods) and the frames torn / plastic work (the girder).
 

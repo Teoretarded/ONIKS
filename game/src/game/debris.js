@@ -834,7 +834,7 @@ export async function createDebris(game) {
       const m = massOf(ext, false, md.rho || 200, 40, false);
       const tint = tintOf(u.side);
       if (md.how === 'topple') {
-        const b = spawnModule({ ent, key, names, st, T0, M0, v: vb, w: [0, 0, 0], t0: e.t + .15 + .5 * r.r(), tint, mass: m, plate, seed: seed + n * 17, floatT: md.rho < 80 ? 20 + 30 * r.r() : 0, sinkV: 1.5, life: 300 });
+        const b = spawnModule({ ent, key, names, st, T0, M0, v: vb, w: [0, 0, 0], t0: e.t + .15 + .5 * r.r(), tint, mass: m, plate, seed: seed + n * 17, floatT: md.float ? 20 + 30 * r.r() : 0, sinkV: 1.5, life: 300 });
         if (!b) continue;
         b.o.from = u.id;
         // over the side the hull lists to (a vehicle: any way but toward the blast)
@@ -863,7 +863,7 @@ export async function createDebris(game) {
         const v = [vb[0] + hx / hl * hs, up, vb[2] + hz / hl * hs];
         const ws = mix(md.spin[0], md.spin[1], r.r());
         const w = [r.n() * ws, r.n() * ws * .6, r.n() * ws];
-        const b = spawnModule({ ent, key, names, st, T0, M0, v, w, t0: e.t + .02 + .12 * r.r(), tint, mass: m, plate, seed: seed + n * 17, floatT: md.rho < 80 ? 25 + 30 * r.r() : 0, sinkV: 2, life: 300 });
+        const b = spawnModule({ ent, key, names, st, T0, M0, v, w, t0: e.t + .02 + .12 * r.r(), tint, mass: m, plate, seed: seed + n * 17, floatT: md.float ? 25 + 30 * r.r() : 0, sinkV: 2, life: 300 });
         if (!b) continue;
         b.o.from = u.id;
         if (r.r() < .5) b.o.burn = { stage: STAGE.damaged, until: b.t0 + 3 + 5 * r.r(), tr: null, glow: .6 };

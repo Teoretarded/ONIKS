@@ -4,6 +4,7 @@
      L.look(ONIKS, id, [x, y, z], { yaw, pitch, dist })               // yaw relative to the unit's heading (0: from ahead)
      L.spawn(ONIKS, 'ddg', x, z, hdg)
    The hit goes through the sim's own paths (sim.emit('hit') + applyDamage), so every system sees it as a real one. */
+import { attitudeM } from '../game/debris/math.js';
 import { applyDamage } from '../sim/damage.js';
 import { partNear } from '../sim/bodies.js';
 
@@ -24,11 +25,13 @@ export function hit(O, id, loc, kind = 'oniks', o = {}) {
   const sim = O.sim, u = sim.units.get(id);
   if (!u) return null;
   const P = O.game.PROJ[kind] || { dmg: 20 };
-  const pos = toWorld(u, loc[0], loc[1], loc[2]);
+  // (in the frame of the ship as drawn, heaving and rolling in the swell: a model-frame aim lands where it is aimed)
+  const pose = O.game.unitPose ? O.game.unitPose(u) : null, M = pose ? attitudeM(pose.hdg, pose.pitch || 0, pose.roll || 0, new Array(9)) : null;
+  const pos = M ? [0, 1, 2].map(k => pose.pos[k] + M[3 * k] * loc[0] + M[3 * k + 1] * loc[1] + M[3 * k + 2] * loc[2]) : toWorld(u, loc[0], loc[1], loc[2]);
   // the round comes in from o.from (model frame direction toward where it came from), default: square to the nearer side
   const f = o.from || [loc[0] >= 0 ? 1 : -1, .05, 0];
   const c = Math.cos(u.hdg), s = Math.sin(u.hdg), l = Math.hypot(f[0], f[1], f[2]) || 1, sp = o.speed || P.speed || 300;
-  const vel = [-(f[0] * c + f[2] * s) / l * sp, -f[1] / l * sp, -(-f[0] * s + f[2] * c) / l * sp];
+  const vel = M ? [0, 1, 2].map(k => -(M[3 * k] * f[0] + M[3 * k + 1] * f[1] + M[3 * k + 2] * f[2]) / l * sp) : [-(f[0] * c + f[2] * s) / l * sp, -f[1] / l * sp, -(-f[0] * s + f[2] * c) / l * sp];
   const part = o.part || partNear(u.def, loc[0], loc[1], loc[2]) || u.def.partNames[0];
   const part2 = partNear(u.def, loc[0], loc[1], loc[2], part);
   sim.emit('hit', { pos, target: id, kind, side: u.side === 'coast' ? 'fleet' : 'coast', from: 0, part, vel });

@@ -144,7 +144,7 @@ export const UNIT_PLANS = {
       { parts: ['gun'], how: 'toss', up: [6, 14], spin: [.6, 2.2], rho: 420 },
       { parts: ['ciwsF'], how: 'toss', up: [8, 16], spin: [1, 3.5], rho: 300 },
       { parts: ['ciwsA'], how: 'toss', up: [8, 16], spin: [1, 3.5], rho: 300 },
-      { parts: ['boats'], how: 'toss', up: [4, 9], spin: [.5, 1.6], rho: 60 },
+      { parts: ['boats'], how: 'toss', up: [4, 9], spin: [.5, 1.6], rho: 60, float: true },   // (only the boats float: a mast, a stack sink)
       { parts: ['stacks'], how: 'topple', rho: 45, rel: .8, p: .6 },
     ],
   },

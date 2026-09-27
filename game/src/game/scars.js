@@ -226,8 +226,12 @@ export function createScars(game) {
       const vx = x - h[0], vy = y - h[1], vz = z - h[2];
       const s = vx * din[0] + vy * din[1] + vz * din[2], d2 = vx * vx + vy * vy + vz * vz;
       const two = nx * nx + ny * ny + nz * nz < .01;
-      if (s > -12 && s < 36 && d2 - s * s < rr * rr && (two || nx * din[0] + ny * din[1] + nz * din[2] < .25)) {
-        if (s < bs) { bs = s; found = true; o[0] = x; o[1] = y; o[2] = z; o[3] = two ? -din[0] : nx; o[4] = two ? -din[1] : ny; o[5] = two ? -din[2] : nz; }
+      // (the dot nearest where the path meets the surface: along the path, and off it (a flared side's plating higher up
+      // stands further out, so it is met first by a wide cylinder though the path crosses the side lower down))
+      const pp = d2 - s * s;
+      if (s > -12 && s < 36 && pp < rr * rr && (two || nx * din[0] + ny * din[1] + nz * din[2] < .25)) {
+        const sc = s + Math.sqrt(Math.max(0, pp));
+        if (sc < bs) { bs = sc; found = true; o[0] = x; o[1] = y; o[2] = z; o[3] = two ? -din[0] : nx; o[4] = two ? -din[1] : ny; o[5] = two ? -din[2] : nz; }
       }
     };
     // a narrow cylinder round the path first (0.45 m: on a flared side the wide one met the plating ~2 m above the path
@@ -288,6 +292,9 @@ export function createScars(game) {
     const guess = Math.cbrt(Wk) * .6;
     const o = new Array(6), ts = performance.now();
     if (!snap(ent, st, h, din, e.under ? .8 : Math.max(1.2, guess * .55), o)) return;          // nothing of the model there: no mark
+    // (aimed under the water on a side: the model's dots stop at the waterline, so the hit is carried down the side to
+    // the aimed depth, the hull narrowing a little below the waterline)
+    if (sea && !e.under && h[1] < -.3 && o[1] < .6 && Math.abs(o[3]) > .5) { const sx = o[0] >= 0 ? 1 : -1; o[0] = sx * Math.max(.5, Math.abs(o[0]) - .08 * -h[1]); o[1] = Math.max(h[1], -(def.draught || 5) + .5); }
     const nl = Math.hypot(o[3], o[4], o[5]) || 1;
     const nx = o[3] / nl, ny = o[4] / nl, nz = o[5] / nl;
     // the plating there and what the charge does to it

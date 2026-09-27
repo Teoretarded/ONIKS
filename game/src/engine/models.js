@@ -29,10 +29,22 @@ uniform vec4 uK1;         // its upper cut (same)
 uniform vec4 uKb;         // x torn band (m), y on, z tear wavelength (m), w the hull's axis height (model y, m)
 uniform mat3 uKR;         // the instance's model -> world rotation
 uniform vec3 uKT;         // its origin, relative to the eye
+// (value noise on an integer hash, two octaves and a fine ragged one: an irregular tear, not a sawtooth; game/structure/
+// layout.js jagK is the same function)
+float jagH(ivec2 c, int s) {
+  uint h = (uint(c.x) * 73856093u) ^ (uint(c.y) * 19349663u) ^ (uint(s) * 83492791u);
+  h = (h ^ (h >> 13u)) * 1274126177u;
+  return float(h >> 8u) / 16777216.0;
+}
+float jagV(vec2 q, int s) {
+  vec2 i = floor(q), f = q - i, u = f * f * (3.0 - 2.0 * f); ivec2 c = ivec2(i);
+  return mix(mix(jagH(c, s), jagH(c + ivec2(1, 0), s), u.x), mix(jagH(c + ivec2(0, 1), s), jagH(c + ivec2(1, 1), s), u.x), u.y);
+}
 float jagK(vec2 q, float s) {
-  float a = abs(fract(q.x * 0.61 + q.y * 0.23 + s) - 0.5), b = abs(fract(q.y * 0.97 - q.x * 0.31 + s * 1.37) - 0.5);
-  float c = abs(fract(q.x * 2.3 + q.y * 1.9 + s * 2.71) - 0.5);
-  return (a + 0.7 * b + 0.35 * c) * 1.9512 - 1.0;
+  int si = int(floor(s * 1000.0));
+  vec2 r = q * 3.0 + 4096.0;
+  float v = 0.55 * jagV(r * 0.9, si) + 0.3 * jagV(r * 2.3, si + 7) + 0.15 * jagV(r * 6.1, si + 13);
+  return clamp((v - 0.5) * 3.2, -1.0, 1.0);
 }
 `;
 
@@ -267,7 +279,10 @@ void main() {
   }
   if (uBtN > 0) {
     float b0 = 0.0, h0 = 0.0, e0 = 0.0, n0 = 0.0; vec3 t0 = vec3(0.0);
-    if (blastAt(p, uR * aNrm.xyz, true, b0, h0, e0, n0, t0) == 1) { ${CULL} return; }
+    int bk = blastAt(p, uR * aNrm.xyz, true, b0, h0, e0, n0, t0);
+    if (bk == 1) { ${CULL} return; }
+    // (a plug's splat is widened: seen at an angle through the hole, the far end of the pocket is wider than the hole)
+    if (bk == 2) { su *= 2.5; sv *= 2.5; }
   }
   float dist = length(p);
   vec3 v = p / max(dist, 1e-4);
@@ -455,7 +470,7 @@ int scarAt(inout vec3 p, vec3 n, uint hid, bool dp, inout float burn, inout floa
 function blastGLSL() {
   return `
 uniform int uBtN;
-uniform vec4 uBtO[${BTMAX}];     // xyz: the patch's origin (RTE), w: the pocket's depth behind a hole (m)
+uniform vec4 uBtO[${BTMAX}];     // xyz: the patch's origin (RTE), w: the pocket's depth behind a hole (m; < 0: the ship has no interior)
 uniform vec4 uBtX[${BTMAX}];     // xyz: its local x (world), w: heat of the torn edges (0..1)
 uniform vec4 uBtY[${BTMAX}];     // xyz: local y, w: grid (m)
 uniform vec4 uBtZ[${BTMAX}];     // xyz: local z (the struck plate's outward normal), w: the skin band (m)
@@ -476,7 +491,7 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
     vec3 X = uBtX[i].xyz, Y = uBtY[i].xyz, Z = uBtZ[i].xyz;
     vec3 d = p - uBtO[i].xyz;
     vec3 l = vec3(dot(d, X), dot(d, Y), dot(d, Z));
-    float S = uBtY[i].w, band = uBtZ[i].w, heat = uBtX[i].w, D = uBtO[i].w;
+    float S = uBtY[i].w, band = uBtZ[i].w, heat = uBtX[i].w, D = abs(uBtO[i].w), plugD = uBtO[i].w > 0.0 ? 8.3 : 0.3;   // (w < 0: no interior drawn, the plug at the far wall)
     for (int k = 0; k < 2; k++) {
       vec4 P = uBtP[i * 2 + k];
       if (P.x < -0.5) continue;
@@ -531,7 +546,7 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
       if (torn) {
         // the hole: the depth splat pushed back to the pocket's far end (a plug); the dots ride their quarter's corner
         // (petals bent the blast's way), gone with it if it went
-        if (dp) { p -= A * (D + 8.3); return 2; }
+        if (dp) { p -= A * (D + plugD); return 2; }
         bool lx = fx < 0.5, ly = fy < 0.5;
         vec4 tc = lx ? (ly ? t00 : t01) : (ly ? t10 : t11);
         if ((int(tc.w) & 2) != 0) return 1;

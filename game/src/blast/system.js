@@ -193,7 +193,7 @@ export async function createBlast(game) {
     B.tSolve = m.t; B.torn = m.tornSkin; B.below = m.tornBelow; B.setMax = m.setMax; B.byPlate = m.byPlate; B.runMs = m.runMs; B.wallMs = m.wallMs; B.steps = m.steps;
     if (m.tornSkin > 0 && B.tearT < 0) B.tearT = sim.t;
     { const td = performance.now(); try { detachScan(B); } catch (e) { console.error('blast: detach', e); } const dd = performance.now() - td; stats.detachMs = Math.max(stats.detachMs || 0, dd); }
-    if (m.final) { B.state = 'done'; B.final = m; B.res = m.results; B.doneT = sim.t; if (m.debris && m.debris.length) bodies.dotsOf(B.uid, B, m.debris, 1); settle(B); setTimeout(() => { try { settleSupport(B); } catch (e) { console.error('blast: support', e); } }, 0); }
+    if (m.final) { B.state = 'done'; B.final = m; B.res = m.results; B.doneT = sim.t; try { simHoles(B); } catch (e) { console.error('blast: sim holes', e); } if (m.debris && m.debris.length) bodies.dotsOf(B.uid, B, m.debris, 1); settle(B); setTimeout(() => { try { settleSupport(B); } catch (e) { console.error('blast: support', e); } }, 0); }
     else if (m.tornSkin > .05 && !B.ej) ejecta(B, m);
   }
 
@@ -280,6 +280,46 @@ export async function createBlast(game) {
     }
     if (cols.size) { const P = B.pendCols || (B.pendCols = new Set()); for (const c of cols) P.add(c); pendDetach.add(B); }
     if (budgetMs !== undefined) detachWork(B, budgetMs);
+  }
+  /* the sim's holes (sim/ship.js u.ship.holes: model frame x y z, r, A) are what floods her: where the solve tore less
+     than the sim's hole, the hole is opened on the patch's skin to at least the sim's outline (ragged: its radius varies
+     round it, the edge bitten texel by texel), so the picture never shows an intact side over a flooding space */
+  function simHoles(B) {
+    const u = sim.units.get(B.uid), Hs = u && u.ship && u.ship.holes; if (!Hs || !Hs.length) return 0;
+    const F = B.spec.frame, S = B.spec.gridS || S_GRID, O = F.O;
+    const seen = B.simSeen || (B.simSeen = new Map());
+    let added = 0; const touched = new Set();
+    for (const h of Hs) {
+      if (!(h.A > .05)) continue;
+      const key = h.c + ':' + Math.round(h.z * 2) + ':' + Math.round(h.y * 2); if ((seen.get(key) || 0) >= h.A - .05) continue; seen.set(key, h.A);
+      const d = [h.x - O[0], h.y - O[1], h.z - O[2]], l = [d[0] * F.X[0] + d[1] * F.X[1] + d[2] * F.X[2], d[0] * F.Y[0] + d[1] * F.Y[1] + d[2] * F.Y[2], d[0] * F.Z[0] + d[1] * F.Z[1] + d[2] * F.Z[2]];
+      const R0 = Math.sqrt(h.A / Math.PI), sd = (Math.round(h.z * 7) * 131 + Math.round(h.y * 5) * 17 + h.c) | 0;
+      // the outline: the radius round the hole, 12 lobes of random size (smoothly joined), the texel's own bite
+      const lobe = k => .72 + .5 * ((Math.imul((k & 15) + sd * 16, 0x9E3779B1) >>> 0) / 4294967296);
+      for (const r of B.rects) {
+        if (!r.cpu) continue;
+        const off = l[r.ax] - r.val; if (Math.abs(off) > 2) continue;
+        const cu = ((r.ax === 0 ? l[2] : l[0]) - r.u0) / S, cv = ((r.ax === 1 ? l[2] : l[1]) - r.v0) / S, Rt = R0 * 1.25 / S, W = r.nu + 1;
+        // (the solve's own tear there: no more than the sim asks)
+        let torn = 0, all = 0;
+        for (let j = Math.max(0, Math.floor(cv - Rt * .8)); j <= Math.min(r.nv, Math.ceil(cv + Rt * .8)); j++) for (let i = Math.max(0, Math.floor(cu - Rt * .8)); i <= Math.min(r.nu, Math.ceil(cu + Rt * .8)); i++) {
+          if ((i - cu) ** 2 + (j - cv) ** 2 > (Rt * .8) ** 2) continue; all++; if ((r.cpu[4 * (j * W + i) + 3] | 0) & 3) torn++; }
+        if (!all || torn > .7 * all) continue;
+        for (let j = Math.max(0, Math.floor(cv - Rt)); j <= Math.min(r.nv, Math.ceil(cv + Rt)); j++) for (let i = Math.max(0, Math.floor(cu - Rt)); i <= Math.min(r.nu, Math.ceil(cu + Rt)); i++) {
+          const du = i - cu, dv = j - cv, dd = Math.hypot(du, dv) * S; if (dd > R0 * 1.25) continue;
+          const a = (Math.atan2(dv, du) / (2 * Math.PI) + 1) * 12, k0 = Math.floor(a), fa = a - k0, sm = fa * fa * (3 - 2 * fa);
+          const bite = ((Math.imul(i * 73856093 ^ j * 19349663 ^ sd, 0x85EBCA77) >>> 0) / 4294967296 - .5) * .35 * S;
+          if (dd > R0 * (lobe(k0) + (lobe(k0 + 1) - lobe(k0)) * sm) + bite) continue;
+          const t = 4 * (j * W + i), f = r.cpu[t + 3] | 0;
+          if (f & 1) continue;
+          r.cpu[t + 3] = (f | 1) + Math.max(r.cpu[t + 3] % 1, .55); added++; touched.add(r);
+        }
+      }
+    }
+    for (const r of touched) { const rows = Math.max(1, Math.floor(cfg.upTexels / (r.nu + 1)));
+      for (let j = 0; j <= r.nv; j += rows) { const hh = Math.min(rows, r.nv + 1 - j); upQ.push({ r, k: { i0: 0, j0: j, w: r.nu + 1, h: hh, data: r.cpu.subarray(4 * j * (r.nu + 1), 4 * (j + hh) * (r.nu + 1)) } }); } }
+    if (added) { const S2 = S * S * added; B.simTorn = (B.simTorn || 0) + S2; B.torn = Math.max(B.torn || 0, (B.torn || 0) + S2); detachScan(B); }
+    return added;
   }
   /* the columns waiting to be looked at, a time budget a frame (a patch's plating going can touch thousands of dots) */
   const pendDetach = new Set();
@@ -419,7 +459,7 @@ export async function createBlast(game) {
     P.P.fill(-1); P.Q.fill(0);
     use.forEach((B, i) => {
       const F = B.spec.frame, o = i * 16;
-      P.F[o] = F.O[0]; P.F[o + 1] = F.O[1]; P.F[o + 2] = F.O[2]; P.F[o + 3] = B.depth;
+      P.F[o] = F.O[0]; P.F[o + 1] = F.O[1]; P.F[o + 2] = F.O[2]; P.F[o + 3] = B.spec.farWall ? -B.depth : B.depth;
       P.F[o + 4] = F.X[0]; P.F[o + 5] = F.X[1]; P.F[o + 6] = F.X[2]; P.F[o + 7] = 0;
       P.F[o + 8] = F.Y[0]; P.F[o + 9] = F.Y[1]; P.F[o + 10] = F.Y[2]; P.F[o + 11] = B.spec.gridS || S_GRID;
       P.F[o + 12] = F.Z[0]; P.F[o + 13] = F.Z[1]; P.F[o + 14] = F.Z[2]; P.F[o + 15] = Math.max(Math.min(1.6, Math.max(.8, .6 + .08 * (B.spec.Rp || 5))), Math.min(3.5, (B.spec.band || 0) + .35));
@@ -440,6 +480,16 @@ export async function createBlast(game) {
   const gone = new Set();                // units the sim removed whose hull game/structure still draws
   let lastSent = 0;
   let lastBT = null;
+  // the frame's wall time, a decaying high mark (~the last half second's worst frames) -> the solver's share, 0.3 .. 1
+  let lastF = 0, fHi = 0, fScale = 1;
+  function frameScale(now) {
+    const dt = lastF ? now - lastF : 0; lastF = now;
+    if (!(dt > 0) || dt > 200) return fScale;
+    fHi = Math.max(dt, fHi * .93);
+    fScale = fHi > 17 ? Math.max(.3, fScale * .85) : fHi < 15 ? Math.min(1, fScale * 1.04) : fScale;
+    stats.frameScale = fScale;
+    return fScale;
+  }
   function update() {
     const t0 = performance.now();
     // the solver's share of this frame's GPU time: what the game's own frame leaves of ~13.5 ms (game.quality.gpuMs, the
@@ -452,6 +502,9 @@ export async function createBlast(game) {
       // (the shell solver's hits take more steps: its share while one is solving, within the same headroom)
       const mxS = game.timeRate < .9 || game.paused ? cfg.gpuMsShellSlow : cfg.gpuMsShell;
       stats.budgetShell = stats.shellRunning ? Math.max(1.5, Math.min(mxS, 13.5 - other)) : 0;
+      // (frames running long while a solve goes on: the solver's share cut back until they are under ~16 ms again)
+      const fs = frameScale(t0);
+      stats.budget = Math.max(1, stats.budget * fs); if (stats.budgetShell) stats.budgetShell = Math.max(1, stats.budgetShell * fs);
       client.tick(stats.budget, stats.budgetShell || stats.budget);
     }
     // uploads (in the frame: the renderer's GL state stays as it expects)
@@ -500,6 +553,8 @@ export async function createBlast(game) {
     stats.running = run; stats.shellRunning = runS;
     for (const uid of gone) if (!(game.structure && game.structure.draws && game.structure.draws(uid))) { gone.delete(uid); dropUnit(uid); }
     if (any && client && client.mode) { client.targets(TG); for (const k in TG) delete TG[k]; lastSent = game.realT; }
+    // (the sim's holes grow as she floods and as later hits land: looked at again every ~second)
+    if (genTick % 60 === 30) for (const L of byUnit.values()) for (const B of L) if (B.state === 'done') { try { simHoles(B); } catch (e) { console.error('blast: sim holes', e); } }
     // (the interior parts round a hole are sampled once shown: their dots join the model's, and are looked at then)
     if (++genTick % 20 === 0) for (const [uid, L] of byUnit) { const u = sim.units.get(uid), ent = u && entOf(u), Md = ent && modelDots(ent);
       if (Md && Md.n) for (const B of L) if (B.mdGen !== undefined && B.mdGen !== Md.gen && B.rects.some(r => r.cpu)) { try { detachScan(B); } catch (e) { console.error('blast: detach', e); } } }
@@ -564,9 +619,40 @@ export async function createBlast(game) {
           sink.dot(wx, wy, wz, size, rr, gg, bb, 1);
           drawn++;
         }
+        // the floodwater in the spaces behind the hole (the sim's water level a space), seen through it
+        if (u && u.ship && !byZ) drawn += drawWater(sink, u, B, M, p0, size, tr);
       }
     }
     return drawn;
+  }
+
+  /* floodwater: a flat sheet of dim sea dots at the sim's water level in each flooded space the patch opens into
+     (sim/ship.js: water[c] m^3 over the space's floor area and permeability), within reach of the hole */
+  function drawWater(sink, u, B, M, p0, size, tr) {
+    const S = u.ship, Lt = S && S.L; if (!Lt || !S.water) return 0;
+    const Fr = B.spec.frame, bx = B.spec.box, Fo = Fr.O;
+    // the patch's reach (model frame, x z): the box's corners
+    let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
+    for (const a of [bx[0], bx[3]]) for (const c of [bx[2], bx[5]]) { const x = Fo[0] + Fr.X[0] * a + Fr.Z[0] * c, z = Fo[2] + Fr.X[2] * a + Fr.Z[2] * c; x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+    let n = 0;
+    for (let c = 0; c < S.water.length; c++) {
+      if (!(S.water[c] > .5)) continue;
+      const o = c * 6, b = Lt.box;
+      const ax0 = Math.max(x0, b[o]), ax1 = Math.min(x1, b[o + 3]), az0 = Math.max(z0, b[o + 2]), az1 = Math.min(z1, b[o + 5]);
+      if (ax1 - ax0 < .5 || az1 - az0 < .5) continue;
+      const lv = Math.min(b[o + 4] - .1, b[o + 1] + S.water[c] / Math.max(1e-6, (Lt.perm ? Lt.perm[c] : .85) * (Lt.floorA ? Lt.floorA[c] : (b[o + 3] - b[o]) * (b[o + 5] - b[o + 2]))));
+      if (!(lv > b[o + 1] + .05)) continue;
+      const st = .35;
+      for (let x = ax0 + st * .5; x < ax1; x += st) for (let z = az0 + st * .5; z < az1; z += st) {
+        const h = (Math.imul(Math.round(x * 20) * 73856093 ^ Math.round(z * 20) * 19349663, 0x9E3779B1) >>> 0) / 4294967296;
+        const y = lv + .04 * Math.sin(tr * 1.3 + x * 1.7 + z * 1.1 + h * 6.3);
+        const wx = p0[0] + M[0] * x + M[1] * y + M[2] * z, wy = p0[1] + M[3] * x + M[4] * y + M[5] * z, wz = p0[2] + M[6] * x + M[7] * y + M[8] * z;
+        const k = .75 + .5 * h;
+        sink.dot(wx, wy, wz, size, 62 * k, 84 * k, 98 * k, 1);
+        n++;
+      }
+    }
+    return n;
   }
 
   /* the pieces that came loose: dots flying on from where the solver left them (linear drag, gravity), landing on the

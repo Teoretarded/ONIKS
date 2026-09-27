@@ -61,10 +61,17 @@ function slice(ms, msShell) {
   // step ~10 us + 3 ns a node of GPU (the bench's timer queries: 97 us on its 31k-cell patch, GPU-bound)
   if (shell && shell.busy && shell.stats.backend === 'webgpu') {
     let nodes = 0; for (const R of shell.pats.values()) if (R.state === 'run') nodes += R.M.N;
+    // (the queue kept short while the game's frames run long (the main thread cut the share): a deep queue of solver
+    // work sits in front of the game's own frame on the GPU)
+    const dq = (msShell || ms) < 3 ? 2 : cfg.wgDepth || 8;
+    for (const R of shell.pats.values()) if (R.gpu && R.gpu.setDepth && R.dq !== dq) { R.gpu.setDepth(dq); R.dq = dq; }
+    // (usM: the wall time a step measured from submit to done, for the stats: it counts the wait behind the game's own
+    // frame on the GPU, so it is not the step's cost)
+    let usM = 0; for (const R of shell.pats.values()) if (R.state === 'run' && R.gpu && R.gpu.msStep) usM += R.gpu.msStep() * 1000;
     const st = Math.max(8, Math.min(cfg.wgMax, Math.round((msShell || ms) * 1000 / (cfg.wgUs0 + cfg.wgUsNode * nodes))));
     const t0 = performance.now();
     try { for (const m of shell.pump(st)) post(m); } catch (e) { post({ type: 'error', err: String(e && e.stack || e) }); }
-    perf.shSteps = shell.stats.steps; perf.shMs = performance.now() - t0; perf.shBudget = msShell || ms;
+    perf.shSteps = shell.stats.steps; perf.shMs = performance.now() - t0; perf.shBudget = msShell || ms; perf.usStep = Math.round(usM); perf.nodes = nodes; perf.st = st;
   }
   if (fence) {
     if (gl.clientWaitSync(fence, 0, 0) === gl.TIMEOUT_EXPIRED) { perf.skipped++; if (cfg.calibrate) kcal = Math.min(12, kcal * 1.05); return; }

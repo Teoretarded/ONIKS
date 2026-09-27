@@ -29,7 +29,7 @@ export function boxSpec(o = {}) {
   const C = o.C || (o.fuze === 'inside' ? [a[0], a[1], a[2] - 1.6] : [a[0], a[1], a[2] + (o.fuze === 'standoff' ? Math.max(o.standoff || 3, rc) : rc)]);
   // (the bench's shut openings on its spaces: the game's ventsOf; frame brackets come with a side patch, sceneOf)
   return { latMs: o.latMs || 1, vents: o.vents === false ? [] : ventsOf(comps, 1, YD), S: o.grid || .25, shellS: o.grid || .25, plates, box: [XA, YB, ZC, XZ, YD, 0], comps, depth: 10, kind: 'side', frame: { O: [0, 0, 0], X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1] },
-    charge: { C, fill, Mc: o.casing !== undefined ? o.casing : 130, mf: o.mf || .03, Wgas: o.Wgas || 0, vapour: o.vapour || 0 }, wl: -1e9, wlLocal: 0, watch: false, solver: 'shell', syncReads: !!o.sync };
+    charge: { C, fill, Mc: o.casing !== undefined ? o.casing : 130, mf: o.mf || .03, Wgas: o.Wgas || 0, vapour: o.vapour || 0 }, wl: -1e9, wlLocal: 0, watch: false, solver: 'shell', syncReads: !!o.sync, fastEnd: !!o.fastEnd, scatter: o.scatter || 0, seed: o.seed || 0 };
 }
 export let result = null, runner = null, t0 = 0, last = null;
 export function progress() { const R = runner && [...runner.pats.values()][0]; return R ? { t: R.M.sim.t, steps: R.steps, relax: R.M.sim.relax, T1: R.M.sim.T1, ms: Math.round(performance.now() - t0), state: R.state } : result; }

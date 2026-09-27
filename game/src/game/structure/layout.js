@@ -18,10 +18,16 @@ const RHO = 1025;
 export const hsh = (i, s) => { let h = (Math.imul(i | 0, 0x27d4eb2d) ^ Math.imul((s * 1000003) | 0, 0x165667b1)) >>> 0; h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d) >>> 0; h = Math.imul(h ^ (h >>> 12), 0x297a2d39) >>> 0; return ((h ^ (h >>> 15)) >>> 0) / 4294967296; };
 const fract = v => v - Math.floor(v);
 /* the tear across a cut (engine/models.js SLAB_GLSL jagK: keep the two identical): -1..1 */
+const jagH = (cx, cy, s) => { let h = (Math.imul(cx | 0, 73856093) ^ Math.imul(cy | 0, 19349663) ^ Math.imul(s | 0, 83492791)) >>> 0; h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0; return (h >>> 8) / 16777216; };
+function jagV(x, y, s) {
+  const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy, ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
+  const a = jagH(ix, iy, s) + (jagH(ix + 1, iy, s) - jagH(ix, iy, s)) * ux, b = jagH(ix, iy + 1, s) + (jagH(ix + 1, iy + 1, s) - jagH(ix, iy + 1, s)) * ux;
+  return a + (b - a) * uy;
+}
 export function jagK(x, y, s) {
-  const a = Math.abs(fract(x * 0.61 + y * 0.23 + s) - .5), b = Math.abs(fract(y * 0.97 - x * 0.31 + s * 1.37) - .5);
-  const c = Math.abs(fract(x * 2.3 + y * 1.9 + s * 2.71) - .5);
-  return (a + .7 * b + .35 * c) * 1.9512 - 1;
+  const si = Math.floor(s * 1000), rx = x * 3 + 4096, ry = y * 3 + 4096;
+  const v = .55 * jagV(rx * .9, ry * .9, si) + .3 * jagV(rx * 2.3, ry * 2.3, si + 7) + .15 * jagV(rx * 6.1, ry * 6.1, si + 13);
+  return Math.max(-1, Math.min(1, (v - .5) * 3.2));
 }
 
 const layouts = new Map();
