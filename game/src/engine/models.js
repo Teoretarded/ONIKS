@@ -811,7 +811,11 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
         // (a cell whose corners were thrown metres apart (the solver's node went, its neighbour held): drawn it is a
         // strip of plating stretched many times its length, a flat card standing up at a deck edge (QA D23). Steel
         // does not stretch past ~3x: it tore there. Gone past a ragged limit, its last stretch a hot torn edge)
-        { float sg2 = length(vec2(gu, gv)), lim = 2.2 + 0.8 * wreckHash(floor(l * 2.0) * 0.25 + 0.37);
+        // (the stretch counted in every direction, not only out of the plate: corners thrown apart along the plate draw
+        // the cell as a ray of dots along the deck edge, QA D47)
+        { vec3 du = mix(t10.xyz - t00.xyz, t11.xyz - t01.xyz, fy) / S, dv = mix(t01.xyz - t00.xyz, t11.xyz - t10.xyz, fx) / S;
+          vec3 eu = (ax == 0 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0)) + du, ev = (ax == 1 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0)) + dv;
+          float sg2 = sqrt(max(0.0, max(dot(eu, eu), dot(ev, ev)) - 1.0)), lim = 2.2 + 0.8 * wreckHash(floor(l * 2.0) * 0.25 + 0.37);
           if (sg2 > lim) return 1;
           if (sg2 > lim - 0.8) { float ek = (sg2 - lim + 0.8) / 0.8; edge = max(edge, 0.7 * ek); heatN = max(heatN, heat); hot = max(hot, heat * 0.5 * ek); burn = max(burn, 0.8 * ek); } }
         tilt -= Uw * gu + Vw * gv;
