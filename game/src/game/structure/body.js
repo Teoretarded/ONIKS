@@ -66,6 +66,10 @@ export function massOf(P) {
   const S = P.S, L = S.L, sec = L.sec;
   let m = 0, z = 0;
   for (let i = P.i0; i <= P.i1; i++) { m += sec[i].m; z += sec[i].m * sec[i].zg; }
+  // (a piece of sections with no displaced volume (a bow or stern overhang out of the water, layout.js s.m from V0 = 0)
+  // weighs its steel: a tonne a metre, its middle at theirs; 0 / 0 here made the piece's pose NaN and the camera's eye
+  // with it (QA D53))
+  if (!(m > 0)) { m = 0; z = 0; for (let i = P.i0; i <= P.i1; i++) { const mi = 1e3 * Math.max(.5, sec[i].len); m += mi; z += mi * sec[i].zc; } }
   z /= m;
   P.m = m; P.cm[0] = 0; P.cm[1] = L.yG; P.cm[2] = z;
   let Ix = 0, Iy = 0, Iz = 0;
@@ -76,7 +80,7 @@ export function massOf(P) {
     Iy += s.m / 12 * (lx * lx + lz * lz) + s.m * dz * dz;
     Iz += s.m / 12 * (lx * lx + ly * ly);
   }
-  P.I[0] = Ix; P.I[1] = Iy; P.I[2] = Iz;
+  P.I[0] = Math.max(Ix, m); P.I[1] = Math.max(Iy, m); P.I[2] = Math.max(Iz, m);
 }
 
 /* scratch */
@@ -188,6 +192,11 @@ export function stepShip(S, h, sea, t, bed) {
     if (bed) {
       const gy = bed(P.p[0], P.p[2]);
       if (low < gy) { P.p[1] += Math.min(1, gy - low); if (P.v[1] < 0) P.v[1] = 0; const k = Math.exp(-h * 1.5); P.v[0] *= k; P.v[2] *= k; P.w[0] *= k; P.w[1] *= k; P.w[2] *= k; P.aground = true; }
+    }
+    // (a step that went non-finite (a degenerate piece): back to the last good state, at rest, never a NaN pose)
+    if (!(Number.isFinite(P.p[0] + P.p[1] + P.p[2]) && Number.isFinite(P.q[0] + P.q[1] + P.q[2] + P.q[3]))) {
+      for (let k = 0; k < 3; k++) { P.p[k] = Number.isFinite(P.pp[k]) ? P.pp[k] : 0; P.v[k] = 0; P.w[k] = 0; }
+      for (let k = 0; k < 4; k++) P.q[k] = Number.isFinite(P.pq[k]) ? P.pq[k] : k === 0 ? 1 : 0;
     }
     // under for good: what buoyancy is left (every column under) can no longer carry her, and she is well down
     P.reserve = RHO * vmax / P.m - 1;

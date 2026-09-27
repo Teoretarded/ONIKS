@@ -714,6 +714,7 @@ export async function createStructure(game) {
       const P = pieceOf(S, secAt(S, z)); if (!P || P.sunk) return null;
       const a = S.h > 0 ? sat((game.t - S.t) / S.h) : 1, Tq = [0, 0, 0], Rq = [1, 0, 0, 0, 1, 0, 0, 0, 1];
       poseOf(P, a, Tq, Rq);
+      if (!Number.isFinite(Tq[0] + Tq[1] + Tq[2] + Rq[0] + Rq[4] + Rq[8])) return null;
       return { R: Rq, T: Tq };
     },
     hit(id, o) {
@@ -726,7 +727,8 @@ export async function createStructure(game) {
     init() {
       game.structure = sys;
       // a ship taken over answers for herself: her main piece
-      game.unitPose = (u, alpha) => { const S = ships.get(u.id); return S && !S.done && S.u === u ? S.pose : base(u, alpha); };
+      // (a taken-over pose with a NaN in it (never expected: body.js guards its steps) answers with the sim's own, QA D53)
+      game.unitPose = (u, alpha) => { const S = ships.get(u.id); return S && !S.done && S.u === u && Number.isFinite(S.pose.pos[0] + S.pose.pos[1] + S.pose.pos[2] + S.pose.hdg) ? S.pose : base(u, alpha); };
       const w = (sim.weather && sim.weather.wind) || (game.weather && game.weather.wind);
       if (w) { WIND[0] = w[0] || 0; WIND[1] = w.length > 2 ? w[2] : w[1] || 0; }
       bus.on('weather', ww => { if (ww && ww.wind) { WIND[0] = ww.wind[0] || 0; WIND[1] = ww.wind[1] || 0; } });

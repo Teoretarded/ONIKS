@@ -433,3 +433,25 @@ seeds; Oniks stopped 43% of the time, Tomahawk 40%, SLAM-ER 47%; spawns moved on
 The user play-tested ("absolutely amazing") and listed bugs: they are in `game/KNOWN_BUGS.md` with likely causes,
 together with the open issues (four cloud branches to merge: `cloud/simperf`, `cloud/units3`, `cloud/audit`,
 `cloud/validate`). Everything is committed on `game-v1` and pushed to GitHub. Next session starts from KNOWN_BUGS.md.
+
+## 08:50 · Ship hits: the blast system, finished for tonight
+Missile and bomb hits on ships are now solved as real plating: a GPU shell model (ported from the blast bench, with
+its tearing petals) tears, dents and curls the steel round each hit in a few seconds, and everything you see follows it.
+- **Holes look like the sim's holes.** The flooding sim's holes are always opened in the picture (never smaller), a
+  hole's rim glows then cools to a light steel edge, soot greys the plating round it, and at the waterline the sea
+  now pours in (white churn, a foaming sheet over the lip) until the space is full.
+- **What tears off falls.** Structure standing on torn or steeply bent plating (deckhouse walls, masts, fittings)
+  comes away as crumpled pieces that land on the deck, tip off edges or sink; nothing is left hanging in the air
+  (a checker flags floating, hovering or wedged pieces; the last flake of that kind is fixed).
+- **Inside**: decks, frames and bulkheads show through a hole, charred and lit by the fire; floodwater at the sim's
+  level. Cook-offs, superstructure and deckhouse hits, flight decks and islands all go through the same solver.
+- **Sim fixes found on the way**: a hit's hole went into whichever outside wall of its space came first (a carrier
+  hit amidships holed and lit her bow 72 m away); holes now go in the nearest wall, and gas only splits plating near
+  the charge. Balance unchanged (coast 54% over 256 AI games).
+- **Speed**: a hit settles in ~1-4 s at 60 fps (the first hit on a ship class ~2 s longer while its model is
+  prepared); a holed ship no longer draws its whole hull twice (cruiser deck hit 32 -> 16 ms p95). Safety nets
+  against a stuck or crashed GPU solve, and a NaN camera crash during a break-up guarded at its sources.
+- **QA**: a 31-case battery with stills at 12 / 25 / 60 / 300 m, run after every change (the last three full runs clean);
+  the reviewers' list and every run are in `game/src/blast/QA.md`; how it all works in `game/src/blast/README.md`.
+- Still open (QA.md): the solved hole is often larger than the sim's (D49), a few close-up rendering items owned by
+  the close-up agent.

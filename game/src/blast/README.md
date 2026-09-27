@@ -7,7 +7,7 @@ like and feeds game/structure's flooding and girder.
 
 | Solver | Bench commit | Model | Cost (RX 9070 XT) | In game |
 |---|---|---|---|---|
-| `shell` (`shell/`) | 03813d8 (petals option not ported) | shell FE (CST membranes, J2 + strain-dependent Cowper-Symonds, hinges; stiffeners as shear-limited beams on their own line with web-end ties into the plates they meet; GL mesh-scaled erosion, absorbing edges, water backing and a waterline burst's water shock, products inflow through openings, hole/image sources that cannot focus, contact, fragments), 0.25 m, dt ~12 us (9 us on a carrier's plating), no mass scaling | WebGPU (`gpu_wgpu.js`, in the worker: 200 steps a command buffer, mapAsync read backs) or WebGL2 (`gpu.js`, ~30 calls a step). Bench box: P-800 contact 13.6k steps 1.1 s, inside 32.6k steps 1.9 s of full GPU | **default** where the browser has WebGPU: a 6 ms slice a frame (`cfg.gpuMsShell`, 8 in slow motion), ~80-150 steps a frame. In play (60 Hz frames, the GPU shared with another game tab): 5-inch 0.9 s, SM-6 1.4-2.4 s, Kh-35 / Oniks side inside 3.8-4.2 s, waterline 4.9 s, LCS 3.3 s, a carrier 4.6 s, a deck hit 3.3-6.8 s (10.8 under heavy load), a VLS cook-off 6.4 s; the synced frame p50 +5-6 ms, p95 16-21 ms while a hit solves |
+| `shell` (`shell/`) | 03813d8, petals v2 from 3f115d5 | shell FE (CST membranes, J2 + strain-dependent Cowper-Symonds, hinges; stiffeners as shear-limited beams on their own line with web-end ties into the plates they meet; GL mesh-scaled erosion, absorbing edges, water backing and a waterline burst's water shock, products inflow through openings, hole/image sources that cannot focus, contact, fragments), 0.25 m, dt ~12 us (9 us on a carrier's plating), no mass scaling | WebGPU (`gpu_wgpu.js`, in the worker: 200 steps a command buffer, mapAsync read backs) or WebGL2 (`gpu.js`, ~30 calls a step). Bench box: P-800 contact 13.6k steps 1.1 s, inside 32.6k steps 1.9 s of full GPU | **default** where the browser has WebGPU: a 6 ms slice a frame (`cfg.gpuMsShell`, 8 in slow motion), ~80-150 steps a frame. In play (60 Hz frames, the GPU shared with another game tab): 5-inch 0.9 s, SM-6 1.4-2.4 s, Kh-35 / Oniks side inside 3.8-4.2 s, waterline 4.9 s, LCS 3.3 s, a carrier 4.6 s, a deck hit 3.3-6.8 s (10.8 under heavy load), a VLS cook-off 6.4 s; the synced frame p50 +5-6 ms, p95 16-21 ms while a hit solves |
 | `lattice` (`patch.js`, `gpu.js`, `runner.js`) | 1596bde | elastic-plastic lattice, velocity tear-out, running cracks, x64 mass scaling once only gas acts | ~52 us a step for 36k nodes; Oniks contact 3.6k steps, inside 8.2k | without WebGPU, the main-thread fallback, `?blast=lattice`: an outside hit settles in 0.2-1 s, an inside one in 2-4 s at 3 ms of GPU a frame |
 
 The shell port matches the bench (e00312c) on its own test box at 0.25 m (`shell/check.js` beside the bench's
@@ -48,42 +48,81 @@ with sub-grid buckle facets; the structure behind a hole as jittered charred dot
 | `shell/model.js`, `shell/gpu.js`, `shell/gpu_wgpu.js`, `shell/runner.js` | the shell solver: the bench's build / loads / sources / gas / fragments from a spec (`sceneOf`: plates -> pieces, open edges on the patch's fixed faces, the up axis), its GPU passes on WebGL2 and WebGPU (copied; gravity along the up axis), a runner with the lattice runner's interface (grid 0.25 m) |
 | `lab.js`, `check.js`, `shell/check.js` | dev: staged hits with stills; each bench's test section through this module's runners |
 
-## In the game
+## In the game (how the whole system works now)
 
-- **Which hits**: a ship (not a submerged boat), a blast charge (not gun rounds: those are penetration, scars.js
-  pockmarks; not torpedoes under the keel). game/scars.js hands them over (`game.blast.accepts` / `hit` / `cook`) and
-  keeps the mark's bookkeeping, fire and hooks; its analytic carve and interior are left out while the patch stands.
-- **The patch**: the plating round the hit as a flat grid tangent to the model surface (side: vertical, normal
-  horizontal and outward; deck: horizontal), half-width 2.5 W^(1/3) m (3-10 m, 14 m over ~300 kg), up to the deck over
-  the hit at that station (a skin plate too) and down as far, 6 m inboard at most; decks at the class's levels, the
-  nearest transverse bulkhead, gas spaces between them up to the far side (nearest the charge first, 7 at most); edges
-  fixed. Plating (mm) by class and zone (`HULL`: DDG/CG side 10 HSLA, belt 12, deck 9, superstructure 6 aluminium; Nimitz
-  side 22, flight deck 45; LHD side 12, flight deck 20; LCS aluminium 7; craft 5), frames 2.4 m (carrier 1.8, LCS 1.2),
-  longitudinals 0.75 m.
-- **The charge**: TNT equivalent of the round (`phys.js TNT`); a delayed fuze (Oniks, Kalibr, Kh-35, Tomahawk, SLAM-ER,
-  a bomb) 1.6 m in along its path, a contact or stand-off burst outside (blast-frag SAMs at 80 %: scars.js adds their
-  fragment pockmarks). A cook-off: the module's `contents` (data/modules.js: explosive that detonates, the rest and the
-  propellant burning as gas ~0.25 TNT-eq, fuel vapour capped ~0.8 MPa), in the upper part of the module's space.
-- **Time**: the worker never runs past the physical time the game shows since the hit: at x0.1 / x0.02 (the impact
-  tester) the plate tears in step with the fireball; at x1 it runs as fast as its GPU share allows (3 ms a frame, 5 in
-  slow motion, less when the game's own frame is heavy): an outside hit settles in ~0.2-1 s, an inside one in ~2-4 s.
-- **Drawn**: the model's own dots follow the skin plates (engine/models.js `blastAt`: the atlas texture, 6 patches an
-  instance); the inner structure near a hole (decks, the bulkhead, the frames' webs) as charred dots lit by the fire;
-  fires re-seated on the torn rim and the deck inside when it settles; ejecta when the plating tears. The final state
-  stays for the match, in the model frame: it rides game/structure's pieces (`poseAt`) when the ship breaks.
-- **The sim's holes** (sim/ship.js `u.ship.holes`, what floods her) are authoritative: where the solve tore less than
-  the sim's hole, the patch's skin is opened to at least the sim's outline when it settles (ragged: 12 lobes and a
-  per-texel bite; `simHoles`, looked at again every second as the sim's holes grow). The floodwater in the spaces
-  behind a hole is drawn at the sim's water level (`drawWater`). A sim hole no patch covers gets the scars system's
-  analytic hole (`game.scars.holeAt`); an inside charge is moved half way toward the sim's hole for its hit. A ship
-  with no interior (data/models_interior.js) has the hole's depth plug at the pocket's far wall, widened, and her own
-  walls across the pocket occlude from both sides in the depth pass, so no sea or sky shows through the ship. The
-  hole's outline is read a little off each dot (a hash of its 0.125 m cell): ragged inside a texel.
-- **Frame time**: the solver's share is cut (to 0.3 of it) while the game's frames run past ~17 ms, and the WebGPU
-  queue is kept 2 deep when the share is small (a deep queue of solver work sits in front of the game's frame).
-- **Fed back**: `game.structure.refine(id, t, { A, below, frames, work, ... })`: the solved torn area (its share
-  under the water floods) and the frames torn / plastic work (the girder).
+### The path of a hit
+1. **Hand-over.** game/scars.js keeps a mark's bookkeeping and asks `game.blast.accepts(u, kind)`: a ship (not a boat
+   under water), a blast charge (gun rounds stay scars.js pockmarks, torpedoes under the keel stay sim/ship.js
+   `undex`). `hit` / `cook` build a spec (`spec.js`), queue it for the worker and draw nothing new until the first
+   snapshot; the analytic carve stands meanwhile.
+2. **The spec** (`spec.js hitSpec` / `cookSpec`): a patch frame on the model surface (side, deck, or a deckhouse wall
+   found by `wallNear`: x-binned search for the outermost wall within reach, taken as a superstructure plate), the
+   class's plating and scantlings by zone (hull, belt, deck, superstructure aluminium or HTS on the carrier), decks,
+   the nearest bulkhead, gas spaces, openings (`ventsOf`), the charge by fuze (delayed 1.6 m in, contact, stand-off;
+   a cook-off from the module's `contents`), the seeded failure-strain scatter. Up to 3 skin plates a patch.
+3. **The solve** (`worker.js` -> `shell/runner.js`, WebGPU `shell/gpu_wgpu.js`, else WebGL2 `shell/gpu.js`; the
+   lattice `runner.js` only without either): the shell FE on a 0.25 m graded grid, never past the time the game shows
+   since the hit, in a GPU slice a frame (`cfg.gpuMsShell` 8 ms, 10 in slow motion; divided 1.6x for each extra patch
+   running). Bench ports: 1.4x step, the burn ends below 20 kPa, loose cells gas-off, pinned pieces detach; petals v2:
+   two twin nodes a node, the CPU applies the GPU's crack splits (CRK / CRK2), the flaps' effective stiffness during
+   the solve (`effK`) and their vents (`flapVents`). Read-backs are tagged with their step and used `cfg.latMs` later.
+4. **Snapshots and the end**: skin plates as displacement + flags grids (texel w: 1 torn, 2 gone, 4 torn edge, 8
+   unsupported, fraction: soot) uploaded to one atlas (`upTexels` a frame), the interior near a hole as dots, the
+   numbers (torn m2, flap m2, frames torn, plastic work). At the end: the solver's loose pieces become bodies (below),
+   the result is fed back (`game.structure.refine`) and the sim's holes are painted (`simHoles`).
 
-Console: `ONIKS.game.blast` (`stats`, `patches`, `last(id)`, `await solverStats()`, `cfg`), stills:
-`(await import('/game/src/blast/lab.js')).stage(ONIKS, { type, loc, kind, from, rate, view, shots })`, the port against
-the bench's section: `(await import('/game/src/blast/check.js')).run({ kg, fuze })`.
+### What is drawn
+- **The model's own dots** follow the skin plates in the vertex shader (engine/models.js `blastAt`, `BTMAX` patches an
+  instance): the smooth ragged torn field (three-scale domain-warped noise against a threshold, `mk` / `thr`), torn
+  cells' plating curled off its corners (petals), dents lit along their bent face, a stretch limit (a cell pulled past
+  ~2.2-3x tears, its last stretch a hot edge), columns of structure dropped where their plating went (torn, gone,
+  unsupported, thrown > 0.8 m, a deck sloped past 0.47; beyond a deck plate's edge within ~3 m), model lines on
+  plating bent past ~30 deg dropped, interior parts hidden behind held plating or under the sea outside the plates.
+  The torn rim: hot (warm white to amber, flickering) then a light bare-steel line; soot greys the plating round it.
+  Back faces are culled except within 40 m of a patch (seen through a hole, the far side shows).
+- **The inner structure** near a hole (`drawInner`): decks, bulkheads, frames' webs as charred dots, the fire inside
+  lighting them; the floodwater at the sim's water level in each flooded space behind the hole (`drawWater`); at a
+  waterline hole while the space fills, the sea pouring in (`drawInrush`: from the sim's head, sea outside over
+  `S.H` inside; white churn at the opening, a foaming sheet over the lip, spray where it lands).
+- **Loose pieces** (`support.js createBodies`, `drawBodies`): the solver's fragments and every column of the model's
+  dots the shader drops (`detachScan` / `detachWork`, a time budget a frame; `settleSupport` after the solve, orphans
+  included) fly as clumps (crumpled, ragged foot, facets, a hard landing squashes them) or dot sprays; they land on
+  the deck (`floorAt`: the model's columns, the solved plates), sink in the sea, rest only where their lowest points
+  are within 0.25 m of what is under them (`tryRest`: held up on an edge they slide and tip off; still caught after
+  1.5 s a small one breaks up, a large one settles).
+- **The CPU mirror**: `support.js classify` replays the shader's rules on the CPU copy of the texels (the same
+  `wreckHash`, the same thresholds), so what the shader drops is exactly what the bodies carry. Change one, change
+  both.
+- The final state stays for the match, in the model frame; it rides game/structure's pieces (`poseAt`) when she breaks.
+
+### The sim's holes (authoritative)
+sim/ship.js `u.ship.holes` floods her. A hole goes in the outside boundary of its space nearest the point (`outK`: the
+entry punch, the struck skin, a tear running into the next space); the gas splits plating only within
+`SHIPK.gasReach` (4 m/kg^1/3) of the charge, tapering; a space's shell hole is the nearest failed boundary.
+`simHoles` opens the patch's shell plate (plate 0 only) to at least the sim's outline (12 ragged lobes and a per-texel
+bite), rechecked every second as holes grow; a hole no patch covers becomes a scars.js analytic hole
+(`game.scars.holeAt`) with its boundary's own normal (a deck faces up). The solved tear may be larger than the sim's
+hole (D49): the sim hole is the minimum shown, not a cap.
+
+### Fallbacks and guards
+- No WebGPU: WebGL2 shell in the worker; no worker: the main-thread runner; no GPU context: nothing, the analytic
+  scars.js marks stand. `?blast=lattice` / `?blast=off`.
+- Failed maps resolve empty; the runner's stall watchdog (6 s, 8 s for the last read); device-lost recovery in the
+  worker; a main-side patch watchdog (12 s, 90 s in slow motion) fails a patch that stops reporting.
+- Frame guard (`frameScale`): the solver's share drops toward 0.3 while game frames run past ~24 ms, and recovers
+  below ~20 ms; the WebGPU queue is kept 2 deep at a small share. Several patches split the budget.
+- First hit on a class is slower (its CPU dot cloud and interior are built on first use: cg_deck 4.8 s cold vs
+  2.2 s warm).
+
+### QA tools
+- `dev/blast_qa.js`: the battery (31 cases: DDG side / deck / sheer / waterline / superstructure / VLS cook-off /
+  break-up / doors / flooding, CG, CVN, LCS, LHD). In the game page console:
+  `(await import('/game/src/dev/blast_qa.js')).start(ONIKS, { only, dir, keep })`, results in `window.QA.rows`
+  (resolve s, solve p50 / p95 ms, torn m2, flap m2, the sim's systems, qa.js flags), stills at 1 s and settled from
+  60 / 25 / 12 / 300 m to `game/shots/<dir>/`. The tab must stay visible (a hidden page stalls; keep each poll < 45 s).
+- `qa.js check()`: floating, hovering, resting-air, hanging, big-piece (hard), orphan (info).
+- `QA.md`: the reviewers' defect list (Dn), the open-items table with owners, every run's numbers.
+- `check.js` / `shell/check.js`: the bench's test sections through these runners (parity). `lab.js`: staged hits.
+- `game/balance.html?n=32&seed=17`: AI-vs-AI batches (a sim change to holes or gas moves the win rates).
+
+Console: `ONIKS.game.blast` (`stats`, `patches`, `byUnit`, `cfg`, `await solverStats()`, `floorAt`, `taken`).
