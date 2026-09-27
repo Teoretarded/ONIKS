@@ -324,10 +324,14 @@ void main() {
   vec3 U = uR * (aCU.xyz * (1.0 / 127.0)), V = uR * (aCV.xyz * (1.0 / 127.0));
   vec2 j = aCJ.xy * (1.0 / ${JIT_K.toFixed(1)});
   vec3 p = uR * aPos + uT - U * (su * j.x) - V * (sv * j.y);
-  // a section of a broken hull (d.slab): only its own slab splats
+  // a section of a broken hull (d.slab): only its own slab splats; none in the torn band at its ends (the plating
+  // there is peeled, crumpled and torn away in patches: drawn as dots only, it must not hide the frames, decks and
+  // interior behind the tear, QA D10)
   if (uKb.y > 0.5) {
     vec3 pm = (p - uKT) * uKR;
-    if (pm.z < uK0.x + uK0.y * jagK(pm.xy / uKb.z, uK0.z) || pm.z >= uK1.x + uK1.y * jagK(pm.xy / uKb.z, uK1.z)) { ${CULL} return; }
+    float c0 = uK0.x + uK0.y * jagK(pm.xy / uKb.z, uK0.z), c1 = uK1.x + uK1.y * jagK(pm.xy / uKb.z, uK1.z);
+    if (pm.z < c0 || pm.z >= c1) { ${CULL} return; }
+    if ((pm.z - c0) < uKb.x * 0.9 || (c1 - pm.z) < uKb.x * 0.9) { ${CULL} return; }
   }
   // scars: the splats follow the bent plating; a hole's own splats are pushed back to the far end of the pocket
   // behind it (a plug: what is inside shows, the far side of the hull and the sea do not)

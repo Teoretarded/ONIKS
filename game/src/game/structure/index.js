@@ -491,7 +491,8 @@ export async function createStructure(game) {
           // (each side of the break its own face: the frames and deck edges set back into that piece's steel)
           const lo = c === P.cut1, fk = lo ? 'faceLo' : 'faceHi';
           if (!c[fk]) { c.sp = Math.max(.14, S.H.L / 700);   /* (dense enough to read as lines close up; drawFace thins it with distance) */ c[fk] = faceOf(S.H, c.z, c.a, c.s, S.wave, c.sp, lo ? -1 : 1); }
-          dots += bfx.drawFace(c[fk], Rm, Tm, heatOf(c, t), Math.max(1, dist), S.seed, c.sp);
+          let fire = 0; for (const B of S.breaks) if (B.cut === c && B.F) fire = Math.min(1, B.F.k * 1.6);
+          dots += bfx.drawFace(c[fk], Rm, Tm, heatOf(c, t), Math.max(1, dist), S.seed, c.sp, fire);
         }
       }
       // at each break: foam where the open ends meet the water, steam, the fire, the slick

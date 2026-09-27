@@ -125,20 +125,28 @@ export function createBreakFx(game) {
   }
 
   /* the torn face's inside: points F (model frame [x y z kind] x n) through a piece's model transform (Rm, Tm), heat
-     0..1; only the dots above the water (the rest is under the sea's occluder anyway) */
-  function drawFace(F, Rm, Tm, heat, d, seed, sp) {
+     0..1, fire 0..1 (the break's fire burning on it: the frames and decks lit warm, flickering); only the dots above
+     the water (the rest is under the sea's occluder anyway) */
+  function drawFace(F, Rm, Tm, heat, d, seed, sp, fire = 0) {
     const fx = R.fx, n = F.length / 4;
     if (!n || d > 8000) return 0;
     // no closer than ~2.5 px on screen
     const pxm = (cam.fl || 1000) / Math.max(1, d), step = Math.max(1, Math.min(12, Math.ceil(2.5 / Math.max(.01, (sp || .5) * pxm))));
     let m = 0;
+    const sz = pxm > 12 ? 2.6 : pxm > 3 ? 2.2 : 1.6, tq = Math.floor(performance.now() / 90);
     for (let i = 0; i < n; i += step) {
       const x = F[i * 4], y = F[i * 4 + 1], z = F[i * 4 + 2], kind = F[i * 4 + 3];
       const wx = Tm[0] + Rm[0] * x + Rm[1] * y + Rm[2] * z, wy = Tm[1] + Rm[3] * x + Rm[4] * y + Rm[5] * z, wz = Tm[2] + Rm[6] * x + Rm[7] * y + Rm[8] * z;
       const h = heat * (.6 + .4 * hsh(i, seed));
-      // (decks and frames read clearly: the deck edges brightest, the frames a step under the shell; QA D10)
-      const g = kind === 1 ? 205 : kind === 2 ? 168 : 186, b = (g + (255 - g) * h) * (.8 + .2 * hsh(i, seed + 1));
-      fx.dotXYZ(wx, wy, wz, pxm > 3 ? 2 : 1.5, b, g + (190 - g) * h, g * (1 - h) + 110 * h, 1, 'max');
+      // (decks and frames read clearly from the usual angles: deck edges brightest, the frames close under them, the
+      // shell a step down; lit warm by the break's fire, flickering; QA D10)
+      const g = kind === 1 ? 232 : kind === 2 ? 212 : 190, k = .82 + .18 * hsh(i, seed + 1);
+      let r = (g + (255 - g) * h) * k, gg = (g + (190 - g) * h) * k, bb = (g * (1 - h) + 110 * h) * k;
+      if (fire > .02) {
+        const fl = fire * (.45 + .35 * hsh(i >> 3, tq + seed)) * (kind === 0 ? .6 : 1);
+        r = r + (255 - r) * fl; gg = gg + (176 - gg) * fl; bb = bb + (104 - bb) * fl;
+      }
+      fx.dotXYZ(wx, wy, wz, sz, r, gg, bb, 1, 'max');
       m++;
     }
     return m;

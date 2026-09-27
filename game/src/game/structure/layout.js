@@ -208,17 +208,28 @@ export function faceOf(H, z, A, s, wv, sp, sg) {
   if (sg) {
     // the decks' torn edges: a strip of deck plating back from the tear (read as a plate, not a line)
     for (const y of levels) { const w = y >= 0 ? b : H.breadth(z, y); for (let q = 1; q <= 2; q++) for (let x = -w; x <= w; x += sp) put(x, y, 1, j++, q * sp * .6); }
-    // the frames behind the torn edge (QA D10): rings of web frame inside the shell, a beam under each deck, every
-    // ~1.2 m back into the piece, a few bent or gone
+    // the frames behind the torn edge (QA D10): planar rings of web frame inside the shell and a beam under each deck,
+    // every ~1.2 m back from the mean cut; a ring stands only where the tear left steel on this side of it (the tear
+    // runs past some rings and breaks them), so they read as a torn cage of frames, not a cloud on the tear
     const fs = Math.max(.8, H.L / 130), th = Math.min(.5, b * .05);
-    for (let r = 1; r <= 3; r++) {
-      const dz = r * fs;
+    const ring = (x, y, zf, kind, jj) => {
+      if (hsh(jj, s * 97 + 5) < .1) return;
+      const jx = (hsh(jj, s * 13 + 7) - .5) * sp * .3, jy = (hsh(jj, s * 13 + 8) - .5) * sp * .3;
+      const zt = z + A * jagK((x + jx) / wv, (y + jy) / wv, s);
+      if (sg * (zf - zt) < .25) return;                                                   // (torn away past here)
+      out.push(x + jx, y + jy, zf + (hsh(jj, s * 13 + 9) - .5) * .08, kind);
+    };
+    for (let r = 0; r < 6; r++) {
+      const zf = z + sg * (r * fs - A * .55);
       for (const side of [-1, 1]) {
-        for (let y = d - .2; y > 0; y -= sp * .8) put(side * (b - th), y, 2, j++, dz);
-        for (let y = 0; y > -k + .2; y -= sp * .8) put(side * Math.max(0, H.breadth(z, y) - th), y, 2, j++, dz);
+        for (let y = d - .2; y > 0; y -= sp * .7) ring(side * (b - th), y, zf, 2, j++);
+        for (let y = 0; y > -k + .2; y -= sp * .7) ring(side * Math.max(0, H.breadth(z, y) - th), y, zf, 2, j++);
       }
-      for (const y of levels) { const w = (y >= 0 ? b : H.breadth(z, y)) - th, yb = y - .35; for (let x = -w; x <= w; x += sp * .8) put(x, yb, 2, j++, dz); }
+      for (const y of levels) { const w = (y >= 0 ? b : H.breadth(z, y)) - th; for (let x = -w; x <= w; x += sp * .7) { ring(x, y - .35, zf, 2, j++); ring(x, y, zf, 1, j++); } }
     }
+    // the side stringers and deck girders tying the rings: runs back from the tear (the frames read as a cage)
+    for (const side of [-1, 1]) for (const yy of [d * .72, d * .36, 0]) for (let q = 0; q <= 6 * fs; q += sp) put(side * (b - th), yy, 2, j++, q);
+    for (const xx of [-b * .5, 0, b * .5]) for (let q = 0; q <= 6 * fs; q += sp) put(xx, d - .35, 2, j++, q);
   }
   return new Float32Array(out);
 }
