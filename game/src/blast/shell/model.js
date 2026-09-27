@@ -929,8 +929,12 @@ export function checkEnd(M) {
   let v2 = 0, ke = 0; for (let i = 0; i < M.N; i++) { if (M.FREE[i] || !ATT[i]) continue; const q = M.V[3 * i] ** 2 + M.V[3 * i + 1] ** 2 + M.V[3 * i + 2] ** 2; ke += .5 * M.M[i] * q; if (q > v2) v2 = q; }
   let gas = 0; for (let k = 0; k < M.GV.length; k++) if (M.GV[k] < Infinity) gas = Math.max(gas, Math.abs(M.GP[k]));
   const quiet = s.srcs.every(q => q.F > .98) && s.t - s.lastSrc > .005;
-  s.kepeak = Math.max(s.kepeak || 0, ke);
+  s.kepeak = Math.max(s.kepeak || 0, ke); s.keLast = ke; s.gasLast = gas; s.quietLast = quiet;
   if (!s.relax && quiet && gas < 2e4 && s.t > s.tMin && (ke < .05 * s.kepeak || s.t > s.tMin + .1)) { s.relax = true; s.tRelax = s.t; }
+  // (the game's shorter horizon, spec.fastEnd: once the gas is out and the burning nearly done (and not before 0.12 s),
+  // relax: what still tears after that is plating going on eroding at the fringes of what already went; the bench waits
+  // for its kinetic-energy criterion, which a patch with loose plating rarely meets before 0.4 s)
+  if (!s.relax && M.fastEnd && gas < 2e4 && s.t > Math.max(s.tMin + .05, .12) && s.srcs.every(q => q.F > .85)) { s.relax = true; s.tRelax = s.t; }
   if (s.relax && (v2 < .25 || s.t - s.tRelax > .025)) s.T1 = s.t;
   s.vmax = Math.sqrt(v2);
 }

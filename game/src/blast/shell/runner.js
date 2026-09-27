@@ -23,6 +23,7 @@ export function createShellRunner(gl, o = {}) {
   function submit(id, spec) {
     const t0 = now();
     const S = spec.shellS || .25, scene = sceneOf(spec, S), M = buildShell(scene, S);
+    M.fastEnd = !!spec.fastEnd;
     const ch = spec.charge;
     loadShell(M, { C: ch.C, fill: ch.fill !== undefined ? ch.fill : ch.W, Mc: ch.Mc || 0, mf: ch.mf || .03, Wgas: ch.Wgas || 0, vapour: ch.vapour || 0, frags: ch.frags !== false });
     const R = { id, M, spec, gpu: null, state: 'queued', target: 0, watch: spec.watch !== false, lastSnapT: -1, lastSnapMs: 0, tReal0: now(), buildMs: now() - t0, runMs: 0, steps: 0 };

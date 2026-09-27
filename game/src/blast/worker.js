@@ -13,7 +13,7 @@
 import { createRunner } from './runner.js';
 
 let runner = null, gl = null, fence = null, shell = null, shellP = null;
-const owner = new Map();                // patch id -> the runner solving it
+const owner = new Map(), pendingShell = new Set();   // (a shell patch dropped before its runner came up is never started)                // patch id -> the runner solving it
 /* the shell solver (bench e00312c), loaded when a patch asks for it: on WebGPU where the worker has it (its own queue,
    many steps a command buffer, read backs that never stall), else on this WebGL2 context */
 async function shellRunner() {
@@ -107,14 +107,14 @@ self.onmessage = ev => {
     switch (m.type) {
       case 'tick': slice(m.ms || 3, m.msShell); break;
       case 'hit':
-        if (m.spec.solver === 'shell') { shellRunner().then(R => { try { const info = R.submit(m.id, m.spec); owner.set(m.id, R); post({ type: 'built', id: m.id, info }); } catch (e) { post({ type: 'fail', id: m.id, err: String(e && e.stack || e) }); } }); break; }
+        if (m.spec.solver === 'shell') { pendingShell.add(m.id); shellRunner().then(R => { if (!pendingShell.delete(m.id)) return; try { const info = R.submit(m.id, m.spec); owner.set(m.id, R); post({ type: 'built', id: m.id, info }); } catch (e) { post({ type: 'fail', id: m.id, err: String(e && e.stack || e) }); } }); break; }
         { const info = runner.submit(m.id, m.spec); owner.set(m.id, runner); post({ type: 'built', id: m.id, info }); break; }
       case 'targets': for (const k in m.t) { const v = m.t[k], R = owner.get(+k) || runner; if (Array.isArray(v)) R.target(+k, v[0], v[1]); else R.target(+k, v); } break;
-      case 'drop': { const R = owner.get(m.id) || runner; R.drop(m.id); owner.delete(m.id); break; }
+      case 'drop': { if (pendingShell.delete(m.id)) break; const R = owner.get(m.id) || runner; R.drop(m.id); owner.delete(m.id); break; }
       case 'cfg': Object.assign(cfg, m.cfg || {}); break;
       case 'stats': post({ type: 'stats', cfg, perf, stats: runner.stats, shell: shell && shell.stats, backend: shell && shell.stats.backend,
         pats: [...runner.pats.values()].map(R => ({ id: R.id, state: R.state, t: R.P.sim.t, T1: R.P.sim.T1, N: R.P.N, steps: R.steps, runMs: R.runMs }))
-          .concat(shell ? [...shell.pats.values()].map(R => ({ id: R.id, solver: 'shell', state: R.state, t: R.M.sim.t, T1: R.M.sim.T1, N: R.M.N, steps: R.steps, runMs: R.runMs, watch: R.watch, target: R.target, snapT: R.lastSnapT })) : []) }); break;
+          .concat(shell ? [...shell.pats.values()].map(R => ({ id: R.id, solver: 'shell', state: R.state, t: R.M.sim.t, T1: R.M.sim.T1, N: R.M.N, steps: R.steps, runMs: R.runMs, watch: R.watch, target: R.target, snapT: R.lastSnapT, ke: R.M.sim.keLast, kp: R.M.sim.kepeak, gas: R.M.sim.gasLast, quiet: R.M.sim.quietLast, relax: R.M.sim.relax, F: R.M.sim.srcs.map(q => q.F) })) : []) }); break;
     }
   } catch (e) { post({ type: 'fail', id: m.id, err: String(e && e.stack || e) }); }
 };

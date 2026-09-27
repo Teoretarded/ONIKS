@@ -229,7 +229,8 @@ export function createBodies() {
       // at rest only if its middle is over a surface near its foot (else it tips off the edge it caught)
       const fc = floorAt(b.uid, b.p[0], b.p[1], b.p[2]), foot = b.p[1] - pen;
       const over = !fc.wall && fc.y > -1e8 && fc.y > foot - 1.2;
-      if (!over) { const dx = b.p[0] - cx, dz = b.p[2] - cz, l = Math.hypot(dx, dz) || 1; b.v[0] += dx / l * 3 * h * 10; b.v[2] += dz / l * 3 * h * 10; }
+      if (!over && (b.stuck = (b.stuck || 0) + h) < .8) { const dx = b.p[0] - cx, dz = b.p[2] - cz, l = Math.hypot(dx, dz) || 1; b.v[0] += dx / l * 3 * h * 10; b.v[2] += dz / l * 3 * h * 10; }
+      else if (!over) { b.rest = true; b.v = [0, 0, 0]; b.w = [0, 0, 0]; }            // (wedged: it rests on what it caught)
       else if (Math.hypot(b.v[0], b.v[1], b.v[2]) < .35 && Math.hypot(...b.w) < .25) { b.rest = true; b.v = [0, 0, 0]; b.w = [0, 0, 0]; }
     }
   }
