@@ -198,7 +198,7 @@ export async function createBlast(game) {
       }
     }
     if (m.inner) { B.inner = m.inner; B.nIn = m.nIn; }
-    B.tSolve = m.t; B.torn = m.tornSkin; B.below = m.tornBelow; B.setMax = m.setMax; B.byPlate = m.byPlate; B.runMs = m.runMs; B.wallMs = m.wallMs; B.steps = m.steps;
+    B.tSolve = m.t; B.torn = m.tornSkin; B.openM2 = m.openM2 || 0; B.below = m.tornBelow; B.setMax = m.setMax; B.byPlate = m.byPlate; B.runMs = m.runMs; B.wallMs = m.wallMs; B.steps = m.steps;
     if (m.tornSkin > 0 && B.tearT < 0) B.tearT = sim.t;
     { const td = performance.now(); try { detachScan(B); } catch (e) { console.error('blast: detach', e); } const dd = performance.now() - td; stats.detachMs = Math.max(stats.detachMs || 0, dd); }
     if (m.final) { B.state = 'done'; B.final = m; B.res = m.results; B.doneT = sim.t; try { simHoles(B); } catch (e) { console.error('blast: sim holes', e); } if (m.debris && m.debris.length) bodies.dotsOf(B.uid, B, m.debris, 1); settle(B); setTimeout(() => { try { settleSupport(B); } catch (e) { console.error('blast: support', e); } }, 0); }
@@ -350,7 +350,7 @@ export async function createBlast(game) {
     const u = sim.units.get(B.uid); if (!u) { pendDetach.delete(B); return; }
     const ent = entOf(u), Md = ent && modelDots(ent); if (!Md || !Md.n) return;
     const T = takenOf(B.uid, Md), F = B.spec.frame, t0 = performance.now();
-    const D = Md.D, pick = [], info = {};
+    const D = Md.D, pick = [], offs = [], info = {};
     let nc = 0;
     for (const key of P) {
       if (nc && nc % 4 === 0 && performance.now() - t0 > budgetMs) break;
@@ -360,7 +360,7 @@ export async function createBlast(game) {
         if (T[i]) return;
         const o = 7 * i, c = classify(B, D[o], D[o + 1], D[o + 2], D[o + 3], D[o + 4], D[o + 5], info, Md.ins && Md.ins[D[o + 6]]);
         if (c !== CK.COLDROP && c !== CK.BEHINDDROP) return;
-        T[i] = 1; pick.push(i, info.r, info.i, info.j);
+        T[i] = 1; pick.push(i, info.r, info.i, info.j); offs.push(info.off || 0);
       });
     }
     if (!P.size) pendDetach.delete(B);
@@ -389,7 +389,10 @@ export async function createBlast(game) {
         const d = [F.X[0] * dl[0] + F.Y[0] * dl[1] + F.Z[0] * dl[2], F.X[1] * dl[0] + F.Y[1] * dl[1] + F.Z[1] * dl[2], F.X[2] * dl[0] + F.Y[2] * dl[1] + F.Z[2] * dl[2]];
         const so = r.cpu[t + 3] % 1;
         // (steel that went through the blast: charred grey, darker where the soot lay)
-        pts.push(D[o], D[o + 1], D[o + 2], .34 * (1 - .6 * so), D[o + 3], D[o + 4], D[o + 5]); dd.push(d[0], d[1], d[2]);
+        // (charred near the blast; what stood well above it (a stack, a mast, a deckhouse) keeps most of its own light:
+        // no black silhouettes, QA D38)
+        const hb = Math.min(1, Math.max(0, (Math.abs(offs[g[q]]) - 1) / 3));
+        pts.push(D[o], D[o + 1], D[o + 2], (.34 + .5 * hb) * (1 - .6 * so * (1 - hb)), D[o + 3], D[o + 4], D[o + 5]); dd.push(d[0], d[1], d[2]);
         vx += d[0]; vy += d[1]; vz += d[2];
       }
       const m = pts.length / 7; vx /= m; vy /= m; vz /= m;

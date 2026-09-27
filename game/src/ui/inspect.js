@@ -648,6 +648,13 @@ export async function createInspect(game, ctx) {
   /* the placards: lime chip tags condensing as the slice reaches their part, in columns either side of the model,
      dotted leaders to 3 px anchor dots; brackets that fit a part as it settles in the exploded view, on hover and
      focus; coral damage */
+  // a hole of the inspected ship (the sim's, else a scar) within 10 m along her length of a model point
+  function hullNear(m) {
+    const id = S.id, u = id !== undefined ? sim.units.get(id) : null; if (!u) return true;
+    const Hs = u.ship && u.ship.holes; if (Hs && Hs.length) return Hs.some(h => Math.abs(h.z - m[2]) < 10 + h.r);
+    const rec = game.scars && game.scars.of(id); if (rec && rec.list.length) return rec.list.some(q => Math.abs(q.z - m[2]) < 10 + (q.r || 0));
+    return true;
+  }
   function drawTags(ctx, W, H, A, readBottom) {
     const V = S, subj = V.subj, rows = [], t = V.t, xk = V.xr.k, out = V.phase === 'out';
     const front = V.front, scanEnd = V.xr.t0 + V.xr.D + .6;
@@ -659,7 +666,11 @@ export async function createInspect(game, ctx) {
       if (!ts) { if ((xk > 0 && front > ent.az) || t > scanEnd || ent.k > .6) V.tags.set(ent, ts = { t0: t }); else continue; }
       const age = t - ts.t0;
       if (!pcam.project(ent.world, s3) || offScreen(s3, W, H)) continue;
-      let dm = 0; if (dmg) for (const p of ent.parts) dm = Math.max(dm, dmg[p.name] || 0);
+      let dm = 0; if (dmg) for (const p of ent.parts) { let v = dmg[p.name] || 0;
+        // (the hull is one sim part for the whole ship: an entry on it (the stern, the shafts, a space) takes its damage
+        // only where the ship was holed near it, not wherever she was hit: QA D40)
+        if (v > 0 && p.name === 'hull' && ent.m0) v = hullNear(ent.m0) ? v : 0;
+        dm = Math.max(dm, v); }
       const lab = O.condense(ent.label.toUpperCase(), sat(age / .9), t, ent.id.length + ent.label.length);
       const val = dm > 0 ? (dm >= .99 ? 'Destroyed' : `Dmg ${Math.round(dm * 100)} %`) : ent.size;
       const w = O.tagWidth(ctx, ent.id, ent.label, val);

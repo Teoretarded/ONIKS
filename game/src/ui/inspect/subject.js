@@ -142,7 +142,7 @@ export function makeSubject(R, AN, DM, key) {
     const ent = { en, id: en.id, label: en.label, size: en.size || '', side: en.side || null, parts: ps, anchor,
       az: 0, world: [0, 0, 0], model: [0, 0, 0], k: 0, dmg: 0, box: null, scr: null };
     // model-space z of the anchor at rest: when the slice reaches it
-    apX(xfOf(parts[anchor.pi].P.part, st0), anchor.local[0], anchor.local[1], anchor.local[2], q); ent.az = q[ai];
+    apX(xfOf(parts[anchor.pi].P.part, st0), anchor.local[0], anchor.local[1], anchor.local[2], q); ent.az = q[ai]; ent.m0 = [q[0], q[1], q[2]];
     if (en.id) entries.push(ent);
     for (const p of ps) p.ent = ent;
   }

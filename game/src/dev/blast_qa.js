@@ -205,7 +205,7 @@ export async function runCase(O, c, o = {}) {
   row.resolve = B ? (B.state === 'done' ? +((B.doneT || sim.t) - s0).toFixed(2) : B.state) : null;
   row.wallMs = B ? Math.round(B.wallMs || 0) : null;
   row.solve = [pct(rec, .5), pct(rec, .95), rec.length];
-  if (B) Object.assign(row, { torn: +(B.torn || 0).toFixed(2), below: +(B.below || 0).toFixed(2), setMm: Math.round((B.setMax || 0) * 1000), frames: B.res && B.res.framesTorn,
+  if (B) Object.assign(row, { flapM2: +(B.openM2 || 0).toFixed(2), torn: +(B.torn || 0).toFixed(2), below: +(B.below || 0).toFixed(2), setMm: Math.round((B.setMax || 0) * 1000), frames: B.res && B.res.framesTorn,
     byPlate: (B.byPlate || []).map(v => +v.toFixed(2)), W: B.meta && B.meta.W && +B.meta.W.toFixed(1), err: B.err });
   // settled stills
   for (const [k, tag] of [['a', 'set_a60'], ['b', 'set_b60'], ['d', 'set_d25'], ['e', 'set_e12'], ['w', 'set_w300']]) { await shot(O, id, aim, V[k], `${dir}/${c.id}_${tag}`); row.shots.push(tag); }

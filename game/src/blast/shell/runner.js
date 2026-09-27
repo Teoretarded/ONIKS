@@ -375,7 +375,7 @@ export function createShellRunner(gl, o = {}) {
     }
     for (const n of L0.at) if (!gone(n)) { const d = Math.hypot(X[3 * n] - R0[3 * n], X[3 * n + 1] - R0[3 * n + 1], X[3 * n + 2] - R0[3 * n + 2]); if (d > setMax) setMax = d; }
     void up;
-    return { type: 'state', id: R.id, final, t: s.t, T1: s.T1, skins, inner, nIn, tornSkin: torn0, tornBelow: below, byPlate, setMax,
+    return { type: 'state', id: R.id, final, t: s.t, T1: s.T1, skins, inner, nIn, tornSkin: torn0, tornBelow: below, openM2: +(s.openM2 || 0).toFixed(2), byPlate, setMax,
       runMs: R.runMs, steps: R.steps, wallMs: now() - R.tReal0, transfer: tr };
   }
   function outerSoot(M, L, open) {

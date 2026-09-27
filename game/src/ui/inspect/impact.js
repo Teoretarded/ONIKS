@@ -631,7 +631,7 @@ export function createImpact(I) {
         [B.info ? ` · ${B.info.solver === 'shell' ? 'shell FE' : 'lattice'} · ${Math.round(B.info.N / 1000)}k nodes` : '', F], [B.state === 'done' && B.wallMs ? ` · ${(B.wallMs / 1000).toFixed(1)} s` : '', F]]);
       const bp = B.byPlate || [], inner = bp.reduce((a, b) => a + b, 0) - (B.torn || 0);
       L.push([['Torn ', F], [`${(B.torn || 0).toFixed(2)} m²`, (B.torn || 0) > 0 ? CORAL : Wt], [' skin · ', F], [`${(B.below || 0).toFixed(2)} m²`, (B.below || 0) > 0 ? CORAL : Wt],
-        [' under water · ', F], [`${Math.max(0, inner).toFixed(1)} m²`, Wt], [' inside', F]]);
+        [' under water · ', F], [`${Math.max(0, inner).toFixed(1)} m²`, Wt], [' inside · ', F], [`${(B.openM2 || 0).toFixed(1)} m²`, Wt], [' bent open', F]]);
       L.push([['Set ', F], [`${Math.round((B.setMax || 0) * 1000)} mm`, Wt], [' · ', F], [B.meta.kind && B.meta.kind.startsWith('cookoff') ? B.meta.kind.slice(8) : `${B.meta.W >= 10 ? Math.round(B.meta.W) : (B.meta.W || 0).toFixed(1)} kg TNT · ${B.meta.fz === 'in' ? 'inside' : B.meta.fz === 'frag' ? 'blast-frag' : 'contact'}`, Wt],
         [B.res && B.res.framesTorn ? ` · ${B.res.framesTorn} frames torn` : '', F]]);
     }

@@ -87,7 +87,7 @@
 .h-log .h { display: flex; justify-content: space-between; padding-bottom: 10px; margin-bottom: 8px; border-bottom: 1px solid var(--hair); white-space: nowrap; }
 .h-log .h b { color: var(--dim); }
 .h-log .r { display: grid; grid-template-columns: 52px 68px 1fr; padding: 4.5px 0; white-space: nowrap; color: var(--dim); }
-.h-log .r .tx { overflow: hidden; text-overflow: ellipsis; }
+.h-log .r .tx { white-space: normal; line-height: 1.35; overflow-wrap: break-word; }   /* (a long line wraps, never cut mid-word: QA D41) */
 .h-log .r .tm, .h-log .r .cd { color: rgba(255,255,255,.3); font-variant-numeric: tabular-nums; }
 .h-log .r.new { color: #fff; }
 .h-log .r.new .tm { color: var(--faint); }
