@@ -25,7 +25,7 @@
    Coarse, public blast-effects orders of magnitude: electronics racks tens of kPa, machinery a few hundred */
 export const TOL = {
   elec:  { P: 40e3, I: 150, frag: .2, fire: 45, flood: 1, label: 'electronics' },
-  array: { P: 35e3, I: 100, frag: .05, fire: 90, flood: 1, label: 'antenna array' },
+  array: { P: 35e3, I: 100, frag: .01, fire: 90, flood: 1, label: 'antenna array' },
   swbd:  { P: 70e3, I: 250, frag: .15, fire: 60, flood: 1, label: 'switchboard' },
   cable: { P: 120e3, I: 400, frag: .1, fire: 90, flood: 0, label: 'cable way' },
   pump:  { P: 150e3, I: 600, frag: .05, fire: 150, flood: 1, label: 'auxiliary machinery' },
@@ -39,10 +39,11 @@ export const TOL = {
 /* the charges (sim/ship.js): W kg TNT equivalent (game/src/blast/phys.js TNT: approximate public figures), F effective
    fragments (a light-cased penetrator throws few heavy ones, a blast-frag SAM many light ones), pen: plating (mm) its
    fragments go through, fz: how it meets the ship ('in' a delayed fuze inside the hull, 'out' contact or a shell at
-   the skin, 'frag' a proximity burst, 'under' a torpedo under the keel, 'gun' small rounds) */
+   the skin, 'frag' a proximity burst, 'under' a torpedo under the keel, 'gun' small rounds); H: the hole a penetrating
+   round punches on its way in (m^2: its body and the petals round it) */
 export const CHARGE = {
-  oniks: { W: 120, F: 500, pen: 12, fz: 'in' }, kalibr: { W: 100, F: 500, pen: 12, fz: 'in' }, uran: { W: 65, F: 350, pen: 10, fz: 'in' },
-  tlam: { W: 200, F: 800, pen: 10, fz: 'in' }, slam: { W: 100, F: 600, pen: 10, fz: 'in' }, mk84: { W: 450, F: 3000, pen: 12, fz: 'in' },
+  oniks: { W: 120, F: 500, pen: 12, fz: 'in', H: 1.5 }, kalibr: { W: 100, F: 500, pen: 12, fz: 'in', H: 1.2 }, uran: { W: 65, F: 350, pen: 10, fz: 'in', H: .8 },
+  tlam: { W: 200, F: 800, pen: 10, fz: 'in', H: 1.2 }, slam: { W: 100, F: 600, pen: 10, fz: 'in', H: 1 }, mk84: { W: 450, F: 3000, pen: 12, fz: 'in', H: 1.2 },
   hellfire: { W: 5, F: 250, pen: 8, fz: 'out' }, kornet: { W: 3, F: 120, pen: 6, fz: 'out' },
   shell: { W: 3.2, F: 600, pen: 8, fz: 'out' }, gun5: { W: 3.2, F: 600, pen: 8, fz: 'out' }, shell130: { W: 3.6, F: 700, pen: 8, fz: 'out' },
   shell57: { W: .35, F: 120, pen: 5, fz: 'out' },
@@ -52,7 +53,7 @@ export const CHARGE = {
   ciws: { W: 0, F: 25, pen: 20, fz: 'gun' }, gun30: { W: .05, F: 30, pen: 6, fz: 'gun' }, rws: { W: 0, F: 15, pen: 8, fz: 'gun' },
 };
 export function chargeOf(kind, dmg) {
-  return CHARGE[kind] || { W: Math.max(.2, (dmg || 10) * 1.4), F: (dmg || 10) * 12, pen: 8, fz: 'in' };
+  return CHARGE[kind] || { W: Math.max(.2, (dmg || 10) * 1.4), F: (dmg || 10) * 12, pen: 8, fz: 'in', H: .6 };
 }
 
 /* the rules' numbers (sim/ship.js); named so the pacing is a tuning pass */

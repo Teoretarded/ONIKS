@@ -98,6 +98,8 @@ function resolve(sp, def) {
       n.comp = L.at(cx, cy, cz);
       const dx = Math.max(.3, b[3] - b[0]), dy = Math.max(.3, b[4] - b[1]), dz = Math.max(.3, b[5] - b[2]);
       n.area = Math.min(25, (dx * dy + dy * dz + dx * dz) / 4);        // ~ its area presented to a burst
+      const mx = Math.max(dx, dy, dz);
+      n.big = mx > 8; n.bigAx = mx === dx ? 0 : mx === dy ? 1 : 2;
       n.route = null;
     } else {
       const P = n.pts, m = P.length / 3;
@@ -112,6 +114,7 @@ function resolve(sp, def) {
       n.c = [(P[0] + P[P.length - 3]) / 2, (P[1] + P[P.length - 2]) / 2, (P[2] + P[P.length - 1]) / 2];
       n.comp = n.route.length ? n.route[0][0] : AIR;
       n.area = Math.min(10, len * .15);
+      n.big = false; n.bigAx = 2;
     }
     n.st = station(n.c[2]);
   }
@@ -191,7 +194,16 @@ export function shipHit(sim, u, dmg, src, pos, ev) {
     if (L.at(p[0], p[1], p[2]) < 0) {
       for (let s = .25; s <= 16; s += .25) if (L.at(p[0] + dx * s, p[1] + dy * s, p[2] + dz * s) >= 0) { p[0] += dx * (s - .25); p[1] += dy * (s - .25); p[2] += dz * (s - .25); break; }
     }
-    if (fz === 'in' && l > 1e-6) { const k = Math.min(COOK.pen, 1.6); p[0] += dx * k; p[1] += dy * k; p[2] += dz * k; }
+    if (fz === 'in' && l > 1e-6) {
+      // the hole it punches on the way in (its body, the petals round it): in the plating between the space it entered
+      // and the outside
+      const ci = L.at(p[0] + dx * .5, p[1] + dy * .5, p[2] + dz * .5);
+      if (ci >= 0 && C.H) {
+        const k = L.pair(ci, p[1] < 0 ? SEA : AIR) >= 0 ? L.pair(ci, p[1] < 0 ? SEA : AIR) : L.pair(ci, p[1] < 0 ? AIR : SEA);
+        if (k >= 0 && S.torn[k] < C.H) { S.torn[k] = Math.max(S.torn[k], C.H); S.tornY[k * 2] = p[1] - .7; S.tornY[k * 2 + 1] = p[1] + .7; makeHole(sim, u, S, ci, k, p[0], p[1], p[2], C.H, L.bB[k]); }
+      }
+      const k = Math.min(COOK.pen, 1.6); p[0] += dx * k; p[1] += dy * k; p[2] += dz * k;
+    }
   }
   // a round with no charge of its own (a unit hit by a script, a kinetic round): scaled from its damage
   const W = fz === 'gun' ? Math.max(.02, C.W) : Math.max(.05, C.W);
@@ -308,23 +320,45 @@ function blastAt(sim, u, S, W, F, pen, fz, p, src, depth, skip) {
     const R = Math.max(.3, q[3]);
     const gasG = inside ? gasNode(n, nG) : 0;
     if (R > Rmax && gasG <= 0) continue;
-    // what stands between: intact plating ~3 %, torn or open ~50 %; fragments stop at plating thicker than pen
-    const T = pathT(S, px, py, pz, q[0], q[1], q[2], pen);
-    let Pn = 0, In = 0;
-    if (R <= Rmax) { const Z = R / W13; Pn = kinneyPs(Z) * SHIPK.refl * T[0]; In = kinneyIs(Z, W13) * SHIPK.refl * T[0]; }
-    if (gasG > 0) { Pn = Math.max(Pn, P0 * gasG); In = Math.max(In, P0 * gasG * tg); }
-    const Tn = n.T, D = Math.min(Pn / Tn.P, In / Tn.I);
-    let f = D > wa ? Math.min(4, (D - wa) / wb) : 0;            // (past 1: a blast that overwhelms an armoured module)
-    let why = f > 0 ? 'blast' : '';
-    if (F > 0 && T[1] > 0) {
-      const hits = F * n.area / (4 * Math.PI * R * R) * T[1];
-      const ff = hits * Tn.frag;
-      if (ff > .02) { f += ff; if (!why || ff > f * .5) why = 'frag'; }
+    // a big node (an engine room, a hangar, a magazine block) is wrecked where the blast reaches it: its damage is
+    // the mean over its nearest point, its middle and two points along its length
+    let f = 0, why = '';
+    if (n.big) {
+      const b = n.box, ax = n.bigAx, qx = q[0], qy = q[1], qz = q[2];
+      const wn = Math.min(.4, 6 / (b[ax + 3] - b[ax])), wo = (1 - wn) / 3;     // the nearest point counts less on a long one
+      nodeAt(n, qx, qy, qz, px, py, pz, W13, Rmax, gasG, P0, F, pen, S, wn);
+      for (let s = 0; s < 3; s++) {
+        SP3[0] = n.c[0]; SP3[1] = n.c[1]; SP3[2] = n.c[2];
+        if (s) SP3[ax] = b[ax] + (b[ax + 3] - b[ax]) * (s === 1 ? .25 : .75);
+        nodeAt(n, SP3[0], SP3[1], SP3[2], px, py, pz, W13, Rmax, gasG, P0, F, pen, S, wo);
+      }
+      f = NF[0]; why = NF[1] > NF[2] ? 'frag' : 'blast';
+      NF[0] = NF[1] = NF[2] = 0;
+    } else {
+      nodeAt(n, q[0], q[1], q[2], px, py, pz, W13, Rmax, gasG, P0, F, pen, S, 1);
+      f = NF[0]; why = NF[1] > NF[2] ? 'frag' : 'blast';
+      NF[0] = NF[1] = NF[2] = 0;
     }
     if (f > .01) damageNode(sim, u, S, n, f, why, src, depth);
     if (!u.alive) return;
   }
   S.dirty = true;
+}
+/* the damage (NF[0] += w x f; NF[1] frag share, NF[2] blast share) at a node's point from the charge: overpressure and
+   impulse through what stands between (intact plating ~3 %, torn or open ~50 %), the gas of its space, fragments on
+   the line (through plating thinner than pen) */
+const NF = [0, 0, 0], SP3 = [0, 0, 0];
+function nodeAt(n, qx, qy, qz, px, py, pz, W13, Rmax, gasG, P0, F, pen, S, w) {
+  const R = Math.max(.3, Math.hypot(qx - px, qy - py, qz - pz));
+  const T = pathT(S, px, py, pz, qx, qy, qz, pen);
+  let Pn = 0, In = 0;
+  if (R <= Rmax) { const Z = R / W13; Pn = kinneyPs(Z) * SHIPK.refl * T[0]; In = kinneyIs(Z, W13) * SHIPK.refl * T[0]; }
+  if (gasG > 0) { Pn = Math.max(Pn, P0 * gasG); In = Math.max(In, P0 * gasG * SHIPK.tGas); }
+  const Tn = n.T, D = Math.min(Pn / Tn.P, In / Tn.I), [wa, wb] = SHIPK.wreck;
+  const fb = D > wa ? Math.min(4, (D - wa) / wb) : 0;            // (past 1: a blast that overwhelms an armoured module)
+  let ff = 0;
+  if (F > 0 && T[1] > 0) { ff = F * n.area / (4 * Math.PI * R * R) * T[1] * Tn.frag; if (ff <= .02) ff = 0; }
+  NF[0] += w * (fb + ff); NF[1] += w * ff; NF[2] += w * fb;
 }
 function gasIx(c, nG) { for (let g = 0; g < nG; g++) if (GASC[g] === c) return g; return -1; }
 /* the gas share at a node (a cable way: the most of the spaces on its route) */
@@ -421,21 +455,43 @@ function undex(sim, u, S, W, p, src) {
   S.dirty = true;
 }
 
-function makeHole(sim, u, S, c, k, px, py, pz, A, out) {
-  const L = S.L, r = Math.sqrt(A / Math.PI);
+function makeHole(sim, u, S, c, k, px, py, pz, A, out, depth) {
+  const L = S.L;
+  let r = Math.sqrt(A / Math.PI);
   // on the plating: the side (half-breadth at the point) or the bottom, whichever is nearer
-  let hx = px, hy = py, hz = pz;
+  let hx = px, hy = py, hz = pz;   // (hy may move: the part of the tear in this space)
   const bz = L.bBox, o = k * 6;
   hz = Math.max(bz[o + 2], Math.min(bz[o + 5], pz));
   if (L.bAx[k] === 1 || (bz[o + 4] - bz[o + 1]) < 1) { hy = (bz[o + 1] + bz[o + 4]) / 2; }
   else { hy = Math.max(bz[o + 1], Math.min(bz[o + 4], py)); const hb = L.hb(hz, hy); hx = (px < 0 ? -1 : 1) * (hb > 0 ? hb : Math.abs(px)); }
-  // merge with a hole already in this space's plating nearby
-  for (const h of S.holes) if (h.c === c && Math.hypot(h.x - hx, h.y - hy, h.z - hz) < h.r + r) {
-    const A2 = Math.min(L.bArea[k] * .6, h.A0 + A * .7);
-    h.A0 = A2; h.A = Math.max(h.A, A2); h.r = Math.sqrt(A2 / Math.PI); return;
+  // a tear wider than the space's side runs on into the space above or below (its own plating, its own hole)
+  const y0 = L.box[c * 6 + 1], y1 = L.box[c * 6 + 4];
+  if (!depth && L.bAx[k] !== 1) for (const dir of [-1, 1]) {
+    const edge = dir < 0 ? y0 : y1, over = dir < 0 ? edge - (hy - r) : (hy + r) - edge;
+    if (over < .3) continue;
+    const c2 = L.at(hx - Math.sign(hx) * .6, edge + dir * .4, hz);
+    if (c2 < 0 || c2 === c) continue;
+    const k2 = L.pair(c2, edge + dir * .4 < 0 ? SEA : AIR) >= 0 ? L.pair(c2, edge + dir * .4 < 0 ? SEA : AIR) : L.pair(c2, edge + dir * .4 < 0 ? AIR : SEA);
+    if (k2 < 0) continue;
+    const share = Math.min(.5, over / (2 * r)), A2 = A * share;
+    if (A2 < .05) continue;
+    S.torn[k2] = Math.max(S.torn[k2], A2);
+    makeHole(sim, u, S, c2, k2, hx, edge + dir * Math.min(over, r) * .5, hz, A2, L.bB[k2], 1);
+    A -= A2; r = Math.sqrt(A / Math.PI);
+    hy = dir < 0 ? Math.max(hy, y0 + r * .8) : Math.min(hy, y1 - r * .8);
   }
-  S.holes.push({ c, k, x: hx, y: hy, z: hz, r, A, A0: A, sea: out === SEA || hy - r < .5 });
-  if (hy - r < .5) sim.emit('compartment', { unit: u.id, side: u.side, comp: L.ids[c], label: L.names[c], state: 'breach', A: +A.toFixed(1), below: hy < 0 });
+  // merge with a hole already in this space's plating nearby (it grows, and reaches lower)
+  let h = null;
+  for (const o of S.holes) if (o.c === c && Math.hypot(o.x - hx, o.y - hy, o.z - hz) < o.r + r) { h = o; break; }
+  if (h) {
+    const A2 = Math.min(L.bArea[k] * .6, Math.max(h.A0, A) + Math.min(h.A0, A) * .5), r2 = Math.sqrt(A2 / Math.PI);
+    const lo = Math.min(h.y - h.r, hy - r), hi = Math.max(h.y + h.r, hy + r);
+    h.A0 = A2; h.A = Math.max(h.A, A2); h.r = r2; h.y = Math.max(lo + r2, Math.min(hi - r2, (lo + hi) / 2));
+  } else S.holes.push(h = { c, k, x: hx, y: hy, z: hz, r, A, A0: A, sea: false, low: false, told: 0 });
+  // (the part of it in this space's side: the space's floor is its lowest point)
+  const bot = Math.max(y0, h.y - h.r);
+  h.sea = h.sea || out === SEA || bot < .5;
+  if (bot < .5 && h.A0 > (h.told || 0) * 1.5) { h.low = true; h.told = h.A0; sim.emit('compartment', { unit: u.id, side: u.side, comp: L.ids[c], label: L.names[c], state: 'breach', A: +h.A0.toFixed(1), below: bot < 0 }); }
 }
 
 /* damage f (0..1 of it) to a node: a module takes it in its hp (damage.js: cook-off rolls, 'module' event) */
@@ -699,7 +755,7 @@ function stepShip(sim, u, S, dt) {
       // the water pools toward the side it came in by (the frames, tanks and partitions of a real space are not
       // symmetric): a space holed on one side holds its water a little off the centre line
       let xc = (L.box[o] + L.box[o + 3]) / 2;
-      for (const h of S.holes) if (h.c === c && h.sea) { xc += .1 * h.x; break; }
+      for (const h of S.holes) if (h.c === c && h.sea) { xc += .04 * h.x; break; }
       wsum += W[c]; wx += W[c] * xc; wy += W[c] * (L.box[o + 1] + lv) / 2; wz += W[c] * (L.box[o + 2] + L.box[o + 5]) / 2;
       const fill = W[c] / cap;
       if (fill > .03 && fill < .97) {

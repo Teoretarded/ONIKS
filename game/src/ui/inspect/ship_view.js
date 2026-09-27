@@ -57,7 +57,7 @@ export function createShipView(I) {
       if (!boxScreen(V, x0, b[o + 1], b[o + 2], x1, b[o + 4], b[o + 5])) continue;
       const fire = S.fire[c], cap = L.vol[c] * L.perm[c], fl = cap > 0 ? S.water[c] / cap : 0;
       const hov = c === hoverComp;
-      ctx.strokeStyle = fire > 0 ? CORAL : HULLC + (hov ? .55 : house ? .07 : .12) + ')';
+      ctx.strokeStyle = fire > 0 ? CORAL : HULLC + (hov ? .55 : house ? .09 : fl > .005 ? .4 : .18) + ')';
       ctx.globalAlpha = A * (fire > 0 ? .35 + .25 * fire * (.8 + .2 * Math.sin(t * 7 + c)) : 1);
       ctx.beginPath();
       for (const [i, j] of E12) { ctx.moveTo(S2[i][0], S2[i][1]); ctx.lineTo(S2[j][0], S2[j][1]); }
@@ -139,6 +139,9 @@ export function createShipView(I) {
     const buses = sp.buses.map(B => `${sp.nodes[B.bus].id.replace('swbd', 'SB')}${S.ok[B.bus] ? '' : '×'}`).join(' ');
     const kn = u.def.speed * u.slowK / .5144;
     out.push([['Power ', F], [buses, Wt], [' · speed ', F], [`${kn.toFixed(0)} kn`, S.prop < 1 ? CORAL : Wt], [' · steering ', F], [S.steerK < 1 ? 'emergency' : 'ok', S.steerK < 1 ? CORAL : Wt], [fires ? ` · ${fires} fire${fires > 1 ? 's' : ''}` : '', CORAL]]);
+    let lit = 0, hurt = 0, dead = 0;
+    for (const n of sp.nodes) { const dm = n.mod ? Math.min(1, u.mods[n.mod.id] / n.mod.hp) : S.h[n.i]; if (!S.ok[n.i]) dead++; else if (dm > .05) hurt++; else lit++; }
+    out.push([['Systems ', F], [`${sp.nodes.length}`, Wt], [' · lit ', F], [`${lit}`, LIME], [' · damaged ', F], [`${hurt}`, Wt], [' · out ', F], [`${dead}`, dead ? CORAL : Wt]]);
     const lost = [];
     for (const n of sp.nodes) if (!S.ok[n.i] && n.cls !== 'cable') lost.push(`${short(n.label)}${S.why[n.i] ? ' (' + S.why[n.i] + ')' : ''}`);
     const cw = sp.nodes.filter(n => n.cls === 'cable' && !S.ok[n.i]).length;
@@ -149,7 +152,11 @@ export function createShipView(I) {
     return out;
   }
   const short = s => String(s).split(' · ')[0];
-  const countBulkheads = L => { let n = 0; for (let k = 0; k < L.bn; k++) if (L.bKind[k] === 'bulkhead') n++; return n; };
+  const countBulkheads = L => {         // watertight transverse bulkheads (planes: a bulkhead is many boundaries)
+    const zs = [];
+    for (let k = 0; k < L.bn; k++) if (L.bKind[k] === 'bulkhead') { const z = (L.bBox[k * 6 + 2] + L.bBox[k * 6 + 5]) / 2; if (!zs.some(v => Math.abs(v - z) < 1)) zs.push(z); }
+    return zs.length;
+  };
   const openDoors = S => { let n = 0; for (let k = 0; k < S.L.bn; k++) if (S.door[k] > 0) n++; return n; };
 
   return { draw2d, readout, set hover(c) { hoverComp = c; } };
