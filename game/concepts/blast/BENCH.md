@@ -142,7 +142,7 @@ verify.html `?quick=1` after these changes: 28 pass, 3 fail, 3 info. The fails a
 (float32 tie-breaks, above) and the two "petals, not cut-outs" checks (v35: 53 % / 92 %; v34: 53 % / 81 % of the torn side thrown loose,
 was 61 / 82 % at the audit); energy near contact, momentum, dt, parity, mesh dish now pass.
 
-The full suite (v35, 39106f7): 39 pass, 7 fail, 4 info (v34, ae3abf6: 36 / 9 / 4). v35 fixed the tearing momentum
+The full suite (v35, 39106f7): 39 pass, 7 fail, 4 info (v34, ae3abf6: 36 / 9 / 4); v35 final: 40 / 6 / 4. v35 fixed the tearing momentum
 check and "Burke 120 kg contact on the deckhouse"; the whole-run energy check passes with the relaxation on its own
 line (above). Still failing, as in v34: the mirror under tearing, both petals checks, the contact hole's mesh check
 (0.25 / 0.125 / 0.0625 m: 3.2 / 2.8 / 10.4 m² over the whole run: the fine grid's second deck keeps tearing late;
@@ -239,7 +239,10 @@ at 0.25 m, no gain (by WebGL timer queries the gather is ~45 % of a step, cells 
 on WebGPU the step does not shrink with it); time-scaling the gas phase (masses × k², the step × k once the detonation's
 loads are over, loose pieces and the gas in real time): steps / 2–3, but gas-driven tearing is not quasi-static — the
 box inside case tore 170 → 84 → 69 m² at k = 1 / 2 / 4, a VLS burn 572 → 313 → 232 m². Left: multi-rate steps (the
-coarse ring at 2 dt); a cook-off (propellant burning, τ 0.12 s) still runs to the 0.4 s cap.
+coarse ring at 2 dt). Cook-offs: a burning source counts as done once what it has still to burn would add under 20 kPa to
+its space: a fuel fire (box, 120 kg-case position) ends at 139 ms (before: not before its burn was 98 % done, 0.24 s); a VLS cell's propellant is
+still ~12 % unburnt at 0.25 s (a steady pressure then only means the holes carry its output away; ending there cut the
+torn area 532 → 354 m²), so it runs to the cap.
 
 ## Does tearing have a cliff? (v35, generic box)
 
@@ -273,25 +276,47 @@ threshold. The v34 bench (and the game port, from 200fe28) had none of the three
 ## Petals (option, `petals: true`)
 
 Cells used to go away when they failed, so a hole is a patch of missing cells with loose pieces round it. With petals a
-tear runs along cell edges instead: every node inside a plate (not on a junction, not anchored) has an idle twin; a
-cell at its failure limit asks for a crack along one of its edges (the pair nearer the charge's radius, so cracks run
-radially; the one that continues a crack, else the one nearer the charge); at the next step each node on that edge
-splits: the cells beyond the crack line move to its twin with their share of the mass (a node members act on keeps its
-own), hinges across the line stop, and the twin starts from the node's motion. A cracked cell erodes at 1.5 × its limit
-(`petalK`), and crushing (area < 0.25) and fragment damage erode as before. Each node splits once. CPU and WebGPU
-(`gpu_wgpu.js`: a crack pass at the start of each step, the cell, hinge, gather, node and contact passes resolve a
-split node's corners by their cell's side); WebGL2 runs ignore it. CPU vs WebGPU with petals: 120 kg contact 300 steps
-1.0e-4, 1200 kg 2.7e-4 (L2), the same nodes split and the same cells eroded (without petals 8.7e-5 / 2.3e-4).
+tear runs along cell edges instead. Every node inside a plate (not on a junction, not anchored) has two idle twins, so
+it can split twice (three pieces meet there: a crack can branch or cross). A cell at its failure limit asks for a crack
+along one of its edges: across its larger stretch (whichever side of 45° the principal stretch lies), the one that
+continues a crack, else the one nearer the charge. At the next step each node on that edge splits: the cells of the
+asking cell's piece beyond the crack line move to the node's next twin with their share of the mass (a node members act
+on keeps its own), hinges across the line stop, and the twin starts from the node's motion. A cracked cell erodes at 3 ×
+its limit (`petalK`); crushing (area < 0.25) and fragment damage erode as before. A flap bent open (a cell on a split
+node turned over 60° from its rest plane) vents its area between its two spaces (`openM2` in the results). CPU and
+WebGPU (`gpu_wgpu.js`: a crack pass at the start of each step, the cell, hinge, gather, node and contact passes resolve
+a split node's corners by their cell's side; the crack records ride with the node read-back); WebGL2 runs ignore it.
+CPU vs WebGPU with petals, 1200 kg contact, 150 steps: 5.0e-5 (L2), the same 379 splits and eroded cells.
 
-Cost at 0.25 m (box, 21.8 k nodes → 42.1 k with twins): 85 vs 69 µs a step on WebGPU (+24 %), builds unchanged.
+Tried: a second crack from the same cell, across its other pair at 1.2 × its limit (`petalK2`): cracks then close into
+loops and cut pieces out (1200 kg: cut-out share 0.16, petals 0.41); off by default. The radius rule (v35's first
+version, `petalRadial`) is an option. Erosion of cracked cells at 1.5 × the limit (v35's first version) left the hole
+mostly eroded.
 
-Effect (box, 0.25 m, WebGPU): 120 kg contact: attached side plating moved over 0.5 m 0 → 1.6 m², eroded side 2.2 →
-2.1 m², 114 nodes split. 1200 kg contact: 5.5 → 7.8 m² of flaps, eroded side 15.4 → 19.8 m², 6.5 k splits. The flaps are
-there; the centre of a large hole still goes (crushed cells erode), and cracks also cut more pieces loose: by
-verify.html's "petals, not cut-outs" measure the loose share of the torn nodes rises (1200 kg: 34 → 64 % at 0.25 m,
-52 → 71 % at 0.125 m), so it still fails. What it would take: nodes that split more than once (a crack star at the
-hole's centre), crack tips that turn with the local principal stretch instead of the radius, and cracked cells that
-keep their load across the crack only (not erode) — the next steps if the option is wanted.
+`BLAST.petalReport()` (after a run; the struck plate): eroded, loose (cut out: pieces no longer joined) and bent-open
+(attached cells turned over 45°) area; petal share = bent-open / (bent-open + loose + eroded), cut-out share = loose /
+(bent-open + loose); `petals` is true for a petal share ≥ 0.35 with a cut-out share ≤ 0.3. (verify.html's "petals, not
+cut-outs" counts torn nodes, which twins inflate, and runs without petals; the bench's own check is this.) Box, bare
+contact charges, WebGPU:
+
+| Case | Eroded | Loose | Bent open | Petal share | Cut-out share |
+|---|---|---|---|---|---|
+| 120 kg, 0.25 m, no petals | 2.2 | 0 | 0 | 0 | – |
+| 120 kg, 0.25 m, petals | 1.25 | 0.63 | 1.75 | 0.48 | 0.26 |
+| 500 kg, 0.25 m, petals | 8.4 | 1.1 | 5.4 | 0.36 | 0.17 |
+| 1200 kg, 0.25 m, no petals | 14.5 | 0.2 | 1.0 | 0.06 | 0.16 |
+| 1200 kg, 0.25 m, petals (v35 first version) | 20.5 | 2.1 | 6.6 | 0.23 | 0.24 |
+| 1200 kg, 0.25 m, petals | 15.1 | 0.4 | 16.4 | 0.51 | 0.02 |
+| 1200 kg, 0.125 m, no petals | 18.2 | 2.5 | 2.0 | 0.09 | 0.56 |
+| 1200 kg, 0.125 m, petals | 16.8 | 3.3 | 12.7 | 0.39 | 0.21 |
+
+The eroded middle of a large contact hole is the breach itself (cells past 3 × their limit: 1200 kg on 10 mm HSLA);
+round it the plating opens as bent-back petals and few pieces are cut out. With petals less plating erodes elsewhere
+(1200 kg, all plates: 204 → 82 m² eroded) because tears are cracks, and 265 m² of flaps are bent open (vented).
+Inside 120 kg: 179 m² eroded without petals; with them 52 eroded and 225 bent open.
+
+Cost at 0.25 m (box, 21.9 k nodes → 62.4 k with twins): 86 vs 66 µs a step on WebGPU (+30 %); 1200 kg at 0.125 m 12.6 vs
+10.9 s. Builds unchanged.
 
 ## Approximations still in the model
 
@@ -340,12 +365,12 @@ sustained gas), `patchL`, `fineR`, `uniformGrid`, `noWebEnds`, `noWater`, `wgBat
 `boxZ` (reduced section), `brackets`, `kLaw`, `kComp`, `kBand`, `kEps` (knock-down), `efScale` (failure strain ×),
 `shutVents`, `inDepth` (inside charge depth), `insideLOS`, `latMs` (read-back latency), `noRate`, `lReg` (non-local
 length, 0: off), `erodeEvery`, `endGas` (old end rule), `noStrip`, `endLog`, `petals`, `petalK`, `petalRadial`,
-`petalKeep` (a cell whose edges cannot split stays, cracked), `plates` ({ name: { h, mat } } per-plate overrides on the
+`petalKeep` (a cell whose edges cannot split stays, cracked), `petalK2` (a second crack from a cell; off), `plates` ({ name: { h, mat } } per-plate overrides on the
 box), `gasRamp` ({ P, tau }: gas alone in the charge's space), `detachPins`, `looseVent`;
 `BLAST.probe(cfg, times, points, stopAt)` (displacements at points and times, headless or WebGPU);
 results per piece (torn m², max displacement), `energy` (CPU), `nm` (plate). `BLAST.parity(cfg, steps)` (CPU vs
 WebGL), `BLAST.parityA({ ...cfg, pair: ['cpu' | 'gpu' | 'webgpu', ...] }, steps)`, `BLAST.bench(n, backend)`
 (steps/s), `BLAST.stress(iters, draws)` (a heavy WebGL scene alongside; 0 stops it), `BLAST.fdCheck(node, 'cell' |
-'hinge' | 'truss')`, `BLAST.torqueBy()`, `BLAST.forceAt(node)` (each pass's net moment / force on a node), `BLAST.gpuProfile(n)` (WebGL timer queries), `BLAST.model()` (all arrays: cells `CN`, `CER`,
+'hinge' | 'truss')`, `BLAST.petalReport(plate)`, `BLAST.torqueBy()`, `BLAST.forceAt(node)` (each pass's net moment / force on a node), `BLAST.gpuProfile(n)` (WebGL timer queries), `BLAST.model()` (all arrays: cells `CN`, `CER`,
 `CDM`, `CEP`; hinges `HN`, `HTP`, `HTPS`; members `TA`, `TB`, `TFL`, `TBA`, `TBB`, `TSC`, `TCL`; pieces `PAN`, `CMAP`;
 `scene`).
