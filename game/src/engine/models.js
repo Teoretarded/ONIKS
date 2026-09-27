@@ -252,7 +252,7 @@ void main() {
   if (dmg > 0.0) col = mix(col, CORAL, min(1.0, dmg * 1.1));
   if (burn > 0.0) { col = mix(col, vec3(0.62, 0.6, 0.56), burn); b *= 1.0 - 0.72 * burn; }   // (charred, still readable)
   // the torn edge: glowing while hot (warm white to amber), then a charred grey ring
-  if (edge > 0.0) { float hk = clamp((heatN - 0.06) / 0.6, 0.0, 1.0); b = max(b, edge * (0.36 + 0.64 * hk) * (0.75 + 0.3 * hr)); col = mix(col, mix(vec3(0.55, 0.53, 0.5), vec3(1.0, 0.72, 0.42), hk), edge); }
+  if (edge > 0.0) { float hk = clamp((heatN - 0.06) / 0.6, 0.0, 1.0); b = max(b, edge * (0.85 + 0.15 * hk) * (0.8 + 0.25 * hr)); col = mix(col, mix(vec3(0.8, 0.77, 0.72), vec3(1.0, 0.72, 0.42), hk), edge); }   // (a cold torn rim stays a light, bare-steel line: the hole reads at a distance, QA D48)
   vec2 sc = scanAt(p);
   vec3 rgb = col * b;
   // the rim still hot: warm white at the tear, flickering
@@ -790,7 +790,7 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
           if (dmin < 0.6) {
             vec3 q = floor(l * 5.0);
             float hn = fract(sin(dot(q, vec3(41.3, 289.1, 97.7))) * 43758.55), hj = fract(sin(dot(floor(l * 1.6), vec3(12.9, 78.2, 37.7))) * 43758.55);
-            edge = max(edge, 0.7 * (1.0 - dmin / 0.6)); heatN = max(heatN, heat); hot = max(hot, heat * 0.5 * (1.0 - dmin / 0.6));
+            edge = max(edge, 0.85 * smoothstep(0.6, 0.3, dmin)); heatN = max(heatN, heat); hot = max(hot, heat * 0.5 * (1.0 - dmin / 0.6));
           }
         }
         dl = mix(mix(t00.xyz, t10.xyz, fx), mix(t01.xyz, t11.xyz, fx), fy);
@@ -806,7 +806,7 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
         float e = mix(mix(float((f00 & 4) >> 2), float((int(t10.w) & 4) >> 2), fx), mix(float((int(t01.w) & 4) >> 2), float((int(t11.w) & 4) >> 2), fx), fy);
         if (e > 0.3) { if (mk > 0.001) { edge = max(edge, 0.8 * e); heatN = max(heatN, heat); hot = max(hot, heat * 0.55 * e); } else burn = max(burn, 0.25 * e); }   // (a broken frame or longitudinal away from the hole: scorched, not a glowing grid, QA D42)
         float so = mix(mix(fract(t00.w), fract(t10.w), fx), mix(fract(t01.w), fract(t11.w), fx), fy);
-        burn = max(burn, so * so * 0.8);
+        burn = max(burn, so * so * 0.55);   // (soot greys the plating round a hole, it does not black it out: the opening itself is the dark, QA D48)
         // the dent's slope: the normal leans with it
         float gu = mix(t10[ax] - t00[ax], t11[ax] - t01[ax], fy) / S, gv = mix(t01[ax] - t00[ax], t11[ax] - t10[ax], fx) / S;
         // (a line of the model (a sheer strake, a rail) on plating bent steeper than ~30 deg: it tore off with it, not a
