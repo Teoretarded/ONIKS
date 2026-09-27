@@ -8,7 +8,7 @@
    (a fence polled or a buffer read is a round trip to Chrome's GPU process, busy with the game's frames). A check run
    (spec.syncReads, WebGL2) reads blocking every sync, as the bench's headless runCase. The snapshots and results are the
    same shape as the lattice runner's (skins in each plate's grid order, through the cell map). */
-import { sceneOf, buildShell, loadShell, commonSync, checkEnd, markDebris, openCell, gpuModel, attachedCell, MATS } from './model.js';
+import { sceneOf, buildShell, loadShell, commonSync, checkEnd, markDebris, openCell, gpuModel, attachedCell, detachPinned, looseCells, MATS } from './model.js';
 import { createGPU } from './gpu.js';
 import { createWGPU } from './gpu_wgpu.js';
 
@@ -74,7 +74,10 @@ export function createShellRunner(gl, o = {}) {
     if (m > 0 && m % 200 === 0) {
       const VE = R.VE || (R.VE = { V: new Float64Array(3 * M.N), FREE: new Uint8Array(M.N), U: new Float64Array(3 * M.N) });
       const tn = now();
-      if (g.nodesOf(m, VE.V, VE.FREE, VE.U)) { const V0 = M.V, F0 = M.FREE; M.V = VE.V; M.FREE = VE.FREE; M.U = VE.U; checkEnd(M); M.V = V0; M.FREE = F0; M.U = null; }
+      if (g.nodesOf(m, VE.V, VE.FREE, VE.U)) { const V0 = M.V, F0 = M.FREE; M.V = VE.V; M.FREE = VE.FREE; M.U = VE.U; checkEnd(M); M.V = V0; M.FREE = F0; M.U = null;
+        // (bench 03813d8: corner-pinned plating let go; loose plating out of its compartment's wall)
+        if (detachPinned(M)) g.setDamage(M.CFD);
+        const lo = looseCells(M); if (lo.length && g.gasOff) g.gasOff(lo, M.CVIS); }
       stats.nodeMs += now() - tn;
     }
   }

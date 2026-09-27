@@ -1,4 +1,4 @@
-/* The blast bench's shell model (game/concepts/blast/blast.js at commit 882692c, its petals prototype left out), ported for the game: the same
+/* The blast bench's shell model (game/concepts/blast/blast.js at commit 03813d8, its petals option left out), ported for the game: the same
    physics, from a scene built out of a patch spec (blast/spec.js) instead of the bench's test box. No DOM, no GL.
 
    Structure: every quad cell is 4 crossed CST membranes (corotational, plane-stress J2 + linear hardening + Cowper-
@@ -948,6 +948,39 @@ export function checkEnd(M) {
   if (!s.relax && M.fastEnd && gas < 2e4 && s.t > Math.max(s.tMin + .05, .12) && s.srcs.every(q => q.F > .85)) { s.relax = true; s.tRelax = s.t; }
   if (s.relax && (v2 < .25 || s.t - s.tRelax > .025)) s.T1 = s.t;
   s.vmax = Math.sqrt(v2);
+}
+/* (bench 03813d8) plating hanging on by corner nodes only (cells meeting another piece at a corner: a pin of zero width
+   it swings on, tearing what it hits) is let go: its cells erode as a piece torn off would. -> cells released (CFD = 1) */
+export function detachPinned(M) {
+  const s = M.sim; if (s.pinAt === s.cellsTorn) return 0; s.pinAt = s.cellsTorn;
+  const NC = M.NC, par = M.PINUF && M.PINUF.length === NC ? M.PINUF : (M.PINUF = new Int32Array(NC));
+  for (let c = 0; c < NC; c++) par[c] = c;
+  const fd = c => { while (par[c] !== c) { par[c] = par[par[c]]; c = par[c]; } return c; };
+  const ok = c => M.CKN[c] !== 1 && !M.CER[c] && M.CFD[c] < 1;
+  for (let h = 0; h < M.NH; h++) { const a = M.HC[2 * h], b = M.HC[2 * h + 1]; if (ok(a) && ok(b)) { const ra = fd(a), rb = fd(b); if (ra !== rb) par[ra] = rb; } }
+  const root = new Uint8Array(NC), comps = new Map();
+  for (let c = 0; c < NC; c++) { if (!ok(c)) continue; const r = fd(c);
+    for (let k = 0; k < 4; k++) { const i = M.CN[4 * c + k]; if (M.AK[i] > 0 || M.WINV[i] === 0) root[r] = 1;
+      let l = comps.get(i); if (!l) comps.set(i, l = []); if (!l.includes(r)) l.push(r); } }
+  const adj = new Map(); for (const l of comps.values()) if (l.length > 1) for (const x of l) for (const y of l) if (x !== y) { let a = adj.get(x); if (!a) adj.set(x, a = new Set()); a.add(y); }
+  const pinned = new Uint8Array(NC), seen = new Uint8Array(NC), q = [];
+  for (const [x] of adj) if (root[x]) { seen[x] = 1; q.push(x); }
+  while (q.length) { const x = q.pop(); for (const y of adj.get(x) || []) if (!seen[y]) { seen[y] = 1; if (!root[y]) pinned[y] = 1; q.push(y); } }
+  let n = 0; for (let c = 0; c < NC; c++) if (ok(c) && pinned[fd(c)]) { M.CFD[c] = 1; n++; }
+  if (n) s.detached = (s.detached || 0) + n;
+  return n;
+}
+/* (bench 03813d8) plating blown loose (no node joined to the structure) leaves its compartment's wall: its area opens
+   between the two spaces as a vent and the gas no longer pushes it (CVIS bit 16). -> the cells newly loose */
+export function looseCells(M) {
+  const s = M.sim, A = M.ATT; if (!A || s.looseAt === A) return []; s.looseAt = A;
+  const l = [];
+  for (let c = 0; c < M.NC; c++) { if (M.CVIS[c] & 16 || M.CKN[c] === 1) continue;
+    if (A[M.CN[4 * c]] || A[M.CN[4 * c + 1]] || A[M.CN[4 * c + 2]] || A[M.CN[4 * c + 3]]) continue;
+    M.CVIS[c] |= 16; l.push(c);
+    const a = Math.min(M.CSP[c], M.CSN[c]), b = Math.max(M.CSP[c], M.CSN[c]); if (a !== b) M.OPEN.set((a << 8) | b, (M.OPEN.get((a << 8) | b) || 0) + M.CAR[c]); }
+  if (l.length) s.loose = (s.loose || 0) + l.length;
+  return l;
 }
 /* pieces no longer connected to the rest of the ship are debris (bench settle) */
 export function markDebris(M) {
