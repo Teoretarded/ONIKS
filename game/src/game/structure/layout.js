@@ -180,12 +180,13 @@ export function sectionsOf(H, def, focus) {
 /* the inside of a torn face at cut z (model frame points [x, y, z, kind] kind 0 shell, 1 deck, 2 frame): the shell's
    outline, the decks and platforms across it, the inner bottom, the centreline girder, the longitudinal bulkheads;
    every point on the cut's tear (amplitude A m, seed s, wavelength wv m) */
-export function faceOf(H, z, A, s, wv, sp) {
+export function faceOf(H, z, A, s, wv, sp, sg) {
   const out = [], b = Math.max(.5, H.beam(z)), k = H.keel(z), d = Math.max(2, H.deck(z));
-  const put = (x, y, kind, j) => {
+  // (dz: set back from the tear into the piece's own steel, sg the side the piece keeps: its frames behind the torn edge)
+  const put = (x, y, kind, j, dz = 0) => {
     if (hsh(j, s * 97 + kind) < .12) return;                                             // torn out
     const jx = (hsh(j, s * 13 + 1) - .5) * sp * .5, jy = (hsh(j, s * 13 + 2) - .5) * sp * .5;
-    const zz = z + A * jagK((x + jx) / wv, (y + jy) / wv, s) + (hsh(j, s * 13 + 3) - .5) * sp;
+    const zz = z + A * jagK((x + jx) / wv, (y + jy) / wv, s) + (hsh(j, s * 13 + 3) - .5) * sp * (dz ? .3 : 1) + (sg || 0) * dz;
     out.push(x + jx, y + jy, zz, kind);
   };
   let j = 0;
@@ -201,5 +202,20 @@ export function faceOf(H, z, A, s, wv, sp) {
   for (let y = 5.5; y < d - 2; y += 5.5) { if (Math.abs(y - levels[1]) < 2) continue; for (let x = -b; x <= b; x += sp * 1.4) put(x, y, 1, j++); }
   // the centreline girder and longitudinal bulkheads, frames at the tank tops
   for (const xb of [0, -b * .5, b * .5]) { const y0 = xb ? levels[3] : -k; for (let y = y0; y < (xb ? levels[1] : d); y += sp) put(xb, y, 2, j++); }
+  if (sg) {
+    // the decks' torn edges: a strip of deck plating back from the tear (read as a plate, not a line)
+    for (const y of levels) { const w = y >= 0 ? b : H.breadth(z, y); for (let q = 1; q <= 2; q++) for (let x = -w; x <= w; x += sp) put(x, y, 1, j++, q * sp * .6); }
+    // the frames behind the torn edge (QA D10): rings of web frame inside the shell, a beam under each deck, every
+    // ~1.2 m back into the piece, a few bent or gone
+    const fs = Math.max(.8, H.L / 130), th = Math.min(.5, b * .05);
+    for (let r = 1; r <= 3; r++) {
+      const dz = r * fs;
+      for (const side of [-1, 1]) {
+        for (let y = d - .2; y > 0; y -= sp * .8) put(side * (b - th), y, 2, j++, dz);
+        for (let y = 0; y > -k + .2; y -= sp * .8) put(side * Math.max(0, H.breadth(z, y) - th), y, 2, j++, dz);
+      }
+      for (const y of levels) { const w = (y >= 0 ? b : H.breadth(z, y)) - th, yb = y - .35; for (let x = -w; x <= w; x += sp * .8) put(x, yb, 2, j++, dz); }
+    }
+  }
   return new Float32Array(out);
 }

@@ -134,16 +134,17 @@ void main() {
       bool lo = e0 < e1;
       float e = lo ? e0 : e1, sg = lo ? -1.0 : 1.0, h4 = u01(hash1(hid ^ 0x3c6ef372u));
       tk = 1.0 - e; th = lo ? uK0.w : uK1.w;
-      if (h4 < 0.3 * tk * tk) { ${CULL} return; }
       vec2 rd = pm.xy - vec2(0.0, uKb.w);
-      // (crumpled: the plating at the tear buckled in patches ~1-2 m across, some bent out, some pushed in, some thrown
-      // along the hull, coherent over the patch rather than a per-dot fuzz; QA D10)
+      // (crumpled: the plating at the tear buckled in patches ~1-2 m across, some bent out, some pushed in, coherent
+      // over the patch rather than a per-dot fuzz, and torn away in ragged patches at the very edge (the frames and
+      // decks behind show through); little thrown along the hull, so no streaks running out of the tear; QA D10)
       int ks = int(floor((lo ? uK0.z : uK1.z) * 1000.0)) + 41;
-      vec2 cq = vec2(pm.x + pm.z * 0.7, pm.y - pm.z * 0.4) * 1.6 + 4096.0;
+      vec2 cq = vec2(pm.x + pm.z * 0.5, pm.y + pm.z * 0.5) * 1.3 + 4096.0;
       float cn = jagV(cq, ks), cn2 = jagV(cq * 0.55 + 17.0, ks + 3);
+      if (h4 < 0.3 * tk * tk || (cn < 0.4 && tk > 0.45 + 0.5 * cn)) { ${CULL} return; }
       float rl = length(rd), cu = tk * tk * uKb.x * (0.25 + 0.85 * cn + 0.2 * h4);
       vec2 rn = rl > 1e-3 ? rd / rl : vec2(0.0, 1.0);
-      p += uKR * vec3(rn * cu * (cn2 > 0.38 ? 0.75 : -0.55), sg * cu * (0.15 + 0.6 * cn2));
+      p += uKR * vec3(rn * cu * (cn2 > 0.38 ? 0.7 : -0.5), sg * cu * (0.04 + 0.16 * cn2));
     }
   }
   // level cross-fade: the outgoing level's dots go out, the incoming one's come in, one by one

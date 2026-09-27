@@ -479,8 +479,10 @@ export async function createStructure(game) {
           // (not while the whole face is under the water: the sea's occluder hides it)
           const yk = Tm[1] + Rm[4] * -S.H.keel(c.z) + Rm[5] * c.z, yd = Tm[1] + Rm[4] * S.H.deck(c.z) + Rm[5] * c.z;
           if (Math.max(yk, yd) < -1) continue;
-          if (!c.face) { c.sp = Math.max(.3, S.H.L / 260); c.face = faceOf(S.H, c.z, c.a, c.s, S.wave, c.sp); }
-          dots += bfx.drawFace(c.face, Rm, Tm, heatOf(c, t), Math.max(1, dist), S.seed, c.sp);
+          // (each side of the break its own face: the frames and deck edges set back into that piece's steel)
+          const lo = c === P.cut1, fk = lo ? 'faceLo' : 'faceHi';
+          if (!c[fk]) { c.sp = Math.max(.14, S.H.L / 700);   /* (dense enough to read as lines close up; drawFace thins it with distance) */ c[fk] = faceOf(S.H, c.z, c.a, c.s, S.wave, c.sp, lo ? -1 : 1); }
+          dots += bfx.drawFace(c[fk], Rm, Tm, heatOf(c, t), Math.max(1, dist), S.seed, c.sp);
         }
       }
       // at each break: foam where the open ends meet the water, steam, the fire, the slick

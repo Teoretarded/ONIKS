@@ -136,8 +136,9 @@ export function createBreakFx(game) {
       const x = F[i * 4], y = F[i * 4 + 1], z = F[i * 4 + 2], kind = F[i * 4 + 3];
       const wx = Tm[0] + Rm[0] * x + Rm[1] * y + Rm[2] * z, wy = Tm[1] + Rm[3] * x + Rm[4] * y + Rm[5] * z, wz = Tm[2] + Rm[6] * x + Rm[7] * y + Rm[8] * z;
       const h = heat * (.6 + .4 * hsh(i, seed));
-      const g = kind === 1 ? 150 : kind === 2 ? 118 : 176, b = (g + (255 - g) * h) * (.75 + .25 * hsh(i, seed + 1));
-      fx.dotXYZ(wx, wy, wz, pxm > 6 ? 2 : 1.4, b, g + (190 - g) * h, g * (1 - h) + 110 * h, 1, 'max');
+      // (decks and frames read clearly: the deck edges brightest, the frames a step under the shell; QA D10)
+      const g = kind === 1 ? 205 : kind === 2 ? 168 : 186, b = (g + (255 - g) * h) * (.8 + .2 * hsh(i, seed + 1));
+      fx.dotXYZ(wx, wy, wz, pxm > 3 ? 2 : 1.5, b, g + (190 - g) * h, g * (1 - h) + 110 * h, 1, 'max');
       m++;
     }
     return m;

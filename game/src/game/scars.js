@@ -651,6 +651,24 @@ export function createScars(game) {
     S.seats = Float32Array.from(seats);
   }
 
+  /* a solved mark (the blast system): its fire only on what the solver tore (QA D20). The first seats came from the
+     estimate (a rim ~1.2-1.45 x the estimated radius, the pocket's floor); once the torn area is known a seat further
+     out than the torn rim is drawn in onto it (never on the intact plating round the hole), and a mark that tore no
+     skin burns nothing that could be seen: its fire goes out */
+  function fixSeats(S, t) {
+    S.seatFix = S.bA;
+    if (!(S.bA > .02)) { S.fire.stop(t); S.fire = null; return; }
+    const Z = S.seats; if (!Z) return;
+    const cx = S.hx !== undefined ? S.hx : S.x, cy = S.hy !== undefined ? S.hy : S.y, cz = S.hz !== undefined ? S.hz : S.z;
+    const R = Math.max(.3, Math.sqrt(S.bA / Math.PI));
+    for (let j = 0, n = Z.length / 7; j < n; j++) {
+      const o = j * 7, dx = Z[o] - cx, dy = Z[o + 1] - cy, dz = Z[o + 2] - cz, al = dx * S.nx + dy * S.ny + dz * S.nz;
+      const lx = dx - S.nx * al, ly = dy - S.ny * al, lz = dz - S.nz * al, ll = Math.hypot(lx, ly, lz), lim = R * (.8 + .15 * hsh(j, S.seed + 29));
+      if (ll > lim) { const k = lim / ll; Z[o] = cx + S.nx * al + lx * k; Z[o + 1] = cy + S.ny * al + ly * k; Z[o + 2] = cz + S.nz * al + lz * k; }
+      Z[o + 3] = Math.min(Z[o + 3], Math.max(.3, R * .3));
+    }
+  }
+
   /* a fire seated on the hole's burning surfaces (none for a dent, pockmarks, a small hit that only scorches) */
   function startFire(u, S) {
     const f = fxSys();
@@ -833,6 +851,7 @@ export function createScars(game) {
         C[i * 4] = 0; C[i * 4 + 1] = S.reach; C[i * 4 + 2] = S.pet;
         C[i * 4 + 3] = ah < 0 ? 0 : .04 + .96 * Math.exp(-ah / (S.kind === 'pock' ? 3 : 9)) * (S.W > 2 || S.kind === 'pock' ? 1 : .5);
         Dd[i * 4] = KC[S.kind]; Dd[i * 4 + 1] = S.D; Dd[i * 4 + 2] = S.sg; Dd[i * 4 + 3] = S.np;
+        if (S.fire && S.bl && S.bA !== undefined && S.seatFix !== S.bA) fixSeats(S, t);
         const F = S.fire;
         if (F) {
           // the seats carried with the full pose (roll, pitch, list, sinking); the smoke leaves from the highest one
