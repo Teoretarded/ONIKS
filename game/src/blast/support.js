@@ -174,13 +174,25 @@ export function createBodies() {
     idx.sort((a, b) => rel[4 * a + 1] - rel[4 * b + 1]); for (let q = 0; q < Math.min(12, n); q++) pick.add(idx[Math.floor(q * Math.min(n, Math.max(12, n * .15)) / 12)]);
     for (const [ax, sg] of [[0, 1], [0, -1], [2, 1], [2, -1], [1, 1], [1, -1]]) { let b = 0; for (let i = 1; i < n; i++) if (sg * rel[4 * i + ax] > sg * rel[4 * b + ax]) b = i; pick.add(b); }
     const s = (n * 7919 + uid * 131) % 997 / 997;
-    // crumpled: a piece that tore away is bent and dented (folds ~1 m, up to 0.3 m deep, along its own faces)
+    // crumpled: a piece that tore away is bent and dented (folds ~1 m, up to 0.45 m deep, along its own faces); near
+    // its foot (where it tore free of the plating: the lowest metre) its edge is bitten ragged, curled outward and
+    // scorched, the scorch fading up the piece (QA D23: no clean cardboard panels)
     { let ex = 0; for (let i = 0; i < n; i++) ex = Math.max(ex, Math.abs(rel[4 * i]), Math.abs(rel[4 * i + 1]), Math.abs(rel[4 * i + 2]));
-      const A = Math.min(.3, .06 + .05 * ex);
+      const A = Math.min(.45, .1 + .07 * ex);
+      let hiY = -1e9; for (let i = 0; i < n; i++) hiY = Math.max(hiY, rel[4 * i + 1]); const tall = hiY - lowY > 1.5;   // (a piece that stood: a stack, a wall)
+      const hsh = (i, k) => (Math.imul(i * 2654435761 + k * 40503 + (s * 1e6 | 0), 0x85EBCA77) >>> 0) / 4294967296;
       for (let i = 0; i < n; i++) { const x = rel[4 * i], y = rel[4 * i + 1], z = rel[4 * i + 2];
-        const w = A * (Math.sin(x * 2.1 + s * 6.3) * Math.sin(z * 1.7 + y * 1.3 + s * 3.1) + .5 * Math.sin((x + z) * 4.3 + s * 9.7));
-        const a = nrm[3 * i] / 127, c = nrm[3 * i + 1] / 127, d = nrm[3 * i + 2] / 127;
-        if (a * a + c * c + d * d > .01) { rel[4 * i] += a * w; rel[4 * i + 1] += c * w; rel[4 * i + 2] += d * w; } else { rel[4 * i + 1] += w; } } }
+        const w = A * (Math.sin(x * 2.1 + s * 6.3) * Math.sin(z * 1.7 + y * 1.3 + s * 3.1) + .5 * Math.sin((x + z) * 4.3 + s * 9.7) + .35 * Math.sin(x * 7.9 - z * 6.1 + y * 5.3));
+        const a = nrm[3 * i] / 127, c = nrm[3 * i + 1] / 127, d = nrm[3 * i + 2] / 127, two = a * a + c * c + d * d <= .01;
+        const hf = y - lowY;                                           // height above the foot
+        const e = Math.max(0, 1 - hf / 1.2);                           // near the torn edge
+        // the edge: ragged (bitten away ever more toward the foot, with a wavy line)
+        const edgeLine = .35 + .3 * Math.sin(x * 3.7 + z * 2.9 + s * 11) + .15 * hsh(i, 1);
+        if (tall && hf < edgeLine) { rel[4 * i + 3] = -1; continue; }
+        const curl = e * e * (.35 + .4 * hsh(i, 2));                     // curled outward, as a petal
+        if (!two) { rel[4 * i] += a * (w + curl); rel[4 * i + 1] += c * (w + curl) - curl * .3; rel[4 * i + 2] += d * (w + curl); } else { rel[4 * i + 1] += w; }
+        rel[4 * i + 3] *= .45 + .55 * Math.min(1, hf / 2.5);             // scorched near the tear, fading up
+      } }
     const b = { kind: 'clump', uid, B, p: [cx, cy, cz], v: v0.slice(), w: [(s - .5) * 1.2, (s * 7 % 1 - .5) * .6, (s * 13 % 1 - .5) * 1.2], R: [1, 0, 0, 0, 1, 0, 0, 0, 1],
       rel, nrm, n, low: Int32Array.from(pick), rest: false, gone: false, t: 0, hot: hot || 0, fade: 1, sea: false, still: 0 };
     list.push(b); return b;
@@ -272,7 +284,14 @@ export function createBodies() {
       if (b.p[1] < -.3) { b.sea = true; b.v[1] = Math.max(b.v[1], -1.5); b.v[0] *= .95; b.v[2] *= .95; b.w = b.w.map(x => x * .95); b.fade = Math.max(0, 1 + (b.p[1] + .3) / 3); if (b.fade <= 0) b.gone = true; }
     } else if (pen > 0) {
       b.p[1] += pen;
-      if (b.v[1] < -2) { b.v[1] = -b.v[1] * .12; b.v[0] *= .5; b.v[2] *= .5; b.w = b.w.map(x => x * .5); }
+      if (b.v[1] < -2) {
+        // a hard landing crushes it: its lower part squashed and splayed, harder the faster it came down (once)
+        if (!b.sagged) { b.sagged = true; const k = Math.min(.45, -b.v[1] * .04); let lo = 1e9, hi = -1e9;
+          for (let i = 0; i < b.n; i++) { const y = b.rel[4 * i + 1]; if (y < lo) lo = y; if (y > hi) hi = y; }
+          const H = Math.max(.5, hi - lo);
+          for (let i = 0; i < b.n; i++) { const f = Math.max(0, 1 - (b.rel[4 * i + 1] - lo) / Math.min(H, 2)); if (f <= 0) continue;
+            b.rel[4 * i + 1] -= (b.rel[4 * i + 1] - lo) * k * f; b.rel[4 * i] *= 1 + .25 * k * f; b.rel[4 * i + 2] *= 1 + .25 * k * f; } }
+        b.v[1] = -b.v[1] * .12; b.v[0] *= .5; b.v[2] *= .5; b.w = b.w.map(x => x * .5); }
       else { b.v[1] = Math.max(0, b.v[1]); b.v[0] *= .6; b.v[2] *= .6; b.w = b.w.map(x => x * .5); }
       // at rest only if its middle is over a surface near its foot (else it tips off the edge it caught)
       const fc = floorAt(b.uid, b.p[0], b.p[1], b.p[2]), foot = b.p[1] - pen;
@@ -295,6 +314,7 @@ export function createBodies() {
       const R = b.R, rel = b.rel;
       const N = b.nrm;
       for (let i = 0; i < b.n; i += stride) {
+        if (rel[4 * i + 3] < 0) continue;                                     // (bitten off the torn edge)
         const x = rel[4 * i], y = rel[4 * i + 1], z = rel[4 * i + 2];
         let lit = 1;
         if (L && N) { const a = N[3 * i] / 127, c = N[3 * i + 1] / 127, d = N[3 * i + 2] / 127;

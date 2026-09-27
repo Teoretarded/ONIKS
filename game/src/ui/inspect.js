@@ -417,6 +417,8 @@ export async function createInspect(game, ctx) {
         if (!V.manual && !V.fly) cam.goal.dist = Math.exp(lerp(Math.log(A.dist), Math.log(E.dist), k));
       }
     }
+    // (a hurt ship: the view is drawn along her toward where she was holed, not held on her middle)
+    if (!V.focus && V.kind === 'unit' && V.u) { const hz = damageZ(V.u); if (hz !== null) { const k = ease(sat(V.t / 1.2)) * .7; V.focusLocal[2] = lerp(V.focusLocal[2], hz, k); } }
     toWorld(V.R0, V.T0, V.focusLocal, V.focusW);
     const F = V.fly;
     if (F) {
@@ -432,6 +434,13 @@ export async function createInspect(game, ctx) {
     }
     cam.fly = null;
     cam.followFn = focusFn; cam.followOff = FOLLOW0;
+  }
+  // the station (model z) of a ship's holes, weighted by their area: the sim's, else the scars; null if unhurt
+  function damageZ(u) {
+    let w = 0, z = 0;
+    const Hs = u.ship && u.ship.holes; if (Hs) for (const h of Hs) if (h.A > .05) { w += h.A; z += h.A * h.z; }
+    if (!w && game.scars) { const rec = game.scars.of(u.id); if (rec) for (const q of rec.list) if (q.r > .2) { w += q.r * q.r; z += q.r * q.r * q.z; } }
+    return w > 0 ? z / w : null;
   }
   const FOLLOW0 = [0, 0, 0];
   const focusFn = () => S ? S.focusW : null;
