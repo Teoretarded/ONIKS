@@ -209,6 +209,20 @@ export async function runCase(O, c, o = {}) {
   row.sys = systems(O, id);
   // flooding over time: the sim run ahead (no rendering), the state again and a wide still
   if (c.ff) { const lost = []; const oe = sim.emit.bind(sim); sim.emit = (t, e) => { if (e && (e.unit === id || e.target === id) && lost.length < 40) lost.push([t, +sim.t.toFixed(1), JSON.stringify(e, (a, v) => typeof v === 'number' ? +v.toFixed(3) : v).slice(0, 240)]); return oe(t, e); }; O.ff(c.ff); sim.emit = oe; row.ffEvents = lost; O.advance(.1, 3); row.sys2 = systems(O, id); await shot(O, id, aim, V.w, `${dir}/${c.id}_ff${c.ff}_w300`); await shot(O, id, aim, V.a, `${dir}/${c.id}_ff${c.ff}_a60`); row.shots.push('ff'); }
+  // what the player is told: the HUD and the Inspect view of her (systems out, flooding), with the UI on
+  if (c.ff || o.hud) {
+    try {
+      g.setUiHidden && g.setUiHidden(false);
+      const I = g.inspect;
+      if (I && I.open) { I.open(id); for (let i = 0; i < 20; i++) await frame(O); }
+      await O.hudShot(`${dir}/${c.id}_inspect`);
+      if (I && I.close) I.close();
+      for (let i = 0; i < 5; i++) await frame(O);
+      await O.hudShot(`${dir}/${c.id}_hud`);
+      row.shots.push('inspect', 'hud');
+    } catch (e) { row.hudErr = String(e && e.message); }
+    g.setUiHidden && g.setUiHidden(true);
+  }
   // the floating-dot check, when game/src/blast/qa.js exists
   try {
     const QM = await import('/game/src/blast/qa.js');
