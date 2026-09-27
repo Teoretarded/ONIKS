@@ -152,6 +152,8 @@ async function shot(O, id, loc, v, name) {
 export async function runCase(O, c, o = {}) {
   const g = O.game, sim = O.sim, dir = o.dir || 'qa';
   const [x, z] = clearSpot(O);
+  // the player on the struck ship's side for the systems cases (the log and Inspect report own ships in full)
+  if ((c.ff || o.hud) && g.setSide && g.side !== 'fleet') g.setSide('fleet');
   const id = spawn(O, c.type, x, z, 0);
   g.setUiHidden && g.setUiHidden(true);
   const V = views(c), row = { id: c.id, type: c.type, kind: c.cook ? 'cookoff' : c.kind, shots: [] };
@@ -194,6 +196,7 @@ export async function runCase(O, c, o = {}) {
       shot1 = true;
       await shot(O, id, aim, V.a, `${dir}/${c.id}_1s_a60`); await shot(O, id, aim, V.b, `${dir}/${c.id}_1s_b60`);
       row.shots.push('1s_a60', '1s_b60'); look(O, id, c.loc, V.a);
+      if (c.ff || o.hud) { g.setUiHidden && g.setUiHidden(false); await frame(O); await O.hudShot(`${dir}/${c.id}_1s_hud`); g.setUiHidden && g.setUiHidden(true); }
     }
     const solved = !B || B.state === 'done' || B.state === 'fail';
     if (solved && doneAt === null) doneAt = t;
@@ -209,17 +212,21 @@ export async function runCase(O, c, o = {}) {
   row.sys = systems(O, id);
   // flooding over time: the sim run ahead (no rendering), the state again and a wide still
   if (c.ff) { const lost = []; const oe = sim.emit.bind(sim); sim.emit = (t, e) => { if (e && (e.unit === id || e.target === id) && lost.length < 40) lost.push([t, +sim.t.toFixed(1), JSON.stringify(e, (a, v) => typeof v === 'number' ? +v.toFixed(3) : v).slice(0, 240)]); return oe(t, e); }; O.ff(c.ff); sim.emit = oe; row.ffEvents = lost; O.advance(.1, 3); row.sys2 = systems(O, id); await shot(O, id, aim, V.w, `${dir}/${c.id}_ff${c.ff}_w300`); await shot(O, id, aim, V.a, `${dir}/${c.id}_ff${c.ff}_a60`); row.shots.push('ff'); }
-  // what the player is told: the HUD and the Inspect view of her (systems out, flooding), with the UI on
+  // what the player is told: the HUD (its log) and the Inspect view of her with X-ray (systems out, flooded spaces)
   if (c.ff || o.hud) {
     try {
       g.setUiHidden && g.setUiHidden(false);
-      const I = g.inspect;
-      if (I && I.open) { I.open(id); for (let i = 0; i < 20; i++) await frame(O); }
-      await O.hudShot(`${dir}/${c.id}_inspect`);
-      if (I && I.close) I.close();
       for (let i = 0; i < 5; i++) await frame(O);
+      await shot(O, id, aim, V.b, `${dir}/${c.id}_hud_bare`);
       await O.hudShot(`${dir}/${c.id}_hud`);
-      row.shots.push('inspect', 'hud');
+      const I = g.inspect, IS = g.getSystem && g.getSystem('inspect');
+      if (I && I.open) {
+        I.open(id); for (let i = 0; i < 90; i++) await frame(O);
+        await O.hudShot(`${dir}/${c.id}_inspect`);
+        if (IS && IS.onKey) { IS.onKey({ code: 'KeyX', key: 'x', preventDefault() {}, stopPropagation() {} }); for (let i = 0; i < 90; i++) await frame(O); await O.hudShot(`${dir}/${c.id}_xray`); }
+        I.close(); for (let i = 0; i < 150; i++) await frame(O);
+      }
+      row.shots.push('hud', 'inspect', 'xray');
     } catch (e) { row.hudErr = String(e && e.message); }
     g.setUiHidden && g.setUiHidden(true);
   }
