@@ -669,7 +669,8 @@ export async function createInspect(game, ctx) {
       let dm = 0; if (dmg) for (const p of ent.parts) { let v = dmg[p.name] || 0;
         // (the hull is one sim part for the whole ship: an entry on it (the stern, the shafts, a space) takes its damage
         // only where the ship was holed near it, not wherever she was hit: QA D40)
-        if (v > 0 && p.name === 'hull' && ent.m0) v = hullNear(ent.m0) ? v : 0;
+        const sl = subj.simMap && subj.simMap.get(p.name);
+        if (v > 0 && ent.m0 && (p.name === 'hull' || (sl && sl.length === 1 && sl[0] === 'hull'))) v = hullNear(ent.m0) ? v : 0;
         dm = Math.max(dm, v); }
       const lab = O.condense(ent.label.toUpperCase(), sat(age / .9), t, ent.id.length + ent.label.length);
       const val = dm > 0 ? (dm >= .99 ? 'Destroyed' : `Dmg ${Math.round(dm * 100)} %`) : ent.size;
