@@ -18,28 +18,50 @@ const DOTS = new Map();                          // model key -> dots
 /* the model's dots at rest: x y z nx ny nz part (7 floats), columns (x, z) of COL m */
 export function modelDots(ent) {
   let M = DOTS.get(ent.key);
-  if (M && M.n) return M;
+  if (M && M.n) return M.ins ? growInside(ent, M) : M;
   const use = [];
   let n = 0;
   ent.parts.forEach((P, pi) => {
-    const cands = [];
-    for (const c of P.clouds || []) if (c && c.pts && c.n) cands.push(c);
-    if (P.lru) for (const m of P.lru) if (m) for (const c of m.values()) if (c && c.pts && c.n) { cands.push(c); break; }
-    if (!cands.length) return;
-    // the level nearest 0.3 m, not finer than 0.18 m (a fine level can be millions of dots)
-    let best = null;
-    for (const c of cands) { const k = c.sp < .18 ? 1e3 + (1 / c.sp) : Math.abs(Math.log((c.sp || .3) / .3)); if (!best || k < best.k) best = { c, k }; }
+    // (the interior parts are added as they are first drawn: growInside)
+    if (P.part.inside) return;
+    const c = cloudOf(P); if (!c) return;
     let X = null; try { X = P.part.xf ? P.part.xf({}) : null; } catch (e) { X = null; }
     // (a moving part whose rest transform cannot be had is left out: its dots would sit at the model's origin)
     if (X && !(X.R.every(Number.isFinite) && X.T.every(Number.isFinite))) return;
     if (P.dyn && P.part.xf && !X) return;
     let shown = true; try { shown = !P.part.show || !!P.part.show({}); } catch (e) { shown = true; }
     if (!shown) return;
-    use.push([best.c, X, pi]); n += best.c.n;
+    use.push([c, X, pi]); n += c.n;
   });
   if (!n) return { n: 0 };
   const D = new Float32Array(n * 7), col = new Map();
-  let m = 0, lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9];
+  let lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9];
+  const m = fill(D, 0, use, col, lo, hi);
+  const colI = new Map(); for (const [k, l] of col) colI.set(k, Int32Array.from(l));
+  M = { n: m, D, col: colI, lo, hi, parts: ent.parts.map(P => P.name), ins: new Uint8Array(ent.parts.length), seen: 0 };
+  ent.parts.forEach((P, pi) => { if (P.part.inside) M.ins[pi] = 1; });
+  // the top surface: the highest up-facing dot a cell (the dyn parts too: a gun's roof is a surface)
+  const nx = Math.ceil((hi[0] - lo[0]) / HF) + 1, nz = Math.ceil((hi[2] - lo[2]) / HF) + 1, top = new Float32Array(nx * nz).fill(-1e9);
+  for (let i = 0; i < m; i++) { const o = i * 7; if (D[o + 4] < .5) continue; const ix = Math.floor((D[o] - lo[0]) / HF), iz = Math.floor((D[o + 2] - lo[2]) / HF), k = iz * nx + ix; if (D[o + 1] > top[k]) top[k] = D[o + 1]; }
+  // (small gaps closed: a cell with no up-facing dot between two that have one takes the lower)
+  const t2 = top.slice();
+  for (let iz = 0; iz < nz; iz++) for (let ix = 0; ix < nx; ix++) { const k = iz * nx + ix; if (top[k] > -1e8) continue;
+    let a = -1e9, b = -1e9; for (let d = 1; d <= 3; d++) { if (ix - d >= 0 && top[k - d] > -1e8 && a < -1e8) a = top[k - d]; if (ix + d < nx && top[k + d] > -1e8 && b < -1e8) b = top[k + d]; }
+    if (a > -1e8 && b > -1e8) t2[k] = Math.min(a, b); }
+  M.hf = { lo, nx, nz, top: t2 };
+  DOTS.set(ent.key, M);
+  return growInside(ent, M);
+}
+/* the cloud nearest 0.3 m a part has (not finer than 0.18 m: a fine level can be millions of dots) */
+function cloudOf(P) {
+  const cands = [];
+  for (const c of P.clouds || []) if (c && c.pts && c.n) cands.push(c);
+  if (P.lru) for (const m of P.lru) if (m) for (const c of m.values()) if (c && c.pts && c.n) { cands.push(c); break; }
+  let best = null;
+  for (const c of cands) { const k = c.sp < .18 ? 1e3 + (1 / c.sp) : Math.abs(Math.log((c.sp || .3) / .3)); if (!best || k < best.k) best = { c, k }; }
+  return best && best.c;
+}
+function fill(D, m, use, col, lo, hi) {
   for (const [cl, X, pi] of use) {
     const f = cl.pts, by = new Int8Array(f.buffer, f.byteOffset, cl.n * 16);
     for (let i = 0; i < cl.n; i++, m++) {
@@ -51,22 +73,26 @@ export function modelDots(ent) {
         x = x2; y = y2; z = z2; nx = a; ny = b; nz = c;
       }
       const o = m * 7; D[o] = x; D[o + 1] = y; D[o + 2] = z; D[o + 3] = nx; D[o + 4] = ny; D[o + 5] = nz; D[o + 6] = pi;
-      if (x < lo[0]) lo[0] = x; if (y < lo[1]) lo[1] = y; if (z < lo[2]) lo[2] = z; if (x > hi[0]) hi[0] = x; if (y > hi[1]) hi[1] = y; if (z > hi[2]) hi[2] = z;
+      if (lo) { if (x < lo[0]) lo[0] = x; if (y < lo[1]) lo[1] = y; if (z < lo[2]) lo[2] = z; if (x > hi[0]) hi[0] = x; if (y > hi[1]) hi[1] = y; if (z > hi[2]) hi[2] = z; }
       const k = Math.floor(x / COL) * 65536 + Math.floor(z / COL); let l = col.get(k); if (!l) col.set(k, l = []); l.push(m);
     }
   }
-  const colI = new Map(); for (const [k, l] of col) colI.set(k, Int32Array.from(l));
-  M = { n: m, D, col: colI, lo, hi, parts: ent.parts.map(P => P.name) };
-  // the top surface: the highest up-facing dot a cell (the dyn parts too: a gun's roof is a surface)
-  const nx = Math.ceil((hi[0] - lo[0]) / HF) + 1, nz = Math.ceil((hi[2] - lo[2]) / HF) + 1, top = new Float32Array(nx * nz).fill(-1e9);
-  for (let i = 0; i < m; i++) { const o = i * 7; if (D[o + 4] < .5) continue; const ix = Math.floor((D[o] - lo[0]) / HF), iz = Math.floor((D[o + 2] - lo[2]) / HF), k = iz * nx + ix; if (D[o + 1] > top[k]) top[k] = D[o + 1]; }
-  // (small gaps closed: a cell with no up-facing dot between two that have one takes the lower)
-  const t2 = top.slice();
-  for (let iz = 0; iz < nz; iz++) for (let ix = 0; ix < nx; ix++) { const k = iz * nx + ix; if (top[k] > -1e8) continue;
-    let a = -1e9, b = -1e9; for (let d = 1; d <= 3; d++) { if (ix - d >= 0 && top[k - d] > -1e8 && a < -1e8) a = top[k - d]; if (ix + d < nx && top[k + d] > -1e8 && b < -1e8) b = top[k + d]; }
-    if (a > -1e8 && b > -1e8) t2[k] = Math.min(a, b); }
-  M.hf = { lo, nx, nz, top: t2 };
-  DOTS.set(ent.key, M);
+  return m;
+}
+/* the interior parts (data/models_interior.js, part.inside): sampled only once shown (round a hole), so added to the
+   dots as their clouds appear, after the others (the indices already handed out keep their dots; M.n grows) */
+function growInside(ent, M) {
+  const k = ent.parts.length; if (!M.have) M.have = new Uint8Array(k);
+  if (M.seen && ++M.seen % 30) return M;                    // (looked at every 30th call)
+  M.seen = 1;
+  const use = []; let n = 0;
+  ent.parts.forEach((P, pi) => { if (!M.ins[pi] || M.have[pi]) return; const c = cloudOf(P); if (!c) return; M.have[pi] = 1; use.push([c, null, pi]); n += c.n; });
+  if (!n) return M;
+  const D = new Float32Array((M.n + n) * 7); D.set(M.D.subarray(0, M.n * 7));
+  const col = new Map();
+  const m = fill(D, M.n, use, col, null, null);
+  for (const [key, l] of col) { const a = M.col.get(key); if (!a) M.col.set(key, Int32Array.from(l)); else { const b = new Int32Array(a.length + l.length); b.set(a); b.set(l, a.length); M.col.set(key, b); } }
+  M.D = D; M.n = m; M.gen = (M.gen || 0) + 1;
   return M;
 }
 /* the top surface at (x, z) (model frame), -1e9 off the model */
@@ -87,7 +113,7 @@ export function eachInColumns(M, x0, z0, x1, z1, cb) {
    -> 0 untouched, 1 plating (intact), 2 plating (torn: a petal or gone), 3 column kept, 4 column dropped,
    5 behind, kept, 6 behind, dropped */
 export const K = { NONE: 0, PLATE: 1, TORN: 2, COL: 3, COLDROP: 4, BEHIND: 5, BEHINDDROP: 6 };
-export function classify(B, x, y, z, nx, ny, nz, info) {
+export function classify(B, x, y, z, nx, ny, nz, info, ins) {
   const F = B.spec.frame, S = B.spec.gridS || .125, band = B.band || 1, D = B.depth || 4;
   const dx = x - F.O[0], dy = y - F.O[1], dz = z - F.O[2];
   const l = [dx * F.X[0] + dy * F.X[1] + dz * F.X[2], dx * F.Y[0] + dy * F.Y[1] + dz * F.Y[2], dx * F.Z[0] + dy * F.Z[1] + dz * F.Z[2]];
@@ -107,6 +133,11 @@ export function classify(B, x, y, z, nx, ny, nz, info) {
     if (info) { info.r = r; info.off = off; info.i = Math.round(fi); info.j = Math.round(fj); info.up = A[1] > .7; }
     if (Math.abs(off) > band || !face) {
       if (off > -.05 && off < (A[1] > .7 ? 30 : 3)) return (fN & 11) ? K.COLDROP : K.COL;
+      if (ins && off <= -.05 && off > -D - 8) {
+        // an interior part: wrecked where the plating over it tore (most of its dots gone, the same hash as the shader's)
+        const wd = Math.max(0, 1 + off / (D + .4));
+        return ((f00 & 1) || (fN & 3)) && wreckHash(x, y, z) < .7 * wd + .2 ? K.BEHINDDROP : K.BEHIND;
+      }
       if (off <= -.05 && off > -D - .4) return face && Math.min(fi, r.nu - fi, fj, r.nv - fj) * S > .6 && ((f00 & 1) || (fN & 11)) ? K.BEHINDDROP : K.BEHIND;
       continue;
     }
@@ -114,6 +145,14 @@ export function classify(B, x, y, z, nx, ny, nz, info) {
     return (f00 & 1) || (fN & 2) ? K.TORN : K.PLATE;
   }
   return K.NONE;
+}
+
+/* engine/models.js wreckHash: an integer hash of the 0.25 m cell (exact on both sides) */
+export function wreckHash(x, y, z) {
+  const a = (Math.floor(x * 4) + 65536) >>> 0, b = (Math.floor(y * 4) + 65536) >>> 0, c = (Math.floor(z * 4) + 65536) >>> 0;
+  let h = (Math.imul(a, 73856093) ^ Math.imul(b, 19349663) ^ Math.imul(c, 83492791)) >>> 0;
+  h = (h ^ (h >>> 13)) >>> 0; h = Math.imul(h, 1274126177) >>> 0;
+  return (h >>> 8) / 16777216;
 }
 
 /* ---------------------------------------------------------------- loose pieces */
@@ -242,6 +281,9 @@ export function createBodies() {
       else if (!over) { b.rest = true; b.v = [0, 0, 0]; b.w = [0, 0, 0]; }            // (wedged: it rests on what it caught)
       else if (Math.hypot(b.v[0], b.v[1], b.v[2]) < .35 && Math.hypot(...b.w) < .25) { b.rest = true; b.v = [0, 0, 0]; b.w = [0, 0, 0]; }
     }
+    // (held where it is for half a second, by a surface or a wall it caught: at rest there)
+    if (!b.rest && !b.sea) { const mv = Math.hypot(b.p[0] - p0[0], b.p[1] - p0[1], b.p[2] - p0[2]); b.idle = mv < .01 * h + 1e-4 ? (b.idle || 0) + h : 0;
+      if (b.idle > .5) { b.rest = true; b.v = [0, 0, 0]; b.w = [0, 0, 0]; } }
   }
   /* each dot of every body in the model frame: cb(uid, B, x, y, z, brightness, heat, fade, i); L: the light in the model
      frame (a clump's dots are lit by their own face as it turns) */
@@ -287,7 +329,8 @@ export function connectivity(Md, patches, T) {
   const idx = [], cls = [], over = [], info = {};
   eachInColumns(Md, lo[0] - 4, lo[1] - 4, hi[0] + 4, hi[1] + 4, i => {
     const o = 7 * i; let c = K.NONE, anch = false, dead = 0;
-    for (const B of patches) { c = classify(B, D[o], D[o + 1], D[o + 2], D[o + 3], D[o + 4], D[o + 5], info); if (c !== K.NONE) { anch = (c === K.COL || c === K.BEHIND) && Math.abs(info.off) < .8;
+    const ins = Md.ins && Md.ins[D[o + 6]];
+    for (const B of patches) { c = classify(B, D[o], D[o + 1], D[o + 2], D[o + 3], D[o + 4], D[o + 5], info, ins); if (c !== K.NONE) { anch = (c === K.COL || c === K.BEHIND) && (Math.abs(info.off) < .8 || (ins && c === K.BEHIND));
       if (info.up && (c === K.COL || c === K.BEHIND)) { const r = info.r, t = Math.max(0, Math.min(r.nv, info.j)) * (r.nu + 1) + Math.max(0, Math.min(r.nu, info.i)); dead = (r.cpu[4 * t + 3] | 0) & 3 ? 1 : 0; } break; } }
     idx.push(i); over.push(dead); cls.push(c === K.NONE || c === K.PLATE || c === K.TORN || anch ? 1 : c === K.COLDROP || c === K.BEHINDDROP ? 2 : 0);
   });

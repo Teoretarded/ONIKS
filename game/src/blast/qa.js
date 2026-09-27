@@ -42,7 +42,7 @@ export function check(O, o = {}) {
     stats.bodies++; stats.bodyDots += B2.n;
     if (B2.kind === 'clump') {
       if (B2.sea) continue;
-      const moving = Math.hypot(...B2.v) > .05 || !B2.rest && B2.t < 1;
+      const moving = !B2.rest && !(B2.idle > .3) || Math.hypot(...B2.v) > .05;
       const gap = clumpGap(b, B2);
       let ex = 0; for (let i = 0; i < B2.n; i++) ex = Math.max(ex, Math.hypot(B2.rel[4 * i], B2.rel[4 * i + 1], B2.rel[4 * i + 2]));
       if (ex > 8) flags.push({ kind: 'big-piece', unit: B2.uid, n: B2.n, at: B2.p.map(v => +v.toFixed(2)), extent: +ex.toFixed(1) });

@@ -1,4 +1,4 @@
-/* The blast bench's shell model on the GPU, WebGL2 (game/concepts/blast/gpu.js at commit ae3abf6, copied; the one change:
+/* The blast bench's shell model on the GPU, WebGL2 (game/concepts/blast/gpu.js at commit 882692c, copied; the one change:
    gravity on free pieces along the patch's up axis, uUp). RGBA32F, the same physics as the bench's CPU reference, pass
    for pass:
      0. clear the node force accumulator; scatter last step's contact push-back into it
@@ -158,7 +158,8 @@ void main(){
     util = max(util, vm / ((mA.z + mA.w * ep.w) * rf));
     float Dr11 = co * co * D11 + 2.0 * co * si * D12 + si * si * D22, Dr22 = si * si * D11 - 2.0 * co * si * D12 + co * co * D22, Dr12 = (co * co - si * si) * D12 + co * si * (D22 - D11);
     float S11 = s.x + uBeta * Ep * (Dr11 + nu * Dr22), S22 = s.y + uBeta * Ep * (Dr22 + nu * Dr11), S12 = s.z + uBeta * 2.0 * Gm * Dr12;
-    float P11 = co * S11 - si * S12, P12 = co * S12 - si * S22, P21 = si * S11 + co * S12, P22 = si * S12 + co * S22;
+    float kq = (U12 * (S22 - S11) + S12 * (U11 - U22)) / (U11 + U22);   // exact P = R (S - k J) (no net moment)
+    float P11 = co * S11 - si * (S12 - kq), P12 = co * (S12 + kq) - si * S22, P21 = si * S11 + co * (S12 - kq), P22 = si * (S12 + kq) + co * S22;
     float vol = A0 * hh * fd, k1 = 1.0 / L12, k2 = -P3x / (L12 * P3y), k3 = 1.0 / P3y;
     float f2x = -vol * (P11 * k1 + P12 * k2), f2y = -vol * (P21 * k1 + P22 * k2), f3x = -vol * P12 * k3, f3y = -vol * P22 * k3;
     vec3 g2 = f2x * e1 + f2y * e2, g3 = f3x * e1 + f3y * e2;
@@ -245,7 +246,7 @@ void main(){
 }`;
 
 const TRUSS_FS = HEAD + `
-uniform sampler2D uTS, uCS; uniform sampler2DArray uMA;
+uniform sampler2D uTS, uCS, uFrc; uniform sampler2DArray uMA;
 // state (Lp, negative once failed; shear set; accumulated strain; bending set); forces on 9 nodes: a, b, A (m back),
 // B (m ahead), C0 (chord start), the plating nodes across a and b on either side (the angles' axes run between them)
 layout(location=0) out vec4 oSt;
@@ -321,7 +322,10 @@ void main(){
     }
   }
   int nx = int(t5.z); float tbn = nx >= 0 ? abs(texelFetch(uMA, ivec3(AT(nx), 0), 0).w) : 0.0;
-  float failed = max(0.0, log(Lp / L0)) + max(abs(st.w), tbn) * t1.z >= t1.y ? 1.0 : 0.0;
+  // stripped: an end node with no intact cell left (last step's gather: members only) lets the member go
+  float wa = texelFetch(uFrc, AT(a), 0).w, wb = texelFetch(uFrc, AT(b), 0).w;
+  bool strip = (wa > 0.0 && wa < 0.5) || (wb > 0.0 && wb < 0.5);
+  float failed = strip || max(0.0, log(Lp / L0)) + max(abs(st.w), tbn) * t1.z >= t1.y ? 1.0 : 0.0;
   oSt = vec4(failed > 0.5 ? -Lp : Lp, tsp, eb, tbp);
   oF0 = vec4(F[0], F[1].x); oF1 = vec4(F[1].yz, F[2].xy); oF2 = vec4(F[2].z, F[3]); oF3 = vec4(F[4], F[5].x);
   oF4 = vec4(F[5].yz, F[6].xy); oF5 = vec4(F[6].z, F[7]); oF6 = vec4(F[8], 0.0);
@@ -346,8 +350,10 @@ void main(){
   if (i >= uN) { none(); return; }
   vec4 cn = texelFetch(uCon, AT(i), 0);
   if (cn.x < 0.0) { none(); return; }
-  vec4 c0 = texelFetch(uCS, ATW(int(cn.x), 11, 0), 0);
-  put(int(c0[k]), vec4(cn.yzw * (0.25 / uH), 0.0));
+  int c = int(cn.x); vec4 c0 = texelFetch(uCS, ATW(c, 11, 0), 0);
+  vec3 nc = normalize(cross(texelFetch(uCS, ATW(c, 11, 1), 0).xyz, texelFetch(uCS, ATW(c, 11, 3), 0).xyz));
+  float a = cn.z, b = cn.w, w = k == 0 ? (1.0 - a) * (1.0 - b) : k == 1 ? a * (1.0 - b) : k == 2 ? a * b : (1.0 - a) * b;
+  put(int(c0[k]), vec4(nc * (cn.y * w / uH), 0.0));   // bilinear weights of the point hit, along the cell's rest normal
 }`;
 
 // gather: each node sums the forces its elements computed for it (adjacency lists), and counts the intact ones
@@ -376,7 +382,7 @@ void main(){
   for (int k = 0; k < 256; k++) { if (k >= n2) break;
     int e = ADJ(o2 + k), t = e / 16, r = e - 16 * t; ivec2 q = AT(t);
     int f = 3 * r; F += vec3(texelFetch(uMF, ivec3(q, f >> 2), 0)[f & 3], texelFetch(uMF, ivec3(q, (f + 1) >> 2), 0)[(f + 1) & 3], texelFetch(uMF, ivec3(q, (f + 2) >> 2), 0)[(f + 2) & 3]);
-    if (r < 2 && texelFetch(uMA, ivec3(q, 0), 0).x > 0.0) cnt += 1.0; }
+    if (r < 2 && texelFetch(uMA, ivec3(q, 0), 0).x > 0.0) cnt += 1.0 / 64.0; }   // cells count 1, members 1/64 (a member reads 'no cell left' off it)
   o = vec4(F, cnt);
 }`;
 
@@ -402,14 +408,14 @@ void main(){
   vec4 fr = texelFetch(uFrc, p, 0);
   vec3 F = fr.xyz, u = pos.xyz, v = vel.xyz;
   float free_ = pos.w;
-  if (fr.w < 0.5 && n0.y <= 0.0) free_ = 1.0;
+  if (fr.w <= 0.0 && n0.y <= 0.0) free_ = 1.0;
   if (uUseImp == 1) F += texelFetch(uImp, p, 0).xyz / uH;
   if (n0.y > 0.0) {
     vec3 d = u - anc.xyz; float dl = length(d);
     if (dl > 1e-12) { float f = n0.y * dl; if (f > n0.z) { anc.xyz = u - d * (n0.z / n0.y / dl); f = n0.z; } F -= d / dl * f; }
-    F -= n0.w * v;
   }
   v = v + F * (uH * n0.x);
+  if (n0.y > 0.0) v /= 1.0 + uH * n0.x * n0.w;       // the boundary dashpot, implicit (stable at any step)
   if (free_ > 0.5) v[uUp] -= uG * uH; else v *= 1.0 - uAlpha * uH;
   u += v * uH;
   // contact: the other panels near this node (planar maps); stop against an intact cell, push it back next step
@@ -433,7 +439,9 @@ void main(){
     float gap = (cur - pl) * sd; if (gap > 0.015) continue;
     u += n * ((0.015 - gap) * sd);
     float rel = (dot(v, n) - vc) * sd;
-    if (rel < 0.0) { float dv = -rel * sd; v += n * dv; oCon = vec4(float(c), -dv / n0.x * n); }
+    if (rel < 0.0) { float dv = -rel * sd; v += n * dv;
+      vec3 r1 = texelFetch(uCS, ATW(c, 11, 1), 0).xyz, r3 = texelFetch(uCS, ATW(c, 11, 3), 0).xyz, xr = n1.xyz + u - texelFetch(uNS, ATW(int(cc.x), 5, 1), 0).xyz;
+      oCon = vec4(float(c), -dv / n0.x * dot(n, normalize(cross(r1, r3))), clamp(dot(xr, r1) / dot(r1, r1), 0.0, 1.0), clamp(dot(xr, r3) / dot(r3, r3), 0.0, 1.0)); }
     break;
   }
   oPos = vec4(u, free_); oVel = vec4(v, 0.0); oAnc = anc;
@@ -557,7 +565,7 @@ export function createGPU(gl, M) {
   const subA = (t, l, h, a) => { gl.bindTexture(gl.TEXTURE_2D_ARRAY, t); gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, l, Wd, h, 1, gl.RGBA, gl.FLOAT, a); };
   function upload() { bindAll();
     const z = n => new Float32Array(Wd * rows(n) * 4);
-    const zN = z(N); for (let l = 0; l < 3; l++) subA(nodeA[cur], l, NHr, zN);
+    const zN = z(N); for (let l = 0; l < 3; l++) subA(nodeA[cur], l, NHr, zN); sub2(frc, Wd, NHr, zN);
     { const c = z(N); for (let i = 0; i < N; i++) c[4 * i] = -1; sub2(con, Wd, NHr, c); }
     const zC = z(NC); for (let l = 0; l < 4; l++) subA(cellA[cur], l, CHr, zC); sub2(T.dmg, Wd, CHr, zC);
     subA(cellA[cur], 4, CHr, zC);   // state: intact, failure ratio 0
@@ -702,8 +710,9 @@ export function createGPU(gl, M) {
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null); gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     tagged.set('n' + tag, { b, f: gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0) }); gl.flush();
   }
-  function nodesOf(tag, V, FREE) { const e = tagged.get('n' + tag); if (!e) return false; tagged.delete('n' + tag);
+  function nodesOf(tag, V, FREE, U) { const e = tagged.get('n' + tag); if (!e) return false; tagged.delete('n' + tag);
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, e.b); gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, rb); for (let i = 0; i < N; i++) FREE[i] = rb[4 * i + 3] > .5 ? 1 : 0;
+    if (U) for (let i = 0; i < N; i++) { U[3 * i] = rb[4 * i]; U[3 * i + 1] = rb[4 * i + 1]; U[3 * i + 2] = rb[4 * i + 2]; }
     gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, Wd * NHr * 16, rb); for (let i = 0; i < N; i++) { V[3 * i] = rb[4 * i]; V[3 * i + 1] = rb[4 * i + 1]; V[3 * i + 2] = rb[4 * i + 2]; }
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null); gl.deleteBuffer(e.b); gl.deleteSync(e.f); return true; }
   function readState(o) {                                 // end of run: plastic strain, damage, member failures, hinge sets

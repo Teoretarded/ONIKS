@@ -72,9 +72,9 @@ export function createShellRunner(gl, o = {}) {
     const M = R.M, s = M.sim, g = R.gpu, m = s.n - R.LAT;
     if (s.n % 200 === 0) g.requestNodes(s.n);
     if (m > 0 && m % 200 === 0) {
-      const VE = R.VE || (R.VE = { V: new Float64Array(3 * M.N), FREE: new Uint8Array(M.N) });
+      const VE = R.VE || (R.VE = { V: new Float64Array(3 * M.N), FREE: new Uint8Array(M.N), U: new Float64Array(3 * M.N) });
       const tn = now();
-      if (g.nodesOf(m, VE.V, VE.FREE)) { const V0 = M.V, F0 = M.FREE; M.V = VE.V; M.FREE = VE.FREE; checkEnd(M); M.V = V0; M.FREE = F0; }
+      if (g.nodesOf(m, VE.V, VE.FREE, VE.U)) { const V0 = M.V, F0 = M.FREE; M.V = VE.V; M.FREE = VE.FREE; M.U = VE.U; checkEnd(M); M.V = V0; M.FREE = F0; M.U = null; }
       stats.nodeMs += now() - tn;
     }
   }

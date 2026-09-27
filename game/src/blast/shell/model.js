@@ -1,4 +1,4 @@
-/* The blast bench's shell model (game/concepts/blast/blast.js at commit ae3abf6), ported for the game: the same
+/* The blast bench's shell model (game/concepts/blast/blast.js at commit 882692c, its petals prototype left out), ported for the game: the same
    physics, from a scene built out of a patch spec (blast/spec.js) instead of the bench's test box. No DOM, no GL.
 
    Structure: every quad cell is 4 crossed CST membranes (corotational, plane-stress J2 + linear hardening + Cowper-
@@ -483,7 +483,8 @@ export function buildShell(scene, S) {
   let added = 0, total = 0;
   for (let i = 0; i < N; i++) { total += Mm[i]; const need = kn[i] * dtT * dtT; if (Mm[i] > 0 && WINV[i] > 0 && need > Mm[i]) { added += need - Mm[i]; Mm[i] = need; WINV[i] = 1 / need; } }
   M.massAdded = added / total;
-  M.dt = .75 * dtT; M.BETA = .033 * M.dt;
+  // (bench 882692c: 1.4x the Gershgorin bound, the boundary dashpots implicit; the stiffness damping as before)
+  M.dt = 1.4 * dtT; M.BETA = .033 * .75 * dtT;
   // ---- contact candidates: planar pieces whose plane passes within 1.5 m of the node (not its own; closer than 5 cm
   // at rest is a junction)
   const NCC = M.NCC = new Int32Array(4 * N).fill(-1);
@@ -866,7 +867,7 @@ export function gasStep(M, h) {
   }
 }
 export function openCell(M, c, t) {
-  if (M.CKN[c] === 1) return; M.CKN[c] = 1; if (!M.CER[c]) M.CER[c] = 2;
+  if (M.CKN[c] === 1) return; M.CKN[c] = 1; if (!M.CER[c]) M.CER[c] = 2; M.sim.cellsTorn = (M.sim.cellsTorn || 0) + 1;
   if (M.CTE[c] < 0) M.CTE[c] = t;
   const a = Math.min(M.CSP[c], M.CSN[c]), b = Math.max(M.CSP[c], M.CSN[c]), k = (a << 8) | b;
   if (a !== b) M.OPEN.set(k, (M.OPEN.get(k) || 0) + M.CAR[c]);
@@ -910,11 +911,15 @@ export function commonSync(M, t, torn, hs) {
 }
 /* nodes still joined (through intact cells and members) to the fixed structure; flying debris is not. The end-of-run
    test and the "quiet" clock look at these only (bench attachedNodes) */
-export function attachedNodes(M) {
+export function attachedNodes(M, U) {
   const N = M.N, par = new Int32Array(N); for (let i = 0; i < N; i++) par[i] = i;
   const fd = i => { while (par[i] !== i) { par[i] = par[par[i]]; i = par[i]; } return i; }, un = (a, b) => { a = fd(a); b = fd(b); if (a !== b) par[a] = b; };
   for (let c = 0; c < M.NC; c++) if (M.CKN[c] !== 1) { const a = M.CN[4 * c]; for (let k = 1; k < 4; k++) un(a, M.CN[4 * c + k]); }
-  for (let k = 0; k < M.NT; k++) if (!M.TFL[k]) un(M.TA[k], M.TB[k]);
+  // (bench 882692c: a member stretched past 1.5 its length no longer holds, U the displacements read back)
+  const R0 = M.R0;
+  for (let k = 0; k < M.NT; k++) { if (M.TFL[k]) continue; const a = M.TA[k], b = M.TB[k];
+    if (U) { const d = Math.hypot(R0[3 * a] + U[3 * a] - R0[3 * b] - U[3 * b], R0[3 * a + 1] + U[3 * a + 1] - R0[3 * b + 1] - U[3 * b + 1], R0[3 * a + 2] + U[3 * a + 2] - R0[3 * b + 2] - U[3 * b + 2]); if (d > 1.5 * M.TL0[k]) continue; }
+    un(a, b); }
   const root = new Uint8Array(N); for (let i = 0; i < N; i++) if (M.AK[i] > 0 || M.WINV[i] === 0) root[fd(i)] = 1;
   const a = new Uint8Array(N); for (let i = 0; i < N; i++) a[i] = root[fd(i)];
   return a;
@@ -924,13 +929,19 @@ export const attachedCell = (M, c) => { const A = M.ATT; return !A || A[M.CN[4 *
    strong damping (dynamic relaxation) to read the permanent set (bench checkEnd; X, V read back by the caller) */
 export function checkEnd(M) {
   const s = M.sim;
-  if (!M.ATT || s.n - (M.attN || 0) >= 1000) { M.ATT = attachedNodes(M); M.attN = s.n; }
+  if (!M.ATT || s.n - (M.attN || 0) >= 1000) { M.ATT = attachedNodes(M, M.U); M.attN = s.n; }
   const ATT = M.ATT;
   let v2 = 0, ke = 0; for (let i = 0; i < M.N; i++) { if (M.FREE[i] || !ATT[i]) continue; const q = M.V[3 * i] ** 2 + M.V[3 * i + 1] ** 2 + M.V[3 * i + 2] ** 2; ke += .5 * M.M[i] * q; if (q > v2) v2 = q; }
   let gas = 0; for (let k = 0; k < M.GV.length; k++) if (M.GV[k] < Infinity) gas = Math.max(gas, Math.abs(M.GP[k]));
-  const quiet = s.srcs.every(q => q.F > .98) && s.t - s.lastSrc > .005;
+  let quiet = s.srcs.every(q => q.F > .98) && s.t - s.lastSrc > .005;
+  // (bench 882692c: the run ends once the gas stops rising and tearing is down to a trickle: the structure has taken
+  // what it will take)
+  if (!s.gref || s.t - s.gref.t >= .01) { const g = M.GP.slice(), tc = s.cellsTorn || 0;
+    s.steady = !!s.gref && tc - s.gref.tc <= .03 * tc && g.every((v, k) => !(M.GV[k] < Infinity) || v <= s.gref.g[k] * 1.02 + 2e3); s.gref = { t: s.t, g, tc }; }
+  const gasDone = gas < 2e4 || s.steady;
+  if (s.steady && s.srcs.every(q => q.F > .98)) quiet = true;
   s.kepeak = Math.max(s.kepeak || 0, ke); s.keLast = ke; s.gasLast = gas; s.quietLast = quiet;
-  if (!s.relax && quiet && gas < 2e4 && s.t > s.tMin && (ke < .05 * s.kepeak || s.t > s.tMin + .1)) { s.relax = true; s.tRelax = s.t; }
+  if (!s.relax && quiet && gasDone && s.t > s.tMin && (ke < .05 * s.kepeak || s.t > s.tMin + .1)) { s.relax = true; s.tRelax = s.t; }
   // (the game's shorter horizon, spec.fastEnd: once the gas is out and the burning nearly done (and not before 0.12 s),
   // relax: what still tears after that is plating going on eroding at the fringes of what already went; the bench waits
   // for its kinetic-energy criterion, which a patch with loose plating rarely meets before 0.4 s)

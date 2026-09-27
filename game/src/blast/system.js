@@ -256,13 +256,16 @@ export async function createBlast(game) {
     const ent = entOf(u); if (!ent) return;
     const Md = modelDots(ent); if (!Md.n) return;
     B.band = bandOf(B); B.depth = B.spec.depth || 4;
-    let T = taken.get(B.uid); if (!T || T.length !== Md.n) taken.set(B.uid, T = new Uint8Array(Md.n));
-    const F = B.spec.frame, S = B.spec.gridS || S_GRID, cols = new Set();
+    takenOf(B.uid, Md);
+    // (the model's dots grew (interior parts first drawn round the hole): every dead texel looked at again)
+    const regen = B.mdGen !== Md.gen; B.mdGen = Md.gen;
+    const F = B.spec.frame, S = B.spec.gridS || S_GRID, cols = new Set(), reach = Md.gen ? 8.5 : .5;
     let k = 0;
     for (const r of B.rects) {
       if (!r.cpu || k > 1) continue;
       k++;
-      const W = r.nu + 1, A = r.ax === 0 ? F.X : r.ax === 1 ? F.Y : F.Z, e0 = A[1] > .7 ? 0 : -(B.spec.depth || 4) - .5, e1 = A[1] > .7 ? 0 : 3;
+      if (regen && r.dead) r.dead.fill(0);
+      const W = r.nu + 1, A = r.ax === 0 ? F.X : r.ax === 1 ? F.Y : F.Z, e0 = A[1] > .7 ? 0 : -(B.spec.depth || 4) - reach, e1 = A[1] > .7 ? 0 : 3;
       for (let j = 0; j <= r.nv; j++) for (let i = 0; i <= r.nu; i++) {
         const t = j * W + i, f = (r.cpu[4 * t + 3] | 0) & 11;
         if (!f || r.dead[t] === f) continue;
@@ -280,11 +283,18 @@ export async function createBlast(game) {
   }
   /* the columns waiting to be looked at, a time budget a frame (a patch's plating going can touch thousands of dots) */
   const pendDetach = new Set();
+  let genTick = 0;
+  // the dots of unit uid already flying (grown with the model's dots, keeping what it had)
+  function takenOf(uid, Md) {
+    let T = taken.get(uid);
+    if (!T || T.length < Md.n) { const T2 = new Uint8Array(Md.n); if (T) T2.set(T); taken.set(uid, T = T2); }
+    return T;
+  }
   function detachWork(B, budgetMs) {
     const P = B.pendCols; if (!P || !P.size) { pendDetach.delete(B); return; }
     const u = sim.units.get(B.uid); if (!u) { pendDetach.delete(B); return; }
     const ent = entOf(u), Md = ent && modelDots(ent); if (!Md || !Md.n) return;
-    const T = taken.get(B.uid), F = B.spec.frame, t0 = performance.now();
+    const T = takenOf(B.uid, Md), F = B.spec.frame, t0 = performance.now();
     const D = Md.D, pick = [], info = {};
     let nc = 0;
     for (const key of P) {
@@ -293,7 +303,7 @@ export async function createBlast(game) {
       const cx = Math.floor(key / 65536) - 32768, cz = key % 65536 - 32768;
       eachInColumns(Md, cx + .5, cz + .5, cx + .5, cz + .5, i => {
         if (T[i]) return;
-        const o = 7 * i, c = classify(B, D[o], D[o + 1], D[o + 2], D[o + 3], D[o + 4], D[o + 5], info);
+        const o = 7 * i, c = classify(B, D[o], D[o + 1], D[o + 2], D[o + 3], D[o + 4], D[o + 5], info, Md.ins && Md.ins[D[o + 6]]);
         if (c !== CK.COLDROP && c !== CK.BEHINDDROP) return;
         T[i] = 1; pick.push(i, info.r, info.i, info.j);
       });
@@ -316,7 +326,7 @@ export async function createBlast(game) {
     const tS = Math.max(.02, B.tSolve || .02), running = B.state !== 'done';
     const singles = [];
     for (const g of groups.values()) {
-      const stride = Math.max(1, Math.ceil(g.length / 1500)), pts = [];
+      const stride = Math.max(1, Math.ceil(g.length / 1500)), pts = [], dd = [];
       let vx = 0, vy = 0, vz = 0;
       for (let q = 0; q < g.length; q += stride) {
         const idx = pick[4 * g[q]], r = pick[4 * g[q] + 1], ti = pick[4 * g[q] + 2], tj = pick[4 * g[q] + 3], o = 7 * idx, t = 4 * (Math.min(r.nv, Math.max(0, tj)) * (r.nu + 1) + Math.min(r.nu, Math.max(0, ti)));
@@ -324,10 +334,14 @@ export async function createBlast(game) {
         const d = [F.X[0] * dl[0] + F.Y[0] * dl[1] + F.Z[0] * dl[2], F.X[1] * dl[0] + F.Y[1] * dl[1] + F.Z[1] * dl[2], F.X[2] * dl[0] + F.Y[2] * dl[1] + F.Z[2] * dl[2]];
         const so = r.cpu[t + 3] % 1;
         // (steel that went through the blast: charred grey, darker where the soot lay)
-        pts.push(D[o] + d[0], D[o + 1] + d[1], D[o + 2] + d[2], .34 * (1 - .6 * so), D[o + 3], D[o + 4], D[o + 5]);
+        pts.push(D[o], D[o + 1], D[o + 2], .34 * (1 - .6 * so), D[o + 3], D[o + 4], D[o + 5]); dd.push(d[0], d[1], d[2]);
         vx += d[0]; vy += d[1]; vz += d[2];
       }
       const m = pts.length / 7; vx /= m; vy /= m; vz /= m;
+      // (a piece moves as one: the plating under its dots may have gone many ways (flying pieces of it), so each dot
+      // takes the piece's mean displacement, bent by at most 0.4 m off it)
+      for (let q = 0; q < m; q++) { const ex = dd[3 * q] - vx, ey = dd[3 * q + 1] - vy, ez = dd[3 * q + 2] - vz, e = Math.hypot(ex, ey, ez), k = e > .4 ? .4 / e : 1;
+        pts[7 * q] += vx + ex * k; pts[7 * q + 1] += vy + ey * k; pts[7 * q + 2] += vz + ez * k; }
       // (while the solve runs its plating is moving: the piece leaves with it; at the end it just drops)
       let v = running ? [vx / tS, vy / tS, vz / tS] : [0, 0, 0];
       const sp = Math.hypot(v[0], v[1], v[2]); if (sp > 14) v = v.map(x => x * 14 / sp);
@@ -347,13 +361,13 @@ export async function createBlast(game) {
     const t0 = performance.now(), info = {};
     for (const b of L) detachWork(b, Infinity);
     for (let it = 0; it < 4; it++) {
-      const C = connectivity(Md, L, taken.get(B.uid));
+      const C = connectivity(Md, L, takenOf(B.uid, Md));
       const fl = C.floating.filter(g => g.length > 2);
       if (!fl.length) break;
       const D = Md.D, touched = new Set();
       for (const g of fl) for (const i of g) {
         const o = 7 * i;
-        for (const b of L) { const c = classify(b, D[o], D[o + 1], D[o + 2], D[o + 3], D[o + 4], D[o + 5], info); if (c === CK.NONE) continue;
+        for (const b of L) { const c = classify(b, D[o], D[o + 1], D[o + 2], D[o + 3], D[o + 4], D[o + 5], info, Md.ins && Md.ins[D[o + 6]]); if (c === CK.NONE) continue;
           const r = info.r; if (!r.cut) r.cut = new Uint8Array((r.nu + 1) * (r.nv + 1));
           const t = Math.max(0, Math.min(r.nv, info.j)) * (r.nu + 1) + Math.max(0, Math.min(r.nu, info.i));
           if (!r.cut[t]) { r.cut[t] = 1; if (!((r.cpu[4 * t + 3] | 0) & 8)) r.cpu[4 * t + 3] += 8; touched.add(r); }
@@ -486,6 +500,9 @@ export async function createBlast(game) {
     stats.running = run; stats.shellRunning = runS;
     for (const uid of gone) if (!(game.structure && game.structure.draws && game.structure.draws(uid))) { gone.delete(uid); dropUnit(uid); }
     if (any && client && client.mode) { client.targets(TG); for (const k in TG) delete TG[k]; lastSent = game.realT; }
+    // (the interior parts round a hole are sampled once shown: their dots join the model's, and are looked at then)
+    if (++genTick % 20 === 0) for (const [uid, L] of byUnit) { const u = sim.units.get(uid), ent = u && entOf(u), Md = ent && modelDots(ent);
+      if (Md && Md.n) for (const B of L) if (B.mdGen !== undefined && B.mdGen !== Md.gen && B.rects.some(r => r.cpu)) { try { detachScan(B); } catch (e) { console.error('blast: detach', e); } } }
     if (pendDetach.size) { const td = performance.now(); for (const B of [...pendDetach]) { try { detachWork(B, cfg.detachMs); } catch (e) { console.error('blast: detach', e); pendDetach.delete(B); } if (performance.now() - td > cfg.detachMs) break; } stats.detachWorkMs = performance.now() - td; }
     { const tt = game.t, h = lastBT === null ? 0 : tt - lastBT; lastBT = tt; if (bodies.list.length && h > 0) bodies.step(h, floorAt); }
     stats.updMs = performance.now() - t0;

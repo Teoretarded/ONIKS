@@ -462,6 +462,13 @@ uniform vec4 uBtZ[${BTMAX}];     // xyz: local z (the struck plate's outward nor
 uniform vec4 uBtP[${BTMAX * 2}]; // skin plate k of patch i (i * 2 + k): x axis (-1 none), y plane (local m), z u0, w v0
 uniform vec4 uBtQ[${BTMAX * 2}]; // x nu, y nv (cells), zw its first texel in the atlas
 uniform highp sampler2D uBtT;
+// (an integer hash of the 0.25 m cell: blast/support.js wreckHash replays it exactly on the CPU)
+float wreckHash(vec3 p) {
+  uvec3 c = uvec3(ivec3(floor(p * 4.0)) + 65536);
+  uint h = (c.x * 73856093u) ^ (c.y * 19349663u) ^ (c.z * 83492791u);
+  h = (h ^ (h >> 13u)) * 1274126177u;
+  return float(h >> 8u) / 16777216.0;
+}
 int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, inout float edge, inout float heatN, inout vec3 tilt) {
   bool two = dot(n, n) < 0.01;
   for (int i = 0; i < ${BTMAX}; i++) {
@@ -504,7 +511,7 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
           // an interior part (bulkheads, decks, machinery...): wrecked where the plating over it tore (most of it gone,
           // the rest charred and pushed with the plating), followed and scorched behind plating that held
           float wd = max(0.0, 1.0 - (-off) / (D + 0.4));
-          if (torn || (fN & 3) != 0) { if (fract(sin(dot(floor(p * 4.0), vec3(12.99, 78.23, 37.71))) * 43758.55) < 0.7 * wd + 0.2) return 1; burn = max(burn, 0.85); }
+          if (torn || (fN & 3) != 0) { if (wreckHash(p) < 0.7 * wd + 0.2) return 1; burn = max(burn, 0.85); }
           else if ((fN & 8) != 0) burn = max(burn, 0.5 * wd);
           p += (X * dlb.x + Y * dlb.y + Z * dlb.z) * wd;
           break;
