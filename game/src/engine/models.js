@@ -112,7 +112,8 @@ void main() {
   if (inst > 0) {
     if (float(inst) >= need) { ${CULL} return; }
     // what a back face would add is hidden (the depth pass) unless it is an x-ray
-    if (!two0 && uP.y <= 0.0 && dot(uR * aNrm.xyz, p) > 0.0) { ${CULL} return; }
+    // (on an instance with blast patches they are looked at after them: seen through a hole, the far sides show)
+    if (!two0 && uP.y <= 0.0 && uBtN == 0 && dot(uR * aNrm.xyz, p) > 0.0) { ${CULL} return; }
     sub = clamp(need - float(inst), 0.0, 1.0);
     vec2 j = aCJ.xy * (1.0 / ${JIT_K.toFixed(1)}), o;
     vec2 h2 = vec2(u01(hash1(hid ^ 0x9e3779b9u)), u01(hash1(hid ^ 0x7f4a7c15u))) - 0.5;
@@ -151,6 +152,7 @@ void main() {
   // blast patches (game/src/blast): the plating as the solver left it
   vec3 btTilt = vec3(0.0);
   if (uBtN > 0 && blastAt(p, uR * aNrm.xyz, false, burn, hot, edge, heatN, btTilt) == 1) { ${CULL} return; }
+  if (inst > 0 && !two0 && uP.y <= 0.0 && gHole <= 0.0 && dot(uR * aNrm.xyz, p) > 0.0) { ${CULL} return; }
   if (burn > 0.0 && edge <= 0.0 && u01(hash1(hid ^ 0x1b873593u)) < burn * 0.35) { ${CULL} return; }
   // the torn edge of a section: a bright ragged rim, glowing while the break is fresh, charred behind it
   if (tk > 0.0) { if (tk > 0.6) { edge = max(edge, tk); heatN = max(heatN, th); } hot = max(hot, th * tk * tk * 0.8); burn = max(burn, 0.55 * tk * (1.0 - tk)); }
@@ -180,6 +182,8 @@ void main() {
   float b, rim = 0.0, fk = 1.0;
   bool two = dot(aNrm.xyz, aNrm.xyz) < 0.01;
   float lit = 0.45;
+  // (an interior wall seen through a hole from inside its space: its far side is the face we see)
+  if (!two && gHole > 0.0 && dot(n0, v) > 0.0) { n = -n; n0 = -n0; }
   if (two) { b = 0.45; }
   else {
     float dn = dot(n0, v);
@@ -195,6 +199,9 @@ void main() {
       fk = max(fac, uDen.y);
       b = 0.06 + 0.74 * max(lam, 0.0) + 0.14 * fac + 0.34 * w * w * w;
       b *= 0.55 + 0.45 * b;
+      // (seen through a hole, the spaces inside keep a little light of their own: walls, decks and ceilings read as
+      // dotted structure, never black blocks; the fire adds to it below)
+      if (gHole > 0.0) b = max(b, gHole * (0.13 + 0.1 * fac));
       lit = b;
       rim = fac < 0.18 ? 1.0 - fac / 0.18 : 0.0; rim *= rim;
     }
@@ -259,6 +266,35 @@ ${blastGLSL()}
 out vec4 vAx;             // the cell's axes on screen (px): U xy, V zw
 out float vSz;
 ${SLAB_GLSL}
+/* the blast patches' torn field (the cells' torn flags, bilinear: as blastAt reads it) at a point of the undeformed
+   plating (n: its normal; 0 for a line): the largest over the plates it is part of (0 intact .. 1 torn) */
+float btMk(vec3 p, vec3 n) {
+  float m = 0.0;
+  for (int i = 0; i < ${BTMAX}; i++) {
+    if (i >= uBtN) break;
+    vec3 d = p - uBtO[i].xyz;
+    if (dot(d, d) > 1600.0) continue;     // (a patch spans 28 m at most)
+    vec3 l = vec3(dot(d, uBtX[i].xyz), dot(d, uBtY[i].xyz), dot(d, uBtZ[i].xyz));
+    float S = uBtY[i].w, band = uBtZ[i].w;
+    for (int k = 0; k < 2; k++) {
+      vec4 P = uBtP[i * 2 + k];
+      if (P.x < -0.5) continue;
+      int ax = int(P.x + 0.5);
+      float off = (ax == 0 ? l.x : ax == 1 ? l.y : l.z) - P.y;
+      if (abs(off) > band) continue;
+      vec3 A = ax == 0 ? uBtX[i].xyz : ax == 1 ? uBtY[i].xyz : uBtZ[i].xyz;
+      if (dot(n, n) > 0.01 && abs(dot(n, A)) <= 0.5) continue;
+      vec4 Q = uBtQ[i * 2 + k];
+      float gx = ((ax == 0 ? l.z : l.x) - P.z) / S - 0.5, gy = ((ax == 1 ? l.z : l.y) - P.w) / S - 0.5;
+      if (gx < -0.5 || gy < -0.5 || gx > Q.x - 0.5 || gy > Q.y - 0.5) continue;
+      int ci = int(floor(gx)), cj = int(floor(gy)), nx = int(Q.x) - 1, ny = int(Q.y) - 1; float fx = gx - float(ci), fy = gy - float(cj);
+      #define TC(a, c) float(int(texelFetch(uBtT, ivec2(int(Q.z) + clamp(a, 0, nx), int(Q.w) + clamp(c, 0, ny)), 0).w) & 1)
+      m = max(m, mix(mix(TC(ci, cj), TC(ci + 1, cj), fx), mix(TC(ci, cj + 1), TC(ci + 1, cj + 1), fx), fy));
+      #undef TC
+    }
+  }
+  return m;
+}
 void main() {
   float su = (aCU.w + 128.0) * (1.0 / ${CELL_K.toFixed(1)}) * uP.w, sv = (aCV.w + 128.0) * (1.0 / ${CELL_K.toFixed(1)}) * uP.w;
   if (su <= 0.0 || sv <= 0.0) { ${CULL} return; }
@@ -274,18 +310,40 @@ void main() {
   // behind it (a plug: what is inside shows, the far side of the hull and the sea do not)
   gIn = uP.x;
   bool twoS = false;
+  float bendB = 0.0;
   if (uScN > 0) {
     float b0 = 0.0, h0 = 0.0, e0 = 0.0, n0 = 0.0;
     if (scarAt(p, uR * aNrm.xyz, hash1(uint(gl_VertexID) * 747796405u + 2891336453u), true, b0, h0, e0, n0) == 1) { ${CULL} return; }
   }
   if (uBtN > 0) {
     float b0 = 0.0, h0 = 0.0, e0 = 0.0, n0 = 0.0; vec3 t0 = vec3(0.0);
+    vec3 pu = p;
     int bk = blastAt(p, uR * aNrm.xyz, true, b0, h0, e0, n0, t0);
+    // (the plating's splat: a model cell can be larger than the patch's grid (0.25 m) and reach over the tear from an
+    // intact centre, where its own dots are torn away: a black cell-sized block, the hole's outline a staircase. The
+    // splat is kept to the part of its cell clear of the torn field: its corners tested at 1, 1/2, 1/4 of the cell)
+    if (bk == 0 || bk == 4) {
+      float sk = 1.0;
+      for (int q = 0; q < 3; q++) {
+        vec3 hu = U * (su * 0.5 * sk), hv = V * (sv * 0.5 * sk);
+        vec3 nw = uR * aNrm.xyz;
+        if (max(max(btMk(pu + hu + hv, nw), btMk(pu + hu - hv, nw)), max(btMk(pu - hu + hv, nw), btMk(pu - hu - hv, nw))) < 0.08) break;
+        sk *= 0.5;
+      }
+      if (sk < 0.2) { ${CULL} return; }
+      su *= sk; sv *= sk;
+    }
     if (bk == 1) { ${CULL} return; }
     // (a plug's splat is widened: seen at an angle through the hole, the far end of the pocket is wider than the hole)
     if (bk == 2) { su *= 2.5; sv *= 2.5; }
     if (bk == 4) { su *= 0.4; sv *= 0.4; }
     twoS = bk == 3;
+    // (bent plating: the splat is a flat cell at its centre's displacement, the dots follow the bend across it: where
+    // the plating is bent steeply (a dent's slope, the lip of a hole) a flat splat stands in front of its neighbours'
+    // dots and prints as a black square. Pushed back by the bend's depth across half the cell; the
+    // buckle facets only light the dots (they do not move them) and are left out of the depth pass's tilt)
+    float g = length(t0);
+    if (g > 0.04) bendB = min(g, 2.0) * 0.55 * max(su, sv);
   }
   float dist = length(p);
   vec3 v = p / max(dist, 1e-4);
@@ -306,7 +364,7 @@ void main() {
   if (sz > 2.5) sz += 0.5;
   vAx = vec4(a, b); vSz = sz;
   // pushed back: the cell's own depth range (a face seen edge-on spans more) and a little more
-  float bias = (uP.y + 0.55 * sqrt(max(0.0, 1.0 - fac * fac)) / max(fac, 0.25)) * max(su, sv);
+  float bias = (uP.y + 0.55 * sqrt(max(0.0, 1.0 - fac * fac)) / max(fac, 0.25)) * max(su, sv) + bendB;
   p *= 1.0 + bias / dist;
   p.y -= curveDrop(p);
   gl_Position = toClip(p);
@@ -335,6 +393,7 @@ const SC0 = new Float32Array(32);
 function scarGLSL() {
   return `
 float gIn = 0.0;                   // this part is inside the hull (an interior part, data/models_interior.js: part.inside)
+float gHole = 0.0;                 // (set by blastAt) an interior dot seen through a hole: lit from either side
 // scars: where hits struck this instance, world-aligned, relative to the eye
 uniform vec4 uScA[8];     // xyz: the mark's centre on the surface, w: its radius (m: the hole, the dent, the pockmarks' spread)
 uniform vec4 uScB[8];     // xyz: the surface's outward normal there, w: seed
@@ -539,18 +598,25 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
         int fN = int((fx < 0.5 ? (fy < 0.5 ? t00 : t01) : (fy < 0.5 ? t10 : t11)).w);
         vec3 dlb = mix(mix(t00.xyz, t10.xyz, fx), mix(t01.xyz, t11.xyz, fx), fy);
         if (off > -0.05 && off < (A.y > 0.7 ? 30.0 : 3.0)) {
-          if ((fN & 11) != 0) return 1;
+          // (torn: the smooth ragged outline, as the plating's own; the nearest texel's flag would cut 0.25 m steps)
+          if (torn || (fN & 10) != 0) return 1;
           p += X * dlb.x + Y * dlb.y + Z * dlb.z;
+          // (its underside, seen only from inside through a hole in the deck: the ceiling there)
+          if (!two && dot(n, A) < -0.5) gHole = max(gHole, 0.6);
           break;
         }
         if (off <= -0.05 && gIn > 0.5 && off > -D - 8.0) {
           // an interior part (bulkheads, decks, machinery...): wrecked where the plating over it tore (most of it gone,
           // the rest charred and pushed with the plating), followed and scorched behind plating that held
           float wd = max(0.0, 1.0 - (-off) / (D + 0.4));
-          if (torn || (fN & 3) != 0) { if (wreckHash(l * 3.0) < 0.7 * wd + 0.2) return 1;   // (per ~8 cm cell: a speckle, not 0.25 m blocks)
+          // (depth pass: none of a wrecked part's cells splat: its dots are a speckle, a splat is a whole cell, and the
+          // survivors' cells would print as black blocks over what is behind)
+          if (torn || (fN & 2) != 0) { if (dp || wreckHash(l * 3.0) < 0.7 * wd + 0.2) return 1;   // (per ~8 cm cell: a speckle, not 0.25 m blocks)
             burn = max(burn, 0.5); hot = max(hot, heat * 0.4 * wd); edge = max(edge, 0.35 * wd); heatN = max(heatN, heat); }
           else if ((fN & 8) != 0) burn = max(burn, 0.5 * wd);
           p += (X * dlb.x + Y * dlb.y + Z * dlb.z) * wd;
+          // (what stands behind a hole is seen from inside its spaces: the walls' far sides lit and splatted too)
+          gHole = max(gHole, 0.3 + 0.7 * wd); if (dp) return 3;
           break;
         }
         if (off <= -0.05 && off > -D - 0.4) {
@@ -558,10 +624,11 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
           float ed = min(min(fi, Q.x - fi), min(fj, Q.y - fj)) * S;
           // (and only the surfaces facing the plate, or lines: the ship's shell and walls across the pocket stay)
           // (a ship with no interior drawn keeps them, charred: they are the far side of the hole, not the sea)
-          if ((face || two) && ed > 0.6 && (torn || (fN & 11) != 0)) { if (plugD > 1.0) return 1; burn = max(burn, 0.5); hot = max(hot, heat * 0.25); }
+          if ((face || two) && ed > 0.6 && (torn || (fN & 10) != 0)) { if (plugD > 1.0) return 1; burn = max(burn, 0.5); hot = max(hot, heat * 0.25); }
           float wd = 1.0 - (-off) / (D + 0.4);
           p += (X * dlb.x + Y * dlb.y + Z * dlb.z) * wd;
-          if (dp && plugD < 1.0) return 3;
+          gHole = max(gHole, 0.3 + 0.7 * wd);
+          if (dp) return 3;
           break;
         }
         // (a ship with no interior drawn: her own walls across the pocket, seen from inside through the hole, occlude
@@ -580,24 +647,43 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
         // (a line of the model over the hole (the sheer, a rail's foot): not plating, it goes with the plating it ran on;
         // the blast system flies it)
         if (two) return 1;
-        // (a torn cell's plating: shreds hanging off its corner, ragged (each dot its own share drawn in) and curled the
-        // way the corner went, as the petals the grid is too coarse to tear)
-        vec2 r0 = vec2(fx, fy) - vec2(lx ? 0.0 : 1.0, ly ? 0.0 : 1.0);
-        float hq = fract(sin(dot(floor(l * 7.3), vec3(12.99, 78.23, 37.71))) * 43758.55);
-        vec2 o = r0 * S * -mix(0.15, 0.6, hq);
-        dl = tc.xyz + (ax == 2 ? vec3(o.x, o.y, 0.0) : ax == 1 ? vec3(o.x, 0.0, o.y) : vec3(0.0, o.y, o.x));
-        float dn = tc[ax], rr = dot(r0, r0), cu = sign(dn) * min(abs(dn) * 0.9, S * 1.4);
-        dl[ax] += cu * rr * 1.6;
-        // the petal's face leans with its curl: it catches the light across the bend
-        { vec3 Ua = ax == 0 ? Z : X, Va = ax == 1 ? Z : Y; tilt -= (Ua * r0.x + Va * r0.y) * (cu * 3.2 / S); }
-        // (a shred hangs off its corner: past a ragged length it is gone)
-        if (length(r0) > mix(0.35, 0.8, fract(hq * 7.13))) return 1;
-        heatN = max(heatN, heat); hot = max(hot, heat * 0.9); burn = max(burn, 0.85);
-        // a petal bent over: its face leans with it (from the cell's corners, while none of them went)
-        if ((int(t00.w) & 2) == 0 && (int(t10.w) & 2) == 0 && (int(t01.w) & 2) == 0 && (int(t11.w) & 2) == 0) {
-          float gu = mix(t10[ax] - t00[ax], t11[ax] - t01[ax], fy) / S, gv = mix(t01[ax] - t00[ax], t11[ax] - t10[ax], fx) / S;
-          tilt -= (ax == 0 ? Z : X) * gu + (ax == 1 ? Z : Y) * gv;
+        // (a torn cell's plating: petals only along the tear, hanging off the intact plating and rolled back the way it
+        // went; the hole itself is open. Each dot finds the nearest intact cell (5 x 5 round it): past a ragged reach
+        // (lobes ~0.4 m along the rim, a fine grain at the dot's scale) it is gone. Never a per-cell pattern: the petal
+        // is a strip rolled on a circle about the tear line, its length measured from the intact plating)
+        float bd = 9.0; vec2 bv = vec2(0.0);
+        {
+          int ci = int(floor(fi)), cj = int(floor(fj)), nx = int(Q.x) - 1, ny = int(Q.y) - 1;
+          for (int a = -2; a <= 2; a++) for (int c = -2; c <= 2; c++) {
+            int ii = ci + a, jj = cj + c;
+            if (ii < 0 || jj < 0 || ii > nx || jj > ny) continue;
+            if ((int(texelFetch(uBtT, ivec2(int(Q.z) + ii, int(Q.w) + jj), 0).w) & 1) != 0) continue;
+            vec2 dv = vec2(float(ii) + 0.5 - fi, float(jj) + 0.5 - fj), e2 = max(abs(dv) - 0.5, 0.0);
+            float dd = length(e2);
+            if (dd < bd) { bd = dd; bv = dv; }
+          }
         }
+        if (bd > 2.0) return 1;
+        vec2 q2 = vec2(u, v) * 2.4; vec2 qi2 = floor(q2), qf2 = q2 - qi2, qs2 = qf2 * qf2 * (3.0 - 2.0 * qf2);
+        float lob = mix(mix(wreckHash(vec3(qi2, 5.0) * 0.25 + 0.01), wreckHash(vec3(qi2 + vec2(1.0, 0.0), 5.0) * 0.25 + 0.01), qs2.x),
+                        mix(wreckHash(vec3(qi2 + vec2(0.0, 1.0), 5.0) * 0.25 + 0.01), wreckHash(vec3(qi2 + vec2(1.0, 1.0), 5.0) * 0.25 + 0.01), qs2.x), qs2.y);
+        float grain = wreckHash(floor(l * 20.0) * 0.25 + 0.37);
+        float s = bd * S, reach = S * (0.15 + 1.5 * lob * lob) * (0.75 + 0.5 * grain);
+        if (s > reach) return 1;
+        // rolled: a strip of length s on a circle of radius rc about the tear line (back toward the intact plating in
+        // the plane, out of it the way the plating went)
+        vec3 Ua = ax == 0 ? Z : X, Va = ax == 1 ? Z : Y;
+        float bl = length(bv); vec3 toE = bl > 1e-4 ? normalize(Ua * bv.x + Va * bv.y) : Ua;
+        dl = mix(mix(t00.xyz, t10.xyz, fx), mix(t01.xyz, t11.xyz, fx), fy);
+        { float dL = length(dl); if (dL > 0.8) dl *= 0.8 / dL; }
+        float sg = dl[ax] < -0.01 ? -1.0 : 1.0, rc = S * mix(0.5, 1.4, lob), th = s / rc;
+        vec3 w = toE * (s - rc * sin(th)) + A * (sg * rc * (1.0 - cos(th)));
+        dl += vec3(dot(w, X), dot(w, Y), dot(w, Z));
+        // the petal's face turns with the roll (it catches the light across the bend)
+        tilt += (A * cos(th) - toE * sg * sin(th)) - A;
+        heatN = max(heatN, heat); hot = max(hot, heat * 0.9 * (1.0 - 0.5 * s / max(reach, 1e-3))); burn = max(burn, 0.8);
+        // its free end: a ragged edge, glowing while hot
+        edge = max(edge, 0.7 * smoothstep(0.55, 1.0, s / max(reach, 1e-3)));
       } else {
         // next to a torn cell: the edge bitten ragged (the tear runs through the plating, not along the cell's side)
         {
@@ -617,11 +703,13 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
         if (mk > 0.001) { float ek = clamp(1.0 - (thr - mk) / 0.22, 0.0, 1.0); edge = max(edge, 0.85 * ek); heatN = max(heatN, heat); hot = max(hot, heat * 0.6 * ek); burn = max(burn, 0.9 * ek); }
         // (plating at a hole's edge: the torn cells' corners fly off, it does not stretch after them)
         if (mk > 0.001) { float dL = length(dl); if (dL > 0.8) dl *= 0.8 / dL; }
-        // (depth pass: the plating's splats at a hole's edge are small, so the hole's outline is the dots', not the splat grid's)
-        if (dp && mk > 0.001) { p += X * dl.x + Y * dl.y + Z * dl.z; return 4; }
+        // (depth pass: the plating's splats at a hole's edge are small, so the hole's outline is the dots', not the splat grid's;
+        // none within reach of the ragged threshold (its noise and grain move it ~0.5 in mk inside a cell): there a
+        // splat would stand where the dots are torn away, a dark square in the hole)
+        if (dp && mk > 0.001) { p += X * dl.x + Y * dl.y + Z * dl.z; return thr - mk > 0.5 ? 4 : 1; }
         // a torn edge: its corners' flags, fading across the cell
         float e = mix(mix(float((f00 & 4) >> 2), float((int(t10.w) & 4) >> 2), fx), mix(float((int(t01.w) & 4) >> 2), float((int(t11.w) & 4) >> 2), fx), fy);
-        if (e > 0.3) { edge = max(edge, 0.8 * e); heatN = max(heatN, heat); hot = max(hot, heat * 0.55 * e); }
+        if (e > 0.3) { if (mk > 0.001) { edge = max(edge, 0.8 * e); heatN = max(heatN, heat); hot = max(hot, heat * 0.55 * e); } else burn = max(burn, 0.25 * e); }   // (a broken frame or longitudinal away from the hole: scorched, not a glowing grid, QA D42)
         float so = mix(mix(fract(t00.w), fract(t10.w), fx), mix(fract(t01.w), fract(t11.w), fx), fy);
         burn = max(burn, so * so * 0.8);
         // the dent's slope: the normal leans with it
@@ -630,7 +718,7 @@ int blastAt(inout vec3 p, vec3 n, bool dp, inout float burn, inout float hot, in
         tilt -= Uw * gu + Vw * gv;
         // plating strained past yield buckles finer than the grid: facets ~0.3 m catching the light unevenly
         float gs = clamp((length(vec2(gu, gv)) - 0.1) * 1.5, 0.0, 0.5);
-        if (gs > 0.04) { vec3 q = floor(l * 3.3); float h1 = fract(sin(dot(q, vec3(127.1, 311.7, 74.7))) * 43758.55), h2 = fract(sin(dot(q, vec3(269.5, 183.3, 246.1))) * 43758.55);
+        if (gs > 0.04 && !dp) { vec3 q = floor(l * 3.3); float h1 = fract(sin(dot(q, vec3(127.1, 311.7, 74.7))) * 43758.55), h2 = fract(sin(dot(q, vec3(269.5, 183.3, 246.1))) * 43758.55);
           tilt += (Uw * (h1 - 0.5) + Vw * (h2 - 0.5)) * gs; }
       }
       p += X * dl.x + Y * dl.y + Z * dl.z;
