@@ -18,7 +18,9 @@
                     period: she overshoots and settles); a submerged boat leans into the turn (snap roll). Squat and
                     trim by the stern with the Froude number, more in shallow water; the bow wave height (u.bow, m);
                     list and trim from flooding (u.list, u.trim). The swell is added by the render pose (sim/sea.js).
-   Aircraft         bank to turn (turn rate g tan(bank) / v, the bank rate-limited, rolled out ahead of the heading);
+   Aircraft         bank to turn (turn rate g tan(bank) / v, the bank rate-limited and eased onto its value, rolled
+                    out ahead of the heading; off a catapult wings level, then a departure bank eased in with time and
+                    height); the nose follows its attitude at a pitch rate;
                     energy: thrust against parasitic drag, the induced drag of a hard turn (load factor 1 / cos bank)
                     and the climb: the throttle holds the speed until it runs out of thrust, then the aircraft slows;
                     the climb rate is what the thrust has to spare at flying speed; pitch = flight path + angle of attack
@@ -37,6 +39,8 @@ import { hullOf } from './sea.js';
 import { endStrike } from './airstrike.js';
 
 const G = 9.81, TAU = Math.PI * 2, TAN_GS = Math.tan(3.5 * Math.PI / 180);
+const ROLL_EASE = Math.min(1, DT * 5), PITCH_RATE = .2;          // aircraft: roll easing per tick, pitch rate (rad/s)
+const ss01 = x => x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x);
 
 /* exact one-step update of a damped oscillator x'' = w^2 (x0 - x) - 2 z w x' with x0 held over the step: the matrix
    taking (x - x0, x') to the next step, computed once per (w, z) */
@@ -321,12 +325,21 @@ function wing(sim, u, P, N, floor, homing) {
   let tb = (e > 1.2 || e < -1.2 || (o0 !== undefined && (o0.kind === 'attack' || o0.kind === 'strike'))) ? P.tanB : P.tanBC;
   const vs = u.landing ? P.vs * .85 : P.vs, nL = (ve / vs) * (ve / vs);
   if (nL * nL - 1 < tb * tb) tb = nL > 1.03 ? Math.sqrt(nL * nL - 1) : .245;
-  if (u.aboardOf && u.pos[1] < 300 && sim.t - u.born < 25 && tb > .267) tb = .267;
+  // climbing away from the ship: wings level off the catapult, a departure bank (up to 30 deg) eased in over the next
+  // seconds; more only as she gets clear (eased in from 200 to 900 m, or 90 s after the launch), not all at once
+  const tL = sim.t - u.born;
+  if (u.aboardOf && tL < 90) {
+    const tc = Math.tan(.52 * ss01((tL - 3.5) / 8) + Math.max(0, Math.atan(tb) - .52) * ss01((u.pos[1] - 200) / 700));
+    if (tb > tc) tb = tc;
+  }
   const t0 = u._tr === undefined || u._trR !== u.roll ? Math.tan(u.roll) : u._tr;
   const lead = G * t0 / v * (u.roll < 0 ? -u.roll : u.roll) / P.rollRate * .5, oMax = G * tb / v;
   const oW = clamp((e - lead) / 2.5, -oMax, oMax), xT = oW * v / G, bT = Math.atan(xT), dR = P.rollRate * DT;
+  // the roll at the roll rate, eased onto the bank it wants (~0.2 s from it) instead of stopping dead there
+  const dE = (bT - u.roll) * ROLL_EASE;
   let t1;
-  if (bT - u.roll > dR) { u.roll += dR; t1 = Math.tan(u.roll); } else if (bT - u.roll < -dR) { u.roll -= dR; t1 = Math.tan(u.roll); } else { u.roll = bT; t1 = xT; }
+  if (dE > dR) { u.roll += dR; t1 = Math.tan(u.roll); } else if (dE < -dR) { u.roll -= dR; t1 = Math.tan(u.roll); }
+  else if (dE > 1e-4 || dE < -1e-4) { u.roll += dE; t1 = Math.tan(u.roll); } else { u.roll = bT; t1 = xT; }
   u._tr = t1; u._trR = u.roll;
   const t12 = t1 * t1;                                               // load factor n^2 = 1 + tan^2(bank)
   u.hdg += G * t1 / v * DT;
@@ -339,7 +352,9 @@ function wing(sim, u, P, N, floor, homing) {
   const climb = d.climb || 5, desc = climb * 1.3 < v * .2 ? climb * 1.3 : v * .2;
   vyC = vyC > climb ? climb : vyC < -desc ? -desc : vyC;
   const ex = F.aT - Dp - Dt;
-  if (vyC > 0 && u.speed < vT * .9) vyC = Math.min(vyC, Math.max(0, ex * v / G));
+  // short of its speed the thrust to spare goes half to the climb, half to speeding up (a climb-out at a steady
+  // attitude, accelerating, not an ever steeper climb hanging at the catapult's speed)
+  if (vyC > 0 && u.speed < vT * .9) vyC = Math.min(vyC, Math.max(0, ex * v / G) * (u.speed < vT * .8 ? .5 : 1));
   if (vyC > 0 && ve < vs * 1.25) vyC = 0;                          // near the stall: nose down first
   u.vy = vy0 + clamp(vyC - vy0, -ay * DT, ay * DT);
   const gr = u.vy / v, sg = gr > -.5 && gr < .5 ? gr * (1 - .5 * gr * gr) : gr / Math.sqrt(1 + gr * gr);   // sin of the flight path
@@ -350,7 +365,11 @@ function wing(sim, u, P, N, floor, homing) {
   if (P.ab) u.ab = sim.t - u.born < 6 || aC + Dp + Dt + G * sg > .62 * F.aT ? 1 : 0;   // past military thrust
   // pitch: flight path + angle of attack (it grows with the load factor and as the dynamic pressure falls)
   const fp = gr > -.4 && gr < .4 ? gr * (1 - gr * gr * (1 / 3 - gr * gr * .2)) : Math.atan(gr);
-  u.pitch = fp + clamp(P.aoa * (t12 < .02 ? 1 + .5 * t12 : Math.sqrt(1 + t12)) * qr, -.05, .26);
+  // (in a bank the angle of attack lifts the nose toward the turn, not up: only its vertical share, cos bank)
+  const pT = fp + clamp(P.aoa * (t12 < .02 ? 1 + .5 * t12 : Math.sqrt(1 + t12)) * qr, -.05, .26) / Math.sqrt(1 + t12);
+  // the nose follows at a pitch rate (off the catapult she rotates up over a second, never in one tick)
+  const dP = pT - u.pitch, pR = PITCH_RATE * DT;
+  u.pitch = dP > pR ? u.pitch + pR : dP < -pR ? u.pitch - pR : pT;
   const s = Math.sin(u.hdg), c = Math.cos(u.hdg);
   u.pos[0] += s * u.speed * DT; u.pos[2] += c * u.speed * DT; u.pos[1] += u.vy * DT;
   if (u.pos[1] < floor) { u.pos[1] = floor; if (u.vy < 0) u.vy = 0; }
@@ -394,7 +413,7 @@ function deckStep(sim, u, P) {
   u.speed = cv.speed * Math.cos(k.hd) + k.v; u.vy = 0;
   if (k.mode === 'cat' && k.s >= k.len) {
     // off the end: the stroke's speed plus the ship's, a little sink before she climbs away
-    u.deck = null; u.vy = -1.2; u.roll = 0; u.pitch = .06;
+    u.deck = null; u.vy = -1.2; u.roll = 0;                         // (the nose comes up at the pitch rate: wing())
   }
 }
 function deckPlace(u, cv) {
