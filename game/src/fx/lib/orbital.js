@@ -20,6 +20,7 @@ import { ColdLaunch, VlsLaunch, HotLaunch, GunBlast, BalLaunch, SubLaunch, TorpL
 import { Burst, BoosterSep } from './burst.js';
 import { Splash, Dirt, Blast, Fire, Sinking, TorpedoHit } from './impact.js';
 import { TracerStream, GunStream, Muzzle } from './guns.js';
+import { Scorch } from './scorch.js';
 import { SubWater, wakeU, WAKE_T } from './water.js';
 import { Lightning, flashLead, flashLevel } from './weather.js';
 
@@ -580,6 +581,19 @@ function dirt(e, age) {
   }
   if (age < 2.5) ringH(p[0], p[1] + .5, p[2], 2 + H * 1.4 * Math.sqrt(age / 2.5), .5 * (1 - age / 2.5), 48, .08, e.seed);
 }
+/* a crater on land: its lip as a ring, the scorched ground's ragged edge faint, the ejecta's rays as short hairlines */
+function scorch(e, age) {
+  const p = e.p, k = ss(.15, .9, age);
+  if (k <= 0 || !V.vis(p[0], p[1], p[2], e.Re * 1.25 + 2)) return;
+  if (e.R > 0) ringE(p[0], p[1] + .2, p[2], 1, 0, e.R * 1.05, e.R * 1.05, .55 * k, 48, .06, e.seed);
+  ringE(p[0], p[1] + .15, p[2], 1, 0, e.Rc, e.Rc, .14 * k, 40, .22, e.seed + 1);
+  const n = e.R > 0 ? 9 : 5, r0 = Math.max(.6, e.R * 1.15);
+  for (let i = 0; i < n; i++) {
+    const th = (i + .7 * hsh(i, e.seed)) / n * TAU, r1 = e.Re * (.45 + .4 * hsh(i, e.seed + 1)), c = Math.cos(th), sn = Math.sin(th);
+    const ax = p[0] + c * r0, az = p[2] + sn * r0, bx = p[0] + c * r1, bz = p[2] + sn * r1;
+    seg(ax, C.ground(ax, az) + .15, az, bx, C.ground(bx, bz) + .15, bz, .22 * k * ss(.3, 1.2, age));
+  }
+}
 function blast(e, sa) {
   if (sa < 0 || sa > e.dur) return;
   const P = e.p, sc = e.sc, s2 = Math.sqrt(sc);
@@ -1056,7 +1070,7 @@ const BY = new Map([
   [ColdLaunch, coldLaunch], [VlsLaunch, vlsLaunch], [HotLaunch, hotLaunch], [GunBlast, gunBlast], [BalLaunch, balLaunch],
   [SubLaunch, subLaunch], [TorpLaunch, torpLaunch], [Burst, burst], [BoosterSep, boosterSep], [Splash, splash], [Dirt, dirt],
   [Blast, blast], [Fire, fire], [Sinking, sinking], [TorpedoHit, torpedoHit], [TracerStream, tracers], [GunStream, gunStream], [Muzzle, muzzle],
-  [Lightning, lightning],
+  [Lightning, lightning], [Scorch, scorch],
 ]);
 /* one effect instance at its age (unknown kinds: nothing, never dots) */
 export function orbDraw(e, age) { const f = BY.get(e.constructor); if (f) f(e, age); }

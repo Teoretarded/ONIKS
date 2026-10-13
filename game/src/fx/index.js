@@ -19,6 +19,7 @@ import { ColdLaunch, VlsLaunch, HotLaunch, GunBlast, BalLaunch, SubLaunch, TorpL
 import { Burst, BoosterSep, FragBelt } from './lib/burst.js';
 import { Splash, Dirt, Blast, Fire, Sinking, TorpedoHit } from './lib/impact.js';
 import { HullBlast } from './lib/hullblast.js';
+import { Scorch, SCORCH_MAX } from './lib/scorch.js';
 import { TracerStream, GunStream, Muzzle } from './lib/guns.js';
 import { Wake, Downwash, Bubbles, SubWater } from './lib/water.js';
 import { drawJet, drawProps } from './lib/air.js';
@@ -110,6 +111,8 @@ const LAUNCH_AS = { sam48: 'sm6', ram: 'pdms' };
 const SPLASH_H = { sam48: 16, ram: 12, kornet: 9, shell: 26, oniks: 46, tlam: 36, slam: 34, hellfire: 12, sm6: 16, pdms: 14, sam: 12, aam: 12, crash: 30, uran: 30, kalibr: 40 };
 const HIT_SC = { sam48: .35, ram: .3, kornet: .22, oniks: 1, tlam: .7, slam: .65, hellfire: .3, shell: .2, sm6: .35, pdms: .3, sam: .3, aam: .3, ciws: .05, gun30: .06, uran: .55, kalibr: .75 };
 const THREAT = { kornet: 1, oniks: 1, tlam: 1, slam: 1, hellfire: 1, shell: 1, crash: 1, uran: 1, kalibr: 1 };
+/* warhead charge (kg, as game/scars.js WH) for the crater a round leaves on land (lib/scorch.js); crash: scorched ground */
+const CRATER_KG = { oniks: 250, kalibr: 200, tlam: 450, slam: 360, uran: 145, hellfire: 9, kornet: 7, shell: 3.6, sm6: 64, pdms: 39, sam: 20, sam48: 180, ram: 11, aam: 18, mk84: 430, crash: 0 };
 const GUNS = { ciws: 1, gun30: 1 };
 const NOZ = { sam48: 3.8, ram: 1.4, kornet: .6, oniks: 4.5, sm6: 3.3, tlam: 3.1, slam: 2.2, pdms: 1.8, sam: 1.7, aam: 1.8, hellfire: .85, uran: 2.25, kalibr: 4.15 };
 /* torpedoes: the round's length (m) and the height of the column its charge throws up under a keel */
@@ -156,6 +159,7 @@ class FxSystem {
     this.bolts = [];              // natural lightning (real time: this.wclk, which stops while the game is paused)
     this.wclk = 0; this.lastBig = -9; this.lastBigIc = -9; this.lastCg = -9;
     this.groundFires = [];
+    this.scorches = [];           // craters and scorched ground left by rounds on land (lib/scorch.js), newest last
     this.down = new Downwash({});
     this.skirt = new Downwash({ D: 15 });      // an LCAC on cushion: the spray (dust over land) from under its skirt
     this.V = new View();
@@ -289,6 +293,7 @@ class FxSystem {
           this.add(new Dirt({ t0: t, pos: [pos[0], gy, pos[2]], size: H * .7, seed }), 2);
           if (threat) this.add(new Blast({ t0: t, pos: [pos[0], gy + 1, pos[2]], sc: k === 'shell' ? .15 : .4, sea: false, gy, seed: seed + 3 }), 3);
           if (k === 'crash') this.startFire(null, t, [pos[0], gy, pos[2]], .22, seed);
+          if (CRATER_KG[k] !== undefined) this.scorch(pos[0], gy, pos[2], CRATER_KG[k], t, seed + 7);
         }
         return;
       }
@@ -431,6 +436,14 @@ class FxSystem {
       f.k = Math.min(1, (f.k || 0) + (heavy ? .7 : .45));
     }
   }
+  /* a crater (kg > 0) or scorched ground (kg 0, a crash) on land; the oldest goes past SCORCH_MAX */
+  scorch(x, gy, z, kg, t, seed) {
+    if (this.wet(x, z)) return null;
+    const s = new Scorch({ t0: t, pos: [x, gy, z], kg, seed, ground: this.C.ground });
+    this.scorches.push(s);
+    if (this.scorches.length > SCORCH_MAX) this.scorches.shift();
+    return s;
+  }
   /* the scars system (game/scars.js) seats fires at the hit points of units it has marked */
   scarred() { const g = this.game; return !!(g && g.scars); }
   onHit(ev, t, seed) {
@@ -460,6 +473,8 @@ class FxSystem {
       if (wet && pos[1] < 6 + Math.cbrt(kg)) this.add(new Splash({ t0: t + .03, pos: [pos[0] + nrm[0] * 3, 0, pos[2] + nrm[2] * 3], size: 14 * Math.cbrt(kg), seed: seed + 3, ring: 0 }), 2);
     } else this.add(new Blast({ t0: t, pos, sc, sea, gy, seed }), 3);
     if (!sea && sc >= .15) this.add(new Dirt({ t0: t, pos: [pos[0], gy, pos[2]], size: 10 + 22 * sc, seed: seed + 1 }), 2);
+    // a warhead going off on (or just over) the ground by a vehicle or a site leaves its crater there
+    if (dom === 'land' && CRATER_KG[k] > 0 && pos[1] - gy < 2 + Math.cbrt(CRATER_KG[k])) this.scorch(pos[0], gy, pos[2], CRATER_KG[k], t, seed + 7);
     // a missile or a shell sets it burning (at the hole, by the scars system, when it runs)
     if (u && sc >= .15 && !this.scarred()) {
       const big = sea ? (u.def.size[0] > 200 ? 1.4 : 1) : .3;
@@ -625,6 +640,8 @@ class FxSystem {
     const sdot = sink.dot, sadd = sink.add || sink.glow || sink.dot, sdisc = sink.add ? sink.glow : sink.halo;
     C.dot = (x, y, z, s, r, gg, b, a) => { if (C.n < C.cap) { C.n++; sdot(x, y, z, s, r, gg, b, a); } };
     C.glow = (x, y, z, s, r, gg, b, a) => { if (C.n < C.cap) { C.n++; sadd(x, y, z, s, r, gg, b, a); } };
+    // alpha over, depth tested (dark over bright returns: scorched ground); null when the sink has none
+    C.over = sink.over ? (x, y, z, s, r, gg, b, a) => { if (C.n < C.cap) { C.n++; sink.over(x, y, z, s, r, gg, b, a); } } : null;
     C.halo = sdisc ? (x, y, z, s, r, gg, b, a) => { C.n++; sdisc(x, y, z, s, r, gg, b, a); } : (x, y, z, s, r, gg, b, a) => { C.n++; sadd(x, y, z, Math.max(2, Math.round((s > 0 ? s : -s * V.pxm(x, y, z)) * .9)), r, gg, b, a * .35); };
     C.light = sink.light ? (x, y, z, r, gg, b, i, rad) => { if (i > C.lmin && C.nl < C.lmax) { C.nl++; sink.light(x, y, z, r, gg, b, i, rad); } } : () => {};
     C.lift = sink.lift ? (v, r, gg, b) => { if (v > .002) sink.lift(v, r, gg, b); } : () => {};
@@ -725,7 +742,8 @@ class FxSystem {
       }
     }
     mark('heads');
-    // 2. bursts' debris, splashes, casings, tracers
+    // 2. craters and scorched ground; bursts' debris, splashes, casings, tracers
+    for (const e of this.scorches) { const a = t - e.t0; if (a >= -.001) { if (D) D(e, a); else e.draw(C, a); } }
     for (const e of this.fx) if (e.layer === 2) { const a = t - e.t0; if (a >= -.001) { if (D) D(e, a); else e.draw(C, a); } }
     mark('debris');
     // 3. smoke: trails, columns, wakes, weather

@@ -46,6 +46,8 @@ sink.glow(x, y, z, radius, r, g, b, a)       // soft additive disc (1 - d^2/R^2)
 sink.light(x, y, z, r, g, b, intensity, radiusM)   // dynamic light: dots within radiusM brighten
                                                      //   by rgb * intensity * (1 - d^2/r^2)^2; 1 = a strong flash
 sink.lift(v, r, g, b)                        // full-frame additive lift (lightning), v 0..1
+sink.over(x, y, z, size, r, g, b, a)         // optional: alpha-over dot, depth tested, composited after the max and
+                                             //   additive ones (dark over bright returns: scorched ground)
 sink.model(key, pos, R9, alpha) -> bool      // optional: queue a model instance (R9 3x3 row-major); false if unknown
 sink.cam = { eye, f, r, u, fl /* px at 1080p */, tanX, tanY, near }   // REQUIRED for LOD and culling
 ```
@@ -81,12 +83,12 @@ flashes use .4 - 1.4, fires .3, plumes .1 - .35.
 | `hit` with a warhead on a unit the scars system marked | **HullBlast** (`lib/hullblast.js`, scaled by the warhead's kg): white core and a warm light on the hull's dots, a lens streak, the pressure shell and a shock ring running out over the sea, a dense burst of sparks and fragments off the struck face (fast, decelerating, tails, white-hot -> amber -> coral), a fireball rising and sooting over into a smoke mushroom; a water column for a waterline hit |
 | `cookoff` (sim/damage.js: a magazine / a load going up) | two **HullBlast**es venting up through the deck over the module (scaled by the event's size, up to the heaviest), then the rounds in it going off as smaller blasts over four seconds; a column of water when it is low in a ship. The scars system opens the rupture there and its fire burns on |
 | `hit` on a ship (otherwise) | **Blast** at the point on the model's surface (`game.scars.surface(ev)`, else the sim's point): flash lighting hull and water, the fireball swelling, lifting off the hull and cooling white -> lime -> smoke, dotted lime halo, lens streak, hot fragments arcing with tails, water thrown off the waterline. With the scars system running (game/scars.js) the fires are its own, one **Fire** seated at each hole in the model frame; without it the ship starts to **Fire** (below) where it was struck |
-| `hit` on land | Blast + **Dirt** (dust and clods in a cone, the dust column and base surge, a ground ring), the unit starts to burn |
+| `hit` on land | Blast + **Dirt** (dust and clods in a cone, the dust column and base surge, a ground ring), the unit starts to burn; a warhead going off on or just over the ground leaves a **Scorch** there |
 | `hit` on an aircraft | a small **Burst**; the aircraft trails smoke (a Trail on the unit) |
 | `hit` by a gun (`ciws`, `gun30`) | small Blast, no fire |
 | `splash` in the air (`air`, self-destruct, miss) | a smaller Burst |
 | `splash` on water | **Splash**: column (hollow jet and crown), ring (lime for a moment), mist drifting off, foam; plus a small Blast for a warhead |
-| `splash` on land | Dirt (+ Blast for a warhead); an aircraft crash on land leaves a burning wreck |
+| `splash` on land | Dirt (+ Blast for a warhead); an aircraft crash on land leaves a burning wreck. Every round (and a crash) leaves a **Scorch** (`lib/scorch.js`): the ground's returns charred dark round the point (a ragged disc, alpha-over dots), the crater's raised lip a dense ring of returns, sparse rings in its bowl, the ejecta in pale rays and clods beyond, embers for the first minute; crater radius 0.5 kg^(1/3) m (Oniks ~3 m, Hellfire ~1 m), a crash only scorches. They stay for the match (the newest 48, `fx.scorches`); Orbital: the lip and the scorched edge as rings, the rays as hairlines |
 | `destroyed` ship | a second, bigger Blast; the fire at full; **Sinking**: bubbles boiling round the hull, a slick spreading and drifting downwind, steam where the hot hull goes under |
 | `destroyed` boat under the water | no blast, no fire: the air of the hull coming up in a boil 2.5 s later, Sinking without the steam |
 | `destroyed` land unit | Blast; the wreck burns on (Fire; kept on the ground after `removed` for 75 s, its smoke longer) |
@@ -123,6 +125,7 @@ white through `R.wire` (the orbital system flushes it); no lime, no coral. `stat
 | `lib/hullblast.js` | `HullBlast` |
 | `lib/impact.js` | `Splash`, `Dirt`, `Blast`, `Fire` (with `seat(n)` and `SW` filled each frame, world: the flames stand on the burning surface itself, spread along it, a seat under the sea only steams, the light never reaches the water; else tongues of flame standing on their seats, white-hot at the root through amber to coral at the tip, a dotted amber glow, leaning downwind; embers; `flame` / `embers` / `lightR` / `lightI` / `lightRgb` / `dense` options), `Sinking`, `TorpedoHit` |
 | `lib/guns.js` | `TracerStream`, `Muzzle` |
+| `lib/scorch.js` | `Scorch` (craters and scorched ground on land, built once on the drawn ground; `SCORCH_MAX`) |
 | `lib/water.js` | `Wake` (with row strength and the mast `feather`), `Downwash`, `Bubbles`, `SubWater` |
 | `lib/air.js` | `drawJet`, `drawProps` (E-2D) |
 | `lib/weather.js` | `Lightning`, `drawRain`, `drawShafts` |
