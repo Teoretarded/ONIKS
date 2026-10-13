@@ -90,8 +90,10 @@ Screenshots of several of these were shared in the chat. Start the next session 
   `cloud/audit` (bug fixes), `cloud/validate` (`tools/validate.mjs` data cross-checks). They branch from an older
   `game-v1` (8960317), so expect conflicts in `units.js`, `models.js`, `anatomy.js`, `sensors.js`, `weapons.js`.
   Merge one at a time, re-run tests and look at the game after each.
-- The hit replay (J) does not re-show debris; the Orbital style's clip plane doesn't cut the rear section of a
-  broken missile.
+- The hit replay (J) does not re-show debris (still open 2026-10-13: `game/replay.js` replays the hit but not
+  `game.debris`' pieces; left to the replay's owner). ~~The Orbital style's clip plane doesn't cut the rear section
+  of a broken missile.~~ *Fixed 2026-10-13 (6498422): a gate in its hidden mode clips the hairlines too
+  (`engine/wire.js` clip plane, `wire_models.js`); the rear section keeps its body lines, cut at the break.*
 - On a cold first open the Combat screen could list only six maps (fixed in the fallback list; watch for it).
 - Saves made with older code are refused on Continue (by design: the sim changed).
 - Campaign missions override some HP values (M5, M6); re-check campaign difficulty after the balance changes.
@@ -101,15 +103,27 @@ Screenshots of several of these were shared in the chat. Start the next session 
 
 ## From the user's second play-test (2026-09-25, evening)
 
-- Radar spin-up bug still happens right after loading into sandbox (maybe other modes).
-- DDG radar: SPY-1D is four fixed faces, it must not show a rotating sweep; recheck all ship radars and rates.
-- Selection/tracking brackets on the F/A-18 (maybe others) broken again.
+- ~~Radar spin-up bug still happens right after loading into sandbox (maybe other modes).~~ *Fixed (a51479c: matches
+  started at the x4 default; now x1). Re-checked 2026-10-13: sim time and every antenna advance at real time from the
+  first frame (the loop caps a frame at 0.1 s, so a slow load never runs the sim ahead).*
+- ~~DDG radar: SPY-1D is four fixed faces, it must not show a rotating sweep; recheck all ship radars and rates.~~
+  *Fixed (a51479c, 99c96f1). Re-checked 2026-10-13: the DDG / CG show four fixed face beams, no sweep; SPS-67 15 rpm,
+  CG SPS-49 6 rpm, CVN / LHD SPS-48E 15 rpm, LCS Sea Giraffe 60 rpm.*
+- ~~Selection/tracking brackets on the F/A-18 (maybe others) broken again.~~ *Fixed (b5b6524: one cached pose per
+  frame for render, brackets and follow). Re-checked 2026-10-13: the bracket fits the drawn jet climbing at 26 deg,
+  90-600 m, in stills and live frames.*
 - Pantsir rarely kills missiles: check blast/proximity physics; interceptors miss a lot (SM-6, ESSM 1/12).
 - F/A-18 launches at odd angles right after take-off; should ingress fast/low, launch inside a sensible envelope.
+  *Climb-out fixed 2026-10-13 (0917a14, sim/dynamics.js): wings level off the catapult, the nose rotating up at a
+  pitch rate, a departure bank eased in with time and height (no snap from 15 to 75 deg at 300 m), the roll eased
+  onto its bank, a ~12 deg climb accelerating to 200 m/s. Not looked at: the weapon release envelope / low ingress
+  (sim/airstrike.js).*
 - Scale still feels wrong (ships/missiles look huge; a 64 km leg doesn't read as 64 km): prove with measured stills.
 - Bullet-time slowdown near an intercept starts too late and stutters; cinematic / terminal camera needs a redesign
   (missile in view along its line of sight; pull back when it's being engaged so the interceptors are seen).
-- Ship wake outline stays long after the ship stops; dark "displacement" discs under ships (and near the F/A-18).
+- ~~Ship wake outline stays long after the ship stops; dark "displacement" discs under ships (and near the F/A-18).~~
+  *Fixed (a51479c). Re-checked 2026-10-13: a DDG stopped from 29 kn leaves no outline; no dark disc under ships or
+  the F/A-18.*
 - **To plan: damage system rework** — how vehicles and their modules look after hits, by what hit them.
 - Requests: "Launch missiles" at a map point from any selected unit that carries them; time rates below x1 ([: 0.5, 0.2).
 - Cinematic camera (director.js, 2026-09-25 rework) is still choppy and not smooth in the user's play: below standard, redo.
