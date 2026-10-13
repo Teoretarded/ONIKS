@@ -138,3 +138,9 @@ Screenshots of several of these were shared in the chat. Start the next session 
   tears look wrong, plating is missing or gone where it should not be, pieces hang in the air, damage shows on the far
   side of the hull. A hit also causes a micro-stutter. ~~A missile hitting the ground leaves no mark.~~ *(Fixed
   2026-10-13, afc5c9e: a crater and scorched ground, fx/lib/scorch.js.)* Ships look poor up close.
+- Camera, still open after the 2026-10-14 rework: the kill cam's defence angle sets the hull very large and bright in
+  the X-ray (readable, but it fills the frame); Chase riding an interceptor can lurch once as the pieces' anchor
+  takes over at the burst (one frame, under the flash); the Overview's re-framing when a raid starts or ends moves
+  fast (it is 30-60 km out, so it reads as a slow drift); the in-game panel's Camera tab does not dim In the mix /
+  Mix changes when the mode is not Mix (the Settings screen does). Lab: `game/src/game/director/lab.js` (scene, rec
+  with jolt / cut / subject-on-screen counts, stills).
