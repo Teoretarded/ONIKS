@@ -26,7 +26,7 @@ import { predict, newPrediction } from './predict.js';
 
 const UP = [0, 1, 0];
 const V3 = () => [0, 0, 0];
-const W = { chase: 2.2, launch: 2.0, intercept: 2.4, gun: 2.8, impact: 1.8, break: 2.0, after: 1.4, site: 1.3, death: 1.2, idle: 1.0 };
+const W = { tripod: 4.5, flyby: 5, chase: 2.2, launch: 2.0, intercept: 2.4, gun: 2.8, impact: 1.8, break: 2.0, after: 1.4, site: 1.3, death: 1.2, idle: 1.0 };
 const DDG_MOUNT = [[0, 13.6, 33.3], [0, 16.4, -47.9]];     // Phalanx fwd / aft (sim/weapons.js MOUNT)
 
 export function createShots(game) {
@@ -478,11 +478,22 @@ export function createShots(game) {
       if (ok) { copy(sh.last || (sh.last = V3()), t3); sh.lost = 0; }
       else { if (!sh.last) return false; if (!sh.lost) sh.lost = game.realT; if (game.realT - sh.lost > (sh.linger || 2.5)) return false; copy(t3, sh.last); }
       sh.gE[0] = sh.gE[1] = sh.gE[2] = 0;
-      for (let k = 0; k < 3; k++) sh.gL[k] = t3[k] - sh.A[k];
-      const d = Math.max(1, Math.hypot(sh.gL[0], sh.gL[1], sh.gL[2]));
+      // the lens leads a moving subject a little (room ahead of it in the frame, as an operator frames a pass)
+      const lp = sh.subjId ? projAt(sh.subjId) : null, r = rate();
+      const d = Math.max(1, Math.hypot(t3[0] - sh.A[0], t3[1] - sh.A[1], t3[2] - sh.A[2]));
+      // (at most a quarter of the half frame: on a long lens the room ahead is a few metres)
+      let lx = 0, ly = 0, lz = 0;
+      if (lp && lp.vel) {
+        lx = lp.vel[0] * r * .22; ly = lp.vel[1] * r * .22; lz = lp.vel[2] * r * .22;
+        const ll = Math.hypot(lx, ly, lz), cap = .25 * d * Math.tan((cam.fov0 !== undefined ? cam.fov0 : cam.fov) * (sh.fov || 1) / 2);
+        if (ll > cap) { const f = cap / ll; lx *= f; ly *= f; lz *= f; }
+      }
+      sh.gL[0] = t3[0] - sh.A[0] + lx; sh.gL[1] = t3[1] - sh.A[1] + ly; sh.gL[2] = t3[2] - sh.A[2] + lz;
       // the zoom: the subject's angular size over the share of the frame it should fill (log-smoothed, slower in than out)
       const f0 = cam.fov0 !== undefined ? cam.fov0 : cam.fov;
-      const want = clamp(Math.max(sh.size || 8, 1) / d / (sh.frac || .12) / f0, sh.kMin || .05, sh.kMax || 1);
+      // (gone: the lens opens on the place, the burst and its pieces)
+      const sz = sh.lost ? Math.max(sh.size || 8, 70) : Math.max(sh.size || 8, 1);
+      const want = clamp(sz / d / (sh.frac || .12) / f0, sh.kMin || .05, sh.kMax || 1);
       const lw = Math.log(want);
       sh.lk = sh.lk === undefined ? lw : sh.lk + (lw - sh.lk) * (1 - Math.exp(-dt * (lw > sh.lk ? 1.6 : .8)));
       sh.fov = Math.exp(sh.lk);

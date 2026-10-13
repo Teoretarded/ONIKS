@@ -210,7 +210,8 @@ export function createModes(D) {
     slow: () => 1,
   };
   /* a tripod for candidate c: placed for what is about to happen */
-  function tripodFor(c, force) {
+  function tripodFor(c, force, o) {
+    o = o || {};
     const p = D.projAt(c.id); if (!p) return false;
     const P = game.projPose(p).pos, v = p.vel || [0, 0, 1], appr = Math.atan2(v[0], v[2]), side = D.sideOf(P, v);
     let T = P, r = 900, h = 3.5, ride = 0, rideOff = null;
@@ -221,10 +222,13 @@ export function createModes(D) {
       T = r0.tEv < FAR ? r0.meet.slice() : P;
       const u = defenderOf(c);
       // a defending ship: the camera on her own deck, aft and to the side the round comes from
-      if (u && u.def.domain === 'sea' && u.alive && (c.id + c.unit) % 2 === 0) {
+      if (u && u.def.domain === 'sea' && u.alive && (o.ride || (c.id + c.unit) % 2 === 0)) {
         const pose = game.unitPose(u), rx = Math.cos(pose.hdg), rz = -Math.sin(pose.hdg);
         const sd = (T[0] - pose.pos[0]) * rx + (T[2] - pose.pos[2]) * rz >= 0 ? 1 : -1;
         ride = u.id; rideOff = [sd * u.def.size[1] * .42, Math.min(u.def.size[2] * .45, 14), -u.def.size[0] * .32];
+      } else if (u && o.ride && u.alive) {
+        // a land defender: beside it, low, looking out the way the round comes
+        T = S.centreOf(u, [0, 0, 0]); r = clamp(u.def.size[0] * 3, 25, 60); h = 2.2;
       } else r = clamp(dist3(P, T) * .25, 600, 1800);
     } else if (c.type === 'launch') {
       T = p.fromPos || P; const lu = sim.units.get(p.from); r = clamp((lu ? lu.def.size[0] : 12) * 20, 260, 900); h = 2;
@@ -237,13 +241,13 @@ export function createModes(D) {
     if (ride) { E = [0, 0, 0]; S.mountAt(sim.units.get(ride), rideOff, E); }
     else E = D.tripodSpot(T, appr, side, r, h);
     if (!E) return false;
-    return D.startTripod(E, D.projPt(c.id), Math.max(S.lenOf(p), 4) * 1.6, { key: 'tripod:' + c.id, subjId: c.id, score: c.s2 || c.s, ride, rideOff,
+    return D.startTripod(E, D.projPt(c.id), Math.max(S.lenOf(p), 4) * 1.6, { key: 'tripod:' + c.id, id: c.id, subjId: c.id, score: c.s2 || c.s, ride, rideOff,
       frac: .1, kMin: .035, evFn: evOf(c.id), evKind: c.type === 'gun' ? 'gun' : c.type === 'impact' ? 'impact' : 'intercept', hotT: EV[c.type] ? 1 : 0,
       dur: 40, linger: 3.5, lock: 3, move: { cut: true } });
   }
   /* the same tripod, the lens on another subject (a pan) */
   function tripodAt(P, c, sh) {
-    return D.startTripod(P, D.projPt(c.id), Math.max(S.lenOf(D.projAt(c.id)), 4) * 1.6, { key: 'tripod:' + c.id, subjId: c.id, score: c.s2 || c.s, ride: sh.ride, rideOff: sh.rideOff,
+    return D.startTripod(P, D.projPt(c.id), Math.max(S.lenOf(D.projAt(c.id)), 4) * 1.6, { key: 'tripod:' + c.id, id: c.id, subjId: c.id, score: c.s2 || c.s, ride: sh.ride, rideOff: sh.rideOff,
       frac: .1, kMin: .035, evFn: evOf(c.id), evKind: c.type === 'gun' ? 'gun' : c.type === 'impact' ? 'impact' : 'intercept', hotT: EV[c.type] ? 1 : 0,
       dur: 40, linger: 3.5, lock: 2.5, move: { noCut: true, dur: 1.6, lead: 1 } });
   }
@@ -265,7 +269,8 @@ export function createModes(D) {
       if (imp && !(sh && sh.kind === 'impact')) { D.startImpact(imp.id, imp.unit); return; }
       if (sh && (sh.kind === 'impact' || sh.kind === 'after' || sh.kind === 'death') && t < (sh.until || 0)) return;
       // a heavy round fresh in the air: a flyby, once each
-      const fr = D.best(c => c.type === 'chase' && c.h >= 7 && !flown.has(c.id));
+      // (in cruise: a flyby just off the rail would be through its own launch smoke)
+      const fr = D.best(c => c.type === 'chase' && c.h >= 7 && !flown.has(c.id) && (D.projAt(c.id).age || 0) > 14);
       if (fr && (!sh || sh.done || t - sh.t0 > 5)) { flown.add(fr.id); if (flown.size > 64) flown.clear(); if (D.startFlyby({ id: fr.id, ahead: 2.8, side: fr.id % 2 ? 1 : -1 })) return; }
       if (sh && !sh.done && !sh.ended && t < (sh.until || 1e9)) return;
       showcase.quiet();
@@ -415,16 +420,24 @@ export function createModes(D) {
       const sh = D.shot;
       if (sh && t < sh.lock) return;
       // the duel on screen: over the defender's shoulder until its moment is past
-      if (sh && sh.kind === 'gun' && D.projAt(sh.id)) return;
+      if (sh && (sh.kind === 'gun' || (sh.kind === 'tripod' && sh.hotT)) && D.projAt(sh.id)) return;
       if (sh && sh.kind === 'break' && t < sh.until) return;
       // a defender about to take a round on: over its shoulder (in time: the rate is already easing down)
       let eng = null;
       for (const c of D.cands) if ((c.type === 'gun' || c.type === 'intercept') && c.t < 4.5 && defenderOf(c) && (!eng || c.s > eng.s)) eng = c;
       if (eng) {
-        const u = defenderOf(eng);
+        const u = defenderOf(eng), p = D.projAt(eng.id);
         duel.cur = { id: eng.id, def: u.id };
-        D.startGun(eng.id, u.id, 'duel:' + eng.id);
-        if (D.shot && D.shot.kind === 'gun') { D.shot.evKind = eng.type; D.shot.lock = t + 3; }
+        // a gun with the round close: over the mount's shoulder; an interceptor going out a long way: a long lens from
+        // the defender's own deck (or beside it), after the round, the interceptor coming into the frame
+        const near = p && Math.hypot(p.pos[0] - u.pos[0], p.pos[2] - u.pos[2]) < 3500;
+        if (eng.type === 'gun' && near) {
+          D.startGun(eng.id, u.id, 'duel:' + eng.id);
+          if (D.shot && D.shot.kind === 'gun') { D.shot.evKind = eng.type; D.shot.lock = t + 3; }
+        } else if (!(sh && sh.kind === 'tripod' && sh.subjId === eng.id)) {
+          tripodFor(eng, true, { ride: true });
+          if (D.shot && D.shot.kind === 'tripod') D.shot.lock = t + 3;
+        }
         return;
       }
       // a round coming in (taken on soon, or about to hit): ride it in
@@ -439,6 +452,7 @@ export function createModes(D) {
       if (!sh || sh.ended || sh.done || (sh.until && t > sh.until)) duel.quiet();
     },
     ended(sh) {
+      if (sh.kind === 'tripod') return false;      // the director's default: held where the tripod stands, the lens on the pieces
       if (sh.kind === 'gun') {
         // the kill, held over the defender's shoulder: the pieces in the long lens, longer than the Director holds it
         const g = D.gone.get(sh.id);
