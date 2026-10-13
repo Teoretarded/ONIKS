@@ -347,7 +347,10 @@ export function createModes(D) {
     pick(t) {
       const sh = D.shot, B = story.beat;
       if (sh && t < sh.lock) return;
-      // the climax: the Director's framing of the moment, whatever the beat
+      // the climax: the Director's framing of the moment, whatever the beat; one at a time (a raid has a moment every
+      // second: the shot stays with its round through its own)
+      const onIt = sh && sh.id && D.projAt(sh.id) && (EV[sh.evKind || sh.kind] || sh.kind === 'intercept' || sh.kind === 'twoshot') && sh.ev < FAR && sh.ev / D.baseRate() < 6;
+      if (onIt) return;
       const cl = D.best(c => EV[c.type] && c.t < 4.2);
       if (cl && !(sh && (sh.key === cl.key || (sh.id === cl.id && EV[sh.evKind || sh.kind])))) { story.beat = { name: 'climax', id: cl.id, t0: t }; director.take(cl); return; }
       if (sh && EV[sh.evKind || sh.kind] && sh.ev < FAR && sh.ev / D.baseRate() < 4) return;
@@ -420,7 +423,9 @@ export function createModes(D) {
       const sh = D.shot;
       if (sh && t < sh.lock) return;
       // the duel on screen: over the defender's shoulder until its moment is past
-      if (sh && (sh.kind === 'gun' || (sh.kind === 'tripod' && sh.hotT)) && D.projAt(sh.id)) return;
+      // (while its moment is close: a long engagement far out does not hold the camera for a minute)
+      if (sh && (sh.kind === 'gun' || (sh.kind === 'tripod' && sh.hotT)) && D.projAt(sh.id) && sh.ev < FAR && sh.ev / D.baseRate() < 8) return;
+      if (sh && sh.kind === 'tripod' && sh.hotT && t - sh.t0 < 6) return;
       if (sh && sh.kind === 'break' && t < sh.until) return;
       // a defender about to take a round on: over its shoulder (in time: the rate is already easing down)
       let eng = null;
@@ -434,7 +439,7 @@ export function createModes(D) {
         if (eng.type === 'gun' && near) {
           D.startGun(eng.id, u.id, 'duel:' + eng.id);
           if (D.shot && D.shot.kind === 'gun') { D.shot.evKind = eng.type; D.shot.lock = t + 3; }
-        } else if (!(sh && sh.kind === 'tripod' && sh.subjId === eng.id)) {
+        } else if (!(sh && sh.kind === 'tripod' && sh.subjId === eng.id && t - sh.t0 < 25)) {
           tripodFor(eng, true, { ride: true });
           if (D.shot && D.shot.kind === 'tripod') D.shot.lock = t + 3;
         }

@@ -659,14 +659,16 @@ export async function createReplay(game, ctx) {
     const p = sim.projectiles.get(V.proj);
     if (!p || !p.alive) return 0;
     const r = predict(game, p, PX);
-    if (!(r.kind === 'gun' || r.kind === 'intercept') || r.tEv > 6) return 0;
+    // engaged: a burst or an interceptor on its way to it, or a gun about to open fire (the frame turns in time)
+    const soon = r.gunSoon < 3;           // game s: at x0.25, ~12 s of the kill cam
+    if (!((r.kind === 'gun' || r.kind === 'intercept') && r.tEv <= 6) && !soon) return 0;
     const P = game.projPose(p).pos;
     EP[0][0] = P[0]; EP[0][1] = P[1]; EP[0][2] = P[2];
-    EP[1][0] = r.meet[0]; EP[1][1] = r.meet[1]; EP[1][2] = r.meet[2];
-    let n = 2;
+    let n = 1;
+    if (r.tEv <= 6) { EP[1][0] = r.meet[0]; EP[1][1] = r.meet[1]; EP[1][2] = r.meet[2]; n = 2; }
     // the defender, when it is not the hull itself (a Pantsir covering a launcher, a DDG covering the carrier)
-    const gu = r.kind === 'gun' ? sim.units.get(r.gunUnit) : r.kind === 'intercept' ? sim.units.get((sim.projectiles.get(r.qId) || {}).from) : null;
-    if (gu && gu.alive && gu.id !== V.id) { EP[2][0] = gu.pos[0]; EP[2][1] = gu.pos[1] + 5; EP[2][2] = gu.pos[2]; n = 3; }
+    const gu = r.kind === 'gun' && r.tEv <= 6 ? sim.units.get(r.gunUnit) : r.kind === 'intercept' && r.tEv <= 6 ? sim.units.get((sim.projectiles.get(r.qId) || {}).from) : soon ? sim.units.get(r.gunSoonUnit) : null;
+    if (gu && gu.alive && gu.id !== V.id) { EP[n][0] = gu.pos[0]; EP[n][1] = gu.pos[1] + 5; EP[n][2] = gu.pos[2]; n++; }
     return n;
   }
   /* a point into the frame's set, pulled in to within reach of the hull (a far round would shrink her to a speck) */

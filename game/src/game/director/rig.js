@@ -163,7 +163,7 @@ const nrm = o => { const l = Math.hypot(o[0], o[1], o[2]) || 1; o[0] /= l; o[1] 
    old shot that loses its subject mid-blend turns into a ghost from where it was, with its speed. */
 export function createRig(game, stepShot) {
   const cam = game.R.camera;
-  const E = [0, 0, 0], L = [0, 0, 0], V = [0, 0, 0], pE = [0, 0, 0], pL = [0, 0, 0];
+  const E = [0, 0, 0], L = [0, 0, 0], V = [0, 0, 0], VL = [0, 0, 0], pE = [0, 0, 0], pL = [0, 0, 0];
   const B = { on: false, t: 0, dur: 1, lead: .8, lift: 0, prev: null, mode: 'ghost', carry: null,
     E: [0, 0, 0], L: [0, 0, 0], K: 1, vE: [0, 0, 0], vL: [0, 0, 0], A0: [0, 0, 0], Av: [0, 0, 0], pending: false, min: 1, max: 3 };
   const Ef = [0, 0, 0], Lf = [0, 0, 0], dF = [0, 0, 1], dN = [0, 0, 1], tmp = [0, 0, 0], tv = [0, 0, 0], q = [0, 0, 0];
@@ -172,12 +172,12 @@ export function createRig(game, stepShot) {
 
   rig.reset = () => {
     const e = cam.eye, f = cam.f, d = Math.max(50, Math.min(cam.dist || 500, 3000));
-    for (let k = 0; k < 3; k++) { E[k] = pE[k] = e[k]; L[k] = pL[k] = e[k] + f[k] * d; V[k] = 0; }
+    for (let k = 0; k < 3; k++) { E[k] = pE[k] = e[k]; L[k] = pL[k] = e[k] + f[k] * d; V[k] = VL[k] = 0; }
     K = 1; init = true; fresh = true; B.on = false; cA = cV = 0;
   };
   /* the view the blend starts from: the rig's output as it is now, with its velocity (a ghost) */
   function ghostFromOutput() {
-    for (let k = 0; k < 3; k++) { B.E[k] = E[k]; B.L[k] = L[k]; B.vE[k] = V[k]; B.vL[k] = (L[k] - pL[k]) / Math.max(1e-3, rig.dt || 1 / 60); }
+    for (let k = 0; k < 3; k++) { B.E[k] = E[k]; B.L[k] = L[k]; B.vE[k] = V[k]; B.vL[k] = VL[k]; }
     B.K = K; B.mode = 'ghost'; B.prev = null;
   }
   rig.blend = (prev, o) => {
@@ -258,8 +258,8 @@ export function createRig(game, stepShot) {
     // above the ground and the swell: a soft floor (no kink in the motion)
     const g = game.ground(E[0], E[2]), fl = Math.max(0, g) + (g > .5 ? 1.5 : 2.5);
     if (E[1] < fl + 2) E[1] = fl + 2 * Math.exp((E[1] - fl - 2) / 2);
-    if (dt > 0) for (let k = 0; k < 3; k++) { V[k] = (E[k] - pE[k]) / dt; pE[k] = E[k]; pL[k] = L[k]; }
-    if (rig.cutNow) for (let k = 0; k < 3; k++) V[k] = 0;
+    if (dt > 0) for (let k = 0; k < 3; k++) { V[k] = (E[k] - pE[k]) / dt; VL[k] = (L[k] - pL[k]) / dt; pE[k] = E[k]; pL[k] = L[k]; }
+    if (rig.cutNow) for (let k = 0; k < 3; k++) V[k] = VL[k] = 0;
     rig.dt = dt;
     return rig;
   };

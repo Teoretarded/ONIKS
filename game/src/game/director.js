@@ -195,7 +195,9 @@ function makeDirector(game) {
       const tg = Math.min(r.kind === 'gun' ? r.tEv : FAR, r.gunSoon);
       if (tg < FAR) {
         const t = tg / base, gu = r.kind === 'gun' && r.tEv <= r.gunSoon ? r.gunUnit : r.gunSoonUnit;
-        if (t < 8 && gu) add('gun', p.id, 0, gu, t, 58 + 30 * ss(8, 2, t) + bonus + h * .5 - 5 * far, t < 5, h);
+        // (a gun still out of reach is a moment only once it is close: the burst itself, or under ~3.5 s to it)
+        const firing = r.kind === 'gun' && r.tEv <= r.gunSoon;
+        if ((firing ? t < 8 : t < 3.5) && gu) add('gun', p.id, 0, gu, t, 58 + 30 * ss(8, 2, t) + bonus + h * .5 - 5 * far, t < 5, h);
       }
       if (tu && tu.alive && !tu.aboard && seen(tu) && r.tImpact < FAR) {
         const t = r.tImpact / base, blocked = r.tEv < r.tImpact - .3 || r.gunSoon < r.tImpact - .3;
@@ -225,8 +227,9 @@ function makeDirector(game) {
     const prev = shot;
     const mode_ = st().cineCuts || 'cut';
     const travel = dist3(rig.E, sh.En);
-    const sd = Math.max(shot && shot.subj ? dist3(rig.E, shot.subj) : dist3(rig.E, rig.L), dist3(sh.En, sh.subj || sh.Ln));
-    const long = travel > Math.max(1100, 5 * Math.min(sd, 3000));
+    // long: far for the new shot's own scale, or a glide that would have to fly faster than ~450 m/s
+    const sd = dist3(sh.En, sh.subj || sh.Ln), estDur = clamp(.85 + .48 * Math.log(1 + travel / 120), 1, 2.6);
+    const long = travel > Math.max(700, 4 * Math.min(sd, 2000)) || travel / estDur > 450;
     // a reverse angle (the lens turning more than ~120 deg) is a cut too: a whip pan reads as a mistake
     const f0 = [rig.L[0] - rig.E[0], rig.L[1] - rig.E[1], rig.L[2] - rig.E[2]], f1 = [sh.Ln[0] - sh.En[0], sh.Ln[1] - sh.En[1], sh.Ln[2] - sh.En[2]];
     const turn = Math.acos(clamp((f0[0] * f1[0] + f0[1] * f1[1] + f0[2] * f1[2]) / ((Math.hypot(...f0) * Math.hypot(...f1)) || 1), -1, 1));
@@ -331,20 +334,20 @@ function makeDirector(game) {
     return begin(sh, { carry: rode ? sh.anchor : null, noCut: true, dur: hold ? 1.4 : 1.8 });
   }
   function startAfter(u, appr, side) {
-    return begin(S.make('after', { key: 'after:' + u.id, tgt: u.id, appr, side, lock: now_() + 3.5 * paceK(), until: now_() + 10 * paceK(), anchorFn: S.unitAnchor(u.id) }));
+    return begin(S.make('after', { key: 'after:' + u.id, tgt: u.id, appr, side, lock: now_() + 3.5 * paceK(), until: now_() + 10 * paceK(), anchorFn: S.unitAnchor(u.id) }), { min: 1.8 });
   }
   function startSite(pos, u, dur) {
     const sh = S.make('site', { key: 'site', unit: u ? u.id : 0, pos: pos.slice(), L: u ? u.def.size[0] : 60,
       sea: u ? u.def.domain === 'sea' : game.ground(pos[0], pos[2]) < .5, yaw0: Math.atan2(pos[0] - rig.E[0], pos[2] - rig.E[2]),
       side: 1, lock: now_() + 1.5, until: now_() + dur * paceK() });
     for (let k = 0; k < 3; k++) sh.A[k] = pos[k];
-    return begin(sh);
+    return begin(sh, { min: 1.8 });
   }
   function startDeath(k, isFinal) {
     const sh = S.make('death', { key: 'death:' + k.unit, unit: k.unit, pos: k.pos.slice(), L: k.L, sea: k.sea, final: isFinal,
       yaw0: Math.atan2(k.pos[0] - rig.E[0], k.pos[2] - rig.E[2]) + .3, side: 1, lock: now_() + 4, until: now_() + (isFinal ? 1e9 : (k.sea ? 18 : 10) * paceK()) });
     for (let i = 0; i < 3; i++) sh.A[i] = k.pos[i];
-    return begin(sh);
+    return begin(sh, { min: 2 });
   }
   /* the most important unit (own, or the enemy's tracked group in turn) */
   function leadUnit(enemyTurn) {

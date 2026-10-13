@@ -360,7 +360,10 @@ export function createShots(game) {
       sh.ev = Math.min(r.kind === 'gun' ? r.tEv : r.gunSoon, r.tImpact);     // the burst, or the hit if it gets through
       sh.hot = r.kind === 'gun' || r.tImpact < 4;
       if (l < 5000) sh.subj = copy(sh.S, P);
-      sh.aOut = 12 * DEG; sh.fov = .65; sh.near = .4;
+      // the lens: longer for a round still far out (it reads as more than a dot), eased
+      const f0 = cam.fov0 !== undefined ? cam.fov0 : cam.fov, kw = clamp(Math.max(lenOf(p), 4) * 3 / Math.max(1, l) / .12 / f0, .28, .65);
+      sh.kg = sh.kg === undefined ? kw : sh.kg + (kw - sh.kg) * (1 - Math.exp(-dt * 1.2));
+      sh.aOut = 12 * DEG; sh.fov = sh.kg; sh.near = .4;
       return true;
     },
     /* across the target before the round arrives */
