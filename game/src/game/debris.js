@@ -1207,7 +1207,7 @@ export async function createDebris(game) {
   }
   function drawBodies(frame) {
     const t = frame.t, fx = R.fx, e = cam.eye, fl = cam.fl || 1000;
-    const shutter = clamp(game.timeRate / 60, .004, .05), orb = R.style === 'orbital';
+    const shutter = clamp(game.timeRate / 60, .004, .05);
     let dots = 0;
     const lights = [];
     for (const b of world.B) {
@@ -1263,12 +1263,7 @@ export async function createDebris(game) {
       d.dissolve = b.mode === REST ? .15 + .85 * (1 - a) : 0;
       d.alpha = 1;
       if (a <= .01) continue;
-      // the Orbital hairlines have no clip plane: the rear section leaves the airframe to the front one
-      if (d.gate && o.gz > 0 && o.names) {
-        if (!o.maskMain) o.maskMain = d.partAlpha;
-        if (orb) { if (!o.maskNoBody) { o.maskNoBody = Object.assign({}, o.maskMain); o.maskNoBody[o.names[0]] = 0; } d.partAlpha = o.maskNoBody; }
-        else d.partAlpha = o.maskMain;
-      }
+      // (the Orbital hairlines are cut by the same gate: engine/wire_models.js clips at a gate in mode 2)
       R.draw(d);
       if (b.mode === AIR && dist < 6000) dots += streak(fx, P3, b.v, shutter, dist, .35, 226, 228, 222);
       // the torn end: white-hot a moment, then going out

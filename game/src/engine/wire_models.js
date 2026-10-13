@@ -223,6 +223,9 @@ export class WireModels {
     const C = this._entry(d.key);
     let segs = 0;
     const rgb = o.rgb, A0 = (d.alpha === undefined ? 1 : d.alpha) * (1 - (d.dissolve || 0)) * (o.a === undefined ? 1 : o.a) * Math.min(1, px / 3);
+    // a gate in its 'hidden' mode (the dots drawn only behind it: a broken airframe's section, Inspect's contents) is
+    // a clip plane for the hairlines too; a part with its own gate mode keeps its lines whole
+    const clip = d.gate && d.gate.mode === 2 ? d.gate : null, pg = d.partGate;
     for (const c of C) {
       const Pt = c.P, part = Pt.part;
       if (part.show && !part.show(st)) continue;
@@ -244,7 +247,7 @@ export class WireModels {
       if (!B || !B.n) continue;
       const dm = d.damage && d.damage[Pt.name] ? Math.min(1, d.damage[Pt.name] * 1.1) : 0;
       const col = dm > 0 ? [rgb[0] + (1 - rgb[0]) * dm, rgb[1] + (106 / 255 - rgb[1]) * dm, rgb[2] + (61 / 255 - rgb[2]) * dm] : rgb;
-      this.W.model(B, { R: Rp, T: Tp, rgb: col, a: pa, depth: o.depth, fog: o.fog, width: o.width });
+      this.W.model(B, { R: Rp, T: Tp, rgb: col, a: pa, depth: o.depth, fog: o.fog, width: o.width, clip: clip && !(pg && pg[Pt.name] !== undefined && pg[Pt.name] !== 2) ? clip : null });
       segs += B.n;
     }
     return segs;

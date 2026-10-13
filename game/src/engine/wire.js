@@ -9,7 +9,8 @@
    W.path(pts, o) / W.ring(c, r, o) / W.poly // helpers (o: { rgb, a, n, closed })
    const B = W.batch(f32 [ax, ay, az, bx, by, bz, ...])   // static batch (world metres), uploaded once
    W.add(B, { rgb, a, width, fog: [full, none], depth })   // queue a batch for this frame
-   W.model(M, { R, T, rgb, a, back, fog, ... })            // queue a facing-aware model batch (see WireModel)
+   W.model(M, { R, T, rgb, a, back, fog, clip, ... })      // queue a facing-aware model batch (see WireModel); clip:
+                                                             // { n: world unit normal, d: n.p } keeps where n.p < d
    W.flush({ exclude: [x0, y0, x1, y1] })                   // draw everything queued (the renderer does it at the end
                                                              // of the frame when W.auto, else the caller does)
    Facing-aware model batches (the films' GEO.draw on the GPU): each segment carries one or two face normals and a
@@ -93,6 +94,7 @@ uniform vec3 uT;                        // model origin, RTE
 uniform vec3 uEm;                       // the eye in model space
 uniform vec4 uRgb;                      // rgb, w: unused
 uniform vec4 uFace;                     // x: back (edges), y: gen, z: genBack, w: silhouette
+uniform vec4 uClip;                     // clip plane: xyz world unit normal, w: n.p (RTE) of the plane; kept where n.p < w
 ${QUAD}
 void main() {
   vec3 A = aA, B = aB;
@@ -119,6 +121,11 @@ void main() {
     al *= uFace.w * max(0.0, 1.0 - f / 0.2);
   }
   vec3 a = uR * A + uT, b = uR * B + uT;
+  // the clip plane (a section of a broken airframe, Inspect's contents behind the gate): the segment cut where it
+  // crosses, dropped past it
+  float ca = dot(uClip.xyz, a) - uClip.w, cb = dot(uClip.xyz, b) - uClip.w;
+  if (ca >= 0.0 && cb >= 0.0) { ${CULL} return; }
+  if (ca > 0.0) a = mix(a, b, ca / (ca - cb)); else if (cb > 0.0) b = mix(a, b, ca / (ca - cb));
   if (!quad(a, b, al, uRgb.rgb)) { ${CULL} }
 }
 `;
@@ -393,6 +400,9 @@ export class Wire {
     const c = op.rgb || WHITE;
     gl.uniform4f(u.uRgb, c[0], c[1], c[2], 0);
     gl.uniform4f(u.uFace, op.back === undefined ? .16 : op.back, op.gen === undefined ? .28 : op.gen, op.genBack === undefined ? .06 : op.genBack, op.sil === undefined ? 1 : op.sil);
+    const K = op.clip;
+    if (K) gl.uniform4f(u.uClip, K.n[0], K.n[1], K.n[2], K.d - (K.n[0] * e[0] + K.n[1] * e[1] + K.n[2] * e[2]));
+    else gl.uniform4f(u.uClip, 0, 0, 0, 1);
     gl.bindVertexArray(B.vao);
     this._each(bands, () => gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, B.n));
     return B.n;
