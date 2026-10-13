@@ -205,3 +205,23 @@ body.oniks-helping .oniks-sbx, body.oniks-helping .oniks-buy { opacity: 0; point
 
 /* the pause menu and the end block (match.js) at the HUD's scale, like the help and the in-game settings */
 .oniks-menu .blk, .oniks-end .blk { zoom: var(--hs, 1); }
+
+/* the in-game settings' tabs (General · Camera); the Camera tab's rows tighter, with their group headings */
+.oniks-set .tabs { display: flex; gap: 34px; margin-top: 26px; }
+.oniks-set .tabs .t { display: flex; align-items: baseline; gap: 9px; cursor: pointer; color: rgba(255,255,255,.32); }
+.oniks-set .tabs .t .n { font: 400 11px var(--mono); color: rgba(255,255,255,.26); }
+.oniks-set .tabs .t .tx { position: relative; font: 500 22px/1 var(--sans); letter-spacing: -.02em; }
+.oniks-set .tabs .t .tx::after { content: ''; position: absolute; left: 0; right: 0; bottom: -9px; height: 3px;
+  background-image: radial-gradient(circle, var(--lime) 1px, transparent 1.3px); background-size: 6px 3px; background-repeat: repeat-x; clip-path: inset(0 100% 0 0); }
+.oniks-set .tabs .t.sel { color: #fff; }
+.oniks-set .tabs .t.sel .n { color: var(--lime); }
+.oniks-set .tabs .t.sel .tx::after { clip-path: inset(0 0 0 0); }
+.oniks-set .list.cam { margin-top: 22px; }
+.oniks-set .list.cam .row { height: 33px; }
+.oniks-set .list.cam .row .vals { font-size: 16.5px; gap: 20px; }
+.oniks-set .list .grp { height: 30px; display: flex; align-items: flex-end; padding: 0 0 8px 61px; font: 400 10.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: rgba(255,255,255,.3); }
+.oniks-set .row .c.m { font-size: 14.5px; }
+.oniks-set .row .vals:has(.c.m) { gap: 14px; }
+.oniks-set .row .c.m.cur::before { content: ''; position: absolute; left: 50%; top: -11px; width: 5px; height: 5px; margin-left: -2.5px; background: rgba(255,255,255,.3); }
+.oniks-set .row.on .c.m.cur::before { background: var(--lime); }
+.oniks-set .row .cnt { font: 400 12px var(--mono); color: var(--faint); margin-left: -6px; }

@@ -433,3 +433,25 @@ body.th-orb #shade .list { background:
 #watchbar .head { position: absolute; top: 3px; width: 3px; height: 11px; margin-left: -1px; background: var(--acc); }
 body.th-orb #watchbar { color: rgba(246,245,242,.62); }
 #scr-watch .card .kick { margin-bottom: 16px; }
+
+/* ---------- SETTINGS: the tabs (General · Camera) and the Camera tab's two columns */
+.stabs { position: absolute; left: calc(var(--lx) + 61px); top: 132px; display: flex; gap: 40px; }
+.stabs .t { position: relative; display: flex; align-items: baseline; gap: 10px; cursor: pointer; color: rgba(255,255,255,.32); transition: color .15s; }
+.stabs .t .n { font: 400 11px var(--mono); letter-spacing: .05em; color: rgba(255,255,255,.26); }
+.stabs .t .tx { position: relative; font: 500 26px/1 var(--sans); letter-spacing: -.025em; }
+.stabs .t .tx::after { content: ''; position: absolute; left: 0; right: 0; bottom: -10px; height: 3px;
+  background-image: radial-gradient(circle, var(--lime) 1px, transparent 1.3px); background-size: 6px 3px; background-repeat: repeat-x;
+  clip-path: inset(0 100% 0 0); transition: clip-path .3s steps(12); }
+.stabs .t:hover { color: rgba(255,255,255,.7); }
+.stabs .t.sel { color: #fff; }
+.stabs .t.sel .n { color: var(--lime); }
+.stabs .t.sel .tx::after { clip-path: inset(0 0 0 0); }
+body.th-orb .stabs .t .tx::after { background-image: radial-gradient(circle, var(--acc) 1px, transparent 1.3px); }
+.form.cam { column-count: 2; column-gap: 70px; width: 1660px; }
+.form.cam .row, .form.cam .grp, .form.cam .gap { break-inside: avoid; }
+.form.cam .grp.colbreak { break-before: column; }
+.form.cam .grp:first-child, .form.cam .grp.colbreak { height: 22px; }
+.form .row .c.m { font-size: 16px; }
+.form .row .vals:has(.c.m) { gap: 17px; }
+.form .row .c.m.cur::before { content: ''; position: absolute; left: 50%; top: -14px; width: 5px; height: 5px; margin-left: -2.5px; background: rgba(255,255,255,.3); }
+.form .row.on .c.m.cur::before { background: var(--lime); }

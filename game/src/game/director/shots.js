@@ -90,8 +90,14 @@ export function createShots(game) {
     sh.age = game.realT - sh.t0;
     sh.subj = null; sh.near = 0;
     if (!GOAL[sh.kind](sh, dt)) return false;
+    // a framing with no moment of its own (a tripod, a two-shot) is told when its subject's moment comes
+    if (sh.evFn) sh.ev = sh.evFn();
     // the offsets' springs (the goal's own speed fed forward, smoothed: a reframing eases, a moving target is not lagged)
-    if (!sh.init || dt <= 0) {
+    if (sh.raw) {
+      // a framing that eases itself (the wide): its goal as it is
+      for (let k = 0; k < 3; k++) { sh.sE[k] = sh.gE[k]; sh.sL[k] = sh.gL[k]; }
+      sh.init = true;
+    } else if (!sh.init || dt <= 0) {
       for (let k = 0; k < 3; k++) { sh.sE[k] = sh.pE[k] = sh.gE[k]; sh.sL[k] = sh.pL[k] = sh.gL[k]; sh.vE[k] = sh.vL[k] = sh.fE[k] = sh.fL[k] = 0; }
       sh.init = true;
     } else {
@@ -108,8 +114,42 @@ export function createShots(game) {
         spring(sh.sL, sh.vL, sh.gL, sh.fL, w * 1.3, dt, k);
       }
     }
-    for (let k = 0; k < 3; k++) { sh.En[k] = sh.A[k] + sh.sE[k]; sh.Ln[k] = sh.A[k] + sh.sL[k]; }
+    // the output, and its speed (a blend that loses this shot coasts on from it at that speed)
+    if (!sh.vEn) { sh.vEn = V3(); sh.vLn = V3(); sh.hasOut = false; }
+    for (let k = 0; k < 3; k++) {
+      const e = sh.A[k] + sh.sE[k], l = sh.A[k] + sh.sL[k];
+      if (sh.hasOut && dt > 0) { sh.vEn[k] = (e - sh.En[k]) / dt; sh.vLn[k] = (l - sh.Ln[k]) / dt; }
+      sh.En[k] = e; sh.Ln[k] = l;
+    }
+    sh.hasOut = true;
+    keepSubject(sh, dt);
     return true;
+  }
+  /* the subject stays in the frame: past aOut off the lens the look turns toward it, softly (a spring of its own, from
+     rest; per shot, so a blend between two shots blends their corrected views and nothing jumps when one starts) */
+  function keepSubject(sh, dt) {
+    const subj = sh.subj, E = sh.En, L = sh.Ln, aOut = (sh.aOut || .3) * Math.min(1, (sh.fov || 1) * 1.1);
+    let want = 0, a = 0;
+    set(t3, L[0] - E[0], L[1] - E[1], L[2] - E[2]);
+    const ld = norm(t3);
+    if (subj) {
+      set(t4, subj[0] - E[0], subj[1] - E[1], subj[2] - E[2]);
+      if (norm(t4) > 1) {
+        a = Math.acos(clamp(t3[0] * t4[0] + t3[1] * t4[1] + t3[2] * t4[2], -1, 1));
+        const a0 = aOut * .6, span = aOut - a0;
+        if (a > a0) want = (a - a0) - span * Math.tanh((a - a0) / span);
+      }
+    }
+    if (sh.cA === undefined || dt <= 0) { sh.cA = want; sh.cV = 0; }
+    else {
+      const e0 = sh.cA - want, ex = Math.exp(-3 * dt), k0 = sh.cV + 3 * e0;
+      sh.cA = want + (e0 + k0 * dt) * ex; sh.cV = (sh.cV - 3 * k0 * dt) * ex;
+      if (sh.cA < 0) { sh.cA = 0; if (sh.cV < 0) sh.cV = 0; }
+    }
+    if (sh.cA > 1e-4 && a > 1e-4) {
+      slerpU(t3, t4, Math.min(1, sh.cA / a));
+      for (let k = 0; k < 3; k++) L[k] = E[k] + t3[k] * ld;
+    }
   }
 
   /* the round's direction, smoothed (the sim's velocity steps at 20 Hz) */
@@ -355,24 +395,33 @@ export function createShots(game) {
         n = BW.n;
         if (n) { BW.x /= n; BW.y /= n; BW.z /= n; BW.ext = 0; Wd.each(bExt); ext = BW.ext; }
       }
-      if (n) {
-        const kk = dt > 0 ? 1 - Math.exp(-dt * 3) : 1;
-        s.c[0] += (BW.x - s.c[0]) * kk; s.c[1] += (BW.y - s.c[1]) * kk; s.c[2] += (BW.z - s.c[2]) * kk;
-      } else {
-        // no pieces (yet): where the round would be, slowing and falling
-        const tg = Math.max(0, sim.t - s.t0s), dr = Math.exp(-tg * .5);
-        for (let i = 0; i < 3; i++) s.c[i] = s.pos[i] + s.vel[i] * (1 - dr) / .5;
-        s.c[1] -= 4.9 * tg * tg;
-        ext = s.L;
+      // the anchor: a critically damped spring (real time) from the round's place and speed toward the pieces' own
+      // centre (or, before there are pieces, where they would be: the round's line, slowing and falling). It starts
+      // with the round's speed, so a camera that rode the round rides on with its pieces with no step, and slows as
+      // they do, smoothly.
+      const tg = Math.max(0, game.t - s.t0s), kd = .8, dr = Math.exp(-tg * kd), r = rate();
+      if (!s.sp) { s.sp = s.pos.slice(); s.sv = [s.vel[0] * r, s.vel[1] * r, s.vel[2] * r]; }
+      if (n) { t5[0] = BW.x; t5[1] = BW.y; t5[2] = BW.z; }
+      else { for (let i = 0; i < 3; i++) t5[i] = s.pos[i] + s.vel[i] * (1 - dr) / kd; t5[1] -= 2.9 * tg * tg; }
+      if (!n) ext = s.L;
+      if (dt > 0) {
+        // the goal's own speed fed forward (the pieces' line, slowing and falling): no lag behind them
+        t6[0] = s.vel[0] * dr * r; t6[1] = (s.vel[1] * dr - 5.8 * tg) * r; t6[2] = s.vel[2] * dr * r;
+        for (let i = 0; i < 3; i++) spring(s.sp, s.sv, t5, t6, 2.4, dt, i);
       }
+      for (let i = 0; i < 3; i++) { s.c[i] = s.sp[i]; s.cv[i] = s.sv[i]; }
       const g = Math.max(0, game.ground(s.c[0], s.c[2]));
-      if (s.c[1] < g + 2) s.c[1] = g + 2;
+      if (s.c[1] < g + 2) { s.c[1] = s.sp[1] = g + 2; s.cv[1] = s.sv[1] = Math.max(0, s.sv[1]); }
       copy(sh.A, s.c);
       if (s.hold) {
         // held where the eye was (a mount, across a target): the lens on the pieces
-        for (let k = 0; k < 3; k++) sh.gE[k] = s.eyeW[k] - sh.A[k];
-        sh.gL[0] = sh.gL[1] = sh.gL[2] = 0;
+        // (the anchor is the eye itself: still; the look rides its spring after the pieces)
+        copy(sh.A, s.eyeW);
+        sh.gE[0] = sh.gE[1] = sh.gE[2] = 0;
+        for (let k = 0; k < 3; k++) sh.gL[k] = s.c[k] - s.eyeW[k];
         sh.fov = s.fovK || 1;
+        sh.subj = copy(sh.S, s.c); sh.aOut = 16 * DEG;
+        return true;
         sh.near = .5;
       } else {
         const d = clamp(Math.max(s.L * 6, ext * 1.8), 45, 95) * (1 + .15 * ss(2, 7, sh.age));
@@ -417,7 +466,149 @@ export function createShots(game) {
       if (!sh.sea) clearance(sh, t4, sh.A);
       return true;
     },
+
+    /* a tripod: the eye fixed at sh.P (on a deck, a hill, the sea), the lens panning after the subject as an operator
+       would, zooming to hold it at about sh.frac of the frame's height (a long lens on a far round, like range
+       footage). sh.subjFn(out) -> the subject's point (false: gone); sh.size its size (m). False once it has been
+       gone for a moment (the lens rests on where it was). */
+    tripod(sh, dt) {
+      copy(sh.A, sh.P);
+      if (sh.ride) { const u = sim.units.get(sh.ride); if (u && u.alive) { mountAt(u, sh.rideOff, sh.A); copy(sh.P, sh.A); } }
+      const ok = sh.subjFn(t3);
+      if (ok) { copy(sh.last || (sh.last = V3()), t3); sh.lost = 0; }
+      else { if (!sh.last) return false; if (!sh.lost) sh.lost = game.realT; if (game.realT - sh.lost > (sh.linger || 2.5)) return false; copy(t3, sh.last); }
+      sh.gE[0] = sh.gE[1] = sh.gE[2] = 0;
+      for (let k = 0; k < 3; k++) sh.gL[k] = t3[k] - sh.A[k];
+      const d = Math.max(1, Math.hypot(sh.gL[0], sh.gL[1], sh.gL[2]));
+      // the zoom: the subject's angular size over the share of the frame it should fill (log-smoothed, slower in than out)
+      const f0 = cam.fov0 !== undefined ? cam.fov0 : cam.fov;
+      const want = clamp(Math.max(sh.size || 8, 1) / d / (sh.frac || .12) / f0, sh.kMin || .05, sh.kMax || 1);
+      const lw = Math.log(want);
+      sh.lk = sh.lk === undefined ? lw : sh.lk + (lw - sh.lk) * (1 - Math.exp(-dt * (lw > sh.lk ? 1.6 : .8)));
+      sh.fov = Math.exp(sh.lk);
+      sh.subj = copy(sh.S, t3); sh.aOut = 14 * DEG;
+      sh.near = clamp(d * .01, .3, 20);
+      return true;
+    },
+    /* a flyby: the eye still beside the subject's path ahead of it; it comes at the lens and goes past (a whip pan).
+       done once it is well past. */
+    flyby(sh, dt) {
+      const p = sh.id ? projAt(sh.id) : null, u = !p && sh.unit ? unitAt(sh.unit) : null;
+      if (!p && !u) return false;
+      const P = p ? game.projPose(p).pos : centreOf(u, t3), v = p ? p.vel : unitVel(u, t5);
+      if (!sh.placed) {
+        sh.placed = true;
+        const r = rate() || 1, sp = Math.hypot(v[0], v[1], v[2]), vr = p ? r : 1;     // unitVel is per real s already
+        const ahead = sh.ahead || 2.4, L0 = p ? lenOf(p) : u.def.size[0];
+        // where it will be `ahead` real seconds from now, then out to the side and a little up
+        const hx = sp > 1 ? v[0] / sp : Math.sin(cam.yaw), hz = sp > 1 ? v[2] / sp : Math.cos(cam.yaw), hh = Math.hypot(hx, hz) || 1;
+        // out far enough that the pass reads (its peak turn about 1.4 rad/s at the slow rate the pass is seen at)
+        const vs = sp * (p ? Math.min(r, .3) : 1);
+        const off = clamp(Math.max(sh.off || L0 * 3 + 8, vs / 1.4), 10, 420), s = sh.side || 1;
+        sh.A[0] = P[0] + v[0] * vr * ahead + hz / hh * off * s; sh.A[1] = P[1] + v[1] * vr * ahead + off * .18; sh.A[2] = P[2] + v[2] * vr * ahead - hx / hh * off * s;
+        const g = Math.max(0, game.ground(sh.A[0], sh.A[2]));
+        if (sh.A[1] < g + 3) sh.A[1] = g + 3;
+        sh.off0 = off; sh.L0 = L0;
+      }
+      sh.gE[0] = sh.gE[1] = sh.gE[2] = 0;
+      for (let k = 0; k < 3; k++) sh.gL[k] = P[k] - sh.A[k];
+      const d = Math.hypot(sh.gL[0], sh.gL[1], sh.gL[2]);
+      // past it: the subject going away from the lens
+      const away = v[0] * sh.gL[0] + v[1] * sh.gL[1] + v[2] * sh.gL[2] > 0;
+      if (away && d > sh.off0 * 6) sh.done = true;
+      // the moment: its closest pass (game s)
+      const vv = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+      sh.ev = !away && vv > 1 && p ? (v[0] * sh.gL[0] + v[1] * sh.gL[1] + v[2] * sh.gL[2]) / -vv : 1e9;
+      sh.evKind = 'flyby';
+      if (sh.age > (sh.ahead || 2.4) * 3 + 4) sh.done = true;
+      sh.subj = copy(sh.S, P); sh.aOut = 22 * DEG; sh.fov = sh.k || clamp(sh.off0 / 260, .45, .85);
+      sh.near = clamp(Math.min(d, sh.off0) * .05, .3, 4);
+      return true;
+    },
+    /* a dolly along a unit: the eye travels beside her from ahead of the bow to past the stern (or back), low, the lens
+       on her as she goes by. done at the end of the travel. */
+    dolly(sh, dt) {
+      const u = unitAt(sh.unit); if (!u) return false;
+      const pose = game.unitPose(u), L0 = u.def.size[0], H = u.def.size[2], sea = u.def.domain === 'sea';
+      centreOf(u, sh.A);
+      const fx = Math.sin(pose.hdg), fz = Math.cos(pose.hdg), s = sh.side || 1;
+      // the travel: a steady speed, eased in and out over its first and last 15 % (a trapezoid of speed)
+      const T = sh.dur || 12, k = clamp(sh.age / T, 0, 1), a = .15, vm = 1 / (1 - a);
+      const e = k < a ? vm * k * k / (2 * a) : k > 1 - a ? 1 - vm * (1 - k) * (1 - k) / (2 * a) : vm * (k - a / 2);
+      const along = L0 * (.85 - 1.7 * e) * (sh.dir || 1);
+      const D = sh.D || (sea ? clamp(L0 * .55, 30, 160) : clamp(L0 * 1.4, 10, 40)), h = sh.h || (sea ? clamp(H * .35, 5, 18) : clamp(H * .5, 1.6, 6));
+      sh.gE[0] = fx * along + fz * D * s; sh.gE[2] = fz * along - fx * D * s; sh.gE[1] = h - Math.min(H * .28, 12);
+      const look = along * .3;
+      sh.gL[0] = fx * look; sh.gL[2] = fz * look; sh.gL[1] = 0;
+      if (sh.age > T) sh.done = true;
+      sh.aOut = 26 * DEG; sh.near = .5;
+      if (!sea) clearance(sh, t4, sh.A);
+      sh.gE[1] += sh.raise * D * .02;
+      return true;
+    },
+    /* a crane: from low by the unit up and back over her, turning a little (a reveal) */
+    crane(sh, dt) {
+      const u = unitAt(sh.unit); if (!u) return false;
+      centreOf(u, sh.A);
+      const L0 = Math.max(u.def.size[0], 8), sea = u.def.domain === 'sea', T = sh.dur || 11, k = smootherK(clamp(sh.age / T, 0, 1));
+      const yaw = sh.yaw0 + (sh.side || 1) * .45 * k, pitch = (3 + 30 * k) * DEG, d = L0 * (sea ? .75 + 1.1 * k : 1.6 + 2 * k);
+      orbitOff(sh, yaw, pitch, Math.max(d, sea ? 60 : 18));
+      if (sh.age > T) sh.done = true;
+      sh.aOut = 22 * DEG; sh.near = .5;
+      if (!sea) clearance(sh, t4, sh.A);
+      return true;
+    },
+    /* the whole engagement in one frame: high and wide over the points sh.ptsFn(KP) -> n (rounds, their targets, the
+       defence); the centre and the distance ease (an anchor that never jumps), the heading drifts */
+    wide(sh, dt) {
+      const n = sh.ptsFn(KP);
+      if (!n) { if (!sh.hasC) return false; }
+      else {
+        let x = 0, y = 0, z = 0;
+        for (let i = 0; i < n; i++) { x += KP[i][0]; y += KP[i][1]; z += KP[i][2]; }
+        x /= n; y /= n; z /= n;
+        if (!sh.hasC) { sh.C = [x, y, z]; sh.hasC = true; }
+        const kk = 1 - Math.exp(-dt * .45);
+        sh.C[0] += (x - sh.C[0]) * kk; sh.C[1] += (y - sh.C[1]) * kk; sh.C[2] += (z - sh.C[2]) * kk;
+      }
+      copy(sh.A, sh.C);
+      const yaw = sh.yaw0 + sh.age * .012 * (sh.side || 1), pitch = (sh.pitch || 30) * DEG;
+      let d = sh.dMin || 900;
+      if (n) d = Math.max(d, fitDist(cam, sh.A, KP, n, yaw, pitch, .72, .62));
+      d = Math.min(d, sh.dMax || 60000);
+      const ld = Math.log(d);
+      sh.ld = sh.ld === undefined ? ld : sh.ld + (ld - sh.ld) * (1 - Math.exp(-dt * (ld > sh.ld ? .7 : .35)));
+      orbitOff(sh, yaw, pitch, Math.exp(sh.ld));
+      sh.raw = true; sh.aOut = 40 * DEG; sh.near = clamp(Math.exp(sh.ld) * .01, 1, 60);
+      return true;
+    },
+    /* two subjects in one frame from the side of the line between them: a round and the gun or launcher firing at it,
+       a round and its interceptor. sh.aFn / sh.bFn (out) -> false when gone; the frame closes in as they close. */
+    twoshot(sh, dt) {
+      if (!sh.aFn(t3)) return false;
+      if (!sh.bFn(t4)) return false;
+      for (let k = 0; k < 3; k++) sh.A[k] = (t3[k] + t4[k]) / 2;
+      set(t5, t4[0] - t3[0], 0, t4[2] - t3[2]);
+      const sep = Math.hypot(t4[0] - t3[0], t4[1] - t3[1], t4[2] - t3[2]);
+      if (Math.hypot(t5[0], t5[2]) > 1) { norm(t5); if (!sh.ax) sh.ax = t5.slice(); else { const kk = 1 - Math.exp(-dt * 1.5); mixTo(sh.ax, t5, kk); norm(sh.ax); } }
+      const ax = sh.ax || [1, 0, 0], s = sh.side || 1;
+      const nx = ax[2] * s, nz = -ax[0] * s;
+      // out to the side, a little behind the round (sh.back: toward a), above them
+      const yaw = Math.atan2(-nx, -nz) + (sh.skew || .35) * s, pitch = (sh.pitch || 9) * DEG;
+      KP[0][0] = t3[0]; KP[0][1] = t3[1]; KP[0][2] = t3[2]; KP[1][0] = t4[0]; KP[1][1] = t4[1]; KP[1][2] = t4[2];
+      let d = Math.max(sh.dMin || 60, fitDist(cam, sh.A, KP, 2, yaw, pitch, .62, .5));
+      d = Math.min(d, 9000);
+      const ld = Math.log(d);
+      sh.ld = sh.ld === undefined ? ld : sh.ld + (ld - sh.ld) * (1 - Math.exp(-dt * 1.4));
+      orbitOff(sh, yaw, pitch, Math.exp(sh.ld));
+      const g = Math.max(0, game.ground(t4[0] = sh.A[0] + sh.gE[0], t4[2] = sh.A[2] + sh.gE[2]));
+      if (sh.A[1] + sh.gE[1] < g + 4) sh.gE[1] = g + 4 - sh.A[1];
+      sh.sep = sep;
+      sh.aOut = 24 * DEG; sh.near = clamp(Math.exp(sh.ld) * .02, .5, 20);
+      return true;
+    },
   };
+  const smootherK = u => { u = clamp(u, 0, 1); return u * u * u * (u * (u * 6 - 15) + 10); };
   /* the debris bodies born with a break-up (its window of birth times, within 700 m): their centre, their spread */
   const BW = { s: null, n: 0, x: 0, y: 0, z: 0, ext: 0 };
   function bSum(b) {
@@ -488,6 +679,14 @@ function set(o, x, y, z) { o[0] = x; o[1] = y; o[2] = z; return o; }
 function copy(o, a) { o[0] = a[0]; o[1] = a[1]; o[2] = a[2]; return o; }
 function norm(o) { const l = Math.hypot(o[0], o[1], o[2]) || 1; o[0] /= l; o[1] /= l; o[2] /= l; return l; }
 function dist(a, b) { return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]); }
+/* unit a toward unit b by u, along the great circle (into a) */
+function slerpU(a, b, u) {
+  const c = clamp(a[0] * b[0] + a[1] * b[1] + a[2] * b[2], -1, 1);
+  if (c > .9995) { for (let k = 0; k < 3; k++) a[k] += (b[k] - a[k]) * u; norm(a); return a; }
+  const th = Math.acos(c), s = Math.sin(th), wa = Math.sin((1 - u) * th) / s, wb = Math.sin(u * th) / s;
+  for (let k = 0; k < 3; k++) a[k] = a[k] * wa + b[k] * wb;
+  norm(a); return a;
+}
 function mixTo(o, a, k) { o[0] += (a[0] - o[0]) * k; o[1] += (a[1] - o[1]) * k; o[2] += (a[2] - o[2]) * k; }
 /* mixTo, the step no longer than max (m) */
 function moveTo(o, a, k, max) {

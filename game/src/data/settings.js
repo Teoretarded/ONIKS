@@ -27,7 +27,12 @@
      edgePan     * bool                          camera pans at the screen edges
      invertRotate  bool                          right-drag / Q E rotate the other way
      autoSlow    * bool                          drop to x1 on a launch or a new contact (game.autoSlow; was 'oniks.autoSlow')
-     hitReplay   * bool                          a decisive hit replays in slow motion (game/replay.js; Shift+J too)
+     hitReplay   * bool                          the kill cam: a decisive hit replays in slow motion (game/replay.js; Shift+J too)
+     killCam*    *                               the kill cam: what it plays on, its angle, the defence in the frame, its rate,
+                                                 the X-ray, rounds shot down (debris/slowmo.js), the gap between kill cams
+     cine*       *                               the cinematic camera (C, game/director.js): its mode or a mix of modes, slow
+                                                 motion, shot length, cuts, lens, the hand on the camera, quiet time, captions
+   The Camera tab holds the cine* and kill cam rows (TABS, a row's `tab`).
      timeRate      1 | 2 | 4 | 8 | 16 | 32       time rate a match starts at
      menuFilm      'random' | film id           the film behind the main menu */
 
@@ -49,7 +54,13 @@ export const MENU_FILMS = [
   ['od_salvo', 'Salvo'],
 ];
 
-/* The settings table: order, grouping, labels and allowed values. */
+/* The cinematic camera's modes (game/director/modes.js): five of their own, two that combine them. */
+export const CINE_MODES = [
+  ['director', 'Director'], ['chase', 'Chase'], ['tripod', 'Tripod'], ['showcase', 'Showcase'], ['overview', 'Overview'],
+  ['story', 'Storyteller'], ['duel', 'Duel'],
+];
+
+/* The settings table: order, grouping, labels and allowed values (multi: a comma list of any of the choices). */
 export const SETTINGS = [
   { key: 'renderStyle', group: 'Graphics', label: 'Render style', def: 'pointcloud', choices: [['pointcloud', 'Point Cloud'], ['orbital', 'Orbital']] },
   { key: 'renderScale', group: 'Graphics', label: 'Render scale', def: 1, choices: [[.5, '50%'], [.67, '67%'], [.75, '75%'], [1, '100%']] },
@@ -64,10 +75,33 @@ export const SETTINGS = [
   { key: 'edgePan', group: 'Controls', label: 'Edge pan', def: true, choices: [[false, 'Off'], [true, 'On']] },
   { key: 'invertRotate', group: 'Controls', label: 'Invert rotate', def: false, choices: [[false, 'Off'], [true, 'On']] },
   { key: 'autoSlow', group: 'Controls', label: 'Auto ×1', def: true, choices: [[false, 'Off'], [true, 'On']] },
-  { key: 'hitReplay', group: 'Controls', label: 'Hit replay', def: true, choices: [[false, 'Off'], [true, 'On']] },
   { key: 'timeRate', group: 'Controls', label: 'Start time rate', def: 1, choices: [1, 2, 4, 8, 16, 32].map(v => [v, 'x' + v]) },
   { key: 'menuFilm', group: 'Menu', label: 'Menu film', def: 'random', cycle: true, choices: MENU_FILMS },
+  // the Camera tab: the cinematic camera (C; game/director.js) and the kill cam (game/replay.js, game/debris/slowmo.js)
+  { key: 'cineMode', tab: 'camera', group: 'Cinematic camera', label: 'Mode', def: 'director', cycle: true, choices: CINE_MODES.concat([['mix', 'Mix']]) },
+  { key: 'cineMix', tab: 'camera', group: 'Cinematic camera', label: 'In the mix', def: 'director,tripod,story,duel', multi: true, choices: CINE_MODES },
+  { key: 'cineMixEvery', tab: 'camera', group: 'Cinematic camera', label: 'Mix changes', def: 90, choices: [[45, '45 s'], [90, '90 s'], [180, '3 min'], [300, '5 min']] },
+  { key: 'cineSlow', tab: 'camera', group: 'Cinematic camera', label: 'Slow motion', def: 'normal', choices: [['off', 'Off'], ['light', 'x0.5'], ['normal', 'x0.25'], ['strong', 'x0.1']] },
+  { key: 'cinePace', tab: 'camera', group: 'Cinematic camera', label: 'Shot length', def: 'normal', choices: [['quick', 'Quick'], ['normal', 'Normal'], ['long', 'Long']] },
+  { key: 'cineCuts', tab: 'camera', group: 'Cinematic camera', label: 'Long moves', def: 'cut', choices: [['cut', 'Cut'], ['dip', 'Dip'], ['glide', 'Fly']] },
+  { key: 'cineLens', tab: 'camera', group: 'Cinematic camera', label: 'Lens', def: 'normal', choices: [['wide', 'Wide'], ['normal', 'Normal'], ['long', 'Long']] },
+  { key: 'cineShake', tab: 'camera', group: 'Cinematic camera', label: 'Hand on the camera', def: 'subtle', choices: [['off', 'Off'], ['subtle', 'Subtle'], ['handheld', 'Handheld']] },
+  { key: 'cineQuiet', tab: 'camera', group: 'Cinematic camera', label: 'When it is quiet', def: 'rollby', choices: [['rollby', 'Rollbys'], ['overview', 'Overview'], ['orbit', 'Orbit']] },
+  { key: 'cineSides', tab: 'camera', group: 'Cinematic camera', label: 'Whose rounds', def: 'both', choices: [['both', 'Both'], ['own', 'Own'], ['enemy', 'Enemy']] },
+  { key: 'cineTitles', tab: 'camera', group: 'Cinematic camera', label: 'Captions', def: true, choices: [[false, 'Off'], [true, 'On']] },
+  { key: 'hitReplay', tab: 'camera', group: 'Kill cam', label: 'Kill cam', def: true, choices: [[false, 'Off'], [true, 'On']] },
+  { key: 'killCamWhen', tab: 'camera', group: 'Kill cam', label: 'Plays on', def: 'heavy', choices: [['kills', 'Kills'], ['heavy', 'Heavy hits'], ['all', 'Every hit']] },
+  { key: 'killCamAngle', tab: 'camera', group: 'Kill cam', label: 'Angle', def: 'auto', choices: [['auto', 'Auto'], ['across', 'Across'], ['round', 'Round'], ['defence', 'Defence']] },
+  { key: 'killCamDefence', tab: 'camera', group: 'Kill cam', label: 'Show the defence', def: true, choices: [[false, 'Off'], [true, 'On']] },
+  { key: 'killCamSlow', tab: 'camera', group: 'Kill cam', label: 'Slow motion', def: .25, choices: [[.1, 'x0.1'], [.25, 'x0.25'], [.5, 'x0.5']] },
+  { key: 'killCamXray', tab: 'camera', group: 'Kill cam', label: 'X-ray sweep', def: true, choices: [[false, 'Off'], [true, 'On']] },
+  { key: 'killCamIntercept', tab: 'camera', group: 'Kill cam', label: 'Rounds shot down', def: 'slow', choices: [['off', 'Off'], ['slow', 'Slow motion'], ['camera', 'Camera']] },
+  { key: 'killCamCool', tab: 'camera', group: 'Kill cam', label: 'Between kill cams', def: 'normal', choices: [['short', 'Short'], ['normal', 'Normal'], ['long', 'Long']] },
 ];
+
+/* The tabs of the Settings screen and the in-game panel; a row's tab ('general' unless set). */
+export const TABS = [['general', 'General'], ['camera', 'Camera']];
+export const tabOf = d => d.tab || 'general';
 
 /* One true line per setting, for the value it has (the Settings screen and the in-game panel show it). */
 export const NOTES = {
@@ -84,7 +118,34 @@ export const NOTES = {
   edgePan: v => v ? 'The camera pans when the pointer touches a screen edge.' : 'Pan with W A S D or the middle button only.',
   invertRotate: v => v ? 'Right-drag and Q E turn the camera the other way.' : 'Right-drag and Q E turn the camera as the pointer moves.',
   autoSlow: v => v ? 'A launch or a new contact drops time to x1, so it is watched at real speed.' : 'Time stays at the rate you set.',
-  hitReplay: v => v ? 'A decisive hit plays again in slow motion, the X-ray sweeping the hull. J replays the last one.' : 'No automatic replays. J still replays the last decisive hit.',
+  hitReplay: v => v ? 'A decisive hit plays again in slow motion. J replays the last one; Shift J turns the kill cam on and off.' : 'No automatic kill cam. J still replays the last decisive hit.',
+  cineMode: v => ({
+    director: 'Goes to what is about to happen: launches, intercepts, gun bursts, impacts, and what they leave.',
+    chase: 'Rides one round from the rail to its end, then the next. The engagement seen from the round.',
+    tripod: 'Fixed cameras near the action, long lenses panning and zooming after the rounds, like test-range footage.',
+    showcase: 'Slow rollbys of ships, vehicles, aircraft and rounds in flight: dolly, crane, orbit, flyby.',
+    overview: 'High and wide: the whole engagement in one frame, every round, its target and the defence.',
+    story: 'Director, Showcase and Overview in beats: the launch, the wide, the flyby, the moment, the aftermath.',
+    duel: "Chase and Tripod: rides a round in, then over the defender's shoulder as it fires, held through the kill.",
+    mix: 'Changes between the modes picked under In the mix, at a quiet moment. Shift C: the next mode.',
+  }[v]),
+  cineMix: v => v ? `Mix: ${v.split(',').map(k => (CINE_MODES.find(m => m[0] === k) || [k, k])[1]).join(', ')}. Used when the mode is Mix.` : 'None picked: the Mix plays the Director.',
+  cineMixEvery: v => `The Mix moves to its next mode after about ${v < 60 ? v + ' s' : v / 60 + ' min'}, between moments.`,
+  cineSlow: v => ({ off: 'The cinematic never changes the time rate.', light: 'Time eases to x0.5 for each intercept, gun burst and impact.', normal: 'Time eases to x0.25 for each intercept, gun burst and impact.', strong: 'Time eases to x0.1 for each intercept, gun burst and impact.' }[v]),
+  cinePace: v => ({ quick: 'Shorter shots, more changes.', normal: 'Shots held as long as they read.', long: 'Long takes: a shot stays until its moment is over.' }[v]),
+  cineLens: v => ({ wide: 'A wider lens: more of the scene round the subject.', normal: 'The lens each shot was framed for.', long: 'A longer lens: tighter and flatter, the subject larger.' }[v]),
+  cineCuts: v => ({ cut: 'A move of more than about a kilometre is a cut; shorter ones glide.', dip: 'A long move dips to dark and back.', glide: 'Every move flies, however far: no cuts.' }[v]),
+  cineShake: v => ({ off: 'A locked-off camera.', subtle: 'A slow sub-degree drift: a hand on the camera.', handheld: 'A handheld feel, stronger on the close shots.' }[v]),
+  cineQuiet: v => ({ rollby: 'Nothing happening: rollbys of the forces.', overview: 'Nothing happening: a slow wide of both forces.', orbit: 'Nothing happening: a slow orbit of the most important unit.' }[v]),
+  cineSides: v => ({ both: "Both sides' rounds are followed.", own: 'Only your own rounds are followed.', enemy: 'Only the rounds fired at you, and your defence.' }[v]),
+  cineTitles: v => v ? 'A caption names the subject, its speed and its target, as in the films.' : 'No captions.',
+  killCamWhen: v => ({ kills: 'Only a blow that destroys a ship or a major unit.', heavy: 'A heavy round (Oniks, Kalibr, Tomahawk, SLAM-ER, Kh-35) hitting a ship or a major unit.', all: 'Every missile hitting a ship or a major unit.' }[v]),
+  killCamAngle: v => ({ auto: 'Across the target; from behind its defence while the round is engaged.', across: 'Across the target, low, the round coming in through the open side.', round: 'From behind the incoming round, the target ahead.', defence: "From behind the target's defence, looking out at the round coming in." }[v]),
+  killCamDefence: v => v ? 'Guns and interceptors firing at the round stay in the frame; a round shot down is followed to its pieces.' : 'Framed on the target alone.',
+  killCamSlow: v => `The kill cam runs at x${v}.`,
+  killCamXray: v => v ? 'The lime X-ray sweeps the hull and names the parts that broke.' : 'No X-ray: the hit as it is.',
+  killCamIntercept: v => ({ off: 'A round shot down nearby changes nothing.', slow: 'A round shot down near the camera slows time while it comes apart.', camera: 'A round shot down near the camera slows time and the camera turns to the pieces, then gives the view back.' }[v]),
+  killCamCool: v => ({ short: 'Kill cams can follow each other closely.', normal: 'A pause between kill cams (a kill waits less).', long: 'Kill cams are rare: only the big moments.' }[v]),
   timeRate: v => `Matches start at x${v}.`,
   menuFilm: v => v === 'random' ? 'A different favourite film behind the menu each time.' : 'This film plays behind the menu.',
 };
@@ -123,8 +184,8 @@ export const KEYBINDS = [
     ['Z', 'Impact: time ×1 ×0.25 ×0.1', { ctx: 'inspect', mode: 'sandbox' }], ['D', 'Impact: sim damage on / off', { ctx: 'inspect', mode: 'sandbox' }],
     ['C', 'Impact: reset the damage', { ctx: 'inspect', mode: 'sandbox' }] ] },
   { group: 'View and time', binds: [
-    ['C', 'Cinematic camera'], ['C', 'Cinematic on rounds', { ctx: 'rounds' }],
-    ['B', 'Bullet time on rounds', { ctx: 'rounds' }], ['Esc', 'Drop the rounds', { ctx: 'rounds' }], ['J', 'Replay the last hit'], ['Shift J', 'Hit replay on / off'], ['V', 'Radar view'], ['Shift V', 'Radar sweeps on / off'],
+    ['C', 'Cinematic camera'], ['Shift C', 'Cinematic: next mode'], ['C', 'Cinematic on rounds', { ctx: 'rounds' }],
+    ['B', 'Bullet time on rounds', { ctx: 'rounds' }], ['Esc', 'Drop the rounds', { ctx: 'rounds' }], ['J', 'Replay the last hit'], ['Shift J', 'Kill cam on / off'], ['V', 'Radar view'], ['Shift V', 'Radar sweeps on / off'],
     ['F10', 'Hide the interface'], ['F1', 'Help'], ['Space', 'Pause'], ['[ ]', 'Time rate ×0.1 … ×32'], ['Esc', 'Menu'] ] },
   { group: 'Film maker', binds: [
     ['F9', 'Film panel'], ['K', 'Key at this view', { ctx: 'film' }], ['Shift K', 'Key that follows', { ctx: 'film' }], ['Shift F9', 'Play the take'],
@@ -140,6 +201,7 @@ const same = (a, b) => typeof a === 'number' && typeof b === 'number' ? Math.abs
 function valid(k, v) {
   const s = spec(k);
   if (!s) return false;
+  if (s.multi) return typeof v === 'string' && (v === '' || v.split(',').every(x => s.choices.some(c => c[0] === x)));
   return s.choices.some(c => same(c[0], v));
 }
 

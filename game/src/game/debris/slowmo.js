@@ -7,6 +7,9 @@
    never against a rate the player has just chosen. A replay that starts meanwhile takes over: game.bulletTime.take()
    hands it the rate to return to.
 
+   The Kill cam's Rounds shot down setting: off (never), slow motion (as above), or camera: with the cinematic off, the
+   camera also turns to the pieces (a short flight, held while they come apart) and flies back to where it was.
+
    createBulletTime(game) -> { want(b) -> bool, update(dtReal), active, stop(restore) }; game.bulletTime. */
 import { ss, sat } from './math.js';
 
@@ -38,12 +41,21 @@ export function createBulletTime(game) {
     /* a break-up worth it? b: { heavy, px (its size on screen), onScreen, dist } */
     want(b) {
       const auto = api.force || (game.replay ? game.replay.auto : !(game.settings && game.settings.hitReplay === false));
-      if (!auto || S || busy()) return false;
+      const how = (game.settings && game.settings.killCamIntercept) || 'slow';
+      if (!auto || how === 'off' || S || busy()) return false;
+      const look = how === 'camera' && !game.cinematic && b.pos && b.dist < 5000;
       const now = game.realT;
       if (now < next || now - replayEnd < AFTER_REPLAY || now - lastUser < USER) return false;
-      if (!b.onScreen) return false;
-      if (!(b.px >= 26 || (b.heavy && b.px >= 9 && b.dist < 7000))) return false;
+      if (!look && !b.onScreen) return false;
+      if (!look && !(b.px >= 26 || (b.heavy && b.px >= 9 && b.dist < 7000))) return false;
       S = { t: 0, rate0: game.timeRate, from: game.timeRate };
+      if (look) {
+        // the camera turns to the pieces and comes back after
+        const c = game.R.camera;
+        S.cam = { target: c.target.slice(), dist: c.dist, yaw: c.yaw, pitch: c.pitch, followFn: c.followFn, followOff: c.followOff };
+        c.followFn = null;
+        c.flyTo(b.pos, { dist: Math.max(90, Math.min(420, (b.L || 6) * 18)), time: .55 });
+      }
       next = now + COOL;
       bus.emit('rate', { rate: RATE, paused: false, why: 'bullet' });
       bus.emit('bullet', { on: true, b });
@@ -61,7 +73,9 @@ export function createBulletTime(game) {
       else if (t < IN + HOLD) set(RATE);
       else if (t < IN + HOLD + OUT) set(RATE + (S.rate0 - RATE) * ss(0, 1, sat((t - IN - HOLD) / OUT)));
       else {
-        set(S.rate0); S = null;
+        set(S.rate0);
+        if (S.cam) { const c = game.R.camera, k = S.cam; c.flyTo(k.target, { dist: k.dist, yaw: k.yaw, pitch: k.pitch, time: .9 }); if (k.followFn) { c.followFn = k.followFn; c.followOff = k.followOff; } }
+        S = null;
         bus.emit('rate', { rate: game.timeRate, paused: false, why: 'bullet' });
         bus.emit('bullet', { on: false });
       }

@@ -16,6 +16,14 @@
    replay is the Hit replay setting (data/settings.js hitReplay, on by default; the Settings screen, the pause menu's
    settings, or Shift + J here, which saves it).
 
+   The kill cam settings (the Settings screen's Camera tab; data/settings.js): what it plays on (kills, heavy hits, every
+   missile hit), its angle (across the target; from behind the incoming round; from behind the target's defence, looking
+   out at the round; or auto: across, turning to the defence's side while the round is being engaged), the defence in
+   the frame (the guns' bursts and the interceptors at the round, the round itself; a round shot down short is held on
+   as it comes apart), its rate (x0.1 / x0.25 / x0.5), the X-ray sweep on or off, the gap between kill cams. The camera
+   eases toward its framing on springs (centre, distance, heading, pitch): the hull's roll on the swell and a change of
+   angle never jolt it.
+
    game.replay = { active, auto, last, play(), skip(), setAuto(on) }; bus 'replay' { on, id }.
    bus 'replay-peak' (the end screen's kill stills, match.js): once per impact of a live or late replay (not J), PEAK s
    after it, the X-ray open and the broken parts named: { n (the replay), id, type, side, own, dead, fin, kind, title,
@@ -29,15 +37,18 @@ import { makeSubject, toWorld, apX } from '../ui/inspect/subject.js';
 import * as O from '../ui/inspect/overlay.js';
 import { TRACK } from './labels.js';
 import { RATES } from './game.js';
-import { DEG, clamp, sat, ss, ease, wrapPi, newPose, lookFrom, blendPose, bumpOf, glideDur, putCam, camState, acrossView, blockedBy } from './director.js';
+import { DEG, clamp, sat, ss, ease, wrapPi, newPose, lookFrom, eyeOf, glideDur, putCam, camState, acrossView, blockedBy } from './director.js';
 import { setSetting, onSettings } from '../data/settings.js';
+import { predict, newPrediction } from './director/predict.js';
 
-const RATE = .25;                          // the replay's time rate
+let RATE = .25;                            // the replay's time rate (the Kill cam slow motion setting, read at each start)
 const RAMP_IN = .35, RAMP_OUT = .55;       // real s
 const LEAD = .3;                           // real s from the camera's arrival to the impact
 const COOL = 40, COOL_KILL = 12;           // real s between automatic replays (a kill waits less)
 const PEAK = 1.0;                          // real s from an impact to its still (the coral names have condensed)
 const HEAVY = { oniks: 1, tlam: 1, slam: 1, uran: 1, kalibr: 1 };
+const LIGHT = { shell: 1 };                 // never a kill cam (a gun round)
+const COOL_K = { short: .4, normal: 1, long: 2.2 };
 const LIME = O.LIME, CORAL = O.CORAL, FAINT = 'rgba(255,255,255,.36)', WHITE = '#FFFFFF';
 const CAM_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyQ', 'KeyE', 'PageUp', 'PageDown']);
 const MODS = new Set(['ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight', 'AltLeft', 'AltRight', 'MetaLeft', 'MetaRight', 'CapsLock']);
@@ -66,6 +77,11 @@ export async function createReplay(game, ctx) {
   let K = 1;
   const pcam = { project(p, o) { const r = cam.project(p, o); if (r) { r[0] /= K; r[1] /= K; } return r; } };
 
+  const KS = () => game.settings || {};
+  /* the rounds the kill cam plays on (the Plays on setting): heavy ones; every missile; or, for kills only, any
+     missile whose blow will destroy the target */
+  const accepts = kind => KS().killCamWhen === 'heavy' || !KS().killCamWhen ? !!HEAVY[kind] : !LIGHT[kind] && !!game.PROJ[kind];
+  const PX = newPrediction();
   function readAuto() {
     const s = game.settings || {};
     return s.hitReplay === undefined ? true : !!s.hitReplay;
@@ -135,7 +151,7 @@ export async function createReplay(game, ctx) {
   function nextRound(u) {
     let nx = null, nt = 1e9;
     for (const q of sim.projectiles.values()) {
-      if (!q.alive || q.tk !== 'unit' || q.target !== u.id || !HEAVY[q.kind]) continue;
+      if (!q.alive || q.tk !== 'unit' || q.target !== u.id || !accepts(q.kind)) continue;
       const tt = ttiSim(q, u); if (tt < nt) { nt = tt; nx = q; }
     }
     return nx;
@@ -144,11 +160,12 @@ export async function createReplay(game, ctx) {
     if (!auto || (S && S.phase !== 'out') || busy()) return;
     const now = game.realT;
     for (const p of sim.projectiles.values()) {
-      if (!p.alive || !HEAVY[p.kind] || p.tk !== 'unit') continue;
+      if (!p.alive || !accepts(p.kind) || p.tk !== 'unit') continue;
       const u = sim.units.get(p.target);
       if (!u || !u.alive || !major(u) || !visible(u)) continue;
       const P = p.P || game.PROJ[p.kind];
       const kill = u.hp <= P.dmg + .01, fin = kill && finalOf(u);
+      if (KS().killCamWhen === 'kills' && !kill) continue;
       if (!fin && now < (kill ? (u.id === lastHull ? 0 : nextKill) : nextOk)) continue;
       if (p.phase !== 'final' && !p.locked && ttiSim(p, u) > 30) continue;
       const tti = ttiSim(p, u);
@@ -157,7 +174,7 @@ export async function createReplay(game, ctx) {
   }
   function track() {
     for (const p of sim.projectiles.values()) {
-      if (!p.alive || !HEAVY[p.kind] || p.tk !== 'unit') continue;
+      if (!p.alive || !accepts(p.kind) || p.tk !== 'unit') continue;
       let f = flight.get(p.id);
       if (!f) { f = { dir: [0, 0, 1], spd: 0, kind: p.kind, side: p.side }; flight.set(p.id, f); }
       const v = p.vel, s = Math.hypot(v[0], v[1], v[2]) || 1;
@@ -170,6 +187,7 @@ export async function createReplay(game, ctx) {
   /* o: { mode: 'live' | 'after' | 'again', u, p (live), e (after: the hit), rec (again), fin } */
   function start(o) {
     const u = o.u || null, rec = o.rec || null;
+    if (!S || S.phase === 'out') RATE = [.1, .25, .5].includes(+KS().killCamSlow) ? +KS().killCamSlow : .25;
     const def = u ? u.def : game.UNITS[rec.type];
     const subj = subjectOf(u ? u.def.model : rec.key);
     if (!subj || !def) return false;
@@ -198,6 +216,10 @@ export async function createReplay(game, ctx) {
     };
     if (!resolve(V)) { S = prev; return false; }
     V.n = ++serial;
+    V.xray = o.mode === 'again' || KS().killCamXray !== false;
+    V.angle = KS().killCamAngle || 'auto';
+    V.defence = KS().killCamDefence !== false;
+    V.sp = null; V.wq = 0; V.engT = -1;
     // what the hull looked like before (the hit's damage shows at the impact)
     V.before = rec ? rec.before : u && o.mode === 'live' ? (partsSeen.get(u.id) || copyParts(u)) : o.before || {};
     V.after = rec ? rec.after : null;
@@ -313,7 +335,8 @@ export async function createReplay(game, ctx) {
     else if (dir.edgeWas !== undefined) dir.edgeWas = V.edge0;
     // the cooldown: a replay that saw no hit (the salvo stopped short) hardly counts
     const hit = V.tHit >= 0;
-    nextOk = game.realT + (hit ? COOL : 4); nextKill = game.realT + (hit ? COOL_KILL : 2); lastHull = V.dead ? 0 : V.id;
+    const ck = COOL_K[KS().killCamCool] || 1;
+    nextOk = game.realT + (hit ? COOL * ck : 4); nextKill = game.realT + (hit ? COOL_KILL * ck : 2); lastHull = V.dead ? 0 : V.id;
     bus.emit('replay', { on: false, id: V.id });
   }
   function setRate(r) {
@@ -413,6 +436,7 @@ export async function createReplay(game, ctx) {
     if (V.pending && V.phase !== 'out') {
       const p = sim.projectiles.get(V.proj);
       if (p && p.alive && u && u.alive) {
+        V.lastRP = game.projPose(p).pos.slice();
         if (V.tHit < 0) V.tI = impactIn(p, u, t);
         // a round still far off: time runs faster until it is close, then eases down again (the rate on screen follows)
         if (t >= V.ramp && !V.rateTouched) {
@@ -421,13 +445,16 @@ export async function createReplay(game, ctx) {
           if (want > RATE + .01 && V.tHit < 0) V.tI = t + 2.4;
         }
       } else if (!V.roundGone) {
+        if (V.lastRP) V.goneAt = V.lastRP;
         // stopped short: the next round of the salvo on this hull takes its place
         const nx = u && u.alive && V.tHit < 0 ? nextRound(u) : null;
         if (nx && ttiSim(nx, u) < 5) { V.proj = nx.id; V.kind = nx.kind; if (V.tHit < 0) V.tI = Math.min(t + ttiSim(nx, u) / RATE, t + 2.4); }
         else { V.roundGone = true; V.tGone = t; }
       }
       if (V.roundGone && t - V.tGone > .35) {
-        if (V.tHit < 0) { V.tPull = Math.min(V.tPull, V.tGone + 1.2); V.tEnd = Math.min(V.tEnd, V.tGone + 2.8); }
+        // stopped short (shot down): with the defence in the frame, held on its pieces a while before the pull back
+        const hold = V.defence && V.engT >= 0 ? 2.6 : 1.2;
+        if (V.tHit < 0) { V.tPull = Math.min(V.tPull, V.tGone + hold); V.tEnd = Math.min(V.tEnd, V.tGone + hold + 1.8); }
         else { V.pending = false; V.tLast = Math.max(V.tLast, t - 2.2); }
       }
     }
@@ -562,10 +589,25 @@ export async function createReplay(game, ctx) {
     const pull = ease(sat((t - V.tPull) / 2.6)), push = ss(V.fly * .8, V.fly + 3.2, t) * (1 - pull);
     const pitch = ((V.sea ? 6 : 12) + (V.raise || 0) + 6 * pull) * DEG;
     const shift = endShift();
-    const appr = V.appr + V.csd * (.025 * Math.max(0, t - V.fly) + .38 * pull);
-    const d = acrossView(cam, T, HC, 8, appr, V.csd, pitch, { min: V.sea ? 170 : Math.max(24, def.size[0] * 1.6), k: (1 - .12 * push) * (1 + 1.7 * pull), shift, lead: V.tHit >= 0 ? .1 : .2, bx: .47, by: .4 }, e3, l3);
+    // the defence: the round coming in and where the guns' bursts or the interceptors will meet it go into the frame
+    // (within reach of the hull); the round's pieces after it was stopped
+    let n = 8;
+    const eng = V.mode === 'live' && V.tHit < 0 ? engagement(V, T) : 0;
+    if (eng) { V.engT = t; for (let i = 0; i < eng; i++) n = addPt(EP[i], T, n, def); }
+    else if (V.defence && V.goneAt && V.roundGone && V.tHit < 0) n = addPt(V.goneAt, T, n, def);
+    V.wq += ((eng ? 1 : 0) - V.wq) * (1 - Math.exp(-dt * (eng ? 2 : .8)));
+    // the angle: across (as it was); behind the round; behind the defence looking out at it; auto: across, turning to
+    // the defence's side while the round is engaged
+    const A0 = V.appr, cs = V.csd;
+    let appr = A0 + cs * (.025 * Math.max(0, t - V.fly) + .38 * pull);
+    const want_ = V.angle === 'round' ? 1 : V.angle === 'defence' ? 2 : V.angle === 'auto' && V.defence ? (V.wq > .5 ? 2 : 0) : 0;
+    if (want_ === 1) appr = A0 + cs * .22 - cs * 1.2;                       // the look along the round's line
+    else if (want_ === 2) appr = A0 + Math.PI + cs * .4 - cs * 1.2;        // the look out from the hull at the round
+    const d = acrossView(cam, T, HC, n, appr, cs, pitch + (want_ === 2 ? 3 * DEG : 0), { min: V.sea ? 170 : Math.max(24, def.size[0] * 1.6), k: (1 - .12 * push) * (1 + 1.7 * pull), shift, lead: V.tHit >= 0 || eng ? .1 : .2, bx: .47, by: .4 }, e3, l3);
     if (!V.sea && (!V.chk || t > V.chk)) { V.chk = t + .4; if (blockedBy(game.ground, e3, T) > -3) V.raise = Math.min(30, (V.raise || 0) + 4); }
     lookFrom(cam, e3, l3, want);
+    // the framing eased on springs (the hull's roll on the swell, a change of angle, the defence coming into the frame)
+    smooth(V, want, dt);
     // a hand on the camera
     const rt = game.realT;
     want.yaw += .0035 * Math.sin(rt * .71) + .002 * Math.sin(rt * 1.43 + 1.2);
@@ -573,21 +615,77 @@ export async function createReplay(game, ctx) {
     const B = V.blend;
     if (B) {
       if (B.bump < 0) {
-        B.bump = bumpOf(B.from, want);
+        B.bump = 0;
         B.dur = Math.max(V.fly, Math.min(2.4, glideDur(B.from, want, 1.3, 2.4)));
         // arrive a moment before the impact (a late trigger stretches the glide instead of waiting on the spot)
         if (V.mode === 'live') B.dur = clamp(V.tI - LEAD, B.dur, 2.8);
         V.fly = B.dur;
+        // where the camera was (its eye and its look point) and where it goes
+        B.E0 = eyeOf(cam, B.from, [0, 0, 0]); B.L0 = B.from.T.slice();
+        const E1 = eyeOf(cam, want, [0, 0, 0]);
+        const f0 = [B.L0[0] - B.E0[0], B.L0[1] - B.E0[1], B.L0[2] - B.E0[2]], f1 = [want.T[0] - E1[0], want.T[1] - E1[1], want.T[2] - E1[2]];
+        const turn = Math.acos(clamp((f0[0] * f1[0] + f0[1] * f1[1] + f0[2] * f1[2]) / ((Math.hypot(...f0) * Math.hypot(...f1)) || 1), -1, 1));
+        // a long move (or a reverse angle) is a cut through a dip to dark: no flight across the map at x0.25
+        B.cut = Math.hypot(E1[0] - B.E0[0], E1[1] - B.E0[1], E1[2] - B.E0[2]) > 1500 || turn > 2.2;
+        if (B.cut) { V.dip = 0; B.dur = .2; }
       }
       const u = sat(t / B.dur);
-      blendPose(B.from, want, ease(u), B.bump, cur);
-      if (u >= 1) V.blend = null;
-    } else {
-      cur.T[0] = want.T[0]; cur.T[1] = want.T[1]; cur.T[2] = want.T[2];
-      cur.dist = want.dist; cur.pitch = want.pitch; cur.yaw = cur.yaw + wrapPi(want.yaw - cur.yaw);
-    }
+      if (B.cut) {
+        // the old view holds while the picture dips, then the new one
+        if (u < 1) { cur.T[0] = B.from.T[0]; cur.T[1] = B.from.T[1]; cur.T[2] = B.from.T[2]; cur.dist = B.from.dist; cur.yaw = B.from.yaw; cur.pitch = B.from.pitch; }
+        else { copyPose(cur, want); V.blend = null; }
+      } else {
+        // the eye travels, the lens turns to the hull ahead of it (it is found before the move lands)
+        const s = ease(u), sl = ease(sat(u / .65));
+        const E1 = eyeOf(cam, want, e3);
+        for (let k = 0; k < 3; k++) q3[k] = B.E0[k] + (E1[k] - B.E0[k]) * s;
+        const d0 = Math.hypot(B.L0[0] - B.E0[0], B.L0[1] - B.E0[1], B.L0[2] - B.E0[2]), d1 = want.dist;
+        const y0 = Math.atan2(B.L0[0] - B.E0[0], B.L0[2] - B.E0[2]), p0 = Math.asin(clamp((B.E0[1] - B.L0[1]) / Math.max(1, d0), -1, 1));
+        const y1 = Math.atan2(want.T[0] - E1[0], want.T[2] - E1[2]), p1 = Math.asin(clamp((E1[1] - want.T[1]) / Math.max(1, d1), -1, 1));
+        const yw = y0 + wrapPi(y1 - y0) * sl, pt = p0 + (p1 - p0) * sl, ld = Math.exp(Math.log(Math.max(1, d0)) + (Math.log(Math.max(1, d1)) - Math.log(Math.max(1, d0))) * s);
+        l3[0] = q3[0] + Math.sin(yw) * Math.cos(pt) * ld; l3[1] = q3[1] - Math.sin(pt) * ld; l3[2] = q3[2] + Math.cos(yw) * Math.cos(pt) * ld;
+        lookFrom(cam, q3, l3, cur);
+        if (u >= 1) V.blend = null;
+      }
+    } else copyPose(cur, want);
     V.dist = d;
     putCam(cam, cur, follow);
+  }
+  function copyPose(o, w) { o.T[0] = w.T[0]; o.T[1] = w.T[1]; o.T[2] = w.T[2]; o.dist = w.dist; o.pitch = w.pitch; o.yaw = o.yaw + wrapPi(w.yaw - o.yaw); }
+  /* the round's engagement now: its position and where the defence meets it -> EP, the count */
+  const EP = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  function engagement(V, T) {
+    if (!V.defence) return 0;
+    const p = sim.projectiles.get(V.proj);
+    if (!p || !p.alive) return 0;
+    const r = predict(game, p, PX);
+    if (!(r.kind === 'gun' || r.kind === 'intercept') || r.tEv > 6) return 0;
+    const P = game.projPose(p).pos;
+    EP[0][0] = P[0]; EP[0][1] = P[1]; EP[0][2] = P[2];
+    EP[1][0] = r.meet[0]; EP[1][1] = r.meet[1]; EP[1][2] = r.meet[2];
+    let n = 2;
+    // the defender, when it is not the hull itself (a Pantsir covering a launcher, a DDG covering the carrier)
+    const gu = r.kind === 'gun' ? sim.units.get(r.gunUnit) : r.kind === 'intercept' ? sim.units.get((sim.projectiles.get(r.qId) || {}).from) : null;
+    if (gu && gu.alive && gu.id !== V.id) { EP[2][0] = gu.pos[0]; EP[2][1] = gu.pos[1] + 5; EP[2][2] = gu.pos[2]; n = 3; }
+    return n;
+  }
+  /* a point into the frame's set, pulled in to within reach of the hull (a far round would shrink her to a speck) */
+  function addPt(P, T, n, def) {
+    if (n >= HC.length) HC.push([0, 0, 0]);
+    const reach = Math.max(def.size[0] * 2.2, 140), dx = P[0] - T[0], dy = P[1] - T[1], dz = P[2] - T[2], l = Math.hypot(dx, dy, dz) || 1, k = Math.min(1, reach / l);
+    HC[n][0] = T[0] + dx * k; HC[n][1] = T[1] + dy * k; HC[n][2] = T[2] + dz * k;
+    return n + 1;
+  }
+  /* critically damped springs on the orbit pose (real time): the centre, the log distance, the heading, the pitch */
+  function smooth(V, w, dt) {
+    if (!V.sp || dt <= 0) { V.sp = { T: w.T.slice(), vT: [0, 0, 0], L: Math.log(Math.max(1, w.dist)), vL: 0, y: w.yaw, vy: 0, p: w.pitch, vp: 0 }; return; }
+    const S2 = V.sp, W = 2.6, ex = Math.exp(-W * dt);
+    const sp1 = (x, v, g) => { const e0 = x - g, a0 = v + W * e0; return [g + (e0 + a0 * dt) * ex, (v - W * a0 * dt) * ex]; };
+    for (let k = 0; k < 3; k++) { const r = sp1(S2.T[k], S2.vT[k], w.T[k]); S2.T[k] = r[0]; S2.vT[k] = r[1]; w.T[k] = r[0]; }
+    let r = sp1(S2.L, S2.vL, Math.log(Math.max(1, w.dist))); S2.L = r[0]; S2.vL = r[1]; w.dist = Math.exp(r[0]);
+    const gy = S2.y + wrapPi(w.yaw - S2.y);
+    r = sp1(S2.y, S2.vy, gy); S2.y = r[0]; S2.vy = r[1]; w.yaw = r[0];
+    r = sp1(S2.p, S2.vp, w.pitch); S2.p = r[0]; S2.vp = r[1]; w.pitch = r[0];
   }
   function endShift() {
     if (!game.result) return 0;
@@ -598,6 +696,7 @@ export async function createReplay(game, ctx) {
   /* ------------------------------------------------------------------ 3D */
   function draw3d(frame) {
     const V = S; if (!V) return;
+    if (!V.xray) { if (V.hitAt !== undefined && V.imp) { const k = 1 - ss(0, .9, V.t - V.hitAt); if (k > 0) frame.sink.light(V.imp[0], V.imp[1], V.imp[2], 255, 236, 214, k, 160); } return; }
     const subj = V.subj, d = V.inst, t = V.t, F = V.front, ax = subj.axis;
     const out = V.phase === 'out', fo = out ? ss(0, V.fade, t - V.tOut) : 0;
     // the live model steps aside for the cutaway (and comes back as it dissolves out)
@@ -708,6 +807,13 @@ export async function createReplay(game, ctx) {
   /* ------------------------------------------------------------------ 2D */
   function draw2d(ov) {
     const V = S; if (!V) return;
+    // a cut in: the picture dips to dark and comes back on the new view
+    if (V.dip !== undefined) {
+      V.dip += game.dtReal || .016;
+      const a = V.dip < .2 ? ss(0, .2, V.dip) : 1 - ss(.2, .5, V.dip), c = ov.ctx;
+      if (a > 0) { c.save(); c.globalAlpha = a; c.fillStyle = '#0B0C0A'; c.fillRect(0, 0, ov.W, ov.H); c.restore(); }
+      if (V.dip > .5) V.dip = undefined;
+    }
     const A = V.uiA; if (A <= .01) return;
     K = ov.ui || 1;
     ov.ctx.save(); ov.ctx.scale(K, K);
@@ -715,23 +821,23 @@ export async function createReplay(game, ctx) {
   }
   function layer2d(ov, V, A) {
     const ctx = ov.ctx, W = ov.W / K, H = ov.H / K, subj = V.subj;
+
     const endUp = !!endShift();
     // the hull on screen: the tagged assemblies' boxes
     let mb = null;
     for (const ent of subj.entries) { let b = null; for (const p of ent.parts) b = subj.partBox(p, V.R0, V.T0, pcam, b); ent.box = b; if (b) mb = mb ? [Math.min(mb[0], b[0]), Math.min(mb[1], b[1]), Math.max(mb[2], b[2]), Math.max(mb[3], b[3])] : b.slice(); }
     const readBottom = endUp ? 0 : readout(ctx, V, A);
     boxes.length = 0;
-    tags(ctx, V, W, H, A, mb, readBottom, endUp);
-    slice(ctx, V, W, H, A);
+    if (V.xray) { tags(ctx, V, W, H, A, mb, readBottom, endUp); slice(ctx, V, W, H, A); }
     // the still's subject (match.js frames its thumbnail on it): the hull and its placards, as fractions of the screen
     if (V.shot === game.frameN && V.peakInfo) {
       let b = mb ? mb.slice() : null;
       for (const q of boxes) b = b ? [Math.min(b[0], q[0]), Math.min(b[1], q[1]), Math.max(b[2], q[2]), Math.max(b[3], q[3])] : q.slice();
       if (b) V.peakInfo.box = [b[0] / W, b[1] / H, b[2] / W, b[3] / H];
     }
-    const rate = game.timeRate, rs = Math.abs(rate - RATE) < .004 ? 'x0.25' : rate < 1 ? 'x' + rate.toFixed(2) : 'x' + (rate < 10 ? rate.toFixed(1) : Math.round(rate));
+    const rate = game.timeRate, rs = Math.abs(rate - RATE) < .004 ? 'x' + RATE : rate < 1 ? 'x' + rate.toFixed(2) : 'x' + (rate < 10 ? rate.toFixed(1) : Math.round(rate));
     // the rate, always on screen (top right while the end screen has the left of it)
-    O.tag(ctx, endUp ? W - 30 : W / 2, 22, rs, V.mode === 'again' ? 'Replay' : 'Slow motion', 'T+' + (game.fmtTime ? game.fmtTime(sim.t) : Math.floor(sim.t)), { kind: 'lime', a: A, align: endUp ? 'right' : 'center', size: 11 });
+    O.tag(ctx, endUp ? W - 30 : W / 2, 22, rs, V.mode === 'again' ? 'Replay' : 'Kill cam', 'T+' + (game.fmtTime ? game.fmtTime(sim.t) : Math.floor(sim.t)), { kind: 'lime', a: A, align: endUp ? 'right' : 'center', size: 11 });
     if (!endUp && V.shot !== game.frameN) O.keys(ctx, W / 2, H - 50, [['Esc', 'Skip']], A * .9);
   }
   function readout(ctx, V, A) {
@@ -888,7 +994,7 @@ export async function createReplay(game, ctx) {
       const u = sim.units.get(e.target);
       if (!u) return;
       const before = partsSeen.get(u.id) || {};
-      const heavy = !!HEAVY[e.kind];
+      const heavy = accepts(e.kind) && (KS().killCamWhen !== 'kills' || !u.alive);
       if (heavy && major(u) && visible(u)) {
         record(e, u, before);
         const V = S && S.phase !== 'out' ? S : null;
@@ -923,7 +1029,7 @@ export async function createReplay(game, ctx) {
       if (u && (!S || S.phase === 'out') && auto && !busy() && visible(u) && finalOf(u) && (major(u) || u.def.domain === 'sea')) start({ mode: 'after', u, e: { pos: e.pos, from: e.by, kind: '' }, before: partsSeen.get(u.id) || {}, fin: true });
       partsSeen.delete(e.unit);
     } else if (e.type === 'removed') { partsSeen.delete(e.unit); }
-    else if (e.type === 'launch' && HEAVY[e.kind] && e.tk === 'unit') {
+    else if (e.type === 'launch' && accepts(e.kind) && e.tk === 'unit') {
       // warm the target's cutaway while the round flies
       const u = sim.units.get(e.target);
       if (u && major(u) && !subjects.has(u.def.model)) setTimeout(() => subjectOf(u.def.model), 30);

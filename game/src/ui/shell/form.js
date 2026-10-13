@@ -3,7 +3,8 @@
    Enter acts. Mouse: hover focuses, click chooses.
 
    new Form(el, { rows, onChange(id, v), onAction(id), enter: 'start' | 'cycle' | null, blurb: el })
-   row = { id, label, choices: [[v, text]], value, blurb?(v), off?() , meter?, cycle?, note? }
+   row = { id, label, choices: [[v, text]], value, blurb?(v), off?() , meter?, cycle?, multi?, note? }
+   multi: the value is a comma list of any of the choices; ←→ move between them, Enter / Space / a click turns one on or off
        | { id, label, action: true, aside? }   | { gap: true } | { group: 'Graphics' } */
 import { h, esc, pad2, swipe, replay } from './dom.js';
 import { sfx } from './sfx.js';
@@ -46,6 +47,13 @@ export class Form {
       row.vals.innerHTML = `<span class="meter">${ch.slice(1).map((c, i) => `<i data-k="${i + 1}" class="${i + 1 <= k ? 'f' : ''}${i + 1 === k ? ' top' : ''}"></i>`).join('')}</span><span class="mv">${esc(ch[k] ? ch[k][1] : '')}</span>`;
       row.vals.querySelectorAll('.meter i').forEach(q => q.addEventListener('click', e => { e.stopPropagation(); this.focus(row.k); const kk = +q.dataset.k; this.set(row.id, ch[kk === k ? 0 : kk][0], true); }));
       row.vals.querySelector('.meter').addEventListener('dblclick', e => e.preventDefault());
+      return;
+    }
+    if (row.multi) {
+      const on = new Set(String(v || '').split(',').filter(Boolean));
+      row.mk = Math.max(0, Math.min(ch.length - 1, row.mk || 0));
+      row.vals.innerHTML = ch.map((c, i) => `<span class="c m${on.has(c[0]) ? ' sel' : ''}${i === row.mk ? ' cur' : ''}" data-k="${i}">${swipe(row.id + i)}<span class="tx">${esc(c[1])}</span></span>`).join('');
+      row.vals.querySelectorAll('.c').forEach(q => q.addEventListener('click', e => { e.stopPropagation(); this.focus(row.k); row.mk = +q.dataset.k; this.toggle(row); }));
       return;
     }
     if (row.cycle) {
@@ -105,7 +113,9 @@ export class Form {
   }
   step(r, d) {
     if (!r || r.action) return;
-    const ch = r.choices, k0 = ch.findIndex(c => same(c[0], r.value));
+    const ch = r.choices;
+    if (r.multi) { const k = Math.max(0, Math.min(ch.length - 1, (r.mk || 0) + d)); if (k !== r.mk) { r.mk = k; this.build(r); sfx.move(); } else sfx.deny(); return; }
+    const k0 = ch.findIndex(c => same(c[0], r.value));
     if (r.meter) { const k = Math.max(0, Math.min(ch.length - 1, k0 + d)); if (k !== k0) this.set(r.id, ch[k][0], true); else sfx.deny(); return; }
     let k = k0;
     for (let n = 0; n < ch.length; n++) {
@@ -113,6 +123,12 @@ export class Form {
       if (!(r.dis && r.dis(ch[k][0]))) break;
     }
     if (k !== k0) this.set(r.id, ch[k][0], true);
+  }
+  /* a multi row: the choice under its cursor on or off (kept in the choices' order) */
+  toggle(r) {
+    const on = new Set(String(r.value || '').split(',').filter(Boolean)), c = r.choices[r.mk || 0][0];
+    if (on.has(c)) on.delete(c); else on.add(c);
+    this.set(r.id, r.choices.map(x => x[0]).filter(x => on.has(x)).join(','), true);
   }
   act(r) {
     if (this.busy || !r || !r.action) return;
@@ -131,6 +147,7 @@ export class Form {
     if (k === 'ArrowRight' || k === 'd' || k === 'D') { this.step(r, 1); return true; }
     if (k === 'Enter' || k === ' ') {
       if (r && r.action) this.act(r);
+      else if (r && r.multi) this.toggle(r);
       else if (this.o.enter === 'cycle') this.step(r, 1);
       else if (this.o.enter) this.act(this.row(this.o.enter));
       return true;

@@ -126,5 +126,15 @@ Screenshots of several of these were shared in the chat. Start the next session 
   the F/A-18.*
 - **To plan: damage system rework** — how vehicles and their modules look after hits, by what hit them.
 - Requests: "Launch missiles" at a map point from any selected unit that carries them; time rates below x1 ([: 0.5, 0.2).
-- Cinematic camera (director.js, 2026-09-25 rework) is still choppy and not smooth in the user's play: below standard, redo.
+- ~~Cinematic camera (director.js, 2026-09-25 rework) is still choppy and not smooth in the user's play: below standard, redo.~~ *Redone 2026-10-13 (see above).*
 - Balance re-tuned after the intercept rework (2026-09-26, 24 seeds a map): coast wins Krasnaya Kosa 58, Fjord 58 (48 % over 48 seeds), Strait 54, Archipelago 58, Delta 54, Caldera 42, Arctic 50, Harbour 46 %; stopped Oniks 49 %, Tomahawk 55 %, SLAM-ER 61 %, Kh-35 79 %, Kalibr 85 %. Levers: SM-6 range vs missiles 30 km, Pantsir 8 57E6, TEL/Pantsir cost 550/420, replenishment points (Krasnaya Kosa, Fjord, Delta, Arctic), Arctic fleet spawn, Caldera depot 10 km up the flank. Per-map numbers still carry ±10-15 points of seed noise.
+
+## From the user (2026-10-13)
+
+- ~~**Slow motion (bullet time) and the cinematic camera need a rework**~~ *Reworked 2026-10-13/14: seven cinematic modes and a mix, a Camera settings tab, the kill cam's settings and defence framing, no snap when a round is killed (the camera no longer re-anchors to the debris), a dip-cut for long moves, a fixed spring (it lagged and overshot). See game/src/game/README.md.* (Was: later, not now.) Neither is smooth, both are
+  buggy, and they do not behave the way you would expect or the way the user wants. Files: `game/director.js`,
+  `game/debris/slowmo.js`, `game/replay.js`, `game/time.js`.
+- **Now (the priority): hit simulation and model rendering.** Hits on ships (and on anything else) do not look real:
+  tears look wrong, plating is missing or gone where it should not be, pieces hang in the air, damage shows on the far
+  side of the hull. A hit also causes a micro-stutter. ~~A missile hitting the ground leaves no mark.~~ *(Fixed
+  2026-10-13, afc5c9e: a crater and scorched ground, fx/lib/scorch.js.)* Ships look poor up close.
