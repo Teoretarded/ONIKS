@@ -106,31 +106,39 @@ const craterG = a => a <= 0 ? 0 : E.ss(0, .75, a);
 /* the crater's per-dot terms for a lattice point at (qx, qz) from the centre, distance d (< CR_OUT): the height offset,
    a brightness factor and a heat 0..1 (written to CRO) */
 const CRO = [0, 1, 0];
+/* the mushroom's shadow on the land (set by the FX module each frame): the cap's disc at (x, z) radius r, the stem's
+   strip from (sx, sz) to the disc, half width sw, strength k */
+const CSH = { k: 0, x: 0, z: 0, r: 0, sx: 0, sz: 0, sw: 0 };
+/* load sharing set by the FX module while the strike fills the frame: a coarser ground, a smaller forest budget */
+const GOPT = { pxm: 1, fbud: 1 };
 const CR_OUT = 95 * 8;
+/* radial tables (0.5 m steps): the height offset, the slope, 1 / sqrt(1 + slope^2), the slope light's weight, and
+   exp(-(u-1)/2.4); per angle: the ray strength and exp(-(u-1)/L) is taken from the ray length table at run time */
+const CRN = Math.ceil(CR_OUT * 2) + 2, CR_DY = new Float32Array(CRN), CR_SL = new Float32Array(CRN), CR_W = new Float32Array(CRN), CR_EB = new Float32Array(CRN);
+for (let i = 0; i < CRN; i++) { const d = i / 2, u = d / CRA.R; CR_DY[i] = craterDy(d); CR_SL[i] = craterSl(d); CR_W[i] = 1 - E.ss(CRA.R * 1.4, CRA.R * 2.6, d); CR_EB[i] = u > 1 ? Math.exp(-(u - 1) / 2.4) : 1; }
+const CR_LAM0 = 1 / (.08 + .92 * SUN[1]);
 function craterAt(qx, qz, d, g, a) {
-  const R_ = CRA.R, u = d / R_;
-  CRO[0] = craterDy(d) * g;
+  const R_ = CRA.R, u = d / R_, ri = (d * 2) | 0;
+  CRO[0] = CR_DY[ri] * g;
   // light from the bowl's own slope (relative to flat ground), weighted in near the rim
-  const sl = craterSl(d) * g, id = d > .01 ? 1 / d : 0, nx = -sl * qx * id, nz = -sl * qz * id, nl = 1 / Math.sqrt(1 + sl * sl);
-  const lam = (nx * SUN[0] + SUN[1] + nz * SUN[2]) * nl;
-  const w = 1 - E.ss(R_ * 1.4, R_ * 2.6, d);
-  let f = 1 + ((.08 + .92 * (lam > 0 ? lam : 0)) / (.08 + .92 * SUN[1]) - 1) * w;
+  let f = 1;
+  const w = CR_W[ri];
+  if (w > 0) { const sl = CR_SL[ri] * g, id = d > .01 ? 1 / d : 0, nl = 1 / Math.sqrt(1 + sl * sl), lam = (-sl * id * (qx * SUN[0] + qz * SUN[2]) + SUN[1]) * nl; f = 1 + ((.08 + .92 * (lam > 0 ? lam : 0)) * CR_LAM0 - 1) * w; }
   // the rim crest catches the light; the ejecta blanket: scorched, with bright rays
   if (u > .9) {
     // a fast atan2 (to ~0.005 rad), in 0..TAU
     const ax = qx < 0 ? -qx : qx, az = qz < 0 ? -qz : qz, mn = ax < az ? ax : az, mx = ax < az ? az : ax, q_ = mn / (mx + 1e-9), q2 = q_ * q_;
     let ti = ((-.0464964749 * q2 + .15931422) * q2 - .327622764) * q2 * q_ + q_;
     if (az > ax) ti = 1.5707963 - ti; if (qx < 0) ti = 3.1415927 - ti; if (qz < 0) ti = TAU - ti;
-    const k = (ti * (RAYN / TAU)) | 0, ry = RAY[k & (RAYN - 1)], L = CRA.RL[k & (RAYN - 1)];
-    const ex = u - 1, ray = ry * Math.exp(-ex / L);
-    f *= (1 - .62 * g * Math.exp(-ex / 2.4) * (1 - ray)) * (1 + 1.5 * g * ray);
+    const k = ((ti * (RAYN / TAU)) | 0) & (RAYN - 1), ry = RAY[k], ex = u > 1 ? u - 1 : 0, xi = (ex / CRA.RL[k] * 64) | 0, ray = ry * (xi < 1024 ? EXN[xi] : 0);
+    f *= (1 - .62 * g * CR_EB[ri] * (1 - ray)) * (1 + 1.5 * g * ray);
     if (u < 1.12) f *= 1 + .5 * g * (1 - Math.abs(u - 1.03) / .09);
   }
   CRO[1] = f;
-  CRO[2] = u < .92 ? Math.min(1, 1.25 * Math.exp(-a / 70) * (1 - u * u / .85)) * g : 0;
+  CRO[2] = u < .92 ? Math.min(1, CR_HOT * (1 - u * u / .85)) * g : 0;
   return CRO;
 }
-
+let CR_HOT = 0;
 /* draw a land patch: per block a frustum test, then cells at the needed power-of-two step with a per-dot fade.
    fx(x, z, out) -> optional per-dot lime / hide (the strike's rings), keyed on world x z */
 const SH = { x: 0, z: 0, r0: -1, r1: -1, k: 0, hole: 0, glow: 0 };
@@ -172,6 +180,8 @@ function drawPatch(Pa, vis, pxf, lit) {
   let cnt = 0;
   const Q = shPrep(), sh = Q.on, rA2 = Q.rA2, hx = Q.x, hz = Q.z;
   const crA = CRA.a, crG = craterG(crA), crOn = crG > 0, crx = CRA.x, crz = CRA.z, crR2 = CR_OUT * CR_OUT;
+  CR_HOT = crOn ? 1.25 * Math.exp(-crA / 70) : 0;
+  const csk = CSH.k, csx = CSH.x, csz = CSH.z, csr = CSH.r, csr2 = (csr * 1.3) * (csr * 1.3), cssx = CSH.sx, cssz = CSH.sz, csdx = CSH.x - CSH.sx, csdz = CSH.z - CSH.sz, csl2 = csdx * csdx + csdz * csdz + 1e-6, csw = CSH.sw;
   // blocks of 32 cells, split into quarters (to 4 cells) while their depth range is large, each piece at its own step
   const sub = (i0, j0, n, lo, hi) => {
     const ax = x0 + i0 * cell, az = z0 + j0 * cell, ext = n * cell;
@@ -216,6 +226,13 @@ function drawPatch(Pa, vis, pxf, lit) {
             if (kl > .02) { const fl = kl * .9 * a * cmp * gg * hv * Math.min(1, bb / 255 * 2.4); if (b < fl) b = fl; const kk = kl > 1 ? 1 : kl; cr += (SH.col[0] - cr) * kk; cg += (SH.col[1] - cg) * kk; cb += (SH.col[2] - cb) * kk; }
             if (!crOn && d < Q.dr) b *= 1 - Q.dark * (1 - d / Q.dr);
           }
+        }
+        if (csk > 0) {
+          const qx = x - csx, qz = z - csz, d2 = qx * qx + qz * qz; let s_ = 0;
+          if (d2 < csr2) { const d = Math.sqrt(d2); s_ = d < csr * .85 ? 1 : 1 - (d - csr * .85) / (csr * .45); }
+          const px = x - cssx, pz = z - cssz, t = (px * csdx + pz * csdz) / csl2;
+          if (t > 0 && t < 1) { const ox = px - csdx * t, oz = pz - csdz * t, dd = Math.sqrt(ox * ox + oz * oz); if (dd < csw * 1.4) { const s2 = dd < csw ? .8 : .8 * (1 - (dd - csw) / (csw * .4)); if (s2 > s_) s_ = s2; } }
+          if (s_ > 0) b *= 1 - csk * s_;
         }
         if (crh > .02) { const hb = crh * a * hv * 1.1; if (b < hb) b = hb; const kk = crh > 1 ? 1 : crh; cr += (FIRE_[0] - cr) * kk; cg += (FIRE_[1] - cg) * kk; cb += (FIRE_[2] - cb) * kk; if (crh > .5) { const k2 = (crh - .5) * 2; cr += (HOT[0] - cr) * k2; cg += (HOT[1] - cg) * k2; cb += (HOT[2] - cb) * k2; } }
         if (b < .015) continue;
@@ -495,7 +512,7 @@ const SN = makeSea(R_SN[0], R_SN[1], R_SN[2], R_SN[3], R_SN[3], null, (x, z) => 
 lapW('sea');
 function drawSite(vis, seaT, pxf) {
   let n = 0;
-  { const h = C.eye[1] - HIT[1], dh = Math.hypot(C.eye[0] - HIT[0], C.eye[2] - HIT[2]); pxf *= 1 + .28 * E.ss(900, 2600, h) * (1 - E.ss(6000, 12000, dh)); }
+  { const h = C.eye[1] - HIT[1], dh = Math.hypot(C.eye[0] - HIT[0], C.eye[2] - HIT[2]); pxf *= (1 + .28 * E.ss(900, 2600, h) * (1 - E.ss(6000, 12000, dh))) * GOPT.pxm; }
   n += drawPatch(PO, vis, pxf); n += drawPatch(PR, vis, pxf); n += drawPatch(PM, vis, pxf); n += drawPatch(PI_, vis, pxf); n += drawPatch(PG_, vis, pxf);
   const ps = pxf * 1.4;
   n += drawSea(SO, vis, seaT, ps); n += drawSea(SR, vis, seaT, ps); n += drawSea(SM, vis, seaT, ps); n += drawSea(SN, vis, seaT, ps);
@@ -760,7 +777,7 @@ function drawForest(a, T, vis) {
     TV[t] = zt; want += (TL[q + 1] - TL[q]) * treeN(19 * F / Math.max(1, K.WZ[0]));
   }
   for (let i = 0; i < F_.nNear; i++) { const dx = F_.X[i] - e[0], dy = F_.Y[i] - e[1], dz = F_.Z[i] - e[2], zc = dx * f[0] + dy * f[1] + dz * f[2]; if (zc > 1) want += treeN(F_.H[i] * F / zc); }
-  const kB = want > FBUDGET ? FBUDGET / want : 1;
+  const fb = FBUDGET * GOPT.fbud, kB = want > fb ? fb / want : 1;
   FCNT = 0;
   for (let i = 0; i < F_.nNear; i++) oneTree(i, a, T, vis, HZ, scanC, kB);
   for (let t = 0; t < F_.nt; t++) {
@@ -772,5 +789,5 @@ function drawForest(a, T, vis) {
 }
 
 return { RE, CE, coastZ, coastBig, ground, roadD, HIT, makePatch, drawPatch, makeSea, drawSea, drawGlobe, drawLimb, STARS, CLOUD, GLB, PO, PR, PM, PI_, PG_, SO, SR, SM, SN, SH, LG, drop, SPAN, drawSite, VEHS, drawVehicles, GC,
-  gP, gPc, CRA, craterDy, craterSl, craterG, RAY, RAYN, FOR, setShock, drawForest, G2, SUN, hazeK };
+  gP, gPc, CRA, CSH, GOPT, craterDy, craterSl, craterG, RAY, RAYN, FOR, setShock, drawForest, G2, SUN, hazeK };
 };

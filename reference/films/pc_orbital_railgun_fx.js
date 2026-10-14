@@ -328,15 +328,7 @@ function trail(F, T, vis) {
 const gP = W.gP, gPc = W.gPc;
 /* radii and heights as functions of a (sim s since the strike); the film's readout shows shockR and capH */
 const shockR = a => a <= 0 ? 0 : 340 * a + 420 * (1 - Math.exp(-a * 3.2));
-const surgeR = a => a <= 0 ? 0 : 1650 * (1 - Math.exp(-a / 7.5)) + 420 * (1 - Math.exp(-a * 2.2));
-const capH = a => 110 + 1500 * (1 - Math.exp(-a / 16)) + 90 * (1 - Math.exp(-a * 1.4));
-const capR = a => 60 + 560 * (1 - Math.exp(-a / 13));
-const fbR = a => a <= 0 ? 0 : 40 + 245 * (1 - Math.exp(-a * 2.3));
-const fbY = a => Math.min(capH(a), fbR(a) * .5 + 26 * a * a);
-/* the stem's radius at height fraction u (0 foot .. 1 under the cap) */
-/* the dust pedestal's strength (it settles before the crater view) */
-const pedA = a => ss(1.5, 4, a) * (1 - ss(22, 31, a));
-const stemR = (u, Rt) => { const w1 = 1 - u, w2 = w1 * w1, u2 = u * u; return Rt * (.16 + .42 * w2 * w2 * w2 + .3 * u2 * u2); };
+const surgeR = a => a <= 0 ? 0 : 2600 * (1 - Math.exp(-a / 9)) + 420 * (1 - Math.exp(-a * 2.2));
 /* the shock's arrival time at distance d (m), tabulated */
 const SHT = new Float32Array(1501); { let a = 0; for (let i = 0; i <= 1500; i++) { const d = i * 4; while (shockR(a) < d) a += .0005; SHT[i] = a; } }
 const arrive = d => { const x = Math.max(0, Math.min(1500, d / 4)), k = Math.min(1499, Math.floor(x)); return SHT[k] + (SHT[k + 1] - SHT[k]) * (x - k); };
@@ -372,13 +364,6 @@ const NSU = 36000, SUR = (() => { const r = rng(7272), A = new Float32Array(NSU 
 const NEJ = 8000, EJ = (() => { const r = rng(7373), A = new Float32Array(NEJ * 7); for (let i = 0; i < NEJ; i++) { const th = r() * TAU, t0 = Math.pow(r(), 1.6) * .7, el = (38 + 30 * r() - 12 * t0) * DEG, v = (50 + 250 * Math.pow(r(), 1.3)) * (1 - .5 * t0); A[i * 7] = Math.cos(th) * Math.cos(el) * v; A[i * 7 + 1] = Math.sin(el) * v; A[i * 7 + 2] = Math.sin(th) * Math.cos(el) * v; A[i * 7 + 3] = r(); A[i * 7 + 4] = t0; A[i * 7 + 5] = Math.cos(th) * (18 + 35 * r()); A[i * 7 + 6] = Math.sin(th) * (18 + 35 * r()); } return A; })();
 const NCK = 420, CHK = (() => { const r = rng(7383), A = new Float32Array(NCK * 10); for (let i = 0; i < NCK; i++) { const th = r() * TAU, el = (25 + 50 * r()) * DEG, v = 40 + 150 * r(); A[i * 10] = Math.cos(th) * Math.cos(el) * v; A[i * 10 + 1] = Math.sin(el) * v; A[i * 10 + 2] = Math.sin(th) * Math.cos(el) * v; A[i * 10 + 3] = 2 + 5 * r() * r(); A[i * 10 + 4] = r() * TAU; A[i * 10 + 5] = 2 + 6 * r(); A[i * 10 + 6] = r(); A[i * 10 + 7] = r(); A[i * 10 + 8] = Math.cos(th) * 30 * r(); A[i * 10 + 9] = Math.sin(th) * 30 * r(); } return A; })();
 const CKP = (() => { const r = rng(7393), A = new Float32Array(24 * 3); for (let i = 0; i < 24; i++) { const u = r() * 2 - 1, th = r() * TAU, h = Math.sqrt(1 - u * u); A[i * 3] = Math.cos(th) * h; A[i * 3 + 1] = u * .7; A[i * 3 + 2] = Math.sin(th) * h; } return A; })();
-const NFB = 24000, FB = (() => { const r = rng(7474), A = new Float32Array(NFB * 5); for (let i = 0; i < NFB; i++) { const u = r() * 2 - 1, th = r() * TAU, h = Math.sqrt(1 - u * u); A[i * 5] = Math.cos(th) * h; A[i * 5 + 1] = u; A[i * 5 + 2] = Math.sin(th) * h; A[i * 5 + 3] = Math.pow(r(), .3); A[i * 5 + 4] = r(); } return A; })();
-// the cap: billows on a torus (most on its skin, some inside: the turbulence), particles round each billow
-const NPF = 720, PPF = 120, NCAP = NPF * PPF;
-const PUFF = (() => { const r = rng(7575), A = new Float32Array(NPF * 5); for (let i = 0; i < NPF; i++) { A[i * 5] = r() * TAU; A[i * 5 + 1] = r() * TAU; A[i * 5 + 2] = i < NPF * .8 ? .86 + .14 * r() : .15 + .5 * r(); A[i * 5 + 3] = .6 + .5 * r(); A[i * 5 + 4] = r(); } return A; })();
-const CAPP = (() => { const r = rng(7676), A = new Float32Array(NCAP * 4); for (let i = 0; i < NCAP; i++) { const u = r() * 2 - 1, th = r() * TAU, h = Math.sqrt(1 - u * u), q = Math.pow(r(), .2); A[i * 4] = Math.cos(th) * h * q; A[i * 4 + 1] = u * q; A[i * 4 + 2] = Math.sin(th) * h * q; A[i * 4 + 3] = q; } return A; })();
-const NST = 42000, STM = (() => { const r = rng(7777), A = new Float32Array(NST * 4); for (let i = 0; i < NST; i++) { A[i * 4] = r() * TAU; A[i * 4 + 1] = r(); A[i * 4 + 2] = Math.pow(r(), .3); A[i * 4 + 3] = r(); } return A; })();
-const NSK = 10000, SKT = (() => { const r = rng(7878), A = new Float32Array(NSK * 3); for (let i = 0; i < NSK; i++) { A[i * 3] = r() * TAU; A[i * 3 + 1] = r() * TAU; A[i * 3 + 2] = Math.pow(r(), .5); } return A; })();
 let PT = null;
 const setProf = o => { PT = o; };
 /* rings lying on the ground pile into a bright bar when seen edge-on from near the ground: dim them by the camera's
@@ -527,102 +512,6 @@ function sEject(a, vis, hx, hy, hz) {
     }
   }
 }
-function sFire(a, vis, hx, hy, hz) {
-  // the fireball: a ball of turbulent fire growing and rising, flattening into the cap as it climbs, cooling to smoke
-  if (a < 13) {
-    const rf = fbR(a), cy = hy + fbY(a), sq = 1 - .42 * ss(2.5, 8, a), al = vis * (1 - ss(6, 13, a));
-    psys(NFB, rf, hx, cy, hz, 2.2, 16000); const st = PS_ST, sz = PS_S;
-    for (let i = 0; i < NFB; i += st) {
-      const o = i * 5, nx = FB[o], ny = FB[o + 1], nz = FB[o + 2], q = FB[o + 3];
-      const bill = .84 + .16 * fs(nx * 5.1 + ny * 3.7 + a * .9) * fc(nz * 4.3 - ny * 2.2 + a * .7);
-      const rr = rf * q * bill, dent = ny < 0 ? 1 - .5 * ss(3, 9, a) * -ny : 1;
-      const heat = Math.max(0, 1.15 - a * .12 - q * .3 * Math.min(1, a * .5));
-      const lw = nx * SUNL[0] + ny * SUNL[1] + nz * SUNL[2], lit = .2 + .8 * (lw > 0 ? lw : 0) * q;
-      dotL(hx + nx * rr, cy + ny * rr * sq * dent, hz + nz * rr, lut(heat, lit), al * (.55 + .7 * Math.min(1, heat + .2) + .2 * FB[o + 4]), sz);
-    }
-  }
-}
-function sStem(a, vis, hx, hy, hz) {
-  const Hc = capH(a), Rt = capR(a), rmin = Rt * .5;
-  // the stem: dust and smoke drawn up into the cap, flared at the foot, narrow at the waist, twisting, streaked
-  if (a > 1.1) {
-    const top = a < 8 ? E.mix(fbY(a) - fbR(a) * .45, Hc - rmin * .6, ss(3, 8, a)) : Hc - rmin * .6;
-    const al = vis * ss(1.1, 4, a) * (1 - ss(80, 100, a)) * .85;
-    psys(NST, Math.sqrt(Math.max(1, top) * Rt * .5), hx, hy + top / 2, hz, 2.6, 24000); const st = PS_ST, sz = PS_S;
-    const hot0 = a < 7 ? Math.max(0, .8 - a * .11) : 0, uc = .5 * ss(24, 34, a), lf = .6 - .48 * ss(22, 31, a);   // late on the column lifts off the ground
-    for (let i = 0; i < NST; i += st) {
-      const o = i * 4; let u = STM[o + 1] + a * .03 * (1 + STM[o + 3]); u -= Math.floor(u);
-      const y = hy + u * top, w1 = 1 - u, q = STM[o + 2];
-      const rs = stemR(u, Rt) * q * (1 + .06 * fs(u * 9 + STM[o + 3] * 6));
-      const th = STM[o] + a * .25 * w1, ct = fc(th), st_ = fs(th);
-      const fade = ss(uc, uc + .05, u) * (1 - ss(.94, 1, u)) * (lf + (1 - lf) * ss(uc + .02, uc + .3, u));
-      const tex = .76 + .24 * fs(th * 5 + u * 17 - a * .35) * fc(th * 3.3 - u * 9 + a * .2);
-      const lw = ct * SUNL[0] + st_ * SUNL[2], lit = (.08 + .85 * (lw > 0 ? lw : 0) * (.3 + .7 * q)) * tex + .06 * u;
-      dotL(hx + ct * rs, y, hz + st_ * rs, lut(hot0 * w1 * (1.2 - q * .5), lit), al * fade * (.65 + .45 * STM[o + 3]), sz);
-    }
-    // the dust pedestal: a low mound of dust round the foot, the column rising out of it, settling before the crater shows
-    const ap = vis * pedA(a);
-    if (ap > .02) {
-      const Rp = stemR(0, Rt) * 1.25 + 40, Hp = 50 + 90 * ss(2, 12, a);
-      psys(NST, Rp, hx, hy + Hp * .4, hz, 3, 9000); const sp = PS_ST * 2, s2 = PS_S;
-      for (let i = 1; i < NST; i += sp) {
-        const o = i * 4, q = STM[o + 2], th = STM[o] - a * .05, ct = fc(th), st_ = fs(th), r = Rp * q * (1 + .22 * fs(th * 5 + 1.3) + .14 * fs(th * 11 + a * .1) + .08 * fs(q * 13 + th * 3));
-        const hq = Math.pow(Math.max(0, 1 - q * q), .6), y = hy + Hp * hq * (.35 + .65 * STM[o + 1]) * (1 + .25 * fs(th * 7 + a * .2) * fc(q * 9 - a * .3));
-        const lw = (ct * SUNL[0] + st_ * SUNL[2]) * q + SUNL[1] * hq, lit = .12 + .8 * (lw > 0 ? lw : 0);
-        dotL(hx + ct * r, y, hz + st_ * r, lut(hot0 * .6, lit), ap * (.5 + .4 * STM[o + 3]) * (1 - .75 * q * q * q * q), s2);
-      }
-    }
-  }
-}
-function sCap(a, vis, hx, hy, hz) {
-  const Hc = capH(a), Rt = capR(a), Rmaj = Rt * .62, rmin = Rt * .5;
-  // the cap: a rolling toroidal cloud, a skin of small billows (cauliflower), turbulence inside glowing through
-  // underneath while it is young; each billow lit on its own sunward side, darkened where the torus faces away
-  if (a > 2.2) {
-    const al = vis * ss(2.2, 6, a) * (1 - ss(82, 100, a)), roll = a * .32 / (1 + a * .05);
-    psys(NCAP, (Rmaj + rmin) * .95, hx, hy + Hc, hz, 2.4, 56000); const st = PS_ST, sz = PS_S;
-    const hin0 = a < 22 ? Math.max(0, 1 - a * .046) : 0, fq = Math.floor(a * 6) * 7;
-    for (let p = 0; p < NPF; p++) {
-      const q = p * 5, th = PUFF[q] + a * .006, ph = PUFF[q + 1] + roll, rb = PUFF[q + 2], inner = rb < .7, pr = PUFF[q + 3] * rmin * (inner ? .42 : .3);
-      const cph = fc(ph), sph = fs(ph), ct = fc(th), sth = fs(th);
-      const rad = Rmaj + rmin * rb * cph, cx_ = hx + ct * rad, cz_ = hz + sth * rad, cy_ = hy + Hc + rmin * rb * sph * .75;
-      const lb = cph * (ct * SUNL[0] + sth * SUNL[2]) + sph * SUNL[1], vis_ = lb > -.2 ? (lb + .2) / 1.2 : 0;
-      const hin = hin0 * (inner ? 1.25 : sph < -.4 ? (-sph - .4) * .5 : 0), sky = .1 + .08 * sph;
-      const ab = al * (inner ? .8 : 1);
-      for (let k = p % st; k < PPF; k += st) {
-        const o = (p * PPF + k) * 4, lx = CAPP[o], ly = CAPP[o + 1], lz = CAPP[o + 2], lq = CAPP[o + 3];
-        const cl = (lx * SUNL[0] + ly * SUNL[1] + lz * SUNL[2]) / (lq + .02);
-        const lit = sky + .08 + .08 * ly / (lq + .02) + 1.15 * (cl > 0 ? cl : 0) * vis_ * lq;
-        const heat = hin > 0 ? hin * (1.15 - lq * .7) * (.75 + .25 * hz1(p * 31 + k + fq)) : 0;
-        dotL(cx_ + lx * pr, cy_ + ly * pr * .85, cz_ + lz * pr, lut(heat, lit), ab * (.7 + .35 * lq), sz);
-      }
-    }
-  }
-}
-function sCond(a, vis, hx, hy, hz) {
-  const Hc = capH(a), Rt = capR(a), Rmaj = Rt * .62, rmin = Rt * .5;
-  // condensation: two collar clouds round the stem (puffy rings, lit on top), and a thin skirt flaring under the cap
-  if (a > 4.5 && a < 56) {
-    const alr = vis * ss(4.5, 10, a) * (1 - ss(32, 56, a)) * .85, top = Hc - rmin * .6;
-    psys(NSK, Rt * 1.2, hx, hy + Hc * .6, hz, 3, 7000); const st = PS_ST;
-    for (let ring = 0; ring < 2; ring++) {
-      const ur = ring ? .68 : .46, yr = hy + top * ur, rc = stemR(ur, Rt) * (ring ? 1.9 : 2.3) * (1 + .25 * ss(5, 35, a)) + Rt * .08, tb = rc * (ring ? .3 : .42);
-      for (let i = ring; i < NSK; i += st * 2) {
-        const o = i * 3, th = SKT[o] + a * .012 * (ring ? -1 : 1), v = SKT[o + 1], qq = SKT[o + 2];
-        const ct = fc(th), st_ = fs(th), cv = fc(v), sv = fs(v), rr = rc + tb * cv * qq * (.9 + .2 * fs(th * 6 + ring));
-        const lw = (ct * SUNL[0] + st_ * SUNL[2]) * cv * .8 + SUNL[1] * sv, lit = .3 + .7 * (lw > 0 ? lw : 0);
-        dotP(hx + ct * rr, yr + tb * sv * qq * .5, hz + st_ * rr, 240 * lit, 242 * lit, 236 * lit, alr * (ring ? .5 : .62) * (.4 + .5 * qq) * (.7 + .3 * fs(th * 5 + 2.1 * ring)));
-      }
-    }
-    const als = vis * ss(6, 11, a) * (1 - ss(28, 46, a)) * .4;
-    if (als > .02) for (let i = 0; i < NSK; i += st) {
-      const o = i * 3, v = SKT[o + 2], th = SKT[o] - a * .01;
-      const y = hy + Hc - rmin * .55 - v * Hc * .2, rr = Rmaj * (.62 + .5 * v) * (1 + .04 * fs(th * 9 + v * 4));
-      const lit = .5 + .5 * Math.max(0, fc(th) * SUNL[0] + fs(th) * SUNL[2]);
-      dotP(hx + fc(th) * rr, y, hz + fs(th) * rr, 236 * lit, 238 * lit, 232 * lit, als * 4 * v * (1 - v) * (.5 + .5 * fs(th * 5 + 1.7)));
-    }
-  }
-}
 /* the crater drawn over the land so it reads from far away: the rim crest (two bright rings), the bowl shaded by its
    own slopes with the floor glowing, and the ejecta rays as streaks of bright dust over the scorched blanket */
 const NCB = 5000, CBW = (() => { const r = rng(7979), A = new Float32Array(NCB * 3); for (let i = 0; i < NCB; i++) { A[i * 3] = Math.sqrt(r()); A[i * 3 + 1] = r() * TAU; A[i * 3 + 2] = r(); } return A; })();
@@ -663,6 +552,205 @@ function sCrater(a, vis, hx, hy, hz) {
     dotL(hx + ct * d, y, hz + st_ * d, lut(hot * .5 * Math.exp(-(u - 1) * 2), .75 + .25 * RYP[o + 2]), b, 1);
   }
 }
+/* ================= the mushroom =================
+   Notes from reference photos and film (saved in "photos i the user have saved for research/explosions", see its
+   SOURCES.md): Upshot-Knothole Grable (colour still and film), Castle Bravo and Romeo, Ivy Mike, Teapot from the air,
+   the Tumbler-Snapper formation strip, Minor Scale, Sailor Hat, Crossroads Baker, Raikoke from the ISS, pyrocumulus.
+   - The fireball rises fast and within seconds flattens into a ring vortex: hot gas climbs the middle, rolls out over
+     the top and back in under the rim. In the Grable film the roll is a glowing ring of fire inside a darker crust.
+   - The cap's skin is cauliflower at three or more scales (lobes of lumps of knobs). Early it is a ball, then as tall
+     as it is wide, later wider and flatter as it slows; the biggest overshoot into a tower or spread into an anvil.
+   - Light: a hard sun. The sunlit top and side are bright with crisp edges, each lump lit on its own sunward side, deep
+     shadow between lumps and on the far side; the underside is dark. The core glows orange through the underside and
+     the gaps for the first tens of seconds, then the cloud cools to brown and grey dust.
+   - The stem is a narrow twisting column of dust drawn up from the ground (about a quarter of the cap's width), lumpy
+     along its length, flaring into a neck under the cap and into the dust at its foot; knots and collars form on it.
+   - Condensation: a smooth white dome with a flared skirt in the first second (Sailor Hat Charlie); later thin bright
+     collars and skirts round the stem and under the cap where the column punches through moist layers (Bravo,
+     Romeo, Raikoke). Smooth, not lumpy, and wider than the stem; they flash in and burn off.
+   - At the foot a wide low pedestal of billowing dust (Grable), seen from above as a dark disc (Teapot), with the base
+     surge rolling out over the ground (Baker). Conventional blasts (Minor Scale, range bombs) are all lumps and no stem.
+   Built as precomputed billow clouds in canonical frames (the cap in the torus' own frame, the stem on a unit
+   cylinder, the pedestal on a flat ring): billows on billows on billows, points on their skins, normals blended over
+   the scales. Each frame the cap's cross-section rolls about the tube's core, the lumps boil, the stem scrolls up and
+   twists; each dot is lit by its own lump and by the big shape's self-shadow, the hot core glowing from inside early.
+   Any prefix of each set is an even subset: the dot count follows the size on screen. */
+/* sizes (m) and heights over a (sim s): the cap's outer radius, its ring (major) and tube radii, its centre height */
+const capR = a => a <= 0 ? 0 : 70 + 430 * (1 - Math.exp(-a * 2.2)) + 1350 * (1 - Math.exp(-a / 16));
+const capMaj = a => capR(a) * .56 * ss(.8, 7, a);
+const capTub = a => capR(a) * (.9 - .42 * ss(.8, 7, a));
+const capSq = a => 1 - .3 * ss(2, 14, a);
+const capH = a => a <= 0 ? 0 : Math.min(250 + 4300 * (1 - Math.exp(-a / 20)), capR(a) * .72 + 48 * a * a);
+const capRoll = a => a * .3 / (1 + a * .03);
+const fbR = a => capR(a);
+const fbY = a => capH(a);
+/* the stem's top, its radius at height fraction u (0 foot .. 1 under the cap) */
+const stemTop = a => capH(a) - capTub(a) * capSq(a) * .55;
+const stemR = (u, a) => { const R_ = capR(a), w1 = 1 - u, w2 = w1 * w1, u2 = u * u; return R_ * (.15 + .3 * w2 * w2 * w2 + .24 * u2 * u2 * u2); };
+/* the dust pedestal's strength (it settles before the crater view) and its ring */
+const pedA = a => ss(1.2, 3.5, a) * (1 - ss(24, 33, a));
+const CS = 9;
+/* billows on billows: big lumps on a skin, medium lumps on their outer side, small knobs on those; points on the knobs.
+   Writes into P: [key, u, v, w, nu, nv, nw, depth, phase] (u v w in the frame's units; key = the big lump's angle) */
+function billowCloud(seed, NB, centre, sizes, counts, P, keyDepth) {
+  const r = rng(seed), D1 = [0, 0, 0], D2 = [0, 0, 0], D3 = [0, 0, 0], C = [0, 0, 0, 0, 0, 0];
+  const hemi = (ox, oy, oz, lo, o) => { for (let k = 0; k < 24; k++) { const z = r() * 2 - 1, t = r() * TAU, h = Math.sqrt(1 - z * z), x = Math.cos(t) * h, y = z, w = Math.sin(t) * h; if (x * ox + y * oy + w * oz >= lo) { o[0] = x; o[1] = y; o[2] = w; return o; } } o[0] = ox; o[1] = oy; o[2] = oz; return o; };
+  for (let b = 0; b < NB; b++) {
+    centre(r, b, C);                                    // C: key, cu, cv, (ou, ov) outward in the u-v plane
+    const key = C[0], cu = C[1], cv = C[2], ou = C[3], ov = C[4], b1 = sizes[0] * (.75 + .5 * r()), p1 = r();
+    const dep = keyDepth ? () => C[5] : (u, v) => Math.max(0, 1 - Math.hypot(u, v));
+    for (let k = 0; k < counts[0]; k++) { hemi(ou, ov, 0, -.25, D1); const q = .9 + .1 * r(), u = cu + D1[0] * b1 * q, v = cv + D1[1] * b1 * q; P.push(key, u, v, D1[2] * b1 * q, D1[0], D1[1], D1[2], dep(u, v), p1); }
+    for (let m = 0; m < counts[1]; m++) {
+      hemi(ou, ov, 0, .0, D1);
+      const mu = cu + D1[0] * b1 * .86, mv = cv + D1[1] * b1 * .86, mw = D1[2] * b1 * .86, b2 = b1 * sizes[1] * (.8 + .4 * r()), p2 = r();
+      for (let k = 0; k < counts[2]; k++) { hemi(D1[0], D1[1], D1[2], -.15, D2); const u = mu + D2[0] * b2, v = mv + D2[1] * b2, nx = .55 * D2[0] + .45 * D1[0], ny = .55 * D2[1] + .45 * D1[1], nz = .55 * D2[2] + .45 * D1[2], nl = 1 / Math.hypot(nx, ny, nz); P.push(key, u, v, mw + D2[2] * b2, nx * nl, ny * nl, nz * nl, dep(u, v), p2); }
+      for (let s = 0; s < counts[3]; s++) {
+        hemi(D1[0], D1[1], D1[2], .1, D2);
+        const su = mu + D2[0] * b2 * .88, sv = mv + D2[1] * b2 * .88, sw = mw + D2[2] * b2 * .88, b3 = b2 * sizes[2] * (.8 + .4 * r()), p3 = r();
+        for (let k = 0; k < counts[4]; k++) {
+          hemi(D2[0], D2[1], D2[2], -.3, D3); const q = .88 + .12 * r(), u = su + D3[0] * b3 * q, v = sv + D3[1] * b3 * q;
+          const nx = .45 * D3[0] + .33 * D2[0] + .22 * D1[0], ny = .45 * D3[1] + .33 * D2[1] + .22 * D1[1], nz = .45 * D3[2] + .33 * D2[2] + .22 * D1[2], nl = 1 / Math.hypot(nx, ny, nz);
+          P.push(key, u, v, sw + D3[2] * b3 * q, nx * nl, ny * nl, nz * nl, dep(u, v), p3);
+        }
+      }
+    }
+  }
+  // shuffle (so any prefix is an even subset), into a typed array
+  const n = P.length / CS, A = new Float32Array(P.length), idx = new Uint32Array(n);
+  for (let i = 0; i < n; i++) idx[i] = i;
+  for (let i = n - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)), t = idx[i]; idx[i] = idx[j]; idx[j] = t; }
+  for (let i = 0; i < n; i++) for (let q = 0; q < CS; q++) A[i * CS + q] = P[idx[i] * CS + q];
+  return A;
+}
+/* the cap: big lumps on the torus' skin (a few inside: the turbulence round the core); u v in units of the tube radius */
+const CAPC = billowCloud(9191, 170, (r, b, C) => { const inner = b >= 150, th = r() * TAU, ph = r() * TAU, rb = inner ? .15 + .5 * r() : .8 + .14 * r(); C[0] = th; C[1] = Math.cos(ph) * rb; C[2] = Math.sin(ph) * rb; C[3] = Math.cos(ph); C[4] = Math.sin(ph); }, [.3, .4, .42], [16, 8, 9, 5, 30], []);
+const NCAPC = CAPC.length / CS;
+/* packed for the per-frame pass: cos, sin of the lump's angle, u v w, normal, depth, a boil phase (0..63), 1 / |u v| */
+const CK = 11;
+function pack(A) { const n = A.length / CS, O = new Float32Array(n * CK); for (let i = 0; i < n; i++) { const o = i * CS, q = i * CK, u = A[o + 1], v = A[o + 2]; O[q] = Math.cos(A[o]); O[q + 1] = Math.sin(A[o]); O[q + 2] = u; O[q + 3] = v; O[q + 4] = A[o + 3]; O[q + 5] = A[o + 4]; O[q + 6] = A[o + 5]; O[q + 7] = A[o + 6]; O[q + 8] = A[o + 7]; O[q + 9] = (A[o + 8] * 64) | 0; O[q + 10] = 1 / Math.sqrt(u * u + v * v + 1e-4); } return O; }
+const CAPK = pack(CAPC);
+const BO = new Float32Array(64);
+/* the stem: lumps on a unit cylinder (key = angle round it; u out from its skin, v up, w along the skin; units of the
+   local radius; the lump's height fraction in the phase slot's place is the 'depth' slot) */
+const STC = billowCloud(9292, 240, (r, b, C) => { C[0] = r() * TAU; C[1] = .82 + .1 * r(); C[2] = 0; C[3] = 1; C[4] = 0; C[5] = (b + r()) / 240; }, [.36, .45, .45], [12, 6, 10, 3, 16], [], true);
+const NSTC = STC.length / CS;
+/* the pedestal: lumps on a flat ring of dust round the foot (as the cap, units of its tube radius) */
+const PDC = billowCloud(9393, 110, (r, b, C) => { const th = r() * TAU, ph = r() * PI, rb = .78 + .2 * r(); C[0] = th; C[1] = Math.cos(ph) * rb; C[2] = Math.sin(ph) * rb; C[3] = Math.cos(ph); C[4] = Math.sin(ph); }, [.34, .42, .45], [12, 6, 10, 3, 16], []);
+const NPDC = PDC.length / CS, PDK = pack(PDC);
+if (window.ORW_LOG) window.ORW_LOG.push('mushroom clouds ' + NCAPC + ' / ' + NSTC + ' / ' + NPDC);
+/* dot budgets per frame (the counts follow the size on screen up to these) */
+const B_CAP = 100000, B_STEM = 24000, B_PED = 18000;
+const S0 = SUNL[0], S1 = SUNL[1], S2 = SUNL[2];
+/* the count of a set to draw for a disc of radius R_ (m) at (x, y, z): about one dot per k px^2, capped */
+function setN(N, R_, x, y, z, k, cap) {
+  const d = Math.max(1, Math.hypot(x - ex, y - ey, z - ez) - R_ * .4), rpx = R_ * FL / d, area = 3.1416 * rpx * rpx;
+  const n = Math.min(N, cap, Math.round(area / k)); PS_S = area / Math.max(1, n) > 6 ? 2 : 1; return n;
+}
+/* the cap (the fireball at first): rolling, boiling, lit lump by lump, the core glowing through */
+function sCap(a, vis, hx, hy, hz) {
+  if (a <= 0) return;
+  const R_ = capR(a), maj = capMaj(a), tub = capTub(a), sq = capSq(a), Hc = capH(a), roll = -capRoll(a), cr = Math.cos(roll), sr = Math.sin(roll);
+  const al = vis * Math.min(1, a * 6) * (1 - ss(90, 110, a));
+  const n = setN(NCAPC, R_ * 1.05, hx, hy + Hc, hz, 1.5, B_CAP), sz = PS_S;
+  // heat: white-hot at first, the core glowing through the underside for tens of seconds
+  const hAll = Math.exp(-a * 1.1), hCore = Math.exp(-a / 11), boil = .05 + .05 * (1 - ss(5, 30, a)), bt = a * 1.3;
+  const C = CAPK, hyc = hy + Hc, ts = tub * sq, LLm = LL - 1, LHm = LH - 1, u0_ = u0, u1_ = u1, u2_ = u2;
+  for (let k = 0; k < 64; k++) BO[k] = 1 + boil * SNT[(((k / 64 + bt / TAU) * 4096) | 0) & 4095];
+  const big = sz > 1;
+  for (let i = 0; i < n; i++) {
+    const o = i * CK, ct = C[o], st_ = C[o + 1], u0 = C[o + 2], v0 = C[o + 3], bo = BO[C[o + 9]];
+    const u = (u0 * cr - v0 * sr) * bo, v = (u0 * sr + v0 * cr) * bo, w = C[o + 4] * bo * tub, rad = maj + u * tub;
+    const dx = hx + ct * rad - st_ * w - ex, dy = hyc + v * ts - ey, dz = hz + st_ * rad + ct * w - ez;
+    const zc = dx * f0 + dy * f1 + dz * f2; if (zc < NR) continue;
+    const iz = FL / zc, sx = CX + (dx * r0 + dy * r1 + dz * r2) * iz; if (sx < 0 || sx >= BW - 1) continue;
+    const sy = CY - (dx * u0_ + dy * u1_ + dz * u2_) * iz; if (sy < 0 || sy >= BH - 1) continue;
+    const nu0 = C[o + 5], nv0 = C[o + 6], nw = C[o + 7], dep = C[o + 8], nu = nu0 * cr - nv0 * sr, nv = nu0 * sr + nv0 * cr;
+    // the lump's own light, times how much of the big shape stands between it and the sun
+    const lam = (ct * nu - st_ * nw) * S0 + nv * S1 + (st_ * nu + ct * nw) * S2;
+    const ir = C[o + 10], tsun = ((ct * S0 + st_ * S2) * (u0 * cr - v0 * sr) + (u0 * sr + v0 * cr) * S1) * ir;
+    const vis_ = (tsun < -.35 ? 0 : tsun > .3 ? 1 : (tsun + .35) * 1.538) * (1 - .6 * dep);
+    const lit = .05 + .08 * (nv + 1) + 1.05 * (lam > 0 ? lam : 0) * vis_;
+    let heat = hAll * (1.1 - .3 * dep);
+    const hc = hCore * (dep * 1.2 + (v < 0 ? -v * .55 : 0)) * (1 - vis_ * .5); if (hc > heat) heat = hc;
+    const li = ((heat <= 0 ? 0 : heat >= 1 ? LHm : (heat * LHm + .5) | 0) * LL + (lit <= 0 ? 0 : lit >= 1 ? LLm : (lit * LLm + .5) | 0)) * 3;
+    let ab = al * (.72 + .3 * (1 - dep)); if (ab > 1) ab = 1;
+    const cg = LUT[li + 1] * ab, pk = 0xff000000 | ((LUT[li + 2] * ab) << 16) | (cg << 8) | (LUT[li] * ab);
+    let p = (sy | 0) * BW + (sx | 0);
+    if (DD[(p << 2) + 1] < cg) U32[p] = pk;
+    if (big) { p++; if (DD[(p << 2) + 1] < cg) U32[p] = pk; p += BW; if (DD[(p << 2) + 1] < cg) U32[p] = pk; p--; if (DD[(p << 2) + 1] < cg) U32[p] = pk; }
+  }
+}
+/* the stem: lumps on a twisting column scrolling up into the cap; narrow waist, a neck under the cap, the foot in the dust */
+function sStem(a, vis, hx, hy, hz) {
+  if (a < .9) return;
+  const top = stemTop(a), R_ = capR(a), al = vis * ss(.9, 3, a) * (1 - ss(85, 105, a));
+  const uc = .22 * ss(28, 40, a), lf = .75 - .6 * ss(24, 33, a);           // late on the column thins and lifts off the ground
+  const n = setN(NSTC, Math.sqrt(Math.max(1, top) * R_ * .45), hx, hy + top * .5, hz, 1.8, B_STEM), sz = PS_S;
+  const hot0 = Math.exp(-a / 5) * .9, C = STC, rise = a * .028;
+  for (let i = 0; i < n; i++) {
+    const o = i * CS; let h = C[o + 7] + rise; h -= Math.floor(h);
+    const fade = ss(uc, uc + .06, h) * (1 - ss(.93, 1, h)) * (lf + (1 - lf) * ss(uc + .02, uc + .25, h)); if (fade < .02) continue;
+    const Rs = stemR(h, a), th = C[o] + a * .22 * (1 - h) + .4 * h, ct = fc(th), st_ = fs(th);
+    const rr = Rs * C[o + 1], w = C[o + 3] * Rs, y = hy + h * top + C[o + 2] * Rs;
+    const x = hx + ct * rr - st_ * w, z = hz + st_ * rr + ct * w;
+    const nu = C[o + 4], nv = C[o + 5], nw = C[o + 6];
+    const lam = (ct * nu - st_ * nw) * S0 + nv * S1 + (st_ * nu + ct * nw) * S2, cyl = ct * S0 + st_ * S2;
+    const vis_ = (cyl < -.3 ? 0 : cyl > .35 ? 1 : (cyl + .3) / .65) * (1 - .62 * ss(.62, .95, h));
+    const lit = .05 + .06 * (nv + 1) + .95 * (lam > 0 ? lam : 0) * vis_;
+    dotL(x, y, z, lut(hot0 * (1 - h * .6), lit), al * fade * (.75 + .25 * C[o + 8]), sz);
+  }
+}
+/* the pedestal: a ring of billowing dust round the foot, rolling out and settling */
+function sPedestal(a, vis, hx, hy, hz) {
+  const ap = vis * pedA(a); if (ap < .02) return;
+  const R_ = capR(a), Rp = R_ * .45 + 120 + 30 * a, tub = R_ * .26 + 50, sq = .55, roll = -a * .08, cr = Math.cos(roll), sr = Math.sin(roll);
+  const n = setN(NPDC, Rp + tub, hx, hy + tub * .4, hz, 2, B_PED), sz = PS_S, C = PDK, hot0 = Math.exp(-a / 4) * .7, ts = tub * sq;
+  for (let i = 0; i < n; i++) {
+    const o = i * CK, ct = C[o], st_ = C[o + 1], u0 = C[o + 2], v0 = C[o + 3];
+    const u = u0 * cr - v0 * sr, v = u0 * sr + v0 * cr, yy = v * ts + ts * .55; if (yy < -2) continue;
+    const w = C[o + 4] * tub, rad = Rp + u * tub;
+    const nu0 = C[o + 5], nv0 = C[o + 6], nw = C[o + 7], dep = C[o + 8], nu = nu0 * cr - nv0 * sr, nv = nu0 * sr + nv0 * cr;
+    const lam = (ct * nu - st_ * nw) * S0 + nv * S1 + (st_ * nu + ct * nw) * S2;
+    const tsun = ((ct * S0 + st_ * S2) * u + v * S1) * C[o + 10], vis_ = tsun < -.35 ? 0 : tsun > .3 ? 1 : (tsun + .35) * 1.538;
+    const lit = .05 + .07 * (nv + 1) + (lam > 0 ? lam : 0) * vis_ * (1 - .5 * dep);
+    dotL(hx + ct * rad - st_ * w, hy + yy, hz + st_ * rad + ct * w, lut(hot0 * (1 - u * .3), lit), ap * (.85 - .3 * dep), sz);
+  }
+}
+/* condensation: smooth bright collars round the stem and a skirt flaring under the cap, flashing in and burning off */
+const NSK = 8000, SKT = (() => { const r = rng(7878), A = new Float32Array(NSK * 3); for (let i = 0; i < NSK; i++) { A[i * 3] = r() * TAU; A[i * 3 + 1] = r() * TAU; A[i * 3 + 2] = Math.pow(r(), .5); } return A; })();
+function sCond(a, vis, hx, hy, hz) {
+  if (a < 3.5 || a > 60) return;
+  const top = stemTop(a), R_ = capR(a), Hc = capH(a), tub = capTub(a), maj = capMaj(a), sq = capSq(a);
+  const n = setN(NSK, R_, hx, hy + Hc * .6, hz, 3, NSK);
+  for (let ring = 0; ring < 2; ring++) {
+    const a0 = ring ? 7 : 4.5, alr = vis * ss(a0, a0 + 2.5, a) * (1 - ss(a0 + 14, a0 + 30, a)) * .8; if (alr < .02) continue;
+    // a thin flat disc of condensation round the column, soft at its rim, a little dished
+    const ur = ring ? .7 : .46, yr = hy + top * ur, ri = stemR(ur, a) * .95, ro = stemR(ur, a) * (ring ? 2.4 : 3.1) * (1 + .3 * ss(a0, a0 + 20, a));
+    for (let i = ring; i < n; i += 2) {
+      const o = i * 3, th = SKT[o] + a * .01 * (ring ? -1 : 1), q = SKT[o + 2], ct = fc(th), st_ = fs(th);
+      const edge = ro * (1 + .07 * fs(th * 7 + ring * 2) + .04 * fs(th * 17 + 1)), rr = ri + (edge - ri) * q;
+      const yy = yr + (rr - ri) * .06 + (SKT[o + 1] - 3.14) * .004 * ro, fall = 1 - q * q * q;
+      const lit = .55 + .45 * Math.max(0, S1 + .3 * (ct * S0 + st_ * S2));
+      dotP(hx + ct * rr, yy, hz + st_ * rr, 244 * lit, 246 * lit, 240 * lit, alr * fall * (.5 + .3 * fs(th * 3 + q * 9)));
+    }
+  }
+  // the skirt: a thin bell hanging from under the cap's rim
+  const als = vis * ss(6, 10, a) * (1 - ss(26, 44, a)) * .55;
+  if (als > .02) for (let i = 0; i < n; i++) {
+    const o = i * 3, v = SKT[o + 2], th = SKT[o] - a * .008;
+    const y = hy + Hc - tub * sq * .45 - v * Hc * .22, rr = (maj + tub * .55) * (.82 + .35 * Math.pow(v, .7)) * (1 + .03 * fs(th * 9 + v * 4));
+    const lit = .5 + .5 * Math.max(0, fc(th) * S0 + fs(th) * S2);
+    dotP(hx + fc(th) * rr, y, hz + fs(th) * rr, 240 * lit, 242 * lit, 236 * lit, als * 4 * v * (1 - v) * (.5 + .5 * fs(th * 5 + 1.7)));
+  }
+}
+/* the cloud's shadow on the land (for the world's ground pass): the cap's disc and the stem's strip, cast away from the sun */
+function cloudShadow(a) {
+  const S = W.CSH; if (!S) return;
+  if (a < 2 || a > 110) { S.k = 0; return; }
+  const Hc = capH(a), R_ = capR(a), kx = -S0 / S1, kz = -S2 / S1;
+  S.x = HIT[0] + kx * Hc; S.z = HIT[2] + kz * Hc; S.r = (capMaj(a) + capTub(a) * .8); S.sx = HIT[0]; S.sz = HIT[2]; S.sw = stemR(.5, a) * 1.1;
+  S.k = .62 * ss(2, 8, a) * (1 - ss(90, 110, a));
+}
 function strike(a, vis) {
   cam();
   if (a < 0) return;
@@ -673,7 +761,7 @@ function strike(a, vis) {
   sFoot(a, vis, hx, hy, hz); sCrater(a, vis, hx, hy, hz); if (PT) PT.lap(2);
   sSurge(a, vis, hx, hy, hz); if (PT) PT.lap(3);
   sEject(a, vis, hx, hy, hz); if (PT) PT.lap(4);
-  sFire(a, vis, hx, hy, hz); if (PT) PT.lap(5);
+  sPedestal(a, vis, hx, hy, hz); if (PT) PT.lap(5);
   sStem(a, vis, hx, hy, hz); if (PT) PT.lap(6);
   sCap(a, vis, hx, hy, hz); if (PT) PT.lap(7);
   sCond(a, vis, hx, hy, hz); if (PT) PT.lap(8);
@@ -752,11 +840,11 @@ function camInit(F) {
     k(1.8, at(1.08, 2650, 260), up(220), 54),
     k(2.35, G, up(fbY(aT(2.35)) + 160), 62, true),
     k(4.2, V.mad(G, UPH, 3), up(fbY(aT(4.2)) + 40), 60, true),
-    k(sk(.2), at(.72, 2750, 420), up(capH(aT(sk(.2))) * .52), 50),
-    k(sk(.42), at(.46, 3100, 760), up(capH(aT(sk(.42))) * .55), 46),
-    k(sk(.62), at(.3, 2600, 1600), up(capH(aT(sk(.62))) * .38), 46),
-    k(sk(.82), at(.36, 1250, 2000), at(.36 + PI, 60, 30), 48),
-    k(DS + 1.2, at(.42, 1150, 2150), at(.42 + PI, 40, 60), 48, true),
+    k(sk(.2), at(.75, 5200, 600), up(capH(aT(sk(.2))) * .62), 52),
+    k(sk(.45), at(.5, 7600, 1100), up(capH(aT(sk(.45))) * .58), 46),
+    k(sk(.7), at(.34, 6200, 2100), up(capH(aT(sk(.7))) * .45), 46),
+    k(sk(.87), at(.38, 1250, 1750), at(.38 + PI, 60, 30), 46),
+    k(DS + 1.2, at(.43, 1150, 1850), at(.43 + PI, 50, 50), 46, true),
   ]);
   CI.aG = arrive(V.dist([W.G2[0], 0, W.G2[2]], [HIT[0], 0, HIT[2]]));
 }
@@ -786,7 +874,8 @@ function shotFall(F, T) {
 }
 function camHook(T, F) {
   FCs = F;
-  FRAME.T = T; FRAME.a = F.aOf(T); W.CRA.a = FRAME.a;
+  FRAME.T = T; FRAME.a = F.aOf(T); W.CRA.a = FRAME.a; cloudShadow(FRAME.a);
+  { const ld = FRAME.a > 0 ? ss(.2, 1.5, FRAME.a) * (1 - ss(F.T_RET + .5, F.T_RET + 2, T)) : 0; W.GOPT.pxm = 1 + .22 * ld; W.GOPT.fbud = 1 - .45 * ld; }
   if (!CI) camInit(F);
   const T0 = F.T_ON - .5, T1 = F.T_ON + 1.1;
   if (T < T0 || T > CI.Tend) return null;
