@@ -94,7 +94,7 @@ function interpH(Pa) {
    CRA.a (sim s since the strike, set each frame by the FX module before the ground is drawn): a bowl 2R wide and D deep
    with a sharp raised rim, the ejecta blanket thinning outward, bright ejecta rays over a scorched skirt, the floor
    glowing for a while. Shaded from its own slopes so it reads from above. */
-const CRA = { a: -1, R: 95, D: 26, H: 10, x: 0, z: 0 };
+const CRA = { a: -1, R: 160, D: 44, H: 15, x: 0, z: 0 };
 const RAYN = 1024, RAY = new Float32Array(RAYN);
 { const r = rng(5858), sp = []; for (let i = 0; i < 30; i++) sp.push([r() * TAU, .018 + .06 * r() * r(), .4 + .6 * r(), 2.5 + 5.5 * r()]);
   for (let i = 0; i < RAYN; i++) { const t = i / RAYN * TAU; let v = 0; for (const [c, w, h] of sp) { let d = Math.abs(t - c); if (d > PI) d = TAU - d; const q = h * Math.exp(-(d * d) / (w * w)); if (q > v) v = q; } RAY[i] = v; }
@@ -111,7 +111,7 @@ const CRO = [0, 1, 0];
 const CSH = { k: 0, x: 0, z: 0, r: 0, sx: 0, sz: 0, sw: 0 };
 /* load sharing set by the FX module while the strike fills the frame: a coarser ground, a smaller forest budget */
 const GOPT = { pxm: 1, fbud: 1 };
-const CR_OUT = 95 * 8;
+const CR_OUT = CRA.R * 8;
 /* radial tables (0.5 m steps): the height offset, the slope, 1 / sqrt(1 + slope^2), the slope light's weight, and
    exp(-(u-1)/2.4); per angle: the ray strength and exp(-(u-1)/L) is taken from the ray length table at run time */
 const CRN = Math.ceil(CR_OUT * 2) + 2, CR_DY = new Float32Array(CRN), CR_SL = new Float32Array(CRN), CR_W = new Float32Array(CRN), CR_EB = new Float32Array(CRN);
@@ -480,7 +480,8 @@ const STARS = K.stars(9000, 19);
 const HIT = [2, 0, 13]; HIT[1] = ground(HIT[0], HIT[2]);
 CRA.x = HIT[0]; CRA.z = HIT[2];
 /* the ground camera's clearing (the FX module films the strike from here) */
-const G2 = (() => { const d = V.norm([-.55, 0, .83]), x = HIT[0] + d[0] * 2300, z = HIT[2] + d[2] * 2300; return [x, ground(x, z) - drop(x, z), z]; })();
+const G2 = (() => { const d = V.norm([-.55, 0, .83]), x = HIT[0] + d[0] * 1500, z = HIT[2] + d[2] * 1500; return [x, ground(x, z) - drop(x, z), z]; })();
+const HERO_R = 150;                                   // the hero stand round the ground camera (full tree models)
 const SPAN = 15000;
 const GC = OPT.gcam || [2000, 0, 6200];
 /* nested patches with feathered borders: inside its band a finer patch fades out toward its edge while the coarser
@@ -585,7 +586,7 @@ const FOR = (() => {
     const x = HIT[0] + gx + (jx - .5) * SP * .95, z = HIT[2] + gz + (jz - .5) * SP * .95;
     const d = Math.hypot(x - HIT[0], z - HIT[2]); if (d < 150 || d > R1) continue;
     const cz = coastZ(x); if (z - cz < 60) continue;
-    if (roadD(x, z) < 7 || Math.hypot(x - SITE_C[0], z - SITE_C[1]) < 175 || Math.hypot(x - G2[0], z - G2[2]) < 70) continue;
+    if (roadD(x, z) < 7 || Math.hypot(x - SITE_C[0], z - SITE_C[1]) < 175 || Math.hypot(x - G2[0], z - G2[2]) < HERO_R) continue;
     const st = .5 + .45 * noise(x / 360, z / 360, 6.1) + .3 * noise(x / 95, z / 95, 2.3);
     const dg = Math.hypot(x - G2[0], z - G2[2]), dens = Math.max(E.ss(.42, .7, st), .85 * (1 - E.ss(160, 420, dg))) * (1 - E.ss(2300, R1, d)) * E.ss(60, 170, z - cz);
     if (rr > dens * .92) continue;
@@ -625,7 +626,12 @@ const FOR = (() => {
 })();
 lapW('forest ' + FOR.n + ' trees (' + FOR.nNear + ' near), ' + FOR.nt + ' tiles');
 /* the shock's arrival (sim s) at distance d, from the FX module */
-function setShock(arrive) { for (let i = 0; i < FOR.n; i++) FOR.AH[i] = arrive(FOR.D[i]); }
+let ARR_ = d => 1e9;
+function setShock(arrive, shockR) {
+  ARR_ = arrive; if (shockR) SHR = shockR;
+  for (let i = 0; i < FOR.n; i++) FOR.AH[i] = arrive(FOR.D[i]);
+  for (const h of HERO) { h.AH = arrive(h.d); h.vf = 8 / Math.max(1e-4, arrive(h.d + 4) - arrive(h.d - 4)); }
+}
 const FBUDGET = 75000;
 const treeN = hpx => { if (hpx < 6) return .06 * hpx * hpx; const q = hpx - 6, n = 2.16 + 1.5 * q + .01 * q * q; return n < NTP ? n : NTP; };
 /* per-tree pose scratch: base, bent axes (scaled), unbent axes (for the stump), local sun / strike directions */
@@ -788,6 +794,276 @@ function drawForest(a, T, vis) {
   return FCNT;
 }
 
+/* ---------------- the hero stand: full tree models round the ground camera ----------------
+   About 50 trees within HERO_R of G2 (where the FX module films the strike from the forest floor), each a dense dot
+   model from one of four templates (two conifers: bark on a tapered trunk with a root flare, whorls of drooping limbs
+   carrying needle clumps; two broadleaves: a trunk forking into limbs and sub-limbs with leaf clumps), 6-11k points,
+   shuffled within each kind so any prefix is an even subset (the count follows the size on screen). The strike tears
+   them apart as pure functions of the sim time a: the flash scorches the side facing it and sets the crowns smoking;
+   the shock front sweeps through each tree point by point (a lime layer); the leaves strip and stream out in the
+   wind; limbs break off and tumble away; the trunk bends, then snaps (the top slammed down flat away from the strike,
+   its butt dragged downwind, a splintered stump left) or the root plate tears out and the whole tree goes over;
+   litter and dust lift off the forest floor behind the front. */
+const HS = 8;      // template point stride: x y z (unit height), nx ny nz, group (-1 trunk), hash / along
+function heroTpl(kind, seed) {
+  const r = rng(seed), TRK = [], WOOD = [], LEAF = [], G = [];   // G: per group [attach y, length]
+  const con = kind < 2;
+  const r0 = con ? .014 + .003 * kind : (kind === 2 ? .021 : .012);
+  const yF = con ? 1 : (kind === 2 ? .4 : .5);         // the fork (broadleaves)
+  const rad = y => r0 * Math.pow(Math.max(0, 1 - y / (con ? 1.02 : yF * 1.9)), .85) + .0015 + r0 * 1.1 * Math.exp(-y / .025);
+  // the trunk: bark on the tapered cylinder, ridged
+  const nT = con ? 2600 : 2200, yTop = con ? .99 : yF + .04;
+  for (let i = 0; i < nT; i++) {
+    const y = yTop * Math.pow(r(), 1.15), th = r() * TAU, rr = rad(y) * (1 + .1 * Math.sin(th * 11 + y * 40) * r());
+    const ridge = .5 + .5 * Math.abs(Math.sin(th * 7 + 3 * noise(y * 30, th, 1.3)));
+    TRK.push(Math.cos(th) * rr, y, Math.sin(th) * rr, Math.cos(th), 0, Math.sin(th), -1, ridge);
+  }
+  // a limb: wood points along a drooping segment, foliage round its outer part (or a clump at its end)
+  const limb = (g, ax, ay, az, dx, dy, dz, L, droop, nW, nL, clump) => {
+    for (let k = 0; k < nW; k++) { const s = Math.pow(r(), .8), rr = (1 - s) * r0 * .35 + .0008, th = r() * TAU; WOOD.push(ax + dx * L * s + Math.cos(th) * rr, ay + dy * L * s - droop * L * s * s + Math.sin(th) * rr, az + dz * L * s + Math.sin(th) * rr * .5, Math.cos(th), Math.sin(th) * .5, Math.sin(th), g, s); }
+    for (let k = 0; k < nL; k++) {
+      const s = clump ? .7 + .3 * r() : .25 + .75 * Math.sqrt(r());
+      const cx = ax + dx * L * s, cy = ay + dy * L * s - droop * L * s * s, cz = az + dz * L * s;
+      const u = r() * 2 - 1, th = r() * TAU, h = Math.sqrt(1 - u * u), q = Math.cbrt(r()) * (clump || (con ? .016 + .018 * s : .03));
+      let nx = Math.cos(th) * h, ny = u * .8 + .25, nz = Math.sin(th) * h; const nl = 1 / Math.hypot(nx, ny, nz); nx *= nl; ny *= nl; nz *= nl;
+      LEAF.push(cx + nx * q, cy + ny * q * (con ? .5 : .8), cz + nz * q, nx, ny, nz, g, r());
+    }
+  };
+  if (con) {
+    const y0 = kind === 0 ? .42 : .14, step = kind === 0 ? .034 : .03;
+    for (let y = y0; y < .96; y += step * (.8 + .4 * r())) {
+      const nb = 4 + Math.floor(r() * 3), a0 = r() * TAU, f = (y - y0) / (1 - y0);
+      for (let b = 0; b < nb; b++) {
+        const az = a0 + b / nb * TAU + (r() - .5) * .5, el = (kind === 0 ? -.1 : -.3) + .55 * f + (r() - .5) * .2;
+        const L = (kind === 0 ? .2 : .24) * Math.pow(1 - f, .85) * (.7 + .5 * r()) + .02;
+        const dx = Math.cos(az) * Math.cos(el), dy = Math.sin(el), dz = Math.sin(az) * Math.cos(el), g = G.length / 2;
+        G.push(y, L);
+        limb(g, dx * rad(y), y, dz * rad(y), dx, dy, dz, L, kind === 0 ? .25 : .4, Math.round(6 + 70 * L), Math.round(10 + 300 * L), 0);
+      }
+    }
+    if (kind === 0) for (let y = .1; y < y0; y += .03) { const az = r() * TAU, L = .02 + .03 * r(), g = G.length / 2; G.push(y, L); limb(g, Math.cos(az) * rad(y), y, Math.sin(az) * rad(y), Math.cos(az), -.1, Math.sin(az), L, 0, 5, 0, 0); }
+    { const g = G.length / 2; G.push(.96, .05); limb(g, 0, .955, 0, 0, 1, 0, .05, 0, 4, 70, 0); }
+  } else {
+    const nL0 = kind === 2 ? 5 : 4, Lm = kind === 2 ? .42 : .38;
+    for (let b = 0; b < nL0; b++) {
+      const az = b / nL0 * TAU + (r() - .5) * .8, el = (kind === 2 ? .55 : .95) + (r() - .5) * .3, g = G.length / 2;
+      const dx = Math.cos(az) * Math.cos(el), dy = Math.sin(el), dz = Math.sin(az) * Math.cos(el), L = Lm * (.8 + .35 * r()), ay = yF + (r() - .3) * .04;
+      G.push(ay, L);
+      limb(g, 0, ay, 0, dx, dy, dz, L, .05, Math.round(240 * L), 0, 0);
+      const ns = 3 + Math.floor(r() * 2);
+      for (let k = 0; k < ns; k++) {
+        const s = .45 + .4 * r(), bx = dx * L * s, by = ay + dy * L * s, bz = dz * L * s;
+        const a2 = az + (r() - .5) * 1.6, e2 = el + (r() - .5) * .9 - .1, L2 = L * (.4 + .3 * r());
+        limb(g, bx, by, bz, Math.cos(a2) * Math.cos(e2), Math.sin(e2), Math.sin(a2) * Math.cos(e2), L2, .06, Math.round(130 * L2), Math.round(1700 * L2), .07 + .05 * r());
+      }
+      limb(g, 0, ay, 0, dx, dy, dz, L, .05, 0, Math.round(1100 * L), .08);
+    }
+  }
+  const shuf = A => { const n = A.length / HS, O = new Float32Array(A.length), idx = [...Array(n).keys()]; for (let i = n - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)), t = idx[i]; idx[i] = idx[j]; idx[j] = t; } for (let i = 0; i < n; i++) for (let q = 0; q < HS; q++) O[i * HS + q] = A[idx[i] * HS + q]; return O; };
+  return { kind, con, TRK: shuf(TRK), WOOD: shuf(WOOD), LEAF: shuf(LEAF), G: new Float32Array(G), nG: G.length / 2, birch: kind === 3 };
+}
+const HTPL = [heroTpl(0, 901), heroTpl(1, 902), heroTpl(2, 903), heroTpl(3, 904)];
+const HERO = (() => {
+  const r = rng(9090), L = [], toHit = Math.atan2(HIT[2] - G2[2], HIT[0] - G2[0]);
+  for (let tries = 0; L.length < 54 && tries < 8000; tries++) {
+    const wide = r() > .72, ang = toHit + (r() - .5) * (wide ? TAU : 1.75), d = 6 + Math.pow(r(), .75) * (HERO_R - 10);
+    const x = G2[0] + Math.cos(ang) * d, z = G2[2] + Math.sin(ang) * d;
+    const da = Math.abs(((ang - toHit + 3 * PI) % TAU) - PI); if (d < 60 && da < .1 + 1.2 / d) continue;     // a lane open toward the strike
+    let ok = true; for (const q of L) if (Math.hypot(q.x - x, q.z - z) < 6 + .045 * d) { ok = false; break; } if (!ok) continue;
+    const con = noise(x / 120, z / 120, 8.1) + .25 > 0, kind = con ? (r() < .5 ? 0 : 1) : (r() < .6 ? 2 : 3);
+    const H = (con ? 18 + 8 * r() : 14 + 7 * r()) * (d < 12 ? .9 : 1), dh = Math.hypot(x - HIT[0], z - HIT[2]);
+    L.push({ x, z, y: ground(x, z) - drop(x, z), kind, H, sw: H * (.9 + .25 * r()), yaw: r() * TAU, d: dh, ux: (x - HIT[0]) / dh, uz: (z - HIT[2]) / dh,
+      up: r() < .3, hb: H * (.05 + .22 * r()), ts: .022 + .03 * r(), tf: .05 + .035 * r(), Lm: 2 + 9 * r(), th0: .18 + .14 * r(), rr: 1.2 + .9 * r(), seed: (r() * 1e6) | 0, AH: 1e9, vf: 400 });
+  }
+  // per group: does it break, when, how fast it is thrown, its tumble
+  for (const h of L) {
+    const T_ = HTPL[h.kind], n = T_.nG, rg = rng(h.seed);
+    h.yc = Math.cos(h.yaw); h.ys = Math.sin(h.yaw);
+    h.GB = new Float32Array(n); h.GV = new Float32Array(n * 3); h.GA = new Float32Array(n * 4);
+    for (let g = 0; g < n; g++) {
+      const br = rg() < (T_.con ? .78 : .62);
+      h.GB[g] = br ? .008 + .1 * Math.pow(rg(), 1.5) : 1e9;
+      h.GV[g * 3] = 40 + 120 * rg(); h.GV[g * 3 + 1] = 3 + 16 * rg(); h.GV[g * 3 + 2] = (rg() - .5) * 40;
+      const ax = V.norm([rg() - .5, rg() - .5, rg() - .5]); h.GA[g * 4] = ax[0]; h.GA[g * 4 + 1] = ax[1]; h.GA[g * 4 + 2] = ax[2]; h.GA[g * 4 + 3] = 5 + 14 * rg();
+    }
+    h.XG = new Float64Array(n * 15); h.GF = new Uint8Array(n);
+  }
+  return L;
+})();
+lapW('hero stand ' + HERO.length + ' trees, ' + HTPL.map(t => (t.TRK.length + t.WOOD.length + t.LEAF.length) / HS).join(' / ') + ' points');
+/* the forest floor's litter and dust round the camera (lifted and streamed behind the front) */
+const NHD = 26000, HDB = (() => { const r = rng(9191), A = new Float32Array(NHD * 6); for (let i = 0; i < NHD; i++) { const t = r() * TAU, q = 4 + Math.sqrt(r()) * (HERO_R + 50), x = G2[0] + Math.cos(t) * q, z = G2[2] + Math.sin(t) * q, d = Math.hypot(x - HIT[0], z - HIT[2]); A[i * 6] = x; A[i * 6 + 1] = ground(x, z) - drop(x, z); A[i * 6 + 2] = z; A[i * 6 + 3] = d; A[i * 6 + 4] = r(); A[i * 6 + 5] = r(); } return A; })();
+let SHR = a => 0;
+/* rotation about the horizontal axis (uz, 0, -ux) by phi (a tree's top goes out along +u) into a transform's M */
+function rotU(ux, uz, phi, X_) { const c = Math.cos(phi), s = Math.sin(phi), k = 1 - c, ax = uz, az = -ux; X_[0] = c + k * ax * ax; X_[1] = -s * az; X_[2] = k * ax * az; X_[3] = s * az; X_[4] = c; X_[5] = -s * ax; X_[6] = k * az * ax; X_[7] = s * ax; X_[8] = c + k * az * az; }
+const crit = (t, tf) => 1 - (1 + t / tf) * Math.exp(-t / tf);
+/* a tree's pose at tau (sim s since the front reached it): XS the stump's, XU the upper part's (p' = M (p - P) + Q) */
+function heroPose(h, tau, XS, XU) {
+  const ux = h.ux, uz = h.uz, bx = h.x, by = h.y, bz = h.z;
+  if (tau <= 0) { for (const X_ of [XS, XU]) { X_[0] = X_[4] = X_[8] = 1; X_[1] = X_[2] = X_[3] = X_[5] = X_[6] = X_[7] = 0; X_[9] = X_[12] = bx; X_[10] = X_[13] = by; X_[11] = X_[14] = bz; } return; }
+  const ts = h.ts, th0 = h.th0, tb = tau < ts ? th0 * Math.pow(tau / ts, .7) : th0;
+  if (h.up) {
+    // the root plate tears out: the whole tree goes over about the plate's downwind edge
+    const ph = tau < ts ? tb : th0 + (PI / 2 - .14 - th0) * crit(tau - ts, h.tf * 1.5);
+    rotU(ux, uz, ph, XS); XS[9] = XS[12] = bx + ux * h.rr; XS[10] = XS[13] = by; XS[11] = XS[14] = bz + uz * h.rr;
+    const sl = tau > ts ? 1.5 * (1 - Math.exp(-(tau - ts) / .2)) : 0; XS[12] += ux * sl; XS[14] += uz * sl;
+    XU.set(XS); return;
+  }
+  if (tau < ts) { rotU(ux, uz, tb, XS); XS[9] = XS[12] = bx; XS[10] = XS[13] = by; XS[11] = XS[14] = bz; XU.set(XS); return; }
+  const t = tau - ts;
+  rotU(ux, uz, th0 * Math.exp(-t / .02) * Math.cos(t * 60), XS); XS[9] = XS[12] = bx; XS[10] = XS[13] = by; XS[11] = XS[14] = bz;
+  // the top: thrown down about the break, its butt dragged downwind and dropped to the ground
+  const hb = h.hb, ph = th0 + (PI / 2 + .03 - th0) * crit(t, h.tf), Lt = h.Lm * (1 - Math.exp(-t / .12)), dr = (hb * Math.cos(th0) - .4) * E.ss(0, h.tf * 3.4, t);
+  rotU(ux, uz, ph, XU); XU[9] = bx; XU[10] = by + hb; XU[11] = bz;
+  XU[12] = bx + ux * (hb * Math.sin(th0) + Lt); XU[13] = by + hb * Math.cos(th0) - dr; XU[14] = bz + uz * (hb * Math.sin(th0) + Lt);
+}
+const HXS = new Float64Array(15), HXU = new Float64Array(15), HXT = new Float64Array(15), HXT2 = new Float64Array(15), HXG = new Float64Array(15);
+/* a broken limb's flight: its pose when it broke, thrown downwind, rising and falling, tumbling about its own axis */
+function groupPose(h, g, tau, ga, out) {
+  const tb = h.GB[g], t = tau - tb;
+  heroPose(h, tb, HXT, HXT2);
+  const X_ = h.up || ga >= h.hb ? HXT2 : HXT;
+  const V0 = h.GV[g * 3], vy = h.GV[g * 3 + 1], vs = h.GV[g * 3 + 2], k = 2.6, Lf = V0 * (t - (1 - Math.exp(-k * t)) / k);
+  const ax = h.GA[g * 4], ay = h.GA[g * 4 + 1], az = h.GA[g * 4 + 2], an = h.GA[g * 4 + 3] * (1 - Math.exp(-t * 2.2)) / 2.2;
+  const c = Math.cos(an), s = Math.sin(an), q = 1 - c, R0 = [c + ax * ax * q, ax * ay * q - az * s, ax * az * q + ay * s, ay * ax * q + az * s, c + ay * ay * q, ay * az * q - ax * s, az * ax * q - ay * s, az * ay * q + ax * s, c + az * az * q];
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) out[i * 3 + j] = R0[i * 3] * X_[j] + R0[i * 3 + 1] * X_[3 + j] + R0[i * 3 + 2] * X_[6 + j];
+  // the attach point (rest) mapped by the pose at the break, then flown
+  const px = h.x, py = h.y + ga, pz = h.z, dx = px - X_[9], dy = py - X_[10], dz = pz - X_[11];
+  const qx = X_[0] * dx + X_[1] * dy + X_[2] * dz + X_[12], qy = X_[3] * dx + X_[4] * dy + X_[5] * dz + X_[13], qz = X_[6] * dx + X_[7] * dy + X_[8] * dz + X_[14];
+  out[9] = px; out[10] = py; out[11] = pz;
+  out[12] = qx + h.ux * Lf - h.uz * vs * t / (1 + t); out[13] = Math.max(h.y + .3, qy + vy * t - 4.905 * t * t); out[14] = qz + h.uz * Lf + h.ux * vs * t / (1 + t);
+}
+let HCNT = 0;
+/* draw the stand (a: sim s since the strike, T film time for the flicker) */
+function drawHero(a, T, vis) {
+  if (vis < .01) return 0;
+  const e = C.eye, f = C.f, r = C.r, u = C.u, F = C.fl, cx = C.cx + C.shake[0], cy = C.cy + C.shake[1], near = C.near, D = K.pb.d, U32 = u32();
+  const ex = e[0], ey = e[1], ez = e[2], f0 = f[0], f1 = f[1], f2 = f[2], r0 = r[0], r1 = r[1], r2 = r[2], u0 = u[0], u1 = u[1], u2 = u[2];
+  if (Math.hypot(ex - G2[0], ez - G2[2]) > 12000) return 0;
+  const HZ = hazeK(), Rf = a > 0 ? SHR(a) : -1, frm = Math.floor(T * 14) & 1023, S0 = SUN[0], S1 = SUN[1], S2 = SUN[2];
+  HCNT = 0;
+  // one dot: world point, colour, brightness (max blend on green)
+  const put = (x, y, z, cr, cg, cb, b) => {
+    const dx = x - ex, dy = y - ey, dz = z - ez, zc = dx * f0 + dy * f1 + dz * f2; if (zc < near) return;
+    const iz = F / zc, sx = cx + (dx * r0 + dy * r1 + dz * r2) * iz; if (sx < 0 || sx >= BW) return;
+    const sy = cy - (dx * u0 + dy * u1 + dz * u2) * iz; if (sy < 0 || sy >= BH) return;
+    const hq = zc * HZ; b /= 1 + hq * hq; if (b < .02) return; if (b > 1) b = 1;
+    const p = (sy | 0) * BW + (sx | 0), G_ = cg * b; if (D[(p << 2) + 1] < G_) { U32[p] = 0xff000000 | ((cb * b) << 16) | (G_ << 8) | (cr * b); HCNT++; }
+  };
+  for (let ti = 0; ti < HERO.length; ti++) {
+    const h = HERO[ti], T_ = HTPL[h.kind], H = h.H, sw = h.sw, yc = h.yc, ys = h.ys, bx = h.x, by = h.y, bz = h.z, ux = h.ux, uz = h.uz;
+    const tau = a - h.AH, moving = tau > 0;
+    if (!K.wIn(bx, by + H * .5, bz, H * .8 + (moving ? 30 + 160 * Math.min(1, tau * 3) : 0))) continue;
+    const zc0 = Math.max(1, K.WZ[0]), hpx = H * F / zc0, fr = Math.min(1, Math.max(.012, hpx * hpx / 300000));
+    heroPose(h, tau, HXS, HXU);
+    const vf = h.vf, d0 = h.d;
+    const fl = a > 0 ? 1.35 * Math.exp(-a * 2.4) : 0, smo = a > .05 ? E.ss(.05, .6, a) : 0;
+    const bark = (T_.birch ? .78 : .42) * vis, wood = .5 * vis, leaf = (T_.con ? .52 : .6) * vis;
+    if (moving) h.GF.fill(0);
+    // the trunk (stump below the break, the top above it; the whole tree when it is uprooted)
+    const TR = T_.TRK, nT = Math.ceil(TR.length / HS * fr);
+    for (let j = 0; j < nT; j++) {
+      const o = j * HS, lx = TR[o], ly = TR[o + 1] * H, lz = TR[o + 2];
+      let x = bx + (lx * yc + lz * ys) * sw, y = by + ly, z = bz + (-lx * ys + lz * yc) * sw;
+      let b = bark * TR[o + 7], cr = 236, cg = 232, cb = 220;
+      const nx = TR[o + 3] * yc + TR[o + 5] * ys, nz = -TR[o + 3] * ys + TR[o + 5] * yc, face = -(nx * ux + nz * uz);
+      if (moving) {
+        const X_ = h.up || ly >= h.hb ? HXU : HXS, dx = x - X_[9], dy = y - X_[10], dz = z - X_[11];
+        x = X_[0] * dx + X_[1] * dy + X_[2] * dz + X_[12]; y = X_[3] * dx + X_[4] * dy + X_[5] * dz + X_[13]; z = X_[6] * dx + X_[7] * dy + X_[8] * dz + X_[14];
+        // the splintered break: pale wood, ragged
+        if (!h.up && tau > h.ts && Math.abs(ly - h.hb) < .7) { b = .75 * vis; y += (TR[o + 7] - .5) * .6 * (ly < h.hb ? 1 : -1); }
+      }
+      b *= .45 + .55 * Math.max(0, nx * S0 + nz * S2 + .4);
+      if (fl > .03 && face > 0) { const k = Math.min(1, fl * face); if (b < k) b = k; cr = 255; cg = 196 + 50 * k; cb = 138 + 90 * k; }
+      if (Rf > 0) { const q = Math.hypot(x - HIT[0], z - HIT[2]) - Rf; if (q > -3 && q < 1.5) { const k = q < 0 ? 1 + q / 3 : 1 - q / 1.5; if (b < .95 * k) b = .95 * k; cr = 198 + (cr - 198) * (1 - k); cg = 244; cb = 50 + (cb - 50) * (1 - k); } }
+      put(x, y, z, cr, cg, cb, b);
+    }
+    // limbs (moving with the trunk, or thrown on their own once they break)
+    const WD = T_.WOOD, nW = Math.ceil(WD.length / HS * fr), GA_ = T_.G;
+    for (let j = 0; j < nW; j++) {
+      const o = j * HS, g = WD[o + 6], ga = GA_[g * 2] * H;
+      let x = bx + (WD[o] * yc + WD[o + 2] * ys) * sw, y = by + WD[o + 1] * H, z = bz + (-WD[o] * ys + WD[o + 2] * yc) * sw;
+      let b = wood * (.6 + .4 * WD[o + 7]), cr = 236, cg = 232, cb = 220;
+      if (moving) {
+        let X_;
+        if (tau > h.GB[g]) { if (!h.GF[g]) { groupPose(h, g, tau, ga, HXG); h.XG.set(HXG, g * 15); h.GF[g] = 1; } const q = g * 15, XG = h.XG, dx = x - XG[q + 9], dy = y - XG[q + 10], dz = z - XG[q + 11]; x = XG[q] * dx + XG[q + 1] * dy + XG[q + 2] * dz + XG[q + 12]; y = XG[q + 3] * dx + XG[q + 4] * dy + XG[q + 5] * dz + XG[q + 13]; z = XG[q + 6] * dx + XG[q + 7] * dy + XG[q + 8] * dz + XG[q + 14]; b = .62 * vis; }
+        else { X_ = h.up || ga >= h.hb ? HXU : HXS; const dx = x - X_[9], dy = y - X_[10], dz = z - X_[11]; x = X_[0] * dx + X_[1] * dy + X_[2] * dz + X_[12]; y = X_[3] * dx + X_[4] * dy + X_[5] * dz + X_[13]; z = X_[6] * dx + X_[7] * dy + X_[8] * dz + X_[14]; }
+      }
+      if (fl > .03) { const k = Math.min(1, fl * .7); if (b < k) b = k; cr = 255; cg = 196; cb = 138; }
+      if (Rf > 0) { const q = Math.hypot(x - HIT[0], z - HIT[2]) - Rf; if (q > -3 && q < 1.5) { const k = q < 0 ? 1 + q / 3 : 1 - q / 1.5; if (b < .95 * k) b = .95 * k; cr = 198; cg = 244; cb = 50; } }
+      put(x, y, z, cr, cg, cb, b);
+    }
+    // foliage: scorched and smoking on the strike's side; stripped as the front passes, streaming out in the wind
+    const LF = T_.LEAF, nL = Math.ceil(LF.length / HS * fr);
+    for (let j = 0; j < nL; j++) {
+      const o = j * HS, g = LF[o + 6], ga = GA_[g * 2] * H, hq = LF[o + 7];
+      let x = bx + (LF[o] * yc + LF[o + 2] * ys) * sw, y = by + LF[o + 1] * H, z = bz + (-LF[o] * ys + LF[o + 2] * yc) * sw;
+      const nx = LF[o + 3] * yc + LF[o + 5] * ys, ny = LF[o + 4], nz = -LF[o + 3] * ys + LF[o + 5] * yc, face = -(nx * ux + nz * uz);
+      const lam = nx * S0 + ny * S1 + nz * S2;
+      let b = leaf * (.22 + .78 * (lam > 0 ? lam : 0)) * (.7 + .3 * hq), cr = 236, cg = 236, cb = 226;
+      const burn = a > .08 && face > .15 && hq < .3;
+      if (a > .25 && face > 0) b *= 1 - .5 * face;      // charred
+      if (fl > .03 && face > 0) { const k = Math.min(1, fl * face * 1.2); if (b < k) b = k; cr = 255; cg = 196 + 55 * k; cb = 138 + 100 * k; }
+      if (burn && fl < .5) { const fk = HF[(j * 7 + frm * 31 + ti * 5) & 4095], k = (.3 + .5 * fk) * Math.min(1, a * 3); if (b < k) b = k; cr = 255; cg = 142 + 54 * fk; cb = 84 + 50 * fk; }
+      if (moving) {
+        const rho = Math.hypot(x - HIT[0], z - HIT[2]), tp = a - (h.AH + (rho - d0) / vf) - .003 - .03 * hq * hq;
+        if (hq < .86 && tp > 0) {
+          // stripped: streaming downwind, rising, spreading, fading
+          const k = 6 + 10 * hq, s = (150 + 80 * HF[(j * 3 + ti) & 4095]) * (tp - (1 - Math.exp(-k * tp)) / k), sp = .3 + 9 * tp;
+          const h2 = HF[(j * 5 + ti * 7) & 4095] - .5, h3 = HF[(j * 11 + ti * 3) & 4095] - .5;
+          x += ux * s - uz * h2 * sp; z += uz * s + ux * h2 * sp; y += (2 + 9 * hq) * tp + h3 * sp * .7;
+          b *= Math.exp(-tp / .9) * 1.15; if (b < .02) continue;
+          if (!burn) { cr = 224; cg = 226; cb = 214; }
+        } else if (tau > h.GB[g]) {
+          if (!h.GF[g]) { groupPose(h, g, tau, ga, HXG); h.XG.set(HXG, g * 15); h.GF[g] = 1; }
+          const q = g * 15, XG = h.XG, dx = x - XG[q + 9], dy = y - XG[q + 10], dz = z - XG[q + 11]; x = XG[q] * dx + XG[q + 1] * dy + XG[q + 2] * dz + XG[q + 12]; y = XG[q + 3] * dx + XG[q + 4] * dy + XG[q + 5] * dz + XG[q + 13]; z = XG[q + 6] * dx + XG[q + 7] * dy + XG[q + 8] * dz + XG[q + 14];
+        } else { const X_ = h.up || ga >= h.hb ? HXU : HXS, dx = x - X_[9], dy = y - X_[10], dz = z - X_[11]; x = X_[0] * dx + X_[1] * dy + X_[2] * dz + X_[12]; y = X_[3] * dx + X_[4] * dy + X_[5] * dz + X_[13]; z = X_[6] * dx + X_[7] * dy + X_[8] * dz + X_[14]; }
+        if (Rf > 0) { const q = Math.hypot(x - HIT[0], z - HIT[2]) - Rf; if (q > -3 && q < 1.5) { const k = q < 0 ? 1 + q / 3 : 1 - q / 1.5; if (b < .95 * k) b = .95 * k; cr = 198; cg = 244; cb = 50; } }
+      } else if (Rf > 0) { const q = Math.hypot(x - HIT[0], z - HIT[2]) - Rf; if (q > -3 && q < 1.5) { const k = q < 0 ? 1 + q / 3 : 1 - q / 1.5; if (b < .95 * k) b = .95 * k; cr = 198; cg = 244; cb = 50; } }
+      put(x, y, z, cr, cg, cb, b);
+    }
+    // the root plate of an uprooted tree: earth and roots standing up
+    if (h.up && tau > 0) {
+      const n = Math.ceil(700 * Math.min(1, fr * 3)), R_ = h.rr, X_ = HXS;
+      for (let j = 0; j < n; j++) {
+        const t1 = HF[(j * 3 + ti) & 4095] * TAU, q = Math.sqrt(HF[(j * 7 + 1 + ti) & 4095]) * R_, dep = -HF[(j * 13 + 2 + ti) & 4095] * (.9 + .5 * (1 - q / R_));
+        const px = bx + Math.cos(t1) * q, py = by + dep, pz = bz + Math.sin(t1) * q, dx = px - X_[9], dy = py - X_[10], dz = pz - X_[11];
+        const x = X_[0] * dx + X_[1] * dy + X_[2] * dz + X_[12], y = X_[3] * dx + X_[4] * dy + X_[5] * dz + X_[13], z = X_[6] * dx + X_[7] * dy + X_[8] * dz + X_[14];
+        put(x, y, z, 200, 196, 180, (.3 + .3 * HF[(j * 5 + ti) & 4095]) * vis * Math.min(1, tau * 20));
+      }
+    }
+    // smoke off the scorched crown, rising, then blown away by the front
+    if (smo > 0 && fr > .05) {
+      const n = Math.ceil(240 * Math.min(1, fr * 2)), crx = bx - ux * H * .12, crz = bz - uz * H * .12;
+      for (let j = 0; j < n; j++) {
+        const h1 = HF[(j * 3 + ti * 11) & 4095], h2 = HF[(j * 7 + ti * 13 + 5) & 4095], h3 = HF[(j * 17 + ti) & 4095], t0 = .05 + h3 * .3; if (a < t0) continue;
+        const t = a - t0, sp = .4 + 1.6 * t;
+        let x = crx + (h1 - .5) * H * .35 + (h2 - .5) * sp, y = by + H * (.45 + .45 * h2) + (1 + 2.5 * h1) * t + .5 * t * t, z = crz + (h2 - .5) * H * .35 + (h1 - .5) * sp;
+        let al = smo * .34 * (.5 + .5 * h3);
+        if (moving) { const tp = tau; if (tp > 0) { const s = 170 * (tp - (1 - Math.exp(-5 * tp)) / 5); x += ux * s; z += uz * s; y += 4 * tp; al *= Math.exp(-tp / .5); } }
+        const lit = .45 + .55 * h1;
+        put(x, y, z, 130 + 90 * lit, 132 + 90 * lit, 126 + 88 * lit, al);
+      }
+    }
+  }
+  // the forest floor: litter, needles and dust lifted behind the front and streamed downwind (the debris curtain)
+  if (a > 0 && Rf > 0) {
+    const dc = Math.hypot(ex - G2[0], ey - G2[1], ez - G2[2]), st = dc < 400 ? 1 : dc < 1500 ? 2 : 4;
+    for (let i = 0; i < NHD; i += st) {
+      const o = i * 6, d = HDB[o + 3]; if (d > Rf) continue;
+      const t = a - ARR_(d); if (t <= 0) continue;
+      const h1 = HDB[o + 4], h2 = HDB[o + 5], x0 = HDB[o], z0 = HDB[o + 2], ux = (x0 - HIT[0]) / d, uz = (z0 - HIT[2]) / d;
+      const k = 4 + 9 * h1, s = (80 + 150 * h2) * (t - (1 - Math.exp(-k * t)) / k), sp = .5 + 7 * t;
+      const x = x0 + ux * s - uz * (h1 - .5) * sp, z = z0 + uz * s + ux * (h1 - .5) * sp, y = HDB[o + 1] + (1 + 20 * h1 * h1) * (1 - Math.exp(-t * 5)) + (h2 - .5) * sp * .5 + 2 * t;
+      const al = .55 * (1 - Math.exp(-t * 40)) * Math.exp(-t / 1.4) * vis;
+      const hot = Math.exp(-a * 1.5), lit = .5 + .5 * h2;
+      if (h2 > .985) put(x, y, z, 236, 232, 220, al * 1.4);
+      else put(x, y, z, 200 * lit + 40 * hot, 202 * lit + 20 * hot, 192 * lit, al);
+    }
+  }
+  return HCNT;
+}
+
 return { RE, CE, coastZ, coastBig, ground, roadD, HIT, makePatch, drawPatch, makeSea, drawSea, drawGlobe, drawLimb, STARS, CLOUD, GLB, PO, PR, PM, PI_, PG_, SO, SR, SM, SN, SH, LG, drop, SPAN, drawSite, VEHS, drawVehicles, GC,
-  gP, gPc, CRA, CSH, GOPT, craterDy, craterSl, craterG, RAY, RAYN, FOR, setShock, drawForest, G2, SUN, hazeK };
+  gP, gPc, CRA, CSH, GOPT, craterDy, craterSl, craterG, RAY, RAYN, FOR, setShock, drawForest, G2, SUN, hazeK, HERO, HTPL, drawHero, HERO_R };
 };

@@ -2,17 +2,19 @@
    and the strike on the coast, all as dots and rings that are pure functions of their age (seeded at load), plus the
    camera of the fall and the strike (cam(T, FC)). Spectacle only: light, motion, flashes, dust, rings.
      shot    rings of light racing out of the muzzle, a flash, a cone of sparks, four sabot petals peeling away
-     fall    the rod (a closed shell) entering the air: a plasma sheath flowing back off its nose under a flickering
-             bow shock, shock rings shed and swept downstream, Mach diamonds in a hot wake, a growing column of
-             smoke and plasma that stays in the sky after the strike (sun-shaded, drifting in the winds aloft)
+     fall    the rod (a closed shell) entering the air: a plasma sheath flowing back off its nose under an elongated
+             bow shock (a paraboloid running into a narrow cone; never a ball), an ionised wake, broken shock rings
+             shed and swept down the trail (faded end-on), Mach diamonds, a growing column of smoke and plasma that
+             stays in the sky after the strike (sun-shaded, drifting in the winds aloft)
      strike  a blinding flash; an air shock dome with two reflected shells and a condensation dome behind it; a
              ground ring racing over the land; the forest (world) flattened and thrown; the battery's vehicles
              tossed and torn apart; an ejecta curtain and tumbling blocks; a dust skirt racing out; a fireball
              rising into a mushroom (a rolling toroidal cap with glowing inner turbulence, the stem, condensation
              rings and a skirt); the crater (world) with its rim, its glowing floor and its rays
-     cam     the fall filmed wide (the whole trail), then beside the rod through the entry, behind it as it turns
-             into an orb of plasma, braking into a wide shot of the coast; the strike from there, down at ground
-             level in the forest, from above, and in an aerial orbit, handing back to the film's climb */
+     cam     handed in from the film's ride beside the round; behind the rod down the path, a slow orbit to its
+             front quarter through the entry, down to the forest floor looking up at the incoming streak; the strike
+             held there (the slow-motion beat in the hero stand, world.js), a crane up, an aerial arc, the crater from
+             above, handing back to the film's climb (see the camera section for the timeline request) */
 window.ORFX = function (K, L, W, cfg) {
 'use strict';
 const { V, R, X, E, rng, noise } = M3;
@@ -132,13 +134,25 @@ function petals(p, d, U, Wd, a, vis) {
    everything flows and flickers by T, nothing stands still */
 const NFL = 6000, FLW = (() => { const r = rng(919), A = new Float32Array(NFL * 5); for (let i = 0; i < NFL; i++) { A[i * 5] = r() * TAU; A[i * 5 + 1] = r(); A[i * 5 + 2] = .65 + .7 * r(); A[i * 5 + 3] = r(); A[i * 5 + 4] = r(); } return A; })();
 const NBS = 4200, BSH = (() => { const r = rng(929), A = new Float32Array(NBS * 3); for (let i = 0; i < NBS; i++) { A[i * 3] = Math.sqrt(r()); A[i * 3 + 1] = r() * TAU; A[i * 3 + 2] = r(); } return A; })();
-const NOB = 7000, ORBP = (() => { const r = rng(939), A = new Float32Array(NOB * 5); for (let i = 0; i < NOB; i++) { const u = r() * 2 - 1, th = r() * TAU, h = Math.sqrt(1 - u * u); A[i * 5] = Math.cos(th) * h; A[i * 5 + 1] = Math.sin(th) * h; A[i * 5 + 2] = u; A[i * 5 + 3] = .55 + .45 * Math.pow(r(), .35); A[i * 5 + 4] = r(); } return A; })();
 const NMD = 420, MDP = (() => { const r = rng(949), A = new Float32Array(NMD * 2); for (let i = 0; i < NMD; i++) { A[i * 2] = (r() * 2 - 1) * Math.sqrt(r()); A[i * 2 + 1] = r() * TAU; } return A; })();
 /* a ring of dots round the axis D at c (radius rr), n dots, phase ph */
 function ringD(cx_, cy_, cz_, U, Wd, rr, n, col, a, ph, sz) {
   if (a < .015) return;
   for (let k = 0; k < n; k++) { const t = ph + k / n * TAU, cs = fc(t) * rr, sn = fs(t) * rr; dotW(cx_ + U[0] * cs + Wd[0] * sn, cy_ + U[1] * cs + Wd[1] * sn, cz_ + U[2] * cs + Wd[2] * sn, sz, col, a); }
 }
+/* a broken band of dots round the axis (the shock rings): radius jittered, gaps where a noise is low */
+function ringB(cx_, cy_, cz_, U, Wd, rr, n, col, a, ph, jit, gap) {
+  if (a < .015) return;
+  for (let k = 0; k < n; k++) {
+    const t = ph + k / n * TAU, g = .5 + .5 * fs(t * 3 + ph * 1.7) * fc(t * 5 - ph); if (g < gap) continue;
+    const q = rr * (1 + jit * (hz1(k * 13 + (ph * 100 | 0)) - .5)), cs = fc(t) * q, sn = fs(t) * q;
+    dotW(cx_ + U[0] * cs + Wd[0] * sn, cy_ + U[1] * cs + Wd[1] * sn, cz_ + U[2] * cs + Wd[2] * sn, 1, col, a * (.55 + .45 * g));
+  }
+}
+/* the rod's plasma: an elongated bow shock (a paraboloid over the nose running into a narrow cone), the sheath
+   flowing off the nose into a long ionised wake, shock rings shed at the shoulder and swept down the trail (faded when
+   seen end-on, so they never frame the rod as circles), Mach diamonds behind it. Brighter and longer as the air
+   thickens; never a ball. */
 function sheath(p, D, U, Wd, heat, T) {
   cam();
   const px = p[0], py = p[1], pz = p[2];
@@ -146,26 +160,33 @@ function sheath(p, D, U, Wd, heat, T) {
   // in the vacuum a closed shell catching the sun (the film draws it); far away only a point so it still reads
   if (heat < .015) { if (ppm < .45) { dotW(px, py, pz, 2, HOT, 1); K.glowW(px, py, pz, 9, LIME, .35); } return; }
   const alt = Math.hypot(px - W.CE[0], py - W.CE[1], pz - W.CE[2]) - W.RE;
-  const h = heat, orb = ss(30000, 8000, alt);
-  // sizes (m): the bow shock's nose radius, the shock layer at the shoulder, the hot wake behind
-  const Rn = 1 + 3.6 * h + 4 * orb, Rs = Rn * 2.4, so = .3 * Rn, Lb = Rs * Rs / (2 * Rn) - so, Lw = 90 + 380 * h + 300 * orb;
+  const h = heat, lo = ss(32000, 6000, alt);
+  // how end-on the view is (1: along the axis): rings and cones fade there
+  const vd = Math.abs((px - ex) * D[0] + (py - ey) * D[1] + (pz - ez) * D[2]) / dist, side = 1 - ss(.62, .9, vd);
+  // sizes (m): the bow shock's nose radius, the shoulder, the cone, the hot wake
+  const Rn = 1 + 2.2 * h + 1.6 * lo, Rs = Rn * 2.2, so = .3 * Rn, Lb = Rs * Rs / (2 * Rn) - so, Lc = Rs * (9 + 9 * lo), tc = .1 + .04 * (1 - h), Lw = 140 + 420 * h + 520 * lo;
   const nx = px + D[0] * 3.1, ny = py + D[1] * 3.1, nz = pz + D[2] * 3.1;
   const fr = Math.floor(T * 30);
-  // the stagnation point's light, at the nose (never on the body)
-  K.glowW(nx, ny, nz, Math.min(240, 6 + (Rn * 2.4 + 10 * orb) * ppm), HOT, .32 * h + .45 * orb);
-  // the bow shock: a paraboloid shell over the nose, shimmering
+  // the stagnation light at the nose and an ionisation streak down the first part of the wake (glows strung along the axis)
+  K.glowW(nx, ny, nz, Math.min(140, 5 + Rn * 1.8 * ppm), HOT, .3 * h + .25 * lo);
+  for (let k = 1; k <= 5; k++) { const x = Lw * .035 * k * k; K.glowW(nx - D[0] * x, ny - D[1] * x, nz - D[2] * x, Math.min(110, 3 + (Rs * (1 + .25 * k)) * ppm * 1.2), k < 3 ? FIRE : EMB, (.16 + .12 * lo) * h * (1 - k / 6)); }
+  // the bow shock: a paraboloid over the nose, then a cone opening narrowly down the wake, shimmering
   {
-    const n = Math.min(NBS, Math.max(160, Math.round(Rs * Rs * ppm * ppm * 2.6)));
+    const n = Math.min(NBS, Math.max(220, Math.round((Rs * Rs + Lc * Rs * .3) * ppm * ppm * 1.6)));
+    const x1 = (Rs * 1.3) * (Rs * 1.3) / (2 * Rn) - so;
     for (let i = 0; i < n; i++) {
-      const o = i * 3, uq = BSH[o], th = BSH[o + 1] + T * .9, rr = uq * Rs * 1.3, xb = rr * rr / (2 * Rn) - so;
-      const cs = fc(th) * rr, sn = fs(th) * rr, fk = hz1(i * 7 + fr * 13);
-      dotW(nx - D[0] * xb + U[0] * cs + Wd[0] * sn, ny - D[1] * xb + U[1] * cs + Wd[1] * sn, nz - D[2] * xb + U[2] * cs + Wd[2] * sn, 1, uq < .5 ? HOT : WH, h * (1.1 - .65 * uq) * (.45 + .55 * fk));
+      const o = i * 3, uq = BSH[o], th = BSH[o + 1] + T * .9;
+      let rr, xb;
+      if (uq < .55) { rr = uq / .55 * Rs * 1.3; xb = rr * rr / (2 * Rn) - so; }
+      else { const v = (uq - .55) / .45; xb = x1 + (Lc - x1) * v * v; rr = Rs * 1.3 + (xb - x1) * tc; }
+      const cs = fc(th) * rr, sn = fs(th) * rr, fk = hz1(i * 7 + fr * 13), al = h * (uq < .55 ? 1.15 - .5 * uq / .55 : .75 * (1 - (uq - .55) / .45) * side);
+      dotW(nx - D[0] * xb + U[0] * cs + Wd[0] * sn, ny - D[1] * xb + U[1] * cs + Wd[1] * sn, nz - D[2] * xb + U[2] * cs + Wd[2] * sn, 1, uq < .3 ? HOT : WH, al * (.45 + .55 * fk));
     }
   }
   // the sheath: plasma flowing off the nose, over the shoulder and back into the wake, swirling and flickering
   {
     // the layer under the shock, hugging the nose and shoulder (a fast loop), then the hot wake behind (a long one)
-    const n1 = Math.min(NFL >> 1, Math.max(200, Math.round(Rs * Rs * ppm * ppm * 7))), n2 = Math.min(NFL >> 1, Math.max(200, Math.round(Lw * Rs * ppm * ppm * .2)));
+    const n1 = Math.min(NFL >> 1, Math.max(240, Math.round(Rs * Rs * ppm * ppm * 7))), n2 = Math.min(NFL >> 1, Math.max(300, Math.round(Lw * Rs * ppm * ppm * .25)));
     const Ls = Lb * 3.2 + so;
     for (let i = 0; i < n1; i++) {
       const o = i * 5, a0 = FLW[o], sp = FLW[o + 2], rq = FLW[o + 3];
@@ -175,60 +196,51 @@ function sheath(p, D, U, Wd, heat, T) {
       const th = a0 + 2.4 * uu + .5 * fs(T * 5.3 + a0 * 3 + uu * 9);
       const rr = shl * (.5 + .45 * rq) * (1 + .12 * fs(T * 11.7 + i * .37 + uu * 20));
       const cs = fc(th) * rr, sn = fs(th) * rr;
-      const fk = .55 + .45 * hz2(i + fr * 31), al = h * (1.15 - .6 * uu) * fk;
+      const fk = .55 + .45 * hz2(i + fr * 31), al = h * (1.2 - .6 * uu) * fk;
       dotW(nx - D[0] * xb + U[0] * cs + Wd[0] * sn, ny - D[1] * xb + U[1] * cs + Wd[1] * sn, nz - D[2] * xb + U[2] * cs + Wd[2] * sn, uu < .25 && ppm > 3 ? 2 : 1, uu < .3 ? HOT : uu < .7 ? FIRE : EMB, al);
     }
+    // the wake: a long, narrow, turbulent column of glowing gas, white-hot near the rod, cooling to fire and embers
     for (let i = 0; i < n2; i++) {
       const o = (i + (NFL >> 1)) * 5, a0 = FLW[o], sp = FLW[o + 2], rq = FLW[o + 3];
       let uu = FLW[o + 1] + T * 1.2 * sp; uu -= Math.floor(uu);
-      const xb = Ls * .6 + Lw * Math.pow(uu, 1.5);
-      const shl = Rs * (1 + 1.7 * xb / Lw);
+      const xb = Ls * .6 + Lw * Math.pow(uu, 1.35);
+      const shl = Rs * (.8 + 1.1 * xb / Lw);
       const th = a0 + 1.7 * uu + .45 * fs(T * 4.3 + a0 * 3 + uu * 11);
-      const rr = shl * (.2 + .8 * rq) * (1 + .22 * fs(T * 7.7 + i * .37 + uu * 20));
+      const rr = shl * (.15 + .85 * rq * rq) * (1 + .3 * fs(T * 7.7 + i * .37 + uu * 20));
       const cs = fc(th) * rr, sn = fs(th) * rr;
-      const fk = .5 + .5 * hz2(i + fr * 31), al = h * Math.pow(1 - uu, 1.3) * fk * (1.1 - .5 * rq);
-      dotW(nx - D[0] * xb + U[0] * cs + Wd[0] * sn, ny - D[1] * xb + U[1] * cs + Wd[1] * sn, nz - D[2] * xb + U[2] * cs + Wd[2] * sn, 1, uu < .15 ? FIRE : uu < .45 ? EMB : WH, uu > .45 ? al * .5 : al);
+      const fk = .5 + .5 * hz2(i + fr * 31), al = (h + .3 * lo) * Math.pow(1 - uu, 1.1) * fk * (1.15 - .5 * rq);
+      dotW(nx - D[0] * xb + U[0] * cs + Wd[0] * sn, ny - D[1] * xb + U[1] * cs + Wd[1] * sn, nz - D[2] * xb + U[2] * cs + Wd[2] * sn, 1, uu < .12 ? HOT : uu < .4 ? FIRE : uu < .7 ? EMB : WH, uu > .7 ? al * .5 : al);
     }
   }
-  // shock rings shed at the shoulder and swept downstream, opening out as they go
-  {
-    const RDT = .05, NRG = 18, life = RDT * NRG, k0 = Math.floor(T / RDT);
+  // shock rings shed at the shoulder and swept down the trail, opening as they go; broken, ragged bands (seen from the
+  // side they read as ellipses travelling down the column)
+  if (side > .02) {
+    const RDT = .06, NRG = 16, life = RDT * NRG, k0 = Math.floor(T / RDT);
     for (let j = 0; j < NRG; j++) {
       const kq = k0 - j, tau = T - kq * RDT, uq = tau / life; if (uq > 1 || uq < 0) continue;
-      const xr = Lb + Lw * 1.3 * Math.pow(uq, .8), rr = Rs * 1.05 + xr * (.12 + .05 * h + .05 * orb);
-      const al = h * Math.pow(1 - uq, 1.4) * (kq % 3 === 0 ? 1 : .55), wob = .06 * rr * fs(kq * 1.7);
-      const n = Math.min(1100, Math.max(24, Math.round(TAU * rr * ppm / 1.6)));
+      const xr = Lb + Lw * 1.25 * Math.pow(uq, .85), rr = Rs * 1.1 + xr * (tc + .02 + .04 * h);
+      const al = side * h * Math.pow(1 - uq, 1.3) * (kq % 3 === 0 ? 1 : .6), wob = .06 * rr * fs(kq * 1.7);
+      const n = Math.min(1100, Math.max(24, Math.round(TAU * rr * ppm / 1.4)));
       const cxr = nx - D[0] * (xr + wob), cyr = ny - D[1] * (xr + wob), czr = nz - D[2] * (xr + wob);
-      ringD(cxr, cyr, czr, U, Wd, rr, n, uq < .2 ? HOT : WH, al, kq * .9, 1);
-      if (uq < .5) ringD(cxr - D[0] * rr * .05, cyr - D[1] * rr * .05, czr - D[2] * rr * .05, U, Wd, rr * .95, Math.round(n * .6), FIRE, al * .5, kq * 1.3, 1);
+      ringB(cxr, cyr, czr, U, Wd, rr, n, uq < .2 ? HOT : WH, al, kq * .9, .1 + .1 * uq, .25 + .2 * uq);
+      if (uq < .5) ringB(cxr - D[0] * rr * .06, cyr - D[1] * rr * .06, czr - D[2] * rr * .06, U, Wd, rr * .94, Math.round(n * .6), FIRE, al * .55, kq * 1.3, .08, .3);
     }
   }
   // Mach diamonds: a chain of bright knots in the wake, breathing
   {
-    const ND = 7, lam = Rs * 2.3;
+    const ND = 8, lam = Rs * 2.3;
     for (let k = 0; k < ND; k++) {
-      const xd = Lb * 3.2 + Rs * .8 + k * lam * (1 + .06 * fs(T * 9 + k)), half = lam * .42, rd = Rs * (.62 - .05 * k);
-      const it = Math.min(1, 1.3 * h * Math.pow(1 - k / ND, 1.2) * (.7 + .3 * fs(T * 23 + k * 1.7)) * (1 - .35 * orb));
+      const xd = Lb * 3.2 + Rs * .8 + k * lam * (1 + .06 * fs(T * 9 + k)), half = lam * .42, rd = Rs * (.6 - .045 * k);
+      const it = Math.min(1, 1.5 * (h + .3 * lo) * Math.pow(1 - k / ND, 1.1) * (.7 + .3 * fs(T * 23 + k * 1.7)));
       if (it < .03) continue;
-      const n = Math.min(NMD, Math.max(16, Math.round(rd * half * ppm * ppm * 2.4)));
+      const n = Math.min(NMD, Math.max(24, Math.round(rd * half * ppm * ppm * 3)));
       const cxd = nx - D[0] * xd, cyd = ny - D[1] * xd, czd = nz - D[2] * xd;
       for (let i = 0; i < n; i++) {
         const t = MDP[i * 2], th = MDP[i * 2 + 1] + T * 2.1, at = t < 0 ? -t : t, rr = rd * (1 - at), cs = fc(th) * rr, sn = fs(th) * rr;
-        dotW(cxd - D[0] * t * half + U[0] * cs + Wd[0] * sn, cyd - D[1] * t * half + U[1] * cs + Wd[1] * sn, czd - D[2] * t * half + U[2] * cs + Wd[2] * sn, at < .2 && ppm > 3 ? 2 : 1, at < .35 ? HOT : FIRE, it * (.55 + .45 * (1 - at)));
+        dotW(cxd - D[0] * t * half + U[0] * cs + Wd[0] * sn, cyd - D[1] * t * half + U[1] * cs + Wd[1] * sn, czd - D[2] * t * half + U[2] * cs + Wd[2] * sn, at < .2 && ppm > 3 ? 2 : 1, at < .35 ? HOT : FIRE, it * (.6 + .4 * (1 - at)));
       }
-      if (k < 3) K.glowW(cxd, cyd, czd, Math.min(70, 3 + rd * ppm * 1.8), FIRE, .16 * it);
+      if (k < 4) K.glowW(cxd, cyd, czd, Math.min(60, 3 + rd * ppm * 1.6), FIRE, .2 * it);
     }
-  }
-  // low down the sheath swells into an orb of plasma round the nose
-  if (orb > .02) {
-    const Ro = Rn * 1.4 + 7 * orb, c0 = nx - D[0] * Ro * .3, c1 = ny - D[1] * Ro * .3, c2 = nz - D[2] * Ro * .3;
-    const n = Math.min(NOB, Math.max(200, Math.round(Ro * Ro * ppm * ppm * 2.4)));
-    for (let i = 0; i < n; i++) {
-      const o = i * 5, q = ORBP[o + 3] * Ro * (1 + .09 * fs(T * 13 + i * .7)), back = ORBP[o + 2] < 0 ? 1 + .8 * -ORBP[o + 2] : 1;
-      const x = c0 + (U[0] * ORBP[o] + Wd[0] * ORBP[o + 1]) * q + D[0] * ORBP[o + 2] * q * back, y = c1 + (U[1] * ORBP[o] + Wd[1] * ORBP[o + 1]) * q + D[1] * ORBP[o + 2] * q * back, z = c2 + (U[2] * ORBP[o] + Wd[2] * ORBP[o + 1]) * q + D[2] * ORBP[o + 2] * q * back;
-      dotW(x, y, z, 1, ORBP[o + 3] < .8 ? HOT : FIRE, orb * (.5 + .5 * hz1(i + fr * 17)));
-    }
-    K.glowW(c0, c1, c2, Math.min(420, Ro * ppm * 3), FIRE, .22 * orb);
   }
 }
 
@@ -322,6 +334,7 @@ function trail(F, T, vis) {
   }
   // the forest round the site (standing, then flattened by the strike)
   W.drawForest(FRAME.a, T, 1);
+  W.drawHero(FRAME.a, T, 1);
 }
 
 /* ================= the strike ================= */
@@ -332,7 +345,7 @@ const surgeR = a => a <= 0 ? 0 : 2600 * (1 - Math.exp(-a / 9)) + 420 * (1 - Math
 /* the shock's arrival time at distance d (m), tabulated */
 const SHT = new Float32Array(1501); { let a = 0; for (let i = 0; i <= 1500; i++) { const d = i * 4; while (shockR(a) < d) a += .0005; SHT[i] = a; } }
 const arrive = d => { const x = Math.max(0, Math.min(1500, d / 4)), k = Math.min(1499, Math.floor(x)); return SHT[k] + (SHT[k + 1] - SHT[k]) * (x - k); };
-W.setShock(arrive);
+W.setShock(arrive, a => shockR(a));
 /* dust colour: hot early, then white dust lit from the sun (lit 0 shadow .. 1 sunlit); a lookup of heat x light */
 function dustCol(heat, lit, o) { const l = lit > 1 ? 1 : lit < 0 ? 0 : lit; o[0] = SMK[0] + (DUST[0] - SMK[0]) * l; o[1] = SMK[1] + (DUST[1] - SMK[1]) * l; o[2] = SMK[2] + (DUST[2] - SMK[2]) * l; if (heat > 0) { mixc(o, heat > .55 ? FIRE : EMB, Math.min(1, heat * 1.3), o); if (heat > .7) mixc(o, HOT, Math.min(1, (heat - .7) * 3.3), o); } return o; }
 const DC = [0, 0, 0];
@@ -768,131 +781,186 @@ function strike(a, vis) {
   vehicles(a, vis); if (PT) PT.lap(9);
 }
 /* the white-out: overlay alpha */
-const flashA = a => a < 0 ? 0 : a < .06 ? .97 : .97 * Math.exp(-(a - .06) * 2.7);
+const flashA = a => a < 0 ? 0 : a < .02 ? .95 : .95 * Math.exp(-(a - .02) * 9);
 /* the vehicles are handled in strike() (tossed and torn apart); kept for the film's call */
 function debris(p, t, vis) { }
 
 /* ================= the camera of the fall and the strike =================
    cam(T, FC) -> a shot for base time T, or null for the film's own camera. FC: the fall's constants and helpers
-   (TX, TI, T_ON, T_RET, rodAt, altOf, aOf, DIRP, SIDE, UPD, HIT, CE, camBase...). Called first in each frame, so it
-   also sets the strike's state for the world (the crater, the forest). */
+   (TX, TI, T_RET, TF, rodAt, altOf, aOf, DIRP, SIDE, UPD, HIT, CE, MZ0, SAT, camBase...). Called first in each
+   frame, so it also sets the strike's state for the world (the crater, the forest, the cloud's shadow).
+
+   TIMELINE REQUEST (for film.js, the mechanisms agent): the strike wants more time and a slow-motion beat in the
+   forest. Proposed: T_RET = TI + 28 (now 16.4: the base take grows by 11.6 s, DUR 162 -> 173.6) and
+     SWARP = FILM.warp([{ t: 0, rate: .25 }, { t: 1.6, rate: .25 }, { t: 2.6, rate: 1 }, { t: 4.0, rate: 1 },
+                        { t: 4.8, rate: .05 }, { t: 13.8, rate: .05 }, { t: 15.3, rate: 4 }, { t: T_RET - TI + 14, rate: 4 }]);
+   x1/4 for the flash and the plasma dome, x1 while the shock crosses the land, x1/20 for 9 s while the front tears
+   through the trees round the ground camera (sim 2.9..3.35 s; it reaches the camera, 1.5 km out, at 3.18 s), then x4
+   for the cloud and the crater. The camera keys that beat on the sim time a (and the rest on film time), so it works
+   with either timeline.
+
+   Every shot carries an explicit up vector (turned into the film camera's roll), so there are no roll flips; blends
+   turn the look about an axis (never a lerp of near-opposite directions) and last 2 s or more; the look turns at most
+   about 40 deg/s.
+     exit     beside the round as it leaves the muzzle (x1/20), handed over from the film's camera, then riding with
+              the rod as it speeds up, falling in behind it and looking down the path at the Earth
+     coast    a slow orbit round the rod to its front quarter as the Earth comes up (the vacuum, x9)
+     entry    beside and ahead of the rod while the sheath forms and the trail thickens
+     incoming the lens drops away from the rod to the forest floor 1.5 km from the target, looking up at the streak
+     strike   held on the forest floor through the flash, the plasma dome and the shock tearing through the trees,
+              then a slow crane up and back over the flattened forest, an aerial arc round the cloud, and a move in
+              over the crater, from the platform's side (where the climb back up the trail takes off) */
 const kk = (T, a, b) => E.inOut(E.sat((T - a) / (b - a)));
-/* look point from eye toward a mix of two look points by direction (a near and a far point mix evenly) */
-function lookMix(eye, a, b, w) { const da = V.norm(V.sub(a, eye)), db = V.norm(V.sub(b, eye)); return V.mad(eye, V.norm(V.lerp(da, db, w)), 1000); }
-/* blend two shots about an anchor: the eye's direction from the anchor mixed, its distance log-mixed, the look
-   direction mixed (a shot 300 km out and one 300 m out blend without the eye cutting across) */
-function blendAbout(A, B, w, P) {
+const Y_ = [0, 1, 0];
+/* a unit vector made perpendicular to f */
+function orth(f, up) { const d = up[0] * f[0] + up[1] * f[1] + up[2] * f[2], x = up[0] - f[0] * d, y = up[1] - f[1] * d, z = up[2] - f[2] * d, l = Math.hypot(x, y, z); return l < 1e-9 ? null : [x / l, y / l, z / l]; }
+/* slerp of unit vectors */
+function slerpV(a, b, w) { let d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; d = d > 1 ? 1 : d < -1 ? -1 : d; const th = Math.acos(d); if (th < 1e-6) return a.slice(); const s = Math.sin(th), ka = Math.sin((1 - w) * th) / s, kb = Math.sin(w * th) / s; return [a[0] * ka + b[0] * kb, a[1] * ka + b[1] * kb, a[2] * ka + b[2] * kb]; }
+/* shots: { eye, f (unit look), up (unit, perpendicular to f), fov (rad) } */
+const shotL = (eye, target, up, fovDeg) => { const f = V.norm(V.sub(target, eye)); return { eye, f, up: orth(f, up) || orth(f, [1, 0, 0]), fov: fovDeg * DEG }; };
+/* blend two shots: the eye straight (or about an anchor P: direction slerped, distance log-mixed), the look slerped,
+   the up mixed and made perpendicular again */
+function mixS(A, B, w, P) {
   if (w <= 0) return A; if (w >= 1) return B;
-  const da = V.sub(A.eye, P), db = V.sub(B.eye, P), la = Math.max(1e-3, V.len(da)), lb = Math.max(1e-3, V.len(db));
-  const dir = V.norm(V.lerp(V.mul(da, 1 / la), V.mul(db, 1 / lb), w)), eye = V.mad(P, dir, K.logMix(la, lb, w));
-  const fa = V.norm(V.sub(A.target, A.eye)), fb = V.norm(V.sub(B.target, B.eye));
-  return { eye, target: V.mad(eye, V.norm(V.lerp(fa, fb, w)), 1000), fov: A.fov + (B.fov - A.fov) * w, roll: (A.roll || 0) + ((B.roll || 0) - (A.roll || 0)) * w };
+  let eye;
+  if (P) { const da = V.sub(A.eye, P), db = V.sub(B.eye, P), la = Math.max(1e-3, V.len(da)), lb = Math.max(1e-3, V.len(db)); eye = V.mad(P, slerpV(V.mul(da, 1 / la), V.mul(db, 1 / lb), w), K.logMix(la, lb, w)); }
+  else eye = V.lerp(A.eye, B.eye, w);
+  const f = slerpV(A.f, B.f, w);
+  return { eye, f, up: orth(f, V.lerp(A.up, B.up, w)) || A.up, fov: A.fov + (B.fov - A.fov) * w };
 }
-/* roll a shot so a world direction runs across the frame at angle `want` (rad, down to the right when negative) */
-function withRoll(s, dir, want) {
-  const f = V.norm(V.sub(s.target, s.eye)), r = V.norm(V.cross([0, 1, 0], f)), u = V.cross(f, r);
-  const dr = V.dot(dir, r), du = V.dot(dir, u), tw = dr >= 0 ? want : PI - want;
-  let rl = Math.atan2(du, dr) - tw; while (rl > PI) rl -= TAU; while (rl < -PI) rl += TAU;
-  s.roll = rl; return s;
+/* to the film's form: the roll that turns the camera's own frame (built from world +Y) onto the shot's up */
+function outS(s) {
+  const f = s.f, r = V.norm(V.cross(Y_, f)), u = V.cross(f, r);
+  return { eye: s.eye, target: V.mad(s.eye, f, 1000), fov: s.fov, roll: Math.atan2(-V.dot(s.up, r), V.dot(s.up, u)) };
 }
-/* a key path (cubic Hermite, Catmull-Rom tangents; keys with stop:true have zero velocity) */
+/* from the film's form */
+function inS(b) { const f = V.norm(V.sub(b.target, b.eye)), r = V.norm(V.cross(Y_, f)), u = V.cross(f, r), c = Math.cos(b.roll || 0), s = Math.sin(b.roll || 0); return { eye: b.eye.slice(), f, up: [u[0] * c - r[0] * s, u[1] * c - r[1] * s, u[2] * c - r[2] * s], fov: b.fov }; }
+/* a scalar key track (cubic Hermite, Catmull-Rom tangents, flat at the ends) */
+function track(keys) {
+  const n = keys.length, M = keys.map((k, i) => i === 0 || i === n - 1 ? 0 : (keys[i + 1][1] - keys[i - 1][1]) / (keys[i + 1][0] - keys[i - 1][0]));
+  return t => {
+    if (t <= keys[0][0]) return keys[0][1]; if (t >= keys[n - 1][0]) return keys[n - 1][1];
+    let i = 0; while (keys[i + 1][0] < t) i++;
+    const a = keys[i], b = keys[i + 1], dt = b[0] - a[0], u = (t - a[0]) / dt, u2 = u * u, u3 = u2 * u;
+    return a[1] * (2 * u3 - 3 * u2 + 1) + M[i] * dt * (u3 - 2 * u2 + u) + b[1] * (-2 * u3 + 3 * u2) + M[i + 1] * dt * (u3 - u2);
+  };
+}
+/* a key path for the strike (cubic Hermite through eye and target keys; stop keys have zero velocity) */
 function mkPath(keys) {
   const n = keys.length;
-  const tan = (i, f) => { if (i === 0 || i === n - 1 || keys[i].stop) return f === 'fov' ? 0 : [0, 0, 0]; const a = keys[i - 1], b = keys[i + 1], dt = b.t - a.t; return f === 'fov' ? (b.fov - a.fov) / dt : V.mul(V.sub(b[f], a[f]), 1 / dt); };
-  const M = keys.map((k, i) => ({ eye: tan(i, 'eye'), target: tan(i, 'target'), fov: tan(i, 'fov') }));
-  const H = (p0, p1, m0, m1, u, dt) => { const u2 = u * u, u3 = u2 * u; return p0 * (2 * u3 - 3 * u2 + 1) + m0 * dt * (u3 - 2 * u2 + u) + p1 * (-2 * u3 + 3 * u2) + m1 * dt * (u3 - u2); };
+  const tan = (i, fld) => { if (i === 0 || i === n - 1 || keys[i].stop) return fld === 'fov' ? 0 : [0, 0, 0]; const a = keys[i - 1], b = keys[i + 1], dt = b.t - a.t; return fld === 'fov' ? (b.fov - a.fov) / dt : V.mul(V.sub(b[fld], a[fld]), 1 / dt); };
+  const Mt = keys.map((k, i) => ({ eye: tan(i, 'eye'), target: tan(i, 'target'), fov: tan(i, 'fov') }));
+  const Hm = (p0, p1, m0, m1, u, dt) => { const u2 = u * u, u3 = u2 * u; return p0 * (2 * u3 - 3 * u2 + 1) + m0 * dt * (u3 - 2 * u2 + u) + p1 * (-2 * u3 + 3 * u2) + m1 * dt * (u3 - u2); };
   return T => {
     let i = 0; while (i < n - 2 && keys[i + 1].t <= T) i++;
     const a = keys[i], b = keys[i + 1], dt = b.t - a.t, u = E.clamp((T - a.t) / dt, 0, 1);
-    const v3 = f => [0, 1, 2].map(c => H(a[f][c], b[f][c], M[i][f][c], M[i + 1][f][c], u, dt));
-    return { eye: v3('eye'), target: v3('target'), fov: H(a.fov, b.fov, M[i].fov, M[i + 1].fov, u, dt) * DEG };
+    const v3 = fld => [0, 1, 2].map(c => Hm(a[fld][c], b[fld][c], Mt[i][fld][c], Mt[i + 1][fld][c], u, dt));
+    return { eye: v3('eye'), target: v3('target'), fov: Hm(a.fov, b.fov, Mt[i].fov, Mt[i + 1].fov, u, dt) };
   };
 }
 let CI = null;
+/* the round's centre: in the bore before the exit (its u^2 run down the barrel), then the rod's fall */
+function roundAt(F, T) { if (T >= F.TX) return F.rodAt(T); const u = Math.max(0, (T - F.TF) / (F.TX - F.TF)); return V.mad(F.MZ0, F.DIRP, -125 * (F.TX - F.TF) * (1 - u * u)); }
 function camInit(F) {
-  const altAt = t => F.altOf(F.rodAt(t));
-  const tAlt = hh => { let lo = F.TX, hi = F.TI; for (let i = 0; i < 60; i++) { const m = (lo + hi) / 2; if (altAt(m) > hh) lo = m; else hi = m; } return (lo + hi) / 2; };
+  const X0 = F.TX, TI = F.TI;
   const UPH = V.norm(V.sub(HIT, F.CE));
   const N_ = V.norm(V.sub(F.DIRP, V.mul(UPH, V.dot(F.DIRP, UPH))));
   let S_ = V.norm(V.cross(UPH, N_)); if (V.dot(S_, SUNL) < 0) S_ = V.mul(S_, -1);
-  // a point round the strike: azimuth al from the rod's heading toward the sun side, r out, h up
   const at = (al, r, h) => V.add(HIT, V.add(V.mul(V.add(V.mul(N_, Math.cos(al)), V.mul(S_, Math.sin(al))), r), V.mul(UPH, h)));
   const up = h => V.mad(HIT, UPH, h);
-  const TI = F.TI, aT = ts => Math.max(0, F.aOf(TI + ts));
-  CI = { UPH, N_, S_, t165: tAlt(165000), t105: tAlt(105000), t30: tAlt(30000), t19: tAlt(19000), t45: tAlt(4500) };
-  // the wide shot of the fall: fixed, the path from the muzzle to the top of the air in frame, the Earth under it
-  const sEnt = F.sOf(tAlt(110000)), Cw = V.mad(F.MZ0, F.DIRP, sEnt * .5);
-  CI.EW = V.add(Cw, V.add(V.mul(F.SIDE, sEnt * .8), V.add(V.mul(F.UPD, sEnt * .2), V.mul(F.DIRP, -sEnt * .08))));
-  CI.TW = Cw; CI.RW = withRoll({ eye: CI.EW, target: Cw }, F.DIRP, -.5).roll;
-  // the strike: wide over the coast (the trail coming in from the top corner), a dive to the ground in the forest,
-  // up over the crater, out into an aerial orbit, then the film's own camera at the end of the window
-  // the strike, TI .. T_RET: the first seconds are tied to the shock (it reaches the ground camera ~3 s in), the rest
-  // spreads over whatever the film gives the strike; at T_RET the path rests over the crater and hands over to the
-  // film's climb back up the trail (blended about the platform, so the climb takes off from here)
-  const G = V.mad(W.G2, UPH, 9), DS = F.T_RET - TI, sk = f => 4.2 + (DS - 4.2) * f;
-  CI.G = G; CI.Tend = F.T_RET + 1.2;
-  const EE = at(1.5, 3000, 1450);
-  CI.EE = EE; CI.TE = up(230);
-  const k = (ts, eye, target, fov, stop) => ({ t: TI + ts, eye, target, fov, stop });
+  // the rod's frame: heading, the side the camera rides on (the sun's), up off the path
+  const PX = V.sub(F.PW1([1, 0, 0]), F.PW1([0, 0, 0])), D = F.DIRP, SD = V.dot(F.SIDE, PX) <= 0 ? F.SIDE : V.mul(F.SIDE, -1), UD = V.norm(V.cross(V.cross(D, UPH), D));
+  const UDs = V.dot(UD, UPH) < 0 ? V.mul(UD, -1) : UD;
+  // the sim time a -> film time (bisection on the film's clock)
+  const tOfA = av => { let lo = TI, hi = F.T_RET + 30; for (let i = 0; i < 50; i++) { const m = (lo + hi) / 2; if (F.aOf(m) < av) lo = m; else hi = m; } return (lo + hi) / 2; };
+  CI = { UPH, N_, S_, at, up, D, SD, UD: UDs, tOfA };
+  // the ride's parameters over film time from the exit: azimuth from behind the rod toward its side (deg), elevation
+  // (deg), distance (m), the look's lean from the rod toward the path ahead (0..1), the fov
+  const R = t => t - X0;
+  CI.AZ = track([[3.2, 29], [4.9, 30], [7.4, 66], [9.6, 116], [11.0, 134], [12.0, 140]]);
+  CI.EL = track([[3.2, 14], [4.9, 22], [7.4, 13], [9.6, 0], [11.0, -6], [12.0, -8]]);
+  CI.DS = track([[3.2, 22], [4.9, 80], [7.4, 120], [9.6, 160], [11.0, 200], [12.0, 230]]);
+  CI.LA = track([[3.2, .45], [4.9, .72], [7.4, .55], [9.6, .16], [11.0, 0], [12.0, 0]]);
+  CI.FV = track([[3.2, 50], [4.9, 52], [7.4, 50], [9.6, 48], [12.0, 48]]);
+  CI.R = R;
+  // the ground camera: on the forest floor 1.5 km out (the world's G2, inside the hero stand), 2.2 m up
+  const Gc = V.mad(W.G2, UPH, 2.2);
+  CI.Gc = Gc; CI.aG = arrive(Math.hypot(W.G2[0] - HIT[0], W.G2[2] - HIT[2])); CI.tG = tOfA(CI.aG);
+  CI.alG = Math.atan2(V.dot(V.sub(W.G2, HIT), S_), V.dot(V.sub(W.G2, HIT), N_));
+  // where the look rests while the rod comes in, and through the strike: low over the target (the trees in front,
+  // the fireball over them)
+  CI.AIM = up(150); CI.AIMH = up(600);
+  // the strike: the forest beat (keyed on a) until the rise, then a path over film time from the rise to T_RET
+  CI.T_RISE = Math.max(tOfA(3.5), tOfA(CI.aG) + 1.0);
+  CI.Tend = F.T_RET + 2.0;
+  const T0 = CI.T_RISE, DS = F.T_RET - .15 - T0, kt = fr => T0 + DS * fr, aT = fr => Math.max(0, F.aOf(kt(fr)));
+  const k = (fr, eye, target, fov, stop) => ({ t: kt(fr), eye, target, fov: fov * DEG, stop });
+  const al = CI.alG;
   CI.SP = mkPath([
-    k(-.15, EE, up(230), 46, true),
-    k(1.0, at(1.47, 2820, 1330), up(240), 46),
-    k(1.8, at(1.08, 2650, 260), up(220), 54),
-    k(2.35, G, up(fbY(aT(2.35)) + 160), 62, true),
-    k(4.2, V.mad(G, UPH, 3), up(fbY(aT(4.2)) + 40), 60, true),
-    k(sk(.2), at(.75, 5200, 600), up(capH(aT(sk(.2))) * .62), 52),
-    k(sk(.45), at(.5, 7600, 1100), up(capH(aT(sk(.45))) * .58), 46),
-    k(sk(.7), at(.34, 6200, 2100), up(capH(aT(sk(.7))) * .45), 46),
-    k(sk(.87), at(.38, 1250, 1750), at(.38 + PI, 60, 30), 46),
-    k(DS + 1.2, at(.43, 1150, 1850), at(.43 + PI, 50, 50), 46, true),
+    k(0, Gc, CI.AIM, 56, true),
+    k(.14, at(al - .03, 1650, 120), up(150 + capH(aT(.14)) * .3), 56),
+    k(.34, at(al - .22, 2800, 620), up(capH(aT(.34)) * .5), 52),
+    k(.56, at(.42, 5200, 1050), up(capH(aT(.56)) * .5), 46),
+    k(.8, at(.26, 2700, 1500), up(120), 46),
+    k(1, at(.3, 1150, 1700), up(10), 46, true),
   ]);
-  CI.aG = arrive(V.dist([W.G2[0], 0, W.G2[2]], [HIT[0], 0, HIT[2]]));
 }
-const rodOff = (F, T, along, side, up_) => { const p = F.rodAt(T); return V.add(p, V.add(V.mul(F.DIRP, along), V.add(V.mul(F.SIDE, side), V.mul(F.UPD, up_)))); };
-function shotWide(F, T) { return { eye: CI.EW, target: V.lerp(CI.TW, F.rodAt(T), .08), fov: 50 * DEG, roll: CI.RW }; }
-function shotEntry(F, T) {
-  const p = F.rodAt(T), alt = F.altOf(p), heat = ss(110000, 40000, alt), u = ss(CI.t105, CI.t30, T), b = -.32 + .62 * u;
-  const Rr = 150 + 130 * heat, cb = Math.cos(b), sb = Math.sin(b);
-  const sd = V.add(V.mul(F.SIDE, cb), V.mul(F.UPD, sb)), uq = V.add(V.mul(F.UPD, cb), V.mul(F.SIDE, -sb));
-  const eye = V.add(p, V.add(V.mul(sd, Rr * .93), V.add(V.mul(uq, Rr * .26), V.mul(F.DIRP, -Rr * .3))));
-  return withRoll({ eye, target: V.mad(p, F.DIRP, -Rr * .22), fov: 42 * DEG }, F.DIRP, -.36);
+/* the ride with the rod (the exit, the speed-up, the coast, the entry) */
+function shotRide(F, T) {
+  const t = CI.R(T), p = roundAt(F, T), D = CI.D, S = CI.SD, U = CI.UD;
+  const az = CI.AZ(t) * DEG, el = CI.EL(t) * DEG, d = CI.DS(t), la = CI.LA(t);
+  const ce = Math.cos(el), o = V.add(V.mul(D, -ce * Math.cos(az) * d), V.add(V.mul(S, ce * Math.sin(az) * d), V.mul(U, Math.sin(el) * d)));
+  const eye = V.add(p, o), toRod = V.norm(V.sub(V.mad(p, D, 4 - 30 * ss(9, 12.6, t)), eye));
+  const ahead = V.norm(V.add(V.mul(D, Math.cos(.38)), V.mul(U, Math.sin(.38))));
+  const f = slerpV(toRod, ahead, la);
+  return { eye, f, up: orth(f, U) || U, fov: CI.FV(t) * DEG };
 }
-function shotOrb(F, T) { const p = F.rodAt(T); return { eye: V.add(p, V.add(V.mul(F.DIRP, -210), V.add(V.mul(F.UPD, 80), V.mul(F.SIDE, 45)))), target: V.mad(p, F.DIRP, 140), fov: 50 * DEG, roll: 0 }; }
-function shotBrake(F, T) {
-  const tb = CI.t45, Tc = tb + .42 * (1 - Math.exp(-(T - tb) / .42)), w = kk(T, tb, F.TI - .15);
-  const ride = rodOff(F, Tc, -210, 45, 80), eye = V.lerp(ride, CI.EE, w);
-  const pr = F.rodAt(Math.min(T, F.TI));
-  return { eye, target: lookMix(eye, V.mad(pr, F.DIRP, 140 * (1 - ss(tb, tb + .5, T))), CI.TE, kk(T, tb + .15, F.TI - .1)), fov: 50 * DEG + (46 - 50) * DEG * w, roll: 0 };
+/* the ground camera while the rod comes in: looking at the rod, easing up onto the sky over the target before the
+   impact (the look leaves the rod before it gets fast) */
+const lookIn = (F, T, eye) => { const p = F.rodAt(Math.min(T, F.TI - .02)); return slerpV(V.norm(V.sub(p, eye)), V.norm(V.sub(CI.AIMH, eye)), kk(T, F.TX + 14.5, F.TI - .1)); };
+function shotIncoming(F, T) { const f = lookIn(F, T, CI.Gc); return { eye: CI.Gc, f, up: orth(f, CI.UPH), fov: 56 * DEG }; }
+/* the forest floor through the strike (a: sim s): a slow drift and a lean toward the front as it comes */
+function shotForest(F, T, a) {
+  const Gc = CI.Gc, lean = ss(2.3, 3.0, a) * (1 - ss(3.25, 3.5, a));
+  const aim = V.add(CI.AIM, V.mul(CI.UPH, 450 * (1 - ss(1.4, 2.6, a)) - 60 * lean));
+  const eye = V.add(Gc, V.mul(V.norm(V.sub(HIT, Gc)), 3 * lean));
+  const f = V.norm(V.sub(aim, eye));
+  return { eye, f, up: orth(f, CI.UPH), fov: (56 - 2 * lean) * DEG };
 }
-function shotFall(F, T) {
-  if (T < CI.t165) return shotWide(F, T);
-  if (T < CI.t105) return blendAbout(shotWide(F, T), shotEntry(F, T), kk(T, CI.t165, CI.t105), F.rodAt(T));
-  if (T < CI.t30) return shotEntry(F, T);
-  if (T < CI.t19) return blendAbout(shotEntry(F, T), shotOrb(F, T), kk(T, CI.t30, CI.t19), F.rodAt(T));
-  if (T < CI.t45) return shotOrb(F, T);
-  return shotBrake(F, T);
+function shotStrike(F, T, a) {
+  if (T < CI.T_RISE) return shotForest(F, T, a);
+  const s = CI.SP(T), w = kk(T, CI.T_RISE, CI.T_RISE + 2.4), f = V.norm(V.sub(s.target, s.eye));
+  const S = { eye: s.eye, f, up: orth(f, CI.UPH) || CI.UPH, fov: s.fov };
+  return w < 1 ? mixS(shotForest(F, CI.T_RISE, F.aOf(CI.T_RISE)), S, w) : S;
+}
+function shotAll(F, T) {
+  const X0 = F.TX, a = F.aOf(T);
+  if (T < X0 + 11.8) return shotRide(F, T);
+  if (T < X0 + 14.8) {
+    // dropping away from the rod to the forest floor (the eye about the rod, the look kept on it)
+    const A = shotRide(F, T), B = shotIncoming(F, T), w = kk(T, X0 + 11.8, X0 + 14.8), m = mixS(A, B, w, F.rodAt(T)), f = lookIn(F, T, m.eye);
+    return { eye: m.eye, f, up: orth(f, V.lerp(CI.UD, CI.UPH, w)) || CI.UPH, fov: m.fov };
+  }
+  if (T < F.TI) return shotIncoming(F, T);
+  // the impact: from the look at the sky over the target into the forest beat (continuous: both look at it)
+  return shotStrike(F, T, Math.max(0, a));
 }
 function camHook(T, F) {
   FCs = F;
   FRAME.T = T; FRAME.a = F.aOf(T); W.CRA.a = FRAME.a; cloudShadow(FRAME.a);
   { const ld = FRAME.a > 0 ? ss(.2, 1.5, FRAME.a) * (1 - ss(F.T_RET + .5, F.T_RET + 2, T)) : 0; W.GOPT.pxm = 1 + .22 * ld; W.GOPT.fbud = 1 - .45 * ld; }
   if (!CI) camInit(F);
-  const T0 = F.T_ON - .5, T1 = F.T_ON + 1.1;
-  if (T < T0 || T > CI.Tend) return null;
-  if (T < T1) {
-    // pull back from the rod to the whole trail, keeping the rod in the frame until the pan lets it go
-    const w = kk(T, T0, T1), pr = F.rodAt(T), b = blendAbout(F.camBase(T), shotWide(F, T), w, pr);
-    b.target = lookMix(b.eye, pr, b.target, ss(.45, 1, w)); return b;
-  }
-  if (T < F.TI - .15) return shotFall(F, T);
-  let s = CI.SP(T);
-  // the shock reaching the ground camera: a jolt
-  const tg = FRAME.a - CI.aG;
-  if (tg > 0 && tg < 3 && T < F.TI + 5.2) { const sh = FILM.shake(T, 1, 19), amp = 14 * Math.exp(-tg * 1.6); s.target = V.add(s.target, V.add(V.mul(CI.S_, sh[0] * amp), V.mul(CI.UPH, sh[1] * amp))); }
-  // the hand-over to the film's climb
-  if (T > F.T_RET - .1) s = blendAbout(s, F.camBase(T), kk(T, F.T_RET - .1, CI.Tend), F.SAT);
-  return s;
+  // the film's camera rides beside the round through the exit and hands in to this one over T_ON - 1.6 .. T_ON + 1.1
+  if (T < F.T_ON - 1.6 || T > CI.Tend) return null;
+  let s = shotAll(F, T);
+  // the hand-over to the film's climb (it takes off from this pose: REST)
+  if (T > F.T_RET - .1) s = mixS(s, inS(F.camBase(T)), kk(T, F.T_RET - .1, CI.Tend));
+  const o = outS(s);
+  // the shock reaching the ground camera: a jolt, then a sway in the wind (film seconds, so slow motion sways slowly)
+  const tg = T - CI.tG;
+  if (CI.tG && tg > 0 && tg < 6 && T < CI.T_RISE + 1) { const sh = FILM.shake(T, 1, 7), amp = 9 * Math.exp(-tg * .8) * (1 - Math.exp(-tg * 6)); o.target = V.add(o.target, V.add(V.mul(CI.S_, sh[0] * amp), V.mul(CI.UPH, sh[1] * amp * .6))); }
+  return o;
 }
 
-return { setProf, shot, bore, petals, trail, sheath, strike, flashA, debris, shockR, surgeR, capH, capR, gP, FIRE, DUST, cam: camHook, arrive };
+return { setProf, shot, bore, petals, trail, sheath, strike, flashA, debris, shockR, surgeR, capH, capR, gP, FIRE, DUST, cam: camHook, arrive, _dbg: { ci: () => CI, shotRide, shotAll, roundAt } };
 };
