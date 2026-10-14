@@ -11,18 +11,26 @@
 const { V, R, X, E, Cam, rng, noise, fbm } = M3;
 const PI = Math.PI, TAU = 2 * PI, DEG = PI / 180;
 const LIME = [198, 244, 50], CORAL = [255, 106, 61], WH = [238, 238, 228], HOT = [248, 255, 232];
-const BW = 1920, BH = 1080;
+/* the dot raster: STAGE.RES (?res=1080|1440|2160, 16:9) -> BW x BH; the camera's focal length and centre scale with it
+   so the framing is the same. SC (K.S) converts stage px (the 1920x1080 HTML layer, tag offsets, line widths, glow sizes)
+   to raster px: setTag takes raster px. HQ (?hq=1, renders): a fixed high density, no governor, every LOD level
+   crossfaded. SMOOTH (default; ?smooth=0 off, the old hard switches): LOD crossfades and continuous thinning */
+const SQ = new URLSearchParams(location.search), RS = (window.STAGE && STAGE.RES) || { W: 1920, H: 1080, S: 1 };
+const BW = RS.W, BH = RS.H, SC = RS.S;
+const HQ = SQ.has('hq') && SQ.get('hq') !== '0', SMOOTH = SQ.get('smooth') !== '0', RENDER = !!(window.STAGE && STAGE.RENDER);
 const $ = id => document.getElementById(id);
-const K = { LIME, CORAL, WH, HOT, BW, BH, PI, TAU, DEG };
+const K = { LIME, CORAL, WH, HOT, BW, BH, S: SC, HQ, SMOOTH, RENDER, PI, TAU, DEG };
+/* LOD crossfade band (fraction of a level's octave over which it blends into the next coarser one) */
+K.LODB = !SMOOTH ? 0 : HQ ? 1 : .5;
 /* dot density K.DQ divides the LOD's on-screen dot spacings, so near surfaces draw finer levels. ?dq= fixes it;
    stills (?capture) draw at the top density; playback governs it from the render time (K.govern(ms) after each
    played frame) between DQ_MIN and DQ_MAX, holding about 20 ms (quality first) */
-const DQ_MIN = 1.3, DQ_MAX = 2.4;
+const DQ_MIN = 1.3, DQ_MAX = 2.4, DQ_HQ = 3.2;
 const DQ_Q = (() => { let q = new URLSearchParams(location.search).get('dq'); try { if (!q && window.parent !== window) q = new URLSearchParams(parent.location.search).get('dq'); } catch (e) {} return q ? Math.max(.5, +q) : 0; })();
-K.DQ = DQ_Q || (new URLSearchParams(location.search).has('capture') ? DQ_MAX : 1.8);
+K.DQ = DQ_Q || (HQ ? DQ_HQ : new URLSearchParams(location.search).has('capture') ? DQ_MAX : 1.8);
 let DQ_EMA = 14;
 K.govern = (ms, info) => {
-  if (DQ_Q || !info || !info.playing || info.seeking || !(ms > 0) || ms > 200) return;
+  if (DQ_Q || HQ || RENDER || !info || !info.playing || info.seeking || !(ms > 0) || ms > 200) return;
   DQ_EMA += (ms - DQ_EMA) * .08;
   if (DQ_EMA > 21) K.DQ = Math.max(DQ_MIN, K.DQ * (1 - .02 * Math.min(3, (DQ_EMA - 21) / 2 + .5)));
   else if (DQ_EMA < 16) K.DQ = Math.min(DQ_MAX, K.DQ * 1.006);
@@ -30,6 +38,7 @@ K.govern = (ms, info) => {
 let pb = null, D = null, C = null, octx = null;
 
 function setup() {
+  for (const id of ['c', 'o']) { const cv = $(id); if (cv && (cv.width !== BW || cv.height !== BH)) { cv.width = BW; cv.height = BH; } }
   pb = new PointBuf($('c'), [11, 12, 10], { vignette: .55 }); D = pb.d;
   octx = $('o').getContext('2d');
   C = new Cam(BW, BH);
@@ -63,6 +72,8 @@ function dotW(x, y, z, s, c, a) { if (pj(x, y, z)) dot(PJ[0], PJ[1], s, c[0], c[
 function addW(x, y, z, s, c, a) { if (pj(x, y, z) && onS(s)) add(PJ[0], PJ[1], s, c[0], c[1], c[2], a); }
 /* a straight dotted line between two world points (clipped at the near plane), optional glow every 3rd dot */
 const CA = new Float64Array(3), CB = new Float64Array(3);
+/* a line's glow squares: sized in stage px, dimmed by the denser dots per stage px at higher res */
+const G9 = Math.round(9 * SC), G21 = Math.round(21 * SC), GI = 1 / SC;
 function toCam(x, y, z, o) {
   const e = C.eye, dx = x - e[0], dy = y - e[1], dz = z - e[2], r = C.r, u = C.u, f = C.f;
   o[0] = dx * r[0] + dy * r[1] + dz * r[2]; o[1] = dx * u[0] + dy * u[1] + dz * u[2]; o[2] = dx * f[0] + dy * f[1] + dz * f[2];
@@ -82,7 +93,7 @@ function lineW(ax, ay, az, bx, by, bz, step, s, c, a, gc, g1, g2) {
     const t = k / m, x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t;
     if (x < -30 || y < -30 || x > BW + 30 || y > BH + 30) continue;
     dot(x, y, s, c[0], c[1], c[2], a);
-    if (gc && (k % 3) === 0) { add(x, y, 9, gc[0], gc[1], gc[2], g1 * a); if (g2 && (k % 6) === 0) add(x, y, 21, gc[0], gc[1], gc[2], g2 * a); }
+    if (gc && (k % 3) === 0) { add(x, y, G9, gc[0], gc[1], gc[2], g1 * a * GI); if (g2 && (k % 6) === 0) add(x, y, G21, gc[0], gc[1], gc[2], g2 * a * GI); }
   }
 }
 /* a ring of dots: centre c, in-plane unit axes U, W, radius r */
@@ -95,7 +106,7 @@ function ringW(c, U, W, r, n, s, col, a, ph) {
   }
 }
 /* soft round additive glow (screen px radius), falling off as (1 - d^2)^2 */
-function soft(x, y, rad, r, g, b, a) {
+function softR(x, y, rad, r, g, b, a) {
   if (a < .003 || rad < .5) return;
   const x0 = Math.max(0, Math.floor(x - rad)), x1 = Math.min(BW - 1, Math.ceil(x + rad)), y0 = Math.max(0, Math.floor(y - rad)), y1 = Math.min(BH - 1, Math.ceil(y + rad));
   if (x0 > x1 || y0 > y1) return;
@@ -110,14 +121,17 @@ function soft(x, y, rad, r, g, b, a) {
     }
   }
 }
-/* glow at a world point: small ones as stacked squares, big ones soft and round */
+/* (rad in stage px) */
+const soft = SC === 1 ? softR : (x, y, rad, r, g, b, a) => softR(x, y, rad * SC, r, g, b, a);
+/* glow at a world point: small ones as stacked squares, big ones soft and round (px: stage px) */
 function glowW(x, y, z, px, col, a) {
+  px *= SC;
   if (!pj(x, y, z) || !onS(px)) return;
   if (px <= 12) { const q = [px, px * .55, px * .28]; for (let k = 0; k < 3; k++) add(PJ[0], PJ[1], Math.max(1, Math.round(q[k])), col[0], col[1], col[2], a * (.25 + .3 * k)); return; }
-  soft(PJ[0], PJ[1], px * .6, col[0], col[1], col[2], a * .55);
-  soft(PJ[0], PJ[1], px * .22, col[0], col[1], col[2], a * .8);
+  softR(PJ[0], PJ[1], px * .6, col[0], col[1], col[2], a * .55);
+  softR(PJ[0], PJ[1], px * .22, col[0], col[1], col[2], a * .8);
 }
-Object.assign(K, { soft, dot, add, pj, PJ, onS, dotW, addW, lineW, ringW, glowW, toCam });
+Object.assign(K, { soft, softR, dot, add, pj, PJ, onS, dotW, addW, lineW, ringW, glowW, toCam });
 
 /* stars: unit directions at infinity */
 function stars(n, seed) {
@@ -295,19 +309,39 @@ function runPts(P, i0, i1, sp, o) {
   }
 }
 let NPTS = 0;
+/* the LOD pick for a cell: the coarsest level whose dots land at most P px apart (F focal px, d distance), from lmin
+   up (the hard pick, as before). Smooth (band > 0): each switch between two levels becomes a ramp `band` of an
+   octave wide centred on the switch (half and half at it, so the mean density is the hard pick's): LP.a with weight
+   LP.wa, LP.b (the finer or the coarser neighbour, -1 none) with LP.wb; each level drawn on a stable per-point
+   dither (its keep times the weight), so detail fades in and out with distance instead of popping cell by cell */
+const LP = { a: 0, wa: 1, b: -1, wb: 0 };
+function lodPick(sp, nl, F, d, P, lmin, band) {
+  let li = nl - 1; while (li > lmin && sp[li] * F / d > P) li--;
+  LP.a = li; LP.wa = 1; LP.b = -1; LP.wb = 0;
+  if (band <= 0 || nl < 2) return LP;
+  const s = sp[li] * F / d; if (s > P) return LP;                       // (finer than lmin allows: no switch here)
+  const h = band * .5, t = Math.log(P / s) / Math.log(li < nl - 1 ? sp[li + 1] / sp[li] : sp[li] / sp[li - 1]);
+  if (t < h && li > lmin) { const w = .5 - t / (2 * h); LP.b = li - 1; LP.wb = w; LP.wa = 1 - w; }
+  else if (t > 1 - h && li < nl - 1) { const w = Math.min(.5, (t - 1 + h) / (2 * h)); LP.b = li + 1; LP.wb = w; LP.wa = 1 - w; }
+  return LP;
+}
+K.lodPick = lodPick; K.LP = LP;
 function drawLod(ml, Tw, o) {
   prep(Tw);
-  const CH = ml.ch, SD = ml.sd, nl = ml.nl, F = C.fl, oo = opt(o), PX = oo.px / K.DQ, PX0 = oo.px0;
+  const CH = ml.ch, SD = ml.sd, nl = ml.nl, F = C.fl, oo = opt(o), PX = oo.px / K.DQ, PX0 = oo.px0, band = K.LODB, kp = oo.keep;
   const ex = XM[12], ey = XM[13], ez = XM[14];
   for (let c = 0; c < ml.nch; c++) {
     const q = c * SD, mx = CH[q], my = CH[q + 1], mz = CH[q + 2], rad = CH[q + 3];
     if (!sphereIn(mx, my, mz, rad)) continue;
     const dx = mx - ex, dy = my - ey, dz = mz - ez, d = Math.max(.05, Math.sqrt(dx * dx + dy * dy + dz * dz) - rad * .7);
-    let li = nl - 1; while (li > 1 && ml.sp[li] * F / d > PX) li--;
-    if (li === 1 && ml.sp[1] * F / d > PX0) li = 0;
-    const i0 = CH[q + 4 + li * 2], i1 = CH[q + 5 + li * 2];
-    if (i1 > i0) { runPts(ml.lv[li], i0, i1, ml.sp[li], oo); NPTS += i1 - i0; }
+    lodPick(ml.sp, nl, F, d, PX, HQ ? 0 : 1, band);
+    if (!HQ && LP.a === 1 && LP.b < 0 && ml.sp[1] * F / d > PX0) LP.a = 0;
+    const la = LP.a, wa = LP.wa, lb = LP.b, wb = LP.wb;
+    let i0 = CH[q + 4 + la * 2], i1 = CH[q + 5 + la * 2];
+    if (i1 > i0) { oo.keep = kp * wa; runPts(ml.lv[la], i0, i1, ml.sp[la], oo); NPTS += i1 - i0; }
+    if (lb >= 0) { i0 = CH[q + 4 + lb * 2]; i1 = CH[q + 5 + lb * 2]; if (i1 > i0) { oo.keep = kp * wb; runPts(ml.lv[lb], i0, i1, ml.sp[lb], oo); NPTS += i1 - i0; } }
   }
+  oo.keep = kp;
 }
 /* screen box of a cloud's model-space AABB under Tw (8 corners) -> [x0, y0, x1, y1] or null */
 function boxOf(mn, mx, Tw, pad) {
@@ -571,20 +605,37 @@ function mkTag() {
   const o = { el: d, b: d.children[0], i: d.children[1], v: d.children[2], key: '', on: false, w: -1 }; tagPool.push(o); return o;
 }
 const tagW = tg => { if (tg.w < 0) tg.w = tg.el.offsetWidth; return tg.w; };
+/* x, y: raster px (a projected point plus offsets scaled by K.S); the tag itself lives in the stage's 1920 x 1080 px */
 function setTag(tg, id, lab, val, cls, x, y, a) {
   const key = id + '|' + lab + '|' + val + '|' + (cls || '');
   if (tg.key !== key) { tg.key = key; tg.w = -1; tg.b.textContent = id; tg.b.style.display = id ? '' : 'none'; tg.i.textContent = lab; tg.v.textContent = val || ''; tg.v.style.display = val ? '' : 'none'; tg.el.className = 'tag ' + (cls || ''); }
+  if (SC !== 1) { x /= SC; y /= SC; }
   const w = tagW(tg);
   // a tag pushed far off its anchor by the screen edge, or landing on the readout (top left), is hidden, not clamped
-  if (x > 1896 - w + 60 || x < -36 || y < -36 || y > 1100 || (x < 430 && y < 236)) a = 0;
+  if (x > 1896 - w + 60 || x < -36 || y < -36 || y > 1100 || (x < 430 && y < 236) || y > 860) a = 0;   // (y > 860: the menu row)
+  tg.el.classList.remove('off');            // (a tag set again with the same text: endTags' .off must not linger under the inline opacity)
   if (x > 1896 - w) x = 1896 - w; if (x < 24) x = 24; if (y < 24) y = 24; if (y > 1040) y = 1040;
   tg.el.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
-  tg.el.style.opacity = a === undefined ? '' : Math.max(0, Math.min(1, a)).toFixed(2);
+  if (RENDER) tg.tgt = a === undefined ? 1 : Math.max(0, Math.min(1, a));
+  else tg.el.style.opacity = a === undefined ? '' : Math.max(0, Math.min(1, a)).toFixed(2);
   tg.on = true;
 }
 function beginTags() { for (const t of tagPool) t.on = false; }
-/* (the inline opacity setTag left would override .off: cleared, so a tag nobody set this frame really goes) */
-function endTags() { for (const t of tagPool) if (!t.on && !t.el.classList.contains('off')) { t.el.classList.add('off'); t.el.style.opacity = ''; } }
+/* (the inline opacity setTag left would override .off: cleared, so a tag nobody set this frame really goes).
+   Renders have no CSS transitions: the tags' .25 s opacity fade is stepped here per frame instead (STAGE.frameDt) */
+function endTags() {
+  if (RENDER) {
+    const st = (STAGE.frameDt || 1 / 60) / .25;
+    for (const t of tagPool) {
+      const tgt = t.on ? t.tgt : 0, c0 = t.cur || 0, c = c0 + Math.max(-st, Math.min(st, tgt - c0));
+      t.cur = c;
+      if (c <= 0 && !t.on) { if (!t.el.classList.contains('off')) { t.el.classList.add('off'); t.el.style.opacity = ''; } }
+      else { t.el.classList.remove('off'); t.el.style.opacity = c.toFixed(3); }
+    }
+    return;
+  }
+  for (const t of tagPool) if (!t.on && !t.el.classList.contains('off')) { t.el.classList.add('off'); t.el.style.opacity = ''; }
+}
 const GLY = '·:+×/\\|-=', HOTC = 'ABCDEFGHKMNPRSTVXYZ0123456789/·-';
 function decode(s, k, t, seed) {
   if (k >= 1) return s;
@@ -608,13 +659,15 @@ function flicker(a, t0, t1) {
   if (w < .06) return .2; if (w < .12) return .9; if (w < .16) return .1; if (w < .22) return .6;
   return 0;
 }
+/* (b, x, y in raster px; len, lw in stage px) */
+const D24 = [2 * SC, 4 * SC], D23 = [2 * SC, 3 * SC];
 function bracket(b, col, a, len, lw) {
-  const [x0, y0, x1, y1] = b, c = Math.min(len || 14, (x1 - x0) * .35, (y1 - y0) * .35);
-  octx.strokeStyle = col; octx.globalAlpha = a; octx.lineWidth = lw || 1.5; octx.beginPath();
+  const [x0, y0, x1, y1] = b, c = Math.min((len || 14) * SC, (x1 - x0) * .35, (y1 - y0) * .35);
+  octx.strokeStyle = col; octx.globalAlpha = a; octx.lineWidth = (lw || 1.5) * SC; octx.beginPath();
   for (const [px, py, sx, sy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x1, y1, -1, -1], [x0, y1, 1, -1]]) { octx.moveTo(px + sx * c, py); octx.lineTo(px, py); octx.lineTo(px, py + sy * c); }
-  octx.stroke(); octx.lineWidth = 1; octx.setLineDash([2, 4]); octx.globalAlpha = a * .45; octx.strokeRect(x0, y0, x1 - x0, y1 - y0); octx.setLineDash([]); octx.globalAlpha = 1;
+  octx.stroke(); octx.lineWidth = SC; octx.setLineDash(D24); octx.globalAlpha = a * .45; octx.strokeRect(x0, y0, x1 - x0, y1 - y0); octx.setLineDash([]); octx.globalAlpha = 1;
 }
-function leader(x0, y0, x1, y1, col, a) { octx.strokeStyle = col; octx.globalAlpha = a; octx.lineWidth = 1; octx.setLineDash([2, 3]); octx.beginPath(); octx.moveTo(x0, y0); octx.lineTo(x1, y1); octx.stroke(); octx.setLineDash([]); octx.globalAlpha = 1; }
+function leader(x0, y0, x1, y1, col, a) { octx.strokeStyle = col; octx.globalAlpha = a; octx.lineWidth = SC; octx.setLineDash(D23); octx.beginPath(); octx.moveTo(x0, y0); octx.lineTo(x1, y1); octx.stroke(); octx.setLineDash([]); octx.globalAlpha = 1; }
 Object.assign(K, { mkTag, setTag, beginTags, endTags, decode, flicker, bracket, leader, tagW });
 
 /* ---------- the scan site: a coastal battery on a headland ----------
@@ -814,9 +867,12 @@ function makeSite(o) {
       if (!wIn(wx, wy, wz, TL[q + 5])) continue;
       const zt = WZ[0], np = TL[q + 1] - TL[q];
       const spT = 160 / Math.sqrt(np), dsp = spT * F / Math.max(1, zt);
-      const s0 = 2.3 / K.DQ, step = dsp >= s0 ? 1 : Math.min(40, Math.round(s0 * s0 / (dsp * dsp)));
-      const fadeD = zt < 3000 ? 1 : zt < 40000 ? .8 : .6;
-      for (let k = TL[q] + ((tt * 7) % step), k1 = TL[q + 1]; k < k1; k += step) {
+      const s0 = 2.3 / K.DQ, sr = dsp >= s0 ? 1 : Math.min(40, s0 * s0 / (dsp * dsp));
+      // (smooth: a continuous, stable per-point thinning to 1/sr instead of every step-th point)
+      const step = SMOOTH ? 1 : sr === 1 ? 1 : Math.round(sr), kf = SMOOTH ? 1 / sr : 1;
+      const fadeD = SMOOTH ? 1 - .2 * E.ss(2500, 3500, zt) - .2 * E.ss(36000, 44000, zt) : zt < 3000 ? 1 : zt < 40000 ? .8 : .6;
+      for (let k = TL[q] + (SMOOTH ? 0 : (tt * 7) % step), k1 = TL[q + 1]; k < k1; k += step) {
+        if (kf < 1 && (k * .6180339887) % 1 > kf) continue;
         const j = k * 4, px = L[j], py = L[j + 1], pz = L[j + 2];
         const zc = z0 * px + z1 * py + z2 * pz + zb; if (zc < 2) continue;
         const iz = F / zc, sx = cx + (q0 * px + q1 * py + q2 * pz + qb) * iz; if (sx < 0 || sx >= BW) continue;
@@ -842,15 +898,17 @@ function makeSite(o) {
       const wx = M[0] * cxs + M[2] * czs + t[0], wz = M[6] * cxs + M[8] * czs + t[2];
       if (!wIn(wx, t[1], wz, TS[q + 5] + 2)) continue;
       const zt = WZ[0], dsp = 180 / Math.sqrt(TS[q + 1] - TS[q]) * F / Math.max(1, zt);
-      const step = dsp >= 2.3 ? 1 : Math.min(40, Math.round(2.3 * 2.3 / (dsp * dsp)));
-      for (let k = TS[q] + ((tt * 5) % step), k1 = TS[q + 1]; k < k1; k += step) {
+      const sr = dsp >= 2.3 ? 1 : Math.min(40, 2.3 * 2.3 / (dsp * dsp));
+      const step = SMOOTH ? 1 : sr === 1 ? 1 : Math.round(sr), kf = SMOOTH ? 1 / sr : 1, lift = SMOOTH ? 1 + .2 * E.sat(sr - 1) : step > 1 ? 1.2 : 1;
+      for (let k = TS[q] + (SMOOTH ? 0 : (tt * 5) % step), k1 = TS[q + 1]; k < k1; k += step) {
+        if (kf < 1 && (k * .6180339887) % 1 > kf) continue;
         const j = k * 4, px = S[j], pz = S[j + 1];
         let py = .25 * Math.sin(S[j + 3] + ph) + .35 * Math.sin(sw + pz * .02 + px * .006);
         if (Re) py -= (px * px + pz * pz) / (2 * Re);
         const zc = z0 * px + z1 * py + z2 * pz + zb; if (zc < 2) continue;
         const iz = F / zc, sx = cx + (q0 * px + q1 * py + q2 * pz + qb) * iz; if (sx < 0 || sx >= BW) continue;
         const sy = cy - (w0 * px + w1 * py + w2 * pz + wb) * iz; if (sy < 0 || sy >= BH) continue;
-        let b = S[j + 2] * vis * (zc < 3000 ? 1 - zc / 6000 : .5) * (step > 1 ? 1.2 : 1);
+        let b = S[j + 2] * vis * (zc < 3000 ? 1 - zc / 6000 : .5) * lift;
         let cr = WH[0], cg = WH[1], cb = WH[2];
         if (lit > 0) { const dx = px - hx, dz = pz - hz, d = Math.sqrt(dx * dx + dz * dz); if (d < SCAN_R * 3) { const k2 = lit * .5 * Math.exp(-d / 120); cr += (LIME[0] - cr) * k2; cg += (LIME[1] - cg) * k2; cb += (LIME[2] - cb) * k2; b += k2 * .5; } }
         if (b < .02) continue;
@@ -942,7 +1000,7 @@ function makeSite(o) {
       // tendrils racing over the vehicle's points from where the fork hit
       if (age > 0 && age < TAGE) {
         const m = v.m, N = m.NF, TS_ = m.ts, PAR = m.par;
-        octx.globalCompositeOperation = 'lighter'; octx.lineWidth = 1.2; octx.strokeStyle = 'rgba(210,255,120,.85)'; octx.beginPath();
+        octx.globalCompositeOperation = 'lighter'; octx.lineWidth = 1.2 * SC; octx.strokeStyle = 'rgba(210,255,120,.85)'; octx.beginPath();
         for (let i = 0; i < TS_.length; i++) {
           const tn = TS_[i]; if (age < tn || age > tn + TDUR || PAR[i] < 0) continue;
           const p = X.ap(v.W, [N[i * 3], N[i * 3 + 1], N[i * 3 + 2]]), j = PAR[i], q = X.ap(v.W, [N[j * 3], N[j * 3 + 1], N[j * 3 + 2]]);
@@ -952,8 +1010,8 @@ function makeSite(o) {
         }
         octx.stroke(); octx.globalCompositeOperation = 'source-over';
       }
-      const box = boxOf(v.m.mn, v.m.mx, v.W, 4);
-      const px = box ? Math.max(box[2] - box[0], box[3] - box[1]) : 0;
+      const box = boxOf(v.m.mn, v.m.mx, v.W, 4 * SC);
+      const px = box ? Math.max(box[2] - box[0], box[3] - box[1]) / SC : 0;      // (stage px)
       // the track tag: unknown before, decoding during, settled coral after
       if (box && px > 18) {
         const k = E.sat((age - .5) / 1.6), conf = age < 0 ? .31 : .31 + .66 * E.ss(.4, 2.4, age);
@@ -963,24 +1021,24 @@ function makeSite(o) {
         const cls = settled ? 'coral sm' : age > 0 ? 'lime sm' : 'sm';
         const lab = age < 0 ? 'UNKNOWN' : dec;
         const ta = A * (age < -.2 ? .55 : 1) * (age > ID_END + 2 ? Math.max(.5, 1 - (age - ID_END - 2) / 1.5) : 1);
-        setTag(v.tag, idd, lab, conf.toFixed(2), cls, box[0], box[1] - 24, ta);
+        setTag(v.tag, idd, lab, conf.toFixed(2), cls, box[0], box[1] - 24 * SC, ta);
         if (age > 0 && age < ID_END) { const wa = A * E.sat(age / .2) * (1 - E.sat((age - ID_END + .6) / .6)); bracket(box, '#ffffff', wa * .9, 12); }
-        else if (px > 10) { octx.strokeStyle = settled ? '#FF6A3D' : 'rgba(255,255,255,.6)'; octx.globalAlpha = A * .7; octx.lineWidth = 1; const c = Math.min(8, px * .3); const [x0, y0, x1, y1] = box; octx.beginPath(); for (const [bx, by, sx, sy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x1, y1, -1, -1], [x0, y1, 1, -1]]) { octx.moveTo(bx + sx * c, by); octx.lineTo(bx, by); octx.lineTo(bx, by + sy * c); } octx.stroke(); octx.globalAlpha = 1; }
+        else if (px > 10) { octx.strokeStyle = settled ? '#FF6A3D' : 'rgba(255,255,255,.6)'; octx.globalAlpha = A * .7; octx.lineWidth = SC; const c = Math.min(8, px * .3) * SC; const [x0, y0, x1, y1] = box; octx.beginPath(); for (const [bx, by, sx, sy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x1, y1, -1, -1], [x0, y1, 1, -1]]) { octx.moveTo(bx + sx * c, by); octx.lineTo(bx, by); octx.lineTo(bx, by + sy * c); } octx.stroke(); octx.globalAlpha = 1; }
       }
       // part boxes, popping as the tendrils reach them, placards decoding
       if (age > 0 && age < ID_END && px > 90) {
         v.pick.forEach((q, kk) => {
           const t0 = PT0 + kk * PDT, a = age - t0; if (a < 0) return;
           const out = 1 - E.sat((age - ID_END + .5) / .5);
-          const b = boxOf(q.p.ml.mn, q.p.ml.mx, v.W, 2); if (!b) return;
+          const b = boxOf(q.p.ml.mn, q.p.ml.mx, v.W, 2 * SC); if (!b) return;
           const pop = E.sat(a / .12);
           const cxm = (b[0] + b[2]) / 2, cym = (b[1] + b[3]) / 2;
           const bb = [cxm + (b[0] - cxm) * (1.25 - .25 * pop), cym + (b[1] - cym) * (1.25 - .25 * pop), cxm + (b[2] - cxm) * (1.25 - .25 * pop), cym + (b[3] - cym) * (1.25 - .25 * pop)];
           bracket(bb, '#C6F432', A * out * (a < .1 ? (Math.floor(a * 60) % 2 ? .4 : 1) : 1), 9, 1.3);
           const lab = K.decode(q.lab, E.sat((a - .08) / .7), T, kk * 5 + v.seed);
-          const tx = kk % 2 ? bb[2] + 8 : bb[0] - 8 - K.tagW(q.tg);
-          setTag(q.tg, q.id, lab, '', 'lime sm', tx, kk % 2 ? bb[1] : bb[3] - 18, A * out);
-          leader(kk % 2 ? bb[2] : bb[0], kk % 2 ? bb[1] + 9 : bb[3] - 9, kk % 2 ? bb[2] + 8 : bb[0] - 8, kk % 2 ? bb[1] + 9 : bb[3] - 9, '#C6F432', .8 * A * out);
+          const tx = kk % 2 ? bb[2] + 8 * SC : bb[0] - (8 + K.tagW(q.tg)) * SC;
+          setTag(q.tg, q.id, lab, '', 'lime sm', tx, kk % 2 ? bb[1] : bb[3] - 18 * SC, A * out);
+          leader(kk % 2 ? bb[2] : bb[0], kk % 2 ? bb[1] + 9 * SC : bb[3] - 9 * SC, kk % 2 ? bb[2] + 8 * SC : bb[0] - 8 * SC, kk % 2 ? bb[1] + 9 * SC : bb[3] - 9 * SC, '#C6F432', .8 * A * out);
         });
       }
     }

@@ -8,7 +8,9 @@
    FILM.run({ duration, chapters: [{t, title, sub}], render(T, info), update?(dt, T),
               onChapter?(ch, quiet), cues?: [[t, fn]] })
    Keys: P/K pause · J/L -5/+5 s (Shift ±1 s) · , . chapter · 0-9 jump · H hide UI
-         T pin timeline · [ ] other films · Backspace gallery · M sound */
+         T pin timeline · [ ] other films · Backspace gallery · M sound
+   ?res=1080|1440|2160 (STAGE.RES: films that support it draw their raster at that size), ?render=1 hands the page
+   to common/render.js (a video render: no clock, FILM.seek per frame; FILM.cues for the offline sound mix) */
 (function () {
   const FILMS = [
     ['oa_scale', 'Orbital A', 'Scale'],
@@ -37,7 +39,7 @@
     ['pc_orbital_railgun', 'Orbital', 'Railgun'],
   ];
   const Q = STAGE.Q, PAGE = STAGE.PAGE;
-  const FROZEN = Q.has('t'), CLEAN = Q.has('clean') || Q.has('capture');
+  const FROZEN = Q.has('t'), RENDER = STAGE.RENDER, CLEAN = Q.has('clean') || Q.has('capture') || RENDER;
   const fmt = s => { s = Math.max(0, s); return `${String(Math.floor(s / 60)).padStart(2, '0')}:${(s % 60).toFixed(1).padStart(4, '0')}`; };
 
   const FILM = {
@@ -108,6 +110,7 @@
     FILM.chapters = (sc.chapters || []).slice().sort((a, b) => a.t - b.t);
     const cues = (sc.cues || []).slice();
     FILM.cue = (t, fn) => cues.push([t, fn]);
+    FILM.cues = cues;                                     // (film time, fn): the offline audio mix of a render plays these
     const trap = f => f && ((...a) => { try { return f(...a); } catch (e) { STAGE.err = e.stack; console.error(e.stack); throw e; } });
     const render = trap(sc.render), update = trap(sc.update), onChapter = trap(sc.onChapter);
     const chapterAt = t => { let c = FILM.chapters[0] || null; for (const ch of FILM.chapters) if (ch.t <= t + 1e-9) c = ch; return c; };
@@ -136,6 +139,8 @@
     };
     buildBar(); ticks();
 
+    // a video render (common/render.js) steps the frames itself: FILM.seek at each frame time, nothing on the clock
+    if (RENDER) { FILM.playing = false; STAGE.ready = true; if (window.RENDER) window.RENDER.begin(); return; }
     if (FROZEN) {
       FILM.playing = false; FILM.seek(parseFloat(Q.get('t')));
       STAGE.ready = true;
@@ -185,7 +190,7 @@
 
   /* version tag, like the menus */
   addEventListener('DOMContentLoaded', () => {
-    if (FROZEN || Q.has('clean')) return;
+    if (FROZEN || Q.has('clean') || RENDER) return;
     const v = FILMS.find(f => f[0] === PAGE); if (!v) return;
     const d = document.createElement('div');
     d.style.cssText = 'position:fixed;left:50%;top:14px;transform:translateX(-50%);font:500 11px/1 Consolas,monospace;letter-spacing:.08em;text-transform:uppercase;color:rgba(255,255,255,.42);z-index:99;pointer-events:none;transition:opacity 1.2s;white-space:nowrap';

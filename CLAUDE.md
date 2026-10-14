@@ -55,6 +55,7 @@ PATH; call it from PowerShell by full path).
 | Serve and watch | `python tools/serve.py`, open http://localhost:8770/films/index.html |
 | Stills | open `/films/_shoot.html?s=<film>@t1,t2` → `reference/films/shots/<film>_t<sec>.png` (gitignored) |
 | Gallery thumbs | list moments in `reference/films/_thumbs.py`, run it |
+| Film → MP4 (YouTube) | `python tools/render_film.py <film> [--from s --to s]` → `reference/films/renders/<film>_1440p60.mp4` (gitignored; 1440p60, max quality `hq=1`, H.264 CRF 14 + AAC; resumable; starts `tools/serve.py 8772`, opens `/films/<film>.html?render=1&res=1440&fps=60&hq=1`); the page needs `common/render.js` after `film.js`; how it works: `reference/films/common/render.js` header |
 | Film keys | P pause · J/L ±5 s · , . chapter · H hide UI · [ ] films · M sound |
 
 ## Kit
