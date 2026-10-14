@@ -296,6 +296,32 @@ function round_() {
   for (let k = 0; k < 3; k++) { const a = k / 3 * TAU + .3; P.push(G.line([[Math.cos(a) * .101, Math.sin(a) * .101, -RND_H + .02], [Math.cos(a) * .101, Math.sin(a) * .101, .2]], F())); }
   return P;
 }
+/* a sabot petal (one of three round the round, local: the round's frame, the petal centred on +X): a 116° shell
+   slice from the base to the scoop, its lip flared to catch the air at the muzzle */
+const SAB_A = 58 * DEG;
+function sabotPetal() {
+  const P = [], n = 6, z0 = -RND_H - .02, z1 = .2, z2 = .27;
+  const at = (a, r, z) => [Math.cos(a) * r, Math.sin(a) * r, z];
+  for (let k = 0; k < n; k++) {
+    const a0 = -SAB_A + 2 * SAB_A * k / n, a1 = -SAB_A + 2 * SAB_A * (k + 1) / n;
+    P.push(G.hex([at(a0, .103, z0), at(a1, .103, z0), at(a1, .103, z1), at(a0, .103, z1), at(a0, .132, z0), at(a1, .132, z0), at(a1, .132, z1), at(a0, .132, z1)], { ds: .7 }));
+    P.push(G.hex([at(a0, .106, z1), at(a1, .106, z1), at(a1, .12, z2), at(a0, .12, z2), at(a0, .132, z1), at(a1, .132, z1), at(a1, .158, z2), at(a0, .158, z2)], F({ ds: .7 })));
+  }
+  for (const z of [z0 + .08, -.1, .1]) { const L = []; for (let k = 0; k <= 12; k++) L.push(at(-SAB_A + 2 * SAB_A * k / 12, .134, z)); P.push(G.line(L, F())); }
+  return P;
+}
+/* the armature behind the round (local: the round's frame): a C block whose legs ride the rails (top and bottom),
+   its back plate the face the current drives */
+function armature() {
+  const z0 = -RND_H - .13, z1 = -RND_H - .085, z2 = -RND_H - .01, P = [];
+  P.push(G.box([-.09, -.137, z0], [.09, .137, z1], { ds: .7 }));
+  for (const s of [-1, 1]) {
+    P.push(G.box([-.09, s > 0 ? .085 : -.137, z1], [.09, s > 0 ? .137 : -.085, z2], { ds: .7 }));
+    for (const x of [-.06, 0, .06]) P.push(G.line([[x, s * .138, z0 + .01], [x, s * .138, z2 - .005]], F()));
+  }
+  P.push(G.line([[-.07, -.06, z0 - .002], [.07, -.06, z0 - .002], [.07, .06, z0 - .002], [-.07, .06, z0 - .002], [-.07, -.06, z0 - .002]], F()));
+  return P;
+}
 /* ship: the magazine drum (local: column axis, base at y 0) rotates; its base ring and the drive motor stay */
 function drum() {
   const P = [G.lathe([0, 0, 0], [0, 1, 0], [[0, 1.25], [.9, 1.25], [.9, .62], [0, .62]], {})];
@@ -732,7 +758,7 @@ function build() {
     turret: lod(turret(), .8, LB), rear: lod(barrelRear(), .8), breech: lod(breechBlock()), jawS: lod(jaw(1), .5), jawP: lod(jaw(-1), .5),
     railsR: lod(barrelRails(RZ1)), coverS: lod(cover(1)), coverP: lod(cover(-1)),
     sleeve: lod(sleeve(), .8), railsE: lod(sleeveRails()), petalT: lod(petal(1)), petalB: lod(petal(-1)),
-    round: lod(round_(), .5), drum: lod(drum(), .8), pinion: lod(pinion(), .5), hoist: lod(hoist(), .8), carriage: lod(carriage(), .5), tray: lod(tray(), .5),
+    round: lod(round_(), .5), sabot: lod(sabotPetal(), .4), arm: lod(armature(), .4), drum: lod(drum(), .8), pinion: lod(pinion(), .5), hoist: lod(hoist(), .8), carriage: lod(carriage(), .5), tray: lod(tray(), .5),
     body: lod(altBody(), .8), bell: lod(altBell(), .8), exc: lod(altExciter(), .8), fan: lod(altFan(), .6), rotor: lod(altRotor(), .8),
     module: lod(module_(), .5), racks: lod(racks(), .9, LB), cab: lod(cabinets(), .9, LB), breaker: lod(breaker(), .5),
     cool: lod(coolStatic(), .9, LB), coupling: lod(coupling(), .5), wheel: lod(handwheel(), .5),
@@ -751,6 +777,7 @@ window.RGP = {
   HATCH_HINGE, COVER_HINGE, PETAL_HINGE, RAM_H, RAM_C, TUR_OCC, BR_OCC, RACK_OCC, CAB_OCC, RISERS,
   BUS_A: BUS_A.map(poly), BUS_B: BUS_B.map(poly), BUS_C: BUS_C.map(poly),
   COOL: [1, -1].flatMap(s => [COOL_S(s), COOL_R(s)]).concat(PUMPS.map(p => COOL_P(p[0]))).map(poly),
+  sampleLat, lod, LV, LB, quadL, lineL, ringL, perp, bar, bars, pipes, circ, boxY, boxZ, hullAt, sec, hD,
   poly, polyAt, XS, drawX, build, occReset, occHex, occd, odot, oglow, np: () => { const n = NP; NP = 0; return n; },
 };
 })();

@@ -14,6 +14,19 @@ const LIME = [198, 244, 50], CORAL = [255, 106, 61], WH = [238, 238, 228], HOT =
 const BW = 1920, BH = 1080;
 const $ = id => document.getElementById(id);
 const K = { LIME, CORAL, WH, HOT, BW, BH, PI, TAU, DEG };
+/* dot density K.DQ divides the LOD's on-screen dot spacings, so near surfaces draw finer levels. ?dq= fixes it;
+   stills (?capture) draw at the top density; playback governs it from the render time (K.govern(ms) after each
+   played frame) between DQ_MIN and DQ_MAX, holding about 15 ms */
+const DQ_MIN = 1, DQ_MAX = 2.2;
+const DQ_Q = (() => { let q = new URLSearchParams(location.search).get('dq'); try { if (!q && window.parent !== window) q = new URLSearchParams(parent.location.search).get('dq'); } catch (e) {} return q ? Math.max(.5, +q) : 0; })();
+K.DQ = DQ_Q || (new URLSearchParams(location.search).has('capture') ? DQ_MAX : 1.6);
+let DQ_EMA = 14;
+K.govern = (ms, info) => {
+  if (DQ_Q || !info || !info.playing || info.seeking || !(ms > 0) || ms > 200) return;
+  DQ_EMA += (ms - DQ_EMA) * .08;
+  if (DQ_EMA > 15.5) K.DQ = Math.max(DQ_MIN, K.DQ * (1 - .02 * Math.min(3, (DQ_EMA - 15.5) / 2 + .5)));
+  else if (DQ_EMA < 12) K.DQ = Math.min(DQ_MAX, K.DQ * 1.006);
+};
 let pb = null, D = null, C = null, octx = null;
 
 function setup() {
@@ -284,7 +297,7 @@ function runPts(P, i0, i1, sp, o) {
 let NPTS = 0;
 function drawLod(ml, Tw, o) {
   prep(Tw);
-  const CH = ml.ch, SD = ml.sd, nl = ml.nl, F = C.fl, oo = opt(o), PX = oo.px, PX0 = oo.px0;
+  const CH = ml.ch, SD = ml.sd, nl = ml.nl, F = C.fl, oo = opt(o), PX = oo.px / K.DQ, PX0 = oo.px0;
   const ex = XM[12], ey = XM[13], ez = XM[14];
   for (let c = 0; c < ml.nch; c++) {
     const q = c * SD, mx = CH[q], my = CH[q + 1], mz = CH[q + 2], rad = CH[q + 3];
@@ -602,7 +615,11 @@ Object.assign(K, { mkTag, setTag, beginTags, endTags, decode, flicker, bracket, 
 
 /* ---------- the scan site: a coastal battery on a headland ----------
    Site frame: metres, origin on the plateau, +Z inland (north), sea to the south. o: { xf (site -> world),
-   seaR (radius of the site's own sea, m), landR (m), curve (Earth radius: drop far points under the horizon) } */
+   seaR (radius of the site's own sea, m), landR (m), curve (Earth radius: drop far points under the horizon),
+   the scan's pace: tF (per vehicle, s after the stroke), chain (per vehicle: the vehicle its fork leaps from, -1 the
+   strike), tv (tendril speed m/s), tdur (a tendril's life s), tAge (tendrils' window s), revV (the reveal front's
+   speed m/s), revA (reveal window s), idEnd, partT0, partDt (part boxes), fineR / fineSp (a finer ground round the
+   battery) } */
 function coastZ(x) { return -430 + 170 * noise(x / 900, 1.3) + 55 * noise(x / 260, 4.1) - 200 * E.ss(600, 2400, Math.abs(x)) + 260 * noise(x / 4200, 7.7); }
 const VEH_DEF = [
   // key, model, site x, z, yaw, state, id chip, class, track label
@@ -618,6 +635,8 @@ const PART_PICK = {
 };
 function makeSite(o) {
   const XF = o.xf || X.make();
+  const TV = o.tv || 11, TDUR = o.tdur || .2, TAGE = o.tAge || 2.2, REVV = o.revV || 11, REVA = o.revA || 6;
+  const PT0 = o.partT0 || .5, PDT = o.partDt || .32, FINE_R = o.fineR || 0, FINE_SP = o.fineSp || .8, NEAR_DIM = o.nearDim || 1;
   const seaR = o.seaR || 3000, landR = o.landR || 12000, Re = o.curve || 0;
   // vehicles first (the berms need their spots)
   const V_ = VEH_DEF.map(([key, kind, x, z, yaw, st, chip, lab]) => ({ key, kind, x, z, yaw, st, chip, lab }));
@@ -670,6 +689,7 @@ function makeSite(o) {
     for (let x = -ext; x < ext; x += sL) for (let z = -ext; z < ext; z += sL) {
       const xx = x + (r() - .5) * sL * .7, zz = z + (r() - .5) * sL * .7, rr = Math.hypot(xx, zz - 10);
       if (rr < rmin || rr > rmax || rr > landR) { r(); continue; }
+      if (FINE_R) { const fr_ = Math.hypot(xx - 5, zz - 20); if (fr_ < FINE_R && r() > E.ss(FINE_R * .55, FINE_R, fr_)) continue; }
       const sp = spAt(xx, zz);
       if (sp < sL * .999 || sp >= sL * 2) { r(); continue; }
       if (r() > (sL / sp) * (sL / sp)) continue;
@@ -677,7 +697,14 @@ function makeSite(o) {
       addAt(xx, zz, sp);
     }
   }
-  const LAND = tiled(new Float32Array(LA), 4, 160);
+  // the plateau round the battery at a finer spacing (close passes)
+  if (FINE_R) for (let x = -FINE_R; x <= FINE_R; x += FINE_SP) for (let z = -FINE_R; z <= FINE_R; z += FINE_SP) {
+    const xx = 5 + x + (r() - .5) * FINE_SP * .7, zz = 20 + z + (r() - .5) * FINE_SP * .7, fr_ = Math.hypot(xx - 5, zz - 20);
+    if (fr_ >= FINE_R || zz < coastZ(xx) - 5) continue;
+    if (r() > 1 - E.ss(FINE_R * .55, FINE_R, fr_)) continue;      // thins out to the coarse grid's density at the rim
+    addAt(xx, zz, FINE_SP);
+  }
+  const LAND = tiled(new Float32Array(LA), 4, FINE_R ? 80 : 160);
   // sea: x, z, brightness, phase (site frame), rings round the plateau
   const SA = [], rs = rng(5502);
   for (let rad = 20; rad < seaR; rad += 2 + rad * .02) {
@@ -712,7 +739,7 @@ function makeSite(o) {
     const rr = rng(909 + kind.length * 31);
     for (let i = nodes.length - 1; i > 0; i--) { const j = Math.floor(rr() * (i + 1)); const t = nodes[i]; nodes[i] = nodes[j]; nodes[j] = t; }
     nodes.length = Math.min(nodes.length, 340);
-    const ts = nodes.map(q => V.dist(q, sp) / 11 * (1 + .45 * rr()));
+    const ts = nodes.map(q => V.dist(q, sp) / TV * (1 + .45 * rr()));
     const ord = nodes.map((_, i) => i).sort((a, b) => ts[a] - ts[b]);
     const par = new Int32Array(nodes.length).fill(-1);
     for (let k = 1; k < ord.length; k++) {
@@ -747,11 +774,12 @@ function makeSite(o) {
   const SCAN_R = 110;
   V_.forEach((v, k) => {
     const d = Math.hypot(v.x - hitL[0], v.z - hitL[2]);
-    v.tF = .12 + .42 * d / SCAN_R + .08 * k;
-    v.fork = new Fork({ from: hitW, to: v.spW, seed: 61 + k * 17, ground: groundW });
+    v.tF = o.tF ? o.tF[k] : .12 + .42 * d / SCAN_R + .08 * k;
+    const ch = o.chain ? o.chain[k] : -1;
+    v.fork = new Fork({ from: ch >= 0 ? V_[ch].spW : hitW, to: v.spW, seed: 61 + k * 17, ground: groundW });
   });
   const tAll = Math.max(...V_.map(v => v.tF)) + .04;
-  const TF = 2.3, ID_END = 5.2;
+  const TF = 2.3, ID_END = o.idEnd || 5.2;
 
   const site = { XF, ground, groundW, coastZ, V: V_, hitW, hitL, SCAN_R, tAll, LAND, SEA, ONX, onXf, Re };
 
@@ -782,14 +810,14 @@ function makeSite(o) {
       if (!wIn(wx, wy, wz, TL[q + 5])) continue;
       const zt = WZ[0], np = TL[q + 1] - TL[q];
       const spT = 160 / Math.sqrt(np), dsp = spT * F / Math.max(1, zt);
-      const step = dsp >= 2.3 ? 1 : Math.min(40, Math.round(2.3 * 2.3 / (dsp * dsp)));
+      const s0 = 2.3 / K.DQ, step = dsp >= s0 ? 1 : Math.min(40, Math.round(s0 * s0 / (dsp * dsp)));
       const fadeD = zt < 3000 ? 1 : zt < 40000 ? .8 : .6;
       for (let k = TL[q] + ((tt * 7) % step), k1 = TL[q + 1]; k < k1; k += step) {
         const j = k * 4, px = L[j], py = L[j + 1], pz = L[j + 2];
         const zc = z0 * px + z1 * py + z2 * pz + zb; if (zc < 2) continue;
         const iz = F / zc, sx = cx + (q0 * px + q1 * py + q2 * pz + qb) * iz; if (sx < 0 || sx >= BW) continue;
         const sy = cy - (w0 * px + w1 * py + w2 * pz + wb) * iz; if (sy < 0 || sy >= BH) continue;
-        let b = L[j + 3] * vis * fadeD * (zc < 1500 ? 1 - zc / 5000 : .7);
+        let b = L[j + 3] * vis * fadeD * (zc < 1500 ? 1 - zc / 5000 : .7) * (zc < 160 ? NEAR_DIM + (1 - NEAR_DIM) * zc / 160 : 1);
         const ds = spT * iz;
         let cr = WH[0], cg = WH[1], cb = WH[2];
         if (fr > 0) {
@@ -829,13 +857,33 @@ function makeSite(o) {
   /* the vehicles: dim unknowns before the scan; tendrils, flare, X-ray, then settled */
   const VO = { a: 1.2, fade: 1400, rev: null, keep: 1, lime: 0, tint: null, tk: 0, px: 3 };
   const REV = { x: 0, y: 0, z: 0, age: 0, v: 11, pre: .55, after: 0 };
+  /* arcs crawling over a vehicle along the reveal front: pairs of its tendril nodes at the front's distance */
+  const CA_ = [0, 0, 0], CB_ = [0, 0, 0];
+  function crawl(v, age) {
+    if (!o.crawl || age < 0 || age > REVA * .75) return;
+    const m = v.m, N = m.NF, n = N.length / 3, fr = Math.floor(age * 30), front = age * REVV, I = Math.min(1, age * 4) * (1 - E.ss(REVA * .5, REVA * .75, age));
+    const sp = m.sp, W = v.W;
+    let made = 0;
+    for (let k = 0; k < 40 && made < o.crawl; k++) {
+      const i = Math.floor(hh(v.seed + k * 3.1, fr) * n), j = Math.floor(hh(v.seed + k * 7.7, fr + 1) * n);
+      const di = Math.hypot(N[i * 3] - sp[0], N[i * 3 + 1] - sp[1], N[i * 3 + 2] - sp[2]);
+      if (Math.abs(di - front) > 1.6) continue;
+      const dj = Math.hypot(N[i * 3] - N[j * 3], N[i * 3 + 1] - N[j * 3 + 1], N[i * 3 + 2] - N[j * 3 + 2]);
+      if (dj > 3.2 || dj < .5) continue;
+      const a = X.ap(W, [N[i * 3], N[i * 3 + 1], N[i * 3 + 2]]), b = X.ap(W, [N[j * 3], N[j * 3 + 1], N[j * 3 + 2]]);
+      CA_[0] = a[0]; CA_[1] = a[1]; CA_[2] = a[2]; CB_[0] = b[0]; CB_[1] = b[1]; CB_[2] = b[2];
+      arcW(CA_, CB_, v.seed + k + fr * .1, age, I, .55);
+      made++;
+    }
+  }
   function drawVehicles(tb) {
     for (const v of V_) {
       const age = tb === null ? -9 : tb - v.tF;
+      crawl(v, age);
       const xr = v.kind === 'tel' ? K.flicker(age, 1.1, 3.9) : 0;
       for (const p of v.m.parts) {
         VO.rev = null; VO.keep = 1; VO.a = 1.2; VO.tint = null; VO.tk = 0;
-        if (age > -1 && age < 6) { REV.x = v.m.sp[0]; REV.y = v.m.sp[1]; REV.z = v.m.sp[2]; REV.age = age; REV.pre = .8; REV.after = .1 * Math.exp(-Math.max(0, age - 1) * .6); VO.rev = REV; }
+        if (age > -1 && age < REVA) { REV.x = v.m.sp[0]; REV.y = v.m.sp[1]; REV.z = v.m.sp[2]; REV.v = REVV; REV.age = age; REV.pre = .8; REV.after = .1 * Math.exp(-Math.max(0, age - 1) * .6); VO.rev = REV; }
         if (xr > 0 && (p.name === 'launcher' || p.name === 'capL' || p.name === 'capR')) VO.keep = 1 - .72 * xr;
         drawLod(p.ml, v.W, VO);
       }
@@ -888,11 +936,11 @@ function makeSite(o) {
     for (const v of V_) {
       const age = tb === null ? -9 : tb - v.tF;
       // tendrils racing over the vehicle's points from where the fork hit
-      if (age > 0 && age < 2.2) {
+      if (age > 0 && age < TAGE) {
         const m = v.m, N = m.NF, TS_ = m.ts, PAR = m.par;
         octx.globalCompositeOperation = 'lighter'; octx.lineWidth = 1.2; octx.strokeStyle = 'rgba(210,255,120,.85)'; octx.beginPath();
         for (let i = 0; i < TS_.length; i++) {
-          const tn = TS_[i]; if (age < tn || age > tn + .2 || PAR[i] < 0) continue;
+          const tn = TS_[i]; if (age < tn || age > tn + TDUR || PAR[i] < 0) continue;
           const p = X.ap(v.W, [N[i * 3], N[i * 3 + 1], N[i * 3 + 2]]), j = PAR[i], q = X.ap(v.W, [N[j * 3], N[j * 3 + 1], N[j * 3 + 2]]);
           if (!pj(p[0], p[1], p[2])) continue; const x0 = PJ[0], y0 = PJ[1];
           if (!pj(q[0], q[1], q[2])) continue;
@@ -918,7 +966,7 @@ function makeSite(o) {
       // part boxes, popping as the tendrils reach them, placards decoding
       if (age > 0 && age < ID_END && px > 90) {
         v.pick.forEach((q, kk) => {
-          const t0 = .5 + kk * .32, a = age - t0; if (a < 0) return;
+          const t0 = PT0 + kk * PDT, a = age - t0; if (a < 0) return;
           const out = 1 - E.sat((age - ID_END + .5) / .5);
           const b = boxOf(q.p.ml.mn, q.p.ml.mx, v.W, 2); if (!b) return;
           const pop = E.sat(a / .12);

@@ -30,23 +30,21 @@ const veil = $('veil');
 STAGE.menu({ el: menuEl, blurb: $('blurb'), axis: 'h', onEnter(i) { if (i === 4) { veil.classList.add('on'); setTimeout(() => veil.classList.remove('on'), 1900); return 2600; } return 1900; } });
 
 /* ---------- time ---------- */
-const DUR = 60;
+const DUR = 82;
 const T_BANK = 19.8, T_BANK1 = 23.2;                                  // racks charge
-const T_LD = 23.9, T_RAIL = T_LD + 3.3, TF = 32.0;                    // loader, rails charge, fire
-const LD = t => T_LD + t;
-const FLY = 4.2, TBU = TF + FLY, LEAD = 1.0, TB = TBU + .08 + LEAD;  // burst, the return stroke
-const TRET0 = 44.3, TRET1 = 52.4;                                       // the lens leaves the site, reaches the ship
-const SH = 2.6;                                                       // the stow runs this much later than in the 58 s cut
-const CHAPTERS = [
-  { t: 0, title: 'Station' }, { t: 4, title: 'Mount' }, { t: 12.6, title: 'Power' }, { t: T_LD, title: 'Load' }, { t: T_RAIL, title: 'Charge' },
-  { t: TF, title: 'Fire' }, { t: TBU, title: 'Strike' }, { t: TB + .4, title: 'Scan' }, { t: 48.4 + SH - .6, title: 'Stow' },
-];
+/* loader time -> film time: the loader holds XH s with the round at the top of the hoist (its exploded view) */
+const T_LD = 23.9, XH = 1.8, LD = t => T_LD + t + (t > 1.355 ? XH : 0), T_XP = T_LD + 1.35;
+const T_RAIL = LD(3.3), TF = T_RAIL + 4.8;                            // rails charge, the round leaves the muzzle
+const TRET1 = DUR - 7.6;                                              // the lens reaches the ship (it leaves the site at TRET0)
+const SH = 2.6 + (TRET1 - 52.4);                                      // the stow runs this much later than in the 58 s cut
 const kk = (T, a, b) => E.inOut(E.sat((T - a) / (b - a)));
 const pulse = (T, a, b) => kk(T, a, b);
 
 /* ---------- the world: the ship on station, the coast 17 km to the north-north-east ---------- */
 const S_POS = [7200, 0, 15600], PSI = Math.atan2(S_POS[0], S_POS[2]);
-const SITE = K.makeSite({ xf: X.make(R.y(PSI), S_POS), seaR: 3100, landR: 14000 });
+/* the scan walks the battery one vehicle at a time, the chain lightning leaping on from the last (tel2, sam, rdr, tel1) */
+const SITE = K.makeSite({ xf: X.make(R.y(PSI), S_POS), seaR: 3100, landR: 14000, tF: [14.9, 2.9, 10.9, 6.9], chain: [2, -1, 3, 1], nearDim: .55,
+  tv: 4.2, tdur: .4, tAge: 4.8, revV: 4.4, revA: 8, crawl: 7, idEnd: 6.2, partT0: .8, partDt: .6, fineR: 72, fineSp: .7 });
 const S_HIT = SITE.hitW, S_LOOK = X.ap(SITE.XF, [5, 21, 15]);
 const RANGE = Math.hypot(S_HIT[0], S_HIT[2]);
 LOG.push(`site ${(performance.now() - t0load).toFixed(0)} ms`);
@@ -70,7 +68,9 @@ const SEA = (() => {
 const STARS = K.stars(2400, 9);
 
 /* ---------- the destroyer (the Mk 45 left out: the railgun takes its seat) and the mount ---------- */
-const SHIP = K.lodModel(HD.destroyer(), {}, [.12, .24, .48, .96, 1.92], 101, 1.4, ['gun']);
+/* the ship's fine detail (pc_scan_railgun_ship.js, optional): lattice parts that replace some of HD.destroyer's */
+const SHIPX = window.RGS ? RGS.build(P_) : { skip: [], parts: [] };
+const SHIP = K.lodModel(HD.destroyer(), {}, [.12, .24, .48, .96, 1.92], 101, 1.4, ['gun', ...SHIPX.skip]);
 LOG.push(`ship ${(performance.now() - t0load).toFixed(0)} ms`);
 const CL = P_.build();
 LOG.push(`unit ${(performance.now() - t0load).toFixed(0)} ms (parts ${CL.ms.toFixed(0)}, ${(CL.n0 / 1e6).toFixed(2)} M fine pts)`);
@@ -79,6 +79,20 @@ function shipW(T) {
   const roll = .5 * DEG * Math.sin(TAU * T / 12), pitch = .2 * DEG * Math.sin(TAU * T / 7.5 + 1.1), heave = .12 * Math.sin(TAU * T / 6);
   return X.make(R.mul(R.x(pitch), R.z(roll)), [0, heave, 0]);
 }
+
+/* ---------- the shot's clock: real time to the release, x0.01 through the bore and out of the muzzle, back to x1
+   for the flight. simAt(T): sim s since the round left the muzzle (negative before) ---------- */
+const V0 = 2300, V1 = 900;                                            // muzzle 2 300 m/s, 900 m/s at the burst
+const LB_ = P_.SLV1 + .06 + P_.EXT - P_.SEAT_Z;                       // bore travel, seated round -> muzzle (m)
+const T_BORE = 2 * LB_ / V0, ACC = V0 / T_BORE;                       // its time in the bore (uniform acceleration)
+const SLO = .01, W0 = TF - 1.4;
+const SIMW = FILM.warp([{ t: 0, rate: 1 }, { t: .2, rate: SLO }, { t: 2.3, rate: SLO }, { t: 4.0, rate: 1 }, { t: 40, rate: 1 }]);
+const SIMW0 = SIMW(1.4);
+const simAt = T => T < W0 ? T - W0 - SIMW0 : SIMW(Math.min(40, T - W0)) - SIMW0 + Math.max(0, T - W0 - 40);
+const simRate = T => T < W0 || T - W0 > 40 ? 1 : SIMW.rate(T - W0);
+const filmAt = sim => { let lo = W0 - 30, hi = W0 + 39; for (let k = 0; k < 60; k++) { const m = (lo + hi) / 2; if (simAt(m) < sim) lo = m; else hi = m; } return (lo + hi) / 2; };
+const T_REL = filmAt(-T_BORE);                                        // the breech releases the round
+const roundZ = T => { const tau = Math.max(0, simAt(T) + T_BORE); return P_.SEAT_Z + .5 * ACC * tau * tau; };   // its centre in the bore (B z)
 
 /* ---------- the mount's, the room's and the loader's state in film time ---------- */
 const AZ = PSI, EL = P_.EL_LOAD, HAT = 105 * DEG, COV = 125 * DEG, PET = 115 * DEG;
@@ -93,7 +107,7 @@ const modLvl = (k, T) => E.ss(modT(k), modT(k) + .3, T) * (1 - E.ss(TF, TF + .12
 const brkT = r => modT(r * 20) - .3;
 const nCharged = T => { let n = 0; for (let k = 0; k < NMOD; k++) if (modLvl(k, T) > .98) n++; return n; };
 const clampT = k => LD(2.6) + k * .055;
-const ST = { hatch: 0, petal: 0, yaw: 0, el: 0, ext: 0, covS: 0, covP: 0, rec: 0, rot: 0, rate: 0, rotX: 0, rateX: 0, chg: 0, glow: 0,
+const ST = { xp: 0, hatch: 0, petal: 0, yaw: 0, el: 0, ext: 0, covS: 0, covP: 0, rec: 0, rot: 0, rate: 0, rotX: 0, rateX: 0, chg: 0, glow: 0,
   rod: 0, bell: 0, rtr: 0, pump: 0, pumpR: 0, fan: 0, fanR: 0, drum: 0, hoistY: 0, rnd: 0, tray: 0, brc: 0, ram: 0, gh: 0, jaw: new Float64Array(P_.BANDS.length), valve: 0 };
 const HOIST_B = P_.RND_Y0 - P_.GY;                                    // the round's centre in the drum (T y)
 function stateAt(T) {
@@ -109,14 +123,14 @@ function stateAt(T) {
   s.rod = kk(T, 14.7, 15.2) * (1 - kk(T, 18.0, 18.4));
   s.bell = 1.2 * kk(T, 15.1, 15.9) * (1 - kk(T, 17.4, 18.1));
   s.rtr = .95 * kk(T, 15.7, 16.5) * (1 - kk(T, 16.9, 17.6));
-  const a = T - TF;
-  s.rec = a > 0 && a < 1.6 ? .55 * (a < .015 ? a / .015 : Math.exp(-(a - .015) * 4.2)) : 0;
+  const a = T - TF, ar = T > TF - 1.6 ? simAt(T) + T_BORE : -1;      // sim s since the round was released
+  s.rec = ar > 0 && ar < 1.6 ? .55 * (ar < .015 ? ar / .015 : Math.exp(-(ar - .015) * 4.2)) : 0;
   s.rot = ROTW(T) * VIS_REV * TAU; s.rate = ROTW.rate(T);
   s.rotX = ROTX(T) * VIS_REV * TAU; s.rateX = ROTX.rate(T);
   s.pump = PUMPW(T) * 4 * TAU; s.pumpR = PUMPW.rate(T);
   s.fan = FANW(T) * 3 * TAU; s.fanR = FANW.rate(T);
   s.valve = kk(T, 13.9, 15.2) * 1.5 * TAU;
-  s.chg = E.ss(T_RAIL, TF - .3, T) * (T < TF ? 1 : 0);
+  s.chg = E.ss(T_RAIL, T_REL - .3, T) * (1 - E.ss(T_REL - .02, T_REL + .25, T));
   s.glow = a > 0 ? Math.exp(-a * 1.2) : 0;
   // the loader
   s.drum = kk(T, T_LD, T_LD + .5);                                      // one cell (30°)
@@ -124,8 +138,9 @@ function stateAt(T) {
   s.tray = (90 * DEG - EL) * (kk(T, LD(.1), LD(.6)) * (1 - kk(T, LD(1.4), LD(1.85))));
   const up = kk(T, LD(.45), LD(1.35)), down = kk(T, LD(1.45), LD(2.3));
   s.hoistY = HOIST_B + (P_.HY1 - HOIST_B) * up * (1 - down);
-  s.rnd = T < LD(.45) ? 0 : T < LD(1.35) ? 1 : T < TF ? 2 : 3;               // in the drum, on the hoist, in the tray / breech, fired
+  s.rnd = T < LD(.45) ? 0 : T < LD(1.35) ? 1 : T < T_REL ? 2 : 3;            // in the drum, on the hoist, in the tray / breech, fired
   s.ram = kk(T, LD(1.85), LD(2.2));
+  s.xp = kk(T, T_XP + .15, T_XP + .75) * (1 - kk(T, T_XP + XH - .6, T_XP + XH - .05));     // the round's exploded view
   s.brc = kk(T, LD(.8), LD(1.2)) * (1 - kk(T, LD(2.25), LD(2.6)));
   const un = kk(T, LD(.5), LD(.75));
   for (let k = 0; k < s.jaw.length; k++) s.jaw[k] = un * (1 - kk(T, clampT(k), clampT(k) + .12));
@@ -190,15 +205,25 @@ const B_C = V.mad(MZ0, DIR0, HB / Math.sin(EL));
 const bez = (u, out) => { const a = (1 - u) * (1 - u), b = 2 * u * (1 - u), c = u * u; for (let k = 0; k < 3; k++) out[k] = a * MZ0[k] + b * B_C[k] + c * B_TOP[k]; return out; };
 const ARC = (() => { const n = 400, L = new Float64Array(n + 1), p = [0, 0, 0], q = [0, 0, 0]; bez(0, p); for (let i = 1; i <= n; i++) { bez(i / n, q); L[i] = L[i - 1] + V.dist(p, q); p[0] = q[0]; p[1] = q[1]; p[2] = q[2]; } return { L, n, len: L[n] }; })();
 const uOfD = d => { const L = ARC.L; let lo = 0, hi = ARC.n; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (L[m] < d) lo = m; else hi = m; } return (lo + (d - L[lo]) / Math.max(1e-6, L[hi] - L[lo])) / ARC.n; };
-const V0 = 2300, V1 = 900, S1 = 2 * ARC.len / (V0 + V1);                     // muzzle 2 300 m/s, 900 m/s at the burst
+const S1 = 2 * ARC.len / (V0 + V1);
 const dOfS = s => V0 * s - (V0 - V1) / (2 * S1) * s * s;
 const vOfS = s => V0 - (V0 - V1) * s / S1;
-const WARP = FILM.warp([{ t: 0, rate: 1 }, { t: .35, rate: 1 }, { t: 1.4, rate: 3 }, { t: 3.2, rate: 3 }, { t: FLY, rate: 1.6 }]);
-const WS = S1 / WARP.total;
-const climbS = T => T <= TF ? 0 : T >= TBU ? S1 : WARP(T - TF) * WS;
-const climbRate = T => T <= TF || T >= TBU ? 1 : WARP.rate(T - TF) * WS;
+const sOfD = d => { const a2 = (V0 - V1) / (2 * S1); return (V0 - Math.sqrt(Math.max(0, V0 * V0 - 4 * a2 * d))) / (2 * a2); };
+const TBU = filmAt(S1);                                               // the burst
+const HANG = 1.1, LEAD = 2.2, T_LEAD = TBU + HANG, TB = T_LEAD + LEAD; // the burst hangs; the leader runs down; the return stroke
+const TOUR_T = [2.9, 6.9, 10.9, 14.9];                                // the chain reaches tel2, sam, rdr, tel1 (s after the stroke)
+const TRET0 = TB + TOUR_T[3] + 4.5;                                   // the lens leaves the site
+const climbS = T => T <= TF ? 0 : T >= TBU ? S1 : simAt(T);
+const climbRate = T => T <= TF - 1.6 || T >= TBU ? 1 : simRate(T);
 const probeAt = (s, out) => bez(uOfD(dOfS(s)), out);
-const TRN_N = 700, TRAIL = (() => {                                       // u, sim time passed, angle, spread, distance
+const bezT = (u, out) => { for (let k = 0; k < 3; k++) out[k] = 2 * (1 - u) * (B_C[k] - MZ0[k]) + 2 * u * (B_TOP[k] - B_C[k]); const l = Math.hypot(out[0], out[1], out[2]); out[0] /= l; out[1] /= l; out[2] /= l; return out; };
+const CHAPTERS = [
+  { t: 0, title: 'Station' }, { t: 4, title: 'Mount' }, { t: 12.6, title: 'Power' }, { t: T_LD, title: 'Load' }, { t: T_RAIL, title: 'Charge' },
+  { t: T_REL - .3, title: 'Fire' }, { t: TF + 2.4, title: 'Flight' }, { t: TBU - .2, title: 'Strike' }, { t: TB + .4, title: 'Scan' }, { t: TRET0, title: 'Return' }, { t: 48.4 + SH - .6, title: 'Stow' },
+];
+/* the sabot: three petals round the round; at the muzzle they peel off, slow in the air and fall away */
+const SAB_TAU = .05, SAB_VR = 140, SAB_TR = .25;
+const TRN_N = 4200, TRAIL = (() => {                                       // u, sim time passed, angle, spread, distance
   const A = new Float32Array(TRN_N * 5), r = rng(3131), a2 = (V0 - V1) / (2 * S1);
   for (let i = 0; i < TRN_N; i++) {
     const d = ARC.len * Math.pow((i + .5) / TRN_N, 1.4);
@@ -208,7 +233,7 @@ const TRN_N = 700, TRAIL = (() => {                                       // u, 
   return A;
 })();
 const BOLT = new K.Bolt({ top: B_TOP, hit: S_HIT, seed: 1402, depth: 9, nb: 14, rough: .55, spark: 26 });
-const BURST = (() => { const r = rng(515), A = new Float32Array(520 * 4); for (let i = 0; i < 520; i++) { const u = r() * 2 - 1, a = r() * TAU, h = Math.sqrt(1 - u * u); A[i * 4] = Math.cos(a) * h; A[i * 4 + 1] = u; A[i * 4 + 2] = Math.sin(a) * h; A[i * 4 + 3] = .5 + .5 * r(); } return A; })();
+const NBU = 2600, BURST = (() => { const r = rng(515), A = new Float32Array(NBU * 4); for (let i = 0; i < NBU; i++) { const u = r() * 2 - 1, a = r() * TAU, h = Math.sqrt(1 - u * u); A[i * 4] = Math.cos(a) * h; A[i * 4 + 1] = u; A[i * 4 + 2] = Math.sin(a) * h; A[i * 4 + 3] = .5 + .5 * r(); } return A; })();
 const SHOCK = (() => { const r = rng(616), A = new Float32Array(600 * 3); for (let i = 0; i < 600; i++) { const u = r() * 2 - 1, a = r() * TAU, h = Math.sqrt(1 - u * u); A[i * 3] = Math.cos(a) * h; A[i * 3 + 1] = u; A[i * 3 + 2] = Math.sin(a) * h; } return A; })();
 const PLUME = (() => { const r = rng(717), A = new Float32Array(320 * 5); for (let i = 0; i < 320; i++) { const a = r() * TAU, s = r(); A[i * 5] = Math.cos(a) * s; A[i * 5 + 1] = Math.sin(a) * s; A[i * 5 + 2] = 2 + 34 * r() * r(); A[i * 5 + 3] = .3 + 1.3 * r(); A[i * 5 + 4] = r(); } return A; })();
 const VAPOR = (() => { const r = rng(818), A = new Float32Array(90 * 5); for (let i = 0; i < 90; i++) { A[i * 5] = (r() - .5) * 1.1; A[i * 5 + 1] = (r() - .5) * 2.2; A[i * 5 + 2] = r(); A[i * 5 + 3] = .4 + .6 * r(); A[i * 5 + 4] = r() * TAU; } return A; })();
@@ -220,6 +245,20 @@ const P3 = [0, 0, 0];
 function lookMix(eye, a, b, w) {
   const da = V.norm(V.sub(a, eye)), db = V.norm(V.sub(b, eye)), d = V.norm(V.lerp(da, db, w));
   return V.mad(eye, d, E.mix(V.dist(eye, a), V.dist(eye, b), w));
+}
+
+/* the side of the line of fire the lens works from (the starboard quarter, where it watches the mount) */
+const MW = [0, P_.GY + 2.4, P_.GZ], SIDE = (() => { const q = [HDIR[2], 0, -HDIR[0]], r = V.sub([32, 14.5, 74], MW); return V.dot(q, r) > 0 ? q : V.mul(q, -1); })();
+/* in the plane of the arc, square to the flight path and up */
+const NUP = t => { const n = V.cross(SIDE, t); return n[1] < 0 ? V.mul(n, -1) : n; };
+/* the shot through the bore: beside the middle of the barrel, then beside the muzzle */
+const EOFF = V.add(V.add(V.mul(SIDE, 8.2), [0, .5, 0]), V.mul(DIR0, -1.6));
+const EM = V.add(MZ0, EOFF), TM = V.mad(MZ0, DIR0, 1.8);
+const RW = [0, 0, 0];
+function camBore(T) {
+  const back = LB_ - (roundZ(T) - P_.SEAT_Z);
+  for (let k = 0; k < 3; k++) RW[k] = MZ0[k] - DIR0[k] * back;
+  return { eye: V.add(RW, EOFF), target: V.mad(RW, DIR0, 1.8), fov: 46 * DEG };
 }
 
 /* before the shot: close, held shots where each mechanism works (the lens drifts, it does not cut) */
@@ -243,44 +282,48 @@ const PATH_A = FILM.path([
   { t: 23.7, eye: [2.5, 6.9, 49.6], target: [-.2, 2.6, 48.0], fov: 42 },
   { t: LD(.4), eye: [3.2, 5.0, 45.4], target: [-.3, 2.6, 48.1], fov: 42 },
   { t: LD(1.0), eye: [2.9, 5.6, 45.6], target: [-.35, 5.2, 47.8], fov: 42 },
+  { t: T_XP + .5, eye: [2.5, 8.3, 45.9], target: [-.43, 7.72, 47.77], fov: 40 },
+  { t: T_XP + XH - .4, eye: [2.1, 8.9, 46.2], target: [-.43, 7.8, 47.77], fov: 40 },
   { t: LD(1.8), eye: [3.0, 6.9, 45.4], target: [-.3, 7.3, 47.8], fov: 42 },
   { t: LD(2.8), eye: [7.5, 10.8, 45.4], target: [.3, 9.0, 49.0], fov: 40 },
-  { t: LD(4.3), eye: [14, 13.5, 51.5], target: [1.5, 11.5, 51.5], fov: 40 },
-  { t: TF - 2.1, eye: [24, 14.5, 62], target: [2, 12.8, 52.5], fov: 38 },
-  { t: TF, eye: [32, 14.5, 74], target: [3, 14.8, 54.6], fov: 40 },
+  { t: T_RAIL + .9, eye: [8.4, 11.2, 47.0], target: [.8, 10.2, 49.5], fov: 42 },
+  { t: T_RAIL + 2.0, eye: [8.8, 13.2, 49.2], target: [1.8, 13.0, 51.9], fov: 42 },
+  { t: T_RAIL + 3.1, eye: [9.6, 15.2, 51.6], target: [2.6, 15.6, 53.9], fov: 42 },
 ]);
 const A_END = PATH_A(TF);
-/* after the shot: the lens backs off square to the line of fire, farther as the probe climbs, keeping the ship low
-   in frame and the arc across it (the Scale shot) */
-const MW = [0, P_.GY + 2.4, P_.GZ], SIDE = (() => { const q = [HDIR[2], 0, -HDIR[0]], r = V.sub(A_END.eye, MW); return V.dot(q, r) > 0 ? q : V.mul(q, -1); })();
-const PB = [0, 0, 0], EB = [0, 0, 0];
+const PB = [0, 0, 0], EB = [0, 0, 0], TG = [0, 0, 0];
+/* out of the muzzle (x0.01): the lens holds beside it and lifts its eye after the round */
+function camF1(T) {
+  const d = dOfS(climbS(T)), w = E.ss(TF, TF + .9, T);
+  return { eye: V.mad(EM, DIR0, -.6 * w), target: V.mad(TM, DIR0, Math.min(34, d * .7) * w), fov: 46 * DEG };
+}
+/* the chase: the lens rides just ahead of the probe and to one side, looking back at it: the trail runs away
+   behind it, down to the ship and the sea; it drops back and opens out as the probe climbs */
+function camRig(T) {
+  const s = climbS(T), u = uOfD(dOfS(s)); bez(u, PB); bezT(u, TG);
+  const n = NUP(TG), g = E.ss(TF + 2.0, TF + 4.6, T);
+  const dF = E.mix(9, 34, g), dS = E.mix(9, 64, g), dU = E.mix(2.5, 18, g), back = E.mix(7, 40, g);
+  const eye = [0, 0, 0]; for (let k = 0; k < 3; k++) eye[k] = PB[k] + TG[k] * dF + SIDE[k] * dS + n[k] * dU;
+  return { eye, target: V.mad(PB, TG, -back), fov: E.mix(52, 60, g) * DEG };
+}
+/* the wide: the lens backs off square to the line of fire, farther as the probe climbs, keeping the ship low in
+   frame and the arc across it (the Scale shot); it closes on the probe as it tops out (the burst framed big), then
+   opens on the whole stroke as the leader runs down to the coast */
+const MIDS = V.lerp(B_TOP, S_HIT, .5);
 function camB(T) {
   probeAt(climbS(T), PB);
   const h = PB[1] - MW[1], x = (PB[0] - MW[0]) * HDIR[0] + (PB[2] - MW[2]) * HDIR[2];
   const off = 70 + 1.05 * Math.hypot(h, x);
   for (let k = 0; k < 3; k++) EB[k] = MW[k] + SIDE[k] * off + HDIR[k] * .42 * x - HDIR[k] * 30;
   EB[1] = MW[1] + 22 + .36 * h;
-  const w = E.ss(TF + .4, TF + 3.6, T), eye = V.lerp(A_END.eye, EB, w);
-  const tgt = V.lerp(MW, PB, .5 * E.ss(TF + .6, TF + 3, T) + .08 * E.ss(TBU - 1.4, TBU - .2, T));
-  tgt[1] += .12 * h * E.ss(TF + .6, TF + 3, T);
-  return { eye, target: lookMix(eye, A_END.target, tgt, E.ss(TF + .05, TF + 2.4, T)), fov: (40 + 18 * E.ss(TF + .4, TF + 3.6, T)) * DEG };
+  const eye = EB.slice();
+  const t0 = V.lerp(MW, PB, .47); t0[1] += .1 * h;
+  const z = E.ss(TBU - 2.4, TBU - .1, T), l = E.ss(T_LEAD - .2, T_LEAD + 1.4, T);
+  const target = lookMix(eye, lookMix(eye, t0, B_TOP, z), MIDS, l);
+  return { eye, target, fov: (58 - 48 * z + 42 * l) * DEG };
 }
-const CB_END = camB(TBU - .3);
 const E21 = camB(TBU).eye;
-const DIRS = V.norm(V.sub(E21, S_HIT)), D0 = V.dist(E21, S_HIT);
-const AZ0 = Math.atan2(DIRS[0], DIRS[2]), EL0 = Math.asin(DIRS[1]);
 const sph = (az, el) => [Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az)];
-/* after the strike the lens circles the battery half way round (the scan identifies it on the way), so that it ends
-   on the landward side looking out over it to the sea, the burst and the trail: the way home is straight ahead */
-const azC = T => AZ0 - PI * E.ss(TB + 1.0, TRET0 + 1.6, T);
-const elC = T => E.mix(E.mix(EL0, 36 * DEG, E.ss(TBU + .6, TB + 2.8, T)), 20 * DEG, E.ss(TRET0 - 3, TRET0 + 1.2, T));
-const DCLOSE = 118;
-/* the strike is framed whole (the burst over the headland and the ground under it), the view swings from the
-   probe to the middle of the stroke before the burst, so the leader runs down a still frame; then the lens
-   closes on the battery */
-const MIDS = V.lerp(B_TOP, S_HIT, .5);
-const TRAILMID = [0, 0, 0]; bez(.62, TRAILMID);
-const E0 = PATH_A(TRET1 - DUR);
 /* yaw / pitch blend of two look points (turns the short way round, never through a degenerate direction) */
 function lookTurn(eye, a, b, w) {
   const da = V.sub(a, eye), db = V.sub(b, eye);
@@ -290,7 +333,52 @@ function lookTurn(eye, a, b, w) {
   const y = ya + (yb - ya) * w, p = pa + (pb - pa) * w, L = E.mix(V.len(da), V.len(db), w);
   return [eye[0] + Math.cos(p) * Math.sin(y) * L, eye[1] + Math.sin(p) * L, eye[2] + Math.cos(p) * Math.cos(y) * L];
 }
-/* ahead: the ship, the view raised toward the burst while it is still far ahead */
+
+/* the scan: the lens drops out of the sky onto the battery and walks round it with the chain lightning, one vehicle
+   at a time (site frame: +Z inland, the strike at (2, 13)); then it rises over the battery, landward, looking out to
+   sea (the burst, the trail, the way home) */
+const SXF = SITE.XF, ST_ = p => X.ap(SXF, p);
+const TOUR_ORD = [1, 3, 2, 0];                                        // tel2, sam, rdr, tel1 (VEH_DEF order)
+/* per vehicle: the lens arrives as the chain leaps onto it and drifts round it while the scan runs over it (a
+   hold), then swings on to the next; every key is a rest (eased in and out), the swings lifted a little */
+const TK = (() => {
+  const keys = [], h = SITE.hitL;
+  const near = (v, ang, d, up) => {
+    const rx = v.x - h[0], rz = v.z - h[2], rl = Math.hypot(rx, rz), c = Math.cos(ang), sn = Math.sin(ang);
+    const dx = (rx * c - rz * sn) / rl, dz = (rx * sn + rz * c) / rl, gx = v.x + dx * d, gz = v.z + dz * d;
+    return [gx, Math.max(SITE.ground(gx, gz), SITE.ground(v.x, v.z)) + up, gz];
+  };
+  TOUR_ORD.forEach((k, i) => {
+    const v = SITE.V[k], tall = v.kind === 'radar', c = V.add(v.cenW, [0, tall ? 2 : .5, 0]);
+    const dA = tall ? 34 : i ? 18.5 : 24, uA = tall ? 15 : i ? 6.2 : 8.5, dB = tall ? 29 : 15, uB = tall ? 10 : 4.4;
+    keys.push({ t: TB + (i ? TOUR_T[i] - .5 : 2.4), eye: ST_(near(v, -.85, dA, uA)), target: c, fov: tall ? 50 : 46, lift: 5 });
+    keys.push({ t: TB + TOUR_T[i] + 2.1, eye: ST_(near(v, -.42, dB, uB)), target: c, fov: tall ? 52 : 48 });
+  });
+  keys.push({ t: TB + TOUR_T[3] + 3.6, eye: ST_([-36, 29 + 24, 50]), target: ST_([4, 26, 10]), fov: 50, lift: 6 });
+  keys.push({ t: TRET0, eye: ST_([-10, 29 + 46, 96]), target: ST_([6, 22, 0]), fov: 52 });
+  return keys;
+})();
+function PATH_S(T) {
+  let i = 0; while (i < TK.length - 2 && TK[i + 1].t <= T) i++;
+  const a = TK[i], b = TK[i + 1], u = E.ss(a.t, b.t, T), ut = b.lift ? E.ss(a.t, a.t + .6 * (b.t - a.t), T) : u;
+  const eye = V.lerp(a.eye, b.eye, u); eye[1] += (b.lift || 0) * Math.sin(PI * u);
+  return { eye, target: lookTurn(eye, a.target, b.target, ut), fov: E.mix(a.fov, b.fov, u) * DEG };
+}
+const DV0 = camB(TB - .2);
+/* the drop: from the wide onto the battery, the distance falling three orders of magnitude, the view turning down
+   from the stroke to the first vehicle */
+function camDive(T) {
+  const g = E.ss(TB - .2, TB + 2.4, T), K0 = TK[0], tgt = K0.target;
+  const d0 = V.sub(DV0.eye, tgt), d1 = V.sub(K0.eye, tgt), L0 = V.len(d0), L1 = V.len(d1);
+  const az0 = Math.atan2(d0[0], d0[2]), el0 = Math.asin(d0[1] / L0);
+  let az1 = Math.atan2(d1[0], d1[2]); const el1 = Math.asin(d1[1] / L1);
+  while (az1 - az0 > PI) az1 -= TAU; while (az1 - az0 < -PI) az1 += TAU;
+  const eye = V.add(tgt, V.mul(sph(az0 + (az1 - az0) * g, E.mix(el0, el1, g)), K.logMix(L0, L1, g)));
+  const target = lookTurn(eye, lookTurn(eye, DV0.target, S_HIT, E.ss(TB - .25, TB + .7, T)), tgt, E.ss(TB + .7, TB + 2.1, T));
+  return { eye, target, fov: E.mix(DV0.fov, K0.fov * DEG, E.ss(TB, TB + 2.2, T)) };
+}
+/* the way home: from the landward side of the battery, over it and the coast, along the trail to the ship */
+const E0 = PATH_A(TRET1 - DUR);
 const GA = [0, 0, 0];
 function ahead(eye, T) {
   const dx = E0.eye[0] - eye[0], dz = E0.eye[2] - eye[2], h = Math.hypot(dx, dz) || 1, L = E.clamp(.25 * h, 260, 1800);
@@ -298,16 +386,7 @@ function ahead(eye, T) {
   return lookTurn(eye, GA, E0.target, E.ss(TRET0 + 4.0, TRET1 - .8, T));
 }
 const seaLook = (eye, T) => lookTurn(eye, S_LOOK, ahead(eye, T), E.ss(TRET0 - 2.2, TRET0 + .6, T));
-function camC(T) {
-  const g = .32 * E.ss(TBU + .1, TB, T) + .68 * E.ss(TB + .1, TB + 2.8, T);
-  const eye = V.add(S_HIT, V.mul(sph(azC(T), elC(T)), K.logMix(D0, DCLOSE, g)));
-  const t1 = lookMix(eye, CB_END.target, MIDS, E.ss(TBU - 1.4, TBU + .8, T));
-  const target = lookMix(eye, t1, seaLook(eye, T), E.ss(TB - .2, TB + 1.7, T));
-  const fov = (58 + 12 * E.ss(TBU - 1.2, TBU + .6, T) - 40 * E.ss(TB - .2, TB + 1.8, T)) * DEG;
-  return { eye, target, fov };
-}
-/* the way home: from the landward side of the battery, over it and the coast, along the trail to the ship */
-const P1 = camC(TRET0).eye;
+const P1 = TK[TK.length - 1].eye;
 const HM = [(P1[0] + E0.eye[0]) / 2, 700, (P1[2] + E0.eye[2]) / 2], BZ = [0, 0, 0];
 function homeEye(T) {
   const u = E.ss(TRET0, TRET1, T), w = u < .5 ? .5 * Math.pow(2 * u, 1.7) : 1 - .5 * Math.pow(2 - 2 * u, 2.4), a = (1 - w) * (1 - w), b = 2 * w * (1 - w), c = w * w;
@@ -316,7 +395,7 @@ function homeEye(T) {
 }
 function camD(T) {
   const eye = homeEye(T).slice(), v2 = E.ss(TRET0 + 3.0, TRET1 - .6, T);
-  return { eye, target: seaLook(eye, T), fov: (30 + 8 * Math.sin(PI * v2) + 2 * v2) * DEG };
+  return { eye, target: seaLook(eye, T), fov: (30 + 8 * Math.sin(PI * v2) + 2 * v2 + 22 * (1 - E.ss(TRET0, TRET0 + 2.5, T))) * DEG };
 }
 const DBGCAM = (() => {
   let spec = STAGE.Q.get('cam');
@@ -325,11 +404,17 @@ const DBGCAM = (() => {
 })();
 function camAt(T) {
   if (DBGCAM) return { eye: DBGCAM.slice(0, 3), target: DBGCAM.slice(3, 6), fov: (DBGCAM[6] || 40) * DEG };
-  if (T < TF) { const s = PATH_A(T), d = FILM.drift(T, .05 * E.ss(12, 14, T) * (1 - E.ss(27, 29, T)), 3); s.eye = V.add(s.eye, d); return s; }
-  if (T < TBU - .3) return camB(T);
-  if (T < TBU + .4) return K.blendShot(camB(T), camC(T), E.ss(TBU - .3, TBU + .4, T));
-  if (T < TRET0) return camC(T);
-  if (T < TRET0 + .6) return K.blendShot(camC(T), camD(T), E.ss(TRET0, TRET0 + .6, T));
+  if (T < T_REL - .7) { const s = PATH_A(T), d = FILM.drift(T, .05 * E.ss(12, 14, T) * (1 - E.ss(27, 29, T)), 3); s.eye = V.add(s.eye, d); return s; }
+  if (T < T_REL + .1) return K.blendShot(PATH_A(T), camBore(T), E.ss(T_REL - .7, T_REL + .1, T));
+  if (T < TF) return camBore(T);
+  if (T < TF + .9) return camF1(T);
+  if (T < TF + 2.3) return K.blendShot(camF1(T), camRig(T), E.ss(TF + .9, TF + 2.3, T));
+  if (T < TF + 3.9) return camRig(T);
+  if (T < TF + 6.4) return K.blendShot(camRig(T), camB(T), E.ss(TF + 3.9, TF + 6.4, T));
+  if (T < TB - .2) return camB(T);
+  if (T < TB + 2.4) return camDive(T);
+  if (T < TRET0) return PATH_S(T);
+  if (T < TRET0 + .8) return K.blendShot(PATH_S(TRET0), camD(T), E.ss(TRET0, TRET0 + .8, T));
   if (T < TRET1) return camD(T);
   return PATH_A(T - DUR);
 }
@@ -353,8 +438,15 @@ const SO = { a: .7, fade: 600, size: .5, md: 1, cut: null, px: 5.6, edge: .4, lm
 const SOP = { a: .7, fade: 600, size: .55, md: 1, px: 8, edge: .55, keep: .65 };
 const MO = { a: 1.25, fade: 260, lime: 0, md: 0, size: .8, keep: 1, px: 4.7, edge: .68, S: null, zfix: undefined, bk: .12, foc: 0 };
 const RO = { a: 1.15, fade: 30, lime: 0, md: 3, S: null, size: .7, px: 4.8, edge: .62, zfix: undefined, bk: 0, foc: 0 };
+/* dot density: the LOD keeps dots at most px apart on screen; DQ divides those spacings (?dq=1: the old density) */
+const PX0 = [SO, SOP, MO, RO].map(o => o.px);
+function density() { [SO, SOP, MO, RO].forEach((o, i) => { o.px = PX0[i] / K.DQ; }); SO.lmin = K.DQ > 1.3 ? 0 : 1; }
 const lock = (T, t0) => { const a = T - t0; return a > 0 && a < .6 ? Math.exp(-a * 6) : 0; };
-function drawShip(Ws) { for (const p of SHIP) { SO.cut = p.name === 'hull' ? P_.CUT : null; P_.drawX(p.ml, Ws, SO); } P_.drawX(CL.hullP, Ws, SOP); }
+function drawShip(Ws) {
+  for (const p of SHIP) { SO.cut = p.name === 'hull' ? P_.CUT : null; P_.drawX(p.ml, Ws, SO); }
+  for (const p of SHIPX.parts) { SO.cut = p.cut ? P_.CUT : null; P_.drawX(p.ml, Ws, SO); }
+  SO.cut = null; P_.drawX(CL.hullP, Ws, SOP);
+}
 function occluders(T, st, Ws) {
   P_.occReset();
   const hx = (C8, Tw) => P_.occHex(C8.map(p => X.ap(Tw, p)));
@@ -388,6 +480,20 @@ function drawMount(T, st) {
   X_(CL.railsR, XF.B, MO); X_(CL.railsE, XF.E, MO);
   MO.lime = 0; MO.a = 1.25;
 }
+/* the round with its sabot (three petals) and the armature: e pulls them apart (the exploded view); Ls the model ->
+   ship transform for the X-ray tests (null: drawn plain in world) */
+const PET_L = [0, 1, 2].map(k => X.make(R.z(k * TAU / 3), [0, 0, 0]));
+const RA = { L: X.make(), Ls: X.make() };
+function drawRound(Lw, Ls, e, o) {
+  const X_ = P_.drawX, Lt = e > 0 ? tr(0, 0, .3 * e) : null;
+  o.S = Ls ? (Lt ? X.mul(Ls, Lt) : Ls) : null; X_(CL.round, Lt ? X.mul(Lw, Lt) : Lw, o);
+  for (let k = 0; k < 3; k++) {
+    const a = k * TAU / 3, Lp = e > 0 ? X.make(R.z(a), [Math.cos(a) * .34 * e, Math.sin(a) * .34 * e, .05 * e]) : PET_L[k];
+    o.S = Ls ? X.mul(Ls, Lp) : null; X_(CL.sabot, X.mul(Lw, Lp), o);
+  }
+  const La = tr(0, 0, -.42 * e); o.S = Ls ? X.mul(Ls, La) : null; X_(CL.arm, X.mul(Lw, La), o);
+  o.S = null;
+}
 /* the loader below and behind the breech (seen in the X-ray) */
 const XRd = X.make(R.I(), [0, 0, 0]);
 function drawLoader(T, st, Ws) {
@@ -411,7 +517,11 @@ function drawLoader(T, st, Ws) {
   let Lr = null;
   if (st.rnd === 1) Lr = X.mul(XR.T, X.make(ROT_UP, [0, st.hoistY, P_.HZ]));
   else if (st.rnd === 2) Lr = st.ram > 0 ? X.mul(XR.B, tr(0, 0, P_.TRAY_Z + (P_.SEAT_Z - P_.TRAY_Z) * st.ram)) : X.mul(XR.tray, XRd);
-  if (Lr) { RO.S = Lr; RO.a = 1.5; RO.lime = Math.max(.45, .9 * lock(T, LD(2.2))) * (st.rnd === 2 && T > LD(2.9) ? .4 : 1); X_(CL.round, X.mul(Ws, Lr), RO); RO.a = 1.15; }
+  if (Lr) {
+    RO.a = 1.5 + .4 * st.xp; RO.lime = Math.max(.45, .9 * lock(T, LD(2.2))) * (st.rnd === 2 && T > LD(2.9) ? .4 : 1);
+    RO.keep = Math.max(RO.keep, st.xp); XF.RND = X.mul(Ws, Lr);
+    drawRound(XF.RND, Lr, st.xp, RO); RO.a = 1.15; RO.keep = FK.load;
+  }
   // the tray (B frame, pivoting)
   RO.S = XR.tray; RO.a = 1.4; RO.lime = Math.max(.2, .6 * lock(T, LD(.6)) + .6 * lock(T, LD(1.85))); X_(CL.tray, XF.tray, RO); RO.a = 1.15;
   RO.S = null; RO.lime = 0; RO.keep = 1;
@@ -575,9 +685,17 @@ function drawRoomFX(T, st, Ws) {
   for (let r = 0; r < 4; r++) busPulses(P_.BUS_C[r], T, T_RAIL - .2 + .2 * r, TF + .1, 2.2, .5, 1, Ws);
   busPulses(COL, T, T_RAIL + .4, TF + .1, 2.4, .35, 1, Ws);
 }
-/* the loader's lights: the rammer's chain, the round seating, the breech seal */
+/* the loader's lights: the rammer's chain, the round seating, the breech seal; in the exploded view a scan plane
+   sweeps the round's parts as they part and close */
 function loaderFX(T, st, Ws) {
   if (!isOpen(P_.GZ)) return;
+  if (st.xp > .01 && XF.RND) {
+    const L = XF.RND, e = st.xp, U = X.dir(L, [1, 0, 0]), W = X.dir(L, [0, 1, 0]);
+    const zs = -.9 + 1.8 * ((T - T_XP - .3) / 1.1 % 1);
+    apI(L, 0, 0, zs, Q1); K.ringW(Q1, U, W, .24 + .1 * e, 90, 1, LIME, .8 * e, T * 3);
+    for (let k = 0; k < 3; k++) { const a = k * TAU / 3 + .9; apI(L, Math.cos(a) * (.13 + .34 * e), Math.sin(a) * (.13 + .34 * e), zs, Q2); P_.odot(Q2[0], Q2[1], Q2[2], 2, HOT, e); }
+    for (const z of [-.42 * e - P_.RND_H - .07, .3 * e]) { apI(L, 0, 0, z, Q1); K.ringW(Q1, U, W, .2, 60, 1, LIME, .5 * e, -T * 2); }
+  }
   // the rammer chain from its housing to the round's base while it pushes
   const rr = T > LD(1.8) && T < LD(2.55) ? (T < LD(2.2) ? st.ram : 1 - kk(T, LD(2.2), LD(2.5))) : 0;
   if (rr > .01) {
@@ -611,8 +729,29 @@ function ramLine(Tb, b, Tp, p, a) {
   K.lineW(Q1[0], Q1[1], Q1[2], Q3[0], Q3[1], Q3[2], .8, 2, WH, .7 * a);
   K.lineW(Q3[0], Q3[1], Q3[2], Q2[0], Q2[1], Q2[2], .8, 1, WH, .9 * a);
 }
+/* a hydraulic ram between a base (frame Tb) and a pin (frame Tp): the cylinder (four staves, collars) fixed at the
+   base, the rod out to the pin; lit while it moves */
+const EB0 = [0, 0, 0], EB1 = [0, 0, 0];
+function ramSolid(Tb, b, Tp, p, cyl, rc, rr, a, lit) {
+  apI(Tb, b[0], b[1], b[2], EB0); apI(Tp, p[0], p[1], p[2], EB1);
+  const d = V.sub(EB1, EB0), L = V.len(d); if (L < .01) return;
+  const f = V.mul(d, 1 / L), a_ = Math.abs(f[1]) < .9 ? [0, 1, 0] : [1, 0, 0], U = V.norm(V.cross(f, a_)), W = V.cross(f, U);
+  const lc = Math.min(cyl, L - .05), col = lit > .05 ? LIME : WH;
+  for (let k = 0; k < 4; k++) {
+    const an = k * PI / 2 + .4, cs = Math.cos(an) * rc, sn = Math.sin(an) * rc;
+    const ox = U[0] * cs + W[0] * sn, oy = U[1] * cs + W[1] * sn, oz = U[2] * cs + W[2] * sn;
+    K.lineW(EB0[0] + ox, EB0[1] + oy, EB0[2] + oz, EB0[0] + f[0] * lc + ox, EB0[1] + f[1] * lc + oy, EB0[2] + f[2] * lc + oz, 1, 1, WH, .75 * a);
+  }
+  for (const u of [0, .5, 1]) K.ringW(V.mad(EB0, f, lc * u), U, W, rc * 1.15, 24, 1, WH, .8 * a, 0);
+  const c0 = V.mad(EB0, f, lc);
+  K.lineW(c0[0], c0[1], c0[2], EB1[0], EB1[1], EB1[2], .8, 2, col, (.75 + .25 * lit) * a);
+  K.ringW(EB1, U, W, rr * 1.8, 16, 1, col, .9 * a, 0);
+}
 function mechFX(T, st) {
   const mv = x => .35 + .65 * x;
+  // elevation rams under the barrel, either side of the bore
+  const elv = Math.abs(EL * (kk(T + .03, 6.6, 9.4) * (1 - kk(T + .03, 51.2 + SH, 53.9 + SH))) - st.el) > 1e-4 ? 1 : 0;
+  for (const sg of [-1, 1]) ramSolid(XF.T, [sg * .55, .42, 2.62], XF.B, [sg * .42, -.47, 1.4], 1.05, .085, .035, 1, elv);
   for (const s of [-1, 1]) for (const [b, p] of P_.RAM_H(s)) ramLine(XF.M, b, s > 0 ? XF.hatS : XF.hatP, p, mv(st.hatch));
   for (const s of [-1, 1]) for (const [b, p] of P_.RAM_C(s)) ramLine(XF.B, b, s > 0 ? XF.covS : XF.covP, p, mv(s > 0 ? st.covS : st.covP));
   // the sleeve's lock pins shooting home at full run-out (and drawing at the stow)
@@ -689,6 +828,32 @@ function drawCharge(T, st) {
   }
   apI(XF.E, 0, 0, P_.SLV1 + .2, Q1); K.glowW(Q1[0], Q1[1], Q1[2], 40 + 110 * q * q, LIME, .1 + .25 * q * q);
 }
+/* while the rails charge, a scan plane runs the barrel breech -> muzzle and draws its section where it cuts:
+   the rails top and bottom, the insulators between them, the containment round them, the sleeve over the front */
+const TS0 = T_RAIL + .35, TS1 = T_RAIL + 3.1;
+function rectB(Tw, x0, y0, x1, y1, z, col, a, s) {
+  apI(Tw, x0, y0, z, Q1); apI(Tw, x1, y0, z, Q2); K.lineW(Q1[0], Q1[1], Q1[2], Q2[0], Q2[1], Q2[2], 1, s, col, a);
+  apI(Tw, x1, y1, z, Q1); K.lineW(Q2[0], Q2[1], Q2[2], Q1[0], Q1[1], Q1[2], 1, s, col, a);
+  apI(Tw, x0, y1, z, Q2); K.lineW(Q1[0], Q1[1], Q1[2], Q2[0], Q2[1], Q2[2], 1, s, col, a);
+  apI(Tw, x0, y0, z, Q1); K.lineW(Q2[0], Q2[1], Q2[2], Q1[0], Q1[1], Q1[2], 1, s, col, a);
+}
+function drawSlice(T, st) {
+  if (T < TS0 || T > TS1) return;
+  const u = E.ss(TS0, TS1, T), A = E.ss(TS0, TS0 + .25, T) * (1 - E.ss(TS1 - .25, TS1, T));
+  const z0 = P_.RZ0 + .05, z1 = P_.SLV1 + st.ext - .05, z = z0 + (z1 - z0) * u, B = XF.B;
+  // the plane: a faint lattice square to the bore, its rim lit
+  for (let i = -12; i <= 12; i++) for (let j = -12; j <= 12; j++) { if ((i + j) & 1) continue; apI(B, i * .08, j * .08, z, Q1); K.dotW(Q1[0], Q1[1], Q1[2], 1, LIME, .16 * A); }
+  rectB(B, -1, -1, 1, 1, z, LIME, .55 * A, 1);
+  // the section
+  for (const sg of [1, -1]) {
+    rectB(B, -.1, sg * .14, .1, sg * .22, z, HOT, A, 2);                                            // rail
+    if (z < P_.RZ1) rectB(B, -.4, sg * .22, .4, sg * .5, z, LIME, .9 * A, 1);                       // containment
+    rectB(B, sg * .095, -.14, sg * .165, .14, z, LIME, .75 * A, 1);                                 // insulator
+  }
+  if (z > P_.SLV0 + st.ext) { rectB(B, -.64, -.74, .64, .74, z, LIME, .9 * A, 1); rectB(B, -.58, -.62, .58, .62, z, LIME, .5 * A, 1); }   // sleeve
+  for (const zb of P_.BANDS) if (Math.abs(z - zb - .05) < .07) rectB(B, -.46, -.56, .46, .56, z, HOT, A, 2);
+  apI(B, 0, 0, z, Q1); K.glowW(Q1[0], Q1[1], Q1[2], 50, LIME, .3 * A);
+}
 /* vapour off the heat exchangers once the hatches are open and the loop is running */
 function drawVapor(T, st) {
   const A = st.hatch * E.ss(15.5, 17.5, T) * (1 - E.ss(45, 48, T)) * .35; if (A < .01) return;
@@ -699,15 +864,76 @@ function drawVapor(T, st) {
     K.dotW(Q1[0], Q1[1], Q1[2], 1, WH, A * (1 - age) * Math.min(1, age * 6));
   }
 }
-function drawFire(T) {
-  const a = T - TF; if (a < 0 || a > 3.2) return;
-  const m = MZ0, d = DIR0, U = V.norm(V.cross(d, [0, 1, 0])), W = V.cross(U, d);
-  if (a < .5) {
-    const L = 30 + 900 * a, jA = Math.exp(-a * 7);
-    K.lineW(m[0], m[1], m[2], m[0] + d[0] * L, m[1] + d[1] * L, m[2] + d[2] * L, 1.2, 2, HOT, jA, LIME, .12 * jA, .04 * jA);
-    for (let k = 1; k <= 4; k++) { const c = V.mad(m, d, 4 * k + 30 * a * k); K.ringW(c, U, W, (.8 + .5 * k) * (1 + 4 * a), 90, 1, k % 2 ? LIME : HOT, jA * (1 - k * .18), k); }
+/* the round through the bore (x0.01): it runs breech -> muzzle on the rails, the current behind it lighting the
+   rails white-hot back to the breech, the armature's arc at its base, the field's rings round the barrel at it */
+const RT = X.make(R.I(), [0, 0, 0]);
+const SAB_R = [0, 1, 2].map(k => R.z(k * TAU / 3));
+function drawBore(T, st) {
+  if (T < T_REL || T >= TF) return;
+  const z = roundZ(T), U = X.dir(XF.B, [1, 0, 0]), W = X.dir(XF.B, [0, 1, 0]);
+  const v = ACC * (simAt(T) + T_BORE), q = v / V0;
+  // the round and its sabot in the bore
+  const Lr = X.mul(XF.B, tr(0, 0, z));
+  MO.lime = .55; MO.a = 1.6; MO.S = null; MO.keep = 1; MO.md = 0;
+  drawRound(Lr, null, 0, MO);
+  MO.lime = 0; MO.a = 1.25;
+  // the rails behind it carry the current: white-hot from the breech to the armature, dark ahead
+  const z0 = P_.RZ0;
+  for (const y of [.18, -.18]) {
+    apI(XF.B, 0, y, z0, Q1); apI(XF.B, 0, y, z - P_.RND_H, Q2);
+    K.lineW(Q1[0], Q1[1], Q1[2], Q2[0], Q2[1], Q2[2], 1, 2, HOT, .95, LIME, .2, .08);
   }
-  if (a < .6) { K.glowW(m[0], m[1], m[2], Math.round(40 + 300 * Math.exp(-a * 9)), HOT, .95 * Math.exp(-a * 6)); K.glowW(m[0] + d[0] * 6, m[1] + d[1] * 6, m[2] + d[2] * 6, 120, LIME, .5 * Math.exp(-a * 5)); }
+  // the armature: an arc sheet across the rails at the round's base
+  apI(XF.B, 0, 0, z - P_.RND_H - .05, Q1); K.glowW(Q1[0], Q1[1], Q1[2], 60 + 60 * q, HOT, .9); K.glowW(Q1[0], Q1[1], Q1[2], 160, LIME, .35);
+  const fr = Math.floor(T * 60);
+  for (let i = 0; i < 9; i++) { const h = K.hh(i * 3.1, fr); apI(XF.B, (h - .5) * .14, .17, z - P_.RND_H - .03 - .05 * h, Q2); apI(XF.B, (K.hh(i * 7.7, fr) - .5) * .14, -.17, z - P_.RND_H - .03, Q3); K.arcW(Q2, Q3, i + fr * .1, T, 1, .5); }
+  // the field: rings round the barrel at the armature, trailing back
+  for (let k = 0; k < 5; k++) { apI(XF.B, 0, 0, z - P_.RND_H - k * .35, Q1); K.ringW(Q1, U, W, .62 + .1 * k, 120, k ? 1 : 2, k ? LIME : HOT, (1 - k * .18) * (.6 + .4 * q), T * 9 + k); }
+  // plasma blown out past the round's sides, streaming back down the bore
+  for (let i = 0; i < 90; i++) {
+    const h = K.hh(i * 1.7, fr), a = K.hh(i * 2.9, fr) * TAU, d = h * 1.6;
+    apI(XF.B, Math.cos(a) * .12, Math.sin(a) * .17, z - P_.RND_H - d, Q1); K.dotW(Q1[0], Q1[1], Q1[2], 1, h < .3 ? HOT : LIME, .9 * (1 - h));
+  }
+  // the bands flash as it passes (the clamps take the load)
+  for (const zb of P_.BANDS) { const d = z - zb; if (d < 0 || d > 1.4) continue; apI(XF.B, 0, 0, zb + .05, Q1); K.ringW(Q1, U, W, .74, 60, 2, HOT, 1 - d / 1.4, 0); }
+}
+/* after the muzzle: the sabot's three petals peel off, slow in the air and tumble away (sim time) */
+function drawSabot(T) {
+  const a = simAt(T); if (a < 0 || a > 1.6) return;
+  const fwd = V0 * SAB_TAU * (1 - Math.exp(-a / SAB_TAU)), rad = SAB_VR * SAB_TR * (1 - Math.exp(-a / SAB_TR));
+  const B = XF.B, Rb = B.R;
+  for (let k = 0; k < 3; k++) {
+    const ang = k * TAU / 3, c = Math.cos(ang), s = Math.sin(ang);
+    const rd = X.dir(B, [c, s, 0]);
+    const p = V.add(V.add(V.mad(MZ0, DIR0, fwd), V.mul(rd, rad)), [0, -4.9 * a * a, 0]);
+    // tumble: pitched out about the petal's own hinge (square to the bore and its radial)
+    const pit = Math.min(2.6, a * 70 + a * a * 20), Lp = X.make(R.mul(Rb, R.mul(R.z(ang), R.y(pit))), p);
+    MO.lime = .3 * Math.exp(-a * 8); MO.a = 1.5; P_.drawX(CL.sabot, Lp, MO); MO.lime = 0; MO.a = 1.25;
+    if (a < .05) { K.glowW(p[0], p[1], p[2], 12, HOT, .7 * (1 - a / .05)); }
+  }
+}
+/* the muzzle (sim time a: the blast in slow motion, then the plume) */
+function drawFire(T) {
+  const a = simAt(T); if (a < 0 || a > 3.2) return;
+  const m = MZ0, d = DIR0, U = V.norm(V.cross(d, [0, 1, 0])), W = V.cross(U, d);
+  // the plasma ball out of the muzzle: a bright core, a shell of dots running out and dimming
+  if (a < .06) {
+    const r = 3.6 * (1 - Math.exp(-a * 220)) + 20 * a, A = Math.exp(-a * 45);
+    K.glowW(m[0] + d[0] * r * .6, m[1] + d[1] * r * .6, m[2] + d[2] * r * .6, Math.round(50 + 260 * Math.exp(-a * 160)), HOT, .95 * Math.exp(-a * 70));
+    for (let i = 0; i < 600; i++) {
+      const o = i * 3, k = .55 + .45 * SHOCK[o + 1] * SHOCK[o + 1];
+      const x = m[0] + d[0] * r * (.7 + .6 * SHOCK[o]) + (U[0] * SHOCK[o + 1] + W[0] * SHOCK[o + 2]) * r * .7 * k;
+      const y = m[1] + d[1] * r * (.7 + .6 * SHOCK[o]) + (U[1] * SHOCK[o + 1] + W[1] * SHOCK[o + 2]) * r * .7 * k;
+      const z = m[2] + d[2] * r * (.7 + .6 * SHOCK[o]) + (U[2] * SHOCK[o + 1] + W[2] * SHOCK[o + 2]) * r * .7 * k;
+      K.dotW(x, y, z, i % 7 ? 1 : 2, i % 3 ? HOT : LIME, A * (.5 + .5 * Math.abs(SHOCK[o])));
+    }
+  }
+  if (a < .5) {
+    const L = 30 * Math.min(1, a / .004) + 900 * a, jA = Math.exp(-a * 7);
+    K.lineW(m[0], m[1], m[2], m[0] + d[0] * L, m[1] + d[1] * L, m[2] + d[2] * L, 1.2, 2, HOT, jA, LIME, .12 * jA, .04 * jA);
+    for (let k = 1; k <= 4; k++) { const c = V.mad(m, d, Math.min(1, a / .006) * 4 * k + 30 * a * k); K.ringW(c, U, W, (.8 + .5 * k) * (1 + 4 * a), 120, 1, k % 2 ? LIME : HOT, jA * (1 - k * .18), k); }
+  }
+  if (a < .6) { K.glowW(m[0] + d[0] * 6, m[1] + d[1] * 6, m[2] + d[2] * 6, 120, LIME, .5 * Math.exp(-a * 5) * Math.min(1, a / .01)); }
   if (a < 1.8) {
     const r = 1 + 60 * Math.pow(a, .6), A = Math.max(0, 1 - a / 1.8);
     const c = V.mad(m, d, 2 + 10 * a);
@@ -726,7 +952,10 @@ function drawFire(T) {
     K.dotW(x, y, z, PLUME[o + 4] < .15 ? 2 : 1, PLUME[o + 4] < .35 ? LIME : WH, w * .85);
   }
 }
-/* the trail stays up (fading) until the lens is home: the way back runs along it */
+/* the trail stays up (fading) until the lens is home: the way back runs along it. Three layers: the smoke column
+   (world-fixed puffs that spread with age), the glowing line from the muzzle to the probe, and close behind the probe
+   a dense wake of heated air (world-fixed samples every 0.25 m, so the chase shows it streaming past) */
+const NWAKE = 520;
 function drawProbe(T) {
   if (T < TF || T > TRET1 + .5) return;
   const s = climbS(T), vis = 1 - .35 * E.ss(TB + 3, TRET0, T) - .65 * E.ss(TRET1 - 2.5, TRET1 + .5, T), after = T > TBU ? T - TBU : 0;
@@ -736,35 +965,66 @@ function drawProbe(T) {
     bez(u, Q1);
     const drift = 1 + 9 * Math.sqrt(age) * (.15 + k), ang = TRAIL[o + 2];
     const b = Math.min(1, (.3 + .9 * Math.exp(-age / 2.5)) * vis);
-    const x = Q1[0] + Math.cos(ang) * drift * TRAIL[o + 3], y = Q1[1] + Math.sin(ang) * drift * TRAIL[o + 3] * .5, z = Q1[2] + Math.sin(ang) * drift * TRAIL[o + 3];
-    K.dotW(x, y, z, age < 3 ? 2 : 1, age < 1.2 ? HOT : WH, b);
-    if (age < 5 && (i & 1) === 0) K.glowW(x, y, z, 10, LIME, .14 * b * (1 - age / 5));
+    const x = Q1[0] + Math.cos(ang) * drift * TRAIL[o + 3], y = Q1[1] + Math.sin(ang) * drift * TRAIL[o + 3] * .5 + .6 * age * age * k, z = Q1[2] + Math.sin(ang) * drift * TRAIL[o + 3];
+    K.dotW(x, y, z, age < 3 && (i & 3) === 0 ? 2 : 1, age < 1.2 ? HOT : WH, b);
+    if (age < 5 && (i % 5) === 0) K.glowW(x, y, z, 10, LIME, .14 * b * (1 - age / 5));
   }
-  const uP = uOfD(dOfS(s));
+  const dP = dOfS(s), uP = uOfD(dP);
   if (vis > .01) {
     bez(0, Q3);
-    for (let i = 1; i <= 90; i++) {
-      const u = uP * i / 90; bez(u, Q2);
-      const ageL = after + (1 - i / 90) * Math.min(s, 3);
-      const a = vis * Math.max(.3, Math.exp(-ageL / 1.6)) * .7;
-      K.lineW(Q3[0], Q3[1], Q3[2], Q2[0], Q2[1], Q2[2], 1.4, 1, ageL < 1 ? HOT : WH, a, LIME, .1 * a, .03 * a);
+    const n = 180;
+    for (let i = 1; i <= n; i++) {
+      const dd = dP * i / n; bez(uOfD(dd), Q2);
+      const ageL = Math.max(0, s - sOfD(dd)) + after;
+      const a = vis * Math.max(.38, Math.exp(-ageL / 1.8)) * .85;
+      K.lineW(Q3[0], Q3[1], Q3[2], Q2[0], Q2[1], Q2[2], 1.2, ageL < 1.5 ? 2 : 1, ageL < 1 ? HOT : WH, a, LIME, .16 * a, .05 * a);
       Q3[0] = Q2[0]; Q3[1] = Q2[1]; Q3[2] = Q2[2];
     }
   }
   if (T < TBU) {
-    const p = probeAt(s, P3), u = uP, q = bez(Math.max(0, u - .004 * climbRate(T)), Q2);
+    // the wake: world-fixed samples behind the probe, each spreading and cooling from the moment it was passed
+    const j1 = Math.floor(dP / .25), j0 = Math.max(0, j1 - NWAKE);
+    for (let j = j0; j <= j1; j++) {
+      const dj = j * .25, age = Math.max(0, s - sOfD(dj)), h1 = K.hh(j, 3.3), h2 = K.hh(j, 7.1), h3 = K.hh(j, 9.7);
+      bez(uOfD(dj), Q1);
+      const rr = .15 + 2.6 * Math.sqrt(age) * h1, an = h2 * TAU, c = Math.cos(an) * rr;
+      const x = Q1[0] + c * SIDE[0], y = Q1[1] + Math.sin(an) * rr, z = Q1[2] + c * SIDE[2];
+      const b = Math.exp(-age * 2.2) * (.55 + .45 * h3);
+      if (b < .03) continue;
+      K.dotW(x, y, z, age < .05 && h3 > .6 ? 2 : 1, age < .12 ? HOT : h3 > .7 ? LIME : WH, b);
+    }
+    const p = probeAt(s, P3), q = bez(Math.max(0, uP - .004 * climbRate(T)), Q2);
     K.lineW(q[0], q[1], q[2], p[0], p[1], p[2], 1.2, 2, HOT, .9, LIME, .08, .02);
-    K.dotW(p[0], p[1], p[2], 3, [255, 255, 255], 1);
+    // the probe itself, close up: the round (its sabot gone), nose glowing with the heat of the climb
+    if (V.dist(C.eye, p) < 900) {
+      const t = bezT(uP, TG), Lp = X.make(R.look(t, [0, 1, 0]), p);
+      MO.lime = .35; MO.a = 1.6; MO.S = null; MO.md = 0; MO.keep = 1; P_.drawX(CL.round, Lp, MO); MO.lime = 0; MO.a = 1.25;
+      const nose = V.mad(p, t, P_.RND_H + .3); K.glowW(nose[0], nose[1], nose[2], 14, HOT, .7);
+    } else K.dotW(p[0], p[1], p[2], 3, [255, 255, 255], 1);
     K.glowW(p[0], p[1], p[2], 26, LIME, .45);
   }
 }
 /* the burst, and the smoke it leaves hanging over the headland */
 function drawBurst(T) {
   const a = T - TBU; if (a < 0 || a > TRET1 - TBU) return;
-  const p = B_TOP, r = 420 * (1 - Math.exp(-a * 2.6)) + 18 * a, A = a < 2.4 ? Math.max(0, 1 - a / 2.4) : 0, S = .22 * E.ss(.8, 2.4, a) * (1 - E.ss(TRET1 - TBU - 4, TRET1 - TBU, a));
+  const p = B_TOP, r = 420 * (1 - Math.exp(-a * 2.6)) + 18 * a, A = a < 2.6 ? Math.max(0, 1 - a / 2.6) : 0, S = .22 * E.ss(.8, 2.4, a) * (1 - E.ss(TRET1 - TBU - 4, TRET1 - TBU, a));
   if (a < .5) K.glowW(p[0], p[1], p[2], Math.round(60 + 240 * Math.exp(-a * 6)), HOT, .9 * Math.exp(-a * 4));
-  if (A > 0) K.glowW(p[0], p[1], p[2], 120, LIME, .25 * A);
-  for (let i = 0; i < 520; i++) { const o = i * 4, rr = r * BURST[o + 3]; const b = A * (.5 + .5 * BURST[o + 3]) + S * BURST[o + 3]; if (b < .02) continue; K.dotW(p[0] + BURST[o] * rr + 30 * a, p[1] + BURST[o + 1] * rr * (a > 2.4 ? .6 : 1) - 40 * Math.min(a, 2.4) ** 2, p[2] + BURST[o + 2] * rr, i % 5 ? 1 : 2, a < 2.4 && i % 3 ? LIME : WH, b); }
+  if (A > 0) K.glowW(p[0], p[1], p[2], 160, LIME, .25 * A);
+  // the shell: lime sparks thrown out, a white ring, then hanging smoke
+  for (let i = 0; i < NBU; i++) {
+    const o = i * 4, rr = r * BURST[o + 3]; const b = A * (.5 + .5 * BURST[o + 3]) + S * BURST[o + 3]; if (b < .02) continue;
+    K.dotW(p[0] + BURST[o] * rr + 30 * a, p[1] + BURST[o + 1] * rr * (a > 2.4 ? .6 : 1) - 40 * Math.min(a, 2.4) ** 2, p[2] + BURST[o + 2] * rr, i % 9 ? 1 : 2, a < 2.4 && i % 3 ? LIME : WH, b);
+  }
+  if (a < 1.6) { const U = [1, 0, 0], W = [0, 0, 1]; K.ringW(p, U, W, r * 1.15, 900, 1, HOT, .7 * (1 - a / 1.6), 0); }
+  // the charge gathering under the burst before the leader goes: arcs crawling over the cloud's underside
+  if (a > .3 && T < TB + .3) {
+    const fr = Math.floor(T * 24), I = E.ss(TBU + .3, T_LEAD, T) * (T > TB ? 1 - (T - TB) / .3 : 1);
+    for (let i = 0; i < 7; i++) {
+      const h = K.hh(i * 5.1, fr), g = K.hh(i * 9.3, fr), q1 = [p[0] + (h - .5) * r * 1.4, p[1] - r * (.25 + .3 * g), p[2] + (g - .5) * r * 1.4];
+      const q2 = [q1[0] + (K.hh(i, fr) - .5) * r * .7, q1[1] - r * .25 * K.hh(i * 2, fr), q1[2] + (K.hh(i * 3, fr) - .5) * r * .7];
+      K.arcW(q1, q2, i + fr * .1, T, I, .5);
+    }
+  }
 }
 function drawSea(T) {
   const e = C.eye, f = C.f, r = C.r, u = C.u, F = C.fl, cx = C.cx + C.shake[0], cy = C.cy + C.shake[1];
@@ -772,7 +1032,7 @@ function drawSea(T) {
   for (let t = 0; t < SEA.nt; t++) {
     const q = t * 6; if (!K.wIn(TL[q + 2], 0, TL[q + 4], TL[q + 5] + 2)) continue;
     const zt = K.WZ[0], dsp = 400 / Math.sqrt(TL[q + 1] - TL[q]) * F / Math.max(1, zt);
-    const step = dsp >= 2.3 ? 1 : Math.min(40, Math.round(2.3 * 2.3 / (dsp * dsp)));
+    const s0 = 2.3 / Math.sqrt(K.DQ), step = dsp >= s0 ? 1 : Math.min(40, Math.round(s0 * s0 / (dsp * dsp)));
     const rf = 1 - E.ss(16000, 29000, Math.hypot(TL[q + 2], TL[q + 4]));
     for (let k = TL[q] + ((t * 5) % step), k1 = TL[q + 1]; k < k1; k += step) {
       const j = k * 4, x = S[j], z = S[j + 1], y = .2 * Math.sin(S[j + 3] + ph) + .45 * Math.sin(sw + z * .011 + x * .004);
@@ -780,7 +1040,7 @@ function drawSea(T) {
       const sx = cx + F * (dx * r[0] + dy * r[1] + dz * r[2]) / zc; if (sx < 0 || sx >= 1920) continue;
       const sy = cy - F * (dx * u[0] + dy * u[1] + dz * u[2]) / zc; if (sy < 0 || sy >= 1080) continue;
       if (P_.occd(sx, sy, zc)) continue;
-      const b = S[j + 2] * (zc < 3000 ? 1 - zc / 6000 : .5 + .6 * E.ss(3000, 12000, zc)) * rf * (step > 1 ? 1.3 : 1);
+      const b = 1.7 * S[j + 2] * (zc < 3000 ? 1 - zc / 7000 : .57 + .5 * E.ss(3000, 12000, zc)) * rf * (step > 1 ? 1.3 : 1);
       K.dot(sx, sy, zc < 50 ? 2 : 1, 236, 238, 232, b);
     }
   }
@@ -800,8 +1060,14 @@ const UT = [
   ['PCU', 'Power conditioning ×5', st => '', 'W', [-1.84, 3.85, 55.35], 21.0, 23.2],
   ['MAG', 'Magazine drum', st => '', 'W', [1.1, 2.3, 48.1], LD(0), LD(1.1)],
   ['HST', 'Hoist', st => '', 'T', [.2, -3.2, P_.HZ], LD(.5), LD(1.6)],
+  ['PRB', 'Probe · inert', st => '', 'RND', [.12, 0, .55], T_XP + .5, T_XP + XH - .3],
+  ['SAB', 'Sabot ×3', st => '', 'RND', [.48, 0, 0], T_XP + .7, T_XP + XH - .3],
+  ['ARM', 'Armature', st => '', 'RND', [.1, -.14, -.86], T_XP + .9, T_XP + XH - .3],
   ['BRC', 'Breech block', st => '', 'B', [.56, .64, -2.2], LD(.9), LD(2.6)],
   ['CLP', 'Rail clamps ×11', st => '', 'B', [.46, .55, 3.2], LD(2.7), LD(4.2)],
+  ['RLS', 'Rails ×2 · copper', st => '', 'B', [.1, .22, 1.2], TS0 + .45, TS1 - .1],
+  ['INS', 'Insulators', st => '', 'B', [.165, -.08, 2.6], TS0 + .8, TS1 - .1],
+  ['CNT', 'Containment', st => '', 'B', [.4, .5, 3.8], TS0 + 1.15, TS1 - .1],
   ['MZL', 'Muzzle', st => `${Math.round(100 * st.chg)} %`, 'E', [.7, .82, P_.SLV1], T_RAIL + 1.4, TF - .1],
 ].map(([id, lab, val, fr, at, t0, t1]) => ({ id, lab, val, fr, at, t0, t1, tg: K.mkTag() }));
 let ST_T = 0;
@@ -823,15 +1089,17 @@ function readout(T, st) {
   else if (T < T_LD) { const n = nCharged(T); l1 = 'Capacitor racks · <b>charging</b>'; l2 = `Bank <b>${(1.2 * n).toFixed(1)} MJ</b> · ${n}/${NMOD}`; }
   else if (T < T_RAIL) {
     l1 = 'Loader · <b>ramming</b>';
-    l2 = T < LD(.45) ? 'Drum <b>indexing</b>' : T < LD(1.35) ? 'Hoist <b>up</b>' : T < LD(1.85) ? 'Breech <b>open</b> · tray <b>in line</b>' : T < LD(2.6) ? 'Round <b>seated</b>' : 'Rail clamps <b>locking</b>';
+    l2 = T < LD(.45) ? 'Drum <b>indexing</b>' : T < LD(1.35) ? 'Hoist <b>up</b>' : T < T_XP + XH ? 'Round <b>check</b> · sabot · armature' : T < LD(1.85) ? 'Breech <b>open</b> · tray <b>in line</b>' : T < LD(2.6) ? 'Round <b>seated</b>' : 'Rail clamps <b>locking</b>';
   }
-  else if (T < TF) { l1 = 'Rails · <b>charging</b>'; l2 = `Charge <b>${Math.round(100 * st.chg)} %</b> · 32 MJ`; }
+  else if (T < T_REL) { l1 = 'Rails · <b>charging</b>'; l2 = `Charge <b>${Math.round(100 * st.chg)} %</b> · 32 MJ`; rate = simRate(T); }
+  else if (T < TF) { const tau = simAt(T) + T_BORE; rate = simRate(T); l1 = `Round · <b>in the bore</b>`; l2 = `<b>${Math.round(ACC * tau)} m/s</b> · <b>${(roundZ(T) - P_.SEAT_Z).toFixed(1)}</b> / ${LB_.toFixed(1)} m`; }
   else if (T < TBU) { const s = climbS(T); rate = climbRate(T); probeAt(s, Q4); l1 = `Probe · <b>alt ${km(Q4[1])} km</b>`; l2 = `<b>${Math.round(vOfS(s))} m/s</b> · range <b>${km(Math.hypot(Q4[0], Q4[2]))} km</b>`; }
-  else if (T < TB) { l1 = `Probe · <b>burst · ${km(B_TOP[1])} km</b>`; l2 = `Leader <b>${Math.round(100 * E.sat((T - TBU - .08) / LEAD))} %</b> · range <b>${km(RANGE)} km</b>`; }
+  else if (T < T_LEAD) { l1 = `Probe · <b>burst · ${km(B_TOP[1])} km</b>`; l2 = `Charge <b>${Math.round(100 * E.ss(TBU, T_LEAD, T))} %</b> · range <b>${km(RANGE)} km</b>`; }
+  else if (T < TB) { l1 = `Probe · <b>burst · ${km(B_TOP[1])} km</b>`; l2 = `Leader <b>${Math.round(100 * E.sat((T - T_LEAD) / LEAD))} %</b> · range <b>${km(RANGE)} km</b>`; }
   else if (T < 48.4 + SH - .6) { const n = SITE.V.filter(v => T - TB > v.tF + 2.4).length; l1 = `Scan · <b>${SITE.V.length} contacts</b>`; l2 = `Identified <b>${n}/${SITE.V.length}</b> · range <b>${km(RANGE)} km</b>`; }
   else { l1 = 'Railgun · <b>stowing</b>'; l2 = T < 49.8 + SH ? 'Covers <b>closing</b>' : T < 51.3 + SH ? `Rails <b>${(P_.SLV1 + st.ext - P_.RZ0).toFixed(1)} m</b>` : T < 54.6 + SH ? `Train <b>${Math.round(st.yaw / DEG)}°</b> · elev <b>${Math.round(st.el / DEG)}°</b>` : 'Hatches <b>closing</b>'; }
-  const sim = T < TF ? T - TF : T < TBU ? climbS(T) : S1 + (T - TBU);
-  const rateTxt = rate > 1.08 ? `<span class="l">×${rate.toFixed(1)}</span>` : '×1';
+  const sim = T < TF - 1.6 ? T - TF : T < TBU ? simAt(T) : S1 + (T - TBU);
+  const rateTxt = rate > 1.08 ? `<span class="l">×${rate.toFixed(1)}</span>` : rate < .92 ? `<span class="l">×${rate < .1 ? rate.toFixed(2) : rate.toFixed(1)}</span>` : '×1';
   const html = `${l1}<br>${l2}<br>${K.fmtClock(T > 48.4 + SH - .6 ? T - DUR - TF : sim)} · ${rateTxt}`;
   if (html !== roTxt) { roTxt = html; ro.innerHTML = html; }
 }
@@ -840,7 +1108,7 @@ function unitTags(T, st) {
   for (const t of UT) {
     if (T < t.t0 || T > t.t1) continue;
     const a = E.sat((T - t.t0) / .2) * (1 - E.sat((T - t.t1 + .4) / .4));
-    const fr = t.fr === 'W' ? XF.W : XF[t.fr];
+    const fr = t.fr === 'W' ? XF.W : XF[t.fr]; if (!fr) continue;
     const p = X.ap(fr, t.at); if (!K.pj(p[0], p[1], p[2])) continue;
     const x = K.PJ[0], y = K.PJ[1];
     K.leader(x, y, x + 46, y - 46, '#C6F432', .8 * a);
@@ -861,14 +1129,15 @@ function shipMark(T, Ws) {
 /* ---------- render ---------- */
 const L_SHIP = [.55, .62, .5], L_SITE = [-.55, .6, -.6];
 let NP = 0;
-function render(T) {
+function render(T, info) {
+  const tr0 = performance.now(); density();
   K.beginTags();
   const st = stateAt(T), Ws = shipW(T);
   mountXf(Ws, st); focusAt(T);
   const xr = xrayAt(T);
   FILM.apply(C, camAt(T));
-  const af = T - TF, tb = T - TB;
-  C.shake = af > 0 && af < 1 ? FILM.shake(T, 9 * (1 - af), 24) : tb > 0 && tb < .8 ? FILM.shake(T, 3 * (1 - tb / .8), 22) : [0, 0];
+  const af = T > TF - 1.6 ? simAt(T) : -1, tb = T - TB;
+  C.shake = af > 0 && af < 1 ? FILM.shake(TF + af * 3, 7 * (1 - af) * E.ss(-.001, .004, af), 24) : tb > 0 && tb < .8 ? FILM.shake(T, 3 * (1 - tb / .8), 22) : [0, 0];
   C.near = .1; C.update();
   RO.foc = MO.foc = 1.15 * V.dist(C.eye, C.target);
   if (PROF) pt0 = performance.now();
@@ -888,12 +1157,13 @@ function render(T) {
   if (near) { trunk(T, st); mechFX(T, st); drawVapor(T, st); }
   if (siteOn) { K.setLight(L_SITE); SITE.drawVehicles(T > TB - 1 ? tb : null); }
   drawCharge(T, st);
+  if (near) { drawSlice(T, st); drawBore(T, st); drawSabot(T); }
   drawFire(T); drawProbe(T); drawBurst(T);
   if (T > TBU && siteOn) SITE.drawBolt(BOLT, tb, LEAD);
   pf('fx');
   octx.clearRect(0, 0, 1920, 1080);
   let fl = 0;
-  if (af > 0 && af < .4) fl = .1 * Math.exp(-af * 10);
+  if (af > 0 && af < .4) fl = .12 * Math.exp(-af * 700);
   if (tb > 0 && tb < .7) fl = Math.max(fl, .1 * Math.min(1, K.Bolt.stroke(tb)));
   if (T > TBU && T < TBU + .3) fl = Math.max(fl, .08 * Math.exp(-(T - TBU) * 12));
   if (fl > .004) { octx.fillStyle = `rgba(232,246,214,${fl.toFixed(3)})`; octx.fillRect(0, 0, 1920, 1080); }
@@ -904,6 +1174,7 @@ function render(T) {
   pf('overlay');
   K.pb.blit();
   K.endTags(); pf('blit');
+  K.govern(performance.now() - tr0, info);
   NP = K.npts() + P_.np();
 }
 
@@ -927,7 +1198,10 @@ const cues = [
   [T_LD, whirr(200, 160, .5)], [LD(.5), clunk], [LD(.45), whirr(180, 420, .9)], [LD(.75), clack], [LD(1.2), clunk], [LD(1.8), clunk], [LD(1.85), whirr(300, 800, .35)], [LD(2.6), clunk],
   ...Array.from({ length: 11 }, (_, k) => [clampT(k) + .12, tick]),
   [T_RAIL, () => SFX.tone(200, 2600, 5.0, 'sawtooth', .012)], [T_RAIL + 1, () => SFX.noise(4, 5000, .5, .016, 3)],
+  [T_REL, () => { SFX.tone(48, 30, 2.6, 'sawtooth', .022); SFX.noise(2.4, 260, .7, .02, 1.6); }],
   [TF, () => { SFX.crack(); SFX.rumble(3, .3); SFX.tone(900, 60, 1.2, 'sawtooth', .02); }],
+  [TF + 2.4, () => SFX.noise(5, 1800, .5, .012, 2)], [T_LEAD, () => { SFX.tone(2400, 600, 1.8, 'sawtooth', .006); SFX.noise(2, 6000, .4, .01, 1.5); }],
+  ...TOUR_T.map(t => [TB + t, () => { SFX.crack(); SFX.tone(1200, 3000, .5, 'square', .006); }]),
   [TBU, () => SFX.crack()], [TB, () => { SFX.crack(); SFX.rumble(4, .16); }],
   [TB + .5, tick], [TB + 1.2, tick],
   [S2(48.4), () => SFX.tone(260, 170, .5, 'square', .008)], [S2(49.4), clunk], [S2(49.8), () => SFX.noise(1.4, 1400, .6, .02, .3)], [S2(51.2), clunk],
@@ -935,5 +1209,5 @@ const cues = [
 ];
 LOG.push(`load ${(performance.now() - t0load).toFixed(0)} ms`);
 FILM.run({ duration: DUR, chapters: CHAPTERS, render, cues });
-STAGE.dbg = () => ({ camAt, prof: PROF, log: LOG, np: NP, mz: MZ0, dir: DIR0, btop: B_TOP, s1: S1, arc: ARC.len, range: RANGE, e21: E21, stateAt, XF, XR });
+STAGE.dbg = () => ({ camAt, prof: PROF, log: LOG, np: NP, mz: MZ0, dir: DIR0, btop: B_TOP, s1: S1, arc: ARC.len, range: RANGE, e21: E21, stateAt, XF, XR, times: { T_REL, TF, TBU, T_LEAD, TB, TRET0, TRET1, SH, DUR, T_BORE } });
 })();
