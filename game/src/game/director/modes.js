@@ -64,7 +64,8 @@ export function createModes(D) {
       if (c.type === 'chase') return D.startChase(c.id);
       if (c.type === 'intercept') {
         // the angle, in turn: riding with the threat, still by the meet point, the two in one frame, from the interceptor
-        const V = D.forceVar || ['threat', 'witness', 'two', 'interceptor'][nVar++ % 4];
+        const V = D.forceVar || ['engage', 'witness', 'engage', 'interceptor'][nVar++ % 4];
+        if (V === 'engage') return engageOf(c, false);
         if (V === 'two') {
           // the two in one frame only once they are close (far apart they are two specks): riding with the threat first
           const q = D.projAt(c.q); if (!q || c.t > 3.2) { const ok = D.startIntercept(c, 'threat'); if (ok && q && D.shot) D.shot.then = 'two'; return ok; }
@@ -75,9 +76,11 @@ export function createModes(D) {
       }
       if (c.type === 'gun') {
         // over the mount's shoulder two times in three, else the round and the gun in one frame
-        if (D.forceGun ? D.forceGun === 'mount' : nGun++ % 3 !== 2) return D.startGun(c.id, c.unit, c.key);
+        // over the mount's shoulder for a round close in, else with the round, pulled back to the gun firing at it
         const p = D.projAt(c.id), u = sim.units.get(c.unit); if (!p || !u) return false;
-        return D.startTwo(D.projPt(c.id), D.unitPt(c.unit), { key: c.key, id: c.id, unit: c.unit, side: D.sideOf(game.projPose(p).pos, p.vel || [0, 0, 1]), evFn: evOf(c.id), evKind: 'gun', dMin: Math.max(60, u.def.size[0] * 1.2) });
+        const near = Math.hypot(p.pos[0] - u.pos[0], p.pos[2] - u.pos[2]) < 3000;
+        if (D.forceGun ? D.forceGun === 'mount' : near && nGun++ % 2 === 0) return D.startGun(c.id, c.unit, c.key);
+        return engageOf(c, false);
       }
       if (c.type === 'impact') return D.startImpact(c.id, c.unit);
       return false;
@@ -95,7 +98,7 @@ export function createModes(D) {
         return;
       }
       // the shot's own moment: stay through it
-      if (cur && sh.hot !== false && sh.ev < FAR && sh.ev / base < 3.5 && (EV[sh.kind] || sh.kind === 'twoshot')) return;
+      if (cur && sh.hot !== false && sh.ev < FAR && sh.ev / base < 3.5 && (EV[sh.kind] || sh.kind === 'twoshot' || sh.kind === 'engage')) return;
       const age = t - sh.t0;
       if (cur && (cur.type === 'gun' || cur.type === 'intercept') && age > 9 * D.paceK() && !(best && best.s > cur.s + 20)) { director.take(cur); return; }
       let keep;
@@ -133,7 +136,7 @@ export function createModes(D) {
         if (sh.kind === 'launch') { if (sh.done) D.startChase(chaseId, { lock: t + 2 }); return; }
         // engaged: out to its side, the interceptor or the burst coming at the lens past it
         const eng = D.best(c => c.id === chaseId && (c.type === 'intercept' || c.type === 'gun') && c.t < 5);
-        if (eng && sh.kind === 'chase') { D.startIntercept(Object.assign({}, eng, { q: eng.type === 'intercept' ? eng.q : 0 }), 'threat'); return; }
+        if (eng && sh.kind === 'chase') { engageOf(eng, false); return; }
         // a long cruise: a fresh heavy launch elsewhere takes over now and then
         const la = D.best(c => c.type === 'launch' && c.h >= 7 && c.s > 55);
         if (la && sh.kind === 'chase' && t - sh.t0 > 30 * D.paceK()) chase.take(la);
@@ -347,13 +350,25 @@ export function createModes(D) {
     pick(t) {
       const sh = D.shot, B = story.beat;
       if (sh && t < sh.lock) return;
-      // the climax: the Director's framing of the moment, whatever the beat; one at a time (a raid has a moment every
-      // second: the shot stays with its round through its own)
-      const onIt = sh && sh.id && D.projAt(sh.id) && (EV[sh.evKind || sh.kind] || sh.kind === 'intercept' || sh.kind === 'twoshot') && sh.ev < FAR && sh.ev / D.baseRate() < 6;
-      if (onIt) return;
+      // the hit and what it leaves are held: the flash, the fireball, the pieces (nothing cuts in for ~5 s)
+      if (sh && (sh.kind === 'break' || sh.kind === 'after' || sh.kind === 'death') && t - sh.t0 < 5 * D.paceK()) return;
+      const cur = sh && sh.id ? D.projAt(sh.id) : null;
+      // the round on screen, its moment coming: one move on the same round, pulling back and round until what comes
+      // for it is in the frame; its target close instead: across the target
+      if (cur && sh.kind !== 'engage' && sh.kind !== 'impact' && sh.kind !== 'launch') {
+        const eng = D.best(c => c.id === sh.id && (c.type === 'intercept' || c.type === 'gun') && c.t < 4.5);
+        if (eng) { story.beat = { name: 'climax', id: sh.id, t0: t }; if (engageOf(eng, sh.kind !== 'chase')) return; }
+        const imp = D.best(c => c.id === sh.id && c.type === 'impact' && c.t < 4);
+        if (imp) { story.beat = { name: 'climax', id: sh.id, t0: t, unit: imp.unit }; if (D.startImpact(imp.id, imp.unit)) return; }
+      }
+      // through its own moment, and while it is coming (under ~12 s), nothing else takes the picture; an engagement
+      // that has gone quiet (the interceptor missed, the gun waits) eases back in behind the round
+      if (cur && sh.kind === 'engage' && t - sh.t0 > 4 && !(sh.ev < FAR && sh.ev / D.baseRate() < 9)) { D.startChase(sh.id); return; }
+      if (cur && (sh.kind === 'engage' || sh.kind === 'impact')) return;
+      if (cur && (sh.kind === 'chase' || sh.kind === 'tripod') && D.best(c => c.id === sh.id && EV[c.type] && c.t < 12)) return;
+      // another round's moment, when this one has none coming: to it
       const cl = D.best(c => EV[c.type] && c.t < 4.2);
-      if (cl && !(sh && (sh.key === cl.key || (sh.id === cl.id && EV[sh.evKind || sh.kind])))) { story.beat = { name: 'climax', id: cl.id, t0: t }; director.take(cl); return; }
-      if (sh && EV[sh.evKind || sh.kind] && sh.ev < FAR && sh.ev / D.baseRate() < 4) return;
+      if (cl) { story.beat = { name: 'climax', id: cl.id, t0: t, unit: cl.type === 'impact' ? cl.unit : 0 }; if (cl.type === 'impact' ? D.startImpact(cl.id, cl.unit) : engageOf(cl, true)) return; }
       // a fresh salvo: its launch
       const la = D.best(c => c.type === 'launch' && c.s > 50);
       if (la && !(B && B.name === 'launch' && B.id === la.id) && (!B || B.name === 'quiet' || t - B.t0 > 6)) {
@@ -375,10 +390,13 @@ export function createModes(D) {
         if (B.name === 'wide' && age > 6 * D.paceK()) { story.beat = { name: 'flyby', id: B.id, t0: t }; if (D.startFlyby({ id: B.id, ahead: 2.8, side: B.id % 2 ? 1 : -1, cut: true })) return; }
         if (B.name === 'flyby' && (sh && sh.kind === 'flyby' ? sh.done : age > 6)) { story.beat = { name: 'approach', id: B.id, t0: t, n: 0 }; D.startChase(B.id); return; }
         if (B.name === 'approach' && age > 8 * D.paceK()) {
-          // the approach in turn: behind it, then a tripod by where it is going
+          // a long approach: a pass now and then (the round going by the lens), then behind it again; never with its
+          // moment close (the pull back to it starts from behind the round)
           B.n = (B.n || 0) + 1; B.t0 = t;
-          if (B.n % 2) { const c = D.best(x => x.id === B.id && x.type === 'chase'); if (c && tripodFor(Object.assign({}, c, { type: lead.tk === 'unit' ? 'impact' : 'chase', unit: lead.target }))) return; }
-          D.startChase(B.id); return;
+          const soon = D.best(c => c.id === B.id && EV[c.type] && c.t < 16);
+          if (!soon && B.n % 2 && D.startFlyby({ id: B.id, ahead: 2.6, side: B.n % 4 === 1 ? 1 : -1, cut: true })) return;
+          if (!(sh && sh.kind === 'chase' && sh.id === B.id)) D.startChase(B.id);
+          return;
         }
         if (sh && !sh.ended && !(sh.until && t > sh.until)) return;
       }
@@ -392,7 +410,9 @@ export function createModes(D) {
       }
       // more in the air: ride the most pressing
       const nx = D.best(c => c.type === 'chase');
-      if (nx && (!sh || sh.ended || sh.done || quietKind(sh) && t - sh.t0 > 9)) { story.beat = { name: 'approach', id: nx.id, t0: t, n: 0 }; D.startChase(nx.id); return; }
+      // (a rollby gives way after a few seconds: the rounds are the story)
+      const qk = sh && (sh.kind === 'dolly' || sh.kind === 'crane' || sh.kind === 'idle' || sh.kind === 'wide' || sh.kind === 'tripod' && !sh.id);
+      if (nx && (!sh || sh.ended || sh.done || (qk && t - sh.t0 > 3.5) || quietKind(sh) && t - sh.t0 > 9)) { story.beat = { name: 'approach', id: nx.id, t0: t, n: 0 }; D.startChase(nx.id); return; }
       if (!sh || sh.ended || sh.done || (sh.until && t > sh.until)) story.quiet();
     },
     ended(sh) {
@@ -408,6 +428,11 @@ export function createModes(D) {
     },
     slow: () => 1,
   };
+
+  /* the engaged framing of candidate c (an interceptor or a gun coming for its round) */
+  function engageOf(c, cut) {
+    return D.startEngage(c.id, { key: c.key, q: c.type === 'intercept' ? c.q : 0, unit: c.type === 'gun' ? c.unit : 0, evKind: c.type, pull: !cut, move: cut ? { cut: true } : null });
+  }
 
   /* ================================================================ Duel (Chase + Tripod) */
   const duel = {

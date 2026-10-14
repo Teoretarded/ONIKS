@@ -50,7 +50,8 @@ export function settingsScreen(app) {
       if (tabOf(d) !== tab) continue;
       if (d.group !== grp) { grp = d.group; rows.push({ group: grp }); }
       rows.push({ id: d.key, label: d.label, choices: d.choices, value: s[d.key], meter: d.meter, cycle: d.cycle, multi: d.multi, blurb: BLURB[d.key],
-        off: d.key === 'cineMix' || d.key === 'cineMixEvery' ? f => f.value('cineMode') !== 'mix' : undefined });
+        off: d.key === 'cineMix' || d.key === 'cineMixEvery' ? f => f.value('cineMode') !== 'mix' : undefined,
+        dis: d.dis ? v => d.dis(v, getSettings()) : undefined });
     }
     rows.push({ gap: true }, { id: 'back', label: 'Back', action: true, blurb: 'Settings are saved as you change them.' });
     form = new Form(formEl, {

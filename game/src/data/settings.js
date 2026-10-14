@@ -56,9 +56,12 @@ export const MENU_FILMS = [
 
 /* The cinematic camera's modes (game/director/modes.js): five of their own, two that combine them. */
 export const CINE_MODES = [
-  ['director', 'Director'], ['chase', 'Chase'], ['tripod', 'Tripod'], ['showcase', 'Showcase'], ['overview', 'Overview'],
-  ['story', 'Storyteller'], ['duel', 'Duel'],
+  ['story', 'Storyteller'], ['director', 'Director'], ['showcase', 'Showcase'],
+  ['chase', 'Chase'], ['tripod', 'Tripod'], ['overview', 'Overview'], ['duel', 'Duel'],
 ];
+/* the modes little work has gone into yet: offered only with the Experimental modes setting on */
+export const CINE_EXPERIMENTAL = ['chase', 'tripod', 'overview', 'duel'];
+const expOff = s => !(s && s.cineExperimental === true);
 
 /* The settings table: order, grouping, labels and allowed values (multi: a comma list of any of the choices). */
 export const SETTINGS = [
@@ -78,8 +81,9 @@ export const SETTINGS = [
   { key: 'timeRate', group: 'Controls', label: 'Start time rate', def: 1, choices: [1, 2, 4, 8, 16, 32].map(v => [v, 'x' + v]) },
   { key: 'menuFilm', group: 'Menu', label: 'Menu film', def: 'random', cycle: true, choices: MENU_FILMS },
   // the Camera tab: the cinematic camera (C; game/director.js) and the kill cam (game/replay.js, game/debris/slowmo.js)
-  { key: 'cineMode', tab: 'camera', group: 'Cinematic camera', label: 'Mode', def: 'director', cycle: true, choices: CINE_MODES.concat([['mix', 'Mix']]) },
-  { key: 'cineMix', tab: 'camera', group: 'Cinematic camera', label: 'In the mix', def: 'director,tripod,story,duel', multi: true, choices: CINE_MODES },
+  { key: 'cineMode', tab: 'camera', group: 'Cinematic camera', label: 'Mode', def: 'story', cycle: true, choices: CINE_MODES.concat([['mix', 'Mix']]), dis: (v, s) => CINE_EXPERIMENTAL.includes(v) && expOff(s) },
+  { key: 'cineExperimental', tab: 'camera', group: 'Cinematic camera', label: 'Experimental modes', def: false, choices: [[false, 'Off'], [true, 'On']] },
+  { key: 'cineMix', tab: 'camera', group: 'Cinematic camera', label: 'In the mix', def: 'story,director,showcase', multi: true, choices: CINE_MODES, dis: (v, s) => CINE_EXPERIMENTAL.includes(v) && expOff(s) },
   { key: 'cineMixEvery', tab: 'camera', group: 'Cinematic camera', label: 'Mix changes', def: 90, choices: [[45, '45 s'], [90, '90 s'], [180, '3 min'], [300, '5 min']] },
   { key: 'cineSlow', tab: 'camera', group: 'Cinematic camera', label: 'Slow motion', def: 'normal', choices: [['off', 'Off'], ['light', 'x0.5'], ['normal', 'x0.25'], ['strong', 'x0.1']] },
   { key: 'cinePace', tab: 'camera', group: 'Cinematic camera', label: 'Shot length', def: 'normal', choices: [['quick', 'Quick'], ['normal', 'Normal'], ['long', 'Long']] },
@@ -119,16 +123,17 @@ export const NOTES = {
   invertRotate: v => v ? 'Right-drag and Q E turn the camera the other way.' : 'Right-drag and Q E turn the camera as the pointer moves.',
   autoSlow: v => v ? 'A launch or a new contact drops time to x1, so it is watched at real speed.' : 'Time stays at the rate you set.',
   hitReplay: v => v ? 'A decisive hit plays again in slow motion. J replays the last one; Shift J turns the kill cam on and off.' : 'No automatic kill cam. J still replays the last decisive hit.',
-  cineMode: v => ({
+  cineExperimental: v => v ? 'Chase, Tripod, Overview and Duel can be picked. Little work has gone into them yet: they may not look good or run well.' : 'Only Storyteller, Director and Showcase (and a mix of them). Turn on to try Chase, Tripod, Overview and Duel.',
+  cineMode: v => (CINE_EXPERIMENTAL.includes(v) ? 'Experimental: little work has gone into this mode yet; it may not look good or run well. ' : '') + ({
     director: 'Goes to what is about to happen: launches, intercepts, gun bursts, impacts, and what they leave.',
     chase: 'Rides one round from the rail to its end, then the next. The engagement seen from the round.',
     tripod: 'Fixed cameras near the action, long lenses panning and zooming after the rounds, like test-range footage.',
     showcase: 'Slow rollbys of ships, vehicles, aircraft and rounds in flight: dolly, crane, orbit, flyby.',
     overview: 'High and wide: the whole engagement in one frame, every round, its target and the defence.',
-    story: 'Director, Showcase and Overview in beats: the launch, the wide, the flyby, the moment, the aftermath.',
+    story: 'The default. In beats: the launch, a wide of the salvo, a flyby, riding the lead round, pulling back as its interceptor or a gun comes for it, the hit held, the aftermath; rollbys between.',
     duel: "Chase and Tripod: rides a round in, then over the defender's shoulder as it fires, held through the kill.",
     mix: 'Changes between the modes picked under In the mix, at a quiet moment. Shift C: the next mode.',
-  }[v]),
+  }[v]) + (CINE_EXPERIMENTAL.includes(v) ? ' (Experimental modes must be on.)' : ''),
   cineMix: v => v ? `Mix: ${v.split(',').map(k => (CINE_MODES.find(m => m[0] === k) || [k, k])[1]).join(', ')}. Used when the mode is Mix.` : 'None picked: the Mix plays the Director.',
   cineMixEvery: v => `The Mix moves to its next mode after about ${v < 60 ? v + ' s' : v / 60 + ' min'}, between moments.`,
   cineSlow: v => ({ off: 'The cinematic never changes the time rate.', light: 'Time eases to x0.5 for each intercept, gun burst and impact.', normal: 'Time eases to x0.25 for each intercept, gun burst and impact.', strong: 'Time eases to x0.1 for each intercept, gun burst and impact.' }[v]),

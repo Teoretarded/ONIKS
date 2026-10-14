@@ -34,7 +34,7 @@ import { predict, newPrediction } from './director/predict.js';
 import { createRig, DEG, clamp, ss, wrapPi, newPose, lookFrom, putCam, blockedBy } from './director/rig.js';
 import { createShots } from './director/shots.js';
 import { createModes } from './director/modes.js';
-import { CINE_MODES, setSetting, getSettings } from '../data/settings.js';
+import { CINE_MODES, CINE_EXPERIMENTAL, setSetting, getSettings } from '../data/settings.js';
 import { TRACK } from './labels.js';
 export { DEG, clamp, sat, ss, ease, wrapPi, newPose, lookFrom, eyeOf, fitDist, camState, bumpOf, glideDur, blendPose, putCam, blockedBy, hullCorners, acrossView } from './director/rig.js';
 
@@ -48,7 +48,7 @@ const RANK = { carrier: 10, hq: 9, cg: 8, ddg: 8, lcs: 6, tel: 6, s400: 5, radar
 /* the rate the cinematic eases to for each moment (the Slow motion setting's 'normal') */
 const SLOW = { intercept: .2, gun: .25, impact: .3, flyby: .3 };
 const SLOW_SET = { off: 0, light: .5, normal: 1, strong: .1 };
-const EVENT_SHOTS = { intercept: 1, gun: 1, impact: 1, twoshot: 1, tripod: 1, flyby: 1 };
+const EVENT_SHOTS = { intercept: 1, gun: 1, impact: 1, twoshot: 1, tripod: 1, flyby: 1, engage: 1 };
 const LENS = { wide: 1.28, normal: 1, long: .7 };
 const PACE = { quick: .7, normal: 1, long: 1.45 };
 const QUIET_SHOTS = { chase: 1, idle: 1, site: 1, dolly: 1, crane: 1, wide: 1, flyby: 1, tripodq: 1 };
@@ -107,9 +107,11 @@ function makeDirector(game) {
   }
 
   /* ---------- the mode (or the mix's current one) ---------- */
-  function mixList() { return String(st().cineMix || '').split(',').filter(k => MODES[k]); }
+  /* a mode the player may use now: the main ones always, the experimental ones once turned on */
+  const usable = k => !!MODES[k] && (!CINE_EXPERIMENTAL.includes(k) || st().cineExperimental === true);
+  function mixList() { return String(st().cineMix || '').split(',').filter(usable); }
   function chooseMode(fresh) {
-    const m = st().cineMode || 'director';
+    const m = st().cineMode || 'story';
     let id = m;
     if (m === 'mix') {
       const L = mixList();
@@ -119,7 +121,7 @@ function makeDirector(game) {
         id = L[mix.i % L.length];
       }
     }
-    if (!MODES[id]) id = 'director';
+    if (!usable(id)) id = 'story';
     if (id !== modeId || !mode || fresh) {
       modeId = id; mode = MODES[id]; modeT0 = game.realT;
       if (mode.enter) mode.enter();
@@ -128,10 +130,10 @@ function makeDirector(game) {
     return false;
   }
   function nextMode() {
-    if ((st().cineMode || 'director') === 'mix' && mixList().length > 1) {
+    if ((st().cineMode || 'story') === 'mix' && mixList().length > 1) {
       mix.i = (mix.i + 1) % mixList().length; mix.t0 = game.realT;
     } else {
-      const ids = CINE_MODES.map(m => m[0]), i = ids.indexOf(modeId);
+      const ids = CINE_MODES.map(m => m[0]).filter(usable), i = ids.indexOf(modeId);
       setSetting('cineMode', ids[(i + 1) % ids.length]);
     }
     chooseMode(false);
@@ -333,6 +335,13 @@ function makeDirector(game) {
     const rode = !hold && o.rode;
     return begin(sh, { carry: rode ? sh.anchor : null, noCut: true, dur: hold ? 1.4 : 1.8 });
   }
+  /* on the round, pulled back to show what comes for it (o: { q: the interceptor, unit: the gun, evKind, move }) */
+  function startEngage(id, o) {
+    o = o || {};
+    const p = projAt(id); if (!p) return false;
+    const sh = S.make('engage', Object.assign({ key: 'engage:' + id, id, lock: now_() + 2 * paceK(), anchorFn: S.projAnchor(id) }, o));
+    return begin(sh, o.move || { dur: 1.3, lead: .85 });
+  }
   function startAfter(u, appr, side) {
     return begin(S.make('after', { key: 'after:' + u.id, tgt: u.id, appr, side, lock: now_() + 3.5 * paceK(), until: now_() + 10 * paceK(), anchorFn: S.unitAnchor(u.id) }), { min: 1.8 });
   }
@@ -474,7 +483,7 @@ function makeDirector(game) {
       // stopped in the air: its pieces. Seen from a mount, across a target, from a tripod or a two-shot: held there,
       // the lens on them; riding with the round: on with its pieces; riding with something else: an orbit of them
       const hold = sh.kind === 'gun' || sh.kind === 'impact' || sh.kind === 'tripod' || sh.kind === 'twoshot' || (sh.kind === 'intercept' && sh.var === 'witness') || sh.kind === 'flyby';
-      const rode = (sh.kind === 'chase' || (sh.kind === 'intercept' && sh.var === 'threat'));
+      const rode = (sh.kind === 'chase' || sh.kind === 'engage' || (sh.kind === 'intercept' && sh.var === 'threat'));
       startBreak(g && g.pos ? g.pos : lastP, lastV, S.lenOf({ kind: sh.pk || '' }) || 6, hold, { rode, lock: 3.6, until: 7.5 });
       return;
     }
@@ -488,7 +497,7 @@ function makeDirector(game) {
     const now = game.realT;
     if (final) { if (!shot || shot.kind !== 'death' || !shot.final) startDeath(final, true); return; }
     // the mix: on to its next mode at a quiet moment
-    if ((st().cineMode || 'director') === 'mix') {
+    if ((st().cineMode || 'story') === 'mix') {
       const L = mixList();
       const every = (+st().cineMixEvery || 90);
       const quiet = !shot || QUIET_SHOTS[shot.kind] || shot.kind === 'break' && now > shot.lock;
@@ -582,7 +591,7 @@ function makeDirector(game) {
       game, sim, S, get rig() { return rig; }, get shot() { return shot; }, set shot(v) { shot = v; },
       get cands() { return CANDS.slice(0, nC); }, best, gather, recent, gone, get pin() { return pin; },
       HERO, RANK, FAR, baseRate, projAt, seen, heroOf, sideOf, sideFor, paceK, now: now_, lastP, lastV,
-      begin, startLaunch, startChase, startIntercept, startGun, startImpact, startBreak, startAfter, startSite, startDeath,
+      begin, startLaunch, startChase, startEngage, startIntercept, startGun, startImpact, startBreak, startAfter, startSite, startDeath,
       startIdle, startTripod, startFlyby, startDolly, startCrane, startWide, startTwo, projPt, unitPt, tripodSpot,
       leadUnit, defaultEnded, quiet: () => quiet(), gunOf, markEv,
       get modes() { return MODES; },

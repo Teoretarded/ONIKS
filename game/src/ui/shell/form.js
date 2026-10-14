@@ -52,7 +52,7 @@ export class Form {
     if (row.multi) {
       const on = new Set(String(v || '').split(',').filter(Boolean));
       row.mk = Math.max(0, Math.min(ch.length - 1, row.mk || 0));
-      row.vals.innerHTML = ch.map((c, i) => `<span class="c m${on.has(c[0]) ? ' sel' : ''}${i === row.mk ? ' cur' : ''}" data-k="${i}">${swipe(row.id + i)}<span class="tx">${esc(c[1])}</span></span>`).join('');
+      row.vals.innerHTML = ch.map((c, i) => `<span class="c m${on.has(c[0]) ? ' sel' : ''}${i === row.mk ? ' cur' : ''}${row.dis && row.dis(c[0]) ? ' dis' : ''}" data-k="${i}">${swipe(row.id + i)}<span class="tx">${esc(c[1])}</span></span>`).join('');
       row.vals.querySelectorAll('.c').forEach(q => q.addEventListener('click', e => { e.stopPropagation(); this.focus(row.k); row.mk = +q.dataset.k; this.toggle(row); }));
       return;
     }
@@ -127,6 +127,7 @@ export class Form {
   /* a multi row: the choice under its cursor on or off (kept in the choices' order) */
   toggle(r) {
     const on = new Set(String(r.value || '').split(',').filter(Boolean)), c = r.choices[r.mk || 0][0];
+    if (!on.has(c) && r.dis && r.dis(c)) { sfx.deny(); return; }
     if (on.has(c)) on.delete(c); else on.add(c);
     this.set(r.id, r.choices.map(x => x[0]).filter(x => on.has(x)).join(','), true);
   }

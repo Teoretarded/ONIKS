@@ -142,6 +142,7 @@ export function createHelp(game) {
         if (i >= specs.length) { closeSettings(); snd('back'); return; }
         setFocus(i, true);
         if (c && specs[i].multi) { mk = +c.dataset.v; toggleMulti(i); }
+        else if (c && specs[i].cycle) step(i, 1);
         else if (c) choose(i, +c.dataset.v);
       });
       setEl.addEventListener('mouseover', e => { const row = e.target.closest('[data-row]'); if (row && +row.dataset.row !== focus) setFocus(+row.dataset.row); });
@@ -159,7 +160,7 @@ export function createHelp(game) {
         vals = `<span class="meter">${d.choices.slice(1).map((c, j) => `<i data-v="${j + 1}" class="${j + 1 <= k ? 'f' : ''}${j + 1 === k ? ' top' : ''}"></i>`).join('')}</span><span class="mv">${esc(d.choices[k] ? d.choices[k][1] : '')}</span>`;
       } else if (d.multi) {
         const on = new Set(String(v || '').split(',').filter(Boolean));
-        vals = d.choices.map((c, j) => `<span class="c m${on.has(c[0]) ? ' sel' : ''}${i === focus && j === mk ? ' cur' : ''}" data-v="${j}"><span class="tx">${esc(c[1])}</span></span>`).join('');
+        vals = d.choices.map((c, j) => `<span class="c m${on.has(c[0]) ? ' sel' : ''}${i === focus && j === mk ? ' cur' : ''}${d.dis && d.dis(c[0], s) ? ' dis' : ''}" data-v="${j}"><span class="tx">${esc(c[1])}</span></span>`).join('');
       } else if (d.cycle) {
         const k = Math.max(0, d.choices.findIndex(c => same(c[0], v)));
         vals = `<span class="c sel" data-v="${(k + 1) % d.choices.length}"><span class="tx">${esc(d.choices[k][1])}</span></span><span class="cnt">${pad2(k + 1)} / ${pad2(d.choices.length)}</span>`;
@@ -196,8 +197,9 @@ export function createHelp(game) {
   }
   function choose(i, j) {
     const d = specs[i]; if (!d || !d.choices[j]) return;
-    const v = d.choices[j][0];
+    let v = d.choices[j][0];
     if (same(getSettings()[d.key], v)) return;
+    if (d.dis && d.dis(v, getSettings())) { snd('deny'); return; }
     setSetting(d.key, v);            // applied live by the onSettings listeners (below, main.js, audio)
     snd('tick');
     buildSettings();
@@ -205,6 +207,7 @@ export function createHelp(game) {
   function toggleMulti(i) {
     const d = specs[i]; if (!d) return;
     const on = new Set(String(getSettings()[d.key] || '').split(',').filter(Boolean)), c = d.choices[mk][0];
+    if (!on.has(c) && d.dis && d.dis(c, getSettings())) { snd('deny'); return; }
     if (on.has(c)) on.delete(c); else on.add(c);
     setSetting(d.key, d.choices.map(x => x[0]).filter(x => on.has(x)).join(','));
     snd('tick'); buildSettings();
@@ -215,7 +218,11 @@ export function createHelp(game) {
     const k = d.choices.findIndex(c => same(c[0], getSettings()[d.key]));
     let j = k + dir;
     if (d.meter) { if (j < 0 || j >= d.choices.length) { snd('deny'); return; } }
-    else j = (j + d.choices.length) % d.choices.length;
+    else {
+      j = (j + d.choices.length) % d.choices.length;
+      // (choices not open now, e.g. the experimental camera modes, are stepped over)
+      for (let n = 0; d.dis && n < d.choices.length && d.dis(d.choices[j][0], getSettings()); n++) j = (j + dir + d.choices.length) % d.choices.length;
+    }
     choose(i, j);
   }
   function openSettings(o) {

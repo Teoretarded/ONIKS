@@ -144,3 +144,10 @@ Screenshots of several of these were shared in the chat. Start the next session 
   fast (it is 30-60 km out, so it reads as a slow drift); the in-game panel's Camera tab does not dim In the mix /
   Mix changes when the mode is not Mix (the Settings screen does). Lab: `game/src/game/director/lab.js` (scene, rec
   with jolt / cut / subject-on-screen counts, stills).
+- From the user (2026-10-14): Chase's angles hid the action; a missile tracked after launch sat on the right of the
+  frame, then jumped to a high view; the camera cut away right after a hit; Storyteller is the favourite. *Done
+  2026-10-14: Storyteller is the default (Director and Showcase the other main modes; Chase, Tripod, Overview and Duel
+  behind an Experimental modes setting with a warning); the chase frames the round close, on the left third with
+  room ahead; before an intercept or a gun burst the camera pulls back over the round's shoulder toward what comes
+  for it (no cut to a high view); a hit and its pieces are held ~5 s in slow motion, closer to the burst.*
+

@@ -225,3 +225,5 @@ body.oniks-helping .oniks-sbx, body.oniks-helping .oniks-buy { opacity: 0; point
 .oniks-set .row .c.m.cur::before { content: ''; position: absolute; left: 50%; top: -11px; width: 5px; height: 5px; margin-left: -2.5px; background: rgba(255,255,255,.3); }
 .oniks-set .row.on .c.m.cur::before { background: var(--lime); }
 .oniks-set .row .cnt { font: 400 12px var(--mono); color: var(--faint); margin-left: -6px; }
+
+.oniks-set .row .c.dis { color: rgba(255,255,255,.13); }

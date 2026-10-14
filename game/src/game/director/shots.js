@@ -26,7 +26,7 @@ import { predict, newPrediction } from './predict.js';
 
 const UP = [0, 1, 0];
 const V3 = () => [0, 0, 0];
-const W = { tripod: 4.5, flyby: 5, chase: 2.2, launch: 2.0, intercept: 2.4, gun: 2.8, impact: 1.8, break: 2.0, after: 1.4, site: 1.3, death: 1.2, idle: 1.0 };
+const W = { tripod: 4.5, flyby: 5, engage: 2.6, chase: 2.2, launch: 2.0, intercept: 2.4, gun: 2.8, impact: 1.8, break: 2.0, after: 1.4, site: 1.3, death: 1.2, idle: 1.0 };
 const DDG_MOUNT = [[0, 13.6, 33.3], [0, 16.4, -47.9]];     // Phalanx fwd / aft (sim/weapons.js MOUNT)
 
 export function createShots(game) {
@@ -81,7 +81,7 @@ export function createShots(game) {
       En: V3(), Ln: V3(), subj: null, S: V3(), aOut: 16 * DEG, fov: 1, near: 0, side: 1, raise: 0, chk: 0,
       F: [0, 0, 1], FH: [0, 0, 1], R: [1, 0, 0], ev: 1e9, hot: true, done: false,
     }, o);
-    if (kind === 'intercept' || kind === 'gun') { sh.M = V3(); sh.wF = V3(); sh.wR = V3(); sh.pr = newPrediction(); }
+    if (kind === 'intercept' || kind === 'gun' || kind === 'engage') { sh.M = V3(); sh.wF = V3(); sh.wR = V3(); sh.pr = newPrediction(); }
     sh.anchor = sh.anchorFn || fixedAnchor(sh);
     return sh;
   }
@@ -193,19 +193,50 @@ export function createShots(game) {
     /* behind, beside, above; the lens ahead along the line of sight */
     chase(sh, dt) {
       const p = projAt(sh.id); if (!p) return false;
-      const P = heading(sh, p, dt), F = sh.F, R = sh.R, Lb = lenOf(p);
+      const P = heading(sh, p, dt), FH = sh.FH, Lb = lenOf(p);
       copy(sh.A, P);
-      const back = clamp(Lb * 5 + 10, 35, 60) * (1 + .06 * Math.sin(sh.age * .19));
-      const sw = .42 + .05 * Math.sin(sh.age * .13 + 1), lift = .2 + .03 * Math.sin(sh.age * .17 + 2);
-      for (let k = 0; k < 3; k++) sh.gE[k] = -F[k] * back + R[k] * back * sw + UP[k] * back * lift;
-      // the lens ahead, part way to the round's line of sight to its target
-      const T = tgtPoint(p, t3);
-      if (T) { set(t4, T[0] - P[0], T[1] - P[1], T[2] - P[2]); norm(t4); } else copy(t4, F);
-      for (let k = 0; k < 3; k++) t5[k] = F[k] * .7 + t4[k] * .3;
-      norm(t5);
-      for (let k = 0; k < 3; k++) sh.gL[k] = t5[k] * back * 1.5;
-      sh.subj = copy(sh.S, P); sh.aOut = 15 * DEG;
-      sh.near = clamp(back * .15, .3, 8);
+      // beside and behind it, a little above, close; the round's travel goes to the right of the frame and the round
+      // eases over to the left third (room ahead of it), as a camera ship flying with it would frame it
+      const h = Math.atan2(FH[0], FH[2]), comp = ss(.5, 6, sh.age);
+      const d = clamp(Lb * 4 + 12, 22, 55) * (1 + .05 * Math.sin(sh.age * .19));
+      const yaw = h - .55 + .05 * Math.sin(sh.age * .11), pitch = (6 + 1.5 * Math.sin(sh.age * .17 + 2)) * DEG;
+      frameAt(sh, P, P, yaw, pitch, d, .34 * comp);
+      sh.subj = copy(sh.S, P); sh.aOut = 22 * DEG;
+      sh.near = clamp(d * .12, .3, 6);
+      return true;
+    },
+    /* engaged: anchored on the round as the chase is, the camera pulls back and swings round behind it (quickly, on
+       its springs) to look past the round at what comes for it (the interceptor, the gun's burst, the gun itself): the
+       round on the left third, the threat coming in at the lens from ahead, growing; at the meet both are in the frame */
+    engage(sh, dt) {
+      const p = projAt(sh.id); if (!p) return false;
+      const P = heading(sh, p, dt), FH = sh.FH, Lb = lenOf(p);
+      copy(sh.A, P);
+      let Q = null;
+      const q = sh.q ? projAt(sh.q) : null;
+      if (q) { Q = copy(t4, game.projPose(q).pos); sh.ev = closing(p, q, t6); }
+      else {
+        const r = predict(game, p, sh.pr);
+        sh.ev = Math.min(r.kind === 'gun' ? r.tEv : r.gunSoon, r.tImpact);
+        const gu = sh.unit ? unitAt(sh.unit) : r.gunSoonUnit ? unitAt(r.gunSoonUnit) : null;
+        if (r.kind === 'gun') Q = copy(t4, r.q); else if (gu) Q = centreOf(gu, t4);
+      }
+      if (sh.ev >= 1e8) sh.ev = 1e9;
+      // the line to the threat (level-ish, eased: an interceptor climbing or diving does not tip the frame)
+      const h0 = Math.atan2(FH[0], FH[2]);
+      let hq = h0, dq = 1e9;
+      if (Q) { hq = Math.atan2(Q[0] - P[0], Q[2] - P[2]); dq = Math.hypot(Q[0] - P[0], Q[1] - P[1], Q[2] - P[2]); }
+      sh.hq = sh.hq === undefined ? hq : sh.hq + wrapPi(hq - sh.hq) * (1 - Math.exp(-dt * 1.5));
+      // out from the chase's distance to about twice it; the lens a little wider
+      const dC = clamp(Lb * 4 + 12, 22, 55), dW = clamp(dC * 2.1, 50, 130);
+      sh.dz = sh.dz === undefined ? (sh.pull ? dC : dW) : sh.dz + (dW - sh.dz) * (1 - Math.exp(-dt * 2.4));
+      // close to the meet the frame opens a little more, both in it
+      const dm = Q && dq < sh.dz * 4 ? Math.max(sh.dz, dq * .55) : sh.dz;
+      const yaw = sh.hq - .32, pitch = (5 + 3 * ss(dW * 3, dW, dq)) * DEG;
+      frameAt(sh, P, P, yaw, pitch, dm, .3);
+      sh.fov = 1.12;
+      sh.subj = copy(sh.S, P); sh.aOut = 26 * DEG;
+      sh.near = clamp(dm * .05, .3, 6);
       return true;
     },
     /* low beside the launcher, still; the lens rises with the round */
@@ -427,9 +458,10 @@ export function createShots(game) {
         return true;
         sh.near = .5;
       } else {
-        const d = clamp(Math.max(s.L * 6, ext * 1.8), 45, 95) * (1 + .15 * ss(2, 7, sh.age));
+        // close on the burst first (the flash, the fireball, the pieces leaving it), opening out as they spread
+        const d = clamp(Math.max(s.L * 4.5, ext * 1.4), 26, 85) * (1 + .25 * ss(1.5, 8, sh.age));
         s.d0 = s.d0 === undefined ? d : s.d0 + (d - s.d0) * (1 - Math.exp(-dt * 1.2));
-        const yaw = s.yaw0 + s.spin * sh.age * .12, pitch = clamp(s.pitch0, 5 * DEG, 18 * DEG);
+        const yaw = s.yaw0 + s.spin * sh.age * .09, pitch = clamp(s.pitch0, 4 * DEG, 12 * DEG);
         orbitOff(sh, yaw, pitch, s.d0);
         sh.near = clamp(s.d0 * .12, .3, 8);
       }
@@ -650,6 +682,14 @@ export function createShots(game) {
     if (sh.shift) shiftLook(sh, sh.shift, base);
     if (!sea) clearance(sh, t4, sh.A);
     return true;
+  }
+  /* the eye on an orbit (yaw, pitch, d) round the point C, the lens turned right of C so that C sits sx of the half
+     frame left of centre; written as offsets from the anchor P */
+  function frameAt(sh, P, C, yaw, pitch, d, sx) {
+    const cp = Math.cos(pitch), tx = Math.tan((cam.fov0 !== undefined ? cam.fov0 : cam.fov) / 2) * cam.W / Math.max(1, cam.H);
+    const sh_ = sx * tx * d, rx = Math.cos(yaw), rz = -Math.sin(yaw);
+    sh.gE[0] = C[0] - Math.sin(yaw) * cp * d - P[0]; sh.gE[1] = C[1] + Math.sin(pitch) * d - P[1]; sh.gE[2] = C[2] - Math.cos(yaw) * cp * d - P[2];
+    sh.gL[0] = C[0] + rx * sh_ - P[0]; sh.gL[1] = C[1] - P[1]; sh.gL[2] = C[2] + rz * sh_ - P[2];
   }
   /* eye on an orbit (yaw, pitch, d) round the anchor, the lens on it */
   function orbitOff(sh, yaw, pitch, d) {
