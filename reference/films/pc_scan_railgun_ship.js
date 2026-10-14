@@ -169,7 +169,7 @@ function mk(prims, L, cs, dsStd) {
   NPTS += ml.lv[1].length / 6;
   return ml;
 }
-const LBIG = [.1, .1, .2, .4, .8, 1.6], LDET = [.05, .05, .1, .2, .4, .8];
+const LBIG = [.05, .1, .2, .4, .8, 1.6], LDET = [.025, .05, .1, .2, .4, .8];
 const EMPTY = { lv: [], sp: [], ch: new Float32Array(0), nch: 0, sd: 0, nl: 0, n: 0 };
 /* face lattices sparser than the edges (the mount's big faces are drawn at 1.6 - 1.8) */
 const DS_HULL = 1.0, DS_DECK = 1.8, DS_WALL = 1.6, DS_ROOF = 1.8;

@@ -30,12 +30,40 @@ const veil = $('veil');
 STAGE.menu({ el: menuEl, blurb: $('blurb'), axis: 'h', onEnter(i) { if (i === 4) { veil.classList.add('on'); setTimeout(() => veil.classList.remove('on'), 1900); return 2600; } return 1900; } });
 
 /* ---------- time ---------- */
-const DUR = 82;
+const DUR0 = 82;                                                      // the base take (old time)
 const T_BANK = 19.8, T_BANK1 = 23.2;                                  // racks charge
 /* loader time -> film time: the loader holds XH s with the round at the top of the hoist (its exploded view) */
 const T_LD = 23.9, XH = 1.8, LD = t => T_LD + t + (t > 1.355 ? XH : 0), T_XP = T_LD + 1.35;
 const T_RAIL = LD(3.3), TF = T_RAIL + 4.8;                            // rails charge, the round leaves the muzzle
-const TRET1 = DUR - 7.6;                                              // the lens reaches the ship (it leaves the site at TRET0)
+/* ---------- inserted sequences ----------
+   Self-contained stretches spliced into the take, each with its own camera, models and FX; the base timeline (old
+   time T, 0..DUR0) holds while one plays, spinning machinery keeps turning (spin), the sea and the ship's motion run on
+   the film's own clock. A module (window.RGE: engine rooms and the power and data runs forward, at old 4.0;
+   window.RGM: the round assembled in the magazine, at the loader's start):
+     { len, build(ctx), chapters: [{t, title}], cues: [[u, fn]], cam(u, ctx) -> {eye, target, fov rad},
+       draw(u, ctx), xray(u, XS, ctx) -> bool (sets the hull X-ray window), room (true: draw the power room too),
+       readout(u, ctx) -> {l1, l2, rate}, tags(u, ctx) }   (u: s into the insert) */
+const INS = [{ at: 4.0, mod: window.RGE }, { at: T_LD, mod: window.RGM }].filter(q => q.mod && q.mod.len > 0);
+{ let off = 0; for (const q of INS) { q.len = q.mod.len; q.r0 = q.at + off; off += q.len; } }
+const DUR = DUR0 + INS.reduce((a, q) => a + q.len, 0);
+const mapOut = t => { let o = t; for (const q of INS) if (q.at <= t) o += q.len; return o; };   // old time -> film time
+const SEG = { k: -1, u: 0, T: 0 };
+function mapIn(TR) {
+  let off = 0;
+  for (let i = 0; i < INS.length; i++) {
+    const q = INS[i];
+    if (TR < q.r0) break;
+    if (TR < q.r0 + q.len) { SEG.k = i; SEG.u = TR - q.r0; SEG.T = q.at; return SEG; }
+    off += q.len;
+  }
+  SEG.k = -1; SEG.u = 0; SEG.T = TR - off; return SEG;
+}
+let TRNOW = 0;
+/* a warp's value at old time T, plus what it turned through during the inserts already played (at its rate there) */
+const spin = (W, T) => { let v = W(T); for (const q of INS) if (q.at <= T) v += W.rate(q.at) * E.clamp(TRNOW - q.r0, 0, q.len); return v; };
+/* periods that divide the take, so the swell and the ship's motion loop exactly */
+const PER = p => DUR / Math.max(1, Math.round(DUR / p));
+const TRET1 = DUR0 - 7.6;                                              // the lens reaches the ship (it leaves the site at TRET0)
 const SH = 2.6 + (TRET1 - 52.4);                                      // the stow runs this much later than in the 58 s cut
 const kk = (T, a, b) => E.inOut(E.sat((T - a) / (b - a)));
 const pulse = (T, a, b) => kk(T, a, b);
@@ -76,7 +104,7 @@ const CL = P_.build();
 LOG.push(`unit ${(performance.now() - t0load).toFixed(0)} ms (parts ${CL.ms.toFixed(0)}, ${(CL.n0 / 1e6).toFixed(2)} M fine pts)`);
 /* gentle motion on station, loop-exact (whole periods in 60 s) */
 function shipW(T) {
-  const roll = .5 * DEG * Math.sin(TAU * T / 12), pitch = .2 * DEG * Math.sin(TAU * T / 7.5 + 1.1), heave = .12 * Math.sin(TAU * T / 6);
+  const roll = .5 * DEG * Math.sin(TAU * T / PER(12)), pitch = .2 * DEG * Math.sin(TAU * T / PER(7.5) + 1.1), heave = .12 * Math.sin(TAU * T / PER(6));
   return X.make(R.mul(R.x(pitch), R.z(roll)), [0, heave, 0]);
 }
 
@@ -96,10 +124,10 @@ const roundZ = T => { const tau = Math.max(0, simAt(T) + T_BORE); return P_.SEAT
 
 /* ---------- the mount's, the room's and the loader's state in film time ---------- */
 const AZ = PSI, EL = P_.EL_LOAD, HAT = 105 * DEG, COV = 125 * DEG, PET = 115 * DEG;
-const ROTW = FILM.warp([{ t: 0, rate: 0 }, { t: 15.6, rate: 0 }, { t: 19.4, rate: 1 }, { t: TF, rate: 1 }, { t: TF + 2.5, rate: .45 }, { t: 45, rate: 0 }, { t: DUR, rate: 0 }]);
-const ROTX = FILM.warp([{ t: 0, rate: 0 }, { t: 18.5, rate: 0 }, { t: 20.6, rate: 1 }, { t: TF, rate: 1 }, { t: TF + 2.5, rate: .45 }, { t: 45, rate: 0 }, { t: DUR, rate: 0 }]);
-const PUMPW = FILM.warp([{ t: 0, rate: 0 }, { t: 14.6, rate: 0 }, { t: 16.0, rate: 1 }, { t: TF + 3, rate: 1 }, { t: 46, rate: 0 }, { t: DUR, rate: 0 }]);
-const FANW = FILM.warp([{ t: 0, rate: 0 }, { t: 14.9, rate: 0 }, { t: 16.6, rate: 1 }, { t: TF + 3, rate: 1 }, { t: 46, rate: 0 }, { t: DUR, rate: 0 }]);
+const ROTW = FILM.warp([{ t: 0, rate: 0 }, { t: 15.6, rate: 0 }, { t: 19.4, rate: 1 }, { t: TF, rate: 1 }, { t: TF + 2.5, rate: .45 }, { t: 45, rate: 0 }, { t: DUR0, rate: 0 }]);
+const ROTX = FILM.warp([{ t: 0, rate: 0 }, { t: 18.5, rate: 0 }, { t: 20.6, rate: 1 }, { t: TF, rate: 1 }, { t: TF + 2.5, rate: .45 }, { t: 45, rate: 0 }, { t: DUR0, rate: 0 }]);
+const PUMPW = FILM.warp([{ t: 0, rate: 0 }, { t: 14.6, rate: 0 }, { t: 16.0, rate: 1 }, { t: TF + 3, rate: 1 }, { t: 46, rate: 0 }, { t: DUR0, rate: 0 }]);
+const FANW = FILM.warp([{ t: 0, rate: 0 }, { t: 14.9, rate: 0 }, { t: 16.6, rate: 1 }, { t: TF + 3, rate: 1 }, { t: 46, rate: 0 }, { t: DUR0, rate: 0 }]);
 const RPM = 9600, VIS_REV = 2.4;
 const NMOD = P_.MOD.length;
 const modT = k => T_BANK + .3 + (T_BANK1 - T_BANK - .3) * k / NMOD;
@@ -125,10 +153,10 @@ function stateAt(T) {
   s.rtr = .95 * kk(T, 15.7, 16.5) * (1 - kk(T, 16.9, 17.6));
   const a = T - TF, ar = T > TF - 1.6 ? simAt(T) + T_BORE : -1;      // sim s since the round was released
   s.rec = ar > 0 && ar < 1.6 ? .55 * (ar < .015 ? ar / .015 : Math.exp(-(ar - .015) * 4.2)) : 0;
-  s.rot = ROTW(T) * VIS_REV * TAU; s.rate = ROTW.rate(T);
-  s.rotX = ROTX(T) * VIS_REV * TAU; s.rateX = ROTX.rate(T);
-  s.pump = PUMPW(T) * 4 * TAU; s.pumpR = PUMPW.rate(T);
-  s.fan = FANW(T) * 3 * TAU; s.fanR = FANW.rate(T);
+  s.rot = spin(ROTW, T) * VIS_REV * TAU; s.rate = ROTW.rate(T);
+  s.rotX = spin(ROTX, T) * VIS_REV * TAU; s.rateX = ROTX.rate(T);
+  s.pump = spin(PUMPW, T) * 4 * TAU; s.pumpR = PUMPW.rate(T);
+  s.fan = spin(FANW, T) * 3 * TAU; s.fanR = FANW.rate(T);
   s.valve = kk(T, 13.9, 15.2) * 1.5 * TAU;
   s.chg = E.ss(T_RAIL, T_REL - .3, T) * (1 - E.ss(T_REL - .02, T_REL + .25, T));
   s.glow = a > 0 ? Math.exp(-a * 1.2) : 0;
@@ -148,7 +176,10 @@ function stateAt(T) {
 }
 /* the X-ray window over the power room */
 const XSH = TF + 2.9;
+const BOX0 = XS.box.slice();
 function xrayAt(T) {
+  for (let i = 0; i < 6; i++) XS.box[i] = BOX0[i];
+  XS.ko = 1; XS.ks = 1;
   if (T < 12.8 || T > XSH + 1.2) { XS.zo = 99; XS.zs = 99; return false; }
   XS.zo = 57.6 - 17.2 * kk(T, 12.8, 14.5); XS.ko = 1 - E.ss(14.3, 15.2, T);
   XS.zs = T < XSH ? 99 : 57.6 - 17.2 * kk(T, XSH, XSH + 1.2); XS.ks = 1 - E.ss(XSH + 1, XSH + 1.2, T);
@@ -378,7 +409,7 @@ function camDive(T) {
   return { eye, target, fov: E.mix(DV0.fov, K0.fov * DEG, E.ss(TB, TB + 2.2, T)) };
 }
 /* the way home: from the landward side of the battery, over it and the coast, along the trail to the ship */
-const E0 = PATH_A(TRET1 - DUR);
+const E0 = PATH_A(TRET1 - DUR0);
 const GA = [0, 0, 0];
 function ahead(eye, T) {
   const dx = E0.eye[0] - eye[0], dz = E0.eye[2] - eye[2], h = Math.hypot(dx, dz) || 1, L = E.clamp(.25 * h, 260, 1800);
@@ -416,7 +447,7 @@ function camAt(T) {
   if (T < TRET0) return PATH_S(T);
   if (T < TRET0 + .8) return K.blendShot(PATH_S(TRET0), camD(T), E.ss(TRET0, TRET0 + .8, T));
   if (T < TRET1) return camD(T);
-  return PATH_A(T - DUR);
+  return PATH_A(T - DUR0);
 }
 
 /* ---------- focus: in each beat the parts at work are drawn full, the rest sparse and dim ---------- */
@@ -1028,7 +1059,7 @@ function drawBurst(T) {
 }
 function drawSea(T) {
   const e = C.eye, f = C.f, r = C.r, u = C.u, F = C.fl, cx = C.cx + C.shake[0], cy = C.cy + C.shake[1];
-  const S = SEA.F, TL = SEA.TL, ph = T * TAU / 6, sw = T * TAU / 12;
+  const S = SEA.F, TL = SEA.TL, ph = T * TAU / PER(6), sw = T * TAU / PER(12);
   for (let t = 0; t < SEA.nt; t++) {
     const q = t * 6; if (!K.wIn(TL[q + 2], 0, TL[q + 4], TL[q + 5] + 2)) continue;
     const zt = K.WZ[0], dsp = 400 / Math.sqrt(TL[q + 1] - TL[q]) * F / Math.max(1, zt);
@@ -1075,11 +1106,13 @@ const ro = $('ro'), kick = $('kick');
 let roTxt = '', kickTxt = '';
 const km = m => (m / 1000).toFixed(1);
 function readout(T, st) {
-  const ci = CHAPTERS.reduce((a, c, i) => c.t <= T ? i : a, 0);
-  const kt = `0${ci + 1} · ${CHAPTERS[ci].title}`;
+  const ci = FCH.reduce((a, c, i) => c.t <= TRNOW ? i : a, 0);
+  const kt = `${String(ci + 1).padStart(2, '0')} · ${FCH[ci].title}`;
   if (kt !== kickTxt) { kickTxt = kt; kick.textContent = kt; }
   let l1, l2, rate = 1;
-  if (T < 4.2 || T > 56.8 + SH) { l1 = 'DDG-51 · <b>on station</b>'; l2 = 'Railgun <b>stowed</b>'; }
+  const iq = SEG.k >= 0 ? INS[SEG.k] : null;
+  if (iq) { const r = iq.mod.readout ? iq.mod.readout(SEG.u, CTX) : {}; l1 = r.l1 || ''; l2 = r.l2 || ''; rate = r.rate || 1; }
+  else if (T < 4.2 || T > 56.8 + SH) { l1 = 'DDG-51 · <b>on station</b>'; l2 = 'Railgun <b>stowed</b>'; }
   else if (T < 12.6) {
     l1 = 'Railgun · <b>deploying</b>';
     l2 = T < 5.8 ? 'Hatches <b>opening</b>' : T < 9.4 ? `Train <b>${Math.round(st.yaw / DEG)}°</b> · elev <b>${Math.round(st.el / DEG)}°</b>` : T < 10.9 ? `Rails <b>${(P_.SLV1 + st.ext - P_.RZ0).toFixed(1)} m</b>` : 'Covers <b>open</b>';
@@ -1098,9 +1131,9 @@ function readout(T, st) {
   else if (T < TB) { l1 = `Probe · <b>burst · ${km(B_TOP[1])} km</b>`; l2 = `Leader <b>${Math.round(100 * E.sat((T - T_LEAD) / LEAD))} %</b> · range <b>${km(RANGE)} km</b>`; }
   else if (T < 48.4 + SH - .6) { const n = SITE.V.filter(v => T - TB > v.tF + 2.4).length; l1 = `Scan · <b>${SITE.V.length} contacts</b>`; l2 = `Identified <b>${n}/${SITE.V.length}</b> · range <b>${km(RANGE)} km</b>`; }
   else { l1 = 'Railgun · <b>stowing</b>'; l2 = T < 49.8 + SH ? 'Covers <b>closing</b>' : T < 51.3 + SH ? `Rails <b>${(P_.SLV1 + st.ext - P_.RZ0).toFixed(1)} m</b>` : T < 54.6 + SH ? `Train <b>${Math.round(st.yaw / DEG)}°</b> · elev <b>${Math.round(st.el / DEG)}°</b>` : 'Hatches <b>closing</b>'; }
-  const sim = T < TF - 1.6 ? T - TF : T < TBU ? simAt(T) : S1 + (T - TBU);
+  const sim = T < TF - 1.6 ? TRNOW - TF_R : T < TBU ? simAt(T) : S1 + (T - TBU);
   const rateTxt = rate > 1.08 ? `<span class="l">×${rate.toFixed(1)}</span>` : rate < .92 ? `<span class="l">×${rate < .1 ? rate.toFixed(2) : rate.toFixed(1)}</span>` : '×1';
-  const html = `${l1}<br>${l2}<br>${K.fmtClock(T > 48.4 + SH - .6 ? T - DUR - TF : sim)} · ${rateTxt}`;
+  const html = `${l1}<br>${l2}<br>${K.fmtClock(T > 48.4 + SH - .6 ? T - DUR0 - TF : sim)} · ${rateTxt}`;
   if (html !== roTxt) { roTxt = html; ro.innerHTML = html; }
 }
 function unitTags(T, st) {
@@ -1129,13 +1162,20 @@ function shipMark(T, Ws) {
 /* ---------- render ---------- */
 const L_SHIP = [.55, .62, .5], L_SITE = [-.55, .6, -.6];
 let NP = 0;
-function render(T, info) {
+function render(TR, info) {
   const tr0 = performance.now(); density();
   K.beginTags();
-  const st = stateAt(T), Ws = shipW(T);
+  TRNOW = TR;
+  const sg = mapIn(TR), T = sg.T, iq = sg.k >= 0 ? INS[sg.k] : null;
+  const st = stateAt(T), Ws = shipW(TR);
   mountXf(Ws, st); focusAt(T);
-  const xr = xrayAt(T);
-  FILM.apply(C, camAt(T));
+  let xr = xrayAt(T);
+  if (iq) {
+    CTX.T = TR; CTX.u = sg.u; CTX.Ws = Ws; CTX.st = st; CTX.camOld = camAt(iq.at);
+    const xi = iq.mod.xray ? iq.mod.xray(sg.u, XS, CTX) : false;
+    xr = iq.mod.room ? xr : false; CTX.xray = xi;
+  }
+  FILM.apply(C, iq ? iq.mod.cam(sg.u, CTX) : camAt(T));
   const af = T > TF - 1.6 ? simAt(T) : -1, tb = T - TB;
   C.shake = af > 0 && af < 1 ? FILM.shake(TF + af * 3, 7 * (1 - af) * E.ss(-.001, .004, af), 24) : tb > 0 && tb < .8 ? FILM.shake(T, 3 * (1 - tb / .8), 22) : [0, 0];
   C.near = .1; C.update();
@@ -1145,14 +1185,15 @@ function render(T, info) {
   const near = V.dist(C.eye, MW) < 400;
   if (near) occluders(T, st, Ws); else P_.occReset();
   pf('clear');
-  K.drawStars(STARS, .9, T, -.02);
+  K.drawStars(STARS, .9, TR, -.02);
   const siteOn = T > TF + 1 && T < TRET1 + 1;
   if (siteOn) SITE.drawGround(T, T > TB - LEAD - .2 ? tb : null);
   pf('ground');
-  drawSea(T); pf('sea');
+  drawSea(TR); pf('sea');
   K.setLight(V.add(V.add(V.mul(C.r, .45), V.mul(C.u, .7)), V.mul(C.f, -.55)));
   drawShip(Ws); pf('ship');
   if (near) { drawMount(T, st); pf('mount'); }
+  if (iq && iq.mod.draw) { iq.mod.draw(sg.u, CTX); pf('insert'); }
   if (xr && near) { drawRoom(T, st, Ws); drawLoader(T, st, Ws); pf('room'); drawRoomFX(T, st, Ws); loaderFX(T, st, Ws); pf('roomfx'); }
   if (near) { trunk(T, st); mechFX(T, st); drawVapor(T, st); }
   if (siteOn) { K.setLight(L_SITE); SITE.drawVehicles(T > TB - 1 ? tb : null); }
@@ -1168,7 +1209,7 @@ function render(T, info) {
   if (T > TBU && T < TBU + .3) fl = Math.max(fl, .08 * Math.exp(-(T - TBU) * 12));
   if (fl > .004) { octx.fillStyle = `rgba(232,246,214,${fl.toFixed(3)})`; octx.fillRect(0, 0, 1920, 1080); }
   if (T > TB - 1.2 && T < TRET0 + 2.2) SITE.overlay(T, tb, 1 - E.ss(TRET0 + .8, TRET0 + 2, T));
-  unitTags(T, st);
+  if (iq) { if (iq.mod.tags) iq.mod.tags(sg.u, CTX); } else unitTags(T, st);
   shipMark(T, Ws);
   readout(T, st);
   pf('overlay');
@@ -1207,7 +1248,23 @@ const cues = [
   [S2(48.4), () => SFX.tone(260, 170, .5, 'square', .008)], [S2(49.4), clunk], [S2(49.8), () => SFX.noise(1.4, 1400, .6, .02, .3)], [S2(51.2), clunk],
   [S2(51.3), whirr(150, 90, 3.0)], [S2(54.6), () => SFX.tone(300, 180, .3, 'square', .01)], [S2(55.5), () => SFX.noise(1.2, 700, .8, .03, .2)], [S2(56.8), clunk],
 ];
+/* the context the inserts draw with */
+function tagAt(tg, id, lab, val, p, a, age) {
+  if (a < .01 || !K.pj(p[0], p[1], p[2])) return;
+  const x = K.PJ[0], y = K.PJ[1];
+  K.leader(x, y, x + 46, y - 46, '#C6F432', .8 * a);
+  K.dot(x, y, 3, LIME[0], LIME[1], LIME[2], a);
+  K.setTag(tg, id, K.decode(lab, E.sat(age / .6), TRNOW, id.length), val, 'lime sm', x + 50, y - 60, a);
+}
+const CTX = { K, P_, CL, XS, XF, XR, M3, HD, GEO, FILM, STAGE, V, R, X, E, rng, PI, TAU, DEG, LIME, HOT, WH, CORAL: K.CORAL, SO, MO, RO,
+  apI, kk, lock, tr, tagAt, odot: P_.odot, oglow: P_.oglow, drawX: P_.drawX, MW, GY: P_.GY, GZ: P_.GZ, SIDE, T: 0, u: 0, Ws: null, st: null, camOld: null, xray: false,
+  PATH_A, camAt: t => camAt(t) };
+for (const q of INS) if (q.mod.build) { const t0 = performance.now(); q.mod.build(CTX); LOG.push(`insert ${q.at} ${(performance.now() - t0).toFixed(0)} ms`); }
+const TF_R = mapOut(TF);
+const FCH = CHAPTERS.map(c => ({ t: mapOut(c.t), title: c.title }))
+  .concat(...INS.map(q => (q.mod.chapters || []).map(c => ({ t: q.r0 + c.t, title: c.title })))).sort((a, b) => a.t - b.t);
+const FCUES = cues.map(([t, fn]) => [mapOut(t), fn]).concat(...INS.map(q => (q.mod.cues || []).map(([u, fn]) => [q.r0 + u, fn])));
 LOG.push(`load ${(performance.now() - t0load).toFixed(0)} ms`);
-FILM.run({ duration: DUR, chapters: CHAPTERS, render, cues });
-STAGE.dbg = () => ({ camAt, prof: PROF, log: LOG, np: NP, mz: MZ0, dir: DIR0, btop: B_TOP, s1: S1, arc: ARC.len, range: RANGE, e21: E21, stateAt, XF, XR, times: { T_REL, TF, TBU, T_LEAD, TB, TRET0, TRET1, SH, DUR, T_BORE } });
+FILM.run({ duration: DUR, chapters: FCH, render, cues: FCUES });
+STAGE.dbg = () => ({ camAt, prof: PROF, log: LOG, np: NP, mz: MZ0, dir: DIR0, btop: B_TOP, s1: S1, arc: ARC.len, range: RANGE, e21: E21, stateAt, XF, XR, times: { T_REL, TF, TBU, T_LEAD, TB, TRET0, TRET1, SH, DUR0, DUR, T_BORE }, mapOut, mapIn: t => Object.assign({}, mapIn(t)), INS: INS.map(q => ({ at: q.at, r0: q.r0, len: q.len })) });
 })();
