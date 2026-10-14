@@ -1,22 +1,26 @@
 /* SCAN · RAILGUN parts: the electromagnetic railgun mount in the Mk 45's seat on the Burke's foredeck, its loader and
    the power room under it.
    The mount: a gunhouse of two cheeks (access panels, louvres, a crew door) round the barrel slot; in the starboard
-   cheek the hydraulic power unit (motor, pump, reservoir, three accumulators, valve manifold), in the port cheek two
-   helium compressors and the fire-control cabinet; two hydraulic train drives whose pinions walk round a fixed ring
-   gear; on the roof an electro-optical / infrared director (yaw, pitch) and an X-band fire-control radar (yaw); the
+   cheek the hydraulic power unit (the tank with its sight glass, filler and clean-out cover; the finned motor, the bell
+   housing, an axial piston pump with a nine-piston block and swash plate (drawn apart: they turn and tilt), its
+   compensator; the pressure filter; the manifold and a stack of four directional valves; three piston accumulators
+   (their pistons drawn apart); the gauge panel; braided hoses), in the port cheek two helium compressors and the
+   fire-control cabinet; two train drives (planetary gearbox, brake, radial-piston hydraulic motor) whose pinions walk
+   round a fixed ring gear; on the roof an electro-optical / infrared director (yaw, pitch) and an X-band fire-control radar (yaw); the
    cradle on its trunnions with two hydraulic elevation rams, two recoil buffers, the muzzle velocity radar on a
    bridge over the barrel and the loader frame behind the breech. The barrel (12.85 m): a sliding breech block, a
    feed section with the two current injection blocks, copper rails top and bottom with insulating sidewalls in a
    composite containment, preload clamps at 13 bands (wedge jaws that drive home), and between them 12 stations of
    superconducting augmenting coils (a racetrack pair either side, the field across the bore) each in its cryostat
-   with a pulse-tube cryocooler, current leads and helium lines to two headers; the rails' coolant manifold under
-   the barrel; the muzzle block with the arc shunt and a two-leaf muzzle cover.
+   with a pulse-tube cryocooler (valve body, motor, regenerator, pulse tube, buffer and inertance tube; inside, the two
+   stages and the thermal strap), current leads fed from a coil bus along the top and helium lines to two headers;
+   the rails' coolant manifold under the barrel; the muzzle block with the arc shunt and a two-leaf muzzle cover.
    The loader for the 2 m long-rod round: a 12-cell magazine drum round the power column in the power room, a hoist
    in the rotating trunk, a tray that takes the round standing and swings it into line behind the breech, a chain
    rammer (2.4 m stroke).
    The power room: four pulsed alternators with exciters (one comes apart on guide rods), two coolant pumps (brushless
    DC motors: finned housing, drive inverter, a stator of twelve wound teeth, a permanent-magnet rotor, the pump's
-   impeller in its volute), the valve header, the coolant lines down to the keel (the heat sink's ports, RGP.SINK),
+   shrouded six-vane impeller in a spiral volute), the valve header, the coolant lines down to the keel (the heat sink's ports, RGP.SINK),
    four capacitor racks (80 modules, film capacitor cans), five power conditioning cabinets, bus bars, cable trays,
    fans; the X-ray point pass (a slice opens a window in the hull, the room shows only where it is open).
    Surfaces are sampled on regular lattices with their edges drawn as hairlines at twice the density (the Aegis face
@@ -294,28 +298,24 @@ const HYD = [
 ];
 const HE_T = [-4.1 + .375, -3.2 + .375].map((z, i) => [[-1.7 - .05 * i, 1.32, z], [-1.7 - .05 * i, 1.8 + .06 * i, z], [-1.45 - .05 * i, 1.8 + .06 * i, -1.6], [-1.45 - .05 * i, 1.8 + .06 * i, .6], [-1.38, TRN[1] + .05 - .1 * i, TRN[2]]]);
 const COOL_T = s => [[s * .2, -2.85, 0], [s * .2, -.2, 0], [1.25 + .1 * s, -.2, .3], [1.25 + .1 * s, .3, .4], [1.25 + .1 * s, 1.6, .5], [1.38, TRN[1] - .1 * s, TRN[2]]];
-const HPU = { mot: [1.85, 1.38, -4.15], man: [1.6, .9, -2.2], acc: [-2.75, -2.35, -1.95].map(z => [2.32, .3, z]) };
+/* the hydraulic power unit (T, in the starboard cheek, aft): the tank; on it the electric motor (axis +Z), the bell
+   housing and the axial piston pump (swash plate, a nine-piston cylinder block, the valve plate, the compensator); the
+   pressure filter; the manifold with its four-spool valve stack; three piston accumulators; the gauge panel facing
+   outboard */
+const HPU = { mot: [1.86, 1.33, -4.36], pump: [1.86, 1.33, -3.48], man: [1.6, .9, -2.2], acc: [-2.75, -2.35, -1.95].map(z => [2.32, .3, z]),
+  gauge: [2.535, 1.5, -3.56], gauge2: [2.535, 1.34, -3.38], filt: [1.5, .62, -2.85], spool: [-2.52, -2.3, -2.08, -1.86],
+  PST: .05, PR: .046, PN: 9, CB0: -3.36, CB1: -3.2, SW: -3.42, AYB: .44, AYT: 1.38 };
+/* the oil's ways (T): pump -> pressure filter -> manifold; manifold -> each accumulator; return -> the tank's filter */
+const HYD_P = [
+  [[1.74, 1.33, -3.1], [1.6, 1.36, -3.02], [1.52, 1.34, -2.95], [1.5, 1.26, -2.93]],
+  [[1.5, 1.22, -2.77], [1.5, 1.1, -2.7], [1.5, .92, -2.6]],
+  ...[-2.75, -2.35, -1.95].map(z => [[1.82, .5, z + .05], [2.06, .5, z + .05], [2.2, .38, z], [2.32, .34, z]]),
+  [[1.38, .62, -2.5], [1.3, .9, -2.8], [1.3, 1.1, -3.1], [1.42, 1.18, -3.2]],
+];
 const HEC = [-4.1, -3.2].map(z => [-1.88, 1.2, z + .375]);
 function gunIn(g) {
   const P = [];
-  if (g === 'h') {
-  P.push(G.box([1.35, .3, -4.25], [2.35, 1.0, -3.05], { ds: 1.2 }));
-  P.push(G.line([[2.36, .42, -3.4], [2.36, .92, -3.4]]), G.line([[2.36, .42, -3.36], [2.36, .92, -3.36]], F()), G.cyl([1.6, 1.0, -3.3], [1.6, 1.08, -3.3], .06, F()));
-  P.push(G.lathe(HPU.mot, [0, 0, 1], [[0, .19], [.06, .21], [.55, .21], [.6, .17]], { caps: true }));
-  for (let k = 0; k < 16; k++) { const a = k / 16 * TAU, c = Math.cos(a), n = Math.sin(a), m = HPU.mot; P.push(G.line([[m[0] + c * .21, m[1] + n * .21, m[2] + .1], [m[0] + c * .245, m[1] + n * .245, m[2] + .12], [m[0] + c * .245, m[1] + n * .245, m[2] + .52], [m[0] + c * .21, m[1] + n * .21, m[2] + .54]], F())); }
-  P.push(G.lathe([HPU.mot[0], HPU.mot[1], -3.55], [0, 0, 1], [[0, .1], [.12, .14], [.42, .14], [.46, .1]], { caps: true }));
-  P.push(G.box([1.7, 1.0, -4.05], [2.0, 1.18, -3.2], F()));
-  P.push(G.lathe([2.15, 1.0, -3.4], [0, 1, 0], [[0, .07], [.28, .07]], { caps: true }));
-  for (const a of HPU.acc) {
-    P.push(G.lathe(a, [0, 1, 0], [[0, .07], [.06, .12], [.14, .15], [1.0, .15], [1.12, .1], [1.2, .04]], { caps: true }));
-    P.push(G.cyl([a[0], 1.5, a[2]], [a[0], 1.58, a[2]], .025, F()), G.box([a[0] - .15, .3, a[2] - .09], [a[0] + .15, .42, a[2] + .09], F()));
-  }
-  P.push(G.box([1.38, .3, -2.65], [1.82, .9, -1.75], { ds: 1.1 }));
-  for (let k = 0; k < 4; k++) { const z = -2.55 + k * .24; P.push(G.cyl([1.82, .72, z], [1.98, .72, z], .05, F()), G.box([1.98, .66, z - .06], [2.08, .78, z + .06], F())); }
-  for (let k = 0; k < 2; k++) P.push(circ([1.37, .62, -2.42 + k * .42], [1, 0, 0], .06, F()), circ([1.37, .62, -2.42 + k * .42], [1, 0, 0], .045, F()));
-  for (const pl of HYD) P.push(...flex(pl, .018, F({ ds: .8 })));
-  return P;
-  }
+  if (g === 'h') return hpuPrims();
   for (const c of HEC) {
     P.push(G.box([-2.35, .3, c[2] - .375], [-1.42, 1.2, c[2] + .375], { ds: 1.2 }));
     const g = [-2.36, .78, c[2]]; P.push(circ(g, [1, 0, 0], .25, F()), circ(g, [1, 0, 0], .17, F()), circ(g, [1, 0, 0], .08, F()));
@@ -324,12 +324,109 @@ function gunIn(g) {
   P.push(G.box([-2.3, .3, -2.1], [-1.42, 1.95, -1.0], { ds: 1.2 }));
   P.push(G.panel([[-1.415, .5, -2.0], [-1.415, .5, -1.1], [-1.415, 1.85, -1.1], [-1.415, 1.85, -2.0]], F()));
   for (let k = 0; k < 6; k++) P.push(G.line([[-1.414, 1.55 - k * .1, -1.95], [-1.414, 1.55 - k * .1, -1.6]], F()));
-  for (const p of TD_P) { P.push(G.lathe(p, [0, 1, 0], [[0, .2], [.05, .2], [.05, .14], [.45, .14], [.52, .1]], { caps: true })); P.push(G.cyl([p[0], p[1] + .3, p[2]], [p[0] - Math.sign(p[0]) * .22, p[1] + .3, p[2]], .03, F())); }
+  // the train drives: a planetary gearbox (ribbed) on its flange, a spring-applied brake, the radial-piston hydraulic
+  // motor (five cylinders round it) with its port block and two hose fittings, the shaft down to the pinion
+  for (const p of TD_P) {
+    const [x, y, z] = p, so = -Math.sign(x);
+    P.push(G.lathe([x, y, z], [0, 1, 0], [[0, .17], [.02, .19], [.2, .19], [.22, .16]], { caps: true, ds: 1.1 }));
+    for (let k = 0; k < 10; k++) { const a = k / 10 * TAU; P.push(G.panel([[x + Math.cos(a) * .19, y + .03, z + Math.sin(a) * .19], [x + Math.cos(a) * .215, y + .05, z + Math.sin(a) * .215], [x + Math.cos(a) * .215, y + .19, z + Math.sin(a) * .215], [x + Math.cos(a) * .19, y + .2, z + Math.sin(a) * .19]], F({ fill: true }))); }
+    P.push(G.lathe([x, y + .2, z], [0, 1, 0], [[0, .25], [.03, .25]], F({ caps: true })));
+    for (let k = 0; k < 8; k++) { const a = (k + .5) / 8 * TAU; P.push(G.cyl([x + Math.cos(a) * .225, y + .23, z + Math.sin(a) * .225], [x + Math.cos(a) * .225, y + .25, z + Math.sin(a) * .225], .01, F())); }
+    P.push(G.lathe([x, y + .23, z], [0, 1, 0], [[0, .15], [.12, .15]], { caps: true }), G.box([x + so * .14, y + .26, z - .05], [x + so * .22, y + .33, z + .05], F()));
+    P.push(G.lathe([x, y + .35, z], [0, 1, 0], [[0, .14], [.02, .17], [.16, .17], [.18, .12]], { caps: true, ds: 1.2 }));
+    for (let k = 0; k < 5; k++) { const a = k / 5 * TAU + .3; P.push(G.lathe([x + Math.cos(a) * .16, y + .44, z + Math.sin(a) * .16], [Math.cos(a), 0, Math.sin(a)], [[0, .05], [.08, .05], [.09, .035]], F({ caps: true }))); }
+    P.push(G.box([x - .07, y + .53, z - .07], [x + .07, y + .62, z + .07]), G.cyl([x, y + .58, z + .07], [x, y + .58, z + .13], .02, F()), G.cyl([x, y + .58, z - .07], [x, y + .58, z - .13], .02, F()));
+  }
   for (const pl of HE_T) P.push(...pipes(pl, .024, F()));
   for (const s of [-1, 1]) P.push(...pipes(COOL_T(s).slice(3), .045));
   for (const s of [-1, 1]) P.push(G.lathe([s * 1.38, TRN[1], TRN[2]], [s, 0, 0], [[0, .09], [.14, .09]], { caps: true }));
   return P;
 }
+/* a braided hose: the line through P, crimped ferrules at both ends */
+function hose(P, r, o) {
+  const out = flex(P, r, o || F({ ds: .8 }));
+  for (const [a, b] of [[P[0], P[1]], [P[P.length - 1], P[P.length - 2]]]) { const d = V.norm(V.sub(b, a)); out.push(G.cyl(a, V.mad(a, d, .05), r * 1.55, F()), G.lathe(V.mad(a, d, .05), d, [[0, r * 1.25], [.025, r * 1.25]], F())); }
+  return out;
+}
+function hpuPrims() {
+  const P = [], m = HPU.mot, x = m[0], y = m[1];
+  // the tank: shell, lid with its bolted clean-out cover, the filler-breather, the sight glass, the drain, lifting eyes
+  P.push(G.box([1.32, .3, -4.38], [2.46, .98, -2.98], { ds: 1.2 }));
+  P.push(G.box([1.3, .98, -4.4], [2.48, 1.0, -2.96], F({ ds: 1.4 })));
+  P.push(G.line([[1.4, 1.002, -2.9 - .08], [1.4, 1.002, -3.06]], F()));
+  for (let k = 0; k < 10; k++) { const a = k / 10 * TAU; P.push(G.cyl([1.6 + Math.cos(a) * .12, 1.0, -4.05 + Math.sin(a) * .12], [1.6 + Math.cos(a) * .12, 1.02, -4.05 + Math.sin(a) * .12], .008, F())); }
+  P.push(circ([1.6, 1.003, -4.05], [0, 1, 0], .15, F()), circ([1.6, 1.003, -4.05], [0, 1, 0], .135, F()));
+  P.push(G.lathe([2.25, 1.0, -3.2], [0, 1, 0], [[0, .03], [.06, .03], [.06, .055], [.12, .055], [.13, .03]], F({ caps: true })));
+  for (let k = 0; k < 8; k++) { const a = k / 8 * TAU; P.push(G.line([[2.25 + Math.cos(a) * .056, 1.07, -3.2 + Math.sin(a) * .056], [2.25 + Math.cos(a) * .056, 1.11, -3.2 + Math.sin(a) * .056]], F())); }
+  P.push(G.box([2.46, .4, -3.36], [2.48, .9, -3.3], F()), G.lathe([2.5, .44, -3.33], [0, 1, 0], [[0, .018], [.42, .018]], F()), G.box([2.48, .4, -3.36], [2.53, .44, -3.3], F()), G.box([2.48, .86, -3.36], [2.53, .9, -3.3], F()));
+  for (let k = 0; k < 5; k++) P.push(G.line([[2.522, .5 + k * .08, -3.345], [2.53, .5 + k * .08, -3.345]], F()));
+  P.push(G.cyl([2.0, .34, -4.38], [2.0, .34, -4.48], .025, F()), G.box([1.97, .31, -4.52], [2.03, .37, -4.48], F()));
+  for (const [ex, ez] of [[1.36, -4.34], [2.42, -4.34], [1.36, -3.02], [2.42, -3.02]]) P.push(G.lathe([ex, 1.0, ez], [0, 1, 0], [[0, .02], [.05, .02]], F()), circ([ex, 1.07, ez], [1, 0, 1], .025, F()));
+  // the electric motor: finned frame, fan cowl and grille, terminal box, feet; the D-end flange
+  P.push(G.lathe(m, [0, 0, 1], [[0, .12], [.1, .2], [.12, .2], [.6, .2], [.64, .18], [.7, .18], [.72, .13]], { caps: true, ds: 1.3 }));
+  for (let k = 0; k < 24; k++) { const a = k / 24 * TAU, c = Math.cos(a), n = Math.sin(a); if (n < -.55) continue; P.push(G.panel([[x + c * .2, y + n * .2, m[2] + .16], [x + c * .245, y + n * .245, m[2] + .18], [x + c * .245, y + n * .245, m[2] + .6], [x + c * .2, y + n * .2, m[2] + .62]], F({ fill: true, ds: .9 }))); }
+  for (const r of [.05, .1, .15]) P.push(circ([x, y, m[2] - .002], [0, 0, 1], r, F()));
+  for (let k = 0; k < 8; k++) { const a = k / 8 * TAU; P.push(G.line([[x + Math.cos(a) * .03, y + Math.sin(a) * .03, m[2] - .003], [x + Math.cos(a) * .18, y + Math.sin(a) * .18, m[2] - .003]], F())); }
+  P.push(G.box([x - .1, y + .2, m[2] + .22], [x + .1, y + .33, m[2] + .46]), G.cyl([x + .1, y + .26, m[2] + .34], [x + .2, y + .26, m[2] + .34], .022, F()));
+  P.push(G.box([x - .2, .98, m[2] + .1], [x + .2, y - .14, m[2] + .2], F()), G.box([x - .2, .98, m[2] + .52], [x + .2, y - .14, m[2] + .62], F()));
+  // the bell housing (its windows show the jaw coupling), the pump: housing, shaft, port cover, the compensator
+  const pz = HPU.pump[2];
+  P.push(G.lathe([x, y, m[2] + .72], [0, 0, 1], [[0, .17], [.04, .17], [.06, .14], [.16, .13], [.18, .15], [.2, .15]], { ds: 2.4 }));
+  for (const s of [-1, 1]) P.push(G.line([[x + s * .14, y - .06, m[2] + .78], [x + s * .14, y + .06, m[2] + .78], [x + s * .135, y + .06, m[2] + .86], [x + s * .135, y - .06, m[2] + .86], [x + s * .14, y - .06, m[2] + .78]], F()));
+  P.push(G.lathe([x, y, m[2] + .74], [0, 0, 1], [[0, .055], [.06, .055]], F({ caps: true })), G.lathe([x, y, m[2] + .82], [0, 0, 1], [[0, .055], [.06, .055]], F({ caps: true })));
+  P.push(G.lathe([x, y, pz], [0, 0, 1], [[0, .13], [.03, .13], [.05, .12], [.3, .12], [.32, .125], [.36, .125], [.44, .12], [.46, .1]], { ds: 2.6 }));
+  for (let k = 0; k < 6; k++) { const a = k / 6 * TAU + .3; P.push(G.cyl([x + Math.cos(a) * .115, y + Math.sin(a) * .115, pz + .3], [x + Math.cos(a) * .115, y + Math.sin(a) * .115, pz + .37], .012, F())); }
+  P.push(G.box([x - .07, y + .12, pz + .1], [x + .07, y + .2, pz + .26]), G.cyl([x + .07, y + .16, pz + .18], [x + .16, y + .16, pz + .18], .014, F()), G.lathe([x + .12, y + .16, pz + .18], [1, 0, 0], [[0, .022], [.02, .022]], F({ caps: true })));
+  P.push(G.box([x - .045, y - .23, pz + .36], [x + .045, y - .12, pz + .44], F()));
+  // the pressure filter on its bracket: bowl, head, clogging indicator
+  const f = HPU.filt;
+  P.push(G.lathe(f, [0, 1, 0], [[0, .03], [.04, .055], [.56, .055], [.6, .045]], { caps: true, ds: 1.3 }));
+  P.push(G.box([f[0] - .08, f[1] + .58, f[2] - .08], [f[0] + .08, f[1] + .7, f[2] + .08]), G.lathe([f[0] + .08, f[1] + .64, f[2]], [1, 0, 0], [[0, .02], [.03, .02], [.03, .012], [.045, .012]], F({ caps: true })));
+  P.push(G.box([f[0] - .02, .3, f[2] - .06], [f[0] + .02, f[1] + .1, f[2] + .06], F()));
+  // the manifold block, its ports and plugs; the stack of four directional valves on it, solenoids both ends
+  P.push(G.box([1.38, .3, -2.65], [1.82, .9, -1.75], { ds: 1.1 }));
+  for (let k = 0; k < 6; k++) for (let j = 0; j < 2; j++) P.push(circ([1.823, .45 + j * .25, -2.55 + k * .15], [1, 0, 0], .022, F()));
+  for (const z of HPU.spool) {
+    P.push(G.box([1.5, .9, z - .085], [1.7, 1.02, z + .085]));
+    for (const s of [-1, 1]) { const x0 = s > 0 ? 1.7 : 1.5; P.push(G.lathe([x0, .96, z], [s, 0, 0], [[0, .036], [.13, .036], [.14, .028]], F({ caps: true })), G.box([x0 + s * .14 - .02, .95, z - .025], [x0 + s * .14 + .02, 1.0, z + .025], F())); }
+    P.push(G.line([[1.5, 1.021, z - .06], [1.7, 1.021, z - .06]], F()), G.line([[1.5, 1.021, z + .06], [1.7, 1.021, z + .06]], F()));
+  }
+  P.push(G.lathe([1.6, .9, -1.72], [0, 0, 1], [[0, .03], [.12, .03], [.13, .022]], F({ caps: true })), G.lathe([1.45, .9, -2.66], [0, 0, -1], [[0, .028], [.1, .028]], F({ caps: true })));
+  // the accumulators: shell, oil end and port, gas end with its charging valve and guard
+  for (const a of HPU.acc) {
+    P.push(G.lathe(a, [0, 1, 0], [[0, .07], [.04, .12], [.1, .15], [.14, .15], [1.04, .15], [1.1, .13], [1.18, .07], [1.22, .04]], { caps: true, ds: 1.8 }));
+    for (const yy of [.15, 1.06]) P.push(circ([a[0], a[1] + yy, a[2]], [0, 1, 0], .152, F()));
+    P.push(G.cyl([a[0], a[1] + 1.22, a[2]], [a[0], a[1] + 1.3, a[2]], .018, F()), G.box([a[0] - .05, a[1] + 1.22, a[2] - .05], [a[0] + .05, a[1] + 1.34, a[2] + .05], F({ edgeOnly: true })));
+    P.push(G.box([a[0] - .16, .3, a[2] - .1], [a[0] + .16, .36, a[2] + .1], F()), G.box([a[0] - .17, .62, a[2] - .17], [a[0] + .17, .66, a[2] + .17], F({ edgeOnly: true })));
+  }
+  // the gauge panel (facing outboard): the system pressure gauge (0..25 MPa) and the precharge gauge
+  P.push(G.box([2.5, 1.22, -3.78], [2.52, 1.7, -3.26], F()), G.box([2.42, 1.3, -3.7], [2.5, 1.34, -3.66], F()));
+  for (const [g, r] of [[HPU.gauge, .085], [HPU.gauge2, .05]]) {
+    P.push(G.lathe([g[0] - .02, g[1], g[2]], [1, 0, 0], [[0, r + .01], [.025, r + .01]], { caps: true }), circ([g[0] + .006, g[1], g[2]], [1, 0, 0], r, F()), circ([g[0] + .006, g[1], g[2]], [1, 0, 0], r * .2, F()));
+    const n = r > .06 ? 26 : 11;
+    for (let k = 0; k < n; k++) { const a = (-135 + 270 * k / (n - 1)) * DEG, L = k % 5 ? .1 : .2, ca = Math.sin(a), sa = Math.cos(a);
+      P.push(G.line([[g[0] + .007, g[1] + sa * r * .92, g[2] - ca * r * .92], [g[0] + .007, g[1] + sa * r * (.92 - L), g[2] - ca * r * (.92 - L)]], F())); }
+  }
+  P.push(...flex(quad3([2.42, 1.32, -3.68], [2.0, 1.1, -3.0], [1.82, .8, -2.62], 10), .006));
+  // the oil lines: braided hoses (pump -> filter), rigid tubes, the return; the lines out to the rams and train motors
+  P.push(...hose(HYD_P[0], .026));
+  for (let i = 1; i < HYD_P.length; i++) P.push(...pipes(HYD_P[i], .02, F()));
+  for (const pl of HYD) P.push(...hose(pl, .018));
+  P.push(...hose([[1.86, 1.11, -3.1], [1.86, 1.05, -3.1], [1.86, 1.0, -3.1]], .034));
+  return P;
+}
+/* the pump's moving parts (local: the pump's axis Z from its back face): the cylinder block (nine bores, turning), the
+   swash plate (tilted by the stroke) */
+function hpuBlock() {
+  const P = [G.lathe([0, 0, HPU.CB0 - HPU.pump[2]], [0, 0, 1], [[0, .075], [.02, .08], [HPU.CB1 - HPU.CB0, .08]], { caps: true, ds: 1.6 })];
+  for (let k = 0; k < HPU.PN; k++) { const a = k / HPU.PN * TAU; P.push(circ([Math.cos(a) * HPU.PR, Math.sin(a) * HPU.PR, HPU.CB1 - HPU.pump[2] + .002], [0, 0, 1], .013, F())); }
+  P.push(G.cyl([0, 0, -.05], [0, 0, .46], .016, {}));
+  return P;
+}
+const hpuSwash = () => [G.lathe([0, 0, -.012], [0, 0, 1], [[0, .085], [.024, .085]], { caps: true, ds: 1.2 }), G.box([-.1, -.03, -.03], [-.085, .03, .012], F()), G.line([[0, .086, .013], [0, -.086, .013]], F())];
+/* an accumulator's piston (local: its centre) */
+const accPiston = () => [G.lathe([0, -.035, 0], [0, 1, 0], [[0, .142], [.07, .142]], { caps: true, ds: 1.1 }), circ([0, -.015, 0], [0, 1, 0], .146, F()), circ([0, .02, 0], [0, 1, 0], .146, F())];
+
 /* the sensors: the EO/IR director (pedestal T; yoke: the yaw frame at the pedestal top; head: the pitch frame) */
 function eoBase() {
   const P = [G.lathe(EO_P, [0, 1, 0], [[0, .24], [.04, .24], [.04, .15], [.3, .15], [.3, .19], [.34, .19]], { caps: true })];
@@ -433,7 +530,14 @@ function barrel() {
   // helium headers along the top, a flex line from each cold head down to them
   for (const s of [-1, 1]) {
     P.push(G.cyl([s * .17, .48, -2.0], [s * .17, .48, RZ1 - .2], .026, {}));
-    for (const zc of STN) { const z = zc - .14; P.push(...flex(quad3([s * .5, KY + .3, z], [s * .32, KY + .34, z], [s * .17, .5, z], 6), .012)); }
+    for (const zc of STN) for (const dz of [-.035, .035]) { const z = zc - .14 + dz; P.push(...flex(quad3([s * .365, KY + .245, z], [s * .27, KY + .31, z], [s * .17, .505, z - dz * .4], 7), .011)); }
+  }
+  // the coils' current bus along the top: a pair of conductors on standoffs over the bands, a drop to each station's
+  // current leads
+  for (const s of [-1, 1]) {
+    P.push(bar([s * .32, .575, -2.3], [s * .32, .575, RZ1 - .3], .05, .016, [0, 1, 0], { ds: 1.2 }));
+    for (const zb of BANDS) P.push(G.cyl([s * .32, .46, zb + .05], [s * .32, .567, zb + .05], .011, F()));
+    for (const zc of STN) P.push(...bars([[s * .32, .575, zc + .22], [s * .4, .6, zc + .22], [s * .45, KY + .2, zc + .22]], .03, .012, [0, 0, 1], F()));
   }
   // the rails' coolant manifold: supply and return under the barrel, a stub up into the containment at each station
   for (const s of [-1, 1]) {
@@ -460,41 +564,89 @@ const insPrims = () => [-1, 1].map(s => G.box([s * IX0, -RY0, RZ0], [s * IX1, RY
 function coilPrims() {
   const P = [];
   for (const s of [-1, 1]) {
-    const path = racetrack(s * CXC, .25, .14, 12);
+    // the winding pack: two pancakes of REBCO tape, the turns drawn as nested racetracks; the stainless former it is
+    // wound on; the clamp plates either side with their bolts; the terminal block and the joint to the leads
+    const path = racetrack(s * CXC, .25, .14, 14);
     for (let i = 0; i < path.length - 1; i++) if (V.dist(path[i], path[i + 1]) > 1e-4) P.push(bar(path[i], path[i + 1], .034, .075, [1, 0, 0], { ds: 1.2 }));
-    for (const dx of [-.024, 0, .024]) P.push(G.line(racetrack(s * CXC + dx, .268, .14, 18), F()));
-    for (const dr of [-.008, .008]) P.push(G.line(racetrack(s * (CXC + .039), .25 + dr, .14, 18), F()));
+    for (const dx of [-.026, -.009, .009, .026]) for (const dr of [-.03, -.012, .006, .024]) P.push(G.line(racetrack(s * CXC + dx, .25 + dr, .14, 20), F()));
     P.push(G.box([s * (CXC - .02), -.19, -.14], [s * (CXC + .02), .19, .14], F({ ds: 1.4 })));
+    for (const dx of [-.045, .045]) {
+      P.push(G.line(racetrack(s * CXC + dx, .3, .14, 20), F()), G.line(racetrack(s * CXC + dx, .2, .14, 20), F()));
+      for (let k = 0; k < 10; k++) { const a = k / 10 * TAU, y = Math.cos(a) * .3, z = Math.sin(a) > 0 ? .14 + Math.sin(a) * .3 : -.14 + Math.sin(a) * .3;
+        P.push(G.cyl([s * CXC + dx * 1.15, y * .82, z * .9], [s * CXC + dx * .9, y * .82, z * .9], .007, F())); }
+    }
+    P.push(G.box([s * (CXC - .03), .27, .1], [s * (CXC + .03), .33, .22], F()), G.cyl([s * CXC, .33, .16], [s * CXC, .38, .2], .01, F()));
+    // the cold-mass supports (G10 struts from the cryostat's walls) and the thermal shield's frame
+    for (const [y, z] of [[.36, -.3], [.36, .3], [-.36, -.3], [-.36, .3]]) P.push(G.cyl([s * CXC, y * .75, z], [s * (KX1 - .015), y, z * 1.15], .008, F()));
+    P.push(G.line([[s * (KX0 + .02), -.37, -.39], [s * (KX1 - .02), -.37, -.39], [s * (KX1 - .02), .37, -.39], [s * (KX0 + .02), .37, -.39], [s * (KX0 + .02), -.37, -.39]], F()));
+    P.push(G.line([[s * (KX0 + .02), -.37, .39], [s * (KX1 - .02), -.37, .39], [s * (KX1 - .02), .37, .39], [s * (KX0 + .02), .37, .39], [s * (KX0 + .02), -.37, .39]], F()));
+    for (const y of [-.37, .37]) for (const x of [KX0 + .02, KX1 - .02]) P.push(G.line([[s * x, y, -.39], [s * x, y, .39]], F()));
   }
   return P;
 }
-/* B: the cryocoolers (a pulse-tube cold head on each cryostat: flange, regenerator, cold head, the motor and rotary
-   valve on top with its cooling fins) */
+/* B: the cryocoolers: a pulse-tube cold head on each cryostat. Outside: the mounting flange and its bolts, the rotary
+   valve body with the helium supply and return couplings, its finned motor on top, the regenerator and the pulse tube
+   side by side, the buffer volume with the inertance tube wound round it. Inside (seen through the cryostat's shell):
+   the two tubes down to the first stage (40 K) and the second (20 K), copper discs, the braided thermal strap from
+   the second stage to the coil */
 const COLD = []; for (const zc of STN) for (const s of [-1, 1]) COLD.push([s * .5, KY, zc - .14]);
-function cryoPrims() {
+const COLD_HERO = 9;                                    // (station 4, starboard: the cold head the lens watches frost over, finer)
+function cryoPrims(only) {
   const P = [];
-  for (const c of COLD) {
-    P.push(G.lathe(c, [0, 1, 0], [[0, .09], [.03, .09]], { caps: true }));
-    P.push(G.lathe([c[0], c[1] + .03, c[2]], [0, 1, 0], [[0, .045], [.2, .045], [.2, .07], [.34, .07], [.36, .05]], { caps: true }));
-    for (let k = 0; k < 5; k++) P.push(circ([c[0], c[1] + .24 + k * .022, c[2]], [0, 1, 0], .082, F()));
-    P.push(G.cyl([c[0], c[1] + .1, c[2]], [c[0] - Math.sign(c[0]) * .085, c[1] + .1, c[2]], .012, F()));
+  for (const c of only === undefined ? COLD : [COLD[only]]) {
+    const s = Math.sign(c[0]), [x, y, z] = c, ix = -s;                   // (ix: toward the bore)
+    P.push(G.lathe(c, [0, 1, 0], [[0, .095], [.022, .095]], { caps: true, ds: .8 }));
+    for (let k = 0; k < 8; k++) { const a = k / 8 * TAU; P.push(G.lathe([x + Math.cos(a) * .08, y + .022, z + Math.sin(a) * .08], [0, 1, 0], [[0, .007], [.01, .007]], F({ caps: true }))); }
+    // the valve body, its couplings, the motor
+    P.push(G.lathe([x, y + .2, z], [0, 1, 0], [[0, .05], [.012, .058], [.07, .058], [.08, .05]], { caps: true, ds: .9 }));
+    for (const dz of [-.035, .035]) P.push(G.lathe([x + ix * .055, y + .245, z + dz], [ix, 0, 0], [[0, .013], [.04, .013], [.045, .019], [.075, .019], [.08, .012]], F({ caps: true })));
+    P.push(G.lathe([x, y + .28, z], [0, 1, 0], [[0, .06], [.012, .07], [.1, .07], [.11, .05], [.12, .02]], { caps: true, ds: 1.1 }));
+    for (let k = 0; k < 7; k++) P.push(circ([x, y + .3 + k * .012, z], [0, 1, 0], .082, F()));
+    for (let k = 0; k < 12; k++) { const a = k / 12 * TAU; P.push(G.line([[x + Math.cos(a) * .072, y + .292, z + Math.sin(a) * .072], [x + Math.cos(a) * .082, y + .292, z + Math.sin(a) * .082], [x + Math.cos(a) * .082, y + .378, z + Math.sin(a) * .082]], F())); }
+    P.push(G.box([x - .02, y + .4, z - .03], [x + .02, y + .43, z + .03], F()));
+    // the regenerator and the pulse tube between the flange and the valve body
+    P.push(G.lathe([x + ix * .022, y + .022, z], [0, 1, 0], [[0, .026], [.178, .026]], { ds: .7 }), G.lathe([x - ix * .03, y + .022, z], [0, 1, 0], [[0, .016], [.178, .016]], { ds: .7 }));
+    for (const yy of [.07, .13]) P.push(circ([x + ix * .022, y + yy, z], [0, 1, 0], .028, F()), circ([x - ix * .03, y + yy, z], [0, 1, 0], .018, F()));
+    // the buffer volume and its inertance tube (a helix round it)
+    const bz = z + .11;
+    P.push(G.lathe([x, y + .03, bz], [0, 1, 0], [[0, .02], [.01, .032], [.15, .032], [.16, .02]], { caps: true, ds: .8 }));
+    const hx = []; for (let k = 0; k <= 70; k++) { const a = k / 70 * 5 * TAU; hx.push([x + Math.cos(a) * .042, y + .05 + .11 * k / 70, bz + Math.sin(a) * .042]); }
+    P.push(G.line(hx, F()), ...flex([[x, y + .2, z + .05], [x, y + .21, bz - .02], [x, y + .17, bz - .04]], .006));
+    // inside the cryostat: the tubes down to the stages, the stages, the thermal strap to the coil
+    P.push(G.lathe([x + ix * .022, y - .3, z], [0, 1, 0], [[0, .02], [.3, .02]], F({ ds: .9 })), G.lathe([x - ix * .03, y - .3, z], [0, 1, 0], [[0, .013], [.3, .013]], F({ ds: .9 })));
+    P.push(G.lathe([x, y - .14, z], [0, 1, 0], [[0, .06], [.02, .06]], F({ caps: true })), G.lathe([x, y - .32, z], [0, 1, 0], [[0, .045], [.025, .045]], F({ caps: true })));
+    const st = quad3([x, y - .32, z], [x + ix * .02, y - .4, z + .1], [s * CXC, .27, z + .14 + .02], 10);
+    for (const d of [-.008, 0, .008]) P.push(G.line(st.map(p => [p[0] + d, p[1], p[2] + d]), F()));
   }
   return P;
 }
-const FROST = { pts: null };
-/* frost: seeded points on the cold heads, their flex lines and the helium headers (drawn with keep = the frost) */
+const FROST = { pts: null, n: 0 };
+/* frost: seeded points [x, y, z (B), kind, station, order]; kind 0 a cold head (growing from its cold flange up),
+   1 its flex line, 2 the helium headers (z: where the cold front reaches them), 3 a cryostat's top and its lead
+   tower (as the station's coils reach 20 K). order (0..1): when, within its part's frosting, the point appears */
 function frostCloud() {
   const r = M3.rng(7741), A = [];
-  const push = (x, y, z) => A.push(x, y, z, 0, 0, 0);
-  for (const c of COLD) {
-    for (let i = 0; i < 320; i++) { const a = r() * TAU, y = .035 + .2 * Math.pow(r(), 1.5), rr = .052 + .032 * r() * r(); push(c[0] + Math.cos(a) * rr, c[1] + y, c[2] + Math.sin(a) * rr); }
-    for (let i = 0; i < 90; i++) { const a = r() * TAU, rr = .03 + .065 * Math.sqrt(r()); push(c[0] + Math.cos(a) * rr, c[1] + .032 + .006 * r(), c[2] + Math.sin(a) * rr); }
-    const P = quad3([c[0], KY + .3, c[2]], [c[0] * .64, KY + .34, c[2]], [Math.sign(c[0]) * .17, .5, c[2]], 24);
-    for (let i = 0; i < 80; i++) { const k = Math.floor(r() * 24), u = r(), a = r() * TAU, p = V.lerp(P[k], P[k + 1], u), rr = .016 + .014 * r(); push(p[0] + Math.cos(a) * rr, p[1] + Math.sin(a) * rr, p[2] + (r() - .5) * .01); }
-  }
-  for (const s of [-1, 1]) for (let i = 0; i < 3200; i++) { const z = -2.0 + r() * (RZ1 - 1.8), a = r() * TAU, rr = .029 + .02 * r() * r(); push(s * .17 + Math.cos(a) * rr, .48 + Math.sin(a) * rr, z); }
-  const pts = new Float32Array(A); FROST.pts = pts;
-  return K.lodCloud([.006, .012, .024, .048, .096].map((sp, li) => { const st = 1 << li, o = []; for (let i = 0; i < pts.length / 6; i += st) for (let q = 0; q < 6; q++) o.push(pts[i * 6 + q]); return { sp, pts: new Float32Array(o) }; }), .8);
+  const push = (x, y, z, kind, k, h) => A.push(x, y, z, kind, k, h);
+  COLD.forEach((c, i) => {
+    const k = i >> 1, ix = -Math.sign(c[0]), bz = c[2] + .11, mul = i === COLD_HERO ? 5 : 1;
+    // crystals: clusters of three or four dots, on the tubes and the flange (from the flange up), the buffer, the
+    // valve body's couplings
+    const crystal = (px, py, pz, kind, h) => { const n = 2 + Math.floor(r() * 3); for (let q = 0; q < n; q++) push(px + (r() - .5) * .007, py + (r() - .5) * .007, pz + (r() - .5) * .007, kind, k, Math.min(.999, h + .02 * r())); };
+    for (let j = 0; j < 260 * mul; j++) { const a = r() * TAU, u = Math.pow(r(), 1.2), rr = .029 + .012 * r() * r(); crystal(c[0] + ix * .022 + Math.cos(a) * rr, c[1] + .022 + .178 * u, c[2] + Math.sin(a) * rr, 0, .6 * u + .4 * r()); }
+    for (let j = 0; j < 160 * mul; j++) { const a = r() * TAU, u = Math.pow(r(), 1.2), rr = .019 + .01 * r() * r(); crystal(c[0] - ix * .03 + Math.cos(a) * rr, c[1] + .022 + .178 * u, c[2] + Math.sin(a) * rr, 0, .6 * u + .4 * r()); }
+    for (let j = 0; j < 150 * mul; j++) { const a = r() * TAU, rr = .03 + .065 * Math.sqrt(r()); crystal(c[0] + Math.cos(a) * rr, c[1] + .022 + .006 * r(), c[2] + Math.sin(a) * rr, 0, .45 * r()); }
+    for (let j = 0; j < 120 * mul; j++) { const a = r() * TAU, u = r(), rr = .034 + .01 * r(); crystal(c[0] + Math.cos(a) * rr, c[1] + .04 + .15 * u, bz + Math.sin(a) * rr, 0, .25 + .5 * u + .25 * r()); }
+    for (let j = 0; j < 50 * mul; j++) { const dz = r() < .5 ? -.035 : .035, u = r(), a = r() * TAU; crystal(c[0] + ix * (.06 + .07 * u), c[1] + .245 + Math.cos(a) * .022, c[2] + dz + Math.sin(a) * .022, 0, .55 + .45 * r()); }
+    const sg = Math.sign(c[0]), P = quad3([sg * .365, KY + .245, c[2] + .035], [sg * .27, KY + .31, c[2] + .035], [sg * .17, .505, c[2] + .021], 24);
+    for (let j = 0; j < 110; j++) { const q = Math.floor(r() * 24), u = r(), a = r() * TAU, p = V.lerp(P[q], P[q + 1], u), rr = .014 + .014 * r(); push(p[0] + Math.cos(a) * rr, p[1] + Math.sin(a) * rr, p[2] + (r() - .5) * .01, 1, k, (q + u) / 24 * .6 + .4 * r()); }
+    // the cryostat's top over the station, its lead tower
+    const zc = STN[k], s = Math.sign(c[0]);
+    for (let j = 0; j < 160; j++) { const x = s * (KX0 + (KX1 - KX0) * r()), z = zc - KZ + 2 * KZ * r(); push(x, KY + .004 + .006 * r(), z, 3, k, r()); }
+    for (let j = 0; j < 60; j++) { const a = r() * TAU, y = KY + .16 * r(); push(s * .45 + Math.cos(a) * .043, y, zc + .22 + Math.sin(a) * .043, 3, k, .3 + .7 * r()); }
+  });
+  for (const s of [-1, 1]) for (let i = 0; i < 4200; i++) { const z = -2.0 + r() * (RZ1 - 1.8), a = r() * TAU, rr = .028 + .022 * r() * r(); push(s * .17 + Math.cos(a) * rr, .48 + Math.sin(a) * rr, z, 2, -1, r()); }
+  FROST.pts = new Float32Array(A); FROST.n = A.length / 6;
+  return null;
 }
 /* B: a preload clamp's wedge jaw at a band (s side; slides out s * 0.05 when unlocked) */
 const jaw = s => [G.box([s * .362, -.3, .012], [s * .45, .3, .088]), G.box([s * .45, -.07, .02], [s * .49, .07, .08], F()), G.line([[s * .451, -.25, .05], [s * .451, .25, .05]], F())];
@@ -523,9 +675,27 @@ function tray() {
 const rammerHead = () => [G.lathe([0, 0, -.12], [0, 0, 1], [[0, .1], [.1, .12], [.12, .12]], { caps: true }), G.box([-.07, -.17, -.2], [.07, -.08, -.04], F())];
 /* a hydraulic ram (local: the base at the origin, +Z toward the pin): the cylinder; the rod (local: the pin end
    at the origin, +Z away from the base, the rod running back down -Z into the cylinder) */
-const ramCyl = () => [G.lathe([0, 0, -.1], [0, 0, 1], [[0, .06], [.1, .06], [.1, .115], [.18, .115], [.18, .1], [1.2, .1], [1.25, .118], [1.33, .118], [1.33, .07]], { caps: true }), G.box([-.05, -.09, -.16], [.05, .09, -.06], F()),
-                      G.cyl([.1, 0, .25], [.16, 0, .25], .025, F()), G.cyl([.1, 0, 1.15], [.16, 0, 1.15], .025, F())];
-const ramRod = () => [G.cyl([0, 0, -1.5], [0, 0, -.08], .055, {}), G.lathe([0, 0, -.08], [0, 0, 1], [[0, .07], [.1, .07]], { caps: true }), G.cyl([-.08, 0, 0], [.08, 0, 0], .065, { caps: true })];
+/* the elevation ram's cylinder (local: the base pin at the origin, +Z toward the rod's end): the base clevis and pin,
+   the cap end, the barrel, the gland and its nut; the oil ports at both ends with their fittings; the position
+   transducer along it */
+function ramCyl() {
+  const P = [G.lathe([0, 0, -.1], [0, 0, 1], [[0, .06], [.1, .06], [.1, .118], [.2, .118], [.2, .1], [1.18, .1], [1.2, .112], [1.26, .122], [1.33, .122], [1.33, .07]], { caps: true, ds: 1.1 })];
+  for (const s of [-1, 1]) P.push(G.box([s * .05, -.09, -.2], [s * .085, .09, -.05]));
+  P.push(G.cyl([-.11, 0, -.14], [.11, 0, -.14], .028, F()));
+  for (let k = 0; k < 6; k++) { const a = k / 6 * TAU; P.push(G.line([[Math.cos(a) * .123, Math.sin(a) * .123, 1.26], [Math.cos(a) * .123, Math.sin(a) * .123, 1.33]], F())); }
+  for (const z of [.12, 1.08]) P.push(G.box([.095, -.05, z - .05], [.15, .05, z + .05]), G.cyl([.15, 0, z], [.19, 0, z], .022, F()), G.lathe([.19, 0, z], [1, 0, 0], [[0, .03], [.035, .03]], F({ caps: true })));
+  P.push(G.cyl([-.01, .125, .2], [-.01, .125, 1.24], .011, F()), G.box([-.04, .1, .18], [.02, .16, .26], F()));
+  for (const z of [.4, .7, 1.0]) P.push(circ([0, 0, z], [0, 0, 1], .102, F()));
+  return P;
+}
+/* the ram's rod (local: the rod's eye at the origin, the rod running back down -Z into the cylinder): the chromed rod,
+   the rod end with its spherical bearing and pin */
+function ramRod() {
+  const P = [G.cyl([0, 0, -1.5], [0, 0, -.1], .055, { ds: .9 }), G.lathe([0, 0, -.1], [0, 0, 1], [[0, .062], [.03, .07], [.08, .07]], { caps: true })];
+  for (const a of [.6, 2.4, 4.2]) P.push(G.line([[Math.cos(a) * .056, Math.sin(a) * .056, -1.45], [Math.cos(a) * .056, Math.sin(a) * .056, -.12]], F()));
+  P.push(G.lathe([-.045, 0, 0], [1, 0, 0], [[0, .075], [.09, .075]], { caps: true }), circ([.046, 0, 0], [1, 0, 0], .045, F()), G.cyl([-.1, 0, 0], [.1, 0, 0], .028, { caps: true }));
+  return P;
+}
 /* a train drive's pinion (local: centre, axis Y) */
 function trainPinion() {
   const P = [G.lathe([0, -.07, 0], [0, 1, 0], [[0, PIN_R - .02], [.14, PIN_R - .02]], { caps: true }), G.cyl([0, .07, 0], [0, .3, 0], .045, {})];
@@ -796,9 +966,21 @@ function pumpStatic() {
   P.push(G.line([[-.2, -.2, .72], [-.2, .2, .72], [-.2, .2, .98], [-.2, -.2, .98], [-.2, -.2, .72]], F()), G.line([[.2, -.2, .72], [.2, .2, .72], [.2, .2, .98], [.2, -.2, .98], [.2, -.2, .72]], F()));
   for (let k = 0; k < 4; k++) P.push(G.line([[-.2, .2 - k * .13, .85], [.2, .2 - k * .13, .85]], F()));
   P.push(G.lathe([0, 0, .98], [0, 0, 1], [[0, .15], [.08, .15]], {}));
-  P.push(G.lathe([0, 0, 1.06], [0, 0, 1], [[0, .17], [.05, .34], [.3, .34], [.37, .17]], { caps: true, ds: 2.2 }));
-  P.push(G.cyl([0, .28, 1.24], [0, .55, 1.24], .075, {}), G.lathe([0, .5, 1.24], [0, 1, 0], [[0, .12], [.04, .12]], F({ caps: true })));
-  P.push(G.cyl([0, 0, 1.43], [0, 0, 1.55], .1, {}), G.lathe([0, 0, 1.5], [0, 0, 1], [[0, .15], [.04, .15]], F({ caps: true })));
+  // the volute: a spiral casing (its walls sparse, the spiral's edges drawn) widening round to the discharge at the
+  // top; the cutwater; the back plate; the suction nozzle in front with its flange
+  P.push(G.lathe([0, 0, 1.06], [0, 0, 1], [[0, .17], [.04, .2], [.04, .24]], F({ ds: 2.4 })));
+  const vR = a => .255 + .085 * a / TAU, vP = (a, r, z) => [Math.cos(PI / 2 + a) * r, Math.sin(PI / 2 + a) * r, z];
+  for (const z of [1.1, 1.38]) { const L = []; for (let k = 0; k <= 64; k++) { const a = k / 64 * TAU; L.push(vP(a, vR(a) + .02, z)); } P.push(G.line(L)); }
+  for (let k = 0; k < 64; k++) { const a0 = k / 64 * TAU, a1 = (k + 1) / 64 * TAU;
+    P.push(G.panel([vP(a0, vR(a0) + .02, 1.1), vP(a1, vR(a1) + .02, 1.1), vP(a1, vR(a1) + .02, 1.38), vP(a0, vR(a0) + .02, 1.38)], F({ fill: true, ds: 2.6 }))); }
+  for (const z of [1.1, 1.38]) for (let k = 0; k < 64; k++) { const a0 = k / 64 * TAU, a1 = (k + 1) / 64 * TAU;
+    P.push(G.panel([vP(a0, .2, z), vP(a1, .2, z), vP(a1, vR(a1) + .02, z), vP(a0, vR(a0) + .02, z)], F({ fill: true, ds: 3.2 }))); }
+  for (let k = 0; k <= 12; k++) { const a = k / 12 * TAU; P.push(G.line([vP(a, vR(a) + .02, 1.1), vP(a, vR(a) + .02, 1.38)], F())); }
+  P.push(G.line([vP(.15, .27, 1.1), vP(.0, .255, 1.24), vP(.15, .27, 1.38)]));
+  P.push(G.cyl([0, .3, 1.24], [0, .55, 1.24], .075, { ds: 1.2 }), G.lathe([0, .5, 1.24], [0, 1, 0], [[0, .12], [.04, .12]], F({ caps: true })));
+  for (let k = 0; k < 8; k++) { const a = k / 8 * TAU; P.push(G.cyl([Math.cos(a) * .1, .5, 1.24 + Math.sin(a) * .1], [Math.cos(a) * .1, .56, 1.24 + Math.sin(a) * .1], .008, F())); }
+  P.push(G.lathe([0, 0, 1.38], [0, 0, 1], [[0, .2], [.03, .12], [.12, .1], [.17, .1]], { ds: 1.2 }), G.lathe([0, 0, 1.5], [0, 0, 1], [[0, .15], [.04, .15]], F({ caps: true })));
+  for (let k = 0; k < 8; k++) { const a = k / 8 * TAU; P.push(G.cyl([Math.cos(a) * .13, Math.sin(a) * .13, 1.5], [Math.cos(a) * .13, Math.sin(a) * .13, 1.56], .008, F())); }
   return P;
 }
 /* the stator (local, the pump's frame): its core ring and twelve teeth, each wound with a coil */
@@ -822,8 +1004,15 @@ function pumpRotor() {
   for (let k = 0; k < 8; k++) { const a = k / 8 * TAU; P.push(boxZ([Math.cos(a) * .132, Math.sin(a) * .132, .36], [.012, .042, .19], a, { ds: 1.6 })); }
   P.push(G.lathe([0, 0, .78], [0, 0, 1], [[0, .11], [.07, .11]], { caps: true }), G.lathe([0, 0, .88], [0, 0, 1], [[0, .11], [.07, .11]], { caps: true }));
   for (let k = 0; k < 6; k++) { const a = k / 6 * TAU; P.push(G.box([Math.cos(a) * .07 - .015, Math.sin(a) * .07 - .015, .85], [Math.cos(a) * .07 + .015, Math.sin(a) * .07 + .015, .88], F())); }
-  P.push(G.lathe([0, 0, 1.15], [0, 0, 1], [[0, .05], [.16, .05]], { caps: true }), G.lathe([0, 0, 1.15], [0, 0, 1], [[0, .29], [.012, .29]], { caps: true, ds: 1.2 }));
-  for (let k = 0; k < 6; k++) { const L = []; for (let j = 0; j <= 5; j++) { const u = j / 5, a = k / 6 * TAU + u * 1.1, r = .06 + .22 * u; L.push([Math.cos(a) * r, Math.sin(a) * r, 1.2]); } P.push(...bars(L, .01, .07, [0, 0, 1], F())); }
+  // the impeller: hub and nut, the back shroud, six backward-curved vanes, the front shroud with its eye, the wear ring
+  P.push(G.lathe([0, 0, 1.12], [0, 0, 1], [[0, .055], [.12, .05], [.16, .03], [.18, .015]], { caps: true }));
+  P.push(G.lathe([0, 0, 1.15], [0, 0, 1], [[0, .29], [.012, .29]], { caps: true, ds: 1.1 }));
+  const vane = (k, r, w) => { const u = (r - .06) / .23, a = k / 6 * TAU + 1.1 * Math.sqrt(u) + w; return [Math.cos(a) * r, Math.sin(a) * r]; };
+  for (let k = 0; k < 6; k++) for (let j = 0; j < 10; j++) {
+    const r0 = .06 + .23 * j / 10, r1 = .06 + .23 * (j + 1) / 10, p0 = vane(k, r0, 0), p1 = vane(k, r1, 0), h0 = .07 - .025 * j / 10, h1 = .07 - .025 * (j + 1) / 10;
+    P.push(G.panel([[p0[0], p0[1], 1.162], [p1[0], p1[1], 1.162], [p1[0], p1[1], 1.162 + h1], [p0[0], p0[1], 1.162 + h0]], F({ fill: true, ds: 1.6 })));
+  }
+  P.push(G.lathe([0, 0, 1.235], [0, 0, 1], [[0, .29], [.012, .29], [.03, .1], [.08, .1]], { ds: 1.4 }), circ([0, 0, 1.31], [0, 0, 1], .1), circ([0, 0, 1.31], [0, 0, 1], .085, F()));
   return P;
 }
 const handwheel = () => [circ([0, 0, 0], [0, 1, 0], .16), circ([0, 0, 0], [0, 1, 0], .14, F()), ...[0, 1, 2, 3].map(k => { const a = k / 4 * TAU + .3; return G.line([[0, 0, 0], [Math.sin(a) * .15, 0, Math.cos(a) * .15]]); }), G.cyl([0, -.02, 0], [0, .03, 0], .035, F())];
@@ -917,16 +1106,23 @@ function hullCloud() {
   return K.lodCloud(lv, 1.4);
 }
 
-/* ================= occlusion: 4 px depth tiles written by convex occluders ================= */
-const OT = 4, OW = 480, OHt = 270, OZ = new Float32Array(OW * OHt);
-let occOn = false;
-function occReset() { if (occOn) OZ.fill(1e9); occOn = false; }
-/* a convex hex (8 corners, world) : each tile whose centre ray enters it gets the entry depth (a little deeper) */
-function occHex(C8) {
+/* ================= occlusion: 4 px depth tiles written by convex occluders =================
+   An occluder of strength s < 1 (one fading in or out) writes its own depth layer: what is behind it dims by s
+   (OZP / OSP; occd dithers it per pixel) instead of vanishing at a threshold */
+const BW_ = K.BW, BH_ = K.BH, OT = 4, OW = Math.ceil(BW_ / OT), OHt = Math.ceil(BH_ / OT), OZ = new Float32Array(OW * OHt);
+const OZP = new Float32Array(OW * OHt), OSP = new Float32Array(OW * OHt);
+let occOn = false, occP = false;
+function occReset() { if (occOn) OZ.fill(1e9); if (occP) { OZP.fill(1e9); OSP.fill(0); } occOn = false; occP = false; }
+/* a convex hex (8 corners, world) : each tile whose centre ray enters it gets the entry depth (a little deeper);
+   s: its strength (0..1, default 1) */
+function occHex(C8, s) {
   const C = K.C, e = C.eye, f = C.f, r = C.r, u = C.u, Fl = C.fl, cx = C.cx + C.shake[0], cy = C.cy + C.shake[1];
+  if (s !== undefined && s < .999) { if (s <= .001) return; } else s = 1;
   if (!occOn) { OZ.fill(1e9); occOn = true; }
+  if (s < 1 && !occP) { OZP.fill(1e9); OSP.fill(0); occP = true; }
+  const ZB = s < 1 ? OZP : OZ;
   let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
-  for (const p of C8) { if (!K.pj(p[0], p[1], p[2])) { x0 = 0; y0 = 0; x1 = 1919; y1 = 1079; break; } const px = K.PJ[0], py = K.PJ[1]; if (px < x0) x0 = px; if (px > x1) x1 = px; if (py < y0) y0 = py; if (py > y1) y1 = py; }
+  for (const p of C8) { if (!K.pj(p[0], p[1], p[2])) { x0 = 0; y0 = 0; x1 = BW_ - 1; y1 = BH_ - 1; break; } const px = K.PJ[0], py = K.PJ[1]; if (px < x0) x0 = px; if (px > x1) x1 = px; if (py < y0) y0 = py; if (py > y1) y1 = py; }
   const tx0 = Math.max(0, Math.floor(x0 / OT)), tx1 = Math.min(OW - 1, Math.floor(x1 / OT)), ty0 = Math.max(0, Math.floor(y0 / OT)), ty1 = Math.min(OHt - 1, Math.floor(y1 / OT));
   if (tx1 < tx0 || ty1 < ty0) return;
   const cen = [0, 0, 0]; for (const p of C8) { cen[0] += p[0] / 8; cen[1] += p[1] / 8; cen[2] += p[2] / 8; }
@@ -957,37 +1153,55 @@ function occHex(C8) {
       }
       if (tin >= tout) continue;
       const zz = tin * 1.008 + .08;
-      for (let v = 0; v < 2; v++) { if (ty + v >= OHt) break; const k = (ty + v) * OW + tx; if (zz < OZ[k]) OZ[k] = zz; if (tx + 1 < OW && zz < OZ[k + 1]) OZ[k + 1] = zz; }
+      for (let v = 0; v < 2; v++) {
+        if (ty + v >= OHt) break; const k = (ty + v) * OW + tx;
+        if (zz < ZB[k]) ZB[k] = zz; if (tx + 1 < OW && zz < ZB[k + 1]) ZB[k + 1] = zz;
+        if (s < 1) { if (s > OSP[k]) OSP[k] = s; if (tx + 1 < OW && s > OSP[k + 1]) OSP[k + 1] = s; }
+      }
     }
   }
 }
-/* a point hidden behind an occluder (screen x, y, depth) */
-const occd = (x, y, z) => occOn && x >= 0 && y >= 0 && x < 1920 && y < 1080 && z > OZ[((y | 0) >> 2) * OW + ((x | 0) >> 2)];
+/* a point hidden behind an occluder (screen x, y, depth); behind a fading one, hidden on a stable per-pixel dither */
+const occd = (x, y, z) => {
+  if (!occOn || x < 0 || y < 0 || x >= BW_ || y >= BH_) return false;
+  const t = ((y | 0) >> 2) * OW + ((x | 0) >> 2);
+  if (z > OZ[t]) return true;
+  return occP && z > OZP[t] && ((Math.imul(x | 0, 73856093) ^ Math.imul(y | 0, 19349663)) >>> 22) / 1024 < OSP[t];
+};
+/* how visible a point is: 1, 0 behind an occluder, 1 - s behind a fading one */
+const occv = (x, y, z) => {
+  if (!occOn || x < 0 || y < 0 || x >= BW_ || y >= BH_) return 1;
+  const t = ((y | 0) >> 2) * OW + ((x | 0) >> 2);
+  return z > OZ[t] ? 0 : occP && z > OZP[t] ? 1 - OSP[t] : 1;
+};
 
 /* ================= the X-ray point pass =================
    XS.zo / zs: the opening and shutting slices (ship z, both sweep bow -> stern); open where zo < z < zs inside
    the box. md 0 plain · 1 shell (thinned where open, lime at the slices) · 3 hidden (seen only where open).
    S: model -> ship transform for clouds not in the ship frame (or null); zfix: test this ship z instead. */
-const XS = { zo: 99, zs: 99, ko: 1, ks: 1, box: [-11, 11, -1.5, 10.5, 40.4, 57.6], dim: 1 };
+const XS = { zo: 99, zs: 99, ko: 1, ks: 1, box: [-11, 11, -1.5, 10.5, 40.4, 57.6], dim: 1, gain: 1 };   // (gain: a fade on all drawX draws)
 const LIME = K.LIME, WH = K.WH;
-const XO = { a: 1, fade: 900, back: .1, lime: 0, keep: 1, md: 0, zfix: undefined, size: 1, S: null, tint: null, tk: 0, cut: null, px: 3.2, edge: .62, occ: true, bk: .33, lmin: 0, px0: 99, foc: 0, amb: 0 };
+const XO = { a: 1, fade: 900, back: .1, lime: 0, keep: 1, md: 0, zfix: undefined, size: 1, S: null, tint: null, tk: 0, cut: null, px: 3.2, edge: .62, occ: true, bk: .33, lmin: 0, px0: 99, foc: 0, amb: 0, qc: null };
+/* qc: a quarter cut in model coords [x0, y0, z0, z1, mode]: mode 1 drops the points with x > x0, y > y0, z0 < z < z1
+   (the cutaway), -1 keeps only those (the piece cut away, drawn apart) */
 const XOO = Object.assign({}, XO);
 function xopt(o) { for (const k in XO) XOO[k] = o && o[k] !== undefined ? o[k] : XO[k]; return XOO; }
 function runX(P, i0, i1, sp, o, md, step) {
-  const x = XMR, C = K.C, D = K.pb.d, F_ = C.fl, cx = C.cx + C.shake[0], cy = C.cy + C.shake[1], near = C.near, BW = 1920, BH = 1080;
+  const x = XMR, C = K.C, D = K.pb.d, F_ = C.fl, cx = C.cx + C.shake[0], cy = C.cy + C.shake[1], near = C.near, BW = BW_, BH = BH_;
   const a00 = x[0], a01 = x[1], a02 = x[2], a10 = x[3], a11 = x[4], a12 = x[5], a20 = x[6], a21 = x[7], a22 = x[8], b0 = x[9], b1 = x[10], b2 = x[11];
   const ex = x[12], ey = x[13], ez = x[14], l0 = x[15], l1 = x[16], l2 = x[17];
-  const A = o.a, fade = o.fade, kf = .55 * A / fade, kfar = .45 * A, back = o.back, keep = o.keep, big = o.size, omd = o.md, allThin = md === 2, eb = o.edge, amb = o.amb;
+  const A = o.a * XS.gain, fade = o.fade, kf = .55 * A / fade, kfar = .45 * A, back = o.back, keep = o.keep, big = o.size, omd = o.md, allThin = md === 2, eb = o.edge, amb = o.amb;
   const lm = o.lime, useOcc = occOn && o.occ, bkeep = o.bk;
   let cr = WH[0] + (LIME[0] - WH[0]) * lm, cg = WH[1] + (LIME[1] - WH[1]) * lm, cb = WH[2] + (LIME[2] - WH[2]) * lm;
   if (o.tint) { const tk = o.tk; cr += (o.tint[0] - cr) * tk; cg += (o.tint[1] - cg) * tk; cb += (o.tint[2] - cb) * tk; }
   const zo = XS.zo, zs = XS.zs, ko = XS.ko, ks = XS.ks, bx = XS.box, S = o.S, zfix = o.zfix, dim = XS.dim, cut = o.cut, c0 = cut ? cut[0] : 0, c1 = cut ? cut[1] : 0;
-  const anyOpen = zo < 90;
+  const anyOpen = zo < 90, qc = o.qc, qm = qc ? qc[4] : 0, qx0 = qm ? qc[0] : 0, qy0 = qm ? qc[1] : 0, qz0 = qm ? qc[2] : 0, qz1 = qm ? qc[3] : 0;
   for (let i = i0, j = i0 * 6; i < i1; i += step, j += 6 * step) {
     const hs = (i * .6180339887) % 1;
     if (keep < 1 && hs > keep) continue;
     const px = P[j], py = P[j + 1], pz = P[j + 2];
     if (cut && pz > c0 && pz < c1) continue;
+    if (qm) { const inq = px > qx0 && py > qy0 && pz > qz0 && pz < qz1; if (qm > 0 ? inq : !inq) continue; }
     const nx = P[j + 3], ny = P[j + 4], nz = P[j + 5], two = nx === 0 && ny === 0 && nz === 0;
     let dn = 0;
     if (!two) { dn = nx * (px - ex) + ny * (py - ey) + nz * (pz - ez); if (dn > 0 && (bkeep === 0 || ((i * .7548776662) % 1) > bkeep)) continue; }
@@ -1014,7 +1228,8 @@ function runX(P, i0, i1, sp, o, md, step) {
     const iz = F_ / zc;
     const sx = cx + (a00 * px + a01 * py + a02 * pz + b0) * iz; if (sx < 0 || sx >= BW) continue;
     const sy = cy - (a10 * px + a11 * py + a12 * pz + b1) * iz; if (sy < 0 || sy >= BH) continue;
-    if (useOcc && zc > OZ[((sy | 0) >> 2) * OW + ((sx | 0) >> 2)]) continue;
+    let ov = 1;
+    if (useOcc) { const t = ((sy | 0) >> 2) * OW + ((sx | 0) >> 2); if (zc > OZ[t]) continue; if (occP && zc > OZP[t]) ov = 1 - OSP[t]; }
     let b, bk = false;
     if (two) b = eb;
     else {
@@ -1029,6 +1244,7 @@ function runX(P, i0, i1, sp, o, md, step) {
     if (thin) b = (bk ? .035 : .035 + .16 * b) * dim;
     let r = cr, g = cg, bl = cb;
     if (k > 0) { if (b < k * .95) b = k * .95; r += (LIME[0] - r) * k; g += (LIME[1] - g) * k; bl += (LIME[2] - bl) * k; }
+    if (ov < 1) b *= ov;
     if (b < .02) continue;
     if (b > 1) b = 1;
     const pxs = sp * iz * big;
@@ -1047,7 +1263,7 @@ function sphereIn(mx, my, mz, rad) {
   const x = XMR, C = K.C, zc = x[6] * mx + x[7] * my + x[8] * mz + x[11];
   if (zc < C.near - rad) return false;
   const xc = x[0] * mx + x[1] * my + x[2] * mz + x[9], yc = x[3] * mx + x[4] * my + x[5] * mz + x[10];
-  const Fl = C.fl, xr = (1920 - C.cx) / Fl, yt = C.cy / Fl, k = Math.sqrt(1 + xr * xr), ky = Math.sqrt(1 + yt * yt);
+  const Fl = C.fl, xr = (BW_ - C.cx) / Fl, yt = C.cy / Fl, k = Math.sqrt(1 + xr * xr), ky = Math.sqrt(1 + yt * yt);
   if ((xc - xr * zc) / k > rad || (-xc - xr * zc) / k > rad) return false;
   if ((yc - yt * zc) / ky > rad || (-yc - yt * zc) / ky > rad) return false;
   return true;
@@ -1071,29 +1287,36 @@ function cellMode(o, mx, my, mz, rad) {
   if (shutAll) return 0;
   return openAll && quiet ? 2 : 1;
 }
-/* LOD per cell: the coarsest level whose dots land at most px apart on screen (1 px dots) */
+/* LOD per cell: the coarsest level whose dots land at most px apart on screen (1 px dots); smooth, each switch
+   between two levels is a crossfade on a stable per-point dither (K.lodPick, K.LODB of an octave wide); keep < 1
+   picks coarser levels (down to keep .05), and (smooth) below .05 thins them on the same dither, so a part fading to
+   keep 0 fades out instead of holding its last level */
+const LP = K.LP, SMOOTH = K.SMOOTH;
 function drawX(ml, Tw, o) {
   XMR = K.prep(Tw);
   const CH = ml.ch, SD = ml.sd, nl = ml.nl, Fl = K.C.fl, oo = xopt(o), PX = oo.px / Math.sqrt(Math.max(.05, oo.keep)), kp = oo.keep;
   oo.keep = 1;
-  const foc = oo.foc;
+  const foc = oo.foc, band = K.LODB, fk = SMOOTH && kp < .05 ? Math.max(0, kp) / .05 : 1;
   const x = XMR, ex = x[12], ey = x[13], ez = x[14];
   for (let c = 0; c < ml.nch; c++) {
     const q = c * SD, mx = CH[q], my = CH[q + 1], mz = CH[q + 2], rad = CH[q + 3];
     if (!sphereIn(mx, my, mz, rad)) continue;
+    if (oo.qc && oo.qc[4] < 0) { const q = oo.qc; if (mx + rad < q[0] || my + rad < q[1] || mz + rad < q[2] || mz - rad > q[3]) continue; }
     const md = cellMode(oo, mx, my, mz, rad); if (md < 0) continue;
     const dx = mx - ex, dy = my - ey, dz = mz - ez, d = Math.max(.05, Math.sqrt(dx * dx + dy * dy + dz * dz) - rad * .7);
     const pxe = foc > 0 && d > foc ? PX * Math.pow(Math.min(1.7, d / foc), 1.2) : PX;
-    let li = nl - 1; while (li > oo.lmin && ml.sp[li] * Fl / d > pxe * 1.3) li--;
-    if (li === oo.lmin && li > 0 && ml.sp[li] * Fl / d > oo.px0) li--;
-    const i0 = CH[q + 4 + li * 2], i1 = CH[q + 5 + li * 2];
-    if (i1 > i0) { const st = md === 2 ? 3 : 1; runX(ml.lv[li], i0, i1, ml.sp[li], oo, md, st); NP += (i1 - i0) / st; }
+    K.lodPick(ml.sp, nl, Fl, d, pxe * 1.3, oo.lmin, band);
+    if (LP.a === oo.lmin && LP.a > 0 && LP.b < 0 && ml.sp[LP.a] * Fl / d > oo.px0) LP.a--;
+    const la = LP.a, lb = LP.b, wa = LP.wa * fk, wb = LP.wb * fk, st = md === 2 ? 3 : 1;
+    let i0 = CH[q + 4 + la * 2], i1 = CH[q + 5 + la * 2];
+    if (i1 > i0 && wa > 0) { oo.keep = wa; runX(ml.lv[la], i0, i1, ml.sp[la], oo, md, st); NP += (i1 - i0) / st; }
+    if (lb >= 0 && wb > 0) { i0 = CH[q + 4 + lb * 2]; i1 = CH[q + 5 + lb * 2]; if (i1 > i0) { oo.keep = wb; runX(ml.lv[lb], i0, i1, ml.sp[lb], oo, md, st); NP += (i1 - i0) / st; } }
   }
   oo.keep = kp;
 }
 /* an FX dot at a world point that respects the occluders */
-function odot(x, y, z, s, c, a) { if (K.pj(x, y, z) && !occd(K.PJ[0], K.PJ[1], K.PJ[2])) K.dot(K.PJ[0], K.PJ[1], s, c[0], c[1], c[2], a); }
-function oglow(x, y, z, px, c, a) { if (K.pj(x, y, z) && !occd(K.PJ[0], K.PJ[1], K.PJ[2])) K.glowW(x, y, z, px, c, a); }
+function odot(x, y, z, s, c, a) { if (K.pj(x, y, z)) { const v = occv(K.PJ[0], K.PJ[1], K.PJ[2]) * XS.gain; if (v > 0) K.dot(K.PJ[0], K.PJ[1], s, c[0], c[1], c[2], v < 1 ? a * v : a); } }
+function oglow(x, y, z, px, c, a) { if (K.pj(x, y, z)) { const v = occv(K.PJ[0], K.PJ[1], K.PJ[2]) * XS.gain; if (v > 0) K.glowW(x, y, z, px, c, v < 1 ? a * v : a); } }
 
 /* the barrel's containment as an occluder (B frame corners, inset): the rails inside and the far coils hide */
 const BR_OCC = [[-.34, -.34, -1.7], [.34, -.34, -1.7], [.34, -.34, RZ1 - .02], [-.34, -.34, RZ1 - .02], [-.34, .34, -1.7], [.34, .34, -1.7], [.34, .34, RZ1 - .02], [-.34, .34, RZ1 - .02]];
@@ -1109,7 +1332,8 @@ function build() {
     cheekS: lod(cheek(1), 1.0), cheekP: lod(cheek(-1), 1.0), gbody: lod(gunBody(), 1.0), ginH: lod(gunIn('h'), .6), ginC: lod(gunIn('c'), .8),
     eoBase: lod(eoBase(), .4, LF), eoYoke: lod(eoYoke(), .4, LF), eoHead: lod(eoHead(), .4, LF), fcBase: lod(fcrBase(), .5, LF), fcHead: lod(fcrHead(), .5, LF),
     cradle: lod(cradle(), .8), barrel: lod(barrel(), .7, LM), rails: lod(railPrims(), .8), ins: lod(insPrims(), .8),
-    coil: lod(coilPrims(), .45, LF), cryo: lod(cryoPrims(), .6, LF), frost: frostCloud(),
+    coil: lod(coilPrims(), .45, LF), cryo: lod(cryoPrims(), .6, LF), frost: frostCloud(), cryoHero: lod(cryoPrims(COLD_HERO), .25, [.0025, .005, .01, .02, .04, .08]),
+    hpuBlock: lod(hpuBlock(), .3, LF), hpuSwash: lod(hpuSwash(), .3, LF), accPiston: lod(accPiston(), .3, LF),
     jawS: lod(jaw(1), .5, LF), jawP: lod(jaw(-1), .5, LF), breech: lod(breechBlock(), .6), petalT: lod(petal(1)), petalB: lod(petal(-1)),
     tray: lod(tray(), .6, LF), rhead: lod(rammerHead(), .4, LF), ramCyl: lod(ramCyl(), .5, LF), ramRod: lod(ramRod(), .5, LF), tpin: lod(trainPinion(), .4, LF),
     round: lod(round_(), .3, LF), rstow: lod(roundStowed(), .5), sabot: lod(sabotPetal(), .3, LF), arm: lod(armature(), .3, LF),
@@ -1122,7 +1346,7 @@ function build() {
   };
   CL.ms = performance.now() - t0;
   if (window.RGP) window.RGP.CL = CL;
-  let n = 0; for (const k in CL) if (CL[k].lv) n += CL[k].lv[0].length / 6; CL.n0 = n;
+  let n = 0; for (const k in CL) if (CL[k] && CL[k].lv) n += CL[k].lv[0].length / 6; CL.n0 = n;
   return CL;
 }
 
@@ -1130,13 +1354,13 @@ window.RGP = {
   GZ, GY, M0, FL, CUT, TRN, SLV0, SLV1, EXT, MZ_E, RZ0, RZ1, ALT, ALT_FLIP, XALT, RACKS, MOD, BANDS, EL_LOAD,
   TRAY_Z, SEAT_Z, RND_H, RAM_L, HZ, HY0, HY1, DRUM_R, DRUM_Y, RND_Y0, NCELL, PIN_P, PUMPS, VALVES, FANS, CAB_X, CAB_Z, CAB_H, BRK, JOINTS,
   FROST, PETAL_HINGE, TUR_OCC, BR_OCC, RACK_OCC, CAB_OCC, MAG_CELL, SINK,
-  NST, STN, DZS, COLD, CXC, KX0, KX1, KY, KZ, CX, CY, RW, RY0, RY1, IX0, IX1,
+  NST, STN, DZS, COLD, COLD_HERO, CXC, KX0, KX1, KY, KZ, CX, CY, RW, RY0, RY1, IX0, IX1,
   HYD: HYD.map(poly), HE_T: HE_T.map(poly), COOL_T: [-1, 1].map(s => poly(COOL_T(s))),
-  EO_P, EO_H, EO_WIN, FC_P, FC_H, FC_A, MV_P, RAM_E, TD_P, RING_R, PIN_R, HPU, HEC, BUS_ANCH, FEED_B, PST, stCoil,
+  EO_P, EO_H, EO_WIN, FC_P, FC_H, FC_A, MV_P, RAM_E, TD_P, RING_R, PIN_R, HPU, HYD_P: HYD_P.map(poly), HEC, BUS_ANCH, FEED_B, PST, stCoil,
   BUS_A: BUS_A.map(poly), BUS_B: BUS_B.map(poly), BUS_C: BUS_C.map(poly),
   COOL: [COOL_SUP, COOL_RET, ...[-1, 1].map(COOL_COLD), ...PUMPS.map(p => COOL_P(p[0]))].map(poly),
   COOL_SUP: poly(COOL_SUP), COOL_RET: poly(COOL_RET), COOL_COLD: [-1, 1].map(s => poly(COOL_COLD(s))), COOL_PD: PUMPS.map(p => poly(COOL_P(p[0]))), COOL_COL: [-1, 1].map(s => poly(COOL_COL(s))),
   sampleLat, lod, LV, LB, LF, LM, quadL, lineL, ringL, perp, bar, bars, pipes, circ, boxY, boxZ, xfPrims, quad3, racetrack, hullAt, sec, hD,
-  poly, polyAt, XS, drawX, build, occReset, occHex, occd, odot, oglow, np: () => { const n = NP; NP = 0; return n; },
+  poly, polyAt, XS, drawX, build, occReset, occHex, occd, occv, odot, oglow, np: () => { const n = NP; NP = 0; return n; },
 };
 })();
