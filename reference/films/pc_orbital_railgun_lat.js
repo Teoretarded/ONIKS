@@ -26,7 +26,9 @@ const pow2 = x => { let p = 1; while (p < x && p < 65536) p <<= 1; return p; };
 
 let K = null, C = null, D = null, U32 = null, OZ = null, OC = null, OW = 480;
 /* per-frame globals */
-const G = { PXF: 3.4, PXL: 1.5, SEAMPX: 7, zref: 400, g0: 1.25, g1: .0004, gmin: .55, occ: false, dots: 0, clip: null };
+const G = { PXF: 3.4, PXL: 1.5, SEAMPX: 7, zref: 400, g0: 1.25, g1: .0004, gmin: .55, hz: .45, hz0: 1.2, hzMax: 2.6, noBack: true, occ: false, dots: 0, clip: null };
+/* depth haze in the dots: beyond hz0 x zref the lattice thins out (and the gain dims it) */
+const thin = z => { const k = z / G.zref - G.hz0; return k <= 0 ? 1 : Math.min(G.hzMax, 1 + G.hz * k); };
 function frame(o) {
   K = window.ORK; C = K.C; D = K.pb.d; if (!U32 || U32.buffer !== D.buffer) U32 = new Uint32Array(D.buffer); OZ = K.OZ; OC = K.OC; OW = K.OW;
   Object.assign(G, o || {});
@@ -45,13 +47,13 @@ class Body {
   }
   chunk(tag) {
     this._close();
-    this._c = { l0: this.L.length / 10, t0: this.T.length / 10, p0: this.P.length / 20, y0: this.Y.length, n0: this.N.length / 7, r0: this.Rg.length / 14, tag: tag || '', pts: [] };
+    this._c = { l0: this.L.length / 10, t0: this.T.length / 10, p0: this.P.length / 23, y0: this.Y.length, n0: this.N.length / 7, r0: this.Rg.length / 14, tag: tag || '', pts: [] };
     return this;
   }
   _pt(p) { this._c.pts.push(p[0], p[1], p[2]); }
   _close() {
     const c = this._c; if (!c) return;
-    c.l1 = this.L.length / 10; c.t1 = this.T.length / 10; c.p1 = this.P.length / 20; c.y1 = this.Y.length; c.n1 = this.N.length / 7; c.r1 = this.Rg.length / 14;
+    c.l1 = this.L.length / 10; c.t1 = this.T.length / 10; c.p1 = this.P.length / 23; c.y1 = this.Y.length; c.n1 = this.N.length / 7; c.r1 = this.Rg.length / 14;
     if (c.l1 > c.l0 || c.t1 > c.t0 || c.p1 > c.p0 || c.y1 > c.y0 || c.n1 > c.n0 || c.r1 > c.r0) {
       const P = c.pts, n = P.length / 3; let mx = 0, my = 0, mz = 0;
       for (let i = 0; i < n; i++) { mx += P[i * 3]; my += P[i * 3 + 1]; mz += P[i * 3 + 2]; }
@@ -86,7 +88,7 @@ class Body {
     const cu = Array.isArray(cell) ? cell[0] : cell, cv = Array.isArray(cell) ? cell[1] : cell;
     const Lu = V.len(u), Lv = V.len(v), nu = Math.max(1, Math.round(Lu / cu)), nv = Math.max(1, Math.round(Lv / cv));
     let n = opt.n || V.norm(V.cross(u, v));
-    this.P.push(o[0], o[1], o[2], u[0] / nu, u[1] / nu, u[2] / nu, v[0] / nv, v[1] / nv, v[2] / nv, nu, nv, n[0], n[1], n[2], opt.br === undefined ? 1 : opt.br, opt.two ? 1 : 0, opt.ch || 0, opt.q || 0, Lu / nu, Lv / nv);
+    this.P.push(o[0], o[1], o[2], u[0] / nu, u[1] / nu, u[2] / nu, v[0] / nv, v[1] / nv, v[2] / nv, nu, nv, n[0], n[1], n[2], opt.br === undefined ? 1 : opt.br, opt.two ? 1 : 0, opt.ch || 0, opt.q || 0, Lu / nu, Lv / nv, 0, 0, 0);
     const p1 = V.add(o, u), p2 = V.add(p1, v), p3 = V.add(o, v);
     this._pt(o); this._pt(p1); this._pt(p2); this._pt(p3);
     const eb = opt.edge === undefined ? .62 : opt.edge;
@@ -95,6 +97,28 @@ class Body {
       const [su, sv] = opt.seams, sb = opt.sbr === undefined ? .4 : opt.sbr;
       if (su) for (let i = su, k = 1; i < nu - .5; i += su, k++) { const a = V.mad(o, u, i / nu); this.line(a, V.add(a, v), sb, opt.ch, opt.q, su * Lu / nu * (1 << CTZ[k])); }
       if (sv) for (let j = sv, k = 1; j < nv - .5; j += sv, k++) { const a = V.mad(o, v, j / nv); this.line(a, V.add(a, u), sb, opt.ch, opt.q, sv * Lv / nv * (1 << CTZ[k])); }
+    }
+    return this;
+  }
+  /* a planar trapezoid: corner o, bottom edge u0 (at v = 0), top edge u1 (from o + v), side v; opt as panel (seams
+     along v only). A triangle when u1 is zero. */
+  trap(o, u0, u1, v, cell, opt) {
+    opt = opt || {};
+    const cu = Array.isArray(cell) ? cell[0] : cell, cv = Array.isArray(cell) ? cell[1] : cell;
+    const L0 = V.len(u0), L1 = V.len(u1), Lu = Math.max(L0, L1), Lv = V.len(v), nu = Math.max(1, Math.round(Lu / cu)), nv = Math.max(1, Math.round(Lv / cv));
+    const n = opt.n || V.norm(V.cross(L0 > L1 ? u0 : u1, v)), w = V.mul(V.sub(u1, u0), 1 / (nu * nv));
+    this.P.push(o[0], o[1], o[2], u0[0] / nu, u0[1] / nu, u0[2] / nu, v[0] / nv, v[1] / nv, v[2] / nv, nu, nv, n[0], n[1], n[2], opt.br === undefined ? 1 : opt.br, opt.two ? 1 : 0, opt.ch || 0, opt.q || 0, Lu / nu, Lv / nv, w[0], w[1], w[2]);
+    const p1 = V.add(o, u0), p3 = V.add(o, v), p2 = V.add(p3, u1);
+    this._pt(o); this._pt(p1); this._pt(p2); this._pt(p3);
+    const eb = opt.edge === undefined ? .62 : opt.edge;
+    if (eb !== false) { this.line(o, p1, eb, opt.ch, opt.q); if (L1 > 1e-6) this.line(p3, p2, eb, opt.ch, opt.q); this.line(o, p3, eb, opt.ch, opt.q); this.line(p1, p2, eb, opt.ch, opt.q); }
+    if (opt.seams && opt.seams[1]) {
+      const sv = opt.seams[1], sb = opt.sbr === undefined ? .4 : opt.sbr;
+      for (let j = sv, k = 1; j < nv - .5; j += sv, k++) { const f = j / nv, a = V.mad(o, v, f); this.line(a, V.add(a, V.add(V.mul(u0, 1 - f), V.mul(u1, f))), sb, opt.ch, opt.q, sv * Lv / nv * (1 << CTZ[k])); }
+    }
+    if (opt.seams && opt.seams[0]) {
+      const su = opt.seams[0], sb = opt.sbr === undefined ? .4 : opt.sbr;
+      for (let i = su, k = 1; i < nu - .5; i += su, k++) { const f = i / nu, a = V.mad(o, u0, f); this.line(a, V.add(p3, V.mul(u1, f)), sb, opt.ch, opt.q, su * Lu / nu * (1 << CTZ[k])); }
     }
     return this;
   }
@@ -130,7 +154,9 @@ class Body {
       const n0 = Math.min(NT, pow2(Math.max(8, TAU * rm / cell)));
       bands.push({ s0, r0, s1, r1, na, n0, kr: (s1 - s0) / L, ka: -(r1 - r0) / L });
     }
-    this.Y.push({ a, d, U, W, bands, br: opt.br === undefined ? 1 : opt.br, two: !!opt.two, solid: !!opt.solid, ch: opt.ch || 0, q: opt.q || 0, cell, ang: opt.ang || null });
+    let s0 = 1e9, s1 = -1e9; for (const [s] of st) { s0 = Math.min(s0, s); s1 = Math.max(s1, s); }
+    const cc = V.mad(a, d, (s0 + s1) / 2), crad = Math.hypot(rmax, (s1 - s0) / 2);
+    this.Y.push({ a, d, U, W, bands, br: opt.br === undefined ? 1 : opt.br, two: !!opt.two, solid: !!opt.solid, ch: opt.ch || 0, q: opt.q || 0, cell, ang: opt.ang || null, cc, crad });
     for (const [s, r] of st) { const c = V.mad(a, d, s); this._pt(V.add(c, V.mul(U, r))); this._pt(V.add(c, V.mul(U, -r))); this._pt(V.add(c, V.mul(W, r))); this._pt(V.add(c, V.mul(W, -r))); }
     const rb = opt.rbr === undefined ? .4 : opt.rbr;
     if (opt.rings !== false) for (const [s, r] of st) if (r > .02) this.ringP(V.mad(a, d, s), U, W, r * 1.002, rb, opt.ch, opt.q, 0);
@@ -166,7 +192,7 @@ const FACE = 1.55;
 const shade = (lam, fac) => { const w = 1 - fac; let b = .07 + .72 * (lam > 0 ? lam : 0) + .16 * fac + .34 * w * w * w; return FACE * b * (.55 + .45 * b); };
 
 /* colour state for the current primitive */
-let CR = 0, CG = 0, CB = 0, CA = 1;
+let CR = 0, CG = 0, CB = 0, CA = 1, EM = 0;
 const O = { a: 1, col: WH, lime: 0, fx: null, keep: 1, pxf: 1, back: .11, occ: false, lc: [255, 255, 255] };
 /* fx(ch, q) -> 0..1 lime, 1..2 lime to white-hot, < 0 dimmed, 10..11 heat (warm), 11..12 heat to white-hot */
 const HEAT = [255, 178, 112];
@@ -179,27 +205,56 @@ function setCol(ch, q) {
     else if (k > 0) { if (k > l) l = Math.min(1, k); if (k > 1) h = Math.min(1, k - 1); a *= 1 + .6 * Math.min(1, k); }
   }
   CR = c[0] + (LIME[0] - c[0]) * l; CG = c[1] + (LIME[1] - c[1]) * l; CB = c[2] + (LIME[2] - c[2]) * l;
+  // what glows (heat, lime, white-hot) keeps a floor of brightness on its unlit side
+  EM = Math.max(w * .85, h * .9, (l - O.lime > 0 ? l - O.lime : 0) * .55);
   if (w > 0) { CR += (HEAT[0] - CR) * w; CG += (HEAT[1] - CG) * w; CB += (HEAT[2] - CB) * w; }
   if (h > 0) { CR += (HOT[0] - CR) * h; CG += (HOT[1] - CG) * h; CB += (HOT[2] - CB) * h; }
   CA = a;
 }
 
-/* a slab clip (camera space): points with c0 < n.p < c1 are not drawn. G.clip = { on, n: [x, y, z], c0, c1 } set per
-   frame by the film; a body opts in with o.clip (an X-ray that slices a part open) */
+/* clips: a convex region cut out of a body (an X-ray that slices a part open, a growth front). Up to 8 planes, all
+   in camera space while drawing: a point p is not drawn when n.p > d for every plane. A body opts in with
+     o.clipM  [nx, ny, nz, d, ...] planes in the body's model space (converted under its transform each draw),
+     o.clipP  [nx, ny, nz, d, ...] planes in camera space,
+     o.clip   true: the film's slab G.clip = { on, n, c0, c1 } (c0 < n.p < c1 cut). */
 let PXLc = 1.5;
-let CL = false, CNX = 0, CNY = 0, CNZ = 0, CC0 = 0, CC1 = 0;
+let CL = false, CN = 0;
+const CP = new Float64Array(32);
 function clipOn(o) {
-  const c = G.clip; CL = !!(o && o.clip && c && c.on);
-  if (CL) { CNX = c.n[0]; CNY = c.n[1]; CNZ = c.n[2]; CC0 = c.c0; CC1 = c.c1; }
+  CN = 0;
+  if (o) {
+    const c = G.clip;
+    if (o.clip && c && c.on) { CP[0] = c.n[0]; CP[1] = c.n[1]; CP[2] = c.n[2]; CP[3] = c.c0; CP[4] = -c.n[0]; CP[5] = -c.n[1]; CP[6] = -c.n[2]; CP[7] = -c.c1; CN = 2; }
+    const p = o.clipP;
+    if (p) for (let i = 0; i + 3 < p.length && CN < 8; i += 4) { const j = CN * 4; CP[j] = p[i]; CP[j + 1] = p[i + 1]; CP[j + 2] = p[i + 2]; CP[j + 3] = p[i + 3]; CN++; }
+  }
+  CL = CN > 0;
 }
-const clipped = (x, y, z) => { const s = CNX * x + CNY * y + CNZ * z; return s > CC0 && s < CC1; };
-/* a hairline with the slab cut out of it */
+/* the model-space planes of o.clipM, appended under the current transform (after prep) */
+function clipModel(o) {
+  const m = o && o.clipM; if (!m) return;
+  for (let i = 0; i + 3 < m.length && CN < 8; i += 4) {
+    const nx = m[i], ny = m[i + 1], nz = m[i + 2], j = CN * 4;
+    const cx = XM[0] * nx + XM[1] * ny + XM[2] * nz, cy = XM[3] * nx + XM[4] * ny + XM[5] * nz, cz = XM[6] * nx + XM[7] * ny + XM[8] * nz;
+    CP[j] = cx; CP[j + 1] = cy; CP[j + 2] = cz; CP[j + 3] = m[i + 3] + cx * XM[9] + cy * XM[10] + cz * XM[11]; CN++;
+  }
+  CL = CN > 0;
+}
+const clipped = (x, y, z) => { for (let i = 0; i < CN; i++) { const j = i * 4; if (CP[j] * x + CP[j + 1] * y + CP[j + 2] * z <= CP[j + 3]) return false; } return true; };
+/* a sphere entirely inside the cut region */
+const clippedS = (x, y, z, r) => { for (let i = 0; i < CN; i++) { const j = i * 4; if (CP[j] * x + CP[j + 1] * y + CP[j + 2] * z - CP[j + 3] <= r) return false; } return true; };
+/* a hairline with the cut region taken out of it */
 function lineC(ax, ay, az, bx, by, bz, bri, step) {
   if (!CL) { lineC0(ax, ay, az, bx, by, bz, bri, step); return; }
-  const sa = CNX * ax + CNY * ay + CNZ * az, sb = CNX * bx + CNY * by + CNZ * bz;
-  if (Math.abs(sb - sa) < 1e-9) { if (!(sa > CC0 && sa < CC1)) lineC0(ax, ay, az, bx, by, bz, bri, step); return; }
-  const t0 = (CC0 - sa) / (sb - sa), t1 = (CC1 - sa) / (sb - sa), lo = Math.min(t0, t1), hi = Math.max(t0, t1);
-  if (lo >= 1 || hi <= 0) { lineC0(ax, ay, az, bx, by, bz, bri, step); return; }
+  let lo = 0, hi = 1;
+  for (let i = 0; i < CN; i++) {
+    const j = i * 4, sa = CP[j] * ax + CP[j + 1] * ay + CP[j + 2] * az - CP[j + 3], sb = CP[j] * bx + CP[j + 1] * by + CP[j + 2] * bz - CP[j + 3];
+    if (sa <= 0 && sb <= 0) { lineC0(ax, ay, az, bx, by, bz, bri, step); return; }
+    if (sa > 0 && sb > 0) continue;
+    const t = sa / (sa - sb);
+    if (sa > 0) { if (t < hi) hi = t; } else if (t > lo) lo = t;
+  }
+  if (lo >= hi) { lineC0(ax, ay, az, bx, by, bz, bri, step); return; }
   const dx = bx - ax, dy = by - ay, dz = bz - az;
   if (lo > 0) lineC0(ax, ay, az, ax + dx * lo, ay + dy * lo, az + dz * lo, bri, step);
   if (hi < 1) lineC0(ax + dx * hi, ay + dy * hi, az + dz * hi, bx, by, bz, bri, step);
@@ -214,7 +269,7 @@ function lineC0(ax, ay, az, bx, by, bz, bri, step) {
   const x0 = cx + F * ax / az, y0 = cy - F * ay / az, x1 = cx + F * bx / bz, y1 = cy - F * by / bz;
   if ((x0 < 0 && x1 < 0) || (y0 < 0 && y1 < 0) || (x0 >= BW && x1 >= BW) || (y0 >= BH && y1 >= BH)) return;
   const dx = x1 - x0, dy = y1 - y0, Ls = Math.sqrt(dx * dx + dy * dy);
-  const m = Math.max(1, Math.ceil(Ls / step));
+  const m = Math.max(1, Math.ceil(Ls / (step * thin((az + bz) * .5))));
   // clip the parameter range to the screen
   let t0 = 0, t1 = 1;
   if (dx !== 0) { let ta = -x0 / dx, tb = (BW - 1 - x0) / dx; if (dx < 0) { const t = ta; ta = tb; tb = t; } if (ta > t0) t0 = ta; if (tb < t1) t1 = tb; } else if (x0 < 0 || x0 > BW - 1) return;
@@ -266,15 +321,15 @@ function sphC(x, y, z, r) {
 
 /* panel kernel (camera space): o corner, u v per-cell steps, nu nv cells, lu lv cell lengths, n normal */
 let PB = 0, PBK = .11, PTWO = 0;
-let Pox, Poy, Poz, Pux, Puy, Puz, Pvx, Pvy, Pvz, Plu, Plv;
+let Pox, Poy, Poz, Pux, Puy, Puz, Pvx, Pvy, Pvz, Pwx = 0, Pwy = 0, Pwz = 0, Plu, Plv;
 function panelK(nu, nv, nx, ny, nz, br, two) {
   // shade at the centre
-  const mx = Pox + (Pux * nu + Pvx * nv) * .5, my = Poy + (Puy * nu + Pvy * nv) * .5, mz = Poz + (Puz * nu + Pvz * nv) * .5;
+  const nn = nu * nv * .25, mx = Pox + (Pux * nu + Pvx * nv) * .5 + Pwx * nn, my = Poy + (Puy * nu + Pvy * nv) * .5 + Pwy * nn, mz = Poz + (Puz * nu + Pvz * nv) * .5 + Pwz * nn;
   const ml = Math.sqrt(mx * mx + my * my + mz * mz) || 1;
   let fac = -(nx * mx + ny * my + nz * mz) / ml, lam = nx * XM[15] + ny * XM[16] + nz * XM[17];
   let back = false;
-  if (fac < 0) { if (two) { fac = -fac; lam = -lam * .7; } else back = true; }
-  PB = back ? O.back * br : shade(lam, fac) * br;
+  if (fac < 0) { if (two) { fac = -fac; lam = -lam * .7; } else { if (G.noBack) return; back = true; } }
+  PB = back ? Math.max(O.back, EM * .6) * br : Math.max(shade(lam, fac), EM) * br;
   PBK = back ? 2.2 : 1;
   if (PB * CA < .01) return;
   tileK(0, nu, 0, nv);
@@ -282,13 +337,13 @@ function panelK(nu, nv, nx, ny, nz, br, two) {
 function tileK(i0, i1, j0, j1) {
   const n = C.near, F = C.fl;
   // corners
-  const z00 = Poz + Puz * i0 + Pvz * j0, z10 = Poz + Puz * i1 + Pvz * j0, z01 = Poz + Puz * i0 + Pvz * j1, z11 = Poz + Puz * i1 + Pvz * j1;
+  const z00 = Poz + Puz * i0 + Pvz * j0 + Pwz * i0 * j0, z10 = Poz + Puz * i1 + Pvz * j0 + Pwz * i1 * j0, z01 = Poz + Puz * i0 + Pvz * j1 + Pwz * i0 * j1, z11 = Poz + Puz * i1 + Pvz * j1 + Pwz * i1 * j1;
   const zmin = Math.min(z00, z10, z01, z11), zmax = Math.max(z00, z10, z01, z11);
   if (zmax < n) return;
   if (CL) {
     // the whole tile inside the clip slab: skip it
     let all = true;
-    for (let k = 0; k < 4 && all; k++) { const ii = k & 1 ? i1 : i0, jj = k & 2 ? j1 : j0, sv = CNX * (Pox + Pux * ii + Pvx * jj) + CNY * (Poy + Puy * ii + Pvy * jj) + CNZ * (Poz + Puz * ii + Pvz * jj); if (!(sv > CC0 && sv < CC1)) all = false; }
+    for (let k = 0; k < 4 && all; k++) { const ii = k & 1 ? i1 : i0, jj = k & 2 ? j1 : j0, ij = ii * jj; if (!clipped(Pox + Pux * ii + Pvx * jj + Pwx * ij, Poy + Puy * ii + Pvy * jj + Pwy * ij, Poz + Puz * ii + Pvz * jj + Pwz * ij)) all = false; }
     if (all) return;
   }
   const di = i1 - i0, dj = j1 - j0;
@@ -298,18 +353,25 @@ function tileK(i0, i1, j0, j1) {
     const cx = C.cx + C.shake[0], cy = C.cy + C.shake[1];
     let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
     for (let k = 0; k < 4; k++) {
-      const ii = k & 1 ? i1 : i0, jj = k & 2 ? j1 : j0, zz = Poz + Puz * ii + Pvz * jj;
-      const sx = cx + F * (Pox + Pux * ii + Pvx * jj) / zz, sy = cy - F * (Poy + Puy * ii + Pvy * jj) / zz;
+      const ii = k & 1 ? i1 : i0, jj = k & 2 ? j1 : j0, ij = ii * jj, zz = Poz + Puz * ii + Pvz * jj + Pwz * ij;
+      const sx = cx + F * (Pox + Pux * ii + Pvx * jj + Pwx * ij) / zz, sy = cy - F * (Poy + Puy * ii + Pvy * jj + Pwy * ij) / zz;
       if (sx < x0) x0 = sx; if (sx > x1) x1 = sx; if (sy < y0) y0 = sy; if (sy > y1) y1 = sy;
     }
     if (x1 < 0 || y1 < 0 || x0 >= BW || y0 >= BH) return;
     if (zmax > 1.7 * zmin && (di > 2 || dj > 2)) { split(i0, i1, j0, j1); return; }
     if ((x1 - x0) * (y1 - y0) > 400000 && (di > 4 || dj > 4)) { split(i0, i1, j0, j1); return; }
   }
-  const zm = Math.max(n, zmin), pxf = G.PXF * O.pxf * PBK;
-  const nU0 = pxf * zm / (Plu * F), nV0 = pxf * zm / (Plv * F);
+  const zm = Math.max(n, zmin), pxf = G.PXF * O.pxf * PBK * thin(zm);
+  // the cells' lengths as seen (foreshortened across the view ray at the tile's middle): a face seen obliquely
+  // needs fewer dots along its foreshortened side
+  const im = (i0 + i1) * .5, jm = (j0 + j1) * .5, mx = Pox + Pux * im + Pvx * jm + Pwx * im * jm, my = Poy + Puy * im + Pvy * jm + Pwy * im * jm, mz = Poz + Puz * im + Pvz * jm + Pwz * im * jm;
+  const ml = Math.sqrt(mx * mx + my * my + mz * mz) || 1, ex = mx / ml, ey = my / ml, ez = mz / ml;
+  const ux = Pux + Pwx * jm, uy = Puy + Pwy * jm, uz = Puz + Pwz * jm, vx = Pvx + Pwx * im, vy = Pvy + Pwy * im, vz = Pvz + Pwz * im;
+  const ue = ux * ex + uy * ey + uz * ez, ve = vx * ex + vy * ey + vz * ez, u2 = ux * ux + uy * uy + uz * uz, v2 = vx * vx + vy * vy + vz * vz;
+  const LuE = Math.max(Plu * .22, Plu * Math.sqrt(Math.max(0, 1 - ue * ue / (u2 || 1)))), LvE = Math.max(Plv * .22, Plv * Math.sqrt(Math.max(0, 1 - ve * ve / (v2 || 1))));
+  const nU0 = pxf * zm / (LuE * F), nV0 = pxf * zm / (LvE * F);
   const su = Math.max(1, pow2(nU0 * .5)), sv = Math.max(1, pow2(nV0 * .5));
-  const kU = pxf / (Plu * F), kV = pxf / (Plv * F);
+  const kU = pxf / (LuE * F), kV = pxf / (LvE * F);
   const cx = C.cx + C.shake[0], cy = C.cy + C.shake[1];
   const br = PB, r = CR * br * CA, g = CG * br * CA, b = CB * br * CA;
   const g0 = G.g0, g1 = G.g1, gm = G.gmin, occ = G.occ && O.occ, keep = O.keep;
@@ -317,16 +379,16 @@ function tileK(i0, i1, j0, j1) {
   let cnt = 0;
   for (let i = ia; i < i1; i += su) {
     const cu = CTZ[i & 65535], lu = 1 << cu, ilu = IP2[cu];
-    const bx = Pox + Pux * (i + .5), by = Poy + Puy * (i + .5), bz = Poz + Puz * (i + .5);
+    const bx = Pox + Pux * (i + .5), by = Poy + Puy * (i + .5), bz = Poz + Puz * (i + .5), vx = Pvx + Pwx * (i + .5), vy = Pvy + Pwy * (i + .5), vz = Pvz + Pwz * (i + .5);
     for (let j = ja; j < j1; j += sv) {
-      const z = bz + Pvz * (j + .5); if (z < n) continue;
+      const z = bz + vz * (j + .5); if (z < n) continue;
       const nu = kU * z, nv = kV * z;
       if (nu >= 2 * lu) continue;
       const cv = CTZ[j & 65535], lv = 1 << cv;
       if (nv >= 2 * lv) continue;
       let a = (nu <= lu ? 1 : 2 - nu * ilu) * (nv <= lv ? 1 : 2 - nv * IP2[cv]);
       if (a < .06) continue;
-      const x = bx + Pvx * (j + .5), y = by + Pvy * (j + .5), iz = F / z;
+      const x = bx + vx * (j + .5), y = by + vy * (j + .5), iz = F / z;
       if (CL && clipped(x, y, z)) continue;
       const sx = cx + x * iz; if (sx < 0 || sx >= BW) continue;
       const sy = cy - y * iz; if (sy < 0 || sy >= BH) continue;
@@ -360,7 +422,6 @@ function latheK(Y) {
   const g0 = G.g0, g1 = G.g1, gm = G.gmin, occ = G.occ && O.occ, pxf0 = G.PXF * O.pxf;
   // a solid band (one with its own occluder) skips its far side while the occlusion is on: it is behind its front
   const br = Y.br, two = Y.two, back = O.back, keep = O.keep, ca = CA, solid = Y.solid && occ;
-  const nd = CL ? CNX * dx + CNY * dy + CNZ * dz : 0;
   let cnt = 0;
   for (const B of Y.bands) {
     const na = B.na, n0 = B.n0, step = NT / n0, kr = B.kr, ka = B.ka;
@@ -368,14 +429,21 @@ function latheK(Y) {
     for (let ia = 0; ia < na; ia++) {
       const u = (ia + .5) / na, s = B.s0 + (B.s1 - B.s0) * u, rr = B.r0 + (B.r1 - B.r0) * u;
       const ccx = ax + dx * s, ccy = ay + dy * s, ccz = az + dz * s;
-      if (CL) { const sc = CNX * ccx + CNY * ccy + CNZ * ccz, e = rr * Math.sqrt(Math.max(0, 1 - nd * nd)); if (sc - e > CC0 && sc + e < CC1) continue; }
+      if (CL) {
+        // the whole ring inside the cut region (each plane: its centre's margin beyond the ring's reach across n)
+        let inside = true;
+        for (let i = 0; i < CN && inside; i++) { const j = i * 4, nd = CP[j] * dx + CP[j + 1] * dy + CP[j + 2] * dz; if (CP[j] * ccx + CP[j + 1] * ccy + CP[j + 2] * ccz - CP[j + 3] <= rr * Math.sqrt(Math.max(0, 1 - nd * nd))) inside = false; }
+        if (inside) continue;
+      }
       if (ccz + rr < n) continue;
       if (ccz > n + rr) { const sx = cx + F * ccx / ccz, sy = cy - F * ccy / ccz, pr = F * rr / (ccz - rr); if (sx + pr < 0 || sx - pr >= BW || sy + pr < 0 || sy - pr >= BH) continue; }
       const zr = Math.max(n, ccz - rr * .5);
-      const la = 1 << CTZ[ia & 65535], needA = pxf0 * zr / (cellA * F);
+      // the axial cells foreshortened along the view ray to the ring's centre
+      const cl = Math.sqrt(ccx * ccx + ccy * ccy + ccz * ccz) || 1, de = (dx * ccx + dy * ccy + dz * ccz) / cl, fa = Math.max(.22, Math.sqrt(Math.max(0, 1 - de * de * kr * kr)));
+      const pxr = pxf0 * thin(zr), la = 1 << CTZ[ia & 65535], needA = pxr * zr / (cellA * fa * F);
       if (needA >= 2 * la) continue;
       const aA = needA <= la ? 1 : 2 - needA / la;
-      const cellT = TAU * Math.max(rr, .02) / n0, needT = pxf0 * zr / (cellT * F);
+      const cellT = TAU * Math.max(rr, .02) / n0, needT = pxr * zr / (cellT * F);
       const st = Math.max(1, Math.min(n0, pow2(needT * .5)));
       // per ring: the facing test and the light as functions of the angle only
       const cu = ux * ccx + uy * ccy + uz * ccz, cw = wx * ccx + wy * ccy + wz * ccz, cd = dx * ccx + dy * ccy + dz * ccz;
@@ -408,7 +476,7 @@ function latheK(Y) {
           if (two) { fac = -fac; lam = -lam * .7; }
           else { if (solid || c3) continue; b = back * br; }
         }
-        if (b < 0) { if (fac > 1) fac = 1; const w = 1 - fac; const q = .07 + .72 * (lam > 0 ? lam : 0) + .16 * fac + .34 * w * w * w; b = FACE * q * (.55 + .45 * q) * br; }
+        if (b < 0) { if (fac > 1) fac = 1; const w = 1 - fac; const q = .07 + .72 * (lam > 0 ? lam : 0) + .16 * fac + .34 * w * w * w; b = Math.max(FACE * q * (.55 + .45 * q), EM) * br; }
         const rx = ux * cs + wx * sn, ry = uy * cs + wy * sn, rz = uz * cs + wz * sn;
         const pz = ccz + rz * rr; if (pz < n) continue;
         if (CL && clipped(ccx + rx * rr, ccy + ry * rr, pz)) continue;
@@ -453,7 +521,7 @@ function tubeK(ax, ay, az, bx, by, bz, r, bri) {
       const th = -PI / 2 + PI * k / rows, c = Math.cos(th), s = Math.sin(th);
       const ox = (px * s + qx * c) * r, oy = (py * s + qy * c) * r, oz = (pz * s + qz * c) * r;
       const nx = ox / r, ny = oy / r, nz = oz / r, lam = nx * lx + ny * ly + nz * lz;
-      const b = shade(lam, c) * bri * .95;
+      const b = Math.max(shade(lam, c), EM) * bri * .95;
       lineC(ax + ox, ay + oy, az + oz, bx + ox, by + oy, bz + oz, b, G.PXF * O.pxf * 1.3);
     }
   }
@@ -472,7 +540,7 @@ function ringK(Rg, j, bri, sp) {
   let fa = 1;
   if (sp > 0) { const px = sp * F / Math.max(n, czm); if (px < G.SEAMPX * .5) return; if (px < G.SEAMPX) fa = px / G.SEAMPX * 2 - 1; }
   if (rp < .6) { dotC(cxm, cym, czm, 1, CR * bri * CA * .7 * fa, CG * bri * CA * .7 * fa, CB * bri * CA * .7 * fa); return; }
-  const m = Math.min(NT, Math.max(8, pow2(TAU * rp / (PXLc * 1.15)))), st = NT / m;
+  const m = Math.min(NT, Math.max(8, pow2(TAU * rp / (PXLc * 1.15 * thin(czm))))), st = NT / m;
   const r_ = CR * bri * CA * fa, g_ = CG * bri * CA * fa, b_ = CB * bri * CA * fa, g0 = G.g0, g1 = G.g1, gm = G.gmin, occ = G.occ && O.occ;
   let cnt = 0;
   for (let k = 0; k < NT; k += st) {
@@ -502,7 +570,7 @@ function knotK(x, y, z, s, bri) {
     if (nx * cx + ny * cy + nz * cz >= 0) continue;
     const ux = XM[b1], uy = XM[3 + b1], uz = XM[6 + b1], vx = XM[b2], vy = XM[3 + b2], vz = XM[6 + b2];
     Pox = cx - (ux + vx) * h; Poy = cy - (uy + vy) * h; Poz = cz - (uz + vz) * h;
-    Pux = ux * cl; Puy = uy * cl; Puz = uz * cl; Pvx = vx * cl; Pvy = vy * cl; Pvz = vz * cl; Plu = cl; Plv = cl;
+    Pux = ux * cl; Puy = uy * cl; Puz = uz * cl; Pvx = vx * cl; Pvy = vy * cl; Pvz = vz * cl; Pwx = Pwy = Pwz = 0; Plu = cl; Plv = cl;
     panelK(nc, nc, nx, ny, nz, bri * 1.5, 0);
     // the face's outline
     const e = bri * .9;
@@ -546,6 +614,7 @@ function draw(B, Tw, o) {
   if (O.a < .01) return;
   clipOn(o); PXLc = G.PXL * (o.pxl || 1);
   prep(Tw, o.L || [0, 1, 0]);
+  clipModel(o);
   const lime0 = O.lime;
   const L = B.L, T = B.T, P = B.P, N = B.N, Rg = B.Rg, F = C.fl, PXL = PXLc, near = C.near, off = B.off, SEAMPX = G.SEAMPX;
   const b9 = XM[9], b10 = XM[10], b11 = XM[11];
@@ -556,13 +625,15 @@ function draw(B, Tw, o) {
     else { XM[9] = b9; XM[10] = b10; XM[11] = b11; }
     toCam(c.c[0], c.c[1], c.c[2]);
     if (!sphC(CAM[0], CAM[1], CAM[2], c.r)) continue;
-    if (CL) { const sc = CNX * CAM[0] + CNY * CAM[1] + CNZ * CAM[2]; if (sc - c.r > CC0 && sc + c.r < CC1) continue; }
+    if (CL && clippedS(CAM[0], CAM[1], CAM[2], c.r)) continue;
     if (O.occ && G.occ && CAM[2] - c.r > near * 4 && chunkHidden(CAM[0], CAM[1], CAM[2], c.r)) continue;
     const lit = B.lit[c.i], cl = B.lime[c.i];
     if (cl > .01) { O.lime = Math.max(lime0, Math.min(1, cl)); } else O.lime = lime0;
     // far away: the whole chunk under a pixel or two
     if (CAM[2] > near && c.r * F / CAM[2] < .7) { setCol(0, 0); dotC(CAM[0], CAM[1], CAM[2], 1, CR * .5 * CA, CG * .5 * CA, CB * .5 * CA); continue; }
     let lastCh = -1, lastQ = -1, d0 = G.dots; if (G.tm) G.tm.t = performance.now();
+    // a body marked coarse (greebles) draws only its edges while a chunk is small on screen
+    const coarse = B.coarse && c.r * F < B.coarse * CAM[2];
     for (let k = c.l0; k < c.l1; k++) {
       if (O.keep < .9 && ((k * .7548776662) % 1) > O.keep * 1.6 + .2) continue;
       const j = k * 10, ch = L[j + 7], q = L[j + 8], sp = L[j + 9];
@@ -582,7 +653,7 @@ function draw(B, Tw, o) {
       ringK(Rg, j, Rg[j + 10] * (1 + lit), Rg[j + 13]);
     }
     G.by.r += G.dots - d0; d0 = G.dots; if (G.tm) { const n = performance.now(); G.tm.r += n - G.tm.t; G.tm.t = n; }
-    for (let k = c.t0; k < c.t1; k++) {
+    for (let k = coarse ? c.t1 : c.t0; k < c.t1; k++) {
       const j = k * 10, ch = T[j + 8], q = T[j + 9];
       if (ch !== lastCh || q !== lastQ) { setCol(ch, q); lastCh = ch; lastQ = q; }
       const x0 = T[j], y0 = T[j + 1], z0 = T[j + 2], x1 = T[j + 3], y1 = T[j + 4], z1 = T[j + 5];
@@ -590,21 +661,32 @@ function draw(B, Tw, o) {
             XM[0] * x1 + XM[1] * y1 + XM[2] * z1 + XM[9], XM[3] * x1 + XM[4] * y1 + XM[5] * z1 + XM[10], XM[6] * x1 + XM[7] * y1 + XM[8] * z1 + XM[11], T[j + 6], T[j + 7] * (1 + lit));
     }
     G.by.t += G.dots - d0; d0 = G.dots; if (G.tm) { const n = performance.now(); G.tm.tb += n - G.tm.t; G.tm.t = n; }
-    for (let k = c.p0; k < c.p1; k++) {
-      const j = k * 20, ch = P[j + 16], q = P[j + 17];
+    for (let k = coarse ? c.p1 : c.p0; k < c.p1; k++) {
+      const j = k * 23, ch = P[j + 16], q = P[j + 17];
       if (ch !== lastCh || q !== lastQ) { setCol(ch, q); lastCh = ch; lastQ = q; }
       const x = P[j], y = P[j + 1], z = P[j + 2];
       Pox = XM[0] * x + XM[1] * y + XM[2] * z + XM[9]; Poy = XM[3] * x + XM[4] * y + XM[5] * z + XM[10]; Poz = XM[6] * x + XM[7] * y + XM[8] * z + XM[11];
+      { // a face under a couple of pixels: one dot for it
+        const S = P[j + 18] * P[j + 9] + P[j + 19] * P[j + 10];
+        if (Poz > near + S && S * F < 1.7 * Poz) { if (S * F > .5 * Poz) dotC(Pox, Poy, Poz, 1, CR * P[j + 14] * .45 * CA, CG * P[j + 14] * .45 * CA, CB * P[j + 14] * .45 * CA); continue; }
+      }
+      const nx = P[j + 11], ny = P[j + 12], nz = P[j + 13], ncx = XM[0] * nx + XM[1] * ny + XM[2] * nz, ncy = XM[3] * nx + XM[4] * ny + XM[5] * nz, ncz = XM[6] * nx + XM[7] * ny + XM[8] * nz;
+      // a one-sided face turned away (its plane's side is the same at every point): skipped
+      if (G.noBack && !P[j + 15] && ncx * Pox + ncy * Poy + ncz * Poz > 0) continue;
       Pux = XM[0] * P[j + 3] + XM[1] * P[j + 4] + XM[2] * P[j + 5]; Puy = XM[3] * P[j + 3] + XM[4] * P[j + 4] + XM[5] * P[j + 5]; Puz = XM[6] * P[j + 3] + XM[7] * P[j + 4] + XM[8] * P[j + 5];
       Pvx = XM[0] * P[j + 6] + XM[1] * P[j + 7] + XM[2] * P[j + 8]; Pvy = XM[3] * P[j + 6] + XM[4] * P[j + 7] + XM[5] * P[j + 8]; Pvz = XM[6] * P[j + 6] + XM[7] * P[j + 7] + XM[8] * P[j + 8];
       Plu = P[j + 18]; Plv = P[j + 19];
-      const nx = P[j + 11], ny = P[j + 12], nz = P[j + 13];
-      panelK(P[j + 9], P[j + 10], XM[0] * nx + XM[1] * ny + XM[2] * nz, XM[3] * nx + XM[4] * ny + XM[5] * nz, XM[6] * nx + XM[7] * ny + XM[8] * nz, P[j + 14] * (1 + lit), P[j + 15]);
+      Pwx = XM[0] * P[j + 20] + XM[1] * P[j + 21] + XM[2] * P[j + 22]; Pwy = XM[3] * P[j + 20] + XM[4] * P[j + 21] + XM[5] * P[j + 22]; Pwz = XM[6] * P[j + 20] + XM[7] * P[j + 21] + XM[8] * P[j + 22];
+      panelK(P[j + 9], P[j + 10], ncx, ncy, ncz, P[j + 14] * (1 + lit), P[j + 15]);
     }
     G.by.p += G.dots - d0; d0 = G.dots; if (G.tm) { const n = performance.now(); G.tm.p += n - G.tm.t; G.tm.t = n; }
-    for (let k = c.y0; k < c.y1; k++) {
+    for (let k = coarse ? c.y1 : c.y0; k < c.y1; k++) {
       const Y = B.Y[k];
       if (Y.ch !== lastCh || Y.q !== lastQ) { setCol(Y.ch, Y.q); lastCh = Y.ch; lastQ = Y.q; }
+      { // a part under a couple of pixels: one dot for it
+        const c_ = Y.cc; toCam(c_[0], c_[1], c_[2]);
+        if (CAM[2] > near + Y.crad && Y.crad * F < .9 * CAM[2]) { if (Y.crad * F > .25 * CAM[2]) dotC(CAM[0], CAM[1], CAM[2], 1, CR * Y.br * .45 * CA, CG * Y.br * .45 * CA, CB * Y.br * .45 * CA); continue; }
+      }
       const br = Y.br; Y.br = br * (1 + lit); latheK(Y); Y.br = br;
     }
     G.by.y += G.dots - d0; d0 = G.dots; if (G.tm) { const n = performance.now(); G.tm.y += n - G.tm.t; G.tm.t = n; }
@@ -626,12 +708,19 @@ function chunkW(B, tag, Tw) { const c = B.CH.find(c => c.tag === tag); return c 
 /* a world-space hairline in the colour of effect channel (ch, q) under the options o (cables, beams on moving parts) */
 const IDW = { R: [1, 0, 0, 0, 1, 0, 0, 0, 1], T: [0, 0, 0] };
 function lineW(a, b, br, ch, q, o) {
-  draw.opt(o); clipOn(o); PXLc = G.PXL * ((o && o.pxl) || 1); prep(IDW, (o && o.L) || [0, 1, 0]); setCol(ch || 0, q || 0);
+  draw.opt(o); clipOn(o); PXLc = G.PXL * ((o && o.pxl) || 1); prep(IDW, (o && o.L) || [0, 1, 0]); clipModel(o); setCol(ch || 0, q || 0);
   toCam(a[0], a[1], a[2]); const ax = CAM[0], ay = CAM[1], az = CAM[2];
   toCam(b[0], b[1], b[2]);
   lineC(ax, ay, az, CAM[0], CAM[1], CAM[2], br, PXLc);
 }
+/* a world-space member of radius r (actuators, struts between moving parts), lit like a body's tube */
+function tubeW(a, b, r, br, ch, q, o) {
+  draw.opt(o); clipOn(o); PXLc = G.PXL * ((o && o.pxl) || 1); prep(IDW, (o && o.L) || [0, 1, 0]); clipModel(o); setCol(ch || 0, q || 0);
+  toCam(a[0], a[1], a[2]); const ax = CAM[0], ay = CAM[1], az = CAM[2];
+  toCam(b[0], b[1], b[2]);
+  tubeK(ax, ay, az, CAM[0], CAM[1], CAM[2], r, br);
+}
 draw.opt = o => { o = o || {}; O.a = o.a === undefined ? 1 : o.a; O.col = o.col || WH; O.lime = o.lime || 0; O.fx = o.fx || null; O.keep = o.keep === undefined ? 1 : o.keep; O.pxf = (o.pxf || 1) / Math.sqrt(Math.max(.12, O.keep)); O.back = o.back === undefined ? .11 : o.back; O.occ = !!o.occ; O.lc = o.lc || [255, 255, 255]; };
 
-window.ORL = { Body, draw, frame, G, chunkW, gain, LIME, HOT, WH, HEAT, lineC, lineW, shade, perp: M3perp };
+window.ORL = { Body, draw, frame, G, chunkW, gain, LIME, HOT, WH, HEAT, lineC, lineW, tubeW, shade, perp: M3perp };
 })();

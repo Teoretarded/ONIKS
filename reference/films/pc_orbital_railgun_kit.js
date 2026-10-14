@@ -67,9 +67,11 @@ function lineW(ax, ay, az, bx, by, bz, step, s, c, a, gc, g1, g2) {
   const x0 = cx + F * CA[0] / CA[2], y0 = cy - F * CA[1] / CA[2], x1 = cx + F * CB[0] / CB[2], y1 = cy - F * CB[1] / CB[2];
   if ((x0 < -60 && x1 < -60) || (y0 < -60 && y1 < -60) || (x0 > BW + 60 && x1 > BW + 60) || (y0 > BH + 60 && y1 > BH + 60)) return;
   const L = Math.hypot(x1 - x0, y1 - y0), m = Math.min(3000, Math.max(1, Math.ceil(L / step)));
+  const occ = OCC_ON, iza = 1 / CA[2], izb = 1 / CB[2];
   for (let k = 0; k <= m; k++) {
     const t = k / m, x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t;
     if (x < -30 || y < -30 || x > BW + 30 || y > BH + 30) continue;
+    if (occ && occT(x, y, 1 / (iza + (izb - iza) * t))) continue;
     dot(x, y, s, c[0], c[1], c[2], a);
     if (gc && (k % 3) === 0) { add(x, y, 9, gc[0], gc[1], gc[2], g1 * a); if (g2 && (k % 6) === 0) add(x, y, 21, gc[0], gc[1], gc[2], g2 * a); }
   }
@@ -105,6 +107,7 @@ function soft(x, y, rad, r, g, b, a) {
 /* glow at a world point: small ones as stacked squares, big ones soft and round */
 function glowW(x, y, z, px, col, a) {
   if (!pj(x, y, z) || !onS(px)) return;
+  if (OCC_ON && occT(PJ[0], PJ[1], PJ[2])) return;
   if (px <= 12) { const q = [px, px * .55, px * .28]; for (let k = 0; k < 3; k++) add(PJ[0], PJ[1], Math.max(1, Math.round(q[k])), col[0], col[1], col[2], a * (.25 + .3 * k)); return; }
   soft(PJ[0], PJ[1], px * .6, col[0], col[1], col[2], a * .55);
   soft(PJ[0], PJ[1], px * .22, col[0], col[1], col[2], a * .8);
@@ -599,7 +602,7 @@ class Fork {
 const reachOf = (a, dur) => { if (a <= 0) return 0; const u = E.clamp(a / dur, 0, 1); return u + .06 * Math.sin(u * PI * 3) * (1 - u); };
 /* a charge arc between two world points: jagged, re-struck at 30 Hz (pure in t), I brightness */
 const ARC = new Float64Array(33 * 3);
-function arcW(a, b, seed, t, I, jag, col) {
+function arcW(a, b, seed, t, I, jag, col, sz) {
   if (I < .01) return;
   const fr = Math.floor(t * 30), n = 16;
   for (let k = 0; k <= n; k++) { const u = k / n; ARC[k * 3] = a[0] + (b[0] - a[0]) * u; ARC[k * 3 + 1] = a[1] + (b[1] - a[1]) * u; ARC[k * 3 + 2] = a[2] + (b[2] - a[2]) * u; }
@@ -612,7 +615,7 @@ function arcW(a, b, seed, t, I, jag, col) {
     }
   }
   const cc = col || HOT;
-  for (let k = 0; k < n; k++) lineW(ARC[k * 3], ARC[k * 3 + 1], ARC[k * 3 + 2], ARC[k * 3 + 3], ARC[k * 3 + 4], ARC[k * 3 + 5], 1.2, 1, cc, Math.min(1, I), LIME, .06, .02);
+  for (let k = 0; k < n; k++) lineW(ARC[k * 3], ARC[k * 3 + 1], ARC[k * 3 + 2], ARC[k * 3 + 3], ARC[k * 3 + 4], ARC[k * 3 + 5], 1.2, sz || 1, cc, Math.min(1, I), LIME, .07, 0);
 }
 Object.assign(K, { Bolt, Fork, reachOf, arcW, disp });
 
@@ -632,6 +635,7 @@ function setTag(tg, id, lab, val, cls, x, y, a) {
   if (x > 1896 - w + 60 || x < -36 || y < -36 || y > 1100 || (x < 430 && y < 236)) a = 0;
   if (x > 1896 - w) x = 1896 - w; if (x < 24) x = 24; if (y < 24) y = 24; if (y > 1040) y = 1040;
   tg.el.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
+  tg.el.classList.remove('off');            // (a tag set again with the same text: endTags' .off must not linger under the inline opacity)
   tg.el.style.opacity = a === undefined ? '' : Math.max(0, Math.min(1, a)).toFixed(2);
   tg.on = true;
 }
