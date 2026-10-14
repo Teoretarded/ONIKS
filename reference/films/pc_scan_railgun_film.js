@@ -1,14 +1,18 @@
-/* SCAN · RAILGUN (Point Cloud): the game's SCAN with a source. An Arleigh Burke on station at night, a railgun
-   mount in the Mk 45's seat on the foredeck. The mount wakes (vent hatches on rams, muzzle petals, it trains and
-   elevates, the muzzle sleeve runs out on its screw and locks, the rail covers fold up on rams); a slice opens the
-   hull under it and shows the power room: the coolant pumps and fans start and the valves open, one of the four
-   pulsed alternators comes apart on its guide rods (exciter end bell, then the rotor) and closes again, the rotors
-   spin up, the breakers close and the capacitor racks charge module by module while the cabinets count; then the
-   loader: the magazine drum indexes, the hoist lifts a round into the tray, the breech block drops, the tray swings
-   into line and the rammer seats the round, the block closes and the rail clamps lock breech to muzzle. The rails
-   charge; it fires a probe toward the coast (x2.8 shown), the probe bursts over the headland and the lime lightning
-   forks down onto a coastal battery, which the scan identifies part by part. The lens climbs away over the coast,
-   back along the trail to the ship, as the mount stows. One take, 60 s, loops. Render is a pure function of T. */
+/* SCAN · RAILGUN (Point Cloud): the game's SCAN with a source. An Arleigh Burke on station at night, an
+   electromagnetic railgun mount in the Mk 45's seat on the foredeck (pc_scan_railgun_parts.js). The mount wakes: the
+   hydraulic power unit starts and the accumulators charge (its cheek ghosted); the cryocoolers top the superconducting
+   coils down to 20 K, frost forming on the cold heads and helium lines, and the 12 coil stations energise breech to
+   muzzle, their field looping across the bore (x240, shown); the muzzle cover opens, the electro-optical director and
+   the fire-control radar acquire and lock, the train drives and the elevation rams lay it; a slice opens the hull
+   under it and shows the power room: the valves open and the coolant pumps start (their brushless motors' coils
+   switching round with the rotors), coolant runs up the power column and down to the keel, one of the four pulsed
+   alternators comes apart on its guide rods and closes again, the rotors spin up, the breakers close and the
+   capacitor racks charge module by module while the cabinets count; then the loader: the drum brings the empty cell
+   under the hoist (the magazine fills it), the hoist lifts the 2 m round to the tray, the breech block drops, the tray
+   swings into line and the chain rammer seats it, all draw back, the block closes and the preload clamps lock breech
+   to muzzle. The rails charge; it fires a probe toward the coast, the probe bursts over the headland and the lime
+   lightning forks down onto a coastal battery, which the scan identifies part by part. The lens climbs away over the
+   coast, back along the trail to the ship, as the mount stows. One take, loops. Render is a pure function of T. */
 (() => {
 const { V, R, X, E, rng } = M3;
 const PI = Math.PI, DEG = PI / 180, TAU = PI * 2;
@@ -30,11 +34,18 @@ const veil = $('veil');
 STAGE.menu({ el: menuEl, blurb: $('blurb'), axis: 'h', onEnter(i) { if (i === 4) { veil.classList.add('on'); setTimeout(() => veil.classList.remove('on'), 1900); return 2600; } return 1900; } });
 
 /* ---------- time ---------- */
-const DUR0 = 82;                                                      // the base take (old time)
-const T_BANK = 19.8, T_BANK1 = 23.2;                                  // racks charge
+const DUR0 = 87.8;                                                    // the base take (old time)
+/* the mount's wake (base time): the hydraulics come up, the cryocoolers top the coils down to 20 K and the coils
+   energise breech -> muzzle (x240, shown), the cover opens, the sensors acquire and lock, it trains and elevates (x1);
+   the X-ray opens the power room */
+const T_HPU = 4.2, T_CRYO = 6.4, T_EN = 8.6, T_CR1 = 10.6, T_TR = 11.6, T_TR1 = 14.4, T_EL = 12.0, T_EL1 = 14.8, T_X = 15.0;
+const enT = k => T_EN + .14 * k;                                      // coil station k energises
+const T_BANK = 24.4, T_BANK1 = 27.8;                                  // racks charge
 /* loader time -> film time: the loader holds XH s with the round at the top of the hoist (its exploded view) */
-const T_LD = 23.9, XH = 1.8, LD = t => T_LD + t + (t > 1.355 ? XH : 0), T_XP = T_LD + 1.35;
-const T_RAIL = LD(3.3), TF = T_RAIL + 4.8;                            // rails charge, the round leaves the muzzle
+const T_LD = 29.0, XH = 1.8, LD = t => T_LD + t + (t > 1.6 ? XH : 0), T_XP = T_LD + 1.6;
+const T_RAIL = LD(4.0), TF = T_RAIL + 4.8;                            // rails charge, the round leaves the muzzle
+/* the clock before the shot: x240 through the cryo stretch (the coils' top-off and energising take minutes) */
+const PREW = FILM.warp([{ t: 0, rate: 1 }, { t: T_CRYO - .2, rate: 1 }, { t: T_CRYO + .2, rate: 240 }, { t: T_CR1 - .2, rate: 240 }, { t: T_CR1 + .2, rate: 1 }, { t: DUR0, rate: 1 }]);
 /* ---------- inserted sequences ----------
    Self-contained stretches spliced into the take, each with its own camera, models and FX; the base timeline (old
    time T, 0..DUR0) holds while one plays, spinning machinery keeps turning (spin), the sea and the ship's motion run on
@@ -132,53 +143,74 @@ const T_REL = filmAt(-T_BORE);                                        // the bre
 const roundZ = T => { const tau = Math.max(0, simAt(T) + T_BORE); return P_.SEAT_Z + .5 * ACC * tau * tau; };   // its centre in the bore (B z)
 
 /* ---------- the mount's, the room's and the loader's state in film time ---------- */
-const AZ = PSI, EL = P_.EL_LOAD, HAT = 105 * DEG, COV = 125 * DEG, PET = 115 * DEG;
-const ROTW = FILM.warp([{ t: 0, rate: 0 }, { t: 15.6, rate: 0 }, { t: 19.4, rate: 1 }, { t: TF, rate: 1 }, { t: TF + 2.5, rate: .45 }, { t: 45, rate: 0 }, { t: DUR0, rate: 0 }]);
-const ROTX = FILM.warp([{ t: 0, rate: 0 }, { t: 18.5, rate: 0 }, { t: 20.6, rate: 1 }, { t: TF, rate: 1 }, { t: TF + 2.5, rate: .45 }, { t: 45, rate: 0 }, { t: DUR0, rate: 0 }]);
-const PUMPW = FILM.warp([{ t: 0, rate: 0 }, { t: 14.6, rate: 0 }, { t: 16.0, rate: 1 }, { t: TF + 3, rate: 1 }, { t: 46, rate: 0 }, { t: DUR0, rate: 0 }]);
-const FANW = FILM.warp([{ t: 0, rate: 0 }, { t: 14.9, rate: 0 }, { t: 16.6, rate: 1 }, { t: TF + 3, rate: 1 }, { t: 46, rate: 0 }, { t: DUR0, rate: 0 }]);
-const RPM = 9600, VIS_REV = 2.4;
+const AZ = PSI, EL = P_.EL_LOAD, PET = 115 * DEG, NST = P_.NST, NCELL = P_.NCELL;
+P_.MAG_CELL.p = [Math.sin(AZ) * P_.HZ, P_.RND_Y0, P_.GZ + Math.cos(AZ) * P_.HZ];        // (the cell under the hoist at the firing train)
+const SX = t => t + SH;                                               // the stow's times (late in the take)
+const HPUW = FILM.warp([{ t: 0, rate: 0 }, { t: T_HPU, rate: 0 }, { t: T_HPU + .7, rate: 1 }, { t: SX(56.6), rate: 1 }, { t: SX(57.2), rate: 0 }, { t: DUR0, rate: 0 }]);
+const ROTW = FILM.warp([{ t: 0, rate: 0 }, { t: 19.8, rate: 0 }, { t: 23.6, rate: 1 }, { t: TF, rate: 1 }, { t: TF + 2.5, rate: .45 }, { t: TF + 11, rate: 0 }, { t: DUR0, rate: 0 }]);
+const ROTX = FILM.warp([{ t: 0, rate: 0 }, { t: 22.5, rate: 0 }, { t: 24.6, rate: 1 }, { t: TF, rate: 1 }, { t: TF + 2.5, rate: .45 }, { t: TF + 11, rate: 0 }, { t: DUR0, rate: 0 }]);
+const PUMPW = FILM.warp([{ t: 0, rate: 0 }, { t: 17.2, rate: 0 }, { t: 18.4, rate: 1 }, { t: TF + 3, rate: 1 }, { t: TF + 12, rate: 0 }, { t: DUR0, rate: 0 }]);
+const FANW = FILM.warp([{ t: 0, rate: 0 }, { t: 17.4, rate: 0 }, { t: 19.0, rate: 1 }, { t: TF + 3, rate: 1 }, { t: TF + 12, rate: 0 }, { t: DUR0, rate: 0 }]);
+const RPM = 9600, VIS_REV = 2.4, PUMP_RPM = 2950;
 const NMOD = P_.MOD.length;
 const modT = k => T_BANK + .3 + (T_BANK1 - T_BANK - .3) * k / NMOD;
 const modLvl = (k, T) => E.ss(modT(k), modT(k) + .3, T) * (1 - E.ss(TF, TF + .12, T));
 const brkT = r => modT(r * 20) - .3;
 const nCharged = T => { let n = 0; for (let k = 0; k < NMOD; k++) if (modLvl(k, T) > .98) n++; return n; };
-const clampT = k => LD(2.6) + k * .055;
-const ST = { xp: 0, hatch: 0, petal: 0, yaw: 0, el: 0, ext: 0, covS: 0, covP: 0, rec: 0, rot: 0, rate: 0, rotX: 0, rateX: 0, chg: 0, glow: 0,
-  rod: 0, bell: 0, rtr: 0, pump: 0, pumpR: 0, fan: 0, fanR: 0, drum: 0, hoistY: 0, rnd: 0, tray: 0, brc: 0, ram: 0, gh: 0, jaw: new Float64Array(P_.BANDS.length), valve: 0 };
-const HOIST_B = P_.RND_Y0 - P_.GY;                                    // the round's centre in the drum (T y)
+const clampT = k => LD(3.3) + k * .05;
+const T_DRUM = T_LD - .9;                                             // the drum indexes the empty cell under the hoist
+const ST = { xp: 0, petal: 0, yaw: 0, el: 0, ext: 0, rec: 0, rot: 0, rate: 0, rotX: 0, rateX: 0, chg: 0, glow: 0,
+  hpu: 0, hpuR: 0, acc: 0, ghS: 0, gh: 0, cryo: 0, cool: 0, frost: 0, field: 0, coil: new Float64Array(NST), eoY: 0, eoP: 0, fcY: 0, fcScan: 0, trv: 0, elv: 0,
+  rod: 0, bell: 0, rtr: 0, pump: 0, pumpR: 0, fan: 0, fanR: 0, drum: 0, hoistY: 0, rnd: 0, tray: 0, brc: 0, ram: 0, ramH: 0, jaw: new Float64Array(P_.BANDS.length), valve: 0 };
+const HOIST_B = P_.HY0;                                               // the round's centre in the drum (T y)
+const yawAt = T => AZ * kk(T, T_TR, T_TR1) * (1 - kk(T, SX(51.4), SX(54.2)));
+const elAt = T => EL * kk(T, T_EL, T_EL1) * (1 - kk(T, SX(51.2), SX(53.9)));
 function stateAt(T) {
   const s = ST;
-  s.hatch = kk(T, 4.3, 5.5) * (1 - kk(T, 55.2 + SH + .3, 56.5 + SH + .3));
-  s.petal = kk(T, 5.0, 5.9) * (1 - kk(T, 54.3 + SH + .3, 55.2 + SH + .3));
-  s.yaw = AZ * kk(T, 5.8, 9.0) * (1 - kk(T, 51.4 + SH, 54.2 + SH));
-  s.el = EL * kk(T, 6.6, 9.4) * (1 - kk(T, 51.2 + SH, 53.9 + SH));
-  s.ext = P_.EXT * kk(T, 9.4, 10.9) * (1 - kk(T, 49.8 + SH, 51.2 + SH));
-  s.covS = kk(T, 10.8, 11.9) * (1 - kk(T, 48.4 + SH, 49.4 + SH));
-  s.covP = kk(T, 11.1, 12.2) * (1 - kk(T, 48.7 + SH, 49.7 + SH));
+  // the hydraulic power unit starts, the accumulators charge; the starboard cheek ghosted to show them
+  s.hpu = spin(HPUW, T) * 6 * TAU; s.hpuR = HPUW.rate(T);
+  s.acc = E.ss(T_HPU + .2, T_HPU + 1.4, T) * (1 - E.ss(SX(56.8), SX(57.4), T));
+  s.ghS = kk(T, T_HPU + .1, T_HPU + .6) * (1 - kk(T, T_CRYO - .4, T_CRYO + .1));
+  // the cryocoolers top the coils down to 20 K (frost on the cold heads and the helium lines), the coils energise
+  s.cryo = E.ss(T_CRYO - .2, T_CRYO + .3, T) * (1 - E.ss(SX(56.8), SX(57.4), T));
+  s.cool = kk(T, T_CRYO + .2, T_EN) * (1 - kk(T, TF + 6, TF + 12));
+  s.frost = .3 + .7 * kk(T, T_CRYO + .2, T_EN + .2) * (1 - kk(T, TF + 6, TF + 12));
+  let f = 0;
+  for (let k = 0; k < NST; k++) { const v = kk(T, enT(k), enT(k) + .5) * (1 - kk(T, SX(48.4) + .06 * k, SX(49.0) + .06 * k)); s.coil[k] = v; f += v; }
+  s.field = f / NST;
+  // the muzzle cover, the sensors acquire, train and elevation
+  s.petal = kk(T, 10.7, 11.4) * (1 - kk(T, SX(54.3), SX(55.2)));
+  s.yaw = yawAt(T); s.el = elAt(T);
+  s.trv = Math.abs(yawAt(T + .03) - s.yaw) > 1e-4 ? 1 : 0; s.elv = Math.abs(elAt(T + .03) - s.el) > 1e-4 ? 1 : 0;
+  const acq = kk(T, 10.8, 12.0) * (1 - kk(T, SX(50.6), SX(51.6)));
+  s.eoY = acq * (AZ - s.yaw); s.eoP = -18 * DEG * (1 - acq) + .4 * DEG * acq;
+  s.fcScan = kk(T, 10.9, 11.3) * (1 - kk(T, 12.2, 12.6));
+  s.fcY = kk(T, 10.9, 11.6) * (1 - kk(T, SX(50.6), SX(51.6))) * (AZ - s.yaw) + s.fcScan * 24 * DEG * Math.sin((T - 10.9) * 3.4);
   // one alternator opens on its guide rods: rods out, exciter end bell off, the rotor drawn, and back
-  s.rod = kk(T, 14.7, 15.2) * (1 - kk(T, 18.0, 18.4));
-  s.bell = 1.2 * kk(T, 15.1, 15.9) * (1 - kk(T, 17.4, 18.1));
-  s.rtr = .95 * kk(T, 15.7, 16.5) * (1 - kk(T, 16.9, 17.6));
+  s.rod = kk(T, 18.9, 19.4) * (1 - kk(T, 22.2, 22.6));
+  s.bell = 1.2 * kk(T, 19.3, 20.1) * (1 - kk(T, 21.6, 22.3));
+  s.rtr = .95 * kk(T, 19.9, 20.7) * (1 - kk(T, 21.1, 21.8));
   const a = T - TF, ar = T > TF - 1.6 ? simAt(T) + T_BORE : -1;      // sim s since the round was released
   s.rec = ar > 0 && ar < 1.6 ? .55 * (ar < .015 ? ar / .015 : Math.exp(-(ar - .015) * 4.2)) : 0;
   s.rot = spin(ROTW, T) * VIS_REV * TAU; s.rate = ROTW.rate(T);
   s.rotX = spin(ROTX, T) * VIS_REV * TAU; s.rateX = ROTX.rate(T);
-  s.pump = spin(PUMPW, T) * 4 * TAU; s.pumpR = PUMPW.rate(T);
+  s.pump = spin(PUMPW, T) * 3 * TAU; s.pumpR = PUMPW.rate(T);
   s.fan = spin(FANW, T) * 3 * TAU; s.fanR = FANW.rate(T);
-  s.valve = kk(T, 13.9, 15.2) * 1.5 * TAU;
+  s.valve = kk(T, 16.2, 17.3) * 1.5 * TAU;
   s.chg = E.ss(T_RAIL, T_REL - .3, T) * (1 - E.ss(T_REL - .02, T_REL + .25, T));
   s.glow = a > 0 ? Math.exp(-a * 1.2) : 0;
-  // the loader
-  s.drum = kk(T, T_LD, T_LD + .5);                                      // one cell (30°)
-  s.gh = kk(T, 20.4, 21.2) * (1 - kk(T, LD(3.1), LD(4.1)));           // the gunhouse ghosted
-  s.tray = (90 * DEG - EL) * (kk(T, LD(.1), LD(.6)) * (1 - kk(T, LD(1.4), LD(1.85))));
-  const up = kk(T, LD(.45), LD(1.35)), down = kk(T, LD(1.45), LD(2.3));
+  // the loader: the drum brings the empty cell under the hoist (the magazine fills it), the hoist lifts the round to
+  // the tray, the breech block drops, the tray swings into line, the rammer seats it, all back, the clamps lock
+  s.drum = kk(T, T_DRUM, T_DRUM + .5) * (1 - kk(T, TF + 8, TF + 9));
+  s.gh = kk(T, T_LD - .5, T_LD) * (1 - kk(T, LD(3.5), LD(4.1)));
+  s.tray = (90 * DEG - EL) * (kk(T, LD(.1), LD(.5)) * (1 - kk(T, LD(1.7), LD(2.15))) + kk(T, LD(3.0), LD(3.35)) * (1 - kk(T, TF + 8, TF + 9)));
+  const up = kk(T, LD(.3), LD(1.5)), down = kk(T, LD(2.7), LD(3.6));
   s.hoistY = HOIST_B + (P_.HY1 - HOIST_B) * up * (1 - down);
-  s.rnd = T < LD(.45) ? 0 : T < LD(1.35) ? 1 : T < T_REL ? 2 : 3;            // in the drum, on the hoist, in the tray / breech, fired
-  s.ram = kk(T, LD(1.85), LD(2.2));
+  s.rnd = T < T_LD ? 3 : T < LD(.3) ? 0 : T < LD(1.5) ? 1 : T < T_REL ? 2 : 3;   // (none) in the drum, on the hoist, in the tray / bore, fired
+  s.ram = kk(T, LD(2.2), LD(2.65)) * (1 - kk(T, TF + 8, TF + 9));
+  s.ramH = s.ram * (1 - kk(T, LD(2.65), LD(3.0)));
   s.xp = kk(T, T_XP + .15, T_XP + .75) * (1 - kk(T, T_XP + XH - .6, T_XP + XH - .05));     // the round's exploded view
-  s.brc = kk(T, LD(.8), LD(1.2)) * (1 - kk(T, LD(2.25), LD(2.6)));
+  s.brc = kk(T, LD(1.6), LD(1.95)) * (1 - kk(T, LD(3.0), LD(3.3)));
   const un = kk(T, LD(.5), LD(.75));
   for (let k = 0; k < s.jaw.length; k++) s.jaw[k] = un * (1 - kk(T, clampT(k), clampT(k) + .12));
   return s;
@@ -189,8 +221,8 @@ const BOX0 = XS.box.slice();
 function xrayAt(T) {
   for (let i = 0; i < 6; i++) XS.box[i] = BOX0[i];
   XS.ko = 1; XS.ks = 1;
-  if (T < 12.8 || T > XSH + 1.2) { XS.zo = 99; XS.zs = 99; return false; }
-  XS.zo = 57.6 - 17.2 * kk(T, 12.8, 14.5); XS.ko = 1 - E.ss(14.3, 15.2, T);
+  if (T < T_X || T > XSH + 1.2) { XS.zo = 99; XS.zs = 99; return false; }
+  XS.zo = 57.6 - 17.2 * kk(T, T_X, T_X + 1.7); XS.ko = 1 - E.ss(T_X + 1.5, T_X + 2.4, T);
   XS.zs = T < XSH ? 99 : 57.6 - 17.2 * kk(T, XSH, XSH + 1.2); XS.ks = 1 - E.ss(XSH + 1, XSH + 1.2, T);
   return true;
 }
@@ -199,28 +231,30 @@ const allOpen = (z0, z1) => XS.zo < 90 && XS.zo < z0 && XS.zs > z1;
 
 /* ---------- transforms ---------- */
 const tr = (x, y, z) => X.make(R.I(), [x, y, z]);
-const pivZ = (a, h) => { const Rm = R.z(a), rh = R.ap(Rm, h); return X.make(Rm, [h[0] - rh[0], h[1] - rh[1], h[2] - rh[2]]); };
 const pivX = (a, h) => { const Rm = R.x(a), rh = R.ap(Rm, h); return X.make(Rm, [h[0] - rh[0], h[1] - rh[1], h[2] - rh[2]]); };
 const M_S = tr(P_.M0[0], P_.M0[1], P_.M0[2]);                                 // M -> ship
 const MOD_L = P_.MOD.map(m => X.make(m.s > 0 ? R.I() : R.y(PI), m.p));         // module -> ship
 const ALT_L = P_.ALT.map((c, k) => X.make(P_.ALT_FLIP[k] ? R.y(PI) : R.I(), c));
+const PUMP_L = P_.PUMPS.map(p => tr(p[0], p[1], p[2]));                        // pump -> ship
+const PCOIL_R = Array.from({ length: P_.PST }, (_, k) => X.make(R.z(k / P_.PST * TAU), [0, 0, 0]));   // stator coil k
+const STL = P_.STN.map(z => tr(0, 0, z));                                     // coil station -> B
 const ROT_UP = R.x(-PI / 2);                                                  // a round standing up
 const XR = {}, XF = {};
 function mountXf(Ws, st) {
   XF.W = Ws;
   XR.M = M_S;
   XR.T = X.mul(XR.M, X.make(R.y(st.yaw), [0, 0, 0]));
-  XR.B = X.mul(XR.T, X.make(R.x(-st.el), P_.TRN));
-  if (st.rec) XR.B = X.mul(XR.B, tr(0, 0, -st.rec));
-  XR.E = X.mul(XR.B, tr(0, 0, st.ext));
-  XR.tray = X.mul(XR.B, X.make(R.x(-st.tray), [0, 0, P_.TRAY_Z]));
-  for (const k of ['M', 'T', 'B', 'E', 'tray']) XF[k] = X.mul(Ws, XR[k]);
-  XF.covS = X.mul(XF.B, pivZ(COV * st.covS, P_.COVER_HINGE(1)));
-  XF.covP = X.mul(XF.B, pivZ(-COV * st.covP, P_.COVER_HINGE(-1)));
-  XF.petT = X.mul(XF.E, pivX(-PET * st.petal, P_.PETAL_HINGE(1)));
-  XF.petB = X.mul(XF.E, pivX(PET * st.petal, P_.PETAL_HINGE(-1)));
-  XF.hatS = X.mul(XF.M, pivZ(-HAT * st.hatch, P_.HATCH_HINGE(1)));
-  XF.hatP = X.mul(XF.M, pivZ(HAT * st.hatch, P_.HATCH_HINGE(-1)));
+  XR.C = X.mul(XR.T, X.make(R.x(-st.el), P_.TRN));
+  XR.B = st.rec ? X.mul(XR.C, tr(0, 0, -st.rec)) : XR.C;
+  XR.E = XR.B;
+  XR.tray = X.mul(XR.C, X.make(R.x(-st.tray), [0, 0, P_.TRAY_Z]));
+  XR.eoY = X.mul(XR.T, X.make(R.y(st.eoY), [P_.EO_P[0], P_.EO_P[1] + .34, P_.EO_P[2]]));
+  XR.eoP = X.mul(XR.eoY, X.make(R.x(-st.eoP), [0, P_.EO_H - .34, 0]));
+  XR.fcY = X.mul(XR.T, X.make(R.y(st.fcY), [P_.FC_P[0], P_.FC_P[1] + P_.FC_H, P_.FC_P[2]]));
+  for (const k of ['M', 'T', 'C', 'B', 'tray', 'eoY', 'eoP', 'fcY']) XF[k] = X.mul(Ws, XR[k]);
+  XF.E = XF.B; XF.P0 = X.mul(Ws, PUMP_L[0]);
+  XF.petT = X.mul(XF.B, pivX(-PET * st.petal, P_.PETAL_HINGE(1)));
+  XF.petB = X.mul(XF.B, pivX(PET * st.petal, P_.PETAL_HINGE(-1)));
   // the opened alternator's moving parts (A frame)
   const LA = ALT_L[P_.XALT];
   XR.xexc = X.mul(LA, tr(0, 0, st.bell)); XR.xrot = X.mul(LA, tr(0, 0, st.rtr));
@@ -259,12 +293,11 @@ const climbRate = T => T <= TF - 1.6 || T >= TBU ? 1 : simRate(T);
 const probeAt = (s, out) => bez(uOfD(dOfS(s)), out);
 const bezT = (u, out) => { for (let k = 0; k < 3; k++) out[k] = 2 * (1 - u) * (B_C[k] - MZ0[k]) + 2 * u * (B_TOP[k] - B_C[k]); const l = Math.hypot(out[0], out[1], out[2]); out[0] /= l; out[1] /= l; out[2] /= l; return out; };
 const CHAPTERS = [
-  { t: 0, title: 'Station' }, { t: 4, title: 'Mount' }, { t: 12.6, title: 'Power' }, { t: T_LD, title: 'Load' }, { t: T_RAIL, title: 'Charge' },
+  { t: 0, title: 'Station' }, { t: 4, title: 'Mount' }, { t: T_CRYO, title: 'Cryo' }, { t: T_CR1, title: 'Lay' }, { t: T_X, title: 'Power' }, { t: T_LD, title: 'Load' }, { t: T_RAIL, title: 'Charge' },
   { t: T_REL - .3, title: 'Fire' }, { t: TF + 2.4, title: 'Flight' }, { t: TBU - .2, title: 'Strike' }, { t: TB + .4, title: 'Scan' }, { t: TRET0, title: 'Return' }, { t: 48.4 + SH - .6, title: 'Stow' },
 ];
 /* the sabot: three petals round the round; at the muzzle they peel off, slow in the air and fall away */
 const BOLT = new K.Bolt({ top: B_TOP, hit: S_HIT, seed: 1402, depth: 9, nb: 14, rough: .55, spark: 26 });
-const VAPOR = (() => { const r = rng(818), A = new Float32Array(90 * 5); for (let i = 0; i < 90; i++) { A[i * 5] = (r() - .5) * 1.1; A[i * 5 + 1] = (r() - .5) * 2.2; A[i * 5 + 2] = r(); A[i * 5 + 3] = .4 + .6 * r(); A[i * 5 + 4] = r() * TAU; } return A; })();
 const SWIRL = (() => { const r = rng(919), A = new Float32Array(200 * 4); for (let i = 0; i < 200; i++) { A[i * 4] = r() * TAU; A[i * 4 + 1] = r(); A[i * 4 + 2] = (r() - .5); A[i * 4 + 3] = .6 + .8 * r(); } return A; })();
 const P3 = [0, 0, 0];
 
@@ -289,34 +322,44 @@ function camBore(T) {
   return { eye: V.add(RW, EOFF), target: V.mad(RW, DIR0, 1.8), fov: 46 * DEG };
 }
 
-/* before the shot: close, held shots where each mechanism works (the lens drifts, it does not cut) */
+/* before the shot: slow drifts close on each mechanism at work, opening out for the reveals (the lens never cuts) */
 const PATH_A = FILM.path([
   { t: -8, eye: [150, 55, 190], target: [0, 9, 26], fov: 32 },
   { t: -4, eye: [64, 22, 110], target: [0, 10, 44], fov: 32 },
   { t: 0, eye: [36, 14.5, 84], target: [0, 10, 48], fov: 32 },
   { t: 3.4, eye: [21, 11.2, 65], target: [1.5, 8.6, 49], fov: 34 },
-  { t: 5.6, eye: [15, 10.2, 57.5], target: [2.6, 8.4, 49], fov: 38 },
-  { t: 8.2, eye: [15.5, 12, 60.5], target: [1, 10, 50.5], fov: 40 },
-  { t: 10.4, eye: [16.5, 14, 63.5], target: [1.4, 12.4, 52.4], fov: 42 },
-  { t: 12.3, eye: [17.5, 12.8, 58.5], target: [1, 9.6, 51], fov: 42 },
-  { t: 14.1, eye: [20, 11.5, 55], target: [.5, 4.8, 47.5], fov: 40 },
-  { t: 15.7, eye: [8.6, 6.0, 49.2], target: [2.2, 2.7, 46.3], fov: 40 },
-  { t: 17.5, eye: [8.9, 6.4, 48.2], target: [2.1, 2.7, 46.0], fov: 40 },
-  { t: 19.5, eye: [12.8, 10.2, 40.8], target: [0, 3, 45], fov: 40 },
-  { t: 20.3, eye: [5.4, 7.0, 46.6], target: [.3, 3.4, 52.6], fov: 42 },
-  { t: 20.9, eye: [2.3, 6.8, 48.6], target: [0, 3.2, 54.5], fov: 43 },
-  { t: 21.6, eye: [.95, 4.7, 50.4], target: [0, 3.0, 55.4], fov: 44 },
-  { t: 22.4, eye: [.7, 4.5, 51.0], target: [0, 2.9, 55.4], fov: 44 },
-  { t: 23.7, eye: [2.5, 6.9, 49.6], target: [-.2, 2.6, 48.0], fov: 42 },
-  { t: LD(.4), eye: [3.2, 5.0, 45.4], target: [-.3, 2.6, 48.1], fov: 42 },
-  { t: LD(1.0), eye: [2.9, 5.6, 45.6], target: [-.35, 5.2, 47.8], fov: 42 },
-  { t: T_XP + .5, eye: [2.5, 8.3, 45.9], target: [-.43, 7.72, 47.77], fov: 40 },
-  { t: T_XP + XH - .4, eye: [2.1, 8.9, 46.2], target: [-.43, 7.8, 47.77], fov: 40 },
-  { t: LD(1.8), eye: [3.0, 6.9, 45.4], target: [-.3, 7.3, 47.8], fov: 42 },
-  { t: LD(2.8), eye: [7.5, 10.8, 45.4], target: [.3, 9.0, 49.0], fov: 40 },
-  { t: T_RAIL + .9, eye: [8.4, 11.2, 47.0], target: [.8, 10.2, 49.5], fov: 42 },
-  { t: T_RAIL + 2.0, eye: [8.8, 13.2, 49.2], target: [1.8, 13.0, 51.9], fov: 42 },
-  { t: T_RAIL + 3.1, eye: [9.6, 15.2, 51.6], target: [2.6, 15.6, 53.9], fov: 42 },
+  { t: 4.0, eye: [19.6, 11, 63], target: [1.9, 8.5, 49], fov: 33 },               // (the engine rooms hand back here)
+  { t: 4.9, eye: [5.8, 12.6, 43.2], target: [1.9, 8.6, 45.6], fov: 40 },          // the hydraulic power unit
+  { t: 5.9, eye: [5.6, 12.2, 44.8], target: [1.8, 8.6, 46.3], fov: 40 },          // the accumulators, the manifold
+  { t: 6.8, eye: [4.4, 11.3, 54.4], target: [.4, 10.3, 53.6], fov: 40 },          // the cryocoolers in profile
+  { t: 7.9, eye: [2.5, 11.35, 53.7], target: [.45, 10.62, 53.25], fov: 34 },        // the cold heads frosting
+  { t: 8.9, eye: [3.4, 12.3, 48.4], target: [.2, 10.0, 51.2], fov: 44 },          // the coils energise
+  { t: 10.3, eye: [3.8, 12.5, 55.6], target: [0, 9.9, 58.6], fov: 46 },           // ... on to the muzzle
+  { t: 11.2, eye: [3.4, 12.6, 58.0], target: [.2, 10.1, 60.0], fov: 44 },         // the cover opens
+  { t: 12.3, eye: [1.4, 13.0, 51.8], target: [-1.2, 11.3, 47.8], fov: 44 },       // the director acquires and locks
+  { t: 13.2, eye: [4.6, 13.4, 50.2], target: [1.2, 11.6, 46.0], fov: 46 },        // the radar locks; it trains
+  { t: 14.8, eye: [13.5, 10.6, 59.0], target: [1.4, 14.4, 51.8], fov: 54 },        // laid: the whole mount, from the deck
+  { t: 16.2, eye: [7.0, 7.6, 37.6], target: [.6, 2.6, 42.0], fov: 44 },           // down into the power room
+  { t: 17.4, eye: [.1, 3.4, 40.9], target: [.62, 1.8, 41.45], fov: 44 },          // a coolant pump starts: its motor
+  { t: 18.6, eye: [.15, 3.2, 41.9], target: [.62, 1.8, 41.9], fov: 44 },          // ... the coupling, the pump
+  { t: 19.4, eye: [8.6, 6.0, 49.2], target: [2.2, 2.7, 46.3], fov: 40 },          // the alternator opens
+  { t: 21.6, eye: [8.9, 6.4, 48.2], target: [2.1, 2.7, 46.0], fov: 40 },
+  { t: 23.2, eye: [12.8, 10.2, 40.8], target: [0, 3, 45], fov: 40 },              // spin-up
+  { t: 24.2, eye: [5.4, 7.0, 46.6], target: [.3, 3.4, 52.6], fov: 42 },           // the racks charge
+  { t: 24.9, eye: [2.3, 6.8, 48.6], target: [0, 3.2, 54.5], fov: 43 },
+  { t: 25.8, eye: [.95, 4.7, 50.4], target: [0, 3.0, 55.4], fov: 44 },
+  { t: 27.0, eye: [.7, 4.5, 51.0], target: [0, 2.9, 55.4], fov: 44 },
+  { t: 28.2, eye: [.9, 3.9, 51.7], target: [-.3, 2.4, 48.3], fov: 46 },           // the drum indexes
+  { t: T_LD, eye: [1.4, 5.6, 51.4], target: [-.45, 3.2, 47.6], fov: 44 },
+  { t: LD(1.0), eye: [2.4, 6.7, 50.6], target: [-.45, 5.6, 47.6], fov: 44 },       // up the hoist
+  { t: T_XP + .5, eye: [2.6, 7.4, 45.9], target: [-.45, 7.15, 47.6], fov: 42 },   // the round's exploded view
+  { t: T_XP + XH - .4, eye: [2.4, 7.6, 46.2], target: [-.45, 7.2, 47.6], fov: 42 },
+  { t: LD(2.0), eye: [3.7, 8.7, 46.6], target: [-.13, 8.08, 48.32], fov: 44 },    // the tray swings, the rammer
+  { t: LD(3.0), eye: [5.2, 9.6, 45.6], target: [.2, 8.6, 48.8], fov: 42 },
+  { t: LD(3.6), eye: [7.5, 11.5, 46.4], target: [.8, 10.2, 49.6], fov: 40 },       // the clamps
+  { t: T_RAIL + .9, eye: [8.4, 11.8, 46.8], target: [1.0, 10.8, 50.0], fov: 42 },  // the rails charge
+  { t: T_RAIL + 2.2, eye: [9.6, 14.2, 49.6], target: [2.0, 13.6, 52.6], fov: 42 },
+  { t: T_RAIL + 3.4, eye: [10.4, 16.5, 52.4], target: [2.9, 16.4, 54.9], fov: 42 },
 ]);
 const A_END = PATH_A(TF);
 const PB = [0, 0, 0], EB = [0, 0, 0], TG = [0, 0, 0];
@@ -437,7 +480,7 @@ function camAt(T) {
 }
 function camBase(T) {
   if (DBGCAM) return { eye: DBGCAM.slice(0, 3), target: DBGCAM.slice(3, 6), fov: (DBGCAM[6] || 40) * DEG };
-  if (T < T_REL - .7) { const s = PATH_A(T), d = FILM.drift(T, .05 * E.ss(12, 14, T) * (1 - E.ss(27, 29, T)), 3); s.eye = V.add(s.eye, d); return s; }
+  if (T < T_REL - .7) { const s = PATH_A(T), d = FILM.drift(T, .05 * E.ss(T_X, T_X + 2, T) * (1 - E.ss(T_LD - 2, T_LD, T)), 3); s.eye = V.add(s.eye, d); return s; }
   if (T < T_REL + .1) return K.blendShot(PATH_A(T), camBore(T), E.ss(T_REL - .7, T_REL + .1, T));
   if (T < TF) return camBore(T);
   if (T < TF + .9) return camF1(T);
@@ -453,28 +496,32 @@ function camBase(T) {
 }
 
 /* ---------- focus: in each beat the parts at work are drawn full, the rest sparse and dim ---------- */
-const PH = [0, 14.3, 18.5, 19.9, T_LD - .1, T_RAIL - .3], PW = new Float64Array(6);
-const FKEEP = {                 // pre, explode, spin, racks, loader, charge
-  alt: [.7, .4, 1, .4, .25, .3], altX: [.7, 1, 1, .4, .25, .3], rack: [.7, .35, .5, 1, .22, .45], cab: [.7, .35, .45, 1, .25, .4],
-  bus: [.7, .4, .6, 1, .3, 1], cool: [.7, .8, .5, .35, .3, .3], over: [.5, .35, .35, .35, .3, .3], floor: [.5, .45, .45, .45, .35, .35],
-  base: [.7, .45, .45, .5, 1, 1], load: [.7, .4, .4, .5, 1, .6], ex: [1, .4, .4, .4, .25, .5], ring: [.7, .4, .4, .4, .2, .5], above: [1, 1, 1, .6, .3, 1],
+const PH = [0, 16.9, 18.8, 22.6, 24.2, 27.7, T_LD - .1, T_RAIL - .3], NPH = PH.length, PW = new Float64Array(NPH);
+const FKEEP = {                 // pre, pumps, explode, spin, racks, drum, loader, charge
+  alt: [.7, .35, .4, 1, .4, .25, .25, .3], altX: [.7, .35, 1, 1, .4, .25, .25, .3], rack: [.7, .3, .35, .35, 1, .3, .22, .45], cab: [.7, .3, .35, .3, 1, .25, .25, .4],
+  bus: [.7, .35, .4, .45, 1, .35, .3, 1], cool: [.7, 1, .5, .35, .35, .3, .3, .3], pump: [.75, 1, .45, .3, .3, .25, .25, .3], over: [.5, .35, .35, .25, .35, .3, .3, .3],
+  floor: [.5, .45, .45, .3, .45, .35, .35, .35], base: [.7, .45, .45, .35, .5, .8, 1, 1], load: [.7, .4, .4, .3, .5, 1, 1, .6], ring: [.7, .4, .4, .3, .4, .2, .2, .5],
+  above: [1, .8, 1, 1, .6, .3, .3, 1],
 };
 const FK = {};
 function focusAt(T) {
-  for (let i = 0; i < 6; i++) { const a = i ? E.ss(PH[i] - .35, PH[i] + .35, T) : 1, b = i < 5 ? E.ss(PH[i + 1] - .35, PH[i + 1] + .35, T) : 0; PW[i] = a * (1 - b); }
-  for (const g in FKEEP) { let v = 0; for (let i = 0; i < 6; i++) v += PW[i] * FKEEP[g][i]; FK[g] = v; }
+  for (let i = 0; i < NPH; i++) { const a = i ? E.ss(PH[i] - .35, PH[i] + .35, T) : 1, b = i < NPH - 1 ? E.ss(PH[i + 1] - .35, PH[i + 1] + .35, T) : 0; PW[i] = a * (1 - b); }
+  const solo = 1 - .72 * ST.xp;                                        // the round's exploded view: all else recedes
+  for (const g in FKEEP) { let v = 0; for (let i = 0; i < NPH; i++) v += PW[i] * FKEEP[g][i]; FK[g] = v * solo; }
   return FK;
 }
 
 /* ---------- drawing: ship, mount, loader, room ---------- */
 const SO = { a: .7, fade: 600, size: .5, md: 1, cut: null, px: 5.6, edge: .4, lmin: 1, px0: 18 };
-const SOP = { a: .7, fade: 600, size: .55, md: 1, px: 8, edge: .55, keep: .65 };
-const MO = { a: 1.25, fade: 260, lime: 0, md: 0, size: .8, keep: 1, px: 4.7, edge: .68, S: null, zfix: undefined, bk: .12, foc: 0 };
+const SOP = { a: .7, fade: 600, size: .55, md: 1, px: 10, edge: .55, keep: .65 };
+const MO = { a: 1.3, fade: 260, lime: 0, md: 0, size: .8, keep: 1, px: 6.4, edge: .74, S: null, zfix: undefined, bk: .12, foc: 0, amb: .06 };
 /* inside the X-ray: lit brighter and fading slower than the ship round them, so the machinery reads through the hull */
-const RO = { a: 1.45, fade: 140, lime: 0, md: 3, S: null, size: .7, px: 4.8, edge: .78, zfix: undefined, bk: 0, foc: 0, amb: .2 };
+const RO = { a: 1.6, fade: 140, lime: 0, md: 3, S: null, size: .7, px: 5.8, edge: .86, zfix: undefined, bk: 0, foc: 0, amb: .26 };
+/* frost on the cold parts: two-sided white dots */
+const FO = { a: 1.9, fade: 200, lime: 0, md: 0, size: .6, keep: 1, px: 3.2, edge: 1, S: null, zfix: undefined, bk: 0, foc: 0 };
 /* dot density: the LOD keeps dots at most px apart on screen; DQ divides those spacings (?dq=1: the old density) */
-const PX0 = [SO, SOP, MO, RO].map(o => o.px);
-function density() { [SO, SOP, MO, RO].forEach((o, i) => { o.px = PX0[i] / K.DQ; }); SO.lmin = K.DQ > 1.3 ? 0 : 1; }
+const PX0 = [SO, SOP, MO, RO, FO].map(o => o.px);
+function density() { [SO, SOP, MO, RO, FO].forEach((o, i) => { o.px = PX0[i] / K.DQ; }); SO.lmin = K.DQ > 1.3 ? 0 : 1; }
 const lock = (T, t0) => { const a = T - t0; return a > 0 && a < .6 ? Math.exp(-a * 6) : 0; };
 function drawShip(Ws) {
   for (const p of SHIP) { SO.cut = p.name === 'hull' ? P_.CUT : null; P_.drawX(p.ml, Ws, SO); }
@@ -484,35 +531,61 @@ function drawShip(Ws) {
 function occluders(T, st, Ws) {
   P_.occReset();
   const hx = (C8, Tw) => P_.occHex(C8.map(p => X.ap(Tw, p)));
-  if (st.gh < .3) for (const c of P_.TUR_OCC) hx(c, XF.T);
-  hx(P_.BR_OCC, XF.B); hx(P_.BR_OCC.map(p => [p[0], -p[1], p[2]]), XF.B);
+  if (st.gh < .3) hx(P_.TUR_OCC[0], XF.T);
+  if (Math.max(st.gh, st.ghS) < .3) hx(P_.TUR_OCC[1], XF.T);
+  hx(P_.BR_OCC, XF.B);
   for (let r = 0; r < 4; r++) { const rk = P_.RACKS[r]; if (allOpen(rk.z0, rk.z1)) hx(P_.RACK_OCC[r], Ws); }
   if (allOpen(55.2, 56.3)) hx(P_.CAB_OCC, Ws);
 }
+/* a hydraulic ram between a base (frame Tb) and a pin (frame Tp): its cylinder fixed at the base, the rod out to
+   the pin (lattice clouds laid along the line between them each frame); lit while it moves */
+const RB = [0, 0, 0], RP = [0, 0, 0];
+function ramDraw(Tb, b, Tp, p, lit) {
+  apI(Tb, b[0], b[1], b[2], RB); apI(Tp, p[0], p[1], p[2], RP);
+  const Rm = R.look([RP[0] - RB[0], RP[1] - RB[1], RP[2] - RB[2]], X.dir(XF.T, [1, 0, 0]));
+  MO.lime = .45 * lit; P_.drawX(CL.ramCyl, X.make(Rm, RB.slice()), MO);
+  MO.lime = .75 * lit; P_.drawX(CL.ramRod, X.make(Rm, RP.slice()), MO); MO.lime = 0;
+}
 function drawMount(T, st) {
-  const X_ = P_.drawX, gl = st.glow;
-  MO.lime = 0; MO.a = 1.25; MO.md = 0; MO.S = null; MO.zfix = undefined; MO.keep = 1;
-  MO.keep = FK.above; MO.a = 1.25 * (.35 + .65 * FK.above); X_(CL.baseAbove, XF.M, MO); MO.keep = 1; MO.a = 1.25;
-  MO.lime = .6 * lock(T, 5.5) + .4 * lock(T, 56.8 + SH); X_(CL.hatchS, XF.hatS, MO); X_(CL.hatchP, XF.hatP, MO);
-  MO.lime = 0; X_(CL.coamS, XF.M, MO); X_(CL.coamP, XF.M, MO);
-  MO.md = 3; MO.S = M_S; MO.keep = FK.ex; MO.a = 1.25 * (.5 + .5 * FK.ex); X_(CL.exS, XF.M, MO); X_(CL.exP, XF.M, MO); MO.md = 0; MO.S = null; MO.keep = 1; MO.a = 1.25;
-  MO.lime = .55 * lock(T, 9.0) + .5 * lock(T, 9.4); MO.keep = 1 - .82 * st.gh; MO.a = 1.25 * (1 - .4 * st.gh);
-  X_(CL.turret, XF.T, MO); MO.keep = 1; MO.a = 1.25;
-  MO.lime = Math.max(.6 * lock(T, 9.4), .18 * st.chg, .5 * gl); X_(CL.rear, XF.B, MO);
-  MO.lime = Math.max(.7 * lock(T, 10.9), .35 * st.chg, .6 * gl); X_(CL.sleeve, XF.E, MO);
-  MO.lime = Math.max(.7 * lock(T, 11.9), .15 * st.chg); X_(CL.coverS, XF.covS, MO);
-  MO.lime = Math.max(.7 * lock(T, 12.2), .15 * st.chg); X_(CL.coverP, XF.covP, MO);
-  MO.lime = .7 * lock(T, 5.9); X_(CL.petalT, XF.petT, MO); X_(CL.petalB, XF.petB, MO);
-  // breech block and the clamp jaws
-  MO.lime = Math.max(.8 * lock(T, LD(1.2)), .8 * lock(T, LD(2.6)), .15 * st.chg); X_(CL.breech, X.mul(XF.B, tr(0, -1.35 * st.brc, 0)), MO);
+  const X_ = P_.drawX, gl = st.glow, ch = st.chg, gS = Math.max(st.ghS, st.gh), gP = st.gh;
+  MO.lime = 0; MO.a = 1.3; MO.md = 0; MO.S = null; MO.zfix = undefined; MO.keep = 1;
+  MO.keep = FK.above; MO.a = 1.3 * (.35 + .65 * FK.above); X_(CL.baseAbove, XF.M, MO); MO.keep = 1; MO.a = 1.3;
+  if (st.ghS > .02) { MO.keep = .45 * st.ghS; MO.a = .8; X_(CL.ring, XF.M, MO); MO.keep = 1; MO.a = 1.3; }
+  // the gunhouse: a cheek ghosts while the lens looks inside it
+  MO.keep = 1 - .86 * gS; MO.a = 1.3 * (1 - .4 * gS); X_(CL.cheekS, XF.T, MO);
+  MO.keep = 1 - .86 * gP; MO.a = 1.3 * (1 - .4 * gP); X_(CL.cheekP, XF.T, MO);
+  MO.keep = 1 - .5 * gS; MO.a = 1.3 * (1 - .3 * gS); X_(CL.gbody, XF.T, MO);
+  // inside: the hydraulic power unit lit as it comes up (the spotlight of the wake), the cryo compressors and cabinet
+  MO.keep = 1 - .6 * st.gh; MO.a = 1.5 + .4 * st.ghS; MO.lime = Math.max(.55 * lock(T, T_HPU), .35 * E.ss(T_HPU, T_HPU + .3, T) * (1 - E.ss(T_HPU + 1.4, T_HPU + 1.9, T)), .4 * st.trv * gS, .4 * st.elv * gS); X_(CL.ginH, XF.T, MO);
+  MO.keep = 1 - .6 * Math.max(st.gh, st.ghS); MO.a = 1.4; MO.lime = .3 * lock(T, T_CRYO); X_(CL.ginC, XF.T, MO); MO.lime = 0; MO.a = 1.3; MO.keep = 1;
+  // the train drives' pinions walk round the fixed ring gear
+  if (st.ghS > .02) for (let i = 0; i < 2; i++) { const p = P_.TD_P[i]; MO.lime = .6 * st.trv; X_(CL.tpin, X.mul(XF.T, X.make(R.y(-st.yaw * P_.RING_R / P_.PIN_R + i), [p[0], .13, p[2]])), MO); }
+  // the sensors: the director's yoke and head, the radar's head
+  MO.lime = 0; X_(CL.eoBase, XF.T, MO); X_(CL.eoYoke, XF.eoY, MO);
+  MO.lime = Math.max(.8 * lock(T, 12.0), .5 * lock(T, 14.9), .12 * E.ss(10.8, 11.2, T)); X_(CL.eoHead, XF.eoP, MO);
+  MO.lime = 0; X_(CL.fcBase, XF.T, MO); MO.lime = Math.max(.8 * lock(T, 12.6), .2 * st.fcScan); X_(CL.fcHead, XF.fcY, MO);
+  // the cradle and its rams
+  MO.lime = Math.max(.22 * st.elv, .6 * lock(T, T_EL1)); X_(CL.cradle, XF.C, MO);
+  for (const s of [-1, 1]) { const e = P_.RAM_E(s); ramDraw(XF.T, e[0], XF.C, e[1], st.elv); }
+  // the barrel: structure, rails, sidewalls; the coils light station by station as they energise
+  const rec = 1 - .55 * st.ghS - .3 * st.gh;                                          // (recedes behind the HPU's close-up)
+  MO.keep = rec; MO.lime = Math.max(.1 * ch, .35 * gl, .45 * lock(T, T_EL1)); X_(CL.barrel, XF.B, MO); MO.keep = 1;
+  if (ch > .01 || gl > .01 || (T > TS0 && T < TS1)) {                     // (inside the containment: seen only lit)
+    MO.lime = Math.min(1, .9 * ch + gl); MO.a = 1.3 + .5 * ch; X_(CL.rails, XF.B, MO); MO.lime = .45 * ch; X_(CL.ins, XF.B, MO); MO.a = 1.3;
+  }
+  for (let k = 0; k < NST; k++) {
+    const v = st.coil[k]; MO.lime = Math.min(1, .5 * v + .5 * lock(T, enT(k) + .45) + .3 * ch * v); MO.a = 1.35 + .35 * v;
+    X_(CL.coil, X.mul(XF.B, STL[k]), MO);
+  }
+  MO.a = 1.3; MO.lime = .32 * st.cryo * (1 - .6 * st.field); X_(CL.cryo, XF.B, MO); MO.lime = 0;
   for (let k = 0; k < P_.BANDS.length; k++) {
-    const z = P_.BANDS[k], o = .07 * st.jaw[k];
-    MO.lime = Math.max(.9 * lock(T, clampT(k) + .12), .25 * st.chg, .4 * gl);
+    const z = P_.BANDS[k], o = .05 * st.jaw[k];
+    MO.lime = Math.max(.9 * lock(T, clampT(k) + .12), .25 * ch, .4 * gl);
     X_(CL.jawS, X.mul(XF.B, tr(o, 0, z)), MO); X_(CL.jawP, X.mul(XF.B, tr(-o, 0, z)), MO);
   }
-  MO.lime = Math.min(1, .9 * st.chg + gl); MO.a = 1.25 + .5 * st.chg;
-  X_(CL.railsR, XF.B, MO); X_(CL.railsE, XF.E, MO);
-  MO.lime = 0; MO.a = 1.25;
+  MO.lime = Math.max(.8 * lock(T, LD(1.95)), .8 * lock(T, LD(3.3)), .15 * ch); X_(CL.breech, X.mul(XF.B, tr(0, -.86 * st.brc, 0)), MO);
+  MO.lime = .7 * lock(T, 11.4); X_(CL.petalT, XF.petT, MO); X_(CL.petalB, XF.petB, MO);
+  MO.lime = 0; MO.a = 1.3;
 }
 /* the round with its sabot (three petals) and the armature: e pulls them apart (the exploded view); Ls the model ->
    ship transform for the X-ray tests (null: drawn plain in world) */
@@ -530,63 +603,77 @@ function drawRound(Lw, Ls, e, o, glow) {
   o.S = null;
 }
 const RCTX = { K, P_, CL, X, R, V, E, M3, LIME, HOT, WH, apI, tr, T: 0 };   // (the round module's context; T: film time)
-/* the loader below and behind the breech (seen in the X-ray) */
+/* the loader below and behind the breech (seen in the X-ray): the drum, the hoist, the tray, the rammer's head */
 const XRd = X.make(R.I(), [0, 0, 0]);
 function drawLoader(T, st, Ws) {
   const X_ = P_.drawX;
-  RO.md = 3; RO.lime = 0; RO.a = 1.15; RO.zfix = undefined; RO.keep = FK.load;
-  // the drum and its pinion
-  const dA = AZ + PI + (st.drum - 1) * 30 * DEG;
+  RO.md = 3; RO.lime = 0; RO.a = 1.5; RO.zfix = undefined; RO.keep = FK.load;
+  // the drum and its drive pinion (ship)
+  const dA = AZ + PI + (st.drum - 1) * TAU / NCELL;
   const Ld = X.make(R.y(dA), [0, P_.DRUM_Y, P_.GZ]);
-  RO.S = Ld; RO.lime = .5 * lock(T, T_LD + .5); X_(CL.drum, X.mul(Ws, Ld), RO);
-  const Lp = X.make(R.y(-dA * 1.28 / .18), P_.PIN_P); RO.S = Lp; RO.lime = .4 * E.ss(T_LD, T_LD + .1, T) * (1 - E.ss(T_LD + .45, T_LD + .6, T)); X_(CL.pinion, X.mul(Ws, Lp), RO);
-  // rounds in the cells (cell 0 leaves on the hoist)
-  RO.lime = 0;
-  for (let k = st.rnd > 0 ? 1 : 0; k < 12; k++) {
-    const a = dA + k * 30 * DEG, L = X.make(ROT_UP, [Math.sin(a) * P_.DRUM_R, P_.RND_Y0, P_.GZ + Math.cos(a) * P_.DRUM_R]);
-    RO.S = L; X_(CL.round, X.mul(Ws, L), RO);
+  RO.S = Ld; RO.lime = .5 * lock(T, T_DRUM + .5); X_(CL.drum, X.mul(Ws, Ld), RO);
+  const Lp = X.make(R.y(-dA * 1.35 / .18), P_.PIN_P); RO.S = Lp; RO.lime = .5 * E.ss(T_DRUM, T_DRUM + .1, T) * (1 - E.ss(T_DRUM + .45, T_DRUM + .6, T)); X_(CL.pinion, X.mul(Ws, Lp), RO);
+  // the rounds in the cells (cell 01 waits empty under the hoist until the magazine fills it, then leaves on the hoist)
+  RO.lime = 0; RO.a = 1.3; RO.keep = .6 * FK.load;
+  for (let k = st.rnd === 0 ? 0 : 1; k < NCELL; k++) {
+    const a = dA + k * TAU / NCELL, L = X.make(ROT_UP, [Math.sin(a) * P_.DRUM_R, P_.RND_Y0, P_.GZ + Math.cos(a) * P_.DRUM_R]);
+    if (k) { RO.S = L; X_(CL.rstow, X.mul(Ws, L), RO); } else drawRound(X.mul(Ws, L), L, 0, RO);   // (cell 01: the magazine's round)
   }
-  // hoist and carriage (T frame)
-  RO.S = XR.T; X_(CL.hoist, XF.T, RO);
-  const Lc = X.mul(XR.T, tr(0, st.hoistY, P_.HZ)); RO.S = Lc; RO.lime = .5 * lock(T, LD(1.35)); X_(CL.carriage, X.mul(Ws, Lc), RO);
-  // the round in flight through the loader
-  let Lr = null;
+  // the hoist trunk and its carriage, the collector, the bus trunks (T, under the deck)
+  RO.a = 1.5; RO.keep = FK.load; RO.S = XR.T; X_(CL.trunk, XF.T, RO);
+  const Lc = X.mul(XR.T, tr(0, st.hoistY, P_.HZ)); RO.S = Lc; RO.lime = Math.max(.6 * lock(T, LD(.3)), .6 * lock(T, LD(1.5))); X_(CL.carriage, X.mul(Ws, Lc), RO);
+  // the round on its way
+  let Lr = null; XF.RND = null;
   if (st.rnd === 1) Lr = X.mul(XR.T, X.make(ROT_UP, [0, st.hoistY, P_.HZ]));
-  else if (st.rnd === 2) Lr = st.ram > 0 ? X.mul(XR.B, tr(0, 0, P_.TRAY_Z + (P_.SEAT_Z - P_.TRAY_Z) * st.ram)) : X.mul(XR.tray, XRd);
+  else if (st.rnd === 2) Lr = st.ram > 0 ? X.mul(XR.B, tr(0, 0, P_.TRAY_Z + P_.RAM_L * st.ram)) : X.mul(XR.tray, XRd);
   if (Lr) {
-    RO.a = 1.5 + .4 * st.xp; RO.lime = Math.max(.45, .9 * lock(T, LD(2.2))) * (st.rnd === 2 && T > LD(2.9) ? .4 : 1);
-    RO.keep = Math.max(RO.keep, st.xp); XF.RND = X.mul(Ws, Lr);
-    drawRound(XF.RND, Lr, st.xp, RO); RO.a = 1.15; RO.keep = FK.load;
+    RO.a = 1.7 + .3 * st.xp; RO.lime = Math.max(.35, .9 * lock(T, LD(2.65))) * (st.rnd === 2 && T > LD(3.3) ? .4 : 1);
+    RO.keep = Math.max(FK.load, st.xp, .85); XF.RND = X.mul(Ws, Lr);
+    drawRound(XF.RND, Lr, st.xp, RO); RO.keep = FK.load;
   }
-  // the tray (B frame, pivoting)
-  RO.S = XR.tray; RO.a = 1.4; RO.lime = Math.max(.2, .6 * lock(T, LD(.6)) + .6 * lock(T, LD(1.85))); X_(CL.tray, XF.tray, RO); RO.a = 1.15;
-  RO.S = null; RO.lime = 0; RO.keep = 1;
+  // the tray (C, pivoting) and the rammer's head
+  RO.S = XR.tray; RO.a = 1.6; RO.lime = Math.max(.2, .7 * lock(T, LD(1.6)) + .6 * lock(T, LD(2.15)) + .6 * lock(T, LD(3.35))); X_(CL.tray, XF.tray, RO);
+  const Lh = X.mul(XR.C, tr(0, 0, P_.TRAY_Z - P_.RND_H - .02 + P_.RAM_L * st.ramH)); RO.S = Lh; RO.lime = st.ramH > .005 ? .7 : 0; X_(CL.rhead, X.mul(Ws, Lh), RO);
+  RO.S = null; RO.lime = 0; RO.keep = 1; RO.a = 1.5;
 }
 function drawRoom(T, st, Ws) {
   const X_ = P_.drawX;
-  RO.md = 3; RO.S = null; RO.lime = 0; RO.a = 1.15; RO.zfix = undefined;
+  RO.md = 3; RO.S = null; RO.lime = 0; RO.a = 1.5; RO.zfix = undefined;
   const dimk = k => .35 + .65 * k;
-  RO.keep = FK.floor; RO.a = .6; X_(CL.floor, Ws, RO); RO.a = 1.15;
-  RO.keep = FK.rack; RO.a = 1.15 * dimk(FK.rack); X_(CL.racks, Ws, RO);
-  RO.keep = FK.cab; RO.a = 1.15 * dimk(FK.cab); X_(CL.cab, Ws, RO);
-  RO.keep = FK.over; RO.a = .9; X_(CL.over, Ws, RO);
-  RO.keep = FK.cool; RO.a = 1.15 * dimk(FK.cool); RO.lime = .3 * E.ss(14.6, 15.4, T) * (1 - E.ss(XSH - 1, XSH, T)); X_(CL.cool, Ws, RO);
-  RO.keep = FK.bus; RO.a = 1.15 * dimk(FK.bus); RO.lime = .4 * E.ss(T_BANK - .6, T_BANK, T) * (1 - E.ss(TF, TF + .3, T)); X_(CL.bus, Ws, RO);
-  RO.keep = FK.base; RO.a = 1.15 * dimk(FK.base); RO.S = M_S; RO.zfix = P_.GZ; RO.lime = .3 * E.ss(T_RAIL - .4, T_RAIL + .6, T) * (1 - E.ss(TF, TF + .3, T)); X_(CL.baseBelow, XF.M, RO); RO.keep = FK.ring; RO.a = 1.15 * dimk(FK.ring); X_(CL.roller, XF.M, RO); RO.zfix = undefined;
-  // pumps' couplings, valve handwheels, fans
-  RO.lime = 0; RO.keep = FK.cool; RO.a = 1.15 * dimk(FK.cool);
-  for (const p of P_.PUMPS) { const L = X.make(R.z(st.pump * (p[0] > 0 ? 1 : -1)), p); RO.S = L; X_(CL.coupling, X.mul(Ws, L), RO); }
-  P_.VALVES.forEach((v, i) => { const L = X.make(R.y(-st.valve * (T > 13.9 + .15 * i ? 1 : 0) - i), v); RO.S = L; RO.lime = .7 * lock(T, 15.2 + .1 * i); X_(CL.wheel, X.mul(Ws, L), RO); });
+  RO.keep = FK.floor; RO.a = .75; X_(CL.floor, Ws, RO); RO.a = 1.5;
+  RO.keep = FK.rack; RO.a = 1.5 * dimk(FK.rack); X_(CL.racks, Ws, RO);
+  RO.keep = FK.cab; RO.a = 1.5 * dimk(FK.cab); X_(CL.cab, Ws, RO);
+  RO.keep = FK.over; RO.a = 1.1; X_(CL.over, Ws, RO);
+  RO.keep = FK.cool; RO.a = 1.5 * dimk(FK.cool); RO.lime = .3 * E.ss(16.6, 17.4, T) * (1 - E.ss(XSH - 1, XSH, T)); X_(CL.cool, Ws, RO);
+  RO.keep = FK.bus; RO.a = 1.5 * dimk(FK.bus); RO.lime = .4 * E.ss(T_BANK - .6, T_BANK, T) * (1 - E.ss(TF, TF + .3, T)); X_(CL.bus, Ws, RO);
+  RO.keep = FK.base; RO.a = 1.5 * dimk(FK.base); RO.S = M_S; RO.zfix = P_.GZ; RO.lime = .3 * E.ss(T_RAIL - .4, T_RAIL + .6, T) * (1 - E.ss(TF, TF + .3, T)); X_(CL.baseBelow, XF.M, RO);
+  RO.keep = FK.ring; RO.a = 1.5 * dimk(FK.ring); X_(CL.roller, XF.M, RO); RO.zfix = undefined;
+  // the coolant pumps: housing, inverter, volute; the stator's wound teeth; the rotor, coupling and impeller turning
+  for (let i = 0; i < 2; i++) {
+    const L = PUMP_L[i], Lw = X.mul(Ws, L);
+    const pr = st.pumpR;                                                 // (running: the housing and the iron recede, the coils carry the light)
+    RO.keep = FK.pump; RO.a = (1.5 - .55 * pr) * dimk(FK.pump); RO.S = L; RO.lime = .5 * lock(T, 17.2 + .15 * i); X_(CL.pump, Lw, RO);
+    RO.a = (.95 - .35 * pr) * dimk(FK.pump); RO.lime = 0; X_(CL.pstat, Lw, RO);
+    const sg = i ? -1 : 1, rot = st.pump * sg + i;
+    for (let k = 0; k < P_.PST; k++) {                                  // the coils, switched round with the rotor
+      const a = (k + .5) / P_.PST * TAU, ph = Math.cos(4 * (a - rot) * sg), on = st.pumpR * E.clamp((ph - .2) / .5, 0, 1);
+      const Lk = X.mul(L, PCOIL_R[k]); RO.S = Lk; RO.lime = on; RO.a = (.9 + 1.1 * on) * dimk(FK.pump); X_(CL.pcoil, X.mul(Ws, Lk), RO);
+    }
+    const Lr = X.mul(L, X.make(R.z(rot), [0, 0, 0])); RO.S = Lr; RO.lime = 0; RO.a = (1.15 - .45 * pr) * dimk(FK.pump); X_(CL.prot, X.mul(Ws, Lr), RO);
+  }
+  // valve handwheels, fans
+  RO.lime = 0; RO.keep = FK.cool; RO.a = 1.5 * dimk(FK.cool);
+  P_.VALVES.forEach((v, i) => { const L = X.make(R.y(-st.valve * (T > 16.2 + .15 * i ? 1 : 0) - i), v); RO.S = L; RO.lime = .7 * lock(T, 17.3 + .1 * i); X_(CL.wheel, X.mul(Ws, L), RO); });
   RO.lime = 0;
   P_.FANS.forEach((f, i) => { const L = X.make(R.z(st.fan * (i ? -1 : 1) + i), f); RO.S = L; X_(CL.fanB, X.mul(Ws, L), RO); });
   // alternators: body, the outer end bell + exciter + fan, the rotor
   for (let k = 0; k < 4; k++) {
     const L = ALT_L[k], xk = k === P_.XALT;
-    RO.keep = xk ? FK.altX : FK.alt; RO.a = 1.15 * dimk(RO.keep);
+    RO.keep = xk ? FK.altX : FK.alt; RO.a = 1.5 * dimk(RO.keep);
     const Lb = xk ? XR.xexc : L, Lr0 = xk ? XR.xrot : L;
     const rot = (xk ? st.rotX : st.rot) * (k % 2 ? -1 : 1) + k, rate = xk ? st.rateX : st.rate;
-    RO.lime = .5 * lock(T, 18.4) * (xk ? 1 : 0); RO.S = L; X_(CL.body, X.mul(Ws, L), RO);
-    RO.lime = xk ? Math.max(.35 * Math.min(1, st.bell * 2), .6 * lock(T, 18.1)) : 0;
+    RO.lime = .5 * lock(T, 22.6) * (xk ? 1 : 0); RO.S = L; X_(CL.body, X.mul(Ws, L), RO);
+    RO.lime = xk ? Math.max(.35 * Math.min(1, st.bell * 2), .6 * lock(T, 22.3)) : 0;
     RO.S = Lb; X_(CL.bell, X.mul(Ws, Lb), RO); X_(CL.exc, X.mul(Ws, Lb), RO);
     const Lf = X.mul(Lb, X.make(R.z(rot), [0, 0, 0])); RO.S = Lf; RO.lime = .15 * rate; X_(CL.fan, X.mul(Ws, Lf), RO);
     const Lr = X.mul(Lr0, X.make(R.z(rot), [0, 0, 0])); RO.S = Lr; RO.lime = Math.max(.2 * Math.min(1, rate), xk ? .4 * Math.min(1, st.rtr * 2) : 0); X_(CL.rotor, X.mul(Ws, Lr), RO);
@@ -595,15 +682,15 @@ function drawRoom(T, st, Ws) {
   RO.keep = FK.rack;
   for (let k = 0; k < NMOD; k++) {
     const l = modLvl(k, T), L = MOD_L[k];
-    RO.S = L; RO.lime = .7 * l + .3 * lock(T, modT(k)); RO.a = (.95 + .45 * l) * dimk(FK.rack); X_(CL.module, X.mul(Ws, L), RO);
+    RO.S = L; RO.lime = (.7 * l + .3 * lock(T, modT(k))) * (.3 + .7 * FK.rack); RO.a = (1.25 + .5 * l) * dimk(FK.rack); X_(CL.module, X.mul(Ws, L), RO);
   }
-  RO.a = 1.15; RO.keep = FK.cab;
+  RO.a = 1.5; RO.keep = FK.cab;
   // breakers (throw closed as each rack starts charging)
   for (let r = 0; r < 4; r++) {
     const c = kk(T, brkT(r), brkT(r) + .12) * (1 - kk(T, TF + .6, TF + 1.2)), L = X.make(R.x(-35 * DEG + 70 * DEG * c), P_.BRK[r]);
     RO.S = L; RO.lime = .9 * lock(T, brkT(r) + .12); X_(CL.breaker, X.mul(Ws, L), RO);
   }
-  RO.S = null; RO.lime = 0; RO.keep = 1; RO.a = 1.15;
+  RO.S = null; RO.lime = 0; RO.keep = 1; RO.a = 1.5;
 }
 /* rotor rims: lime streaks that lengthen with speed; exciters' rings */
 function drawRotorFX(T, st, Ws) {
@@ -612,14 +699,13 @@ function drawRotorFX(T, st, Ws) {
     const c = P_.ALT[k]; if (!isOpen(c[2])) continue;
     const L = X.mul(Ws, ALT_L[k]), sg = k % 2 ? -1 : 1, rot0 = (xk ? st.rotX : st.rot) * sg + k;
     const len = Math.min(2.6, .25 + 2.4 * rate), n = 14;
-    for (let m = 0; m < 3; m++) {
-      const a0 = rot0 + m * TAU / 3;
+    for (let m = 0; m < 4; m++) {
+      const a0 = rot0 + m * TAU / 4;
       for (let j = 0; j < n; j++) {
         const a = a0 - sg * len * j / n, w = 1 - j / n;
         for (const z of [-.66, .66]) { apI(L, Math.cos(a) * .83, Math.sin(a) * .83, z, Q1); P_.odot(Q1[0], Q1[1], Q1[2], 1, j ? LIME : HOT, (.35 + .6 * rate) * w * w); }
       }
     }
-    // the exciter field: a ring of dots at the armature, brightening with speed
     for (let j = 0; j < 36; j++) { const a = j / 36 * TAU + rot0 * .5; apI(L, Math.cos(a) * .44, Math.sin(a) * .44, 1.32, Q1); P_.odot(Q1[0], Q1[1], Q1[2], 1, LIME, .25 + .5 * rate * (.5 + .5 * Math.cos(a * 3 - T * 20))); }
     if (rate > .5) { apI(L, 0, 0, .9, Q1); P_.oglow(Q1[0], Q1[1], Q1[2], 36, LIME, .05 * rate); }
   }
@@ -628,7 +714,7 @@ function drawRotorFX(T, st, Ws) {
 function drawExplodeFX(T, st, Ws) {
   if (!isOpen(P_.ALT[P_.XALT][2])) return;
   const LA = XF.XA, LB = XF.XEXC;
-  const fl = Math.max(lock(T, 14.5), lock(T, 18.4));
+  const fl = Math.max(lock(T, 18.7), lock(T, 22.6));
   if (fl > .02) for (let k = 0; k < 12; k++) { const a = k / 12 * TAU; apI(LB, Math.cos(a) * .9, Math.sin(a) * .9, .78, Q1); P_.odot(Q1[0], Q1[1], Q1[2], 2, LIME, fl); P_.oglow(Q1[0], Q1[1], Q1[2], 8, LIME, .5 * fl); }
   if (st.rod > .01) for (const s of [-1, 1]) {
     const tip = .8 + 1.95 * st.rod;
@@ -657,34 +743,41 @@ function busPulses(pl, T, t0, t1, speed, gap, I, Ws) {
     if (f > .05) P_.oglow(Q1[0], Q1[1], Q1[2], 22, LIME, .55 * f * A);
   }
 }
-const COL = P_.poly([[0, 6.36, P_.GZ], [0, P_.GY + .35, P_.GZ]]);
-const COOL_UP = [-1, 1].flatMap(s => P_.RISERS(s).map(pl => P_.poly(pl.map(p => [p[0], p[1] + P_.GY, p[2] + P_.GZ]))));
-function coolFlow(T, Ws) {
-  const A = .5 * E.ss(15.2, 16.2, T) * (1 - E.ss(XSH - 1, XSH, T)); if (A < .01) return;
-  for (const pl of P_.COOL.concat(COOL_UP)) {
-    const off = (T * 1.3) % .3;
-    for (let s = off; s < pl.L; s += .3) {
-      P_.polyAt(pl, s, Q2); if (!isOpen(Q2[2])) continue;
-      apI(Ws, Q2[0], Q2[1] + .085, Q2[2], Q1); P_.odot(Q1[0], Q1[1], Q1[2], 1, WH, A);
-    }
+const COL = P_.poly([[0, P_.FL + .25, P_.GZ], [0, P_.GY - 2.0, P_.GZ]]);
+/* dots running along a polyline (model frame) at sp m/s, gap m apart. Tw: model -> world; Ts: model -> ship for the
+   X-ray (points under the deck show only where the window is open), null: above the deck, always shown */
+function flow(pl, Tw, Ts, T, sp, gap, size, col, A, glow) {
+  if (A < .01) return;
+  const off = ((T * sp) % gap + gap) % gap;
+  for (let s = off; s < pl.L; s += gap) {
+    P_.polyAt(pl, s, Q2);
+    if (Ts) { apI(Ts, Q2[0], Q2[1], Q2[2], Q3); if (Q3[1] < P_.GY - .05 && !isOpen(Q3[2])) continue; }
+    apI(Tw, Q2[0], Q2[1], Q2[2], Q1); P_.odot(Q1[0], Q1[1], Q1[2], size, col, A);
+    if (glow) P_.oglow(Q1[0], Q1[1], Q1[2], 6, LIME, glow * A);
   }
+}
+const ID = X.make(R.I(), [0, 0, 0]);
+/* the coolant: pumped to the mount up the column, back down and out to the heat sink in the keel, cold from it */
+function coolFlow(T, st, Ws) {
+  const A = .65 * st.pumpR * (1 - E.ss(XSH - 1, XSH, T)); if (A < .01) return;
+  flow(P_.COOL_SUP, Ws, ID, T, 1.4, .26, 1, WH, A, 0);
+  for (const pl of P_.COOL_COL) flow(pl, Ws, ID, T * (pl === P_.COOL_COL[0] ? 1 : -1), 1.4, .26, 1, WH, A, 0);
+  flow(P_.COOL_RET, Ws, ID, T, 1.4, .26, 2, HOT, A, .25);
+  for (const pl of P_.COOL_COLD) flow(pl, Ws, ID, T, 1.4, .26, 1, WH, A, 0);
+  for (const pl of P_.COOL_PD) flow(pl, Ws, ID, T, 1.6, .22, 1, WH, A, 0);
 }
 /* the cabinets: three status rows each (power, activity, the bank's charge as a bar), breaker arcs */
 function cabinetFX(T, st, Ws) {
   if (!allOpen(55.2, 56.3)) return;
-  const on = E.ss(14.2, 14.5, T) * (1 - E.ss(46, 47, T)), bank = nCharged(T) / NMOD, busy = E.ss(T_BANK - .5, T_BANK, T) * (1 - E.ss(TF + .5, TF + 1.5, T));
-  const fr = Math.floor(T * 12);
+  const on = E.ss(16.4, 16.7, T) * (1 - E.ss(TF + 12, TF + 13, T)), bank = nCharged(T) / NMOD, busy = E.ss(T_BANK - .5, T_BANK, T) * (1 - E.ss(TF + .5, TF + 1.5, T));
   for (let c = 0; c < 5; c++) {
     const xc = P_.CAB_X[c], z = P_.CAB_Z - .012;
     for (let j = 0; j < 10; j++) {
       const x = xc - .3 + j * .0667;
-      // row 1: power and state, steady once the room is up
       let a1 = on * (j < 3 || K.hh(c * 11 + j, 1) > .45 ? .75 : .12), c1 = j < 3 ? LIME : WH;
       apI(Ws, x, P_.FL + 2.24, z, Q1); if (a1 > .02) { P_.odot(Q1[0], Q1[1], Q1[2], 2, c1, a1); if (j < 3) P_.oglow(Q1[0], Q1[1], Q1[2], 6, LIME, .3 * a1); }
-      // row 2: activity, blinking faster while the bank charges
       const bl = K.hh(c * 7.1 + j * 3.3, Math.floor(T * (3 + 9 * busy) + j * .37)) > .55 - .25 * busy ? 1 : 0;
       apI(Ws, x, P_.FL + 2.14, z, Q1); if (on > .02) { P_.odot(Q1[0], Q1[1], Q1[2], 2, busy > .3 && bl ? LIME : WH, on * (.15 + .85 * bl)); if (bl && busy > .3) P_.oglow(Q1[0], Q1[1], Q1[2], 6, LIME, .35 * on); }
-      // row 3: the bank's charge as a bar across all five cabinets
       const idx = (c * 10 + j) / 50, lit = idx < bank ? 1 : 0;
       apI(Ws, x, P_.FL + 2.07, z, Q1); if (on > .02) { P_.odot(Q1[0], Q1[1], Q1[2], 2, lit ? LIME : WH, on * (lit ? 1 : .12)); if (lit) P_.oglow(Q1[0], Q1[1], Q1[2], 7, LIME, .4 * on); }
     }
@@ -695,7 +788,6 @@ function cabinetFX(T, st, Ws) {
     K.arcW(Q2, Q3, 77 + r, T, 1 - Math.abs(a - .05) * 3, .6);
     P_.oglow(Q2[0], Q2[1], Q2[2], 30, LIME, .5 * Math.exp(-Math.max(0, a) * 8));
   }
-  void fr;
 }
 /* module LEDs and charge bars */
 function moduleFX(T, Ws) {
@@ -704,156 +796,253 @@ function moduleFX(T, Ws) {
     const l = modLvl(k, T), pre = E.ss(modT(k) - .6, modT(k), T) * (1 - E.ss(TF, TF + .2, T));
     if (l < .01 && pre < .01) continue;
     const L = X.mul(Ws, MOD_L[k]);
-    for (let j = 0; j < 6; j++) { const on = l * 6 > j + .5 ? 1 : 0; apI(L, -.412, -.1, -.16 + j * .05, Q1); P_.odot(Q1[0], Q1[1], Q1[2], 1, on ? LIME : WH, on ? .85 : .15 * pre); }
-    apI(L, -.412, -.2, .17, Q1); P_.odot(Q1[0], Q1[1], Q1[2], 2, LIME, .3 + .7 * l);
+    for (let j = 0; j < 6; j++) { const on = l * 6 > j + .5 ? 1 : 0; apI(L, -.41, .01, -.16 + j * .04, Q1); P_.odot(Q1[0], Q1[1], Q1[2], 1, on ? LIME : WH, on ? .9 : .15 * pre); }
+    apI(L, -.41, -.12, .12, Q1); P_.odot(Q1[0], Q1[1], Q1[2], 2, LIME, .3 + .7 * l);
     const fl = lock(T, modT(k) + .1); if (fl > .05) { apI(L, -.47, .15, 0, Q1); P_.oglow(Q1[0], Q1[1], Q1[2], 16, LIME, .5 * fl); }
+  }
+}
+/* the pumps' motors: the stator's coils switched round in step with the rotor's magnets (three phases, four pole
+   pairs), the inverter's lamp, the impeller's wake in the volute */
+function pumpFX(T, st, Ws) {
+  const r = st.pumpR; if (r < .02) return;
+  for (let i = 0; i < 2; i++) {
+    const L = X.mul(Ws, PUMP_L[i]); if (!isOpen(P_.PUMPS[i][2] + .4)) continue;
+    const sg = i ? -1 : 1, rot = st.pump * sg + i;
+    for (let k = 0; k < P_.PST; k++) {
+      const a = (k + .5) / P_.PST * TAU, ph = Math.cos(4 * (a - rot) * sg), on = E.clamp((ph - .2) / .5, 0, 1); if (on < .05) continue;
+      apI(L, Math.cos(a) * .19, Math.sin(a) * .19, .36, Q1); P_.oglow(Q1[0], Q1[1], Q1[2], 12, LIME, .3 * on * r);
+    }
+    apI(L, .142, .32, .27, Q1); P_.odot(Q1[0], Q1[1], Q1[2], 2, LIME, .9 * E.ss(17.0, 17.2, T)); P_.oglow(Q1[0], Q1[1], Q1[2], 6, LIME, .4 * E.ss(17.0, 17.2, T));
+    for (let j = 0; j < 40; j++) { const a = j / 40 * TAU - rot * 1.3, rr = .2 + .1 * K.hh(j, 3.1); apI(L, Math.cos(a) * rr, Math.sin(a) * rr, 1.22, Q1); P_.odot(Q1[0], Q1[1], Q1[2], 1, WH, .45 * r * (.4 + .6 * K.hh(j, 7.7))); }
   }
 }
 function drawRoomFX(T, st, Ws) {
   drawRotorFX(T, st, Ws);
   drawExplodeFX(T, st, Ws);
-  coolFlow(T, Ws);
+  coolFlow(T, st, Ws);
+  pumpFX(T, st, Ws);
   cabinetFX(T, st, Ws);
   moduleFX(T, Ws);
-  // alternators -> cabinets, cabinets -> racks, racks -> collector, up the column
+  // alternators -> cabinets, cabinets -> racks, racks -> the column (under the floor), up the column
   for (let k = 0; k < 4; k++) busPulses(P_.BUS_A[k], T, T_BANK - .8 + .15 * k, TF + .2, 3.2, .7, .9, Ws);
   for (let r = 0; r < 4; r++) busPulses(P_.BUS_B[r], T, brkT(r) + .1, T_BANK1 + .6, 3.0, .6, .85, Ws);
   for (let r = 0; r < 4; r++) busPulses(P_.BUS_C[r], T, T_RAIL - .2 + .2 * r, TF + .1, 2.2, .5, 1, Ws);
   busPulses(COL, T, T_RAIL + .4, TF + .1, 2.4, .35, 1, Ws);
 }
-/* the loader's lights: the rammer's chain, the round seating, the breech seal; in the exploded view a scan plane
-   sweeps the round's parts as they part and close */
+/* the loader's lights: the cell's latch, the hoist's chain, the tray's grips, the rammer's chain, the round
+   seating, the breech seal; in the exploded view a scan plane sweeps the round's parts as they part and close */
 function loaderFX(T, st, Ws) {
   if (!isOpen(P_.GZ)) return;
   if (st.xp > .01 && XF.RND) {
     const L = XF.RND, e = st.xp, U = X.dir(L, [1, 0, 0]), W = X.dir(L, [0, 1, 0]);
-    const zs = -.9 + 1.8 * ((T - T_XP - .3) / 1.1 % 1);
-    apI(L, 0, 0, zs, Q1); K.ringW(Q1, U, W, .24 + .1 * e, 90, 1, LIME, .8 * e, T * 3);
-    for (let k = 0; k < 3; k++) { const a = k * TAU / 3 + .9; apI(L, Math.cos(a) * (.13 + .34 * e), Math.sin(a) * (.13 + .34 * e), zs, Q2); P_.odot(Q2[0], Q2[1], Q2[2], 2, HOT, e); }
-    for (const z of [-.42 * e - P_.RND_H - .07, .3 * e]) { apI(L, 0, 0, z, Q1); K.ringW(Q1, U, W, .2, 60, 1, LIME, .5 * e, -T * 2); }
+    const zs = -1.1 + 2.2 * ((T - T_XP - .3) / 1.2 % 1);
+    apI(L, 0, 0, zs, Q1); K.ringW(Q1, U, W, .2 + .12 * e, 90, 1, LIME, .8 * e, T * 3);
+    for (let k = 0; k < 3; k++) { const a = k * TAU / 3 + .9; apI(L, Math.cos(a) * (.14 + .34 * e), Math.sin(a) * (.14 + .34 * e), zs, Q2); P_.odot(Q2[0], Q2[1], Q2[2], 2, HOT, e); }
+    for (const z of [-1.0 - .42 * e, 1.0 + .3 * e]) { apI(L, 0, 0, z, Q1); K.ringW(Q1, U, W, .17, 60, 1, LIME, .5 * e, -T * 2); }
   }
-  // the rammer chain from its housing to the round's base while it pushes
-  const rr = T > LD(1.8) && T < LD(2.55) ? (T < LD(2.2) ? st.ram : 1 - kk(T, LD(2.2), LD(2.5))) : 0;
-  if (rr > .01) {
-    const z0 = -3.36, z1 = P_.TRAY_Z - P_.RND_H + (P_.SEAT_Z - P_.TRAY_Z) * rr;
-    apI(XF.B, 0, 0, z0, Q1); apI(XF.B, 0, 0, z1, Q2);
-    K.lineW(Q1[0], Q1[1], Q1[2], Q2[0], Q2[1], Q2[2], 1.2, 1, HOT, .85, LIME, .12, .03);
-    for (const s of [-1, 1]) { apI(XF.B, s * .06, 0, z1, Q3); apI(XF.B, s * .06, 0, z1 - .08, Q4); K.lineW(Q3[0], Q3[1], Q3[2], Q4[0], Q4[1], Q4[2], 1, 1, LIME, .9); }
+  // the cell's latch lets go under the hoist; the drum's index
+  const cl = Math.max(lock(T, LD(.3)), lock(T, T_DRUM + .5));
+  if (cl > .02) { apI(Ws, P_.MAG_CELL.p[0], P_.FL + .15, P_.MAG_CELL.p[2], Q1); K.ringW(Q1, [1, 0, 0], [0, 0, 1], .2 + .1 * (1 - cl), 48, 1, LIME, cl, 0); P_.oglow(Q1[0], Q1[1], Q1[2], 16, LIME, .5 * cl); }
+  // the hoist's chain while it runs
+  if (T > LD(.3) && T < LD(3.6) && (T < LD(1.5) || T > LD(2.7))) {
+    const dir = T < LD(1.5) ? 1 : -1, ph = ((T * 3.6 * dir) % .16 + .16) % .16, y0 = P_.HY0 - 1.1, y1 = P_.HY1 + 1.15;
+    for (let y = y0 + ph; y < y1; y += .16) for (const dz of [.07, .27]) { apI(XF.T, 0, y, P_.HZ + dz, Q1); P_.odot(Q1[0], Q1[1], Q1[2], 1, LIME, .6); }
+  }
+  // the tray's grips close on the round
+  const gp = lock(T, LD(1.6));
+  if (gp > .02) for (const z of [-.8, 0, .8]) for (const s of [-1, 1]) { apI(XF.tray, s * .12, .12, z, Q1); P_.odot(Q1[0], Q1[1], Q1[2], 2, HOT, gp); P_.oglow(Q1[0], Q1[1], Q1[2], 10, LIME, .5 * gp); }
+  // the rammer's chain from its housing to the head while it pushes and draws back
+  if (st.ramH > .005) {
+    const zh = P_.TRAY_Z - P_.RND_H - .22 + P_.RAM_L * st.ramH, z0 = -4.74;
+    apI(XF.C, 0, -.03, z0, Q1); apI(XF.C, 0, -.03, zh, Q2);
+    K.lineW(Q1[0], Q1[1], Q1[2], Q2[0], Q2[1], Q2[2], 1.2, 1, HOT, .8, LIME, .1, .02);
+    const ph = (st.ramH * P_.RAM_L) % .1;
+    for (let z = z0 + ph; z < zh; z += .1) for (const s of [-1, 1]) { apI(XF.C, s * .05, -.03, z, Q3); P_.odot(Q3[0], Q3[1], Q3[2], 1, LIME, .8); }
   }
   // the round in hand: a tracked outline while the loader moves it
-  if (st.rnd === 1 || (st.rnd === 2 && T < LD(2.5))) {
-    const Lr = st.rnd === 1 ? X.mul(XF.T, X.make(ROT_UP, [0, st.hoistY, P_.HZ])) : st.ram > 0 ? X.mul(XF.B, tr(0, 0, P_.TRAY_Z + (P_.SEAT_Z - P_.TRAY_Z) * st.ram)) : XF.tray;
+  if (st.rnd === 1 || (st.rnd === 2 && T < LD(2.9))) {
+    const Lr = st.rnd === 1 ? X.mul(XF.T, X.make(ROT_UP, [0, st.hoistY, P_.HZ])) : st.ram > 0 ? X.mul(XF.B, tr(0, 0, P_.TRAY_Z + P_.RAM_L * st.ram)) : XF.tray;
     const U = X.dir(Lr, [1, 0, 0]), W = X.dir(Lr, [0, 1, 0]);
-    for (const z of [-P_.RND_H, -.12, .25]) { apI(Lr, 0, 0, z, Q1); K.ringW(Q1, U, W, .125, 40, 1, LIME, .8, T * 4); }
-    apI(Lr, 0, 0, P_.RND_H, Q1); P_.oglow(Q1[0], Q1[1], Q1[2], 18, LIME, .45);
+    for (const z of [-1.0, -.62, .48, 1.0]) { apI(Lr, 0, 0, z, Q1); K.ringW(Q1, U, W, z < -.7 || z > .9 ? .05 : .16, 40, 1, LIME, .8, T * 4); }
+    apI(Lr, 0, 0, 1.0, Q1); P_.oglow(Q1[0], Q1[1], Q1[2], 18, LIME, .45);
   }
   // the breech seal as the block reaches home
-  const bs = lock(T, LD(2.6));
-  if (bs > .02) { apI(XF.B, 0, 0, -1.9, Q1); K.ringW(Q1, X.dir(XF.B, [1, 0, 0]), X.dir(XF.B, [0, 1, 0]), .5 + .3 * (1 - bs), 60, 1, LIME, bs, 0); }
-  // the hoist's chain: dots running up the guides while it lifts
-  const hv = T > LD(.45) && T < LD(2.3) ? 1 : 0;
-  if (hv) {
-    const dir = T < LD(1.35) ? 1 : -1, ph = (T * 3.2 * dir) % .2;
-    for (let y = P_.HY0 + ph + .2; y < P_.HY1 - .5; y += .2) { apI(XF.T, 0, y, P_.HZ + .12, Q1); P_.odot(Q1[0], Q1[1], Q1[2], 1, LIME, .55); }
+  const bs = lock(T, LD(3.3));
+  if (bs > .02) { apI(XF.B, 0, 0, -2.44, Q1); K.ringW(Q1, X.dir(XF.B, [1, 0, 0]), X.dir(XF.B, [0, 1, 0]), .2 + .3 * (1 - bs), 60, 1, LIME, bs, 0); }
+}
+
+/* ---------- the mount's FX: hydraulics, cryogenics, the field, sensors, currents ---------- */
+/* oil to the rams and the train motors while they move, into the accumulators as they charge; the accumulators'
+   oil level; the HPU's motor turning */
+function hydFX(T, st) {
+  const gS = Math.max(st.ghS, st.gh), A = .4 + .6 * gS;
+  const ch = E.ss(T_HPU + .2, T_HPU + .4, T) * (1 - E.ss(T_HPU + 1.3, T_HPU + 1.5, T));
+  if (st.elv) for (let i = 0; i < 2; i++) flow(P_.HYD[i], XF.T, null, T, 2.2, .1, 1, LIME, .8 * A, .15);
+  if (st.trv) for (let i = 2; i < 4; i++) flow(P_.HYD[i], XF.T, null, T, 2.2, .1, 1, LIME, .8 * A, .15);
+  if (gS < .05) return;
+  for (const a of P_.HPU.acc) {
+    const h = .42 + .95 * st.acc;
+    for (let j = 0; j < 36; j++) { const b = j / 36 * TAU; apI(XF.T, a[0] + Math.cos(b) * .14, a[1] + h, a[2] + Math.sin(b) * .14, Q1); P_.odot(Q1[0], Q1[1], Q1[2], 2, LIME, .95 * gS); }
+    for (let y = .45; y < h; y += .06) { apI(XF.T, a[0], a[1] + y, a[2], Q1); P_.odot(Q1[0], Q1[1], Q1[2], 1, LIME, .5 * gS); }
+    if (ch > .01) for (let y = .06; y < .42; y += .05) { apI(XF.T, a[0] - .15 + ((T * 2.5 + y) % .3), a[1] + .1, a[2], Q1); P_.odot(Q1[0], Q1[1], Q1[2], 1, LIME, ch * gS); }
+  }
+  if (st.hpuR > .02) { const m = P_.HPU.mot; for (let k = 0; k < 6; k++) { const b = st.hpu + k / 6 * TAU; for (let j = 1; j < 6; j++) { apI(XF.T, m[0] + Math.cos(b) * .035 * j, m[1] + Math.sin(b) * .035 * j, m[2] - .01, Q1); P_.odot(Q1[0], Q1[1], Q1[2], 1, j > 3 ? HOT : LIME, .7 * st.hpuR * gS); } } }
+}
+/* the cryocoolers: a cold pulse runs down each regenerator, helium flows in the lines and the headers; the current
+   leads light as their coil energises */
+function cryoFX(T, st) {
+  const A = st.cryo; if (A < .01) return;
+  const B = XF.B;
+  for (let i = 0; i < P_.COLD.length; i++) {
+    const c = P_.COLD[i], u = ((T * 1.4 + i * .37) % 1), y = c[1] + .23 - .2 * u;
+    for (let j = 0; j < 14; j++) { const b = j / 14 * TAU; apI(B, c[0] + Math.cos(b) * .052, y, c[2] + Math.sin(b) * .052, Q1); P_.odot(Q1[0], Q1[1], Q1[2], 1, u > .7 ? WH : LIME, A * (.35 + .45 * (1 - u))); }
+  }
+  for (const s of [-1, 1]) { const pl = s > 0 ? HEAD_S : HEAD_P; flow(pl, B, null, T * (s > 0 ? 1 : -1), .8, .14, 1, WH, .55 * A, 0); }
+  if (Math.max(st.ghS, st.gh) < .05) for (const pl of P_.HE_T) flow(pl, XF.T, null, T, .8, .14, 1, WH, .4 * A, 0);
+  for (let k = 0; k < NST; k++) {
+    const v = st.coil[k], e = lock(T, enT(k)) + (v > .02 && v < .98 ? .6 : 0); if (e < .02) continue;
+    for (const s of [-1, 1]) for (let y = 0; y < .2; y += .02) { apI(B, s * .45, P_.KY + y, P_.STN[k] + .22, Q1); P_.odot(Q1[0], Q1[1], Q1[2], 1, HOT, Math.min(1, e)); }
   }
 }
-/* rams on the hatches and the covers: a cylinder (fixed at its bracket) and a rod out to the pin */
-function ramLine(Tb, b, Tp, p, a) {
-  apI(Tb, b[0], b[1], b[2], Q1); apI(Tp, p[0], p[1], p[2], Q2);
-  const L = V.dist(Q1, Q2), k = Math.min(1, .3 / Math.max(.01, L));
-  Q3[0] = Q1[0] + (Q2[0] - Q1[0]) * k; Q3[1] = Q1[1] + (Q2[1] - Q1[1]) * k; Q3[2] = Q1[2] + (Q2[2] - Q1[2]) * k;
-  K.lineW(Q1[0], Q1[1], Q1[2], Q3[0], Q3[1], Q3[2], .8, 2, WH, .7 * a);
-  K.lineW(Q3[0], Q3[1], Q3[2], Q2[0], Q2[1], Q2[2], .8, 1, WH, .9 * a);
-}
-/* a hydraulic ram between a base (frame Tb) and a pin (frame Tp): the cylinder (four staves, collars) fixed at the
-   base, the rod out to the pin; lit while it moves */
-const EB0 = [0, 0, 0], EB1 = [0, 0, 0];
-function ramSolid(Tb, b, Tp, p, cyl, rc, rr, a, lit) {
-  apI(Tb, b[0], b[1], b[2], EB0); apI(Tp, p[0], p[1], p[2], EB1);
-  const d = V.sub(EB1, EB0), L = V.len(d); if (L < .01) return;
-  const f = V.mul(d, 1 / L), a_ = Math.abs(f[1]) < .9 ? [0, 1, 0] : [1, 0, 0], U = V.norm(V.cross(f, a_)), W = V.cross(f, U);
-  const lc = Math.min(cyl, L - .05), col = lit > .05 ? LIME : WH;
-  for (let k = 0; k < 4; k++) {
-    const an = k * PI / 2 + .4, cs = Math.cos(an) * rc, sn = Math.sin(an) * rc;
-    const ox = U[0] * cs + W[0] * sn, oy = U[1] * cs + W[1] * sn, oz = U[2] * cs + W[2] * sn;
-    K.lineW(EB0[0] + ox, EB0[1] + oy, EB0[2] + oz, EB0[0] + f[0] * lc + ox, EB0[1] + f[1] * lc + oy, EB0[2] + f[2] * lc + oz, 1, 1, WH, .75 * a);
+const HEAD_S = P_.poly([[.17, .48, -2.0], [.17, .48, P_.RZ1 - .2]]), HEAD_P = P_.poly([[-.17, .48, -2.0], [-.17, .48, P_.RZ1 - .2]]);
+const MAN = [-1, 1].map(s => P_.poly([[s * .12, -.52, -2.25], [s * .12, -.52, P_.RZ1 - .1]]));
+/* the field: at each energised station the dipole's lines run straight across the bore between the coils and loop
+   back round them (upper and lower families); they swell and brighten with the coil's current and again as the rails
+   charge, dots running round them in the field's direction */
+const FLD_N = 96, FLD = (() => {                      // loop j, family f: points in the station's x-y plane (unit)
+  const A = new Float32Array(3 * 2 * FLD_N * 2);
+  for (let j = 0; j < 3; j++) for (let f = 0; f < 2; f++) for (let i = 0; i < FLD_N; i++) {
+    const t = i / FLD_N * TAU, a = .78 + .2 * j, b = .52 + .26 * j, c = .025 + .02 * j, sn = Math.sin(t);
+    const x = a * Math.cos(t), y = (sn > 0 ? b * sn : c * sn) * (f ? -1 : 1);
+    const o = ((j * 2 + f) * FLD_N + i) * 2; A[o] = x; A[o + 1] = y;
   }
-  for (const u of [0, .5, 1]) K.ringW(V.mad(EB0, f, lc * u), U, W, rc * 1.15, 24, 1, WH, .8 * a, 0);
-  const c0 = V.mad(EB0, f, lc);
-  K.lineW(c0[0], c0[1], c0[2], EB1[0], EB1[1], EB1[2], .8, 2, col, (.75 + .25 * lit) * a);
-  K.ringW(EB1, U, W, rr * 1.8, 16, 1, col, .9 * a, 0);
-}
-function mechFX(T, st) {
-  const mv = x => .35 + .65 * x;
-  // elevation rams under the barrel, either side of the bore
-  const elv = Math.abs(EL * (kk(T + .03, 6.6, 9.4) * (1 - kk(T + .03, 51.2 + SH, 53.9 + SH))) - st.el) > 1e-4 ? 1 : 0;
-  for (const sg of [-1, 1]) ramSolid(XF.T, [sg * .55, .42, 2.62], XF.B, [sg * .42, -.47, 1.4], 1.05, .085, .035, 1, elv);
-  for (const s of [-1, 1]) for (const [b, p] of P_.RAM_H(s)) ramLine(XF.M, b, s > 0 ? XF.hatS : XF.hatP, p, mv(st.hatch));
-  for (const s of [-1, 1]) for (const [b, p] of P_.RAM_C(s)) ramLine(XF.B, b, s > 0 ? XF.covS : XF.covP, p, mv(s > 0 ? st.covS : st.covP));
-  // the sleeve's lock pins shooting home at full run-out (and drawing at the stow)
-  const pl = Math.max(lock(T, 10.9), lock(T, 49.8 + SH));
-  if (pl > .02) for (const s of [-1, 1]) { apI(XF.E, s * .67, 0, P_.SLV0 + .15, Q1); K.glowW(Q1[0], Q1[1], Q1[2], 14, LIME, .6 * pl); K.dotW(Q1[0], Q1[1], Q1[2], 2, HOT, pl); }
-  // the drive screw turning while the sleeve runs (a helix of dots)
-  const sv = Math.abs(P_.EXT * (kk(T + .02, 9.4, 10.9) * (1 - kk(T + .02, 49.8 + SH, 51.2 + SH))) - st.ext) > 1e-4;
-  if (sv) for (let z = -.6; z < 5.2; z += .12) { const a = z * 9 - T * 40; apI(XF.B, Math.cos(a) * .04, -.8 + Math.sin(a) * .04, z, Q1); K.dotW(Q1[0], Q1[1], Q1[2], 1, LIME, .6); }
-}
-/* the flexible bus trunk from the rear section down to the turret floor (drawn every frame: the barrel elevates) */
-function trunk(T, st) {
-  const I = E.ss(T_RAIL - .2, T_RAIL + .4, T) * (1 - E.ss(TF, TF + .3, T));
-  const vis = .22 + .5 * I;
-  const n = 34;
-  for (let c = -1; c <= 1; c++) {
-    apI(XF.B, c * .16, -.64, -1.55, Q1); apI(XF.B, c * .16, -1.5, -1.45, Q2);
-    apI(XF.T, c * .16, 1.3, .2, Q3); apI(XF.T, c * .16 + .9, .32, .6, Q4);
-    for (let i = 0; i <= n; i++) {
-      const u = i / n, a = (1 - u) * (1 - u) * (1 - u), b = 3 * u * (1 - u) * (1 - u), d = 3 * u * u * (1 - u), e = u * u * u;
-      const x = a * Q1[0] + b * Q2[0] + d * Q3[0] + e * Q4[0], y = a * Q1[1] + b * Q2[1] + d * Q3[1] + e * Q4[1], z = a * Q1[2] + b * Q2[2] + d * Q3[2] + e * Q4[2];
-      const pulse = I > .01 ? Math.max(0, Math.cos((u * 6 + T * 5) * TAU * .5)) : 0;
-      K.dotW(x, y, z, 1, pulse > .85 ? HOT : WH, vis * .7);
-      if (pulse > .85) K.glowW(x, y, z, 8, LIME, .35 * I);
+  return A;
+})();
+function fieldFX(T, st) {
+  const ch = st.chg, B = XF.B;
+  for (let k = 0; k < NST; k++) {
+    const v = st.coil[k]; if (v < .02) continue;
+    const g = .55 + .45 * v + .18 * ch, z = P_.STN[k], br = Math.min(.85, (.55 + .4 * ch) * v);
+    for (let j = 0; j < 3; j++) for (let f = 0; f < 2; f++) {
+      const o0 = (j * 2 + f) * FLD_N, ph = (T * .45 + k * .13 + j * .3) % 1, a = br * (1 - .22 * j);
+      for (let i = 0; i < FLD_N; i++) {
+        const o = (o0 + i) * 2, u = i / FLD_N, d = Math.abs(u - ph), hot = d < .03 || d > .97;
+        apI(B, FLD[o] * g, FLD[o + 1] * g, z, Q1); P_.odot(Q1[0], Q1[1], Q1[2], hot ? 2 : 1, hot ? HOT : LIME, hot ? Math.min(1, a * 2.6) : a);
+      }
     }
   }
 }
-/* the rails charging: the rails light, rings run breech -> muzzle, arcs across the bore and out to the rings,
-   the particle ring ahead of the muzzle tightens */
+/* the sensors: the director's laser ranging and its lock, the radar's search fan then its track beam, the muzzle
+   velocity radar's beam along the bore */
+function sensorFX(T, st) {
+  const L = XF.eoP;
+  const on = E.ss(10.8, 11.2, T) * (1 - E.ss(SX(51), SX(51.6), T));
+  if (on > .01) for (const w of P_.EO_WIN) { apI(L, w[0], w[1], w[2] + .005, Q1); P_.odot(Q1[0], Q1[1], Q1[2], 2, LIME, .7 * on); }
+  for (const t0 of [12.15, 13.4, 14.9]) {
+    const a = T - t0; if (a < 0 || a > .5) continue;
+    const w = P_.EO_WIN[2]; apI(L, w[0], w[1], w[2], Q1); apI(L, w[0], w[1], w[2] + 6 + 160 * a, Q2);
+    K.lineW(Q1[0], Q1[1], Q1[2], Q2[0], Q2[1], Q2[2], 2, 1, HOT, .9 * (1 - a / .5), LIME, .2, .05);
+  }
+  const lk = lock(T, 12.0);
+  if (lk > .02) { apI(L, 0, 0, 0, Q1); if (K.pj(Q1[0], Q1[1], Q1[2])) { const x = K.PJ[0], y = K.PJ[1], r = 26 + 30 * (1 - lk); K.bracket([x - r, y - r, x + r, y + r], '#C6F432', lk, 8, 1.4); } }
+  // the radar: a fan of three beams sweeping while it searches, one steady beam (pulses running out) once it tracks
+  const F = XF.fcY, A = P_.FC_A, srch = st.fcScan, trk = E.ss(12.4, 12.7, T) * (1 - E.ss(SX(50.6), SX(51), T));
+  if (srch > .01 || trk > .01) {
+    apI(F, A.T[0], A.T[1], A.T[2], Q1);
+    const dz = X.dir(F, R.ap(A.R, [0, 0, 1])), dx = X.dir(F, R.ap(A.R, [1, 0, 0]));
+    if (srch > .01) for (const k of [-1, 0, 1]) { const s = .07 * k; Q2[0] = Q1[0] + (dz[0] + dx[0] * s) * 30; Q2[1] = Q1[1] + (dz[1] + dx[1] * s) * 30; Q2[2] = Q1[2] + (dz[2] + dx[2] * s) * 30; K.lineW(Q1[0], Q1[1], Q1[2], Q2[0], Q2[1], Q2[2], 3, 1, LIME, .35 * srch * (k ? .6 : 1)); }
+    if (trk > .01) for (let i = 0; i < 12; i++) { const d = ((T * 14 + i * 2.5) % 30) + .6; P_.odot(Q1[0] + dz[0] * d, Q1[1] + dz[1] * d, Q1[2] + dz[2] * d, 2, LIME, .8 * trk * (1 - d / 32)); }
+  }
+  // the muzzle velocity radar's beam along the bore, faint once laid, bright through the shot
+  const mv = Math.max(.25 * E.ss(T_EL1, T_EL1 + .3, T) * (1 - E.ss(TF + 2, TF + 3, T)), lock(T, T_EL1 + .1), st.chg * .6, st.glow);
+  if (mv > .02) { const m = P_.MV_P; apI(XF.C, m[0], m[1] + .06, 2.87, Q1); apI(XF.C, m[0], m[1] + .06, 2.87 + 40, Q2); K.lineW(Q1[0], Q1[1], Q1[2], Q2[0], Q2[1], Q2[2], 3, 1, LIME, .5 * mv, LIME, .04, 0); }
+}
+/* the coolant in the mount (the starboard trunnion -> the rails' manifold), helium out to the headers */
+function mountFlow(T, st) {
+  const A = .55 * st.pumpR; if (A < .01) return;
+  for (const pl of P_.COOL_T) flow(pl, XF.T, XR.T, T, 1.2, .2, 1, WH, A * (Math.max(st.ghS, st.gh) > .3 ? 1 : .5), 0);
+  flow(MAN[0], XF.B, null, T, 1.2, .22, 1, WH, A, 0); flow(MAN[1], XF.B, null, -T, 1.2, .22, 1, HOT, A, .15);
+}
+/* the flexible bus straps from the training structure to the injection blocks (they flex as it elevates): current
+   pulses through them while the rails charge and at the shot */
+const SB0 = [0, 0, 0], SB1 = [0, 0, 0], SB2 = [0, 0, 0], SB3 = [0, 0, 0];
+function straps(T, st) {
+  const I = Math.max(E.ss(T_RAIL - .2, T_RAIL + .4, T) * (1 - E.ss(TF, TF + .3, T)), st.glow);
+  const vis = .3 + .5 * I + .4 * Math.max(st.ghS, st.gh), n = 40;
+  for (let si = 0; si < 2; si++) {
+    const s = si ? 1 : -1, a = P_.BUS_ANCH[si], f = P_.FEED_B[si];
+    for (let c = -2; c <= 2; c++) {
+      apI(XF.T, a[0], a[1], a[2] + c * .05, SB0); apI(XF.T, a[0], a[1] - .1, a[2] - .9 + c * .05, SB1);
+      apI(XF.B, f[0] + s * .45, f[1] - .35, f[2] + c * .05, SB2); apI(XF.B, f[0], f[1], f[2] + c * .05, SB3);
+      for (let i = 0; i <= n; i++) {
+        const u = i / n, w0 = (1 - u) * (1 - u) * (1 - u), w1 = 3 * u * (1 - u) * (1 - u), w2 = 3 * u * u * (1 - u), w3 = u * u * u;
+        const x = w0 * SB0[0] + w1 * SB1[0] + w2 * SB2[0] + w3 * SB3[0], y = w0 * SB0[1] + w1 * SB1[1] + w2 * SB2[1] + w3 * SB3[1], z = w0 * SB0[2] + w1 * SB1[2] + w2 * SB2[2] + w3 * SB3[2];
+        const p = I > .01 ? Math.max(0, Math.cos((u * 5 - T * 4 * s) * TAU * .5)) : 0;
+        P_.odot(x, y, z, 1, p > .85 ? HOT : WH, vis * .75);
+        if (p > .9) P_.oglow(x, y, z, 7, LIME, .35 * I);
+      }
+    }
+  }
+}
+/* frost: crystals on the cold heads, their flex lines and the helium headers, each appearing at its own point of the
+   cool-down (seeded per point), a few glinting */
+function frostFX(T, st) {
+  const P = P_.FROST.pts, f = st.frost; if (!P || f < .02) return;
+  const B = XF.B, n = P.length / 6, fr = Math.floor(T * 10);
+  apI(B, 0, .5, 4, Q1); const d = V.dist(C.eye, Q1), step = d < 12 ? 1 : d < 30 ? 2 : 4;
+  for (let i = 0; i < n; i += step) {
+    const h = K.hh(i, 1.7); if (h > f) continue;
+    const o = i * 6; apI(B, P[o], P[o + 1], P[o + 2], Q1);
+    const g = K.hh(i, fr) > .992, h2 = K.hh(i, 5.3);
+    P_.odot(Q1[0], Q1[1], Q1[2], g || h2 > .5 ? 2 : 1, g ? HOT : WH, g ? 1 : (.65 + .35 * h2) * Math.min(1, (f - h) * 6));
+  }
+}
+function mechFX(T, st) {
+  frostFX(T, st); hydFX(T, st); cryoFX(T, st); fieldFX(T, st); sensorFX(T, st); mountFlow(T, st); straps(T, st);
+  // the muzzle cover's leaves seat with a flash; the elevation and train brakes as it is laid
+  const lb = lock(T, T_EL1);
+  if (lb > .02) for (const s of [-1, 1]) { const p = P_.RAM_E(s)[1]; apI(XF.C, p[0], p[1], p[2], Q1); P_.oglow(Q1[0], Q1[1], Q1[2], 16, LIME, .6 * lb); P_.odot(Q1[0], Q1[1], Q1[2], 2, HOT, lb); }
+}
+/* the rails charging: the rails light, rings run breech -> muzzle round the coils, arcs across the bore and out to
+   the rings, the particle ring ahead of the muzzle tightens */
 function drawCharge(T, st) {
   const q = st.chg; if (q < .01) return;
   const U = X.dir(XF.B, [1, 0, 0]), W = X.dir(XF.B, [0, 1, 0]);
-  const z0 = P_.RZ0, z1 = P_.SLV1 + st.ext, Lz = z1 - z0;
-  for (const y of [.18, -.18]) {
+  const z0 = P_.RZ0, z1 = P_.SLV1, Lz = z1 - z0;
+  for (const y of [.19, -.19]) {
     apI(XF.B, 0, y, z0, Q1); apI(XF.B, 0, y, z1, Q2);
     K.lineW(Q1[0], Q1[1], Q1[2], Q2[0], Q2[1], Q2[2], 1.3, 1, LIME, .25 + .6 * q, LIME, .05 + .06 * q, .015);
   }
   const sp = 3 + 16 * q;
-  for (let s = ((T - T_RAIL) * sp) % .5; s < Lz; s += .5) for (const y of [.18, -.18]) {
+  for (let s = ((T - T_RAIL) * sp) % .5; s < Lz; s += .5) for (const y of [.19, -.19]) {
     apI(XF.B, 0, y, z0 + s, Q1); K.dotW(Q1[0], Q1[1], Q1[2], 2, HOT, .5 + .5 * q);
   }
-  const nR = 5, rs = .22 + 1.1 * q;
+  const nR = 6, rs = .22 + 1.1 * q;
   for (let k = 0; k < nR; k++) {
     const f = ((T - T_RAIL) * rs + k / nR) % 1, z = z0 + .4 + f * (Lz - .2);
     apI(XF.B, 0, 0, z, Q1);
-    const a = Math.min(1, (.25 + .9 * q) * Math.sin(PI * f) * 1.3), r = 1.55 - .45 * q + .25 * f;
+    const a = Math.min(1, (.25 + .9 * q) * Math.sin(PI * f) * 1.3), r = 1.35 - .3 * q + .2 * f;
     K.ringW(Q1, U, W, r, 150, 2, LIME, a * .85, T * 3 + k);
     K.ringW(Q1, U, W, r * .93, 90, 1, HOT, a * .6, -T * 2 + k);
-    if (a > .3) { const fr = Math.floor(T * 30), h = K.hh(k * 7.7, fr), an = h * TAU; apI(XF.B, 0, h < .5 ? .18 : -.18, z, Q2); Q3[0] = Q1[0] + (U[0] * Math.cos(an) + W[0] * Math.sin(an)) * r; Q3[1] = Q1[1] + (U[1] * Math.cos(an) + W[1] * Math.sin(an)) * r; Q3[2] = Q1[2] + (U[2] * Math.cos(an) + W[2] * Math.sin(an)) * r; K.arcW(Q2, Q3, k * 13 + fr * .1, T, a, .35); }
+    if (a > .3) { const fr = Math.floor(T * 30), h = K.hh(k * 7.7, fr), an = h * TAU; apI(XF.B, 0, h < .5 ? .19 : -.19, z, Q2); Q3[0] = Q1[0] + (U[0] * Math.cos(an) + W[0] * Math.sin(an)) * r; Q3[1] = Q1[1] + (U[1] * Math.cos(an) + W[1] * Math.sin(an)) * r; Q3[2] = Q1[2] + (U[2] * Math.cos(an) + W[2] * Math.sin(an)) * r; K.arcW(Q2, Q3, k * 13 + fr * .1, T, a, .35); }
   }
   if (q > .5) {
     const per = .9 - .55 * q, ph = ((T - T_RAIL) / per) % 1;
     for (const z of P_.BANDS) {
       const f = (z - z0) / Lz, d = ph - f; if (d < 0 || d > .25) continue;
       const a = (1 - d / .25) * (q - .5) * 2;
-      apI(XF.B, 0, 0, z + .05, Q1); K.ringW(Q1, U, W, .78, 40, 2, HOT, a, 0);
+      apI(XF.B, 0, 0, z + .05, Q1); K.ringW(Q1, U, W, .72, 48, 2, HOT, a, 0);
     }
   }
   const fr = Math.floor(T * 30), n = Math.floor(2 + 10 * q);
   for (let i = 0; i < n; i++) {
-    const h1 = K.hh(i * 3.7, fr), h2 = K.hh(i * 5.3 + 1, fr), z = z0 + .3 + h1 * (Lz - .6), x = (h2 - .5) * .5;
-    apI(XF.B, x, .16, z, Q2); apI(XF.B, -x, -.16, z + (h2 - .5) * .5, Q3);
+    const h1 = K.hh(i * 3.7, fr), h2 = K.hh(i * 5.3 + 1, fr), z = z0 + .3 + h1 * (Lz - .6), x = (h2 - .5) * .22;
+    apI(XF.B, x, .14, z, Q2); apI(XF.B, -x, -.14, z + (h2 - .5) * .4, Q3);
     K.arcW(Q2, Q3, i + fr * .1, T, .6 + .5 * q, .7);
   }
   if (q > .2) for (let i = 0; i < 4; i++) {
     const h = K.hh(i * 9.1 + 4, fr), a = h * TAU, rr0 = .9 + 1.4 * K.hh(i * 2.3, fr);
-    apI(XF.E, 0, .18 * (i % 2 ? 1 : -1), P_.SLV1, Q2); apI(XF.E, Math.cos(a) * rr0, Math.sin(a) * rr0, P_.SLV1 + .3 + .8 * h, Q3);
+    apI(XF.E, 0, .19 * (i % 2 ? 1 : -1), P_.SLV1, Q2); apI(XF.E, Math.cos(a) * rr0, Math.sin(a) * rr0, P_.SLV1 + .3 + .8 * h, Q3);
     K.arcW(Q2, Q3, 40 + i + fr * .1, T, q, .45);
   }
   const rr = 3.4 - 2.1 * q;
@@ -864,8 +1053,9 @@ function drawCharge(T, st) {
   }
   apI(XF.E, 0, 0, P_.SLV1 + .2, Q1); K.glowW(Q1[0], Q1[1], Q1[2], 40 + 110 * q * q, LIME, .1 + .25 * q * q);
 }
-/* while the rails charge, a scan plane runs the barrel breech -> muzzle and draws its section where it cuts:
-   the rails top and bottom, the insulators between them, the containment round them, the sleeve over the front */
+/* while the rails charge, a scan plane runs the barrel breech -> muzzle and draws its section where it cuts: the
+   rails top and bottom, the sidewalls between them, the containment round them, the coils' winding packs in their
+   cryostats, the cold heads, the helium headers above and the coolant manifold below, the clamp collars */
 const TS0 = T_RAIL + .35, TS1 = T_RAIL + 3.1;
 function rectB(Tw, x0, y0, x1, y1, z, col, a, s) {
   apI(Tw, x0, y0, z, Q1); apI(Tw, x1, y0, z, Q2); K.lineW(Q1[0], Q1[1], Q1[2], Q2[0], Q2[1], Q2[2], 1, s, col, a);
@@ -873,32 +1063,32 @@ function rectB(Tw, x0, y0, x1, y1, z, col, a, s) {
   apI(Tw, x0, y1, z, Q2); K.lineW(Q1[0], Q1[1], Q1[2], Q2[0], Q2[1], Q2[2], 1, s, col, a);
   apI(Tw, x0, y0, z, Q1); K.lineW(Q2[0], Q2[1], Q2[2], Q1[0], Q1[1], Q1[2], 1, s, col, a);
 }
+function circB(Tw, x, y, z, r, n, col, a) { for (let k = 0; k < n; k++) { const b = k / n * TAU; apI(Tw, x + Math.cos(b) * r, y + Math.sin(b) * r, z, Q1); K.dotW(Q1[0], Q1[1], Q1[2], 1, col, a); } }
 function drawSlice(T, st) {
   if (T < TS0 || T > TS1) return;
   const u = E.ss(TS0, TS1, T), A = E.ss(TS0, TS0 + .25, T) * (1 - E.ss(TS1 - .25, TS1, T));
-  const z0 = P_.RZ0 + .05, z1 = P_.SLV1 + st.ext - .05, z = z0 + (z1 - z0) * u, B = XF.B;
-  // the plane: a faint lattice square to the bore, its rim lit
-  for (let i = -12; i <= 12; i++) for (let j = -12; j <= 12; j++) { if ((i + j) & 1) continue; apI(B, i * .08, j * .08, z, Q1); K.dotW(Q1[0], Q1[1], Q1[2], 1, LIME, .16 * A); }
-  rectB(B, -1, -1, 1, 1, z, LIME, .55 * A, 1);
-  // the section
+  const z0 = P_.RZ0 + .05, z1 = P_.SLV1 - .05, z = z0 + (z1 - z0) * u, B = XF.B;
+  for (let i = -14; i <= 14; i++) for (let j = -14; j <= 14; j++) { if ((i + j) & 1) continue; apI(B, i * .08, j * .08, z, Q1); K.dotW(Q1[0], Q1[1], Q1[2], 1, LIME, .16 * A); }
+  rectB(B, -1.15, -1.15, 1.15, 1.15, z, LIME, .55 * A, 1);
   for (const sg of [1, -1]) {
-    rectB(B, -.1, sg * .14, .1, sg * .22, z, HOT, A, 2);                                            // rail
-    if (z < P_.RZ1) rectB(B, -.4, sg * .22, .4, sg * .5, z, LIME, .9 * A, 1);                       // containment
-    rectB(B, sg * .095, -.14, sg * .165, .14, z, LIME, .75 * A, 1);                                 // insulator
+    rectB(B, -P_.RW, sg * P_.RY0, P_.RW, sg * P_.RY1, z, HOT, A, 2);                                   // rail
+    rectB(B, sg * P_.IX0, -P_.RY0, sg * P_.IX1, P_.RY0, z, LIME, .75 * A, 1);                          // sidewall
   }
-  if (z > P_.SLV0 + st.ext) { rectB(B, -.64, -.74, .64, .74, z, LIME, .9 * A, 1); rectB(B, -.58, -.62, .58, .62, z, LIME, .5 * A, 1); }   // sleeve
-  for (const zb of P_.BANDS) if (Math.abs(z - zb - .05) < .07) rectB(B, -.46, -.56, .46, .56, z, HOT, A, 2);
+  if (z > -1.72 && z < P_.RZ1) {
+    rectB(B, -P_.CX, -P_.CY, P_.CX, P_.CY, z, LIME, .9 * A, 1);                                        // containment
+    for (const sg of [1, -1]) { rectB(B, -.12, sg * .46, .12, sg * .5, z, LIME, .6 * A, 1); circB(B, sg * .12, -.52, z, .04, 16, WH, .9 * A); circB(B, sg * .17, .48, z, .026, 12, WH, .9 * A); }
+    const k = Math.max(0, Math.min(P_.NST - 1, Math.round((z - P_.STN[0]) / P_.DZS))), dz = z - P_.STN[k];
+    if (Math.abs(dz) < P_.KZ) for (const sg of [1, -1]) {
+      rectB(B, sg * P_.KX0, -P_.KY, sg * P_.KX1, P_.KY, z, LIME, .85 * A, 1);                          // cryostat
+      const hz = .14, ry = .25, legs = Math.abs(dz) < hz ? [ry] : Math.abs(dz) < hz + ry ? [Math.sqrt(Math.max(0, ry * ry - (Math.abs(dz) - hz) ** 2))] : [];
+      const v = st.coil[k];
+      for (const y of legs) for (const yy of [y, -y]) rectB(B, sg * (P_.CXC - .05), yy - .025, sg * (P_.CXC + .05), yy + .025, z, v > .5 ? HOT : LIME, A, 2);   // winding pack
+      if (Math.abs(dz + .14) < .09) circB(B, sg * .5, P_.KY + .15, z, .05, 14, WH, A);               // cold head
+    }
+  }
+  if (z > P_.SLV0) { rectB(B, -.5, -.5, .5, .5, z, LIME, .9 * A, 1); }                                 // muzzle block
+  for (const zb of P_.BANDS) if (Math.abs(z - zb - .05) < .07) rectB(B, -.56, -.46, .56, .46, z, HOT, A, 2);
   apI(B, 0, 0, z, Q1); K.glowW(Q1[0], Q1[1], Q1[2], 50, LIME, .3 * A);
-}
-/* vapour off the heat exchangers once the hatches are open and the loop is running */
-function drawVapor(T, st) {
-  const A = st.hatch * E.ss(15.5, 17.5, T) * (1 - E.ss(45, 48, T)) * .35; if (A < .01) return;
-  for (const s of [-1, 1]) for (let i = 0; i < 90; i++) {
-    const o = i * 5, life = 2.2 * VAPOR[o + 3], age = ((T / life) + VAPOR[o + 2]) % 1;
-    const y = .1 + age * 2.6, sw = .25 * age * Math.sin(VAPOR[o + 4] + T * .7);
-    apI(XF.M, s * (4.2 + VAPOR[o] + sw), y, VAPOR[o + 1], Q1);
-    K.dotW(Q1[0], Q1[1], Q1[2], 1, WH, A * (1 - age) * Math.min(1, age * 6));
-  }
 }
 /* the round through the bore (x0.01): it runs breech -> muzzle on the rails, the current behind it lighting the
    rails white-hot back to the breech, the armature's arc at its base, the field's rings round the barrel at it */
@@ -926,28 +1116,49 @@ function drawSea(T) {
 }
 
 /* ---------- tags and readout ---------- */
+const ZST = k => P_.STN[k];
+const nLocked = T => { let n = 0; for (let k = 0; k < P_.BANDS.length; k++) if (T > clampT(k) + .12) n++; return n; };
 const UT = [
-  ['MNT', 'Railgun mount', st => '', 'T', [0, 2.9, -1.6], 5.6, 8.8],
-  ['VNT', 'Heat exchangers ×2', st => '', 'M', [4.2, .3, 1.1], 5.4, 8.6],
-  ['RAIL', 'Rails', st => `${(P_.SLV1 + st.ext - P_.RZ0).toFixed(1)} m`, 'E', [.6, .74, 4.4], 9.8, 12.3],
-  ['CVR', 'Rail covers ×2', st => '', 'covS', [.6, .7, 1.4], 11.5, 13.2],
-  ['PMP', 'Coolant pumps ×2', st => '', 'W', [.62, 2.05, 41.3], 14.2, 16.0],
-  ['EXC', 'Exciter · end bell', st => '', 'XEXC', [0, .5, 1.3], 15.5, 17.2],
-  ['ROT', 'Rotor', st => '', 'XROT', [0, .8, .3], 16.3, 17.4],
-  ['ALT', 'Pulsed alternators ×4', st => `${Math.round(RPM * st.rate / 10) * 10} rpm`, 'W', [3.2, 3.9, 45.0], 18.7, 21.0],
-  ['CAP', 'Capacitor racks ×4', st => `${(1.2 * nCharged(ST_T)).toFixed(1)} MJ`, 'W', [-1.9, 6.05, 52.2], 20.2, 23.2],
-  ['PCU', 'Power conditioning ×5', st => '', 'W', [-1.84, 3.85, 55.35], 21.0, 23.2],
-  ['MAG', 'Magazine drum', st => '', 'W', [1.1, 2.3, 48.1], LD(0), LD(1.1)],
-  ['HST', 'Hoist', st => '', 'T', [.2, -3.2, P_.HZ], LD(.5), LD(1.6)],
-  ['PRB', 'Probe · inert', st => '', 'RND', [.12, 0, .55], T_XP + .5, T_XP + XH - .3],
-  ['SAB', 'Sabot ×3', st => '', 'RND', [.48, 0, 0], T_XP + .7, T_XP + XH - .3],
-  ['ARM', 'Armature', st => '', 'RND', [.1, -.14, -.86], T_XP + .9, T_XP + XH - .3],
-  ['BRC', 'Breech block', st => '', 'B', [.56, .64, -2.2], LD(.9), LD(2.6)],
-  ['CLP', 'Rail clamps ×11', st => '', 'B', [.46, .55, 3.2], LD(2.7), LD(4.2)],
-  ['RLS', 'Rails ×2 · copper', st => '', 'B', [.1, .22, 1.2], TS0 + .45, TS1 - .1],
-  ['INS', 'Insulators', st => '', 'B', [.165, -.08, 2.6], TS0 + .8, TS1 - .1],
-  ['CNT', 'Containment', st => '', 'B', [.4, .5, 3.8], TS0 + 1.15, TS1 - .1],
-  ['MZL', 'Muzzle', st => `${Math.round(100 * st.chg)} %`, 'E', [.7, .82, P_.SLV1], T_RAIL + 1.4, TF - .1],
+  ['MNT', 'Railgun mount', st => '12.7 m rails', 'T', [0, 3.3, -1.0], 4.15, 4.9],
+  ['HPU', 'Hydraulic power unit', st => `${Math.round(21 * st.acc)} MPa`, 'T', [1.85, 1.62, -3.9], 4.5, 6.1],
+  ['ACC', 'Accumulators ×3', st => '', 'T', [2.32, 1.5, -2.35], 4.8, 6.2],
+  ['VLV', 'Valve manifold · 4 spools', st => '', 'T', [1.6, .9, -2.0], 5.1, 6.2],
+  ['CRC', 'Cryocoolers ×24 · pulse tube', st => `${(40 - 20 * st.cool).toFixed(0)} K`, 'B', [.5, .78, ZST(4) - .14], 6.6, 8.6],
+  ['HEL', 'Helium lines', st => '', 'B', [.17, .5, ZST(5) + .3], 7.0, 8.4],
+  ['FRS', 'Frost', st => '', 'B', [.55, .5, ZST(5) - .14], 7.5, 8.6],
+  ['COIL', 'Superconducting coils ×24 · REBCO', st => `${(5 * st.field).toFixed(1)} T`, 'B', [.62, .25, ZST(7)], 9.1, 10.5],
+  ['CRY', 'Cryostats · vacuum', st => '20 K', 'B', [.62, -.3, ZST(9)], 9.5, 10.5],
+  ['CLMP', 'Preload clamps ×13', st => '', 'B', [.56, .46, P_.BANDS[10] + .05], 9.8, 10.6],
+  ['MZC', 'Muzzle cover', st => '', 'B', [.5, .5, P_.SLV1], 10.8, 11.8],
+  ['EOIR', 'Electro-optical / infrared director', st => 'TV · IR · laser', 'eoP', [0, .16, .2], 11.0, 13.2],
+  ['FCR', 'Fire-control radar · X band', st => st.fcScan > .5 ? 'search' : 'track', 'fcY', [0, .62, .1], 11.3, 13.4],
+  ['ELR', 'Elevation rams ×2', st => `${Math.round(st.el / DEG)}°`, 'C', [.9, -.4, 1.2], 12.4, 14.7],
+  ['TRD', 'Train drives ×2 · ring gear', st => `${Math.round(st.yaw / DEG)}°`, 'T', [2.0, .55, 1.15], 12.8, 14.7],
+  ['MVR', 'Muzzle velocity radar · Doppler', st => '', 'C', [0, 1.14, 2.86], 13.6, 15.0],
+  ['PMP', 'Coolant pump · brushless DC motor', st => `${Math.round(PUMP_RPM * st.pumpR / 10) * 10} rpm`, 'P0', [0, .45, .4], 17.0, 18.8],
+  ['STA', 'Stator · 12 wound teeth', st => '', 'P0', [-.2, -.08, .36], 17.4, 18.8],
+  ['PMR', 'Permanent-magnet rotor', st => '', 'P0', [.1, -.1, .5], 17.6, 18.8],
+  ['IMP', 'Impeller', st => '', 'P0', [.2, -.1, 1.22], 17.8, 18.8],
+  ['SEA', 'Coolant out to the keel heat exchangers', st => '', 'W', [0, 1.1, 40.95], 18.0, 19.0],
+  ['EXC', 'Exciter · end bell', st => '', 'XEXC', [0, .5, 1.3], 19.7, 21.4],
+  ['ROT', 'Rotor · 4 poles', st => '', 'XROT', [0, .8, .3], 20.5, 21.6],
+  ['ALT', 'Pulsed alternators ×4', st => `${Math.round(RPM * st.rate / 10) * 10} rpm`, 'W', [3.2, 3.9, 45.0], 23.0, 24.8],
+  ['CAP', 'Capacitor racks ×4 · 80 modules', st => `${2 * nCharged(ST_T)} MJ`, 'W', [-1.95, 3.6, 53.6], 24.6, 27.8],
+  ['PCU', 'Power conditioning ×5', st => '', 'W', [-1.84, 3.85, 55.35], 25.2, 27.8],
+  ['MAG', 'Magazine drum · 12 cells', st => '', 'W', [1.3, 3.0, 48.3], T_DRUM - .1, LD(.4)],
+  ['HST', 'Hoist', st => `${(st.hoistY - HOIST_B).toFixed(1)} m`, 'T', [.24, -2.4, P_.HZ], LD(.3), LD(1.55)],
+  ['PRB', 'Probe · long rod', st => '2.0 m', 'RND', [.05, 0, .8], T_XP + .5, T_XP + XH - .3],
+  ['SAB', 'Sabot ×3', st => '', 'RND', [.3, 0, 0], T_XP + .7, T_XP + XH - .3],
+  ['ARM', 'Armature', st => '', 'RND', [.1, -.14, -.72], T_XP + .9, T_XP + XH - .3],
+  ['TRY', 'Loading tray', st => '', 'tray', [.19, .1, .6], LD(1.62), LD(2.4)],
+  ['BRC', 'Breech block', st => '', 'B', [.46, .5, -2.7], LD(1.65), LD(3.3)],
+  ['RMR', 'Chain rammer · 2.4 m', st => '', 'C', [.17, .16, -4.9], LD(2.15), LD(3.0)],
+  ['CLP', 'Preload clamps ×13', st => `${nLocked(ST_T)}/13`, 'B', [.56, .46, P_.BANDS[3] + .05], LD(3.3), LD(4.0) + .4],
+  ['RLS', 'Rails ×2 · copper', st => '', 'B', [.1, .24, 1.2], TS0 + .45, TS1 - .1],
+  ['INS', 'Insulating sidewalls', st => '', 'B', [.2, -.08, 2.6], TS0 + .8, TS1 - .1],
+  ['CNT', 'Containment · composite', st => '', 'B', [.36, .3, 3.8], TS0 + 1.15, TS1 - .1],
+  ['BUS', 'Rail feed · bus straps', st => '4.2 MA peak', 'B', [.3, .3, -.6], T_RAIL + .3, T_RAIL + 2.4],
+  ['MZL', 'Muzzle', st => `${Math.round(100 * st.chg)} %`, 'E', [.5, .5, P_.SLV1], T_RAIL + 2.6, TF - .1],
 ].map(([id, lab, val, fr, at, t0, t1]) => ({ id, lab, val, fr, at, t0, t1, tg: K.mkTag() }));
 let ST_T = 0;
 const ro = $('ro'), kick = $('kick');
@@ -960,28 +1171,37 @@ function readout(T, st) {
   let l1, l2, rate = 1;
   const iq = SEG.k >= 0 ? INS[SEG.k] : null;
   if (iq) { const r = iq.mod.readout ? iq.mod.readout(SEG.u, CTX) : {}; l1 = r.l1 || ''; l2 = r.l2 || ''; rate = r.rate || 1; }
-  else if (T < 4.2 || T > 56.8 + SH) { l1 = 'DDG-51 · <b>on station</b>'; l2 = 'Railgun <b>stowed</b>'; }
-  else if (T < 12.6) {
-    l1 = 'Railgun · <b>deploying</b>';
-    l2 = T < 5.8 ? 'Hatches <b>opening</b>' : T < 9.4 ? `Train <b>${Math.round(st.yaw / DEG)}°</b> · elev <b>${Math.round(st.el / DEG)}°</b>` : T < 10.9 ? `Rails <b>${(P_.SLV1 + st.ext - P_.RZ0).toFixed(1)} m</b>` : 'Covers <b>open</b>';
-  } else if (T < 15.0) { l1 = 'Power · <b>coolant loop</b>'; l2 = T < 14.6 ? 'Valves <b>opening</b>' : 'Pumps <b>starting</b>'; }
-  else if (T < 18.5) { l1 = 'Pulsed alternator 3 · <b>opened</b>'; l2 = T < 15.9 ? 'End bell <b>drawn</b>' : T < 17.4 ? 'Rotor <b>drawn</b>' : 'End bell <b>closing</b>'; }
-  else if (T < T_BANK - .2) { l1 = 'Power · <b>pulsed alternators</b>'; l2 = `Rotors <b>${Math.round(RPM * st.rate / 10) * 10} rpm</b>`; }
-  else if (T < T_LD) { const n = nCharged(T); l1 = 'Capacitor racks · <b>charging</b>'; l2 = `Bank <b>${(1.2 * n).toFixed(1)} MJ</b> · ${n}/${NMOD}`; }
-  else if (T < T_RAIL) {
-    l1 = 'Loader · <b>ramming</b>';
-    l2 = T < LD(.45) ? 'Drum <b>indexing</b>' : T < LD(1.35) ? 'Hoist <b>up</b>' : T < T_XP + XH ? 'Round <b>check</b> · sabot · armature' : T < LD(1.85) ? 'Breech <b>open</b> · tray <b>in line</b>' : T < LD(2.6) ? 'Round <b>seated</b>' : 'Rail clamps <b>locking</b>';
+  else if (T < T_HPU || T > SX(56.8)) { l1 = 'DDG-51 · <b>on station</b>'; l2 = 'Railgun <b>stowed</b> · coils <b>40 K</b>'; }
+  else if (T < T_CRYO) { l1 = 'Railgun · <b>waking</b>'; l2 = `Hydraulics <b>${Math.round(21 * st.acc)} MPa</b> · accumulators ×3`; }
+  else if (T < T_CR1) {
+    rate = PREW.rate(T); l1 = 'Cryocoolers · <b>coils to 20 K</b>';
+    let n = 0; for (let k = 0; k < NST; k++) if (st.coil[k] > .98) n++;
+    l2 = T < T_EN ? `Coils <b>${(40 - 20 * st.cool).toFixed(1)} K</b> · helium <b>2.1 MPa</b>` : `Field <b>${(5 * st.field).toFixed(2)} T</b> · coils <b>${n}/${NST}</b>`;
   }
-  else if (T < T_REL) { l1 = 'Rails · <b>charging</b>'; l2 = `Charge <b>${Math.round(100 * st.chg)} %</b> · 32 MJ`; rate = simRate(T); }
+  else if (T < T_X) {
+    l1 = T < 12.0 ? 'Director · <b>acquiring</b>' : T < 12.6 ? 'Director <b>locked</b> · radar <b>search</b>' : 'Target <b>locked</b> · radar <b>track</b>';
+    l2 = T > T_EL1 ? `<b>Laid</b> · train <b>${Math.round(st.yaw / DEG)}°</b> · elev <b>${Math.round(st.el / DEG)}°</b>` : `Train <b>${Math.round(st.yaw / DEG)}°</b> · elev <b>${Math.round(st.el / DEG)}°</b>`;
+  }
+  else if (T < 17.0) { l1 = 'Power room · <b>coolant loop</b>'; l2 = T < 16.2 ? 'X-ray <b>opening</b>' : 'Valves <b>opening</b>'; }
+  else if (T < 18.8) { l1 = 'Coolant pumps · <b>brushless DC</b>'; l2 = `<b>${Math.round(PUMP_RPM * st.pumpR / 10) * 10} rpm</b> · <b>${Math.round(1500 * st.pumpR)} L/min</b> each`; }
+  else if (T < 22.6) { l1 = 'Pulsed alternator 3 · <b>opened</b>'; l2 = T < 20.1 ? 'End bell <b>drawn</b>' : T < 21.6 ? 'Rotor <b>drawn</b>' : 'End bell <b>closing</b>'; }
+  else if (T < T_BANK - .2) { l1 = 'Power · <b>pulsed alternators</b>'; l2 = `Rotors <b>${Math.round(RPM * st.rate / 10) * 10} rpm</b>`; }
+  else if (T < T_DRUM) { const n = nCharged(T); l1 = 'Capacitor racks · <b>charging</b>'; l2 = `Bank <b>${2 * n} MJ</b> · ${n}/${NMOD} modules`; }
+  else if (T < T_RAIL) {
+    l1 = 'Loader · <b>2 m round</b>';
+    l2 = T < T_LD ? 'Drum <b>indexing</b> · cell 01' : T < LD(.3) ? 'Cell 01 <b>latched</b>' : T < LD(1.5) ? `Hoist <b>${(st.hoistY - HOIST_B).toFixed(1)} m</b>` : T < T_XP + XH ? 'Round <b>check</b> · rod · sabot · armature'
+      : T < LD(2.2) ? 'Breech <b>open</b> · tray <b>in line</b>' : T < LD(2.65) ? `Ramming <b>${(P_.RAM_L * st.ram).toFixed(1)} m</b>` : T < LD(3.3) ? 'Round <b>seated</b> · breech <b>closing</b>' : `Clamps <b>${nLocked(T)}/13</b> locked`;
+  }
+  else if (T < T_REL) { l1 = 'Pulse power · <b>armed</b>'; l2 = `Bank <b>160 MJ</b> · field <b>${(5 * st.field).toFixed(1)} T</b> · <b>${Math.round(100 * st.chg)} %</b>`; rate = simRate(T); }
   else if (T < TF) { const tau = simAt(T) + T_BORE; rate = simRate(T); l1 = `Round · <b>in the bore</b>`; l2 = `<b>${Math.round(ACC * tau)} m/s</b> · <b>${(roundZ(T) - P_.SEAT_Z).toFixed(1)}</b> / ${LB_.toFixed(1)} m`; }
   else if (T < TBU) { const s = climbS(T); rate = climbRate(T); probeAt(s, Q4); l1 = `Probe · <b>alt ${km(Q4[1])} km</b>`; l2 = `<b>${Math.round(vOfS(s))} m/s</b> · range <b>${km(Math.hypot(Q4[0], Q4[2]))} km</b>`; }
   else if (T < T_LEAD) { l1 = `Probe · <b>burst · ${km(B_TOP[1])} km</b>`; l2 = `Charge <b>${Math.round(100 * E.ss(TBU, T_LEAD, T))} %</b> · range <b>${km(RANGE)} km</b>`; }
   else if (T < TB) { l1 = `Probe · <b>burst · ${km(B_TOP[1])} km</b>`; l2 = `Leader <b>${Math.round(100 * E.sat((T - T_LEAD) / LEAD))} %</b> · range <b>${km(RANGE)} km</b>`; }
   else if (T < 48.4 + SH - .6) { const n = SITE.V.filter(v => T - TB > v.tF + 2.4).length; l1 = `Scan · <b>${SITE.V.length} contacts</b>`; l2 = `Identified <b>${n}/${SITE.V.length}</b> · range <b>${km(RANGE)} km</b>`; }
-  else { l1 = 'Railgun · <b>stowing</b>'; l2 = T < 49.8 + SH ? 'Covers <b>closing</b>' : T < 51.3 + SH ? `Rails <b>${(P_.SLV1 + st.ext - P_.RZ0).toFixed(1)} m</b>` : T < 54.6 + SH ? `Train <b>${Math.round(st.yaw / DEG)}°</b> · elev <b>${Math.round(st.el / DEG)}°</b>` : 'Hatches <b>closing</b>'; }
-  const sim = T < TF - 1.6 ? TRNOW - TF_R : T < TBU ? simAt(T) : S1 + (T - TBU);
-  const rateTxt = rate > 1.08 ? `<span class="l">×${rate.toFixed(1)}</span>` : rate < .92 ? `<span class="l">×${rate < .1 ? rate.toFixed(2) : rate.toFixed(1)}</span>` : '×1';
-  const html = `${l1}<br>${l2}<br>${K.fmtClock(T > 48.4 + SH - .6 ? T - DUR0 - TF : sim)} · ${rateTxt}`;
+  else { l1 = 'Railgun · <b>stowing</b>'; l2 = T < SX(49.3) ? 'Coils <b>de-energising</b>' : T < SX(51.2) ? 'Director · radar <b>stowed</b>' : T < SX(54.3) ? `Train <b>${Math.round(st.yaw / DEG)}°</b> · elev <b>${Math.round(st.el / DEG)}°</b>` : 'Cover <b>closing</b>'; }
+  const sim = T < TF - 1.6 ? TRNOW - TF_R - (PREW(TF) - PREW(T) - (TF - T)) : T < TBU ? simAt(T) : S1 + (T - TBU);
+  const rateTxt = rate > 1.08 ? `<span class="l">×${rate < 9.5 ? rate.toFixed(1) : Math.round(rate)}</span>` : rate < .92 ? `<span class="l">×${rate < .1 ? rate.toFixed(2) : rate.toFixed(1)}</span>` : '×1';
+  const html = `${l1}<br>${l2}<br>${K.fmtClock(T > 48.4 + SH - .6 ? T - DUR0 - PREW(TF) : sim)} · ${rateTxt}`;
   if (html !== roTxt) { roTxt = html; ro.innerHTML = html; }
 }
 function unitTags(T, st) {
@@ -1045,7 +1265,7 @@ function render(TR, info) {
   if (window.RGK && RGK.drawBase) RGK.drawBase(T, CTX);                   // the heat sink under the hull (base time)
   if (iq && iq.mod.draw) { iq.mod.draw(sg.u, CTX); pf('insert'); }
   if (xr && near) { drawRoom(T, st, Ws); drawLoader(T, st, Ws); pf('room'); drawRoomFX(T, st, Ws); loaderFX(T, st, Ws); pf('roomfx'); }
-  if (near) { trunk(T, st); mechFX(T, st); drawVapor(T, st); }
+  if (near) mechFX(T, st);
   if (siteOn) { K.setLight(L_SITE); SITE.drawVehicles(T > TB - 1 ? tb : null); }
   drawCharge(T, st);
   if (near) { drawSlice(T, st); drawBore(T, st); drawSabot(T); }
@@ -1077,17 +1297,28 @@ const clack = () => { SFX.tone(900, 300, .06, 'square', .012); SFX.noise(.08, 30
 const whirr = (f0, f1, d) => () => { SFX.tone(f0, f1, d, 'sawtooth', .011); SFX.noise(d, 900, .7, .012, .3); };
 const S2 = t => t + SH;
 const cues = [
-  [4.3, () => SFX.noise(1.2, 700, .8, .03, .2)], [5.5, clunk], [5.0, () => SFX.tone(300, 180, .3, 'square', .01)], [5.9, clunk],
-  [5.8, whirr(90, 150, 3.2)], [6.6, whirr(110, 85, 2.8)], [9.4, clunk], [9.4, () => SFX.noise(1.6, 1400, .6, .02, .3)], [10.9, clunk],
-  [10.8, () => SFX.tone(260, 170, .5, 'square', .008)], [11.9, clunk], [11.1, () => SFX.tone(250, 160, .5, 'square', .008)], [12.2, clunk],
-  [12.8, () => SFX.tone(900, 2600, .9, 'sine', .012)], [13.9, whirr(300, 260, 1.2)], [14.6, () => SFX.tone(60, 180, 1.6, 'sawtooth', .01)],
-  [14.5, clack], [14.7, whirr(160, 220, .5)], [15.1, whirr(120, 140, .8)], [15.7, whirr(100, 120, .8)], [16.9, whirr(120, 100, .7)], [17.4, whirr(140, 120, .7)], [18.1, clunk], [18.4, clack],
-  [15.6, () => { SFX.tone(55, 420, 4.2, 'sawtooth', .016); SFX.tone(110, 840, 4.2, 'triangle', .012); }],
-  [19.6, () => { SFX.tone(420, 436, 5.6, 'sawtooth', .007); SFX.tone(840, 872, 5.6, 'triangle', .006); }],
+  // the mount wakes: the hydraulic pump, the accumulators charging
+  [T_HPU, () => { SFX.tone(40, 120, 1.0, 'sawtooth', .014); SFX.noise(1.4, 600, .7, .02, .4); }], [T_HPU + .3, () => SFX.tone(180, 420, 1.1, 'triangle', .008)], [T_HPU + 1.4, clack],
+  // the cryocoolers (x240): the compressors' hum, a tick as each coil reaches field
+  [T_CRYO - .1, () => { SFX.tone(52, 52, 4.2, 'sawtooth', .008); SFX.tone(104, 98, 4.2, 'triangle', .005); }], [T_CRYO + .2, () => SFX.noise(2.2, 4200, .5, .008, 1.5)],
+  ...Array.from({ length: 12 }, (_, k) => [enT(k) + .45, () => SFX.tone(560 + 70 * k, 560 + 70 * k, .05, 'square', .007)]),
+  [T_EN, () => SFX.tone(110, 330, 2.0, 'sine', .01)],
+  // the cover, the sensors, train and elevation, laid
+  [10.7, () => SFX.tone(300, 180, .3, 'square', .01)], [11.4, clunk], [10.8, whirr(260, 330, 1.1)], [12.0, () => { SFX.tone(1400, 1400, .07, 'square', .008); SFX.tone(1870, 1870, .07, 'square', .008); }],
+  [10.9, () => SFX.noise(1.6, 3000, .4, .008, .6)], [12.6, () => { SFX.tone(1200, 1200, .06, 'square', .008); SFX.tone(1600, 1600, .09, 'square', .008); }],
+  [T_TR, whirr(90, 150, 2.8)], [T_EL, whirr(110, 85, 2.8)], [T_EL, () => SFX.noise(2.6, 900, .6, .014, .5)], [T_EL1, clunk], [T_EL1 + .1, tick],
+  // the power room
+  [T_X, () => SFX.tone(900, 2600, .9, 'sine', .012)], [16.2, whirr(300, 260, 1.1)], [17.2, () => { SFX.tone(120, 980, 1.3, 'sine', .009); SFX.tone(240, 1960, 1.3, 'triangle', .004); }], [17.4, () => SFX.noise(1.6, 1200, .5, .01, .5)],
+  [18.7, clack], [18.9, whirr(160, 220, .5)], [19.3, whirr(120, 140, .8)], [19.9, whirr(100, 120, .8)], [21.1, whirr(120, 100, .7)], [21.6, whirr(140, 120, .7)], [22.3, clunk], [22.6, clack],
+  [19.8, () => { SFX.tone(55, 420, 4.2, 'sawtooth', .016); SFX.tone(110, 840, 4.2, 'triangle', .012); }],
+  [23.6, () => { SFX.tone(420, 436, 4.8, 'sawtooth', .007); SFX.tone(840, 872, 4.8, 'triangle', .006); }],
   ...[0, 1, 2, 3].map(r => [brkT(r) + .1, clack]),
   ...Array.from({ length: 10 }, (_, k) => [modT(k * 8) + .1, tick]),
-  [T_LD, whirr(200, 160, .5)], [LD(.5), clunk], [LD(.45), whirr(180, 420, .9)], [LD(.75), clack], [LD(1.2), clunk], [LD(1.8), clunk], [LD(1.85), whirr(300, 800, .35)], [LD(2.6), clunk],
-  ...Array.from({ length: 11 }, (_, k) => [clampT(k) + .12, tick]),
+  // the loader
+  [T_DRUM, whirr(200, 160, .5)], [T_DRUM + .5, clunk], [LD(.3), clack], [LD(.3), whirr(180, 420, 1.2)], [LD(1.5), clunk], [LD(1.6), clack],
+  [LD(1.6), () => SFX.tone(260, 160, .35, 'square', .008)], [LD(1.95), clunk], [LD(1.7), whirr(150, 230, .45)], [LD(2.15), clunk], [LD(2.2), whirr(300, 800, .45)], [LD(2.65), clunk],
+  [LD(2.65), whirr(700, 260, .35)], [LD(2.7), whirr(380, 160, .9)], [LD(3.0), whirr(230, 150, .35)], [LD(3.3), clunk],
+  ...Array.from({ length: 13 }, (_, k) => [clampT(k) + .12, tick]),
   [T_RAIL, () => SFX.tone(200, 2600, 5.0, 'sawtooth', .012)], [T_RAIL + 1, () => SFX.noise(4, 5000, .5, .016, 3)],
   [T_REL, () => { SFX.tone(48, 30, 2.6, 'sawtooth', .022); SFX.noise(2.4, 260, .7, .02, 1.6); }],
   [TF, () => { SFX.crack(); SFX.rumble(3, .3); SFX.tone(900, 60, 1.2, 'sawtooth', .02); }],
@@ -1095,8 +1326,9 @@ const cues = [
   ...TOUR_T.map(t => [TB + t, () => { SFX.crack(); SFX.tone(1200, 3000, .5, 'square', .006); }]),
   [TBU, () => SFX.crack()], [TB, () => { SFX.crack(); SFX.rumble(4, .16); }],
   [TB + .5, tick], [TB + 1.2, tick],
-  [S2(48.4), () => SFX.tone(260, 170, .5, 'square', .008)], [S2(49.4), clunk], [S2(49.8), () => SFX.noise(1.4, 1400, .6, .02, .3)], [S2(51.2), clunk],
-  [S2(51.3), whirr(150, 90, 3.0)], [S2(54.6), () => SFX.tone(300, 180, .3, 'square', .01)], [S2(55.5), () => SFX.noise(1.2, 700, .8, .03, .2)], [S2(56.8), clunk],
+  // the stow: the field down, the sensors stowed, train and elevation home, the cover, the pump stops
+  [S2(48.4), () => SFX.tone(420, 110, 1.4, 'sine', .009)], [S2(50.6), whirr(330, 260, 1.0)], [S2(51.3), whirr(150, 90, 3.0)], [S2(54.2), clunk],
+  [S2(54.3), () => SFX.tone(300, 180, .3, 'square', .01)], [S2(55.2), clunk], [S2(56.7), () => SFX.tone(120, 40, 1.0, 'sawtooth', .012)],
 ];
 /* the context the inserts draw with */
 function tagAt(tg, id, lab, val, p, a, age) {
