@@ -624,14 +624,14 @@ const occd = (x, y, z) => occOn && x >= 0 && y >= 0 && x < 1920 && y < 1080 && z
    S: model -> ship transform for clouds not in the ship frame (or null); zfix: test this ship z instead. */
 const XS = { zo: 99, zs: 99, ko: 1, ks: 1, box: [-11, 11, -1.5, 10.5, 40.4, 57.6], dim: 1 };
 const LIME = K.LIME, WH = K.WH;
-const XO = { a: 1, fade: 900, back: .1, lime: 0, keep: 1, md: 0, zfix: undefined, size: 1, S: null, tint: null, tk: 0, cut: null, px: 3.2, edge: .62, occ: true, bk: .33, lmin: 0, px0: 99, foc: 0 };
+const XO = { a: 1, fade: 900, back: .1, lime: 0, keep: 1, md: 0, zfix: undefined, size: 1, S: null, tint: null, tk: 0, cut: null, px: 3.2, edge: .62, occ: true, bk: .33, lmin: 0, px0: 99, foc: 0, amb: 0 };
 const XOO = Object.assign({}, XO);
 function xopt(o) { for (const k in XO) XOO[k] = o && o[k] !== undefined ? o[k] : XO[k]; return XOO; }
 function runX(P, i0, i1, sp, o, md, step) {
   const x = XMR, C = K.C, D = K.pb.d, F_ = C.fl, cx = C.cx + C.shake[0], cy = C.cy + C.shake[1], near = C.near, BW = 1920, BH = 1080;
   const a00 = x[0], a01 = x[1], a02 = x[2], a10 = x[3], a11 = x[4], a12 = x[5], a20 = x[6], a21 = x[7], a22 = x[8], b0 = x[9], b1 = x[10], b2 = x[11];
   const ex = x[12], ey = x[13], ez = x[14], l0 = x[15], l1 = x[16], l2 = x[17];
-  const A = o.a, fade = o.fade, kf = .55 * A / fade, kfar = .45 * A, back = o.back, keep = o.keep, big = o.size, omd = o.md, allThin = md === 2, eb = o.edge;
+  const A = o.a, fade = o.fade, kf = .55 * A / fade, kfar = .45 * A, back = o.back, keep = o.keep, big = o.size, omd = o.md, allThin = md === 2, eb = o.edge, amb = o.amb;
   const lm = o.lime, useOcc = occOn && o.occ, bkeep = o.bk;
   let cr = WH[0] + (LIME[0] - WH[0]) * lm, cg = WH[1] + (LIME[1] - WH[1]) * lm, cb = WH[2] + (LIME[2] - WH[2]) * lm;
   if (o.tint) { const tk = o.tk; cr += (o.tint[0] - cr) * tk; cg += (o.tint[1] - cg) * tk; cb += (o.tint[2] - cb) * tk; }
@@ -676,7 +676,7 @@ function runX(P, i0, i1, sp, o, md, step) {
       else {
         let fac = -dn / zc; if (fac > 1) fac = 1;
         const lam = nx * l0 + ny * l1 + nz * l2, w = 1 - fac;
-        b = .06 + .74 * (lam > 0 ? lam : 0) + .14 * fac + .34 * w * w * w; b *= .55 + .45 * b;
+        b = .06 + amb + .74 * (lam > 0 ? lam : 0) + .14 * fac + .34 * w * w * w; b *= .55 + .45 * b;
       }
     }
     b *= zc < fade ? A - kf * zc : kfar;
@@ -737,7 +737,7 @@ function drawX(ml, Tw, o) {
     if (!sphereIn(mx, my, mz, rad)) continue;
     const md = cellMode(oo, mx, my, mz, rad); if (md < 0) continue;
     const dx = mx - ex, dy = my - ey, dz = mz - ez, d = Math.max(.05, Math.sqrt(dx * dx + dy * dy + dz * dz) - rad * .7);
-    const pxe = foc > 0 && d > foc ? PX * Math.pow(Math.min(2.4, d / foc), 1.3) : PX;
+    const pxe = foc > 0 && d > foc ? PX * Math.pow(Math.min(1.7, d / foc), 1.2) : PX;
     let li = nl - 1; while (li > oo.lmin && ml.sp[li] * Fl / d > pxe * 1.3) li--;
     if (li === oo.lmin && li > 0 && ml.sp[li] * Fl / d > oo.px0) li--;
     const i0 = CH[q + 4 + li * 2], i1 = CH[q + 5 + li * 2];

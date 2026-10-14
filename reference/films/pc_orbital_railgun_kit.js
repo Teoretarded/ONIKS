@@ -627,13 +627,17 @@ const tagW = tg => { if (tg.w < 0) tg.w = tg.el.offsetWidth; return tg.w; };
 function setTag(tg, id, lab, val, cls, x, y, a) {
   const key = id + '|' + lab + '|' + val + '|' + (cls || '');
   if (tg.key !== key) { tg.key = key; tg.w = -1; tg.b.textContent = id; tg.b.style.display = id ? '' : 'none'; tg.i.textContent = lab; tg.v.textContent = val || ''; tg.v.style.display = val ? '' : 'none'; tg.el.className = 'tag ' + (cls || ''); }
-  const w = tagW(tg); if (x > 1896 - w) x = 1896 - w; if (x < 24) x = 24; if (y < 24) y = 24; if (y > 1040) y = 1040;
+  const w = tagW(tg);
+  // a tag pushed far off its anchor by the screen edge, or landing on the readout (top left), is hidden, not clamped
+  if (x > 1896 - w + 60 || x < -36 || y < -36 || y > 1100 || (x < 430 && y < 236)) a = 0;
+  if (x > 1896 - w) x = 1896 - w; if (x < 24) x = 24; if (y < 24) y = 24; if (y > 1040) y = 1040;
   tg.el.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
   tg.el.style.opacity = a === undefined ? '' : Math.max(0, Math.min(1, a)).toFixed(2);
   tg.on = true;
 }
 function beginTags() { for (const t of tagPool) t.on = false; }
-function endTags() { for (const t of tagPool) if (!t.on) { if (!t.el.classList.contains('off')) t.el.classList.add('off'); } }
+/* (the inline opacity setTag left would override .off: cleared, so a tag nobody set this frame really goes) */
+function endTags() { for (const t of tagPool) if (!t.on && !t.el.classList.contains('off')) { t.el.classList.add('off'); t.el.style.opacity = ''; } }
 const GLY = '·:+×/\\|-=', HOTC = 'ABCDEFGHKMNPRSTVXYZ0123456789/·-';
 function decode(s, k, t, seed) {
   if (k >= 1) return s;

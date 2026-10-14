@@ -32,7 +32,7 @@ const veil = $('veil');
 STAGE.menu({ el: menuEl, blurb: $('blurb'), axis: 'h', onEnter(i) { if (i === 4) { veil.classList.add('on'); setTimeout(() => veil.classList.remove('on'), 1900); return 2600; } return 1900; } });
 
 /* ---------- time ---------- */
-const DUR = 100;
+const DUR = 100;                     // the base take (the inserts below lengthen the film: DURF)
 const T_WAKE = 3.2, WAKE_DT = .036;
 const RADW = [[8.0, 14.4], [8.5, 14.9], [9.0, 15.4], [9.5, 15.9]], ARMW = [10.5, 19.5];
 const ALW = [16.2, 21.6], BEW = [18.8, 23.2], T_PWAVE = 22.6, T_FLOW = 24.2, CAPW = [25.2, 32.4];
@@ -48,6 +48,31 @@ const CHAPTERS = [
   { t: TF - .3, title: 'Fire' }, { t: TX + 2.2, title: 'Fall' }, { t: TI - .4, title: 'Strike' }, { t: T_RET, title: 'Return' },
 ];
 lap('timeline');
+
+/* ---------- inserted sequences (the same contract as Scan · Railgun's) ----------
+   Self-contained stretches spliced into the take, each with its own camera and drawing; the base timeline (base time
+   T, 0..DUR) holds at the splice while one plays and resumes after it. A module:
+     { len, build(ctx), chapters: [{t, title}], cues: [[u, fn]], cam(u, ctx) -> {eye, target, fov rad},
+       draw(u, ctx) (after the base scene), hideBase (true: the base scene is not drawn; the module draws its own world),
+       readout(u, ctx) -> {l1, l2, rate}, tags(u, ctx) }   (u: s into the insert)
+   ctx: { K, L (window.ORL), P (the platform), W (the world), FX, M3, V, R, X, E, LIME, HOT, WH, CORAL, T (film time),
+   u, Tb (base time held), Wt (platform -> world), PP (its pose or null), st, camOld (the base camera at the splice),
+   tagAt(tg, id, lab, val, worldPos, a, age), SAT, CE, RE, HIT, L_SUN } */
+const INS_SPEC = () => [{ at: (window.ORFAB && ORFAB.at) || 32.6, mod: window.ORFAB }];
+const INS = [];
+let DURF = DUR;
+const SEG = { k: -1, u: 0, T: 0 };
+function mapIn(TR) {
+  let off = 0;
+  for (let i = 0; i < INS.length; i++) {
+    const q = INS[i];
+    if (TR < q.r0) break;
+    if (TR < q.r0 + q.len) { SEG.k = i; SEG.u = TR - q.r0; SEG.T = q.at; return SEG; }
+    off += q.len;
+  }
+  SEG.k = -1; SEG.u = 0; SEG.T = TR - off; return SEG;
+}
+const mapOut = t => { let o = t; for (const q of INS) if (q.at <= t) o += q.len; return o; };
 
 /* ---------- the world ---------- */
 const RE = 6371000, CE = [0, -RE, 0], ALT = 380000, GD = 230000;
@@ -413,7 +438,13 @@ function camReturn(T) {
 }
 const OPEN_END = T => ({ eye: OPEN.eye, target: OPEN.target, fov: OPEN.fov * DEG });
 const DBGCAM = (() => { const q = STAGE.Q.get('cam'); return q ? q.split(',').map(Number) : null; })();
+/* the fall and the strike may be filmed by the FX module (FX.cam(T, FC) -> a shot, or null for the base camera) */
+let FC = null;
 function camAt(T) {
+  if (FX.cam && FC) { const c = FX.cam(T, FC); if (c) return c; }
+  return camBase(T);
+}
+function camBase(T) {
   if (DBGCAM) { const f = T > SLEW[1] && T < SLEW_B[0] ? PW1 : PW0; return { eye: f(DBGCAM.slice(0, 3)), target: f(DBGCAM.slice(3, 6)), fov: (DBGCAM[6] || 40) * DEG }; }
   if (T < 40.4) return PATH_A(T);
   if (T < 41.8) return K.blendShot(PATH_A(T), camSlew(T), kk(T, 40.4, 41.8));
@@ -522,11 +553,18 @@ const ro = $('ro'), kick = $('kick');
 let roTxt = '', kickTxt = '';
 const km = m => (m / 1000).toFixed(1);
 const fmtRate = r => r >= 1000 ? `<span class="l">×${Math.round(r / 1000)}k</span>` : r > 1.5 ? `<span class="l">×${Math.round(r)}</span>` : r < .5 ? `<span class="l">×1/${Math.round(1 / r)}</span>` : '×1';
-function readout(T) {
-  const ci = CHAPTERS.reduce((a, c, i) => c.t <= T ? i : a, 0);
-  const kt = `${String(ci + 1).padStart(2, '0')} · ${CHAPTERS[ci].title}`;
+function readout(T, TR) {
+  const ci = FCH.reduce((a, c, i) => c.t <= TR ? i : a, 0);
+  const kt = `${String(ci + 1).padStart(2, '0')} · ${FCH[ci].title}`;
   if (kt !== kickTxt) { kickTxt = kt; kick.textContent = kt; }
   let l1, l2;
+  const iq = SEG.k >= 0 ? INS[SEG.k] : null;
+  if (iq) {
+    const r = iq.mod.readout ? iq.mod.readout(SEG.u, CTX) : {};
+    const html = `${r.l1 || ''}<br>${r.l2 || ''}<br>${fmtRate(r.rate || 1)}`;
+    if (html !== roTxt) { roTxt = html; ro.innerHTML = html; }
+    return;
+  }
   if (T < T_WAKE) { l1 = `Orbit · <b>${km(ALT)} km</b> · <b>7.68 km/s</b>`; l2 = 'Platform <b>parked</b>'; }
   else if (T < RADW[0][0]) { l1 = `Orbit · <b>${km(ALT)} km</b>`; l2 = `Status <b>${Math.min(NL, Math.max(0, Math.floor((T - T_WAKE) / WAKE_DT)))}/${NL}</b>`; }
   else if (T < ALW[0]) { l1 = `Radiators · <b>${Math.round(ST.rad.reduce((a, b) => a + b, 0) / 4 * 100)} %</b>`; l2 = `Arm <b>${T < ARMW[0] ? 'stowed' : T < ARMW[1] ? 'unfolding' : 'free'}</b> · 52 m`; }
@@ -551,12 +589,14 @@ const PROF = STAGE.Q.has('prof') ? {} : null; let PT = 0;
 function prof(n) { const t = performance.now(); if (n) PROF[n] = (PROF[n] || 0) + t - PT; PT = t; }
 let NDOT = 0;
 const DO = { L: L_SUN, fx, occ: true, keep: 1, a: 1 }, DOX = { L: L_SUN, fx, occ: true, keep: 1, a: 1, lime: 0 };
-function render(T) {
+function render(TR) {
   if (PROF) prof(null);
   K.beginTags();
+  const sg = mapIn(TR), T = sg.T, iq = sg.k >= 0 ? INS[sg.k] : null;
   FXT = T;
   const Wt = platXf(T), st = stateAt(T);
-  FILM.apply(C, camAt(T));
+  if (iq) { CTX.T = TR; CTX.u = sg.u; CTX.Tb = T; CTX.Wt = Wt; CTX.st = st; CTX.PP = null; CTX.camOld = camAt(iq.at); }
+  FILM.apply(C, iq ? iq.mod.cam(sg.u, CTX) : camAt(T));
   const ax = T - TX, a = aOf(T);
   C.shake = ax > 0 && ax < 1.4 ? FILM.shake(T, 7 * (1 - ax / 1.4), 26) : T > TF && T < TX ? FILM.shake(T, 1.6, 34) : a > 0 && a < 3 ? FILM.shake(T, 9 * (1 - a / 3), 22) : [0, 0];
   const alt = V.dist(C.eye, CE) - RE;
@@ -569,19 +609,21 @@ function render(T) {
   W.LG.zref = Math.max(500, V.dist(C.eye, C.target));
   if (PROF) prof('setup');
   const PP = dPlat < 40000 ? P.pose(Wt, st) : null;
+  if (iq) CTX.PP = PP;
+  const hideBase = !!(iq && iq.mod.hideBase);
   if (PROF) prof('pose');
   const xr = kk(T, 32.4, 33.4) * (1 - kk(T, 40.0, 41.0)); XR = xr;
   if (PP && dPlat < 6000 && xr < .5) { P.occlude(PP); ORL.G.occ = true; } else ORL.G.occ = false;
   if (PROF) prof('occlude');
-  K.drawStars(W.STARS, .9 * (1 - ss(20000, 3000, alt)), T);
+  K.drawStars(W.STARS, .9 * (1 - ss(20000, 3000, alt)), TR);
   if (PROF) prof('stars');
   let n = 0;
-  n += W.drawGlobe(1, dens);
+  if (!hideBase) n += W.drawGlobe(1, dens);
   if (PROF) prof('globe');
-  W.drawLimb(1);
+  if (!hideBase) W.drawLimb(1);
   if (PROF) prof('limb');
   // the coast
-  if (alt < 120000) {
+  if (alt < 120000 && !hideBase) {
     const SH = W.SH;
     if (a > 0) { SH.x = HIT[0]; SH.z = HIT[2]; SH.r1 = 9000; SH.r0 = FX.shockR(a); SH.wd = 40 + 10 * a; SH.k = 1.2 * Math.exp(-a / 7) * (1 - ss(14, 20, a)); SH.col = a < 1.5 ? HOT : LIME; SH.glow = 1.8 * Math.exp(-a * 1.1); SH.gr = 1400; SH.hole = 40; SH.dark = .7; SH.dr = 260; }
     else SH.r1 = -1;
@@ -590,7 +632,7 @@ function render(T) {
     if (alt < 60000) W.drawVehicles(v => a > 0 && FX.shockR(a) > v.d);
   }
   if (PROF) prof('ground');
-  if (PP) {
+  if (PP && !hideBase) {
     DO.lc = chg(T) > .3 ? LIME : [255, 255, 255];
     DO.keep = 1 - .85 * xr; DO.a = 1 - .62 * xr; DOX.lime = .5 * xr; DOX.a = 1 + .35 * xr; DOX.lc = DO.lc;
     P.draw(PP, st, DO, DOX);
@@ -611,16 +653,17 @@ function render(T) {
     FX.strike(a, 1);
     for (const v of W.VEHS) { const ts = a - (v.d - 20) / 900; if (ts > 0 && ts < 8 && FX.shockR(a) > v.d) FX.debris(v.c, ts, 1); }
   }
+  if (iq && iq.mod.draw) iq.mod.draw(sg.u, CTX);
   if (PROF) prof('fx');
   octx.clearRect(0, 0, 1920, 1080);
   let fl = 0;
   if (ax > 0 && ax < .6) fl = .18 * Math.exp(-ax * 7);
   if (a >= 0) fl = Math.max(fl, FX.flashA(a));
   if (fl > .004) { octx.fillStyle = `rgba(240,246,226,${fl.toFixed(3)})`; octx.fillRect(0, 0, 1920, 1080); }
-  if (PP && dPlat < 400) partTags(T, PP);
-  markTags(T, Wt, PP);
+  if (iq) { if (iq.mod.tags) iq.mod.tags(sg.u, CTX); }
+  else { if (PP && dPlat < 400) partTags(T, PP); markTags(T, Wt, PP); }
   if (PROF) prof('overlay');
-  readout(T);
+  readout(T, TR);
   K.pb.blit();
   if (PROF) prof('blit');
   K.endTags();
@@ -648,7 +691,24 @@ const cues = [
   [TI, () => { SFX.crack(); SFX.rumble(7, .4); SFX.tone(70, 30, 4, 'sine', .08); }], [TI + 1.2, () => SFX.rumble(6, .25)],
   [T_RET, () => SFX.tone(300, 900, 3, 'sine', .01)], [94, clunk], [98.2, clunk],
 ];
+/* the inserts: built, placed, the chapters and cues mapped onto the film clock */
+function tagAt(tg, id, lab, val, p, a, age) {
+  if (a < .01 || !K.pj(p[0], p[1], p[2]) || !K.onS(-40)) return;
+  const x = K.PJ[0], y = K.PJ[1], dx = x > 1100 ? 54 : -54, lx = x + dx;
+  K.leader(x, y, lx, y - 50, '#C6F432', .8 * a); K.dot(x, y, 3, LIME[0], LIME[1], LIME[2], a);
+  const w = K.tagW(tg);
+  K.setTag(tg, id, K.decode(lab, E.sat(age / .7), FXT, id.length), val, 'lime sm', dx > 0 ? lx + 4 : lx - 4 - w, y - 62, a);
+}
+const CTX = { K, L: ORL, P, W, FX, M3, V, R, X, E, LIME, HOT, WH, CORAL: K.CORAL, T: 0, u: 0, Tb: 0, Wt: null, PP: null, st: null, camOld: null, tagAt, SAT, CE, RE, HIT, L_SUN, PW0, PW1, camAt: t => camAt(t) };
+for (const q of INS_SPEC()) if (q.mod && q.mod.len > 0) INS.push({ at: q.at, mod: q.mod, len: q.mod.len });
+INS.sort((a, b) => a.at - b.at);
+{ let off = 0; for (const q of INS) { q.r0 = q.at + off; off += q.len; } DURF = DUR + off; }
+for (const q of INS) if (q.mod.build) { const t0 = performance.now(); q.mod.build(CTX); lap(`insert ${q.at} (${(performance.now() - t0).toFixed(0)} ms build)`); }
+const FCH = CHAPTERS.map(c => ({ t: mapOut(c.t), title: c.title })).concat(...INS.map(q => (q.mod.chapters || []).map(c => ({ t: q.r0 + c.t, title: c.title })))).sort((a, b) => a.t - b.t);
+const FCUES = cues.map(([t, fn]) => [mapOut(t), fn]).concat(...INS.map(q => (q.mod.cues || []).map(([u, fn]) => [q.r0 + u, fn])));
+/* the fall and strike module's context (FX.cam) */
+FC = { TX, TI, T_RET, T_ON, TF, DUR, rodAt, sOf, altOf, vAt, aOf, tauOf, DIRP, SIDE, UPD, HIT, CE, RE, MZ0, SAT, GCAM, EY, PW0, PW1, platXf, FALL, camBase: t => camBase(t) };
 lap('load');
-FILM.run({ duration: DUR, chapters: CHAPTERS, render, cues });
-STAGE.dbg = () => ({ log: LOG, ndot: NDOT, prof: PROF, stats: P.stats(), by: ORL.G.by, TX, TI, TAU_END, L0, cam: T => camAt(T), W, FX, P, HIT, GCAM, PW0, PW1, platXf, C, rodAt, altOf, sOf, tauOf, aOf, FALL });
+FILM.run({ duration: DURF, chapters: FCH, render, cues: FCUES });
+STAGE.dbg = () => ({ INS: INS.map(q => ({ at: q.at, r0: q.r0, len: q.len })), DURF, mapOut, mapIn: t => Object.assign({}, mapIn(t)), log: LOG, ndot: NDOT, prof: PROF, stats: P.stats(), by: ORL.G.by, TX, TI, TAU_END, L0, cam: T => camAt(T), W, FX, P, HIT, GCAM, PW0, PW1, platXf, C, rodAt, altOf, sOf, tauOf, aOf, FALL });
 })();
