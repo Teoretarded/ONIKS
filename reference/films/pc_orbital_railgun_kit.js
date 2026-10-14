@@ -293,7 +293,7 @@ function runPts(P, i0, i1, sp, o) {
 const OW = 480, OH = 270, OZ = new Float32Array(OW * OH), OC = new Uint8Array(OW * OH);
 let OCC_ON = false;
 function occReset() { if (OCC_ON) { OZ.fill(1e9); OC.fill(0); } OCC_ON = false; }
-const NE = new Float64Array(16), NF = new Float64Array(16), NR = new Float64Array(16), NU = new Float64Array(16);
+const NE = new Float64Array(32), NF = new Float64Array(32), NR = new Float64Array(32), NU = new Float64Array(32);
 /* planes [[nx, ny, nz, d]...] (inside: n.p <= d), corners (world) for the screen bounds */
 function occPlanes(planes, corners) {
   let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;

@@ -26,7 +26,7 @@ const pow2 = x => { let p = 1; while (p < x && p < 65536) p <<= 1; return p; };
 
 let K = null, C = null, D = null, U32 = null, OZ = null, OC = null, OW = 480;
 /* per-frame globals */
-const G = { PXF: 3.4, PXL: 1.5, SEAMPX: 7, zref: 400, g0: 1.25, g1: .0004, gmin: .55, occ: false, dots: 0 };
+const G = { PXF: 3.4, PXL: 1.5, SEAMPX: 7, zref: 400, g0: 1.25, g1: .0004, gmin: .55, occ: false, dots: 0, clip: null };
 function frame(o) {
   K = window.ORK; C = K.C; D = K.pb.d; if (!U32 || U32.buffer !== D.buffer) U32 = new Uint32Array(D.buffer); OZ = K.OZ; OC = K.OC; OW = K.OW;
   Object.assign(G, o || {});
@@ -168,20 +168,44 @@ const shade = (lam, fac) => { const w = 1 - fac; let b = .07 + .72 * (lam > 0 ? 
 /* colour state for the current primitive */
 let CR = 0, CG = 0, CB = 0, CA = 1;
 const O = { a: 1, col: WH, lime: 0, fx: null, keep: 1, pxf: 1, back: .11, occ: false, lc: [255, 255, 255] };
+/* fx(ch, q) -> 0..1 lime, 1..2 lime to white-hot, < 0 dimmed, 10..11 heat (warm), 11..12 heat to white-hot */
+const HEAT = [255, 178, 112];
 function setCol(ch, q) {
-  const c = O.col; let l = O.lime, a = O.a, h = 0;
+  const c = O.col; let l = O.lime, a = O.a, h = 0, w = 0;
   if (ch && O.fx) {
     const k = O.fx(ch, q);
-    if (k < 0) a *= Math.max(0, 1 + k);
+    if (k >= 10) { w = Math.min(1, k - 10); if (k > 11) h = Math.min(1, k - 11); a *= 1 + .7 * w; }
+    else if (k < 0) a *= Math.max(0, 1 + k);
     else if (k > 0) { if (k > l) l = Math.min(1, k); if (k > 1) h = Math.min(1, k - 1); a *= 1 + .6 * Math.min(1, k); }
   }
   CR = c[0] + (LIME[0] - c[0]) * l; CG = c[1] + (LIME[1] - c[1]) * l; CB = c[2] + (LIME[2] - c[2]) * l;
+  if (w > 0) { CR += (HEAT[0] - CR) * w; CG += (HEAT[1] - CG) * w; CB += (HEAT[2] - CB) * w; }
   if (h > 0) { CR += (HOT[0] - CR) * h; CG += (HOT[1] - CG) * h; CB += (HOT[2] - CB) * h; }
   CA = a;
 }
 
-/* screen-space hairline between camera-space points, depth-faded; bri brightness */
+/* a slab clip (camera space): points with c0 < n.p < c1 are not drawn. G.clip = { on, n: [x, y, z], c0, c1 } set per
+   frame by the film; a body opts in with o.clip (an X-ray that slices a part open) */
+let PXLc = 1.5;
+let CL = false, CNX = 0, CNY = 0, CNZ = 0, CC0 = 0, CC1 = 0;
+function clipOn(o) {
+  const c = G.clip; CL = !!(o && o.clip && c && c.on);
+  if (CL) { CNX = c.n[0]; CNY = c.n[1]; CNZ = c.n[2]; CC0 = c.c0; CC1 = c.c1; }
+}
+const clipped = (x, y, z) => { const s = CNX * x + CNY * y + CNZ * z; return s > CC0 && s < CC1; };
+/* a hairline with the slab cut out of it */
 function lineC(ax, ay, az, bx, by, bz, bri, step) {
+  if (!CL) { lineC0(ax, ay, az, bx, by, bz, bri, step); return; }
+  const sa = CNX * ax + CNY * ay + CNZ * az, sb = CNX * bx + CNY * by + CNZ * bz;
+  if (Math.abs(sb - sa) < 1e-9) { if (!(sa > CC0 && sa < CC1)) lineC0(ax, ay, az, bx, by, bz, bri, step); return; }
+  const t0 = (CC0 - sa) / (sb - sa), t1 = (CC1 - sa) / (sb - sa), lo = Math.min(t0, t1), hi = Math.max(t0, t1);
+  if (lo >= 1 || hi <= 0) { lineC0(ax, ay, az, bx, by, bz, bri, step); return; }
+  const dx = bx - ax, dy = by - ay, dz = bz - az;
+  if (lo > 0) lineC0(ax, ay, az, ax + dx * lo, ay + dy * lo, az + dz * lo, bri, step);
+  if (hi < 1) lineC0(ax + dx * hi, ay + dy * hi, az + dz * hi, bx, by, bz, bri, step);
+}
+/* screen-space hairline between camera-space points, depth-faded; bri brightness */
+function lineC0(ax, ay, az, bx, by, bz, bri, step) {
   const n = C.near;
   if (az < n && bz < n) return;
   if (az < n) { const t = (n - az) / (bz - az); ax += (bx - ax) * t; ay += (by - ay) * t; az = n; }
@@ -219,7 +243,7 @@ function lineC(ax, ay, az, bx, by, bz, bri, step) {
 }
 /* a dot (camera space) */
 function dotC(x, y, z, s, r, g, b) {
-  if (z < C.near) return;
+  if (z < C.near || (CL && clipped(x, y, z))) return;
   const F = C.fl, sx = C.cx + C.shake[0] + F * x / z, sy = C.cy + C.shake[1] - F * y / z;
   if (sx < 0 || sy < 0 || sx >= BW || sy >= BH) return;
   if (G.occ && O.occ && K.occT(sx, sy, z)) return;
@@ -261,6 +285,12 @@ function tileK(i0, i1, j0, j1) {
   const z00 = Poz + Puz * i0 + Pvz * j0, z10 = Poz + Puz * i1 + Pvz * j0, z01 = Poz + Puz * i0 + Pvz * j1, z11 = Poz + Puz * i1 + Pvz * j1;
   const zmin = Math.min(z00, z10, z01, z11), zmax = Math.max(z00, z10, z01, z11);
   if (zmax < n) return;
+  if (CL) {
+    // the whole tile inside the clip slab: skip it
+    let all = true;
+    for (let k = 0; k < 4 && all; k++) { const ii = k & 1 ? i1 : i0, jj = k & 2 ? j1 : j0, sv = CNX * (Pox + Pux * ii + Pvx * jj) + CNY * (Poy + Puy * ii + Pvy * jj) + CNZ * (Poz + Puz * ii + Pvz * jj); if (!(sv > CC0 && sv < CC1)) all = false; }
+    if (all) return;
+  }
   const di = i1 - i0, dj = j1 - j0;
   if (zmin < n) { if (di * dj > 4) { split(i0, i1, j0, j1); return; } }
   else {
@@ -297,6 +327,7 @@ function tileK(i0, i1, j0, j1) {
       let a = (nu <= lu ? 1 : 2 - nu * ilu) * (nv <= lv ? 1 : 2 - nv * IP2[cv]);
       if (a < .06) continue;
       const x = bx + Pvx * (j + .5), y = by + Pvy * (j + .5), iz = F / z;
+      if (CL && clipped(x, y, z)) continue;
       const sx = cx + x * iz; if (sx < 0 || sx >= BW) continue;
       const sy = cy - y * iz; if (sy < 0 || sy >= BH) continue;
       if (occ) { const ot = ((sy | 0) >> 2) * OW + ((sx | 0) >> 2); if (OC[ot] && z > OZ[ot] * 1.015 + .06) continue; }
@@ -329,6 +360,7 @@ function latheK(Y) {
   const g0 = G.g0, g1 = G.g1, gm = G.gmin, occ = G.occ && O.occ, pxf0 = G.PXF * O.pxf;
   // a solid band (one with its own occluder) skips its far side while the occlusion is on: it is behind its front
   const br = Y.br, two = Y.two, back = O.back, keep = O.keep, ca = CA, solid = Y.solid && occ;
+  const nd = CL ? CNX * dx + CNY * dy + CNZ * dz : 0;
   let cnt = 0;
   for (const B of Y.bands) {
     const na = B.na, n0 = B.n0, step = NT / n0, kr = B.kr, ka = B.ka;
@@ -336,6 +368,7 @@ function latheK(Y) {
     for (let ia = 0; ia < na; ia++) {
       const u = (ia + .5) / na, s = B.s0 + (B.s1 - B.s0) * u, rr = B.r0 + (B.r1 - B.r0) * u;
       const ccx = ax + dx * s, ccy = ay + dy * s, ccz = az + dz * s;
+      if (CL) { const sc = CNX * ccx + CNY * ccy + CNZ * ccz, e = rr * Math.sqrt(Math.max(0, 1 - nd * nd)); if (sc - e > CC0 && sc + e < CC1) continue; }
       if (ccz + rr < n) continue;
       if (ccz > n + rr) { const sx = cx + F * ccx / ccz, sy = cy - F * ccy / ccz, pr = F * rr / (ccz - rr); if (sx + pr < 0 || sx - pr >= BW || sy + pr < 0 || sy - pr >= BH) continue; }
       const zr = Math.max(n, ccz - rr * .5);
@@ -378,6 +411,7 @@ function latheK(Y) {
         if (b < 0) { if (fac > 1) fac = 1; const w = 1 - fac; const q = .07 + .72 * (lam > 0 ? lam : 0) + .16 * fac + .34 * w * w * w; b = FACE * q * (.55 + .45 * q) * br; }
         const rx = ux * cs + wx * sn, ry = uy * cs + wy * sn, rz = uz * cs + wz * sn;
         const pz = ccz + rz * rr; if (pz < n) continue;
+        if (CL && clipped(ccx + rx * rr, ccy + ry * rr, pz)) continue;
         const iz = F / pz, sx = cx + (ccx + rx * rr) * iz; if (sx < 0 || sx >= BW) continue;
         const sy = cy - (ccy + ry * rr) * iz; if (sy < 0 || sy >= BH) continue;
         if (occ) { const ot = ((sy | 0) >> 2) * OW + ((sx | 0) >> 2); if (OC[ot] && pz > OZ[ot] * 1.015 + .06) continue; }
@@ -397,7 +431,7 @@ function tubeK(ax, ay, az, bx, by, bz, r, bri) {
   if (az < n && bz < n) return;
   const F = C.fl;
   const za = Math.max(n, az), zb = Math.max(n, bz), wa = r * F / za, wb = r * F / zb;
-  if (wa < 1.1 && wb < 1.1) { lineC(ax, ay, az, bx, by, bz, bri, G.PXL); return; }
+  if (wa < 1.1 && wb < 1.1) { lineC(ax, ay, az, bx, by, bz, bri, PXLc); return; }
   // clip at near
   if (az < n) { const t = (n - az) / (bz - az); ax += (bx - ax) * t; ay += (by - ay) * t; az = n; }
   else if (bz < n) { const t = (n - bz) / (az - bz); bx += (ax - bx) * t; by += (ay - by) * t; bz = n; }
@@ -405,8 +439,8 @@ function tubeK(ax, ay, az, bx, by, bz, r, bri) {
   const ex = bx - ax, ey = by - ay, ez = bz - az, mx = (ax + bx) * .5, my = (ay + by) * .5, mz = (az + bz) * .5;
   let px = ey * mz - ez * my, py = ez * mx - ex * mz, pz = ex * my - ey * mx;
   const pl = Math.sqrt(px * px + py * py + pz * pz) || 1; px /= pl; py /= pl; pz /= pl;
-  lineC(ax + px * r, ay + py * r, az + pz * r, bx + px * r, by + py * r, bz + pz * r, bri, G.PXL);
-  lineC(ax - px * r, ay - py * r, az - pz * r, bx - px * r, by - py * r, bz - pz * r, bri, G.PXL);
+  lineC(ax + px * r, ay + py * r, az + pz * r, bx + px * r, by + py * r, bz + pz * r, bri, PXLc);
+  lineC(ax - px * r, ay - py * r, az - pz * r, bx - px * r, by - py * r, bz - pz * r, bri, PXLc);
   const wm = Math.max(wa, wb);
   if (wm > 3.2) {
     // a lit lattice between the silhouettes: rows across the visible half
@@ -438,11 +472,12 @@ function ringK(Rg, j, bri, sp) {
   let fa = 1;
   if (sp > 0) { const px = sp * F / Math.max(n, czm); if (px < G.SEAMPX * .5) return; if (px < G.SEAMPX) fa = px / G.SEAMPX * 2 - 1; }
   if (rp < .6) { dotC(cxm, cym, czm, 1, CR * bri * CA * .7 * fa, CG * bri * CA * .7 * fa, CB * bri * CA * .7 * fa); return; }
-  const m = Math.min(NT, Math.max(8, pow2(TAU * rp / (G.PXL * 1.15)))), st = NT / m;
+  const m = Math.min(NT, Math.max(8, pow2(TAU * rp / (PXLc * 1.15)))), st = NT / m;
   const r_ = CR * bri * CA * fa, g_ = CG * bri * CA * fa, b_ = CB * bri * CA * fa, g0 = G.g0, g1 = G.g1, gm = G.gmin, occ = G.occ && O.occ;
   let cnt = 0;
   for (let k = 0; k < NT; k += st) {
     const cs = COS[k], sn = SIN[k], pz = czm + uz * cs + wz * sn; if (pz < n) continue;
+    if (CL && clipped(cxm + ux * cs + wx * sn, cym + uy * cs + wy * sn, pz)) continue;
     const sx = cx + F * (cxm + ux * cs + wx * sn) / pz; if (sx < 0 || sx >= BW) continue;
     const sy = cy - F * (cym + uy * cs + wy * sn) / pz; if (sy < 0 || sy >= BH) continue;
     if (occ) { const ot = ((sy | 0) >> 2) * OW + ((sx | 0) >> 2); if (OC[ot] && pz > OZ[ot] * 1.015 + .06) continue; }
@@ -472,13 +507,13 @@ function knotK(x, y, z, s, bri) {
     // the face's outline
     const e = bri * .9;
     const p0x = Pox, p0y = Poy, p0z = Poz, p1x = p0x + ux * s, p1y = p0y + uy * s, p1z = p0z + uz * s, p3x = p0x + vx * s, p3y = p0y + vy * s, p3z = p0z + vz * s;
-    lineC(p0x, p0y, p0z, p1x, p1y, p1z, e, G.PXL); lineC(p0x, p0y, p0z, p3x, p3y, p3z, e, G.PXL);
-    lineC(p1x, p1y, p1z, p1x + vx * s, p1y + vy * s, p1z + vz * s, e, G.PXL); lineC(p3x, p3y, p3z, p3x + ux * s, p3y + uy * s, p3z + uz * s, e, G.PXL);
+    lineC(p0x, p0y, p0z, p1x, p1y, p1z, e, PXLc); lineC(p0x, p0y, p0z, p3x, p3y, p3z, e, PXLc);
+    lineC(p1x, p1y, p1z, p1x + vx * s, p1y + vy * s, p1z + vz * s, e, PXLc); lineC(p3x, p3y, p3z, p3x + ux * s, p3y + uy * s, p3z + uz * s, e, PXLc);
   }
 }
 /* a status light: a hard dot, a small additive halo when lit (lv 0..1+) */
 function lightK(x, y, z, lv) {
-  if (z < C.near || lv < .02) return;
+  if (z < C.near || lv < .02 || (CL && clipped(x, y, z))) return;
   const F = C.fl, sx = C.cx + C.shake[0] + F * x / z, sy = C.cy + C.shake[1] - F * y / z;
   if (sx < 4 || sy < 4 || sx >= BW - 4 || sy >= BH - 4) return;
   if (G.occ && O.occ && K.occT(sx, sy, z)) return;
@@ -509,9 +544,10 @@ function draw(B, Tw, o) {
   O.a = o.a === undefined ? 1 : o.a; O.col = o.col || WH; O.lime = o.lime || 0; O.fx = o.fx || null; O.keep = o.keep === undefined ? 1 : o.keep;
   O.pxf = (o.pxf || 1) / Math.sqrt(Math.max(.12, O.keep)); O.back = o.back === undefined ? .11 : o.back; O.occ = !!o.occ; O.lc = o.lc || [255, 255, 255];
   if (O.a < .01) return;
+  clipOn(o); PXLc = G.PXL * (o.pxl || 1);
   prep(Tw, o.L || [0, 1, 0]);
   const lime0 = O.lime;
-  const L = B.L, T = B.T, P = B.P, N = B.N, Rg = B.Rg, F = C.fl, PXL = G.PXL, near = C.near, off = B.off, SEAMPX = G.SEAMPX;
+  const L = B.L, T = B.T, P = B.P, N = B.N, Rg = B.Rg, F = C.fl, PXL = PXLc, near = C.near, off = B.off, SEAMPX = G.SEAMPX;
   const b9 = XM[9], b10 = XM[10], b11 = XM[11];
   for (const c of B.CH) {
     // flex offset
@@ -520,6 +556,7 @@ function draw(B, Tw, o) {
     else { XM[9] = b9; XM[10] = b10; XM[11] = b11; }
     toCam(c.c[0], c.c[1], c.c[2]);
     if (!sphC(CAM[0], CAM[1], CAM[2], c.r)) continue;
+    if (CL) { const sc = CNX * CAM[0] + CNY * CAM[1] + CNZ * CAM[2]; if (sc - c.r > CC0 && sc + c.r < CC1) continue; }
     if (O.occ && G.occ && CAM[2] - c.r > near * 4 && chunkHidden(CAM[0], CAM[1], CAM[2], c.r)) continue;
     const lit = B.lit[c.i], cl = B.lime[c.i];
     if (cl > .01) { O.lime = Math.max(lime0, Math.min(1, cl)); } else O.lime = lime0;
@@ -586,5 +623,15 @@ function draw(B, Tw, o) {
 /* the world-space centre of a chunk (by tag) under Tw */
 function chunkW(B, tag, Tw) { const c = B.CH.find(c => c.tag === tag); return c ? X.ap(Tw, c.c) : null; }
 
-window.ORL = { Body, draw, frame, G, chunkW, gain, LIME, HOT, WH, lineC, shade, perp: M3perp };
+/* a world-space hairline in the colour of effect channel (ch, q) under the options o (cables, beams on moving parts) */
+const IDW = { R: [1, 0, 0, 0, 1, 0, 0, 0, 1], T: [0, 0, 0] };
+function lineW(a, b, br, ch, q, o) {
+  draw.opt(o); clipOn(o); PXLc = G.PXL * ((o && o.pxl) || 1); prep(IDW, (o && o.L) || [0, 1, 0]); setCol(ch || 0, q || 0);
+  toCam(a[0], a[1], a[2]); const ax = CAM[0], ay = CAM[1], az = CAM[2];
+  toCam(b[0], b[1], b[2]);
+  lineC(ax, ay, az, CAM[0], CAM[1], CAM[2], br, PXLc);
+}
+draw.opt = o => { o = o || {}; O.a = o.a === undefined ? 1 : o.a; O.col = o.col || WH; O.lime = o.lime || 0; O.fx = o.fx || null; O.keep = o.keep === undefined ? 1 : o.keep; O.pxf = (o.pxf || 1) / Math.sqrt(Math.max(.12, O.keep)); O.back = o.back === undefined ? .11 : o.back; O.occ = !!o.occ; O.lc = o.lc || [255, 255, 255]; };
+
+window.ORL = { Body, draw, frame, G, chunkW, gain, LIME, HOT, WH, HEAT, lineC, lineW, shade, perp: M3perp };
 })();
