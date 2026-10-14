@@ -26,6 +26,10 @@ PATH; call it from PowerShell by full path).
   Less liked: Survey · Battle, The Picture · Raid.
 - Realism matters to the user (they know how these systems look). Real sizes, speeds and timings; show any time
   compression on screen (x8); labels must be true and tracked boxes must fit their objects.
+- **Every film is also rendered to video for YouTube** (from 2026-10-14): 1440p, 60 fps, MP4, at the best quality
+  possible. That means the densest dots, no visible level-of-detail pops (things may only vanish when off screen),
+  and none of the live-playback shortcuts. Render every new or changed film. Length is never cut to save time: the
+  user said "don't trim it".
 
 ## Layout
 
