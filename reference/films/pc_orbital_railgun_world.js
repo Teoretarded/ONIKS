@@ -5,7 +5,10 @@
    strike digs (the land lattice deformed into a bowl with a rim and ejecta rays, CRA.a set by the FX module); a
    forest round the site (dot-model trees, scorched, lit by the passing shock, stripped, thrown and laid flat by it).
    The ground camera's patch sits round G2, where the FX module films the strike from the forest (OPT.gcam is kept
-   for the film but no longer places a patch).
+   for the film but no longer places a patch); round it the exact ground, a hero stand of full trees, a dense forest
+   floor (with the flash's trunk shadows) and, for the slow-motion beat (BEAT), the front's wall of dust. GOPT is set
+   by the FX module each frame (load sharing, the haze of dust round the ground camera, the land lattice thinned
+   under the dense floor).
    World frame: metres, the site's plateau at the origin, +Y up, +Z inland (north), the sea to the south; the Earth's
    centre at (0, -RE, 0); far points drop under the curve. Everything is a pure function of the times passed in. */
 window.ORW = function (K, OPT) {
@@ -110,7 +113,8 @@ const CRO = [0, 1, 0];
    strip from (sx, sz) to the disc, half width sw, strength k */
 const CSH = { k: 0, x: 0, z: 0, r: 0, sx: 0, sz: 0, sw: 0 };
 /* load sharing set by the FX module while the strike fills the frame: a coarser ground, a smaller forest budget */
-const GOPT = { pxm: 1, fbud: 1 };
+const GOPT = { pxm: 1, fbud: 1, hz: 1, hk: 0 };     // hz: the air's haze x (dust round the ground camera); hk: the land lattice
+                                                   // thinned under the dense forest floor in the beat's view (GH: x, z, r)
 const CR_OUT = CRA.R * 8;
 /* radial tables (0.5 m steps): the height offset, the slope, 1 / sqrt(1 + slope^2), the slope light's weight, and
    exp(-(u-1)/2.4); per angle: the ray strength and exp(-(u-1)/L) is taken from the ray length table at run time */
@@ -181,7 +185,7 @@ function drawPatch(Pa, vis, pxf, lit) {
   const Q = shPrep(), sh = Q.on, rA2 = Q.rA2, hx = Q.x, hz = Q.z;
   const crA = CRA.a, crG = craterG(crA), crOn = crG > 0, crx = CRA.x, crz = CRA.z, crR2 = CR_OUT * CR_OUT;
   CR_HOT = crOn ? 1.25 * Math.exp(-crA / 70) : 0;
-  const csk = CSH.k, csx = CSH.x, csz = CSH.z, csr = CSH.r, csr2 = (csr * 1.3) * (csr * 1.3), cssx = CSH.sx, cssz = CSH.sz, csdx = CSH.x - CSH.sx, csdz = CSH.z - CSH.sz, csl2 = csdx * csdx + csdz * csdz + 1e-6, csw = CSH.sw;
+  const hk = GOPT.hk, csk = CSH.k, csx = CSH.x, csz = CSH.z, csr = CSH.r, csr2 = (csr * 1.3) * (csr * 1.3), cssx = CSH.sx, cssz = CSH.sz, csdx = CSH.x - CSH.sx, csdz = CSH.z - CSH.sz, csl2 = csdx * csdx + csdz * csdz + 1e-6, csw = CSH.sw;
   // blocks of 32 cells, split into quarters (to 4 cells) while their depth range is large, each piece at its own step
   const sub = (i0, j0, n, lo, hi) => {
     const ax = x0 + i0 * cell, az = z0 + j0 * cell, ext = n * cell;
@@ -234,6 +238,7 @@ function drawPatch(Pa, vis, pxf, lit) {
           if (t > 0 && t < 1) { const ox = px - csdx * t, oz = pz - csdz * t, dd = Math.sqrt(ox * ox + oz * oz); if (dd < csw * 1.4) { const s2 = dd < csw ? .8 : .8 * (1 - (dd - csw) / (csw * .4)); if (s2 > s_) s_ = s2; } }
           if (s_ > 0) b *= 1 - csk * s_;
         }
+        if (hk > 0) { const qx = x - GH[0], qz = z - GH[1], q2 = qx * qx + qz * qz; if (q2 < GH[3]) { const q = Math.sqrt(q2), k = hk * (q < GH[2] ? 1 : 1 - (q - GH[2]) / (GH[4] - GH[2])); b *= 1 - k; } }
         if (crh > .02) { const hb = crh * a * hv * 1.1; if (b < hb) b = hb; const kk = crh > 1 ? 1 : crh; cr += (FIRE_[0] - cr) * kk; cg += (FIRE_[1] - cg) * kk; cb += (FIRE_[2] - cb) * kk; if (crh > .5) { const k2 = (crh - .5) * 2; cr += (HOT[0] - cr) * k2; cg += (HOT[1] - cg) * k2; cb += (HOT[2] - cb) * k2; } }
         if (b < .015) continue;
         if (b > 1) b = 1;
@@ -253,7 +258,7 @@ function drawPatch(Pa, vis, pxf, lit) {
 const LG = { zref: 2000 };
 /* air haze near the ground: 1 / (1 + (d / H)^2), H from 3.8 km for a camera on the ground (a soft horizon, not a bar of
    piled-up far dots) to 7 km by 1.5 km up, then growing with the height */
-function hazeK() { const e = C.eye, alt = Math.max(0, Math.hypot(e[0], e[1] + RE, e[2]) - RE); return 1 / (3800 + 3200 * E.ss(0, 1500, alt) + alt * 5.5); }
+function hazeK() { const e = C.eye, alt = Math.max(0, Math.hypot(e[0], e[1] + RE, e[2]) - RE); return GOPT.hz / (3800 + 3200 * E.ss(0, 1500, alt) + alt * 5.5); }
 
 /* ---------------- the sea: a flat lattice (curved), waves as a brightness ripple ---------------- */
 function makeSea(x0, z0, cell, nx, nz, skip, bmul) {
@@ -481,7 +486,17 @@ const HIT = [2, 0, 13]; HIT[1] = ground(HIT[0], HIT[2]);
 CRA.x = HIT[0]; CRA.z = HIT[2];
 /* the ground camera's clearing (the FX module films the strike from here) */
 const G2 = (() => { const d = V.norm([-.55, 0, .83]), x = HIT[0] + d[0] * 1500, z = HIT[2] + d[2] * 1500; return [x, ground(x, z) - drop(x, z), z]; })();
-const HERO_R = 150;                                   // the hero stand round the ground camera (full tree models)
+const HERO_R = 62;                                    // the hero stand round the ground camera (full tree models)
+/* the slow-motion beat's camera (the FX module): 26 m nearer the strike than G2 and 5 m up, looking 62 deg off the
+   strike on the side away from the sun (the stand lit from behind the lens, the fireball at the frame's edge); the
+   front crosses its stand in the middle of the beat. Azimuths in the x-z plane (atan2(z, x)) */
+const BEAT = (() => {
+  const hx = HIT[0] - G2[0], hz = HIT[2] - G2[2], l = Math.hypot(hx, hz), h = [hx / l, hz / l];
+  let p = [-h[1], h[0]]; if (p[0] * SUN[0] + p[1] * SUN[2] > 0) p = [h[1], -h[0]];
+  const k = 62 * DEG, L = [Math.cos(k) * h[0] + Math.sin(k) * p[0], Math.cos(k) * h[1] + Math.sin(k) * p[1]];
+  const cx = G2[0] + h[0] * 26, cz = G2[2] + h[1] * 26;
+  return { toHit: Math.atan2(h[1], h[0]), az: Math.atan2(L[1], L[0]), side: Math.atan2(p[1], p[0]), cam: [cx, ground(cx, cz) - drop(cx, cz) + 5, cz] };
+})();
 const SPAN = 15000;
 const GC = OPT.gcam || [2000, 0, 6200];
 /* nested patches with feathered borders: inside its band a finer patch fades out toward its edge while the coarser
@@ -504,7 +519,9 @@ const PM = makePatch(R_M[0], R_M[1], R_M[2], R_M[3], R_M[3], (x, z) => deep(x, z
 lapW('mid patch');
 const PI_ = makePatch(R_I[0], R_I[1], R_I[2], R_I[3], R_I[3], null, null, (x, z) => wIn_(x, z, R_I));
 lapW('impact patch');
-const PG_ = makePatch(R_G[0], R_G[1], R_G[2], R_G[3], R_G[3], null, interpH(PM), (x, z) => wIn_(x, z, R_G));
+/* round the ground camera the exact ground (the stand, the floor and the lens stand on it), blended into the coarse one */
+const IPM = interpH(PM);
+const PG_ = makePatch(R_G[0], R_G[1], R_G[2], R_G[3], R_G[3], null, (x, z, cz) => { const q = Math.hypot(x - G2[0], z - G2[2]); if (q > 420) return IPM(x, z, cz); const g = ground(x, z); return q < 300 ? g : E.mix(g, IPM(x, z, cz), E.ss(300, 420, q)); }, (x, z) => wIn_(x, z, R_G));
 lapW('camera patch');
 const SO = makeSea(-OUTER, -OUTER, 40, Math.round(2 * OUTER / 40), Math.round(2 * OUTER / 40), (x, z) => deep(x, z, R_R), (x, z) => outerFade(x, z) * under(x, z, [R_R]));
 const SR = makeSea(R_R[0], R_R[1], R_R[2], R_R[3], R_R[3], (x, z) => deep(x, z, R_M), (x, z) => wIn_(x, z, R_R) * under(x, z, [R_M]));
@@ -631,6 +648,7 @@ function setShock(arrive, shockR) {
   ARR_ = arrive; if (shockR) SHR = shockR;
   for (let i = 0; i < FOR.n; i++) FOR.AH[i] = arrive(FOR.D[i]);
   for (const h of HERO) { h.AH = arrive(h.d); h.vf = 8 / Math.max(1e-4, arrive(h.d + 4) - arrive(h.d - 4)); }
+  for (let i = 0; i < NFLR; i++) FLR_AH[i] = arrive(FLR[i * FS + 3]);
 }
 const FBUDGET = 75000;
 const treeN = hpx => { if (hpx < 6) return .06 * hpx * hpx; const q = hpx - 6, n = 2.16 + 1.5 * q + .01 * q * q; return n < NTP ? n : NTP; };
@@ -684,7 +702,7 @@ function drawTree(i, n, a, T, vis, HZ, scanC) {
   const base = (.6 + .25 * rn) * vis, tb = F_.K[i] * NTP * TPS;
   // light from the strike: the flash (scorching the side facing it), the shock front passing (a scan-like wave), embers
   const fl = a > 0 ? Math.exp(-a * 1.5) / (1 + (d / 700) * (d / 700)) * 1.6 : 0;
-  const scan = tau > 0 && tau < .45 ? 1 - tau / .45 : 0;
+  const scan = tau > 0 && tau < .1 ? 1 - tau / .1 : 0;
   const char = a > 0 ? (1 - E.ss(250, 1350, d)) * E.ss(0, 2.5, a) * .55 : 0;
   const burn = tau > 0 && d < 700 && a < 70 ? (1 - d / 700) * (1 - E.ss(30, 70, a)) : 0, frm = Math.floor(T * 14);
   const keepN = strip > 0 ? n * (1 - strip) : n, nI = Math.ceil(n);
@@ -731,7 +749,7 @@ function farTree(i, a, vis, HZ, scanC) {
     b *= 1 - (1 - E.ss(250, 1350, d)) * E.ss(0, 2.5, a) * .55;
     const fl = Math.exp(-a * 1.5) / (1 + (d / 700) * (d / 700)) * 1.1;
     if (fl > .03) { const k = fl > 1 ? 1 : fl; if (b < k) b = k; cr += (FIRE_[0] - cr) * k; cg += (FIRE_[1] - cg) * k; cb += (FIRE_[2] - cb) * k; }
-    if (tau > 0 && tau < .45) { const k = (1 - tau / .45) * (1 - tau / .45); if (b < .95 * k) b = .95 * k; cr += (scanC[0] - cr) * k; cg += (scanC[1] - cg) * k; cb += (scanC[2] - cb) * k; }
+    if (tau > 0 && tau < .1) { const k = (1 - tau / .1) * (1 - tau / .1); if (b < .95 * k) b = .95 * k; cr += (scanC[0] - cr) * k; cg += (scanC[1] - cg) * k; cb += (scanC[2] - cb) * k; }
   }
   const hq = zc * HZ; b /= 1 + hq * hq; if (b < .02) return; if (b > 1) b = 1;
   const p = (sy | 0) * BW + (sx | 0), G_ = cg * b, pk = 0xff000000 | ((cb * b) << 16) | (G_ << 8) | (cr * b);
@@ -795,7 +813,9 @@ function drawForest(a, T, vis) {
 }
 
 /* ---------------- the hero stand: full tree models round the ground camera ----------------
-   About 50 trees within HERO_R of G2 (where the FX module films the strike from the forest floor), each a dense dot
+   56 trees within HERO_R of G2 (where the FX module films the strike from the forest floor): 34 framed for the
+   slow-motion beat's camera (BEAT: 12 placed by hand, near ones left and right, a middle ground, a back row), 10 on the
+   strike's side (a lane left open toward it), the rest round the ring; the far forest starts at HERO_R. Each a dense dot
    model from one of four templates (two conifers: bark on a tapered trunk with a root flare, whorls of drooping limbs
    carrying needle clumps; two broadleaves: a trunk forking into limbs and sub-limbs with leaf clumps), 6-11k points,
    shuffled within each kind so any prefix is an even subset (the count follows the size on screen). The strike tears
@@ -803,7 +823,9 @@ function drawForest(a, T, vis) {
    the shock front sweeps through each tree point by point (a lime layer); the leaves strip and stream out in the
    wind; limbs break off and tumble away; the trunk bends, then snaps (the top slammed down flat away from the strike,
    its butt dragged downwind, a splintered stump left) or the root plate tears out and the whole tree goes over;
-   litter and dust lift off the forest floor behind the front. */
+   litter and dust lift off the forest floor behind the front. A frame draws at most HBUDGET points of the stand (the
+   trees big on screen keep their share, the small ones thin first, their dots brighter to make up); the near trees
+   take a warm rim light from the fireball on the strike's side. */
 const HS = 8;      // template point stride: x y z (unit height), nx ny nz, group (-1 trunk), hash / along
 function heroTpl(kind, seed) {
   const r = rng(seed), TRK = [], WOOD = [], LEAF = [], G = [];   // G: per group [attach y, length]
@@ -860,21 +882,30 @@ function heroTpl(kind, seed) {
     }
   }
   const shuf = A => { const n = A.length / HS, O = new Float32Array(A.length), idx = [...Array(n).keys()]; for (let i = n - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)), t = idx[i]; idx[i] = idx[j]; idx[j] = t; } for (let i = 0; i < n; i++) for (let q = 0; q < HS; q++) O[i * HS + q] = A[idx[i] * HS + q]; return O; };
-  return { kind, con, TRK: shuf(TRK), WOOD: shuf(WOOD), LEAF: shuf(LEAF), G: new Float32Array(G), nG: G.length / 2, birch: kind === 3 };
+  return { kind, con, r0, TRK: shuf(TRK), WOOD: shuf(WOOD), LEAF: shuf(LEAF), G: new Float32Array(G), nG: G.length / 2, birch: kind === 3 };
 }
 const HTPL = [heroTpl(0, 901), heroTpl(1, 902), heroTpl(2, 903), heroTpl(3, 904)];
+for (const t of HTPL) t.np = (t.TRK.length + t.WOOD.length + t.LEAF.length) / HS;
+const HBUDGET = 250000;       // the stand's points a frame
 const HERO = (() => {
-  const r = rng(9090), L = [], toHit = Math.atan2(HIT[2] - G2[2], HIT[0] - G2[0]);
-  for (let tries = 0; L.length < 54 && tries < 8000; tries++) {
-    const wide = r() > .72, ang = toHit + (r() - .5) * (wide ? TAU : 1.75), d = 6 + Math.pow(r(), .75) * (HERO_R - 10);
-    const x = G2[0] + Math.cos(ang) * d, z = G2[2] + Math.sin(ang) * d;
-    const da = Math.abs(((ang - toHit + 3 * PI) % TAU) - PI); if (d < 60 && da < .1 + 1.2 / d) continue;     // a lane open toward the strike
-    let ok = true; for (const q of L) if (Math.hypot(q.x - x, q.z - z) < 6 + .045 * d) { ok = false; break; } if (!ok) continue;
+  const r = rng(9090), L = [], toHit = BEAT.toHit, adiff = (a, b) => Math.abs(((a - b + 3 * PI) % TAU) - PI);
+  // the beat's frame first (key trees by hand: near ones left and right, a middle ground, a back row), then the
+  // strike's side (a lane open toward it), then the rest of the ring
+  const KEY = [[-24, 14], [19, 17], [-6, 22], [36, 24], [-38, 27], [7, 31], [-19, 36], [26, 39], [-33, 45], [44, 47], [-4, 49], [15, 56]];
+  const place = (ang, d, near, o) => {
+    o = o || G2; const x = o[0] + Math.cos(ang) * d, z = o[2] + Math.sin(ang) * d; if (Math.hypot(x - G2[0], z - G2[2]) > HERO_R + 4) return false;
+    if (Math.hypot(x - BEAT.cam[0], z - BEAT.cam[2]) < 7) return false;
+    for (const q of L) if (Math.hypot(q.x - x, q.z - z) < (near ? 4.5 : 5.5) + .05 * d) return false;
     const con = noise(x / 120, z / 120, 8.1) + .25 > 0, kind = con ? (r() < .5 ? 0 : 1) : (r() < .6 ? 2 : 3);
-    const H = (con ? 18 + 8 * r() : 14 + 7 * r()) * (d < 12 ? .9 : 1), dh = Math.hypot(x - HIT[0], z - HIT[2]);
+    const H = (con ? 19 + 8 * r() : 15 + 7 * r()) * (d < 12 ? .92 : 1), dh = Math.hypot(x - HIT[0], z - HIT[2]);
     L.push({ x, z, y: ground(x, z) - drop(x, z), kind, H, sw: H * (.9 + .25 * r()), yaw: r() * TAU, d: dh, ux: (x - HIT[0]) / dh, uz: (z - HIT[2]) / dh,
       up: r() < .3, hb: H * (.05 + .22 * r()), ts: .022 + .03 * r(), tf: .05 + .035 * r(), Lm: 2 + 9 * r(), th0: .18 + .14 * r(), rr: 1.2 + .9 * r(), seed: (r() * 1e6) | 0, AH: 1e9, vf: 400 });
-  }
+    return true;
+  };
+  for (const [da, d] of KEY) place(BEAT.az + da * DEG + (r() - .5) * .05, d * (.95 + .1 * r()), true, BEAT.cam);
+  for (let t = 0; L.length < 34 && t < 4000; t++) place(BEAT.az + (r() - .5) * 110 * DEG, 10 + Math.pow(r(), .8) * 52, true, BEAT.cam);
+  for (let t = 0; L.length < 44 && t < 4000; t++) { const ang = toHit + (r() - .5) * 1.6, d = 10 + r() * (HERO_R - 12); if (d < 50 && adiff(ang, toHit) < .12 + 2 / d) continue; place(ang, d, false); }
+  for (let t = 0; L.length < 56 && t < 4000; t++) place(r() * TAU, 8 + Math.sqrt(r()) * (HERO_R - 10), false);
   // per group: does it break, when, how fast it is thrown, its tumble
   for (const h of L) {
     const T_ = HTPL[h.kind], n = T_.nG, rg = rng(h.seed);
@@ -891,8 +922,46 @@ const HERO = (() => {
   return L;
 })();
 lapW('hero stand ' + HERO.length + ' trees, ' + HTPL.map(t => (t.TRK.length + t.WOOD.length + t.LEAF.length) / HS).join(' / ') + ' points');
-/* the forest floor's litter and dust round the camera (lifted and streamed behind the front) */
-const NHD = 26000, HDB = (() => { const r = rng(9191), A = new Float32Array(NHD * 6); for (let i = 0; i < NHD; i++) { const t = r() * TAU, q = 4 + Math.sqrt(r()) * (HERO_R + 50), x = G2[0] + Math.cos(t) * q, z = G2[2] + Math.sin(t) * q, d = Math.hypot(x - HIT[0], z - HIT[2]); A[i * 6] = x; A[i * 6 + 1] = ground(x, z) - drop(x, z); A[i * 6 + 2] = z; A[i * 6 + 3] = d; A[i * 6 + 4] = r(); A[i * 6 + 5] = r(); } return A; })();
+/* the forest floor round the camera: needles, litter and moss, grass and fern tufts, twigs; dense close to the lens (a
+   1/q^2 spread keeps the dots about even on screen from eye height), in dappled sun; in the flash lit low from the
+   strike with each trunk's long shadow thrown across it (precomputed: the stand stands still until the front); behind
+   the front the light litter lifts and streams downwind. FS floats a point: x y z, d (from the strike), h1 h2, tuft
+   height, flash shadow 0..1 */
+const NFLR = 104000, FS = 8, FLR = (() => {
+  const r = rng(9191), A = new Float32Array(NFLR * FS), q0 = 3, q1 = HERO_R + 16;
+  const hs = (i, j, k) => { const v = Math.sin(i * 127.1 + j * 311.7 + k * 74.7) * 43758.5453; return v - Math.floor(v); };
+  for (let i = 0; i < NFLR; i++) {
+    // half in the ground camera's view toward the strike (+-70 deg, 3..78 m), half in the beat camera's (+-54 deg, 8.5..95 m)
+    const bt = i & 1, O = bt ? BEAT.cam : G2, qa = bt ? 8.5 : q0, qb = bt ? 95 : q1, t = bt ? BEAT.az + (r() - .5) * 108 * DEG : BEAT.toHit + (r() - .5) * 140 * DEG;
+    const q = 1 / (1 / qa - r() * (1 / qa - 1 / qb)), k = r(), h1 = r(), h2 = r();
+    let x = O[0] + Math.cos(t) * q, z = O[2] + Math.sin(t) * q, lift = r() * .04;
+    if (k > .8) {         // a grass or fern tuft: blades round a centre on a jittered 0.9 m grid, tips spreading
+      const ci = Math.round(x / .9), cj = Math.round(z / .9), up = Math.pow(h2, .8), a_ = h1 * TAU;
+      lift = up * (.18 + .42 * hs(ci, cj, 1));
+      x = (ci + (hs(ci, cj, 2) - .5) * .6) * .9 + Math.cos(a_) * (.03 + .16 * up); z = (cj + (hs(ci, cj, 3) - .5) * .6) * .9 + Math.sin(a_) * (.03 + .16 * up);
+    } else if (k > .72) { // a twig lying on the litter
+      const ci = Math.round(x / 2.6), cj = Math.round(z / 2.6), a_ = hs(ci, cj, 4) * PI, L_ = 1 + 2.4 * hs(ci, cj, 5), s_ = (h1 - .5) * L_;
+      x = (ci + (hs(ci, cj, 6) - .5) * .8) * 2.6 + Math.cos(a_) * s_; z = (cj + (hs(ci, cj, 7) - .5) * .8) * 2.6 + Math.sin(a_) * s_; lift = .04 + .05 * hs(ci, cj, 8);
+    }
+    const g = ground(x, z) - drop(x, z), d = Math.hypot(x - HIT[0], z - HIT[2]);
+    let sh = 0;
+    for (const h of HERO) {
+      const px = x - h.x, pz = z - h.z, al = px * h.ux + pz * h.uz; if (al <= 0 || al > 170) continue;
+      const lat = Math.abs(px * h.uz - pz * h.ux), hw = h.sw * HTPL[h.kind].r0 * 1.7 + .1, s_ = 1 - E.ss(hw * .6, hw + .008 * al + .08, lat);
+      if (s_ > sh) sh = s_;
+    }
+    const o = i * FS; A[o] = x; A[o + 1] = g + lift; A[o + 2] = z; A[o + 3] = d; A[o + 4] = h1; A[o + 5] = h2; A[o + 6] = k > .8 ? lift : k > .72 ? -1 : 0; A[o + 7] = sh;
+  }
+  return A;
+})();
+const FLR_AH = new Float32Array(NFLR).fill(1e9);
+/* the two halves' bounding spheres (for a frustum test a frame) */
+const FLA = [G2[0] + 40 * Math.cos(BEAT.toHit), G2[1], G2[2] + 40 * Math.sin(BEAT.toHit), 82], FLBc = [BEAT.cam[0] + 52 * Math.cos(BEAT.az), BEAT.cam[1], BEAT.cam[2] + 52 * Math.sin(BEAT.az), 74];
+/* each floor dot's brightness in the sun: the kind (tufts catch the light at their tips, twigs pale), dappled light */
+const FLB = (() => { const B = new Float32Array(NFLR); for (let i = 0; i < NFLR; i++) { const o = i * FS, x = FLR[o], z = FLR[o + 2], tf = FLR[o + 6], h1 = FLR[o + 4];
+  const dap = .5 + .75 * E.ss(.02, .32, noise(x / 5.5, z / 5.5, 3.3) + .3 * noise(x / 1.7, z / 1.7, 8.8));
+  B[i] = (tf > 0 ? .55 + .5 * Math.min(1, tf / .5) : tf < 0 ? .75 : .4 + .4 * h1) * dap; } return B; })();
+lapW('forest floor ' + NFLR);
 let SHR = a => 0;
 /* rotation about the horizontal axis (uz, 0, -ux) by phi (a tree's top goes out along +u) into a transform's M */
 function rotU(ux, uz, phi, X_) { const c = Math.cos(phi), s = Math.sin(phi), k = 1 - c, ax = uz, az = -ux; X_[0] = c + k * ax * ax; X_[1] = -s * az; X_[2] = k * ax * az; X_[3] = s * az; X_[4] = c; X_[5] = -s * ax; X_[6] = k * az * ax; X_[7] = s * ax; X_[8] = c + k * az * az; }
@@ -950,15 +1019,27 @@ function drawHero(a, T, vis) {
     const hq = zc * HZ; b /= 1 + hq * hq; if (b < .02) return; if (b > 1) b = 1;
     const p = (sy | 0) * BW + (sx | 0), G_ = cg * b; if (D[(p << 2) + 1] < G_) { U32[p] = 0xff000000 | ((cb * b) << 16) | (G_ << 8) | (cr * b); HCNT++; }
   };
+  // pass 1: the trees in view and the share of each one's points its size on screen asks for, within a budget
+  // (the big ones on screen keep their share; the budget thins the small ones first)
+  let wantB = 0, wantS = 0;
+  for (let ti = 0; ti < HERO.length; ti++) {
+    const h = HERO[ti], tau = a - h.AH; h.fr_ = 0;
+    if (!K.wIn(h.x, h.y + h.H * .5, h.z, h.H * .8 + (tau > 0 ? 30 + 160 * Math.min(1, tau * 3) : 0))) continue;
+    const hpx = h.H * F / Math.max(1, K.WZ[0]); h.fr_ = Math.min(1, Math.max(.012, hpx * hpx / 330000)); h.big_ = hpx > 520;
+    if (h.big_) wantB += h.fr_ * HTPL[h.kind].np; else wantS += h.fr_ * HTPL[h.kind].np;
+  }
+  const kS = wantB + wantS > HBUDGET ? Math.max(.25, (HBUDGET - wantB) / Math.max(1, wantS)) : 1, kB = wantB + wantS * kS > HBUDGET ? HBUDGET / (wantB + wantS * kS) : 1;
+  const EX = k => k >= 16 ? 0 : EXN[(k * 64) | 0];
   for (let ti = 0; ti < HERO.length; ti++) {
     const h = HERO[ti], T_ = HTPL[h.kind], H = h.H, sw = h.sw, yc = h.yc, ys = h.ys, bx = h.x, by = h.y, bz = h.z, ux = h.ux, uz = h.uz;
-    const tau = a - h.AH, moving = tau > 0;
-    if (!K.wIn(bx, by + H * .5, bz, H * .8 + (moving ? 30 + 160 * Math.min(1, tau * 3) : 0))) continue;
-    const zc0 = Math.max(1, K.WZ[0]), hpx = H * F / zc0, fr = Math.min(1, Math.max(.012, hpx * hpx / 300000));
+    if (!h.fr_) continue;
+    const kk_ = h.big_ ? kB : kS * kB, tau = a - h.AH, moving = tau > 0, fr = h.fr_ * kk_, bc = Math.min(1.5, 1 / Math.sqrt(kk_));   // bc: brighter dots where the budget thins them
     heroPose(h, tau, HXS, HXU);
-    const vf = h.vf, d0 = h.d;
-    const fl = a > 0 ? 1.35 * Math.exp(-a * 2.4) : 0, smo = a > .05 ? E.ss(.05, .6, a) : 0;
-    const bark = (T_.birch ? .78 : .42) * vis, wood = .5 * vis, leaf = (T_.con ? .52 : .6) * vis;
+    // the front's lime layer only where it can touch this tree (its distance from the strike, to first order)
+    const band = Rf > 0 && Math.abs(h.d - Rf) < (moving ? 220 : H + 6), dR = h.d - Rf;
+    const vf = h.vf;
+    const fl = a > 0 ? 1.35 * Math.exp(-a * 2.4) : 0, smo = a > .05 ? E.ss(.05, .6, a) : 0, rim = a > 0 ? .55 * E.ss(.4, 1.6, a) * Math.exp(-a / 9) : 0;
+    const bark = (T_.birch ? 1 : .8) * vis * bc, wood = .8 * vis * bc, leaf = (T_.con ? .92 : 1) * vis * bc;
     if (moving) h.GF.fill(0);
     // the trunk (stump below the break, the top above it; the whole tree when it is uprooted)
     const TR = T_.TRK, nT = Math.ceil(TR.length / HS * fr);
@@ -973,10 +1054,15 @@ function drawHero(a, T, vis) {
         // the splintered break: pale wood, ragged
         if (!h.up && tau > h.ts && Math.abs(ly - h.hb) < .7) { b = .75 * vis; y += (TR[o + 7] - .5) * .6 * (ly < h.hb ? 1 : -1); }
       }
-      b *= .45 + .55 * Math.max(0, nx * S0 + nz * S2 + .4);
+      { const l = nx * S0 + nz * S2 + .25; b *= .3 + .95 * (l > 0 ? l : 0); }
       if (fl > .03 && face > 0) { const k = Math.min(1, fl * face); if (b < k) b = k; cr = 255; cg = 196 + 50 * k; cb = 138 + 90 * k; }
-      if (Rf > 0) { const q = Math.hypot(x - HIT[0], z - HIT[2]) - Rf; if (q > -3 && q < 1.5) { const k = q < 0 ? 1 + q / 3 : 1 - q / 1.5; if (b < .95 * k) b = .95 * k; cr = 198 + (cr - 198) * (1 - k); cg = 244; cb = 50 + (cb - 50) * (1 - k); } }
-      put(x, y, z, cr, cg, cb, b);
+      else if (rim > .03 && face > .2) { const k = rim * face * TR[o + 7]; if (b < k) { b = k; cr = 255; cg = 184; cb = 120; } }
+      if (band) { const q = dR + (x - bx) * ux + (z - bz) * uz; if (q > -3 && q < 1.5) { const k = q < 0 ? 1 + q / 3 : 1 - q / 1.5; if (b < .95 * k) b = .95 * k; cr = 198 + (cr - 198) * (1 - k); cg = 244; cb = 50 + (cb - 50) * (1 - k); } }
+      { const dx = x - ex, dy = y - ey, dz = z - ez, zc = dx * f0 + dy * f1 + dz * f2; if (zc < near) continue;
+        const iz = F / zc, sx = cx + (dx * r0 + dy * r1 + dz * r2) * iz; if (sx < 0 || sx >= BW) continue;
+        const sy = cy - (dx * u0 + dy * u1 + dz * u2) * iz; if (sy < 0 || sy >= BH) continue;
+        const hz_ = zc * HZ; b /= 1 + hz_ * hz_; if (b < .02) continue; if (b > 1) b = 1;
+        const p_ = (sy | 0) * BW + (sx | 0), G_ = cg * b; if (D[(p_ << 2) + 1] < G_) { U32[p_] = 0xff000000 | ((cb * b) << 16) | (G_ << 8) | (cr * b); HCNT++; } }
     }
     // limbs (moving with the trunk, or thrown on their own once they break)
     const WD = T_.WOOD, nW = Math.ceil(WD.length / HS * fr), GA_ = T_.G;
@@ -990,7 +1076,7 @@ function drawHero(a, T, vis) {
         else { X_ = h.up || ga >= h.hb ? HXU : HXS; const dx = x - X_[9], dy = y - X_[10], dz = z - X_[11]; x = X_[0] * dx + X_[1] * dy + X_[2] * dz + X_[12]; y = X_[3] * dx + X_[4] * dy + X_[5] * dz + X_[13]; z = X_[6] * dx + X_[7] * dy + X_[8] * dz + X_[14]; }
       }
       if (fl > .03) { const k = Math.min(1, fl * .7); if (b < k) b = k; cr = 255; cg = 196; cb = 138; }
-      if (Rf > 0) { const q = Math.hypot(x - HIT[0], z - HIT[2]) - Rf; if (q > -3 && q < 1.5) { const k = q < 0 ? 1 + q / 3 : 1 - q / 1.5; if (b < .95 * k) b = .95 * k; cr = 198; cg = 244; cb = 50; } }
+      if (band) { const q = dR + (x - bx) * ux + (z - bz) * uz; if (q > -3 && q < 1.5) { const k = q < 0 ? 1 + q / 3 : 1 - q / 1.5; if (b < .95 * k) b = .95 * k; cr = 198; cg = 244; cb = 50; } }
       put(x, y, z, cr, cg, cb, b);
     }
     // foliage: scorched and smoking on the strike's side; stripped as the front passes, streaming out in the wind
@@ -1000,27 +1086,32 @@ function drawHero(a, T, vis) {
       let x = bx + (LF[o] * yc + LF[o + 2] * ys) * sw, y = by + LF[o + 1] * H, z = bz + (-LF[o] * ys + LF[o + 2] * yc) * sw;
       const nx = LF[o + 3] * yc + LF[o + 5] * ys, ny = LF[o + 4], nz = -LF[o + 3] * ys + LF[o + 5] * yc, face = -(nx * ux + nz * uz);
       const lam = nx * S0 + ny * S1 + nz * S2;
-      let b = leaf * (.22 + .78 * (lam > 0 ? lam : 0)) * (.7 + .3 * hq), cr = 236, cg = 236, cb = 226;
+      let b = leaf * (.16 + 1.05 * (lam > 0 ? lam * (2 - lam) : 0)) * (.7 + .3 * hq), cr = 236, cg = 236, cb = 226;
       const burn = a > .08 && face > .15 && hq < .3;
       if (a > .25 && face > 0) b *= 1 - .5 * face;      // charred
       if (fl > .03 && face > 0) { const k = Math.min(1, fl * face * 1.2); if (b < k) b = k; cr = 255; cg = 196 + 55 * k; cb = 138 + 100 * k; }
+      else if (rim > .03 && face > .25) { const k = rim * face * (.6 + .4 * hq); if (b < k) { b = k; cr = 255; cg = 180 + 30 * hq; cb = 116; } }
       if (burn && fl < .5) { const fk = HF[(j * 7 + frm * 31 + ti * 5) & 4095], k = (.3 + .5 * fk) * Math.min(1, a * 3); if (b < k) b = k; cr = 255; cg = 142 + 54 * fk; cb = 84 + 50 * fk; }
       if (moving) {
-        const rho = Math.hypot(x - HIT[0], z - HIT[2]), tp = a - (h.AH + (rho - d0) / vf) - .003 - .03 * hq * hq;
+        const tp = a - (h.AH + ((x - bx) * ux + (z - bz) * uz) / vf) - .003 - .03 * hq * hq;
         if (hq < .86 && tp > 0) {
           // stripped: streaming downwind, rising, spreading, fading
-          const k = 6 + 10 * hq, s = (150 + 80 * HF[(j * 3 + ti) & 4095]) * (tp - (1 - Math.exp(-k * tp)) / k), sp = .3 + 9 * tp;
+          const k = 6 + 10 * hq, s = (150 + 80 * HF[(j * 3 + ti) & 4095]) * (tp - (1 - EX(k * tp)) / k), sp = .3 + 9 * tp;
           const h2 = HF[(j * 5 + ti * 7) & 4095] - .5, h3 = HF[(j * 11 + ti * 3) & 4095] - .5;
           x += ux * s - uz * h2 * sp; z += uz * s + ux * h2 * sp; y += (2 + 9 * hq) * tp + h3 * sp * .7;
-          b *= Math.exp(-tp / .9) * 1.15; if (b < .02) continue;
+          b *= EX(tp / .9) * 1.15; if (b < .02) continue;
           if (!burn) { cr = 224; cg = 226; cb = 214; }
         } else if (tau > h.GB[g]) {
           if (!h.GF[g]) { groupPose(h, g, tau, ga, HXG); h.XG.set(HXG, g * 15); h.GF[g] = 1; }
           const q = g * 15, XG = h.XG, dx = x - XG[q + 9], dy = y - XG[q + 10], dz = z - XG[q + 11]; x = XG[q] * dx + XG[q + 1] * dy + XG[q + 2] * dz + XG[q + 12]; y = XG[q + 3] * dx + XG[q + 4] * dy + XG[q + 5] * dz + XG[q + 13]; z = XG[q + 6] * dx + XG[q + 7] * dy + XG[q + 8] * dz + XG[q + 14];
         } else { const X_ = h.up || ga >= h.hb ? HXU : HXS, dx = x - X_[9], dy = y - X_[10], dz = z - X_[11]; x = X_[0] * dx + X_[1] * dy + X_[2] * dz + X_[12]; y = X_[3] * dx + X_[4] * dy + X_[5] * dz + X_[13]; z = X_[6] * dx + X_[7] * dy + X_[8] * dz + X_[14]; }
-        if (Rf > 0) { const q = Math.hypot(x - HIT[0], z - HIT[2]) - Rf; if (q > -3 && q < 1.5) { const k = q < 0 ? 1 + q / 3 : 1 - q / 1.5; if (b < .95 * k) b = .95 * k; cr = 198; cg = 244; cb = 50; } }
-      } else if (Rf > 0) { const q = Math.hypot(x - HIT[0], z - HIT[2]) - Rf; if (q > -3 && q < 1.5) { const k = q < 0 ? 1 + q / 3 : 1 - q / 1.5; if (b < .95 * k) b = .95 * k; cr = 198; cg = 244; cb = 50; } }
-      put(x, y, z, cr, cg, cb, b);
+        if (band) { const q = dR + (x - bx) * ux + (z - bz) * uz; if (q > -3 && q < 1.5) { const k = q < 0 ? 1 + q / 3 : 1 - q / 1.5; if (b < .95 * k) b = .95 * k; cr = 198; cg = 244; cb = 50; } }
+      } else if (band) { const q = dR + (x - bx) * ux + (z - bz) * uz; if (q > -3 && q < 1.5) { const k = q < 0 ? 1 + q / 3 : 1 - q / 1.5; if (b < .95 * k) b = .95 * k; cr = 198; cg = 244; cb = 50; } }
+      { const dx = x - ex, dy = y - ey, dz = z - ez, zc = dx * f0 + dy * f1 + dz * f2; if (zc < near) continue;
+        const iz = F / zc, sx = cx + (dx * r0 + dy * r1 + dz * r2) * iz; if (sx < 0 || sx >= BW) continue;
+        const sy = cy - (dx * u0 + dy * u1 + dz * u2) * iz; if (sy < 0 || sy >= BH) continue;
+        const hz_ = zc * HZ; b /= 1 + hz_ * hz_; if (b < .02) continue; if (b > 1) b = 1;
+        const p_ = (sy | 0) * BW + (sx | 0), G_ = cg * b; if (D[(p_ << 2) + 1] < G_) { U32[p_] = 0xff000000 | ((cb * b) << 16) | (G_ << 8) | (cr * b); HCNT++; } }
     }
     // the root plate of an uprooted tree: earth and roots standing up
     if (h.up && tau > 0) {
@@ -1046,24 +1137,48 @@ function drawHero(a, T, vis) {
       }
     }
   }
-  // the forest floor: litter, needles and dust lifted behind the front and streamed downwind (the debris curtain)
-  if (a > 0 && Rf > 0) {
-    const dc = Math.hypot(ex - G2[0], ey - G2[1], ez - G2[2]), st = dc < 400 ? 1 : dc < 1500 ? 2 : 4;
-    for (let i = 0; i < NHD; i += st) {
-      const o = i * 6, d = HDB[o + 3]; if (d > Rf) continue;
-      const t = a - ARR_(d); if (t <= 0) continue;
-      const h1 = HDB[o + 4], h2 = HDB[o + 5], x0 = HDB[o], z0 = HDB[o + 2], ux = (x0 - HIT[0]) / d, uz = (z0 - HIT[2]) / d;
-      const k = 4 + 9 * h1, s = (80 + 150 * h2) * (t - (1 - Math.exp(-k * t)) / k), sp = .5 + 7 * t;
-      const x = x0 + ux * s - uz * (h1 - .5) * sp, z = z0 + uz * s + ux * (h1 - .5) * sp, y = HDB[o + 1] + (1 + 20 * h1 * h1) * (1 - Math.exp(-t * 5)) + (h2 - .5) * sp * .5 + 2 * t;
-      const al = .55 * (1 - Math.exp(-t * 40)) * Math.exp(-t / 1.4) * vis;
-      const hot = Math.exp(-a * 1.5), lit = .5 + .5 * h2;
-      if (h2 > .985) put(x, y, z, 236, 232, 220, al * 1.4);
-      else put(x, y, z, 200 * lit + 40 * hot, 202 * lit + 20 * hot, 192 * lit, al);
+  // the forest floor (only while the lens is near it: its dots crowd round the camera's spot): dappled sun; the flash
+  // with the trunks' shadows; the lime layer of the front; then the light litter lifted and streamed downwind
+  const dG = Math.hypot(ex - G2[0], ey - G2[1], ez - G2[2]), fv = vis * (1 - E.ss(16, 110, dG));
+  if (fv > .02) {
+    const fl = a > 0 ? 1.5 * Math.exp(-a * 2.2) : 0, hot = a > 0 ? Math.exp(-a * 1.5) : 0, sc = SH.col || HOT;
+    const onA = K.wIn(FLA[0], FLA[1], FLA[2], FLA[3]), onB = K.wIn(FLBc[0], FLBc[1], FLBc[2], FLBc[3]);
+    for (let i = onA ? 0 : 1; i < (onA || onB ? NFLR : 0); i += onA && onB ? 1 : 2) {
+      const o = i * FS, h1 = FLR[o + 4], h2 = FLR[o + 5], d = FLR[o + 3];
+      let x = FLR[o], y = FLR[o + 1], z = FLR[o + 2], b = FLB[i] * fv, cr = 228, cg = 224, cb = 208;
+      const t = a - FLR_AH[i];
+      if (t > 0) {
+        const ux = (x - HIT[0]) / d, uz = (z - HIT[2]) / d;
+        if (h1 < .68) {     // lifted: streaming downwind, rising, spreading, thinning out
+          const k = 4 + 9 * h1, s_ = (70 + 160 * h2) * (t - (1 - EX(k * t)) / k), sp = .4 + 6 * t;
+          x += ux * s_ - uz * (h1 - .34) * sp; z += uz * s_ + ux * (h1 - .34) * sp; y += (.6 + 14 * h1 * h1) * (1 - EX(t * 6)) + (h2 - .5) * sp * .5 + 1.6 * t;
+          b = (.42 + .3 * h2) * fv * (1 - EX(t * 40)) * EX(t / 1.6); cr = 206 + 40 * hot; cg = 204 + 20 * hot; cb = 190;
+        } else { const s_ = (FLR[o + 6] > 0 ? 1.2 : .25) * (1 - EX(t * 18)); x += ux * s_; z += uz * s_; }
+      }
+      // the flash outshines the sun: the floor goes dark but where the strike lights it, the trunks' shadows across it
+      if (fl > .03) { const e = fl > 1 ? 1 : fl, k = (.2 + 1.1 * fl) * (1 - .95 * FLR[o + 7]) * (.6 + .4 * h2); b *= 1 - .85 * e; if (b < k) { b = k > 1 ? 1 : k; const w = k > 1 ? 1 : k; cr = 255; cg = 210 + 40 * w; cb = 150 + 90 * w; } }
+      if (Rf > 0) { const q = d - Rf; if (q > -3 && q < 1.5) { const k = q < 0 ? 1 + q / 3 : 1 - q / 1.5; if (b < .9 * k) b = .9 * k; cr = sc[0]; cg = sc[1]; cb = sc[2]; } }
+      put(x, y, z, cr, cg, cb, b);
+    }
+  }
+  // the front's wall in the beat's view: dust and torn needles in a band just behind the front, its leading face lime
+  if (Rf > BW_R - 170 && Rf < BW_R + 70 && dG < 400 && K.wIn(HIT[0] + Math.cos(BW_TH) * Rf, BEAT.cam[1], HIT[2] + Math.sin(BW_TH) * Rf, 160)) {
+    const sc = SH.col || HOT, fa = vis * E.ss(BW_R - 170, BW_R - 120, Rf) * (1 - E.ss(BW_R + 30, BW_R + 70, Rf));
+    for (let k = 0; k < 65; k++) FWG[k] = gP(Rf - 8, BW_TH + (k / 64 - .5) * .21);
+    for (let i = 0; i < NFW; i++) {
+      const o = i * 4, h3 = FWP[o + 3], u = FWP[o + 1], v = FWP[o + 2], q = FWP[o] + .004 * fsin(h3 * 40 + Rf * .05 + 1e4) / .2, th = BW_TH + q * .2;
+      const rr = Rf - u * 26 - 1.5 * h3, ct = Math.cos(th), st = Math.sin(th);
+      const y = FWG[Math.max(0, Math.min(64, ((q + .5) * 64 + .5) | 0))] + v * (6 + 26 * (1 - .6 * u)) * (.7 + .6 * h3) + 1.5 * u * u;
+      if (u < .06) { const k = 1 - u / .06; put(HIT[0] + ct * rr, y, HIT[2] + st * rr, sc[0], sc[1], sc[2], fa * (.55 + .4 * k) * (.6 + .4 * h3)); }
+      else { const lit = .45 + .55 * h3; put(HIT[0] + ct * rr, y, HIT[2] + st * rr, 214 * lit + 30, 210 * lit + 26, 196 * lit + 20, fa * (.62 - .45 * u) * (1 - .5 * v)); }
     }
   }
   return HCNT;
 }
+const GH = (() => { const x = BEAT.cam[0] + 50 * Math.cos(BEAT.az), z = BEAT.cam[2] + 50 * Math.sin(BEAT.az); return [x, z, 58, 78 * 78, 78]; })();
+const FWG = new Float32Array(65), NFW = 20000, FWP = (() => { const r = rng(9292), A = new Float32Array(NFW * 4); for (let i = 0; i < NFW; i++) { A[i * 4] = r() - .5; A[i * 4 + 1] = Math.pow(r(), 1.7); A[i * 4 + 2] = Math.pow(r(), 1.9); A[i * 4 + 3] = r(); } return A; })();
+const BW_R = Math.hypot(BEAT.cam[0] - HIT[0], BEAT.cam[2] - HIT[2]), BW_TH = Math.atan2(BEAT.cam[2] + 30 * Math.sin(BEAT.az) - HIT[2], BEAT.cam[0] + 30 * Math.cos(BEAT.az) - HIT[0]);
 
 return { RE, CE, coastZ, coastBig, ground, roadD, HIT, makePatch, drawPatch, makeSea, drawSea, drawGlobe, drawLimb, STARS, CLOUD, GLB, PO, PR, PM, PI_, PG_, SO, SR, SM, SN, SH, LG, drop, SPAN, drawSite, VEHS, drawVehicles, GC,
-  gP, gPc, CRA, CSH, GOPT, craterDy, craterSl, craterG, RAY, RAYN, FOR, setShock, drawForest, G2, SUN, hazeK, HERO, HTPL, drawHero, HERO_R };
+  gP, gPc, CRA, CSH, GOPT, craterDy, craterSl, craterG, RAY, RAYN, FOR, setShock, drawForest, G2, SUN, hazeK, HERO, HTPL, drawHero, HERO_R, BEAT };
 };

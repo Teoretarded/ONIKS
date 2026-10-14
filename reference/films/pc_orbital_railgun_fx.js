@@ -1,20 +1,26 @@
 /* ORBITAL RAILGUN effects (window.ORFX(K, L, W, cfg)): the shot leaving the muzzle, the rod's fall and its trail,
    and the strike on the coast, all as dots and rings that are pure functions of their age (seeded at load), plus the
    camera of the fall and the strike (cam(T, FC)). Spectacle only: light, motion, flashes, dust, rings.
-     shot    rings of light racing out of the muzzle, a flash, a cone of sparks, four sabot petals peeling away
+     shot    keyed on the sim time since the exit (the film runs it at x1/20): the last rings discharging into the
+             round (a glow swelling in the bore, rings of light at the coils), a big white flash and a lime halo over
+             the crown, gas venting sideways out of eight ports round it, a plume of plasma outrunning the round (it
+             swallows it) with big shock rings racing ahead of it, a cone of sparks; the sabot (the round's own: r 0.96
+             m, 8.4 m with its nose taper and 0.9 m base) splitting into four petals that hinge open from the base and
+             are flung off tumbling, with a disc of chips spreading round the rod's path
      fall    the rod (a closed shell) entering the air: a plasma sheath flowing back off its nose under an elongated
-             bow shock (a paraboloid running into a narrow cone; never a ball), an ionised wake, broken shock rings
-             shed and swept down the trail (faded end-on), Mach diamonds, a growing column of smoke and plasma that
-             stays in the sky after the strike (sun-shaded, drifting in the winds aloft)
-     strike  a blinding flash; an air shock dome with two reflected shells and a condensation dome behind it; a
-             ground ring racing over the land; the forest (world) flattened and thrown; the battery's vehicles
-             tossed and torn apart; an ejecta curtain and tumbling blocks; a dust skirt racing out; a fireball
-             rising into a mushroom (a rolling toroidal cap with glowing inner turbulence, the stem, condensation
-             rings and a skirt); the crater (world) with its rim, its glowing floor and its rays
-     cam     handed in from the film's ride beside the round; behind the rod down the path, a slow orbit to its
-             front quarter through the entry, down to the forest floor looking up at the incoming streak; the strike
-             held there (the slow-motion beat in the hero stand, world.js), a crane up, an aerial arc, the crater from
-             above, handing back to the film's climb (see the camera section for the timeline request) */
+             bow shock (a paraboloid running into a long narrow cone; never a ball), an ionised wake, shock rings
+             rippling down the cone on its surface (faded end-on), a growing column of hot gas and smoke that glows
+             orange behind the rod, thick in the low air, and stays in the sky after the strike (sun-shaded, drifting
+             in the winds aloft, aged on the strike's own clock so the slow motion does not swell it)
+     strike  a blinding flash; a dome of white-hot plasma swelling over the impact in the first instants and lifting
+             into the fireball; an air shock dome with two reflected shells and a condensation dome behind it; shock
+             layers racing out over the forest (a thin wall with a bright crest, white-hot then lime, and two weaker
+             layers trailing it); a ground ring racing over the land; the forest and the hero stand (world) lit by the
+             flash with long trunk shadows across the floor, then flattened and thrown; the battery's vehicles tossed
+             and torn apart; an ejecta curtain and tumbling blocks; a dust skirt racing out; a fireball rising into a
+             mushroom (a rolling toroidal cap with glowing inner turbulence, the stem, condensation rings and a
+             skirt); the crater (world) with its rim, its glowing floor and its rays
+     cam     see the camera section */
 window.ORFX = function (K, L, W, cfg) {
 'use strict';
 const { V, R, X, E, rng, noise } = M3;
@@ -61,43 +67,69 @@ const hz1 = i => HH1[(i >>> 0) % 9000], hz2 = i => HH2[(i >>> 0) % 9000];
 const FRAME = { T: -1, a: -1 };
 let FCs = null;
 
-/* ================= the shot ================= */
+/* ================= the shot =================
+   Keyed on the sim time since the exit (tau, s: the film runs the exit at x1/20, so 0.085 s of it fill 1.7 s), from the
+   film's clock (FC.tauOf). The camera rides 15-30 m beside the round. */
+const tauX = ax => FCs && FCs.tauOf ? (ax > 0 ? FCs.tauOf(FCs.TX + ax) : ax / 20) : ax / 20;
+/* two unit vectors perpendicular to d */
+function perp2(d) { const a = Math.abs(d[1]) < .9 ? [0, 1, 0] : [1, 0, 0], u = V.norm(V.cross(a, d)); return [u, V.cross(d, u)]; }
 const SPARK = (() => { const r = rng(5151), n = 900, A = new Float32Array(n * 4); for (let i = 0; i < n; i++) { const th = r() * TAU, cone = Math.pow(r(), 1.8) * .55; A[i * 4] = Math.cos(th) * Math.sin(cone); A[i * 4 + 1] = Math.sin(th) * Math.sin(cone); A[i * 4 + 2] = Math.cos(cone); A[i * 4 + 3] = .3 + .7 * r(); } return A; })();
-const SHELL = (() => { const r = rng(5252), n = 2400, A = new Float32Array(n * 4); for (let i = 0; i < n; i++) { const u = r() * 2 - 1, th = r() * TAU, h = Math.sqrt(1 - u * u); A[i * 4] = Math.cos(th) * h; A[i * 4 + 1] = Math.sin(th) * h; A[i * 4 + 2] = u; A[i * 4 + 3] = .5 + .5 * r(); } return A; })();
-/* m muzzle (world), d bore direction, U W perpendiculars, ax s since the rod left (film) */
+/* the plume's gas: u along the cone (front-heavy), q across it, an angle, a hash */
+const NPL = 16000, PLM = (() => { const r = rng(5252), A = new Float32Array(NPL * 4); for (let i = 0; i < NPL; i++) { A[i * 4] = i % 3 ? Math.pow(r(), .4) : .9 + .1 * r(); A[i * 4 + 1] = Math.sqrt(r()); A[i * 4 + 2] = r() * TAU; A[i * 4 + 3] = r(); } return A; })();
+/* the vents: 8 jets round the muzzle crown, dots along each */
+const NVT = 3200, VTP = (() => { const r = rng(5353), A = new Float32Array(NVT * 4); for (let i = 0; i < NVT; i++) { A[i * 4] = ((i % 8) + .5) / 8 * TAU + (r() - .5) * .22; A[i * 4 + 1] = Math.pow(r(), .8); A[i * 4 + 2] = (r() - .5) * 2; A[i * 4 + 3] = r(); } return A; })();
+/* m muzzle (world), d bore direction, U W perpendiculars, ax film s since the round left */
 function shot(m, d, U, Wd, ax, vis) {
   cam();
-  if (ax < 0 || ax > 4) return;
-  const A = Math.max(0, 1 - ax / 4) * (vis === undefined ? 1 : vis);
-  if (ax < 1.2) { K.glowW(m[0], m[1], m[2], Math.round(60 + 520 * Math.exp(-ax * 6)), HOT, Math.min(1, 1.2 * Math.exp(-ax * 3.5)) * A); K.glowW(m[0], m[1], m[2], 220, LIME, .5 * Math.exp(-ax * 2.2) * A); }
-  // rings of light racing out of the muzzle (one per coil stage), each expanding as it goes
-  for (let k = 0; k < 11; k++) {
-    const t = ax - k * .05; if (t < 0) continue;
-    const dist = 4 + 120 * Math.pow(t, .7) * (1 + .22 * k), rad = 2.2 + 11 * Math.pow(t, .55) * (1 + .12 * k), al = A * Math.exp(-t * .9) * (k < 4 ? 1 : .75);
-    if (al < .02) continue;
-    const c = V.mad(m, d, dist), n = Math.round(320 + 90 * rad);
-    K.ringW(c, U, Wd, rad, n, k < 5 ? 2 : 1, k % 3 === 1 ? LIME : HOT, al, k * .7);
-    K.ringW(V.mad(c, d, -1.2 - .2 * rad), U, Wd, rad * .9, Math.round(n * .7), 1, LIME, al * .7, k * 1.3);
-    if (k < 4) K.ringW(V.mad(c, d, 1), U, Wd, rad * 1.08, Math.round(n * .8), 1, LIME, al * .45, k * 2.1);
+  if (ax < -.05 || ax > 4.2) return;
+  vis = vis === undefined ? 1 : vis;
+  const tau = tauX(ax), A = vis * Math.max(0, 1 - ax / 4.2);
+  // the flash as the last rings discharge into the round and it leaves: a white bloom over the crown, a lime halo
+  if (ax < 1.6) {
+    const f1 = Math.exp(-Math.max(0, ax) * 4.2) * Math.min(1, (ax + .05) * 20);
+    K.glowW(m[0], m[1], m[2], Math.round(90 + 620 * f1), HOT, Math.min(1, 1.35 * f1) * A);
+    K.glowW(m[0], m[1], m[2], 380, LIME, .45 * Math.exp(-Math.max(0, ax) * 1.8) * A);
   }
-  // the plasma jet along the bore line
-  if (ax < 1.4) for (let i = 0; i < 500; i++) { const u = i / 500, s_ = u * (40 + 700 * Math.min(1, ax * 1.5)), j = (K.hh(i, 5) - .5) * (1 + 6 * u), j2 = (K.hh(i, 9) - .5) * (1 + 6 * u); dotW(m[0] + d[0] * s_ + U[0] * j + Wd[0] * j2, m[1] + d[1] * s_ + U[1] * j + Wd[1] * j2, m[2] + d[2] * s_ + U[2] * j + Wd[2] * j2, u < .2 ? 2 : 1, u < .3 ? HOT : LIME, A * (1 - u) * (1 - ax / 1.4)); }
-  // a plasma puff (a shell of dots blowing out of the bore) and a cone of sparks
-  if (ax < 2.2) {
-    const R0 = 3 + 34 * Math.pow(ax, .6), fa = A * (1 - ax / 2.2);
-    for (let i = 0; i < 2400; i += 1) {
-      const o = i * 4, rr = R0 * SHELL[o + 3], fwd = Math.max(0, SHELL[o + 2]) * .9 + .1;
-      const x = m[0] + (U[0] * SHELL[o] + Wd[0] * SHELL[o + 1]) * rr + d[0] * (rr * fwd * 1.6), y = m[1] + (U[1] * SHELL[o] + Wd[1] * SHELL[o + 1]) * rr + d[1] * (rr * fwd * 1.6), z = m[2] + (U[2] * SHELL[o] + Wd[2] * SHELL[o + 1]) * rr + d[2] * (rr * fwd * 1.6);
-      dotW(x, y, z, i % 9 ? 1 : 2, i % 4 ? LIME : HOT, fa * (.35 + .65 * SHELL[o + 3]));
+  if (tau <= 0) return;
+  // vented gas: eight jets blowing out sideways round the crown, white then lime, spreading and thinning
+  if (tau < .12) {
+    const vv = 1900 * tau, va = A * Math.exp(-tau / .035);
+    for (let i = 0; i < NVT; i++) {
+      const o = i * 4, th = VTP[o], u = VTP[o + 1], j = VTP[o + 2], hq = VTP[o + 3], r_ = 1.4 + vv * u, w = (.25 + .22 * u) * r_ * j;
+      const ca = Math.cos(th), sa = Math.sin(th), bk = -2.5 - .25 * r_ * hq;
+      const x = m[0] + (U[0] * ca + Wd[0] * sa) * r_ + (U[0] * -sa + Wd[0] * ca) * w + d[0] * bk, y = m[1] + (U[1] * ca + Wd[1] * sa) * r_ + (U[1] * -sa + Wd[1] * ca) * w + d[1] * bk, z = m[2] + (U[2] * ca + Wd[2] * sa) * r_ + (U[2] * -sa + Wd[2] * ca) * w + d[2] * bk;
+      dotW(x, y, z, u < .15 && hq < .4 ? 2 : 1, u < .3 && tau < .02 ? HOT : hq < .6 ? LIME : WH, va * (1 - .7 * u) * (.5 + .5 * hq));
     }
-    for (let i = 0; i < 900; i++) {
-      const o = i * 4, life = SPARK[o + 3] * 1.8; if (ax > life) continue;
-      const s = ax * (60 + 260 * SPARK[o + 3]);
-      dotW(m[0] + (U[0] * SPARK[o] + Wd[0] * SPARK[o + 1] + d[0] * SPARK[o + 2]) * s, m[1] + (U[1] * SPARK[o] + Wd[1] * SPARK[o + 1] + d[1] * SPARK[o + 2]) * s, m[2] + (U[2] * SPARK[o] + Wd[2] * SPARK[o + 1] + d[2] * SPARK[o + 2]) * s, i % 5 ? 1 : 2, i % 3 ? HOT : LIME, (1 - ax / life) * A);
+  }
+  // the plume: plasma blowing out of the bore faster than the round (it overtakes and swallows it), a cone of glowing gas
+  // thinning as it grows; big shock rings riding its front and racing ahead of the round
+  const xf = 7600 * tau, pa = A * Math.exp(-tau / .07);
+  if (pa > .02) {
+    psys(NPL, .45 * xf + 4, m[0] + d[0] * xf * .5, m[1] + d[1] * xf * .5, m[2] + d[2] * xf * .5, 1.4, 16000); const st = PS_ST, sz = PS_S;
+    { const c_ = V.mad(m, d, xf * .93), dd = Math.max(1, Math.hypot(c_[0] - ex, c_[1] - ey, c_[2] - ez)); K.glowW(c_[0], c_[1], c_[2], Math.min(360, Math.round((6 + .3 * xf) * FL / dd)), tau < .02 ? HOT : LIME, .32 * pa * Math.exp(-tau / .025)); }
+    for (let i = 0; i < NPL; i += st) {
+      const o = i * 4, u = PLM[o], q = PLM[o + 1], th = PLM[o + 2] + u * 2.1, hq = PLM[o + 3];
+      const x_ = xf * u * (1 - .1 * q * q), rr = (1.2 + .26 * x_) * q * (1 + .12 * fs(th * 5 + u * 13 + tau * 40)), cs = fc(th) * rr, sn = fs(th) * rr;
+      const front = u > .86 ? (u - .86) / .14 : 0, hot = Math.exp(-tau / .012) * (1 - .6 * u), edge = q > .85 ? 1 : 0;
+      dotW(m[0] + d[0] * x_ + U[0] * cs + Wd[0] * sn, m[1] + d[1] * x_ + U[1] * cs + Wd[1] * sn, m[2] + d[2] * x_ + U[2] * cs + Wd[2] * sn, sz, hot > .4 || front > .7 ? HOT : hq < .5 ? LIME : WH, pa * (.55 + .6 * front + .4 * edge + .4 * hot) * (.6 + .4 * hq));
     }
+    // the rings: three at the front, each a thick ragged band of dots
+    const ra = A * Math.exp(-tau / .11);
+    for (let j = 0; j < 3; j++) {
+      const xr = xf * (1 - .11 * j) + 2, rr = (1.2 + .26 * xr) * (1.05 - .06 * j), al = ra * (j ? .6 : 1) * Math.min(1, tau * 150);
+      const c_ = [m[0] + d[0] * xr, m[1] + d[1] * xr, m[2] + d[2] * xr], dist = Math.max(1, Math.hypot(c_[0] - ex, c_[1] - ey, c_[2] - ez)), n = Math.min(3200, Math.max(60, Math.round(TAU * rr * FL / dist / 1.1)));
+      for (let b = 0; b < 3; b++) ringB(c_[0] - d[0] * rr * .04 * b, c_[1] - d[1] * rr * .04 * b, c_[2] - d[2] * rr * .04 * b, U, Wd, rr * (1 - .025 * b), Math.round(n * (1 - .2 * b)), b ? (j ? WH : LIME) : (j ? LIME : HOT), Math.min(1, al * 1.3 * (1 - .22 * b)), j * 2.3 + b * 1.7 + tau * 30, .03 + .02 * b, .08 + .06 * b);
+    }
+  }
+  // a cone of sparks
+  if (tau < .1) for (let i = 0; i < 900; i++) {
+    const o = i * 4, life = SPARK[o + 3] * .1; if (tau > life) continue;
+    const s = tau * (1500 + 5200 * SPARK[o + 3]);
+    dotW(m[0] + (U[0] * SPARK[o] + Wd[0] * SPARK[o + 1] + d[0] * SPARK[o + 2]) * s, m[1] + (U[1] * SPARK[o] + Wd[1] * SPARK[o + 1] + d[1] * SPARK[o + 2]) * s, m[2] + (U[2] * SPARK[o] + Wd[2] * SPARK[o + 1] + d[2] * SPARK[o + 2]) * s, i % 5 ? 1 : 2, i % 3 ? HOT : LIME, (1 - tau / life) * A);
   }
 }
-/* the rod in the bore: a plasma armature behind it, the rails flashing (world points along the bore) */
+/* the rod in the bore: a plasma armature behind it, the rails flashing (world points along the bore); over the last
+   0.3 s (film) the last rings discharge into it: a white glow swelling round the round, rings of light at the coils */
 function bore(b0, d, z0, z1, T) {
   cam();
   for (let i = 0; i < 260; i++) {
@@ -105,36 +137,68 @@ function bore(b0, d, z0, z1, T) {
     const p = V.mad(b0, d, z);
     dotW(p[0] + (j - .5) * .5, p[1] + (K.hh(i + 7, Math.floor(T * 60)) - .5) * .5, p[2] + (K.hh(i + 3, Math.floor(T * 60)) - .5) * .5, u < .1 ? 2 : 1, u < .25 ? HOT : LIME, (1 - u) * .95);
   }
-}
-
-/* ---------- sabot petals: four quarter shells peeling off the rod (rod-relative, a s since the exit) ---------- */
-const PETAL = (() => { const P = []; for (let i = 0; i <= 28; i++) for (let j = 0; j <= 6; j++) P.push((i / 28 - .5) * 5.4, j / 6 * PI / 2 - PI / 4); return new Float32Array(P); })();
-function petals(p, d, U, Wd, a, vis) {
-  cam();
-  if (a < 0 || a > 6) return;
-  const A = (1 - a / 6) * (vis === undefined ? 1 : vis);
-  for (let k = 0; k < 4; k++) {
-    const ang = k / 4 * TAU + PI / 4, rx = Math.cos(ang), ry = Math.sin(ang);
-    const out = .4 + 7 * a + 1.2 * a * a, back = 1.5 * a * a, spin = a * (.9 + .3 * k) * (k % 2 ? 1 : -1);
-    const c = V.add(V.mad(p, d, -back), V.add(V.mul(U, rx * out), V.mul(Wd, ry * out)));
-    // petal frame: radial (rx, ry), tumbling about the tangent
-    const ra = V.add(V.mul(U, rx), V.mul(Wd, ry)), ta = V.add(V.mul(U, -ry), V.mul(Wd, rx));
-    const cs = Math.cos(spin), sn = Math.sin(spin);
-    const ax = V.add(V.mul(d, cs), V.mul(ra, sn)), rr = V.add(V.mul(ra, cs), V.mul(d, -sn));
-    for (let i = 0; i < PETAL.length; i += 2) {
-      const s = PETAL[i], th = PETAL[i + 1], cr = Math.cos(th) * .34, sr = Math.sin(th) * .34;
-      dotW(c[0] + ax[0] * s + rr[0] * (cr - .34) + ta[0] * sr, c[1] + ax[1] * s + rr[1] * (cr - .34) + ta[1] * sr, c[2] + ax[2] * s + rr[2] * (cr - .34) + ta[2] * sr, 1, a < .6 ? HOT : WH, A * (i % 10 === 0 ? 1 : .7));
-    }
+  if (FCs && T > FCs.TX - .32) {
+    const k = ss(FCs.TX - .32, FCs.TX, T), p = V.mad(b0, d, z1 - 3), [U, Wd] = perp2(d);
+    K.glowW(p[0], p[1], p[2], Math.round(60 + 340 * k), HOT, .9 * k);
+    for (let c = 0; c < 4; c++) { const zc = z1 - 2 - c * 4.5, al = k * (1 - c / 4) * (.6 + .4 * K.hh(c, Math.floor(T * 90))); if (al > .03) K.ringW(V.mad(b0, d, zc), U, Wd, 2.6 + .4 * c, 260, 2, c ? LIME : HOT, al, c); }
   }
 }
 
+/* ---------- the sabot: four petals (quarter shells of the round's sabot, r 0.96 m, 8.4 m long with its tapered nose and
+   its 0.9 m base, from CTX.ROUND) hinging open from the base, then thrown off and tumbling; with a disc of chips from
+   the base and the seals spreading round the rod (rod-relative; tau from the film's clock) ---------- */
+const SB_R = .96, SB_IN = .27, SB_L = 8.4, SB_B = .9, SB_TP = 1.6;
+const PETAL = (() => {
+  const r = rng(5454), P = [];
+  const rad = s => s > SB_L / 2 - SB_TP ? SB_R - (SB_R - .57) * (s - (SB_L / 2 - SB_TP)) / SB_TP : SB_R;
+  for (let i = 0; i < 1500; i++) {
+    const k = r(), s = -SB_L / 2 - SB_B + (SB_L + SB_B) * r(), ph = (r() - .5) * PI / 2 * .96;
+    // the outer skin (most), the inner face against the rod, the cut edges, the base's solid quarter
+    if (k < .62) P.push(s, ph, rad(Math.max(s, -SB_L / 2)), 1);
+    else if (k < .74) P.push(s, ph, SB_IN, 0);
+    else if (k < .9) P.push(s, (r() < .5 ? -1 : 1) * PI / 4 * .96, SB_IN + (rad(Math.max(s, -SB_L / 2)) - SB_IN) * r(), 2);
+    else { const sb = -SB_L / 2 - SB_B * r(); P.push(sb, ph, SB_IN + (SB_R - SB_IN) * Math.sqrt(r()), 3); }
+  }
+  return new Float32Array(P);
+})();
+const NCH = 700, CHP = (() => { const r = rng(5555), A = new Float32Array(NCH * 6); for (let i = 0; i < NCH; i++) { A[i * 6] = r() * TAU; A[i * 6 + 1] = 50 + 230 * Math.pow(r(), 1.4); A[i * 6 + 2] = 3 + 26 * r(); A[i * 6 + 3] = .004 + .02 * r(); A[i * 6 + 4] = 6 + 30 * r(); A[i * 6 + 5] = r(); } return A; })();
+function petals(p, d, U, Wd, ax, vis) {
+  cam();
+  const tau = tauX(ax); if (tau < 0 || tau > 2.5) return;
+  const A = (vis === undefined ? 1 : vis) * (1 - ss(1.2, 2.5, tau)), sL = SUNL;
+  for (let k = 0; k < 4; k++) {
+    const ang = k / 4 * TAU + PI / 4, rx = Math.cos(ang), ry = Math.sin(ang);
+    const ra = [U[0] * rx + Wd[0] * ry, U[1] * rx + Wd[1] * ry, U[2] * rx + Wd[2] * ry], ta = [U[0] * -ry + Wd[0] * rx, U[1] * -ry + Wd[1] * rx, U[2] * -ry + Wd[2] * rx];
+    // hinging open about the base's outer edge, then flung off and tumbling (sim seconds)
+    const t1 = Math.max(0, tau - .005), al = .52 * ss(.003, .028, tau) + (5 + 3 * k) * Math.max(0, tau - .02) * (k % 2 ? 1 : -.8);
+    const out = (85 + 28 * k) * t1, back = (9 + 4 * k) * t1, ca = Math.cos(al), sa = Math.sin(al);
+    const hx = p[0] + d[0] * (-SB_L / 2 - SB_B - back) + ra[0] * (SB_R + out), hy = p[1] + d[1] * (-SB_L / 2 - SB_B - back) + ra[1] * (SB_R + out), hz = p[2] + d[2] * (-SB_L / 2 - SB_B - back) + ra[2] * (SB_R + out);
+    const glow = Math.exp(-tau / .02);
+    for (let i = 0; i < PETAL.length; i += 4) {
+      const s = PETAL[i] + SB_L / 2 + SB_B, ph = PETAL[i + 1], rr = PETAL[i + 2], kind = PETAL[i + 3], cp = Math.cos(ph), sp = Math.sin(ph);
+      // in the hinge frame: along d, out along ra (from the hinge, inward is negative), across along ta
+      const vd = s, vr = rr * cp - SB_R, vt = rr * sp, vd2 = vd * ca - vr * sa, vr2 = vd * sa + vr * ca;
+      const x = hx + d[0] * vd2 + ra[0] * vr2 + ta[0] * vt, y = hy + d[1] * vd2 + ra[1] * vr2 + ta[1] * vt, z = hz + d[2] * vd2 + ra[2] * vr2 + ta[2] * vt;
+      // light: the skin's normal (out from the axis, tipped by the hinge), the sun; the inner face and the cut edges dim
+      const nr = cp * ca, nd = -cp * sa, nt = sp, lam = (ra[0] * nr + d[0] * nd + ta[0] * nt) * sL[0] + (ra[1] * nr + d[1] * nd + ta[1] * nt) * sL[1] + (ra[2] * nr + d[2] * nd + ta[2] * nt) * sL[2];
+      const b = kind === 1 ? .35 + .65 * (lam > 0 ? lam : 0) : kind === 0 ? .25 : .45;
+      dotW(x, y, z, 1, glow > .3 && (kind === 3 || kind === 0) ? HOT : WH, A * b * (i % 12 === 0 ? 1.15 : 1));
+    }
+  }
+  // the chips: a disc spreading round the rod's path, glinting as they tumble
+  for (let i = 0; i < NCH; i++) {
+    const o = i * 6, t = tau - CHP[o + 3]; if (t <= 0) continue;
+    const th = CHP[o], v = CHP[o + 1], cs = Math.cos(th) * v * t, sn = Math.sin(th) * v * t, bk = -SB_L / 2 - CHP[o + 2] * t;
+    const gl = .35 + .65 * Math.abs(fs(CHP[o + 4] * t + CHP[o + 5] * 6.3));
+    dotW(p[0] + U[0] * cs + Wd[0] * sn + d[0] * bk, p[1] + U[1] * cs + Wd[1] * sn + d[1] * bk, p[2] + U[2] * cs + Wd[2] * sn + d[2] * bk, CHP[o + 5] < .15 ? 2 : 1, t < .01 ? HOT : WH, A * gl * (.5 + .5 * CHP[o + 5]));
+  }
+}
 
 /* ================= the fall ================= */
 /* the rod's plasma, in the rod's frame (p its centre, D its heading, U Wd perpendiculars), all in film time T:
    everything flows and flickers by T, nothing stands still */
 const NFL = 6000, FLW = (() => { const r = rng(919), A = new Float32Array(NFL * 5); for (let i = 0; i < NFL; i++) { A[i * 5] = r() * TAU; A[i * 5 + 1] = r(); A[i * 5 + 2] = .65 + .7 * r(); A[i * 5 + 3] = r(); A[i * 5 + 4] = r(); } return A; })();
 const NBS = 4200, BSH = (() => { const r = rng(929), A = new Float32Array(NBS * 3); for (let i = 0; i < NBS; i++) { A[i * 3] = Math.sqrt(r()); A[i * 3 + 1] = r() * TAU; A[i * 3 + 2] = r(); } return A; })();
-const NMD = 420, MDP = (() => { const r = rng(949), A = new Float32Array(NMD * 2); for (let i = 0; i < NMD; i++) { A[i * 2] = (r() * 2 - 1) * Math.sqrt(r()); A[i * 2 + 1] = r() * TAU; } return A; })();
 /* a ring of dots round the axis D at c (radius rr), n dots, phase ph */
 function ringD(cx_, cy_, cz_, U, Wd, rr, n, col, a, ph, sz) {
   if (a < .015) return;
@@ -149,10 +213,9 @@ function ringB(cx_, cy_, cz_, U, Wd, rr, n, col, a, ph, jit, gap) {
     dotW(cx_ + U[0] * cs + Wd[0] * sn, cy_ + U[1] * cs + Wd[1] * sn, cz_ + U[2] * cs + Wd[2] * sn, 1, col, a * (.55 + .45 * g));
   }
 }
-/* the rod's plasma: an elongated bow shock (a paraboloid over the nose running into a narrow cone), the sheath
-   flowing off the nose into a long ionised wake, shock rings shed at the shoulder and swept down the trail (faded when
-   seen end-on, so they never frame the rod as circles), Mach diamonds behind it. Brighter and longer as the air
-   thickens; never a ball. */
+/* the rod's plasma: an elongated bow shock (a paraboloid over the nose running into a long narrow cone), the sheath
+   flowing off the nose into a long ionised wake, shock rings rippling down the cone on its surface (faded when seen
+   end-on, so they never frame the rod as circles). Brighter and longer as the air thickens; never a ball. */
 function sheath(p, D, U, Wd, heat, T) {
   cam();
   const px = p[0], py = p[1], pz = p[2];
@@ -164,7 +227,7 @@ function sheath(p, D, U, Wd, heat, T) {
   // how end-on the view is (1: along the axis): rings and cones fade there
   const vd = Math.abs((px - ex) * D[0] + (py - ey) * D[1] + (pz - ez) * D[2]) / dist, side = 1 - ss(.62, .9, vd);
   // sizes (m): the bow shock's nose radius, the shoulder, the cone, the hot wake
-  const Rn = 1 + 2.2 * h + 1.6 * lo, Rs = Rn * 2.2, so = .3 * Rn, Lb = Rs * Rs / (2 * Rn) - so, Lc = Rs * (9 + 9 * lo), tc = .1 + .04 * (1 - h), Lw = 140 + 420 * h + 520 * lo;
+  const Rn = 1 + 2.2 * h + 1.6 * lo, Rs = Rn * 2.2, so = .3 * Rn, Lb = Rs * Rs / (2 * Rn) - so, Lc = Rs * (16 + 18 * lo), tc = .085 + .035 * (1 - h), Lw = 140 + 420 * h + 520 * lo;
   const nx = px + D[0] * 3.1, ny = py + D[1] * 3.1, nz = pz + D[2] * 3.1;
   const fr = Math.floor(T * 30);
   // the stagnation light at the nose and an ionisation streak down the first part of the wake (glows strung along the axis)
@@ -212,34 +275,18 @@ function sheath(p, D, U, Wd, heat, T) {
       dotW(nx - D[0] * xb + U[0] * cs + Wd[0] * sn, ny - D[1] * xb + U[1] * cs + Wd[1] * sn, nz - D[2] * xb + U[2] * cs + Wd[2] * sn, 1, uu < .12 ? HOT : uu < .4 ? FIRE : uu < .7 ? EMB : WH, uu > .7 ? al * .5 : al);
     }
   }
-  // shock rings shed at the shoulder and swept down the trail, opening as they go; broken, ragged bands (seen from the
-  // side they read as ellipses travelling down the column)
+  // shock rings: ripples running down the bow shock's cone, on its surface (born at the shoulder, opening with the cone,
+  // gone at its end); broken, ragged bands that read as ellipses travelling down the sheath from the side, faded end-on
   if (side > .02) {
-    const RDT = .06, NRG = 16, life = RDT * NRG, k0 = Math.floor(T / RDT);
+    const x1 = (Rs * 1.3) * (Rs * 1.3) / (2 * Rn) - so, RDT = .055, NRG = 12, life = RDT * NRG, k0 = Math.floor(T / RDT);
     for (let j = 0; j < NRG; j++) {
       const kq = k0 - j, tau = T - kq * RDT, uq = tau / life; if (uq > 1 || uq < 0) continue;
-      const xr = Lb + Lw * 1.25 * Math.pow(uq, .85), rr = Rs * 1.1 + xr * (tc + .02 + .04 * h);
-      const al = side * h * Math.pow(1 - uq, 1.3) * (kq % 3 === 0 ? 1 : .6), wob = .06 * rr * fs(kq * 1.7);
-      const n = Math.min(1100, Math.max(24, Math.round(TAU * rr * ppm / 1.4)));
-      const cxr = nx - D[0] * (xr + wob), cyr = ny - D[1] * (xr + wob), czr = nz - D[2] * (xr + wob);
-      ringB(cxr, cyr, czr, U, Wd, rr, n, uq < .2 ? HOT : WH, al, kq * .9, .1 + .1 * uq, .25 + .2 * uq);
-      if (uq < .5) ringB(cxr - D[0] * rr * .06, cyr - D[1] * rr * .06, czr - D[2] * rr * .06, U, Wd, rr * .94, Math.round(n * .6), FIRE, al * .55, kq * 1.3, .08, .3);
-    }
-  }
-  // Mach diamonds: a chain of bright knots in the wake, breathing
-  {
-    const ND = 8, lam = Rs * 2.3;
-    for (let k = 0; k < ND; k++) {
-      const xd = Lb * 3.2 + Rs * .8 + k * lam * (1 + .06 * fs(T * 9 + k)), half = lam * .42, rd = Rs * (.6 - .045 * k);
-      const it = Math.min(1, 1.5 * (h + .3 * lo) * Math.pow(1 - k / ND, 1.1) * (.7 + .3 * fs(T * 23 + k * 1.7)));
-      if (it < .03) continue;
-      const n = Math.min(NMD, Math.max(24, Math.round(rd * half * ppm * ppm * 3)));
-      const cxd = nx - D[0] * xd, cyd = ny - D[1] * xd, czd = nz - D[2] * xd;
-      for (let i = 0; i < n; i++) {
-        const t = MDP[i * 2], th = MDP[i * 2 + 1] + T * 2.1, at = t < 0 ? -t : t, rr = rd * (1 - at), cs = fc(th) * rr, sn = fs(th) * rr;
-        dotW(cxd - D[0] * t * half + U[0] * cs + Wd[0] * sn, cyd - D[1] * t * half + U[1] * cs + Wd[1] * sn, czd - D[2] * t * half + U[2] * cs + Wd[2] * sn, at < .2 && ppm > 3 ? 2 : 1, at < .35 ? HOT : FIRE, it * (.6 + .4 * (1 - at)));
-      }
-      if (k < 4) K.glowW(cxd, cyd, czd, Math.min(60, 3 + rd * ppm * 1.6), FIRE, .2 * it);
+      const xr = Lb + (Lc - Lb) * Math.pow(uq, 1.15), rr = (xr < x1 ? Math.sqrt(Math.max(0, 2 * Rn * (xr + so))) : Rs * 1.3 + (xr - x1) * tc) * 1.02;
+      const al = side * h * Math.pow(1 - uq, 1.2) * Math.min(1, uq * 8) * (kq % 3 === 0 ? 1.15 : .7);
+      const n = Math.min(900, Math.max(24, Math.round(TAU * rr * ppm / 1.2)));
+      const cxr = nx - D[0] * xr, cyr = ny - D[1] * xr, czr = nz - D[2] * xr;
+      ringB(cxr, cyr, czr, U, Wd, rr, n, uq < .25 ? HOT : WH, al, kq * .9, .06 + .06 * uq, .2 + .25 * uq);
+      if (uq < .45) ringB(cxr + D[0] * rr * .05, cyr + D[1] * rr * .05, czr + D[2] * rr * .05, U, Wd, rr * .96, Math.round(n * .6), FIRE, al * .5, kq * 1.3, .05, .3);
     }
   }
 }
@@ -253,13 +300,16 @@ const th1 = i => { const s = Math.sin(i * 12.9898) * 43758.5453; return s - Math
 const th2 = i => { const s = Math.sin(i * 78.233 + 1.7) * 24634.6345; return s - Math.floor(s); };
 const th3 = i => { const s = Math.sin(i * 39.425 + 4.1) * 15731.3712; return s - Math.floor(s); };
 /* the column's radius (m) for an age (film s, aged as the film's ageAt) and a height */
-const colR = (age, alt) => Math.min(310, 2.5 + 40 * Math.sqrt(age)) * (.3 + .7 * ss(108000, 26000, alt)) * (1 + .45 * ss(22000, 2500, alt));
+const colR = (age, alt) => Math.min(330, 5 + 36 * Math.sqrt(age)) * (.3 + .7 * ss(108000, 26000, alt)) * (1 + 1.1 * ss(24000, 2000, alt));
 const NCHK = 2048, CK_ST = new Int32Array(NCHK), CK_RP = new Int32Array(NCHK), CK_ZM = new Float64Array(NCHK), CK_DM = new Float64Array(NCHK), CK_ON = new Uint8Array(NCHK);
 const TBUDGET = 36000;
 function trail(F, T, vis) {
   cam();
   if (FCs) { FRAME.T = T; FRAME.a = FCs.aOf(T); W.CRA.a = FRAME.a; }
   const sR = F.sOf(T);
+  // the column's age: the film's clock while the rod falls, then the strike's own (sim) clock, so it does not swell
+  // through the slow motion
+  const TI_ = FCs ? FCs.TI : 1e9, ageAt = T < TI_ || !FCs ? F.ageAt : (s_, T_) => F.ageAt(s_, TI_) + .75 * Math.max(0, FRAME.a);
   if (sR > 0) {
     const Dv = F.DIR, M = F.MZ, U = F.U, Wd = F.W, Fl = FL, near = NR;
     const sU = U[0] * SUNL[0] + U[1] * SUNL[1] + U[2] * SUNL[2], sW = Wd[0] * SUNL[0] + Wd[1] * SUNL[1] + Wd[2] * SUNL[2];
@@ -268,14 +318,14 @@ function trail(F, T, vis) {
     for (let c0 = 0; c0 < sR && ci < NCHK; c0 += TCH, ci++) {
       CK_ON[ci] = 0;
       const c1 = Math.min(sR, c0 + TCH), sm = (c0 + c1) / 2;
-      const altm = F.altAt(sm), airm = ss(112000, 36000, altm), ageMax = F.ageAt(c0, T);
+      const altm = F.altAt(sm), airm = ss(112000, 36000, altm), ageMax = ageAt(c0, T);
       const reach = airm > .02 ? colR(ageMax, altm) * 1.4 + 7 * ageMax + 10 : 10;
       if (!K.wIn(M[0] + Dv[0] * sm, M[1] + Dv[1] * sm, M[2] + Dv[2] * sm, (c1 - c0) / 2 + reach)) continue;
       const zmid = Math.max(near, K.WZ[0]), dmin = Math.max(near, K.WZ[0] - (c1 - c0) / 2 - reach);
       CK_ON[ci] = airm < .02 ? 1 : 2; CK_ZM[ci] = zmid; CK_DM[ci] = dmin;
       const need = (airm < .02 ? 2.2 : 1.7) * dmin / (Fl * TDS); let st = 1; while (st < need && st < 1 << 20) st <<= 1;
       CK_ST[ci] = st;
-      if (airm >= .02) { const agm = F.ageAt(sm, T), wpx = 2 * colR(agm, altm) * Fl / zmid, reps = Math.max(1, Math.min(44, Math.round(wpx * .4))); CK_RP[ci] = reps; want += (c1 - c0) / (TDS * st) * (reps + 1); }
+      if (airm >= .02) { const agm = ageAt(sm, T), wpx = 2 * colR(agm, altm) * Fl / zmid, reps = Math.max(1, Math.min(44, Math.round(wpx * .4))); CK_RP[ci] = reps; want += (c1 - c0) / (TDS * st) * (reps + 1); }
     }
     const kB = want > TBUDGET ? TBUDGET / want : 1;
     ci = 0;
@@ -283,7 +333,7 @@ function trail(F, T, vis) {
       if (!CK_ON[ci]) continue;
       const c1 = Math.min(sR, c0 + TCH), sm = (c0 + c1) / 2, zmid = CK_ZM[ci], dmin = CK_DM[ci], st = CK_ST[ci];
       const mx = M[0] + Dv[0] * sm, my = M[1] + Dv[1] * sm, mz = M[2] + Dv[2] * sm;
-      const ag0 = F.ageAt(c0, T), ag1 = F.ageAt(c1, T), al0 = F.altAt(c0), al1 = F.altAt(c1), icl = 1 / Math.max(1e-6, c1 - c0);
+      const ag0 = ageAt(c0, T), ag1 = ageAt(c1, T), al0 = F.altAt(c0), al1 = F.altAt(c1), icl = 1 / Math.max(1e-6, c1 - c0);
       const i0 = Math.ceil(c0 / TDS / st) * st, i1 = c1 / TDS;
       if (CK_ON[ci] === 1) {
         // the vacuum track: a thin lime line far away, dots close
@@ -312,7 +362,7 @@ function trail(F, T, vis) {
         if (ks < 1 && th3(i + 99) > ks) continue;
         const sp = (i + th1(i) * st * .9) * TDS; if (sp > sR) break;
         const uc = (sp - c0) * icl, alt = al0 + (al1 - al0) * uc, air = ss(112000, 36000, alt), age = ag0 + (ag1 - ag0) * uc;
-        const hot = Math.exp(-age / (.45 + .3 * th3(i)));
+        const hot = Math.exp(-age / (1.1 + .8 * th3(i)));
         const rc = colR(age, alt) * (1 + .15 * fs(sp / 173 + 1.3) + .1 * fs(sp / 71 + 4.1) + .07 * fs(sp / 29.3 + 2.2) + .05 * fs(sp / 431 + .7)) * air;
         // winds aloft: the column drifts and kinks with height; it rises a little as it cools
         const wa = age * air, wx = 4.5 * fs(alt / 6500 + 1.2) * wa, wz = 4.5 * fc(alt / 9000 + .4) * wa, wy = 1.1 * wa;
@@ -433,6 +483,40 @@ function vehicles(a, vis) {
     if (tau < 2.5) for (let i = 0; i < 60; i++) { const s = tau * (8 + 20 * hz1(i + 3)); dotW(cx_ + (hz1(i) - .5) * s, cy_ + (hz2(i) - .3) * s, cz_ + (hz1(i + 9) - .5) * s, 1, tau < .6 ? HOT : DUST, (1 - tau / 2.5) * vis); }
   }
   VOPT.tk = 0;
+}
+/* the plasma dome: in the first instants a hemisphere of white-hot air swelling over the impact, its skin boiling,
+   cooling to fire as it lifts into the fireball (the cap takes over) */
+const NPD = 16000, PDM = (() => { const r = rng(7474), A = new Float32Array(NPD * 5); for (let i = 0; i < NPD; i++) { const th = r() * TAU, el = Math.asin(Math.pow(r(), .7)), q = Math.pow(r(), .3); A[i * 5] = Math.cos(th) * Math.cos(el); A[i * 5 + 1] = Math.sin(el); A[i * 5 + 2] = Math.sin(th) * Math.cos(el); A[i * 5 + 3] = q; A[i * 5 + 4] = r(); } return A; })();
+function sPlasma(a, vis, hx, hy, hz) {
+  if (a <= 0 || a > 1.7) return;
+  const R0 = 24 + 330 * (1 - Math.exp(-a * 5.5)), al = vis * Math.min(1, a * 40) * (1 - ss(.5, 1.7, a)), lift = 70 * a * a, heat = 1.25 * Math.exp(-a * 1.5);
+  psys(NPD, R0, hx, hy + R0 * .45, hz, 1.3, 14000); const st = PS_ST, sz = PS_S;
+  for (let i = 0; i < NPD; i += st) {
+    const o = i * 5, q = PDM[o + 3], hq = PDM[o + 4], ux = PDM[o], uy = PDM[o + 1], uz = PDM[o + 2];
+    const bump = 1 + .1 * fs(ux * 9 + uz * 7 + a * 9) * fc(uy * 8 - a * 6) + .05 * fs(ux * 23 - uz * 19 + a * 17);
+    const rr = R0 * q * bump, y = hy + uy * rr * .82 + lift * q;
+    dotL(hx + ux * rr, y, hz + uz * rr, lut(heat * (1.1 - .45 * q) + .08 * hq, .55 + .45 * hq), al * (.45 + .55 * q) * (.75 + .3 * hq), sz);
+  }
+}
+/* shock layers racing out over the forest: the front's foot as a thin wall of compressed, dusty air with a bright crest
+   (white-hot, then lime like the land's ring), two weaker layers trailing it; they thin out and fade. Near the ground
+   the dots go to the arc that faces the lens (a window of the ring), high up to the whole ring */
+const NLY = 14000, LYP = (() => { const r = rng(7575), A = new Float32Array(NLY * 3); for (let i = 0; i < NLY; i++) { A[i * 3] = (i + r()) / NLY - .5; A[i * 3 + 1] = i % 5 < 3 ? .96 + .04 * r() : Math.pow(r(), .7) * .9; A[i * 3 + 2] = r(); } return A; })();
+function sLayers(a, vis, hx, hy, hz) {
+  if (a < .2 || a > 10) return;
+  const eh = ey - hy, win = .7 + (PI - .7) * ss(150, 700, eh), th0 = Math.atan2(ez - hz, ex - hx), cr = a < 1.5 ? HOT : LIME;
+  for (let k = 0; k < 3; k++) {
+    const ak = a - k * .08; if (ak <= .15) continue;
+    const R0 = shockR(ak) - 4 * k, Hs = (16 + .05 * R0) * (1 - .22 * k), al = vis * ss(.2, .55, a) * Math.exp(-ak / 4.2) * (k ? .55 / k : 1) * (.45 + .55 * graze(R0));
+    if (al < .02 || R0 > 8000) continue;
+    const n = Math.min(NLY, Math.round(NLY * (.35 + .65 * win / PI)));
+    for (let i = 0; i < n; i++) {
+      const o = i * 3, th = th0 + LYP[o] * 2 * win, v = LYP[o + 1], hq = LYP[o + 2], ct = fc(th), st = fs(th);
+      const rr = R0 - hq * (3 + 3 * k), top = Hs * (1 + .18 * fs(th * 37 + k * 2.1 + a) + .1 * fs(th * 91 - a * 3)), y = gP(rr, th) + 3 + v * top;
+      if (v > .95) dotW(hx + ct * rr, y, hz + st * rr, 1, k ? WH : cr, al * (.7 + .3 * hq));
+      else dotW(hx + ct * rr, y, hz + st * rr, 1, DUST, al * (.12 + .36 * v) * (.6 + .4 * hq));
+    }
+  }
 }
 function sGlow(a, vis, hx, hy, hz) {
   // the blinding point and the light of the fireball
@@ -652,7 +736,7 @@ const PDC = billowCloud(9393, 110, (r, b, C) => { const th = r() * TAU, ph = r()
 const NPDC = PDC.length / CS, PDK = pack(PDC);
 if (window.ORW_LOG) window.ORW_LOG.push('mushroom clouds ' + NCAPC + ' / ' + NSTC + ' / ' + NPDC);
 /* dot budgets per frame (the counts follow the size on screen up to these) */
-const B_CAP = 100000, B_STEM = 24000, B_PED = 18000;
+const B_CAP = 80000, B_STEM = 24000, B_PED = 18000;
 const S0 = SUNL[0], S1 = SUNL[1], S2 = SUNL[2];
 /* the count of a set to draw for a disc of radius R_ (m) at (x, y, z): about one dot per k px^2, capped */
 function setN(N, R_, x, y, z, k, cap) {
@@ -770,7 +854,7 @@ function strike(a, vis) {
   vis = vis === undefined ? 1 : vis;
   const hx = HIT[0], hy = HIT[1], hz = HIT[2];
   sGlow(a, vis, hx, hy, hz); if (PT) PT.lap(0);
-  sShock(a, vis, hx, hy, hz); if (PT) PT.lap(1);
+  sPlasma(a, vis, hx, hy, hz); sShock(a, vis, hx, hy, hz); sLayers(a, vis, hx, hy, hz); if (PT) PT.lap(1);
   sFoot(a, vis, hx, hy, hz); sCrater(a, vis, hx, hy, hz); if (PT) PT.lap(2);
   sSurge(a, vis, hx, hy, hz); if (PT) PT.lap(3);
   sEject(a, vis, hx, hy, hz); if (PT) PT.lap(4);
@@ -787,37 +871,35 @@ function debris(p, t, vis) { }
 
 /* ================= the camera of the fall and the strike =================
    cam(T, FC) -> a shot for base time T, or null for the film's own camera. FC: the fall's constants and helpers
-   (TX, TI, T_RET, TF, rodAt, altOf, aOf, DIRP, SIDE, UPD, HIT, CE, MZ0, SAT, camBase...). Called first in each
-   frame, so it also sets the strike's state for the world (the crater, the forest, the cloud's shadow).
-
-   TIMELINE REQUEST (for film.js, the mechanisms agent): the strike wants more time and a slow-motion beat in the
-   forest. Proposed: T_RET = TI + 28 (now 16.4: the base take grows by 11.6 s, DUR 162 -> 173.6) and
-     SWARP = FILM.warp([{ t: 0, rate: .25 }, { t: 1.6, rate: .25 }, { t: 2.6, rate: 1 }, { t: 4.0, rate: 1 },
-                        { t: 4.8, rate: .05 }, { t: 13.8, rate: .05 }, { t: 15.3, rate: 4 }, { t: T_RET - TI + 14, rate: 4 }]);
-   x1/4 for the flash and the plasma dome, x1 while the shock crosses the land, x1/20 for 9 s while the front tears
-   through the trees round the ground camera (sim 2.9..3.35 s; it reaches the camera, 1.5 km out, at 3.18 s), then x4
-   for the cloud and the crater. The camera keys that beat on the sim time a (and the rest on film time), so it works
-   with either timeline.
+   (TX, TI, T_RET, TF, rodAt, altOf, aOf, DIRP, SIDE, UPD, HIT, CE, MZ0, SAT, camBase...), checked on every call (the
+   timeline may change: the shots are rebuilt). Called first in each frame, so it also sets the strike's state for the
+   world (the crater, the forest, the cloud's shadow).
 
    Every shot carries an explicit up vector (turned into the film camera's roll), so there are no roll flips; blends
-   turn the look about an axis (never a lerp of near-opposite directions) and last 2 s or more; the look turns at most
-   about 40 deg/s.
+   turn the look about an axis (never a lerp of near-opposite directions), ease with a smoothstep (peak 1.5x the mean
+   rate) and last 3 s or more; the look turns at most about 40 deg/s.
      exit     beside the round as it leaves the muzzle (x1/20), handed over from the film's camera, then riding with
               the rod as it speeds up, falling in behind it and looking down the path at the Earth
      coast    a slow orbit round the rod to its front quarter as the Earth comes up (the vacuum, x9)
      entry    beside and ahead of the rod while the sheath forms and the trail thickens
-     incoming the lens drops away from the rod to the forest floor 1.5 km from the target, looking up at the streak
-     strike   held on the forest floor through the flash, the plasma dome and the shock tearing through the trees,
-              then a slow crane up and back over the flattened forest, an aerial arc round the cloud, and a move in
-              over the crater, from the platform's side (where the climb back up the trail takes off) */
-const kk = (T, a, b) => E.inOut(E.sat((T - a) / (b - a)));
+     incoming the lens drops away from the rod to the forest floor 1.5 km from the target (3 s), the rod kept in view,
+              then eases onto a still frame from the floor in front of the lens up through the crowns, the target on
+              the horizon; the streak enters it from the top and crosses it (the flash throws the trunks' shadows
+              across the floor toward the lens)
+     strike   held through the flash and the plasma dome; a turn and a crane (3.5 s) to a frame 5 m up in the stand,
+              26 m nearer the strike, 62 deg off it (the world's BEAT), as the shock layers come over the forest; the
+              slow-motion beat (x1/20) as the front's lime layer and its wall of dust sweep through the trees toward the
+              lens and tear them apart, a slow push in; a crane up out of the flattened stand, an aerial arc round the
+              cloud, then the crater from 1.3 km out and 0.8 km up, looking down 32 deg toward the platform's side;
+              that is the last frame (REST): the film's climb takes off from it at T_RET - 0.1 with no blend
+   Measured every 0.1 s from the hand-in to T_RET + 4 s: the look turns at most 38 deg/s (the ride at T_ON + 4, and
+   the film's climb after T_RET) */
+const kk = (T, a, b) => E.ss(a, b, T);
 const Y_ = [0, 1, 0];
 /* a unit vector made perpendicular to f */
 function orth(f, up) { const d = up[0] * f[0] + up[1] * f[1] + up[2] * f[2], x = up[0] - f[0] * d, y = up[1] - f[1] * d, z = up[2] - f[2] * d, l = Math.hypot(x, y, z); return l < 1e-9 ? null : [x / l, y / l, z / l]; }
 /* slerp of unit vectors */
 function slerpV(a, b, w) { let d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; d = d > 1 ? 1 : d < -1 ? -1 : d; const th = Math.acos(d); if (th < 1e-6) return a.slice(); const s = Math.sin(th), ka = Math.sin((1 - w) * th) / s, kb = Math.sin(w * th) / s; return [a[0] * ka + b[0] * kb, a[1] * ka + b[1] * kb, a[2] * ka + b[2] * kb]; }
-/* shots: { eye, f (unit look), up (unit, perpendicular to f), fov (rad) } */
-const shotL = (eye, target, up, fovDeg) => { const f = V.norm(V.sub(target, eye)); return { eye, f, up: orth(f, up) || orth(f, [1, 0, 0]), fov: fovDeg * DEG }; };
 /* blend two shots: the eye straight (or about an anchor P: direction slerped, distance log-mixed), the look slerped,
    the up mixed and made perpendicular again */
 function mixS(A, B, w, P) {
@@ -833,8 +915,6 @@ function outS(s) {
   const f = s.f, r = V.norm(V.cross(Y_, f)), u = V.cross(f, r);
   return { eye: s.eye, target: V.mad(s.eye, f, 1000), fov: s.fov, roll: Math.atan2(-V.dot(s.up, r), V.dot(s.up, u)) };
 }
-/* from the film's form */
-function inS(b) { const f = V.norm(V.sub(b.target, b.eye)), r = V.norm(V.cross(Y_, f)), u = V.cross(f, r), c = Math.cos(b.roll || 0), s = Math.sin(b.roll || 0); return { eye: b.eye.slice(), f, up: [u[0] * c - r[0] * s, u[1] * c - r[1] * s, u[2] * c - r[2] * s], fov: b.fov }; }
 /* a scalar key track (cubic Hermite, Catmull-Rom tangents, flat at the ends) */
 function track(keys) {
   const n = keys.length, M = keys.map((k, i) => i === 0 || i === n - 1 ? 0 : (keys[i + 1][1] - keys[i - 1][1]) / (keys[i + 1][0] - keys[i - 1][0]));
@@ -858,7 +938,7 @@ function mkPath(keys) {
     return { eye: v3('eye'), target: v3('target'), fov: Hm(a.fov, b.fov, Mt[i].fov, Mt[i + 1].fov, u, dt) };
   };
 }
-let CI = null;
+let CI = null, CI_K = '';
 /* the round's centre: in the bore before the exit (its u^2 run down the barrel), then the rod's fall */
 function roundAt(F, T) { if (T >= F.TX) return F.rodAt(T); const u = Math.max(0, (T - F.TF) / (F.TX - F.TF)); return V.mad(F.MZ0, F.DIRP, -125 * (F.TX - F.TF) * (1 - u * u)); }
 function camInit(F) {
@@ -876,33 +956,39 @@ function camInit(F) {
   CI = { UPH, N_, S_, at, up, D, SD, UD: UDs, tOfA };
   // the ride's parameters over film time from the exit: azimuth from behind the rod toward its side (deg), elevation
   // (deg), distance (m), the look's lean from the rod toward the path ahead (0..1), the fov
-  const R = t => t - X0;
+  CI.R = t => t - X0;
   CI.AZ = track([[3.2, 29], [4.9, 30], [7.4, 66], [9.6, 116], [11.0, 134], [12.0, 140]]);
   CI.EL = track([[3.2, 14], [4.9, 22], [7.4, 13], [9.6, 0], [11.0, -6], [12.0, -8]]);
   CI.DS = track([[3.2, 22], [4.9, 80], [7.4, 120], [9.6, 160], [11.0, 200], [12.0, 230]]);
   CI.LA = track([[3.2, .45], [4.9, .72], [7.4, .55], [9.6, .16], [11.0, 0], [12.0, 0]]);
   CI.FV = track([[3.2, 50], [4.9, 52], [7.4, 50], [9.6, 48], [12.0, 48]]);
-  CI.R = R;
-  // the ground camera: on the forest floor 1.5 km out (the world's G2, inside the hero stand), 2.2 m up
-  const Gc = V.mad(W.G2, UPH, 2.2);
+  // the ground camera: on the forest floor 1.5 km out (the world's G2, the hero stand round it), at eye height
+  const Gc = V.mad(W.G2, UPH, 1.7);
   CI.Gc = Gc; CI.aG = arrive(Math.hypot(W.G2[0] - HIT[0], W.G2[2] - HIT[2])); CI.tG = tOfA(CI.aG);
   CI.alG = Math.atan2(V.dot(V.sub(W.G2, HIT), S_), V.dot(V.sub(W.G2, HIT), N_));
-  // where the look rests while the rod comes in, and through the strike: low over the target (the trees in front,
-  // the fireball over them)
-  CI.AIM = up(150); CI.AIMH = up(600);
-  // the strike: the forest beat (keyed on a) until the rise, then a path over film time from the rise to T_RET
-  CI.T_RISE = Math.max(tOfA(3.5), tOfA(CI.aG) + 1.0);
-  CI.Tend = F.T_RET + 2.0;
+  // the incoming frame: still, from the target on the horizon (15 deg above the frame's foot, the forest floor below
+  // it) up through the crowns; the rod's streak enters from the top about a second out
+  // (the floor in front of the lens in its lower part, for the flash's shadows; the streak enters from the top)
+  const hor = v => V.norm(V.sub(v, V.mul(UPH, V.dot(v, UPH)))), fR = V.norm(V.sub(F.rodAt(TI - 1.1), Gc)), fH = V.norm(V.sub(up(8), Gc));
+  const hz_ = slerpV(hor(fR), hor(fH), .62), elI = Math.asin(V.dot(fH, UPH)) + 15 * DEG;
+  CI.FIN = V.norm(V.add(V.mul(hz_, Math.cos(elI)), V.mul(UPH, Math.sin(elI)))); CI.FVIN = 64 * DEG;
+  // the beat: 5 m up in the stand, 62 deg off the strike on the side away from the sun, 4 deg up, a slow push in
+  const az = W.BEAT.az, hz = [Math.cos(az), 0, Math.sin(az)], hp = V.norm(V.sub(hz, V.mul(UPH, V.dot(hz, UPH))));
+  CI.FB = V.norm(V.add(V.mul(hp, Math.cos(4 * DEG)), V.mul(UPH, Math.sin(4 * DEG))));
+  CI.HB = hp; CI.Bc = W.BEAT.cam;
+  CI.tTurn0 = tOfA(.75); CI.tTurn1 = Math.max(CI.tTurn0 + 3.4, tOfA(2.86) + .7);
+  // the rise: from the beat's last frame (keyed on film time from the end of the slow motion to T_RET)
+  CI.T_RISE = Math.max(CI.tTurn1 + 2, tOfA(3.3) - .1);
+  CI.Tend = F.T_RET - .1;          // the film's climb takes off from the last frame (REST) at T_RET - 0.1: no blend needed
   const T0 = CI.T_RISE, DS = F.T_RET - .15 - T0, kt = fr => T0 + DS * fr, aT = fr => Math.max(0, F.aOf(kt(fr)));
   const k = (fr, eye, target, fov, stop) => ({ t: kt(fr), eye, target, fov: fov * DEG, stop });
-  const al = CI.alG;
+  const B1 = shotBeat(F, T0), al = CI.alG;
   CI.SP = mkPath([
-    k(0, Gc, CI.AIM, 56, true),
-    k(.14, at(al - .03, 1650, 120), up(150 + capH(aT(.14)) * .3), 56),
-    k(.34, at(al - .22, 2800, 620), up(capH(aT(.34)) * .5), 52),
-    k(.56, at(.42, 5200, 1050), up(capH(aT(.56)) * .5), 46),
-    k(.8, at(.26, 2700, 1500), up(120), 46),
-    k(1, at(.3, 1150, 1700), up(10), 46, true),
+    k(0, B1.eye, V.mad(B1.eye, B1.f, 1500), B1.fov / DEG, true),
+    k(.24, V.add(at(al - .02, 1560, 70), V.mul(hp, 40)), up(120 + capH(aT(.24)) * .3), 54),
+    k(.48, at(al - .26, 2700, 640), up(capH(aT(.48)) * .48), 50),
+    k(.74, at(.5, 3900, 1100), up(capH(aT(.74)) * .32), 46),
+    k(1, at(.3, 1300, 820), up(0), 46, true),
   ]);
 }
 /* the ride with the rod (the exit, the speed-up, the coast, the entry) */
@@ -910,57 +996,57 @@ function shotRide(F, T) {
   const t = CI.R(T), p = roundAt(F, T), D = CI.D, S = CI.SD, U = CI.UD;
   const az = CI.AZ(t) * DEG, el = CI.EL(t) * DEG, d = CI.DS(t), la = CI.LA(t);
   const ce = Math.cos(el), o = V.add(V.mul(D, -ce * Math.cos(az) * d), V.add(V.mul(S, ce * Math.sin(az) * d), V.mul(U, Math.sin(el) * d)));
-  const eye = V.add(p, o), toRod = V.norm(V.sub(V.mad(p, D, 4 - 30 * ss(9, 12.6, t)), eye));
+  const eye = V.add(p, o), tg = V.mad(p, D, 4 - 30 * ss(9, 12.6, t)), toRod = V.norm(V.sub(tg, eye));
   const ahead = V.norm(V.add(V.mul(D, Math.cos(.38)), V.mul(U, Math.sin(.38))));
   const f = slerpV(toRod, ahead, la);
-  return { eye, f, up: orth(f, U) || U, fov: CI.FV(t) * DEG };
+  return { eye, f, up: orth(f, U) || U, fov: CI.FV(t) * DEG, tg };
 }
-/* the ground camera while the rod comes in: looking at the rod, easing up onto the sky over the target before the
-   impact (the look leaves the rod before it gets fast) */
-const lookIn = (F, T, eye) => { const p = F.rodAt(Math.min(T, F.TI - .02)); return slerpV(V.norm(V.sub(p, eye)), V.norm(V.sub(CI.AIMH, eye)), kk(T, F.TX + 14.5, F.TI - .1)); };
-function shotIncoming(F, T) { const f = lookIn(F, T, CI.Gc); return { eye: CI.Gc, f, up: orth(f, CI.UPH), fov: 56 * DEG }; }
-/* the forest floor through the strike (a: sim s): a slow drift and a lean toward the front as it comes */
-function shotForest(F, T, a) {
-  const Gc = CI.Gc, lean = ss(2.3, 3.0, a) * (1 - ss(3.25, 3.5, a));
-  const aim = V.add(CI.AIM, V.mul(CI.UPH, 450 * (1 - ss(1.4, 2.6, a)) - 60 * lean));
-  const eye = V.add(Gc, V.mul(V.norm(V.sub(HIT, Gc)), 3 * lean));
-  const f = V.norm(V.sub(aim, eye));
-  return { eye, f, up: orth(f, CI.UPH), fov: (56 - 2 * lean) * DEG };
+/* the ground camera while the rod comes in: a still frame up through the crowns */
+function shotIncoming(F, T) { return { eye: CI.Gc, f: CI.FIN, up: orth(CI.FIN, CI.UPH), fov: CI.FVIN }; }
+/* the beat among the trees: a slow push in and a drift down (film time from the turn) */
+function shotBeat(F, T) {
+  const u = ss(0, 1, E.sat((T - CI.tTurn1) / Math.max(1, CI.T_RISE - CI.tTurn1)));
+  const eye = V.add(V.mad(CI.Bc, CI.HB, 3.2 * u - .8), V.mul(CI.UPH, -.7 * u)), f = V.norm(V.add(CI.FB, V.mul(CI.UPH, -.02 * u)));
+  return { eye, f, up: orth(f, CI.UPH), fov: (58 - 3 * u) * DEG };
 }
 function shotStrike(F, T, a) {
-  if (T < CI.T_RISE) return shotForest(F, T, a);
-  const s = CI.SP(T), w = kk(T, CI.T_RISE, CI.T_RISE + 2.4), f = V.norm(V.sub(s.target, s.eye));
-  const S = { eye: s.eye, f, up: orth(f, CI.UPH) || CI.UPH, fov: s.fov };
-  return w < 1 ? mixS(shotForest(F, CI.T_RISE, F.aOf(CI.T_RISE)), S, w) : S;
+  if (T < CI.tTurn0) return shotIncoming(F, T);
+  if (T < CI.tTurn1) { const m = mixS(shotIncoming(F, T), shotBeat(F, CI.tTurn1), kk(T, CI.tTurn0, CI.tTurn1)); m.up = orth(m.f, CI.UPH); return m; }
+  if (T < CI.T_RISE) return shotBeat(F, T);
+  const s = CI.SP(T), f = V.norm(V.sub(s.target, s.eye));
+  return { eye: s.eye, f, up: orth(f, CI.UPH) || CI.UPH, fov: s.fov };
 }
 function shotAll(F, T) {
   const X0 = F.TX, a = F.aOf(T);
   if (T < X0 + 11.8) return shotRide(F, T);
-  if (T < X0 + 14.8) {
-    // dropping away from the rod to the forest floor (the eye about the rod, the look kept on it)
-    const A = shotRide(F, T), B = shotIncoming(F, T), w = kk(T, X0 + 11.8, X0 + 14.8), m = mixS(A, B, w, F.rodAt(T)), f = lookIn(F, T, m.eye);
+  if (T < F.TI - .9) {
+    // dropping away from the rod to the forest floor (3 s): the eye about the rod; the look kept on the rod (from the
+    // ride's aim, seen from the moving eye), easing from 1.4 s into the drop onto the still frame by 0.9 s before the
+    // strike (the streak then enters it from the top)
+    const A = T < X0 + 14.8 ? shotRide(F, T) : null, B = shotIncoming(F, T), w = kk(T, X0 + 11.8, X0 + 14.8), m = A ? mixS(A, B, w, F.rodAt(T)) : B;
+    const tg = A ? V.lerp(A.tg, F.rodAt(T), ss(0, .4, w)) : F.rodAt(T), f = slerpV(V.norm(V.sub(tg, m.eye)), B.f, ss(X0 + 13.2, F.TI - .9, T));
     return { eye: m.eye, f, up: orth(f, V.lerp(CI.UD, CI.UPH, w)) || CI.UPH, fov: m.fov };
   }
   if (T < F.TI) return shotIncoming(F, T);
-  // the impact: from the look at the sky over the target into the forest beat (continuous: both look at it)
   return shotStrike(F, T, Math.max(0, a));
 }
 function camHook(T, F) {
   FCs = F;
   FRAME.T = T; FRAME.a = F.aOf(T); W.CRA.a = FRAME.a; cloudShadow(FRAME.a);
   { const ld = FRAME.a > 0 ? ss(.2, 1.5, FRAME.a) * (1 - ss(F.T_RET + .5, F.T_RET + 2, T)) : 0; W.GOPT.pxm = 1 + .22 * ld; W.GOPT.fbud = 1 - .45 * ld; }
-  if (!CI) camInit(F);
+  W.GOPT.hz = 1; W.GOPT.hk = 0;
+  const key = F.TX + ',' + F.TI + ',' + F.T_RET;
+  if (!CI || key !== CI_K) { CI_K = key; camInit(F); }
   // the film's camera rides beside the round through the exit and hands in to this one over T_ON - 1.6 .. T_ON + 1.1
   if (T < F.T_ON - 1.6 || T > CI.Tend) return null;
-  let s = shotAll(F, T);
-  // the hand-over to the film's climb (it takes off from this pose: REST)
-  if (T > F.T_RET - .1) s = mixS(s, inS(F.camBase(T)), kk(T, F.T_RET - .1, CI.Tend));
-  const o = outS(s);
-  // the shock reaching the ground camera: a jolt, then a sway in the wind (film seconds, so slow motion sways slowly)
+  const o = outS(shotAll(F, T));
+  // dust in the air round the ground camera: the stand reads in front of a fading forest (no bright horizon line)
+  { const e = o.eye, dG = Math.hypot(e[0] - W.G2[0], e[1] - W.G2[1], e[2] - W.G2[2]), g = 1 - ss(80, 500, dG); W.GOPT.hz = 1 + 10 * g; W.GOPT.hk = .92 * (1 - ss(16, 110, dG)); }
+  // the shock reaching the lens: a jolt, then a sway in the wind (film seconds, so slow motion sways slowly)
   const tg = T - CI.tG;
   if (CI.tG && tg > 0 && tg < 6 && T < CI.T_RISE + 1) { const sh = FILM.shake(T, 1, 7), amp = 9 * Math.exp(-tg * .8) * (1 - Math.exp(-tg * 6)); o.target = V.add(o.target, V.add(V.mul(CI.S_, sh[0] * amp), V.mul(CI.UPH, sh[1] * amp * .6))); }
   return o;
 }
 
-return { setProf, shot, bore, petals, trail, sheath, strike, flashA, debris, shockR, surgeR, capH, capR, gP, FIRE, DUST, cam: camHook, arrive, _dbg: { ci: () => CI, shotRide, shotAll, roundAt } };
+return { setProf, shot, bore, petals, trail, sheath, strike, flashA, debris, shockR, surgeR, capH, capR, gP, FIRE, DUST, cam: camHook, arrive };
 };
