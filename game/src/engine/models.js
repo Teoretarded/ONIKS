@@ -1322,7 +1322,8 @@ export class ModelLib {
     let cl;
     if (prims) {
       const W = new PtBuf(256);
-      samplePrims(prims, 0, sp, mulberry(seed), lod >= 2, W, Infinity, seed);
+      // (hook, engine/lattice.js: samplerFor(e) -> the films' lattice sampler for this entry (Settings > Model dot density), else null)
+      (this.samplerFor && this.samplerFor(e) || samplePrims)(prims, 0, sp, mulberry(seed), lod >= 2, W, Infinity, seed);
       cl = this._uploadPacked(W.bytes(), W.n, sp, W.cells(), P.dyn ? 0 : e.bs);
     } else {
       const pts = GEO.sample({ parts: [P.part] }, sp, seed, st || {}, lod >= 2 ? { fine: false } : undefined)[0].pts;
@@ -1349,7 +1350,8 @@ export class ModelLib {
       J = jobs[lod] = { prims, i: 0, W: new PtBuf(est), sp: e.lods[lod], seed, rnd: mulberry(seed), fine: lod >= 2 };
     }
     const t0 = performance.now();
-    if (this.spent < limit) J.i = samplePrims(J.prims, J.i, J.sp, J.rnd, J.fine, J.W, t0 + (limit - this.spent), J.seed);
+    // (hook, engine/lattice.js: the lattice sampler for this entry, as in _sample)
+    if (this.spent < limit) J.i = (this.samplerFor && this.samplerFor(e) || samplePrims)(J.prims, J.i, J.sp, J.rnd, J.fine, J.W, t0 + (limit - this.spent), J.seed);
     let cl = null;
     if (J.i >= J.prims.length) {
       jobs[lod] = null;

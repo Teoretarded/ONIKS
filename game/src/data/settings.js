@@ -14,6 +14,8 @@
      renderStyle * 'pointcloud' | 'orbital'     the look: Point Cloud (graphite, white dots) or Orbital (black, hairlines)
      renderScale * 0.5 | 0.67 | 0.75 | 1        fraction of the device-pixel canvas size
      dotDensity  * 'low' | 'medium' | 'high' | 'ultra'
+     modelDots   * 'standard' | 'high' | 'ultra'  the models' dots: Standard as before, High / Ultra the films' lattice (regular
+                                                 grids, edges as dotted hairlines; engine/lattice.js setModelDots, live)
      effects     * 'low' | 'medium' | 'high'    smoke, debris and spark dots, dynamic lights, landmark detail
                                                  (fx/index.js FX_LEVELS, game/landmarks.js DETAIL; read live)
      autoQuality * bool                          hold 60 fps: effects, dot density, then render scale step down under load
@@ -68,6 +70,7 @@ export const SETTINGS = [
   { key: 'renderStyle', group: 'Graphics', label: 'Render style', def: 'pointcloud', choices: [['pointcloud', 'Point Cloud'], ['orbital', 'Orbital']] },
   { key: 'renderScale', group: 'Graphics', label: 'Render scale', def: 1, choices: [[.5, '50%'], [.67, '67%'], [.75, '75%'], [1, '100%']] },
   { key: 'dotDensity', group: 'Graphics', label: 'Dot density', def: 'high', choices: [['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['ultra', 'Ultra']] },
+  { key: 'modelDots', group: 'Graphics', label: 'Model dot density', def: 'standard', choices: [['standard', 'Standard'], ['high', 'High'], ['ultra', 'Ultra']] },
   { key: 'effects', group: 'Graphics', label: 'Effects', def: 'high', choices: [['low', 'Low'], ['medium', 'Medium'], ['high', 'High']] },
   { key: 'autoQuality', group: 'Graphics', label: 'Auto quality', def: true, choices: [[false, 'Off'], [true, 'On']] },
   { key: 'showFps', group: 'Graphics', label: 'Show FPS', def: false, choices: [[false, 'Off'], [true, 'On']] },
@@ -111,7 +114,8 @@ export const tabOf = d => d.tab || 'general';
 export const NOTES = {
   renderStyle: v => v === 'orbital' ? 'Black, white hairline wireframe, one yellow. The Orbital films.' : 'Graphite, white LiDAR dots, lime and coral. The Point Cloud films.',
   renderScale: v => v < 1 ? `Draws at ${Math.round(v * 100)}% of the screen's pixels and scales up. Faster.` : 'Draws at the full resolution of the screen.',
-  dotDensity: v => ({ low: 'Fewer dots per model and per square of ground. Fastest.', medium: 'A lighter cloud.', high: 'The films\' density.', ultra: 'Denser than the films. Needs a strong GPU.' }[v]),
+  dotDensity: v => ({ low: 'Fewer dots per square of ground and sea. Fastest.', medium: 'A lighter ground and sea.', high: "The films' density on the ground and the sea.", ultra: 'Ground and sea denser than the films. Needs a strong GPU.' }[v]),
+  modelDots: v => ({ standard: 'Models as before: scattered returns. Applies at once.', high: "Models on the films' regular lattice, their edges as dotted hairlines. Applies at once.", ultra: "The films' lattice, denser close up and at mid range. Needs a strong GPU. Applies at once." }[v]),
   effects: v => ({ low: 'Sparse smoke and debris; only the strongest flashes light the world. Fastest.', medium: 'Lighter smoke and debris, fewer dynamic lights.', high: 'Smoke, debris, sparks and dynamic light, as in the films.' }[v]),
   autoQuality: v => v ? 'Holds 60 fps: under load effects, then dots, then render scale step down, and come back.' : 'Quality stays as set, whatever the frame rate.',
   showFps: v => v ? 'Frame rate and frame time on screen.' : 'No frame counter.',

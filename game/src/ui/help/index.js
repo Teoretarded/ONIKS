@@ -19,7 +19,7 @@
 import { KEYBINDS, SETTINGS, NOTES, DOT_DENSITY, TABS, tabOf, getSettings, setSetting, onSettings } from '../../data/settings.js';
 
 const PRI_HELP = 130;
-const IN_GAME = ['renderStyle', 'renderScale', 'dotDensity', 'effects', 'autoQuality', 'showFps', 'envTone', 'radarSweep', 'volume', 'edgePan', 'autoSlow'];
+const IN_GAME = ['renderStyle', 'renderScale', 'dotDensity', 'modelDots', 'effects', 'autoQuality', 'showFps', 'envTone', 'radarSweep', 'volume', 'edgePan', 'autoSlow'];
 /* the in-game panel's tabs: the general rows above, and every row of the Settings screen's Camera tab */
 const TAB_KEYS = { general: IN_GAME, camera: SETTINGS.filter(d => tabOf(d) === 'camera').map(d => d.key) };
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));

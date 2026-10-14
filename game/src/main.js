@@ -10,6 +10,7 @@
    ?nosys=fx,audio (skip optional systems). Console: ONIKS.game / sim / R, ONIKS.benchSync(n), ONIKS.still(name),
    ONIKS.advance(sec), ONIKS.ff(sec), ONIKS.shot(name), ONIKS.hudShot(name) (ui/hud), ONIKS.perf(o) (the stress suite, src/perf.js; game/perf.html runs every map). */
 import { Renderer } from './engine/renderer.js';
+import { setModelDots } from './engine/lattice.js';   // (Settings > Model dot density)
 import { stubMap } from './engine/stubmap.js';
 import { createGame } from './game/game.js';
 import { parseParams, createMatch } from './game/setup.js';
@@ -131,6 +132,8 @@ async function boot() {
   const dens = DOT_DENSITY[settings.dotDensity] || 1;
   const R = new Renderer({ canvas: $('gl'), overlay: $('ov'), map, renderScale: (+Q.get('scale') || 1) * (settings.renderScale || 1),
     terrain: { densNear: 140 * dens, densFar: 380 * dens } });
+  // (hook: Settings > Graphics > Model dot density, the films' lattice on the models; engine/lattice.js, applied live)
+  setModelDots(R, settings.modelDots); onSettings((s, k) => { if (!k || k === 'modelDots') setModelDots(R, s.modelDots); });
   const cam = R.camera;
   cam.attach($('gl'));
   cam.edge = settings.edgePan !== false;

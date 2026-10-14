@@ -104,6 +104,17 @@ flash (`fx.lift`) lights the returns (mostly multiplicative) instead of greying 
 | `prepare(d)`, `drawDepth(d)`, `drawColor(d)` | the renderer's passes (`draw(d)` = prepare + drawColor). `stats` adds `sub` (sub-dots drawn), `occ` (samples splatted), `culled` (models and parts outside the frustum), `bricks` (bricks culled), `brickMs`. |
 | `dotSpacing`, `grazing`, `dotSpacingCut` | dots per pixel: least on-screen spacing of the kept dots (1.8 px at 1080p; 0 off), the facing floor for large parts (.3), and the spacing of a cutaway's interior (2.2). |
 | `fill`, `fillAz`, `fillEl` | the view's fill light on the models: strength (.6; 0 off), bearing off the view heading (pi - .6 rad: behind, left), elevation (.44 rad). |
+| `samplerFor(e)` | hook (null by default): a replacement for the engine's sampler for entry `e`, or null. Set by `engine/lattice.js`. |
+
+**Model dot density** (`engine/lattice.js`, `setModelDots(R, 'standard' | 'high' | 'ultra')`, Settings > Graphics, live):
+Standard is the above. High and Ultra sample the models as the films' lattice does (`reference/films/pc_scan_railgun_parts.js`
+sampleLat): regular grids with no jitter, each sample's cell its own local grid step (sub-dots tile across tapering
+plates), lathes in staggered rows with their cone normals, and edges as two-sided dotted hairlines at ~0.6 of the face
+spacing (a box's twelve edges, lathe stations as rings, panel and blade outlines, and the wire-only feature lines the
+Orbital hairlines draw); none on the coarsest level, so a unit at play range costs what it did. The covered entries
+(all but `gnd_*`, `lmb_*`, `lm_ice_*`) get levels a factor ~2 apart between the same finest and coarsest spacing (it
+wraps `get()`), and the presets set `lodPx`, `subPx`, `subCap`, `subJitter` (0), `dotSpacing`, `grazing` and `rowPx`
+(0); Standard puts the engine's own values back. A switch re-samples the covered models (their coarsest level at once).
 
 ## Terrain and sea (`R.terrain`, engine/terrain.js)
 
