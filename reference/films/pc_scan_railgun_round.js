@@ -3,7 +3,8 @@
    Round frame: +Z the nose, origin at the middle of the rod; metres.
      The rod: tungsten, Ø25 mm (ROD_R .0125), 2.0 m (REAR -1.0 .. NOSE 1.0), 19 kg; an ogive nose .12 long, six swept
      fins at the tail (span .07, z -1.0 .. -.86). Eight conductive traces are engraved along it (channels cut in the
-     surface), with 45° jogs and via pads, between two contact rings (z ±.84); they run on up the nose cone.
+     surface), with 45° jogs and via pads, between two contact rings (z -.66, under the armature's boss, and .84); they
+     run on up the nose cone.
      The sabot: three segments round the middle of the rod (SAB_Z0 -.62 .. SAB_Z1 .48, Ø.28: SAB_R .14 fills the bore
      between the rails), each a 120° wedge of nano-crystalline micro-lattice: two lattice shells (r .052 .096) and
      the skin on the profile (a chamfered rear, the bore-riding body, the forward ramp), tied by radial struts, a
@@ -21,7 +22,12 @@
                                            step), back (m: streaks leaving the laying front instead, fading over it),
                                            laid (round z: drawn only below it, a lime band at it), fresh (its width),
                                            white (the unlit line's level), a (alpha), Ls/md/zfix (the X-ray test), cut
-                                           (ship y: hidden below it, with Ls), kinds (bits: 1 traces, 2 rings, 4 vias)
+                                           (ship y: hidden below it, with Ls), kinds (bits: 1 traces, 2 rings, 4 vias),
+                                           rev (1: the streaks run nose to tail)
+     RGR.xray(Lw, opt)                     the circuit X-rayed: the channels' walls and floors, the conductor in them,
+                                           the via barrels into the core, both sides of the rod. opt: z0 z1 (round z),
+                                           fz (fade), a, glow, T, sp, rev, Ls/cut
+     RGR.thAt(k, z), RGR.surfR(z)          trace k's angle at round z, the rod's radius there (the nose's ogive)
      RGR.LINES                             the circuit as polylines (round frame), RGR.CL the clouds
    Render is a pure function of the transforms, e, glow and rctx.T. */
 (function () {
@@ -32,7 +38,7 @@ const ROD_LEN = 2.0, ROD_R = .0125, SAB_LEN = 1.1, SAB_R = .14, SAB_Z0 = -.62, S
 const ARM_Z0 = -.70, ARM_Z1 = -.62;
 const NOSE_Z = .88;                                   // the nose cone's base
 const FIN_Z1 = -.86, FIN_R = .035, NFIN = 6;
-const TR_Z0 = -.84, TR_Z1 = .84, NTR = 8;             // the traces run between the two contact rings
+const TR_Z0 = -.66, TR_Z1 = .84, NTR = 8;             // the traces run between the two contact rings (the rear one under the armature's boss)
 const CH_W = .0008;                                   // a channel's half width
 const RL = ROD_R + .00025;                            // the traces' radius (in the channel's mouth)
 
@@ -275,7 +281,7 @@ function build(rctx) {
 /* ---------- the circuit FX: dots along the traces in screen space (1.4 px apart), the far side culled, the
    occluders and the X-ray respected; unlit a faint line in its channel, lit lime with streaks running to the nose ---------- */
 const CA = new Float64Array(3), CB = new Float64Array(3), WA = new Float64Array(3), WB = new Float64Array(3);
-const OL = { glow: 0, T: 0, laid: 9, fresh: .035, a: 1, Ls: null, md: 0, zfix: undefined, cut: -99, sp: 1.6, n: 2, step: 1.4, white: .3, kinds: 7, tail: .12, back: 0, sync: 0 };
+const OL = { glow: 0, T: 0, laid: 9, fresh: .035, a: 1, Ls: null, md: 0, zfix: undefined, cut: -99, sp: 1.6, n: 2, step: 1.4, white: .3, kinds: 7, tail: .12, back: 0, sync: 0, rev: 0 };
 const OLO = Object.assign({}, OL);
 function xrOpen(o) {
   if (!o.md || !o.Ls) return true;
@@ -288,7 +294,7 @@ function lines(Lw, opt) {
   const o = OLO; for (const k in OL) o[k] = opt && opt[k] !== undefined ? opt[k] : OL[k];
   if (o.a < .01 || !xrOpen(o)) return;
   const C = K.C, M = Lw.R, T = Lw.T, e = C.eye, r = C.r, u = C.u, f = C.f, Fl = C.fl, cx = C.cx + C.shake[0], cy = C.cy + C.shake[1], near = C.near;
-  const occd = P_.occd, g = o.glow, lit = Math.min(1, g * 1.6), A = o.a;
+  const occd = P_.occd, g = o.glow, lit = Math.min(1, g * 1.6), A = o.a, BW = K.BW, BH = K.BH;
   const cr = WH[0] + (LIME[0] - WH[0]) * lit, cg = WH[1] + (LIME[1] - WH[1]) * lit, cb = WH[2] + (LIME[2] - WH[2]) * lit;
   const base = (o.white + .5 * g) * A, Ls = o.Ls, cut = o.cut, useCut = cut > -98 && Ls;
   const tim = o.T * o.sp, laid = o.laid, fr = o.fresh;
@@ -309,18 +315,18 @@ function lines(Lw, opt) {
       for (let q = 0; q < 2; q++) { const W = q ? WB : WA, Cc = q ? CB : CA, dx = W[0] - e[0], dy = W[1] - e[1], dz = W[2] - e[2]; Cc[0] = dx * r[0] + dy * r[1] + dz * r[2]; Cc[1] = dx * u[0] + dy * u[1] + dz * u[2]; Cc[2] = dx * f[0] + dy * f[1] + dz * f[2]; }
       if (CA[2] < near || CB[2] < near) continue;
       const x0 = cx + Fl * CA[0] / CA[2], y0 = cy - Fl * CA[1] / CA[2], x1 = cx + Fl * CB[0] / CB[2], y1 = cy - Fl * CB[1] / CB[2];
-      if ((x0 < 0 && x1 < 0) || (y0 < 0 && y1 < 0) || (x0 > 1920 && x1 > 1920) || (y0 > 1080 && y1 > 1080)) continue;
+      if ((x0 < 0 && x1 < 0) || (y0 < 0 && y1 < 0) || (x0 > BW && x1 > BW) || (y0 > BH && y1 > BH)) continue;
       const Lp = Math.hypot(x1 - x0, y1 - y0), m = Math.min(1500, Math.max(1, Math.ceil(Lp / o.step))), iz0 = 1 / CA[2], iz1 = 1 / CB[2];
       const wide = Fl * CH_W * 2 * Math.max(iz0, iz1) > (g > .5 ? 1.2 : 4);   // the channel wide on screen (or lit): 2 px traces
       const s0 = S[i], s1 = S[i + 1];
       for (let k = 0; k < m; k++) {
         const t = k / m, x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t;
-        if (x < 0 || y < 0 || x >= 1920 || y >= 1080) continue;
+        if (x < 0 || y < 0 || x >= BW || y >= BH) continue;
         const iz = iz0 + (iz1 - iz0) * t, w = (t * iz1) / iz, zl = z0 + (z1 - z0) * w;
         if (zl > laid) break;
         if (occd(x, y, 1 / iz)) continue;
         let b = base, rr = cr, gg = cg, bb = cb;
-        const sl = s0 + (s1 - s0) * w;
+        const sl0 = s0 + (s1 - s0) * w, sl = o.rev ? ln.L - sl0 : sl0;   // (rev: the streaks run nose to tail)
         if (g > .01 && ln.kind === 0) {
           if (o.back > 0) {
             // streaks leaving the laying front and running back down the new trace, fading over o.back
@@ -344,6 +350,87 @@ function lines(Lw, opt) {
         if ((k & 3) === 0 && (b > .85 || lit > .3)) K.add(x, y, wide ? 7 : 5, LIME[0], LIME[1], LIME[2], b > .85 ? .1 * (b - .6) : .025 * lit * b);
         if (b > 1.05 && (k % 3) === 0) K.add(x, y, 13, LIME[0], LIME[1], LIME[2], .05 * (b - 1));
       }
+    }
+  }
+}
+
+/* ---------- the circuit X-rayed: each channel's two walls and its floor (CH_D deep) as hairlines with section ticks,
+   the conductor in it lime (a charge pulse running it), the vias' barrels down into the core with a ring at their foot,
+   the contact rings' grooves; both sides of the rod (the far side at half), between round z z0..z1 (faded over fz) ---------- */
+const CH_D = .0013, VIA_D = .0045, XTICK = .012;
+const XO = { z0: -9, z1: 9, fz: .06, a: 1, glow: 0, T: 0, sp: 1.2, rev: 0, Ls: null, cut: -99 };
+const XOO = Object.assign({}, XO);
+const XP = [new Float64Array(3), new Float64Array(3), new Float64Array(3), new Float64Array(3), new Float64Array(3), new Float64Array(3)];
+function xray(Lw, opt) {
+  const o = XOO; for (const k in XO) o[k] = opt && opt[k] !== undefined ? opt[k] : XO[k];
+  if (o.a < .01 || !CL.rod) return;
+  // (the channels' walls, floors and ticks only where the rod is wide enough on screen to show them: below 70 px
+  // across they fade, leaving the conductors and the pulse)
+  const dz_ = Math.max(.05, K.C.depth(Lw.T)), dpx = K.C.fl * 2 * ROD_R / dz_, kd = E.sat((dpx - 25) / 45);
+  const M = Lw.R, T = Lw.T, e = K.C.eye, z0 = o.z0, z1 = o.z1, fz = Math.max(1e-4, o.fz), A = o.a, g = o.glow;
+  const Ls = o.Ls, cut = o.cut, useCut = cut > -98 && Ls;
+  const W = (x, y, z, out) => { out[0] = M[0] * x + M[1] * y + M[2] * z + T[0]; out[1] = M[3] * x + M[4] * y + M[5] * z + T[1]; out[2] = M[6] * x + M[7] * y + M[8] * z + T[2]; return out; };
+  const band = z => z < z0 - fz || z > z1 + fz ? 0 : Math.min(1, (z - z0 + fz) / fz, (z1 + fz - z) / fz);
+  const shipY = (x, y, z) => Ls.R[3] * x + Ls.R[4] * y + Ls.R[5] * z + Ls.T[1];
+  const L = (P, Q, st, col, a, gl) => K.lineW(P[0], P[1], P[2], Q[0], Q[1], Q[2], st, 1, col, a, gl ? LIME : null, gl || 0, 0);
+  const [P0, P1, Q0, Q1, R0, R1] = XP;
+  // (in step with lines()' synchronised streaks: the head at (T sp) mod (L + .7) along the trace)
+  const pulse = (s, Ln) => { if (g < .01) return 0; const per = Ln + .7, d = (o.T * o.sp) % per - (o.rev ? Ln - s : s); return d >= 0 && d < .12 ? 1 - d / .12 : 0; };
+  for (let li = 0; li < LN.length; li++) {
+    const ln = LN[li]; if (ln.kind !== 0) continue;
+    const p = ln.p, nn = ln.n, S = ln.s, np = S.length;
+    for (let i = 0; i < np - 1; i++) {
+      const i3 = i * 3, za = p[i3 + 2], zb = p[i3 + 5], wz = band((za + zb) * .5);
+      if (wz < .02) continue;
+      if (useCut && shipY(p[i3], p[i3 + 1], za) < cut) continue;
+      const nx = nn[i3], ny = nn[i3 + 1], nz = nn[i3 + 2], tx = -ny, ty = nx;   // (the channel's normal, its width across)
+      // the far side of the rod (its channels facing away) at half
+      const wnx = M[0] * nx + M[1] * ny + M[2] * nz, wny = M[3] * nx + M[4] * ny + M[5] * nz, wnz = M[6] * nx + M[7] * ny + M[8] * nz;
+      W(p[i3], p[i3 + 1], za, P0);
+      const far = wnx * (P0[0] - e[0]) + wny * (P0[1] - e[1]) + wnz * (P0[2] - e[2]) > 0, k = (far ? .45 : 1) * wz * A;
+      const dd = .00025 + CH_D, dm = .00025 + CH_D * .45;
+      // the walls' lips, the floor, the conductor
+      if (kd > .02) {
+        for (const sd of [-1, 1]) {
+          W(p[i3] + tx * CH_W * sd, p[i3 + 1] + ty * CH_W * sd, za, P0); W(p[i3 + 3] + tx * CH_W * sd, p[i3 + 4] + ty * CH_W * sd, zb, P1); L(P0, P1, 1.5, WH, .55 * k * kd);
+        }
+        W(p[i3] - nx * dd, p[i3 + 1] - ny * dd, za, Q0); W(p[i3 + 3] - nx * dd, p[i3 + 4] - ny * dd, zb, Q1); L(Q0, Q1, 1.5, WH, .4 * k * kd);
+      }
+      W(p[i3] - nx * dm, p[i3 + 1] - ny * dm, za, R0); W(p[i3 + 3] - nx * dm, p[i3 + 4] - ny * dm, zb, R1); L(R0, R1, 1.2, LIME, (.5 + .4 * g) * k * (.35 + .65 * kd), .05 * (.5 + g) * kd);
+      // section ticks: the channel's U, wall to floor to wall
+      if (kd > .02) for (let q = Math.ceil(S[i] / XTICK); q * XTICK < S[i + 1]; q++) {
+        const w = (q * XTICK - S[i]) / Math.max(1e-6, S[i + 1] - S[i]), x = p[i3] + (p[i3 + 3] - p[i3]) * w, y = p[i3 + 1] + (p[i3 + 4] - p[i3 + 1]) * w, z = za + (zb - za) * w;
+        const kt = .4 * k * kd;
+        W(x + tx * CH_W, y + ty * CH_W, z, P0); W(x + tx * CH_W - nx * dd, y + ty * CH_W - ny * dd, z, P1); L(P0, P1, 1.2, WH, kt);
+        W(x - tx * CH_W - nx * dd, y - ty * CH_W - ny * dd, z, Q0); L(P1, Q0, 1.2, WH, kt); W(x - tx * CH_W, y - ty * CH_W, z, Q1); L(Q0, Q1, 1.2, WH, kt);
+      }
+      // the charge pulse riding the conductor
+      const pa = pulse(S[i], ln.L), pb = pulse(S[i + 1], ln.L), pm = Math.max(pa, pb);
+      if (pm > .02) { L(R0, R1, 1, HOT, Math.min(1, pm * 1.3) * k, .12 * pm); K.glowW((R0[0] + R1[0]) / 2, (R0[1] + R1[1]) / 2, (R0[2] + R1[2]) / 2, 9, LIME, .25 * pm * k); }
+    }
+  }
+  // the vias: a barrel down into the core (four walls, the conductor lime down its axis), a ring at its foot
+  for (const [z, th] of VIAS) {
+    const wz = band(z); if (wz < .02) continue;
+    const c = Math.cos(th), s = Math.sin(th);
+    if (useCut && shipY(c * RL, s * RL, z) < cut) continue;
+    W(c * RL, s * RL, z, P0);
+    const far = (M[0] * c + M[1] * s) * (P0[0] - e[0]) + (M[3] * c + M[4] * s) * (P0[1] - e[1]) + (M[6] * c + M[7] * s) * (P0[2] - e[2]) > 0, k = (far ? .45 : 1) * wz * A;
+    const rb = RL - VIA_D;
+    for (let q = 0; q < 4; q++) {
+      const ph = q * PI / 2 + .4, ot = Math.cos(ph) * .0011, oz = Math.sin(ph) * .0011;
+      if (kd > .02) { W(c * RL - s * ot, s * RL + c * ot, z + oz, P1); W(c * rb - s * ot, s * rb + c * ot, z + oz, Q0); L(P1, Q0, 1.2, WH, .45 * k * kd); }
+    }
+    W(c * rb, s * rb, z, Q1); L(P0, Q1, 1, LIME, (.6 + .4 * g) * k * (.35 + .65 * kd), .06 * kd);
+    if (kd > .02) K.ringW(Q1, [-(M[0] * s) + M[1] * c, -(M[3] * s) + M[4] * c, -(M[6] * s) + M[7] * c], [M[2], M[5], M[8]], .0011, 10, 1, LIME, .7 * k, 0);
+  }
+  // the contact rings' grooves
+  for (const zr of [TR_Z0, TR_Z1]) {
+    const wz = band(zr); if (wz < .02) continue;
+    const r = RL - .00025 - CH_D * .45;
+    for (let q = 0; q < 32; q++) {
+      const a0 = q / 32 * TAU, a1 = (q + 1) / 32 * TAU;
+      W(Math.cos(a0) * r, Math.sin(a0) * r, zr, P0); W(Math.cos(a1) * r, Math.sin(a1) * r, zr, P1); L(P0, P1, 1.2, LIME, (.5 + .4 * g) * wz * A, .04);
     }
   }
 }
@@ -378,5 +465,6 @@ function drawRod(Lw, o, glow, rctx) {
 }
 
 window.RGR = { ROD_LEN, ROD_R, SAB_LEN, SAB_R, SAB_Z0, SAB_Z1, LEN, REAR, NOSE, ARM_Z0, ARM_Z1, NOSE_Z, FIN_R, TR_Z0, TR_Z1,
-  LINES, SEG_A, CL, build, draw, drawRod, lines, sabotSeg: k => CL.seg[k], Rz, R_IN, RS, stats: null };
+  LINES, SEG_A, CL, build, draw, drawRod, lines, xray, sabotSeg: k => CL.seg[k], Rz, R_IN, RS, stats: null,
+  NTR, RL, CH_W, CH_D, TR_TIP, thAt: (k, z) => thAt(TRACES[k], z), surfR: z => z <= NOSE_Z ? ROD_R : noseR(z) };
 })();
