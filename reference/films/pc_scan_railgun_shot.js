@@ -4,14 +4,17 @@
    T is base (old) time throughout; the film calls these from render.
    - Bore (x0.01): the round's circuit lines light and charge as it crosses the rails (pulses run along them, arcs
      jump from them to the rails).
-   - Muzzle: the sabot falls away in an impact frame (the frame flashes and strobes, rays, lightning off the round);
-     the shock rings, up to 40 m across, fill with lightning thrown from the round's circuitry.
-   - Flight: lime threads stream back off the circuit lines; small arcs jolt and jump off the rod.
+   - Muzzle (x0.004 for MZH s): the sabot falls away in an impact frame (the frame flashes and strobes, rays,
+     lightning off the round); the armature's halves blow off white-hot, the plasma arc burning across them and back to
+     the rail tips until it breaks; the shock rings, up to 40 m across, fill with lightning from the round's circuitry.
+   - Flight: lime threads stream back off the circuit lines; small arcs jolt and jump off the rod; the bow and tail
+     shock cones at the Mach angle (the readout gives the Mach number at its height).
    - Burst (RGX): the circuit lines blaze and crack the rod open, the pieces float apart, the lightning inside charges
-     and runs wild, gathers under them and leaps down the stroke's path; back at x1 the cloud swells and the film's
-     leader and return stroke run from B_TOP (base T_LEAD..TB).
-   - cam: rides the bore, pulls back off the muzzle for the rings, rides the probe up the arc (the trail behind it,
-     down to the ship), closes on it at the top; after the burst it opens out into the film's wide by TB - .2.
+     and runs wild, gathers under them, each piece pulls a thread down onto the stroke's path and it leaps down; back
+     at x1 the cloud swells and the film's leader and return stroke run from B_TOP (base T_LEAD..TB).
+   - cam: rides the bore, brakes into a still hold 15 m off the muzzle while the sabot comes away and the rings form,
+     closes on the probe by equal factors as the clock comes up and swings round it to its side (under 30°/s), stays
+     off the pieces through the burst and opens out into the film's wide by TB - .2.
    Uses window.RGR (the long-rod round: draw, drawRod, sabotSeg, LINES) when it is there, the film's old round if not.
    Pure in T (u in the insert): seeded rng at load, hashes per frame bucket; no allocation in the per-dot loops. */
 (function () {
@@ -27,12 +30,12 @@ const XW = FILM.warp([{ t: 0, rate: 1 }, { t: XU0, rate: .01 }, { t: 3.4, rate: 
 const XAT = -XW(XU0), sgOf = u => XAT + XW(u), SGE = sgOf(XLEN);
 let SH = null;
 const XON = { on: 0 };                                                    // the insert drew this frame (the base skips the burst)
-window.RGX = { len: XLEN, at: XAT, chapters: [{ t: 0, title: 'Burst' }], cues: [],
+window.RGX = { len: XLEN, at: XAT, span: SGE - XAT, chapters: [{ t: 0, title: 'Burst' }], cues: [],
   build: ctx => { if (SH) SH.xbuild(ctx); }, cam: (u, ctx) => SH.xcam(u, ctx), draw: (u, ctx) => SH.xdraw(u, ctx),
   readout: (u, ctx) => SH.xread(u, ctx), tags: (u, ctx) => SH.xtags(u, ctx) };
 
 window.RGF_INIT = function (c) {
-const { ACC, BOLT, B_TOP, lookTurn, C, CL, DIR0, HOT, K, LB_, LIME, MO, MZ0, NUP, PATH_A, P_, S1, SIDE, TB, TBU, TF, TRET0, TRET1, T_BORE, T_LEAD, T_REL, V0, V1, WH, XF, apI, bez, bezT, camBase, climbRate, climbS, dOfS, drawRound, probeAt, roundZ, sOfD, simAt, tr, uOfD, vOfS } = c;
+const { ACC, BOLT, B_TOP, lookTurn, C, CL, DIR0, HOT, K, LB_, LIME, MO, MZ0, MZH, MZR, NUP, PATH_A, P_, S1, SIDE, TB, TBU, TF, TRET0, TRET1, T_BORE, T_LEAD, T_REL, V0, V1, WH, XF, apI, bez, bezT, camBase, climbRate, climbS, dOfS, drawRound, probeAt, roundZ, sOfD, simAt, tr, uOfD, vOfS } = c;
 const hh = K.hh, UP = [0, 1, 0];
 const RG = window.RGR || {}, NEWR = !!RG.draw;
 const RNOSE = NEWR ? RG.NOSE : P_.RND_H, RTAIL = NEWR ? RG.REAR : -P_.RND_H, R0 = NEWR ? RG.ROD_R : .1;
@@ -68,7 +71,7 @@ function jag(ax, ay, az, bx, by, bz, seed, fr, I, rough, n, core, sz) {
 function glowR(x, y, z, rw, col, a) {
   if (a < .004 || !K.pj(x, y, z)) return;
   const px = Math.min(560, rw * C.fl / K.PJ[2]); if (px < 1.5) return;
-  const sx = K.PJ[0], sy = K.PJ[1]; K.soft(sx, sy, px * .6 + 1, col[0], col[1], col[2], a * .55); K.soft(sx, sy, px * .22 + .8, col[0], col[1], col[2], a * .8);
+  const sx = K.PJ[0], sy = K.PJ[1]; K.softR(sx, sy, px * .6 + 1, col[0], col[1], col[2], a * .55); K.softR(sx, sy, px * .22 + .8, col[0], col[1], col[2], a * .8);   // (raster px)
 }
 /* a ring of light filled with lightning thrown in from near its axis (centre c, unit axes U W, radius r) */
 function lightRing(c3, U, W, r, A, seed, fr, nArc, I) {
@@ -375,7 +378,7 @@ function drawSabot(T) {
     const p = V.add(V.add(V.mad(MZ0, DIR0, fwd), V.mul(rd, rad)), [0, -4.9 * a * a, 0]);
     // tumble: pitched out about the petal's own hinge (square to the bore and its radial)
     const pit = Math.min(2.6, a * 70 + a * a * 20 + .3 * (1 - Math.exp(-a / .0009))), Lp = X.make(R.mul(Rb, R.mul(R.z(ang), R.y(pit))), p);
-    MO.lime = Math.max(.3 * Math.exp(-a * 8), imp); MO.a = 1.5 + 1.2 * imp; MO.S = null; MO.keep = 1; MO.md = 0;
+    MO.lime = Math.max(.3 * Math.exp(-a * 8), .65 * Math.exp(-a * 60), imp); MO.a = 1.8 + 1.2 * imp; MO.S = null; MO.keep = 1; MO.md = 0;
     if (seg) { const s = RG.sabotSeg(k), Ls = X.mul(Lp, X.make(R.z(-ang), [0, 0, 0])); if (typeof s === 'function') s(Ls, MO, RCX); else if (s && s.draw) s.draw(Ls, MO, RCX); else if (s) P_.drawX(s, Ls, MO); }
     else P_.drawX(CL.sabot, Lp, MO);
     MO.lime = 0; MO.a = 1.25;
@@ -386,6 +389,49 @@ function drawSabot(T) {
       lp(Lrod, i, A1); apI(Lp, rs * (.6 + .4 * h), (hh(j, fr + k) - .5) * rs * .5, zs0 + (zs1 - zs0) * hh(j * 9 + k, fr), A2);
       jag(A1[0], A1[1], A1[2], A2[0], A2[1], A2[2], k * 11 + j, fr, (1 - a / .012) * (.6 + .4 * h) + imp, .45, 16, h > .4 ? HOT : LIME, 1);
     }
+  }
+  if (NEWR && RG.CL && RG.CL.armA && a < .03) drawArmature(a, T, Rb);
+  // their tags while the lens holds at the muzzle
+  if (T > TF && T < TF + MZH + .6) {
+    const rd = X.dir(XF.B, [1, 0, 0]), pS = V.add(V.mad(MZ0, DIR0, fwd), V.mul(rd, rad)), w = (t0, t1) => E.sat((T - t0) / .25) * (1 - E.sat((T - t1 + .4) / .4));
+    tagW(TG_SAB, 'SAB', 'Sabot ×3 · discarding', '', pS, w(TF + .35, TF + 2.9), T - TF - .35, T);
+    if (NEWR) tagW(TG_ARM, 'ARM', 'Armature · plasma arc', '', AP[0], w(TF + .15, TF + 1.7), T - TF - .15, T);
+  }
+}
+const TG_SAB = K.mkTag(), TG_ARM = K.mkTag();
+function tagW(tg, id, lab, val, p, a, age, T) {
+  if (a < .01 || !K.pj(p[0], p[1], p[2])) return;
+  const x = K.PJ[0], y = K.PJ[1], S = K.S;
+  K.leader(x, y, x + 46 * S, y - 46 * S, '#C6F432', .8 * a); K.dot(x, y, 3, LIME[0], LIME[1], LIME[2], a);
+  K.setTag(tg, id, K.decode(lab, E.sat(age / .6), T, id.length), val, 'lime sm', x + 50 * S, y - 60 * S, a);
+}
+/* the armature: its two halves blown off the sabot's rear face, white-hot and tumbling apart; the plasma arc burns
+   across the gap between them and back to the rail tips at the muzzle (the current's last path), stretching out
+   until it breaks */
+const AP = [[0, 0, 0], [0, 0, 0]], ATIP = [0, 0, 0];
+function drawArmature(a, T, Rb) {
+  const zc = (RG.ARM_Z0 + RG.ARM_Z1) / 2, fwd = V0 * .022 * (1 - Math.exp(-a / .022)), sep = 38 * .12 * (1 - Math.exp(-a / .12)), yB = X.dir(XF.B, [0, 1, 0]);
+  const fr = Math.floor(T * 40), hot = Math.exp(-a / .004), arcI = Math.exp(-a / .0025) * Math.min(1, .3 + a / .0002), MZE = P_.MZ_E;
+  for (let k = 0; k < 2; k++) {
+    const sd = k ? -1 : 1, c = [0, sd * .1, zc], Rk = R.mul(Rb, R.x(sd * Math.min(2.4, a * 90))), rb = R.ap(Rb, c), rk = R.ap(Rk, c), p = AP[k];
+    for (let q = 0; q < 3; q++) p[q] = MZ0[q] + rb[q] + DIR0[q] * fwd + yB[q] * sd * sep;
+    p[1] -= 4.9 * a * a;
+    MO.lime = .4 + .6 * hot; MO.a = 1.5 + hot; MO.S = null; MO.keep = 1; MO.md = 0;
+    P_.drawX(k ? RG.CL.armB : RG.CL.armA, X.make(Rk, [p[0] - rk[0], p[1] - rk[1], p[2] - rk[2]]), MO);
+    MO.lime = 0; MO.a = 1.25;
+    glowR(p[0], p[1], p[2], .2 + .5 * hot, HOT, .75 * hot);
+    // back to its rail's tip: two strands, white-hot cores, and a lime one wandering wider
+    if (arcI > .02) {
+      apI(XF.B, MZE[0], MZE[1] + sd * .15, MZE[2], ATIP);
+      for (let j = 0; j < 3; j++) jag(ATIP[0], ATIP[1], ATIP[2], p[0] + yB[0] * sd * .04, p[1] + yB[1] * sd * .04, p[2] + yB[2] * sd * .04, 71 + k * 7 + j, fr, arcI * (j < 2 ? 1 : .6), j < 2 ? .3 : .5, 16, j < 2 ? HOT : LIME, j ? 1 : 2);
+      glowR(ATIP[0], ATIP[1], ATIP[2], .5 * arcI + .1, HOT, .6 * arcI);
+    }
+  }
+  // across the gap between the halves: the arc at the armature, a bright knot in the middle
+  const g = Math.exp(-a / .005) * Math.min(1, .4 + a / .0003);
+  if (g > .02) {
+    for (let j = 0; j < 3; j++) jag(AP[0][0], AP[0][1], AP[0][2], AP[1][0], AP[1][1], AP[1][2], 81 + j, fr, g * (j ? .7 : 1), .35 + .15 * j, 16, j === 2 ? LIME : HOT, j ? 1 : 2);
+    glowR((AP[0][0] + AP[1][0]) / 2, (AP[0][1] + AP[1][1]) / 2, (AP[0][2] + AP[1][2]) / 2, .35 + 1.2 * (1 - g), HOT, .8 * g);
   }
 }
 /* the shock rings: [distance down the line of fire, radius, growth (sim s)]: each forms as the round passes */
@@ -420,9 +466,9 @@ function impact(a, T) {
   const sx = K.PJ[0], sy = K.PJ[1], str = (f % 2 ? 1 : .55) * (.4 + .6 * k);
   for (let i = 0; i < 80; i++) {
     const th = (i + .7 * hh(i, 3.3 + f)) / 80 * TAU, cs = Math.cos(th), sn = Math.sin(th);
-    const r0 = 26 + 150 * hh(i, 5.5 + f), r1 = r0 + 220 + 1500 * Math.pow(hh(i, 7.7 + f), 2), hot = hh(i, 9.1) > .68, col = hot ? HOT : LIME, s = i % 5 ? 1 : 2;
+    const r0 = (26 + 150 * hh(i, 5.5 + f)) * K.S, r1 = r0 + (220 + 1500 * Math.pow(hh(i, 7.7 + f), 2)) * K.S, hot = hh(i, 9.1) > .68, col = hot ? HOT : LIME, s = i % 5 ? 1 : 2;
     for (let rr = r0; rr < r1; rr += 2.2) {
-      const x = sx + cs * rr, y = sy + sn * rr; if (x < 0 || y < 0 || x >= 1920 || y >= 1080) break;
+      const x = sx + cs * rr, y = sy + sn * rr; if (x < 0 || y < 0 || x >= K.BW || y >= K.BH) break;
       const t = (rr - r0) / (r1 - r0);
       K.dot(x, y, s, col[0], col[1], col[2], str * (1 - t) * (1 - t));
     }
@@ -549,6 +595,27 @@ function jolts(Lw, tf, I, scale, tg, n) {
     jag(A1[0], A1[1], A1[2], bx, by, bz, j + 1, fr, I * (.6 + .4 * (1 - h0)), .5, 16, h0 < .4 ? HOT : LIME, 1);
   }
 }
+/* the bow and tail shocks: cones off the nose tip and the fin tips at the Mach angle (asin 1/M; the speed of sound at
+   its height, ISA troposphere), rings round them and a light sliding back down each */
+const cSnd = h => Math.sqrt(1.4 * 287.05 * Math.max(216.65, 288.15 - .0065 * Math.max(0, h)));
+function shocks(Lw, v, h, T, I) {
+  if (I < .02) return;
+  const M = v / cSnd(h); if (M < 1.05) return;
+  const tn = Math.tan(Math.asin(1 / M)), fr = Math.floor(T * 30), U = X.dir(Lw, [1, 0, 0]), W = X.dir(Lw, [0, 1, 0]), FRR = NEWR ? (RG.FIN_R || .035) : .12;
+  for (let c = 0; c < 2; c++) {
+    const z0 = c ? RTAIL + .1 : RNOSE, r0 = c ? FRR : 0, L = c ? 2.4 : 3.6, n = c ? 10 : 16, a0 = c ? .45 : .75;
+    for (let j = 0; j < n; j++) {
+      const th = (j + .35 * hh(j + c * 31, 3.1)) / n * TAU, cs = Math.cos(th), sn = Math.sin(th), fl = .75 + .25 * hh(j * 3 + c, fr);
+      for (let q = 0; q < 3; q++) {                                         // three pieces, dimming back from the tip
+        const l0 = L * q / 3, l1 = L * (q + 1) / 3;
+        apI(Lw, cs * (r0 + l0 * tn), sn * (r0 + l0 * tn), z0 - l0, A1); apI(Lw, cs * (r0 + l1 * tn), sn * (r0 + l1 * tn), z0 - l1, A2);
+        K.lineW(A1[0], A1[1], A1[2], A2[0], A2[1], A2[2], 2.4, 1, q ? WH : c ? LIME : HOT, I * a0 * (1 - .32 * q) * fl);
+      }
+    }
+    for (let q = 1; q <= 3; q++) { const l = L * q / 3.4; apI(Lw, 0, 0, z0 - l, A1); K.ringW(A1, U, W, r0 + l * tn, 56, 1, LIME, I * a0 * .45 * (1 - q * .2), q); }
+    const ls = ((T * 1.7 + c * .5) % 1) * L; apI(Lw, 0, 0, z0 - ls, A1); K.ringW(A1, U, W, r0 + ls * tn, 72, 2, c ? LIME : HOT, I * a0 * .8 * (1 - ls / L), 0);
+  }
+}
 const EVIS = T => 1 - .35 * E.ss(TB + 3, TRET0, T) - .65 * E.ss(TRET1 - 2.5, TRET1 + .5, T);
 function drawProbe(T) {
   if (XON.on || T < TF || T > TRET1 + .5) return;
@@ -561,6 +628,7 @@ function drawProbe(T) {
   if (dc < 900) {
     rodDraw(Lw, .8, T, 1);
     if (dc < 250) { if (!(NEWR && RG.drawRod)) drawLines(Lw, .75, T, 2.2); jolts(Lw, T, 1, Math.min(1.6, .5 + vf / 1500), t, 5); }
+    if (dc < 160) shocks(Lw, vOfS(s), p[1], T, 1 - E.ss(90, 160, dc));
     const nose = V.mad(p, t, RNOSE); glowR(nose[0], nose[1], nose[2], .03, HOT, .6);
   } else K.dotW(p[0], p[1], p[2], 3, [255, 255, 255], 1);
   K.glowW(p[0], p[1], p[2], 26, LIME, .45);
@@ -683,6 +751,21 @@ function shatter(sg, tf, Tb) {
     }
     if (st < m.length - 1) { const tp = m[Math.min(m.length - 1, Math.ceil(nv))]; K.dotW(tp[0], tp[1], tp[2], 3, [255, 255, 255], la); glowR(tp[0], tp[1], tp[2], 14, LIME, .5 * la); glowR(tp[0], tp[1], tp[2], 4, HOT, .6 * la); }
   }
+  // each piece pulls a thread of lightning down toward the battery: stepping down off it as the charge gathers and
+  // bending in onto the stroke's own path below the cloud (feeding the leader), held until the leader overtakes them
+  const thI = E.ss(GT0 - .5 * (GT1 - GT0), GT1, sg) * (post ? 1 - E.ss(T_LEAD + .25, T_LEAD + 1.0, Tb) : 1);
+  if (thI > .01) {
+    const m = BOLT.main;
+    for (let f = 0; f < F.nf; f++) {
+      const h1 = hh(f, 1.7), h2 = hh(f, 2.3), rch = E.ss(GT0 + (LP0 - GT0) * .7 * h2, LP1 + (LP1 - LP0) * h1, sg);
+      if (rch < .01) continue;
+      fp(f, F.c3[f * 3], F.c3[f * 3 + 1], F.c3[f * 3 + 2], A1);
+      const M_ = m[Math.min(m.length - 1, 2 + Math.floor(26 * h1))];
+      const ex = A1[0] + (M_[0] - A1[0]) * rch, ey = A1[1] + (M_[1] - A1[1]) * rch, ez = A1[2] + (M_[2] - A1[2]) * rch;
+      jag(A1[0], A1[1], A1[2], ex, ey, ez, 101 + f, fr, thI * (.4 + .4 * hh(f, fr)), .22, f & 1 ? 8 : 16, hh(f * 3, fr) > .6 ? HOT : LIME, 1);
+      if (rch < .98 && (f & 3) === 0) glowR(ex, ey, ez, .15 + .6 * rch, LIME, .3 * thI);
+    }
+  }
   if (post) burstAfter(sg, Tb, sp, fr);
 }
 /* after the insert (base time): the charge crawling over the cloud's underside until the leader goes, and the
@@ -713,49 +796,45 @@ function drawBurst(T) {
 }
 
 /* ---------- the lens ---------- */
-/* in the bore it rides beside the round as drawn (the barrel's frame); out of the muzzle it brakes and pulls back
-   off the line of fire for the rings; then it rides the probe (its own frame: along the path, SIDE, up), out ahead
-   and above as the trail falls away behind it to the ship, closes on it at the top, orbits it through the burst and
-   opens out into the film's wide (camB) by TB - .2 */
+/* In the bore it rides beside the round as drawn (the barrel's frame). From TB0 it lets the round run on ahead and
+   brakes into a hold about 14 m off the muzzle (x0.004: the sabot coming away, the armature's arc, the rings forming
+   down the line of fire), still until the clock comes back up. Then it follows the probe up the line (eye and look
+   sliding along it, the look turning under 25°/s), settles in behind it and swings slowly round to its side by the
+   top of the arc (under 30°/s); through the burst it stays off the pieces' side, closes on the cracks and backs off
+   as the lightning runs wild, then opens out into the film's wide (camB) by TB - .2 */
 const OFF_R = V.add(V.add(V.mul(SIDE, 5.6), V.mul(NB0, .8)), V.mul(DIR0, -1.2));
-const OFF_W = V.add(V.add(V.mul(SIDE, 40), V.mul(NB0, 10)), V.mul(DIR0, -24));
-const rideD = T => T < TF ? -(LB_ - (roundZ(T) - P_.SEAT_Z)) : dOfS(Math.max(0, simAt(T)));
-function rideAt(T, out) {
-  const tb = TF + .05, tau = .14, vr = V0 * .01;
-  const d = T < tb ? rideD(T) : rideD(tb) + vr * tau * (1 - Math.exp(-(T - tb) / tau));
-  out[0] = MZ0[0] + DIR0[0] * d; out[1] = MZ0[1] + DIR0[1] * d; out[2] = MZ0[2] + DIR0[2] * d;
-  // the round as drawn in the bore (recoil, the ship's motion), handed over to the line of fire through the muzzle
-  const w = 1 - E.ss(TF - .15, TF + .15, T);
-  if (w > 0) { const Tc = Math.min(T, TF); apI(XF.B, 0, 0, roundZ(Tc), A1); const dr = rideD(Tc); for (let k = 0; k < 3; k++) out[k] += (A1[k] - (MZ0[k] + DIR0[k] * dr)) * w; }
-  return out;
-}
-function camMuzzle(T) {
-  const P = rideAt(T, [0, 0, 0]), w = E.ss(TF + .06, TF + .85, T), w2 = E.ss(TF + .1, TF + .8, T);
-  const eye = V.add(P, V.lerp(OFF_R, OFF_W, w));
-  const tR = V.mad(P, DIR0, .5), tW = V.mad(MZ0, DIR0, 26);
-  return { eye, target: V.lerp(tR, tW, w2), fov: (42 + 20 * w) * DEG };
+const TB0 = TF - .55, TL0 = TF + 1.25;                                      // the brake: from the ride into the hold
+const LK_E = V.add(V.add(V.mad(MZ0, DIR0, -4), V.mul(SIDE, 14)), V.mul(NB0, 6)), LK_T = V.mad(MZ0, DIR0, 14), LK_F = 56;
+/* (then it drifts slowly back and out, 14 -> 25 m, so the rings read whole as they form) */
+const LK_E2 = V.add(V.add(V.mad(MZ0, DIR0, -9), V.mul(SIDE, 21)), V.mul(NB0, 9)), LK_T2 = V.mad(MZ0, DIR0, 20), LK_F2 = 52;
+const TC0 = TF + MZH + .8, TC1 = TC0 + 3.4;                               // the chase takes over as the clock comes up
+const LK_D = V.norm(V.sub(LK_T2, LK_E2));
+const hm = (p0, p1, m0, m1, u, dt) => { const u2 = u * u, u3 = u2 * u; return p0 * (2 * u3 - 3 * u2 + 1) + m0 * dt * (u3 - 2 * u2 + u) + p1 * (3 * u2 - 2 * u3) + m1 * dt * (u3 - u2); };
+const TT1 = TL0 + 1.0;                                                     // (the look settles a second after the eye)
+function camBrake(T) {
+  const h = .004, a = boreCam(TB0), b = boreCam(TB0 + h), dt = TL0 - TB0, dtt = TT1 - TB0, u = E.clamp((T - TB0) / dt, 0, 1), ut = E.clamp((T - TB0) / dtt, 0, 1), eye = [0, 0, 0], target = [0, 0, 0];
+  const ue = E.ss(TL0, TC0, T), uk = E.ss(TT1 - .3, TC0, T);
+  for (let k = 0; k < 3; k++) {
+    eye[k] = hm(a.eye[k], LK_E[k], (b.eye[k] - a.eye[k]) / h, 0, u, dt) + (LK_E2[k] - LK_E[k]) * ue;
+    target[k] = hm(a.target[k], LK_T[k], (b.target[k] - a.target[k]) / h, 0, ut, dtt) + (LK_T2[k] - LK_T[k]) * uk;
+  }
+  return { eye, target, fov: (E.mix(42, LK_F, E.ss(0, 1, ut)) + (LK_F2 - LK_F) * uk) * DEG };
 }
 /* the ride: keys [time, az (deg, from along the path toward SIDE), el (deg, toward up), distance (m), target (along,
    side, up m), fov]; time runs through the insert (TA + u) and on after it */
 const ZPOST = TA + XLEN;
 const tcOf = T => T < TA ? T : ZPOST + (T - TA);
 const RT_ = [0, 0, 0];
+const TFL = (TA - TC1) / 3;                                               // (the flight's free stretch, in thirds)
 const RK = [
-  [TF + 1.0, 165, 8, 9, [2, 0, 0], 50],
-  [TF + 2.4, 135, 12, 4.5, [.6, 0, 0], 48],
-  [TF + 3.6, 95, 12, 3.2, [0, 0, 0], 46],
-  [TF + 5.0, 40, 14, 4.5, [-3, 0, -.6], 50],
-  [TF + 6.4, 25, 22, 6, [-6, 0, -1.5], 52],
-  [TF + 7.6, 50, 16, 5, [-3, 0, -.5], 50],
-  [TA - .8, 120, 12, 4, [.2, 0, 0], 44],
-  [TA, 152, 11, 4.2, [.4, 0, 0], 42],
-  [TA + .45, 160, 13, 2.2, [.5, 0, 0], 38],
-  [TA + 1.2, 150, 16, 1.35, [.6, 0, 0], 34],
-  [TA + 2.1, 118, 22, 1.25, [.25, 0, 0], 36],
-  [TA + 2.9, 72, 18, 1.6, [0, 0, 0], 40],
-  [TA + 3.5, 42, 10, 2.8, [0, 0, 0], 44],
-  [TA + 4.2, 60, 14, 7, [0, 0, -.3], 48],
-  [TA + 4.9, 90, 12, 14, [0, 0, -1], 50],
+  [TC0, 150, 14, 14, [6, 0, 0], 50],                                      // behind it and to the side, chasing up the line
+  [TC1, 138, 14, 6.5, [2, 0, 0], 48],
+  [TC1 + TFL, 124, 14, 4.6, [.6, 0, 0], 46],                              // closing, the trail falling away to the ship
+  [TC1 + 2 * TFL, 112, 13, 3.7, [.2, 0, 0], 45],                          // round to its side: the shock cones in profile
+  [TA, 102, 12, 3.4, [0, 0, 0], 44],
+  [TA + 1.5, 108, 14, 2.6, [.15, 0, 0], 40],                              // the circuit lines blaze, the cracks run
+  [TA + 3.1, 122, 17, 3.0, [0, 0, 0], 42],                                // the pieces part, the charge builds
+  [TA + 4.4, 118, 11, 6.5, [0, 0, -.4], 48],                              // the lightning runs wild
 ];
 /* from the gathering on: the lens pulls out from the cloud along a direction turning to the film's wide (camB at
    TB - .2) while the leader comes down, its look turning from just under the cloud to the stroke */
@@ -767,7 +846,7 @@ function camOut(tc) {
   const d0 = [T1[0] * OD0[0] + SIDE[0] * OD0[1] + N1[0] * OD0[2], T1[1] * OD0[0] + SIDE[1] * OD0[1] + N1[1] * OD0[2], T1[2] * OD0[0] + SIDE[2] * OD0[1] + N1[2] * OD0[2]];
   const dir = V.norm(V.lerp(d0, WD, g)), L = Math.exp(Math.log(OL0) + (Math.log(WL) - Math.log(OL0)) * f);
   const eye = V.mad(P, dir, L), t0 = V.mad(P, N1, -.12 * L - .5);
-  return { eye, target: lookTurn(eye, t0, WIDE.target, E.ss(.56, 1, w)), fov: E.mix(52, WIDE.fov / DEG, g) * DEG };
+  return { eye, target: lookTurn(eye, t0, WIDE.target, E.ss(.4, 1, w)), fov: E.mix(52, WIDE.fov / DEG, g) * DEG };
 }
 { // the orbit's last key: where the pull-out starts
   const s = camOut(XO0), P = centreAt(XO0, [0, 0, 0], [0, 0, 0]), v = V.sub(s.eye, P), d = V.len(v), tv = V.sub(s.target, P);
@@ -791,12 +870,23 @@ function boreCam(T) {
   apI(XF.B, 0, 0, roundZ(T), A1);
   return { eye: V.add(A1, OFF_R), target: V.mad(A1, DIR0, .5), fov: 42 * DEG };
 }
+/* off the hold into the chase: the lens closes on the probe by equal factors (it grows steadily instead of hanging as
+   a dot), coming round behind it, its look turning from up the line to the probe */
+const CC = [0, 0, 0];
+function camChase(T) {
+  const w = E.ss(TC0, TC1, T), r = camRide(T), P = centreAt(T, CC, [0, 0, 0]);
+  const a = V.sub(LK_E2, P), b = V.sub(r.eye, P), la = V.len(a), lb = V.len(b);
+  const dir = V.norm(V.lerp(V.mul(a, 1 / la), V.mul(b, 1 / lb), w)), eye = V.mad(P, dir, K.logMix(la, lb, E.ss(TC0, TC0 + 2.3, T)));
+  return { eye, target: lookTurn(eye, V.mad(eye, LK_D, 20), r.target, E.ss(TC0, TC1 - .2, T)), fov: E.mix(LK_F2, r.fov / DEG, w) * DEG };
+}
 function cam(T, base) {
   if (T < T_REL - .7 || T >= TB - .2) return null;
-  if (T < T_REL + .1) return K.blendShot(PATH_A(T), boreCam(T), E.ss(T_REL - .7, T_REL + .1, T));
-  if (T < TF - .15) return boreCam(T);
-  if (T < TF + .9) return camMuzzle(T);
-  if (T < TF + 2.3) return K.blendShot(camMuzzle(T), camRide(T), E.ss(TF + .9, TF + 2.3, T));
+  // (the mount's path lands beside the breech at T_REL: it hands over to the ride as the round starts to move)
+  if (T < T_REL - .1) return PATH_A(T);
+  if (T < T_REL + .5) return K.blendShot(PATH_A(T), boreCam(T), E.ss(T_REL - .1, T_REL + .5, T));
+  if (T < TB0) return boreCam(T);
+  if (T < TC0) return camBrake(T);
+  if (T < TC1) return camChase(T);
   const s = camRide(tcOf(T));
   if (T > TB - .6) return K.blendShot(s, base(T), E.ss(TB - .6, TB - .2, T));
   return s;
@@ -831,13 +921,14 @@ function xdraw(u) {
   cloudAt(sg, A4, A5); apI(X.make(R.look(A5, UP), A4), 0, 0, RTAIL, A2);
   drawTrail(sOfD(dA), Math.max(0, sg), 1, true, A2.slice());
   if (sg < SG(1.0)) threads(dA, .85 * (1 - E.ss(SG(.4), SG(1.0), sg)), 2.5 + 55 * vOfS(S1) * XW.rate(u) / 1000, SIDE, NUP(A5));
+  if (sg < SG(.9)) { cloudAt(sg, A4, A5); shocks(X.make(R.look(A5, UP), A4.slice()), vOfS(S1 + Math.min(0, sg)), A4[1], u, 1 - E.ss(SG(.35), SG(.9), sg)); }
   shatter(sg, u, null);
 }
 function xread(u) {
   const sg = sgOf(u), ms = (sg * 1000).toFixed(1), rate = XW.rate(u);
   const l1 = `Probe · <b>burst · ${(B_TOP[1] / 1000).toFixed(1)} km</b>`;
   let l2;
-  if (sg < BL0) l2 = `<b>${Math.round(vOfS(S1 + Math.min(0, sg)))} m/s</b> · top of the arc`;
+  if (sg < BL0) { const v = vOfS(S1 + Math.min(0, sg)); l2 = `<b>${Math.round(v)} m/s</b> · Mach <b>${(v / cSnd(B_TOP[1])).toFixed(1)}</b> · top of the arc`; }
   else if (sg < SG(1.9)) l2 = `Circuits <b>lit</b> · rod <b>cracking</b> · +${ms} ms`;
   else if (sg < WL0) l2 = `Fragments <b>×${NFR}</b> · charge <b>${Math.round(100 * E.ss(CH0, CH1, sg))} %</b> · +${ms} ms`;
   else if (sg < LP0) l2 = `Charge <b>discharging</b> · +${ms} ms`;
