@@ -34,7 +34,7 @@
     ['pc_anatomy_ship', 'Anatomy', 'Ship'],
     ['pc_anatomy_battery', 'Anatomy', 'Battery'],
     ['pc_scan_railgun', 'Scan', 'Railgun'],
-    ['pc_scan_satellite', 'Scan', 'Satellite'],
+    ['pc_orbital_railgun', 'Orbital', 'Railgun'],
   ];
   const Q = STAGE.Q, PAGE = STAGE.PAGE;
   const FROZEN = Q.has('t'), CLEAN = Q.has('clean') || Q.has('capture');
