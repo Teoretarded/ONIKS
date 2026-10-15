@@ -1,30 +1,34 @@
 /* SCAN · RAILGUN insert (window.RGE): the ship's two power plants, spliced in at base time 4.0
    (pc_scan_railgun_film.js, "inserted sequences"). Ship frame: +Z fwd, +X stbd, y up from the waterline, origin
-   midships. One take of 189.5 s, the lens slow (keys 4-6 s apart, holds on each part, the look under 30 deg/s):
-   1. from the power room the hull opens bow to stern over the whole machinery length;
-   2. the gas turbine plant as built (DDG-51 Flight IIA): gas turbine generator 1 (Allison 501-K34, 2.5 MW) starts
-      and closes onto switchboard 1S; LM2500 1B cranks; in slow motion (x0.01) a lime scan plane runs down the open
-      engine naming every row (inlet guide vanes, 16 compressor stages, the combustor, 2 HP and 6 power turbine
-      stages); end-on, the flame runs round the annular combustor's thirty nozzles; the engines run up to idle; the
+   midships. One take of 121.6 s (round 3: cut from 189.5), the lens slow (moves of 3-6 s, a calm hold of 4 s or more
+   on each machine, the look under 25 deg/s):
+   1. from the power room the hull opens bow to stern over the whole machinery length (the ship service generators
+      already on line);
+   2. the gas turbine plant as built (DDG-51 Flight IIA): LM2500 1B's enclosure lifts and it cranks; in slow motion
+      (x0.01) a lime scan plane runs down the open engine naming its six sections, 1.5 s each (inlet guide vanes,
+      compressor 1-6 with the variable stators, compressor 7-16, the combustor, the HP turbine, the power turbine);
+      end-on, the flame front runs round the annular combustor's thirty nozzles; the engines run up to idle; the
       locked-train reduction gear comes apart (exploded) and back, the clutches go in and the gears and shafts turn;
    3. the railgun's own plant (fiction: a real Burke is all gas turbine): a compact pressurised-water reactor below
       the 2nd deck between the engine rooms and the railgun power room (reactor compartment z 13.5-24, turbine room
       24-36.2, the railgun switchboards under the forward launcher 36.2-40.4). The coolant pumps start, the rods
-      withdraw and the core goes critical and heats (x600); the steam generator boils off its U-tubes and the swirl
-      vanes fling the water out of the steam (x0.1); the steam runs through the horizontally split high- and
-      low-pressure turbines (x0.01; the scan plane names their stages), down into the shell-and-tube condenser
-      (x0.1: seawater through the tubes, the condensate raining into the hotwell) and back through the feed pumps;
-      the generator's two-pole rotor turns its field past the three-phase stator windings (x0.01, with the three
-      phase currents traced);
-   4. the railgun switchboard's feeders close and one current pulse runs forward along the cables into the power
-      room, where the take hands back, close and level, to the base camera.
+      withdraw and the neutron flux climbs eight decades (traced beside the core) until it is critical and at power
+      (x600); the steam generator boils off its U-tubes and the swirl vanes fling the water out of the steam (x0.1);
+      one lime trace runs the power from the core to the switchboard; the steam streaks through the horizontally split
+      high- and low-pressure turbines (x0.01; the scan plane names their stages), down into the shell-and-tube
+      condenser (x0.1: seawater through the tubes and the waterboxes, the condensate curtain into the hotwell); the
+      generator's two-pole rotor turns its field lobe past the slotted stator and its three-phase windings (x0.01,
+      the phase currents traced);
+   4. at the railgun switchboard the feeder breakers rack in and close (the arc chutes flash) and one current pulse
+      runs forward along the cables into the power room, where the take hands back, close and level, to the base
+      camera.
    The port loop and turbine set are the starboard ones mirrored. Render is a pure function of u; no allocation in
    the per-dot loops. */
 (function () {
 'use strict';
 const { V, R, X, E } = M3;
 const PI = Math.PI, TAU = 2 * PI, DEG = PI / 180;
-const LEN = 189.5;
+const LEN = 121.6;
 const G = GEO;
 let K = null, P_ = null, LIME = null, HOT = null, WH = null;
 const F = o => Object.assign({ fine: true }, o || {});
@@ -79,27 +83,32 @@ const RAT = { nb: 219, np: 43, ng: 147, ni: 35 };
 const RATIO = RAT.nb / RAT.np * RAT.ng / RAT.ni;         // 21.39
 const SH_RPM = 55;                                       // shafts at zero pitch on station
 /* the beats (u, film s into the insert) */
-const U_SCAN = [31.0, 41.0], U_EO = [42.5, 46.0, 51.5, 54.5], U_XP = [61.0, 64.0, 67.6, 70.6], U_HPS = [130.4, 135.0], U_LPS = [139.8, 144.4];
-/* time compression (sim s per film s), shown on screen: x1 the opening, x20 the gas turbine starts, x0.01 the
-   scan down the engine and the light-off, x20 the run-up, x1 the exploded gear, x4 the clutches, x600 the reactor
-   start-up, x0.1 the boiling, x0.01 the turbine, x0.1 the condenser, x0.01 the generator */
-const RK = [[0, 1], [13.6, 1], [14.2, 20], [30.0, 20], [30.8, .01], [52.4, .01], [53.2, 20], [58.8, 20], [59.6, 1], [73.0, 1], [73.6, 4], [78.6, 4], [79.2, 1],
-  [91.6, 1], [92.2, 600], [101.4, 600], [102.4, .1], [125.4, .1], [126.2, .01], [145.0, .01], [145.8, .1], [155.4, .1], [156.2, .01], [171.0, .01], [171.6, 1], [LEN, 1]];
-const GT_T = [[15.2, 16.4, 18.8, 22.6], [17.6, 18.4, 20.4, 24.2], [18.2, 19.0, 21.0, 25.0]];   // GTG start, light-off, rated, breaker
-const GM_T = { '1B': [27.6, 47.2, 55.8], '1A': [53.4, 53.9, 56.4], '2A': [53.8, 54.3, 56.8], '2B': [54.2, 54.7, 57.2] };   // start, light-off, idle
-const XF_T = { '1B': 2.6, '1A': .1, '2A': .1, '2B': .1 };   // the flame's run round the annulus (film s; 26 ms at x0.01)
-const CLU = [74.2, 74.8];                                // clutches in (MER 1, MER 2)
-const RCP_T = [86.0, 88.8];                              // reactor coolant pumps: start, at speed
-const ROD_T = [[92.6, 94.6], [94.4, 96.2], [96.0, 97.0]];   // rod banks A, B, C withdrawing
-const ROD_H = [1.45, 1.45, .8];
-const T_CRIT = 96.6, T_FULL = 99.6;                      // critical; full power (165 MW thermal)
-const TG_T = [100.0, 101.0];                             // the turbines rolled up to 3 600 rpm
-const T_FP = [99.2, 100.2], T_STM = [99.6, 101.0];       // the feed pumps; steam to the turbines
-const T_ON = 101.4, T_FDR = 174.6, T_PULSE = 175.5;      // generators on the railgun bus; the second feeders close; the pulse
-const LIFT = [25.6, 28.0, 56.6, 58.6];                   // the enclosure of LM2500 1B lifts off and goes back
+const U_SCAN = [13.4, 22.4], U_EO = [23.6, 25.8, 31.2, 33.2], U_XP = [36.0, 37.8, 40.2, 41.8], U_HPS = [78.0, 82.6], U_LPS = [83.2, 87.8];
+/* time compression (sim s per film s), shown on screen: x1 the opening, x20 the crank, x0.01 the scan down the
+   engine and the light-off, x20 the run-up, x1 the exploded gear, x4 the clutches, x600 the reactor start-up, x0.1
+   the boiling, x0.01 the turbine, x0.1 the condenser, x0.01 the generator, x1 the switchboard and the run */
+const U_SL1 = 31.4;                                      // the end of the light-off's slow motion
+const RK = [[0, 1], [11.8, 1], [12.2, 20], [12.8, 20], [13.2, .01], [31.2, .01], [31.8, 20], [34.8, 20], [35.2, 1], [42.6, 1], [43.0, 4], [46.0, 4], [46.4, 1],
+  [53.6, 1], [54.0, 600], [61.6, 600], [62.4, .1], [75.0, .1], [75.8, .01], [89.4, .01], [90.0, .1], [96.0, .1], [96.6, .01], [105.4, .01], [106.0, 1], [LEN, 1]];
+/* the ship service generators have been on line since before the take (start, light-off, rated, breaker) */
+const GT_T = [[-60, -59, -58, -57], [-60, -59, -58, -57], [-60, -59, -58, -57]];
+const GM_T = { '1B': [12.0, 26.3, 34.4], '1A': [32.0, 32.5, 34.2], '2A': [32.4, 32.9, 34.6], '2B': [32.8, 33.3, 35.0] };   // start, light-off, idle
+const XF_T = { '1B': 3.2, '1A': .1, '2A': .1, '2B': .1 };   // the flame front's run round the annulus (film s; 32 ms at x0.01)
+const CLU = [44.0, 44.4];                                // clutches in (MER 1, MER 2)
+const RCP_T = [50.0, 52.4];                              // reactor coolant pumps: start, at speed
+const ROD_T = [[54.2, 56.2], [56.0, 57.8], [57.6, 58.6]];   // rod banks A, B, C withdrawing
+const ROD_H = [1.45, 1.45, .58], ROD_F = 4.35;           // each bank's withdrawal (m; C, the regulating bank, stops at 40 %); full travel x 3
+const T_CRIT = 57.4, T_FULL = 60.4;                      // critical (rods 63 % out); full power (165 MW thermal, rods 80 % out)
+const TG_T = [60.8, 61.8];                               // the turbines rolled up to 3 600 rpm
+const T_FP = [60.0, 61.0], T_STM = [60.4, 61.8];         // the feed pumps; steam to the turbines
+const T_ON = 62.0;                                       // the generators onto the railgun bus
+const U_SGV = [62.8, 64.8, 74.6, 76.6];                  // the U-tubes drawn up while the lens is on the steam generator
+const U_CND = [89.4, 96.4], U_GEN = [95.6, 105.6];       // the condenser's and the generator's beats
+const T_RACK = [106.6, 107.9], T_FDR = 108.8, T_PULSE = 110.8;   // the feeder breakers rack in, close; the pulse
+const LIFT = [10.4, 12.0, 32.4, 34.0];                   // the enclosure of LM2500 1B lifts off and goes back
 function ngg(id, u) {
   const [a, b, c] = GM_T[id];
-  if (id === '1B') return u < a ? 0 : u < a + 1.6 ? 1700 * ss(a, a + 1.6, u) : u < 52.4 ? 1700 + 60 * ss(b, b + 3, u) : 1760 + 3140 * ss(52.4, c, u);
+  if (id === '1B') return u < a ? 0 : u < a + 1.0 ? 1700 * ss(a, a + 1.0, u) : u < U_SL1 ? 1700 + 60 * ss(b, b + 3, u) : 1760 + 3140 * ss(U_SL1, c, u);
   return u < a ? 0 : u < b ? 1700 * ss(a, b, u) : 1700 + 3200 * ss(b, c, u);
 }
 function fgen(k, u) { const [a, b, c] = GT_T[k]; return u < a ? 0 : u < b ? .13 * ss(a, b, u) : .13 + .87 * ss(b, c, u); }
@@ -542,6 +551,75 @@ function swbStatic(n) {
 }
 const SW_DIALS = [[.3, 1.85], [.7, 1.85], [.3, 1.5], [.7, 1.5]];
 
+/* ================= the railgun switchboard (round 3; local: x along the line-up, y up, z out of the front) =================
+   three sections: the generator incomer (s0), metering and protection (s1), two feeder cubicles stacked (s2); each
+   breaker a draw-out truck on rails (its own cloud: it racks in), three arc chutes of splitter plates on its top, the
+   primary disconnects (finger clusters) at its back mating with the cubicle's stabs; the main bus (three bars) along
+   the top back with droppers to the line stabs, the feeders' cables up the back to the trays */
+const RSW_H = 2.3, RSW_D = .95, RSTAB = -.6, RTRAV = .3;
+const RCUB = [{ x: .5, y: .1 }, { x: 2.5, y: .1 }, { x: 2.5, y: 1.15 }];   // cubicles (front-bottom centre): the incomer, feeder A (lower), feeder B (upper)
+const RBUS = [-.68, -.78, -.88], RBY = 2.17;                                // the bus bars' z (phases A, B, C) and height
+const rPole = p => -.2 + p * .2, RSY = [.52, .22];                          // a pole's x in its cubicle; the line (upper) and load (lower) stabs' heights
+function rswStatic() {
+  const P = [];
+  for (let i = 0; i < 3; i++) {
+    const x0 = i, x1 = i + 1;
+    P.push(G.box([x0, 0, -RSW_D], [x1, RSW_H, 0], { edgeOnly: true }));
+    P.push(fnp((o, s) => P_.quadL(o, [x0, 0, -RSW_D], [x0, RSW_H, -RSW_D], [x1, RSW_H, -RSW_D], [x1, 0, -RSW_D], [0, 0, 1], s), { ds: 6 }));
+    for (let k = 0; k < 5; k++) P.push(G.line([[x0 + .15, RSW_H, -.12 - k * .08], [x1 - .15, RSW_H, -.12 - k * .08]], F()));
+  }
+  // section 1: meters, the synchroscope, lamps, a protection relay rack, the mimic's frame
+  P.push(fnp((o, s, es) => { const x0 = 1;
+    for (const [cx, cy] of SW_DIALS) { arcZ(o, x0 + cx, cy, .01, .075, 0, TAU, es); arcZ(o, x0 + cx, cy, .01, .08, 0, TAU, es);
+      for (let k = 0; k <= 10; k++) { const a = PI / 2 + 135 * DEG - k * 27 * DEG; seg(o, [x0 + cx + Math.cos(a) * .06, cy + Math.sin(a) * .06, .012], [x0 + cx + Math.cos(a) * .073, cy + Math.sin(a) * .073, .012], es * .6); } }
+    arcZ(o, x0 + .5, 1.12, .01, .09, 0, TAU, es); arcZ(o, x0 + .5, 1.12, .01, .095, 0, TAU, es);
+    for (let k = 0; k < 4; k++) arcZ(o, x0 + .25 + k * .166, .86, .012, .025, 0, TAU, es);
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++) sqZ(o, x0 + .2 + c * .2, .25 + r * .16, .008, .07, .05, es);
+    sqZ(o, x0 + .5, 2.12, .008, .42, .1, es); }));
+  // the cubicles: their openings, back walls, racking rails, the stabs in their insulating spouts
+  for (const c of RCUB) {
+    const xa = c.x - .45, xb = c.x + .45, ya = c.y, yb = c.y + .95;
+    P.push(G.line([[xa, ya, .006], [xb, ya, .006], [xb, yb, .006], [xa, yb, .006], [xa, ya, .006]]));
+    P.push(G.line([[xa, ya, RSTAB - .04], [xb, ya, RSTAB - .04], [xb, yb, RSTAB - .04], [xa, yb, RSTAB - .04], [xa, ya, RSTAB - .04]], F()));
+    for (const sx of [-1, 1]) P.push(G.line([[c.x + sx * .3, ya + .02, RSTAB], [c.x + sx * .3, ya + .02, .02]]), G.line([[c.x + sx * .35, ya + .06, RSTAB], [c.x + sx * .35, ya + .06, .02]], F()));
+    P.push(fnp((o, s, es) => { for (const yy of RSY) for (let p = 0; p < 3; p++) slathe(o, c.x + rPole(p), ya + yy, [[RSTAB - .04, .05], [RSTAB, .05], [RSTAB, .028], [RSTAB + .05, .028]], 0, TAU, s, es); }, { ds: 1.4 }));
+    // droppers from the bus to the line stabs; the load stabs' cables (feeders: up the back to the top; the incomer: the
+    // generator's cables down from the top)
+    P.push(fnp((o, s, es) => { for (let p = 0; p < 3; p++) { const x = c.x + rPole(p), zb = RBUS[p], yl = ya + RSY[0], yd = ya + RSY[1];
+      seg(o, [x, RBY, zb], [x, yl, zb], es); seg(o, [x + .025, RBY, zb], [x + .025, yl, zb], es); seg(o, [x, yl, zb], [x, yl, RSTAB - .04], es);
+      seg(o, [x, yd, RSTAB - .04], [x, yd, -.93], es); seg(o, [x, yd, -.93], [x, RSW_H, -.93], es); seg(o, [x + .02, yd, -.93], [x + .02, RSW_H, -.93], es); } }));
+  }
+  // the main bus: three flat copper bars along the top back on standoff insulators
+  P.push(fnp((o, s, es) => { for (const zb of RBUS) { for (const dy of [-.05, .05]) seg(o, [.05, RBY + dy, zb], [2.95, RBY + dy, zb], es); for (let x = .05; x < 2.95; x += s) for (let y = RBY - .045; y < RBY + .05; y += s) o.push(x, y, zb, 0, 0, 1);
+    for (let x = .25; x < 2.95; x += .5) { seg(o, [x, RBY - .05, zb], [x, RBY - .14, zb], es); arcZ(o, x, RBY - .1, zb, .02, 0, TAU, es); } }
+    for (let x = .25; x < 2.95; x += .5) seg(o, [x, RBY - .14, RBUS[0] + .04], [x, RBY - .14, RBUS[2] - .04], es); }, { ds: 1.6 }));
+  return P;
+}
+/* a draw-out breaker truck (local: the cubicle's front-bottom centre, racked in): body, front panel (charge window,
+   close/open buttons, the racking screw), wheels, three poles (their vacuum bottles) with an arc chute of eight
+   splitter plates over each, the finger clusters at the back */
+function brkTruck() {
+  const P = [];
+  P.push(G.box([-.33, .04, -.52], [.33, .64, -.03], { edgeOnly: true }));
+  P.push(fnp((o, s) => { P_.quadL(o, [-.33, .04, -.03], [.33, .04, -.03], [.33, .64, -.03], [-.33, .64, -.03], [0, 0, 1], s); for (const sx of [-1, 1]) P_.quadL(o, [sx * .33, .04, -.52], [sx * .33, .04, -.03], [sx * .33, .64, -.03], [sx * .33, .64, -.52], [sx, 0, 0], s); }, { ds: 4.5 }));
+  P.push(fnp((o, s, es) => { sqZ(o, 0, .34, -.02, .29, .26, es); sqZ(o, -.13, .5, -.018, .08, .04, es); arcZ(o, .1, .5, -.018, .032, 0, TAU, es); arcZ(o, .2, .5, -.018, .032, 0, TAU, es);
+    arcZ(o, 0, .15, -.018, .03, 0, TAU, es); arcZ(o, 0, .15, -.018, .012, 0, TAU, es); sqZ(o, .14, .3, -.018, .06, .025, es);
+    seg(o, [-.22, .32, -.02], [-.22, .32, .06], es); seg(o, [-.22, .32, .06], [-.06, .32, .06], es); seg(o, [-.06, .32, .06], [-.06, .32, -.02], es); }));
+  for (const sx of [-1, 1]) for (const z of [-.44, -.1]) P.push(G.cyl([sx * .3, .06, z], [sx * .36, .06, z], .04, F()));
+  for (let p = 0; p < 3; p++) {
+    const x = rPole(p);
+    P.push(G.cyl([x, .2, -.36], [x, .56, -.36], .045, F({ ds: 1.4 })));
+    P.push(G.box([x - .075, .64, -.48], [x + .075, .86, -.22], { edgeOnly: true }));
+    P.push(fnp((o, s, es) => { for (let k = 0; k < 8; k++) { const y = .66 + k * .025; seg(o, [x - .07, y, -.47], [x + .07, y, -.47], es); seg(o, [x - .07, y, -.47], [x - .07, y, -.23], es); seg(o, [x + .07, y, -.47], [x + .07, y, -.23], es); }
+      for (let k = 0; k < 3; k++) seg(o, [x - .07, .86, -.44 + k * .1], [x + .07, .86, -.44 + k * .1], es); }));
+    P.push(fnp((o, s, es) => { for (const y of RSY) { slathe(o, x, y, [[-.52, .04], [-.58, .04]], 0, TAU, s, es); for (let k = 0; k < 6; k++) { const a = k / 6 * TAU; seg(o, [x + Math.cos(a) * .042, y + Math.sin(a) * .042, -.58], [x + Math.cos(a) * .042, y + Math.sin(a) * .042, -.66], es); } } }, { ds: 1.2 }));
+  }
+  return P;
+}
+/* a truck's racking offset (out of the cubicle, local +z): the incomer racked in from the start; each feeder from its
+   test position in along T_RACK (the port board a beat later) */
+const rackOff = (j, u, m) => j ? RTRAV * (1 - kk(u, T_RACK[0] + (j - 1) * .3 + m * .2, T_RACK[1] - .3 + (j - 1) * .3 + m * .2)) : 0;
+const fdrT = (j, m) => T_FDR + (j - 1) * .14 + m * .3;      // feeder j's breaker closes
 /* ================= ducts: round uptakes, rectangular intake trunks (ship frame) ================= */
 function roundDuct(P, path, r0, r1, bel) {
   const n = path.length;
@@ -585,6 +663,16 @@ const RODQ = [[-.055, -.055], [.055, -.055], [.055, .055], [-.055, .055]];
 const HPS = []; for (let k = 0; k < 7; k++) HPS.push({ z: .35 + k * .23, h: .3, t: .42 + .025 * k, n: 64 + 4 * k, c: .055 });
 const LZC = 4.0, LPS = [.22, .49, .76, 1.03, 1.3].map((d, k) => ({ d, h: .42, t: [.66, .76, .88, 1.02, 1.2][k], n: [72, 64, 56, 52, 48][k], c: [.07, .08, .09, .11, .13][k] }));
 const GZ0 = 6.6, GZ1 = 9.6;                              // generator core
+/* the stator (round 3): 36 slots, two bars a slot (top r .64, bottom .70), 60 deg phase belts (each phase's + belt
+   centred at 90 - 120 p deg, its - belt opposite: C- A+ B- C+ A- B+ round from 0); the end windings (ENDW, built in
+   coils) a basket of five-sixths pitch coils */
+const NSL = 36, SLW = 1.9 * DEG, SLR = [.64, .7], SPAN = 15;
+const SLA = k => (k + .5) / NSL * TAU;
+const SLP = [], SLS = [];
+for (let k = 0; k < NSL; k++) { const a = SLA(k); let best = 9, bp = 0, bs = 1;
+  for (let p = 0; p < 3; p++) for (const sg of [1, -1]) { const c = PI / 2 - p * TAU / 3 + (sg < 0 ? PI : 0), d = Math.abs(((a - c) % TAU + TAU + PI) % TAU - PI); if (d < best) { best = d; bp = p; bs = sg; } }
+  SLP.push(bp); SLS.push(bs); }
+const ENDW = [];
 const CX0 = 2.6, CX1 = 5.4;                              // condenser shell
 const CTX = [-1.0, -.6, -.2, .2, .6, 1.0], CTY = [-1.75, -2.15, -2.55, -2.95];
 const SEPS = [[0, 0]]; for (let k = 0; k < 6; k++) SEPS.push([Math.cos(k * PI / 3) * .45, Math.sin(k * PI / 3) * .45]);
@@ -804,6 +892,13 @@ function coils() {
     for (let k = 1; k <= 24; k++) { const f = k / 24, a = t1 + PI + PI * f, rr = r + .12 * Math.sin(PI * f); Q.push([Math.cos(a) * rr, Math.sin(a) * rr, GZ0 - .12 - .26 * Math.sin(PI * f)]); }
     COILS.push({ p, q, t1, pl: P_.poly(Q) });
   }
+  ENDW.length = 0;
+  for (const [zE, dz] of [[GZ0, -1], [GZ1, 1]]) for (let k = 0; k < NSL; k++) {
+    const a0 = SLA(k), Q = [[Math.cos(a0) * SLR[0], Math.sin(a0) * SLR[0], zE]];
+    for (let j = 0; j <= 20; j++) { const f = j / 20, a = a0 + f * SPAN * TAU / NSL, r = SLR[0] + (SLR[1] - SLR[0]) * f + .1 * Math.sin(PI * f); Q.push([Math.cos(a) * r, Math.sin(a) * r, zE + dz * (.07 + .27 * Math.sin(PI * f))]); }
+    const a1 = a0 + SPAN * TAU / NSL; Q.push([Math.cos(a1) * SLR[1], Math.sin(a1) * SLR[1], zE]);
+    ENDW.push({ k, pl: P_.poly(Q) });
+  }
 }
 /* ---- the turbines: both casings split on the horizontal joint (y = 0). The lower halves are drawn whole (casing,
    nozzle diaphragms, the joint's flanges and studs), the upper halves ghosted in their own cloud so the rotor reads ---- */
@@ -960,18 +1055,28 @@ function tgStatic() {
   // the crossover pipe: HP exhaust over to the LP inlet
   P.push(pipe(CROSS, .25, .4));
   P.push(...lpLower(), ...cndPrims());
-  // coupling guard; the generator: frame (cut) and its rings, feet; the stator core (bore, end plates, slots)
+  // coupling guard; the generator: frame (cut) and a few rings, feet
   P.push(fnp((o, s, es) => { for (const z of [5.65, 5.95]) arcZ(o, 0, 0, z, .36, 0, TAU, es); for (let k = 0; k < 6; k++) { const a = k / 6 * TAU; seg(o, [Math.cos(a) * .36, Math.sin(a) * .36, 5.65], [Math.cos(a) * .36, Math.sin(a) * .36, 5.95], es); } }, F()));
-  P.push(fnp((o, s, es) => slathe(o, 0, 0, [[6.0, .3], [6.05, .62], [6.2, .98], [6.3, 1.02], [9.9, 1.02], [10.0, .98], [10.15, .62], [10.2, .3]], a0, a1, s, es), { ds: 2.6 }));
-  P.push(fnp((o, s, es) => { for (let z = 6.8; z < 9.8; z += .5) arcZ(o, 0, 0, z, 1.04, a0, a1, es); }, F()));
+  P.push(fnp((o, s, es) => slathe(o, 0, 0, [[6.0, .3], [6.05, .62], [6.2, .98], [6.3, 1.02], [9.9, 1.02], [10.0, .98], [10.15, .62], [10.2, .3]], a0, a1, s, es), { ds: 3.4 }));
+  P.push(fnp((o, s, es) => { for (let z = 7.1; z < 9.8; z += 1.0) arcZ(o, 0, 0, z, 1.04, a0, a1, es); }, F()));
   for (const sx of [-1, 1]) P.push(G.box([sx * .95 - .12, -1.05, 6.4], [sx * .95 + .12, -.62, 9.8], { ds: 2.5 }));
-  P.push(fnp((o, s, es) => slathe(o, 0, 0, [[GZ0, .58], [GZ1, .58]], a0, a1, s, es, { inner: true, noEdge: true }), { ds: 3.2 }));
-  P.push(fnp((o, s, es) => { slathe(o, 0, 0, [[GZ0, .58], [GZ0, .9]], a0, a1, s, es); slathe(o, 0, 0, [[GZ1, .9], [GZ1, .58]], a0, a1, s, es); }, { ds: 2.2 }));
-  P.push(fnp((o, s, es) => { for (let k = 0; k < 24; k++) { const a = (k + .5) / 24 * TAU; if (!inSec(a, a0, a1)) continue; const c = Math.cos(a), sn = Math.sin(a);
-    seg(o, [c * .6, sn * .6, GZ0], [c * .6, sn * .6, GZ1], es); for (const z of [GZ0, GZ1]) seg(o, [c * .58, sn * .58, z], [c * .74, sn * .74, z], es); } }, F()));
-  // the stator windings: the conductors in the kept sector, the end turns all round
-  P.push(fnp((o, s, es) => { for (const cl of COILS) { const p = cl.pl.P; for (let i = 0; i < p.length - 1; i++) { const a = p[i], b = p[i + 1], mz = (a[2] + b[2]) / 2;
-    if (mz > GZ0 && mz < GZ1 && !inSec(Math.atan2(a[1] + b[1], a[0] + b[0]), a0, a1)) continue; seg(o, a, b, es); seg(o, [a[0] * 1.03, a[1] * 1.03, a[2]], [b[0] * 1.03, b[1] * 1.03, b[2]], es); } } }));
+  // the stator core (round 3): the bore with its 36 slot openings, the end plates with the slots and teeth cut in them,
+  // the laminations hatched on the cut faces, the back of the core
+  P.push(fnp((o, s, es) => slathe(o, 0, 0, [[GZ0, .58], [GZ1, .58]], a0, a1, s, es, { inner: true, noEdge: true }), { ds: 4.0 }));
+  P.push(fnp((o, s, es) => { slathe(o, 0, 0, [[GZ0, .76], [GZ0, .9]], a0, a1, s, es); slathe(o, 0, 0, [[GZ1, .9], [GZ1, .76]], a0, a1, s, es); }, { ds: 2.4 }));
+  P.push(fnp((o, s, es) => { for (let k = 0; k < NSL; k++) { const a = SLA(k); if (!inSec(a, a0, a1)) continue;
+    for (const sg of [-1, 1]) { const b = a + sg * SLW, c = Math.cos(b), sn = Math.sin(b); seg(o, [c * .58, sn * .58, GZ0], [c * .58, sn * .58, GZ1], es);
+      for (const z of [GZ0, GZ1]) seg(o, [c * .58, sn * .58, z], [c * .75, sn * .75, z], es); }
+    for (const z of [GZ0, GZ1]) arcZ(o, 0, 0, z, .75, a - SLW, a + SLW, es); } }));
+  P.push(fnp((o, s, es) => { for (const a of [a0, a1]) { const c = Math.cos(a), sn = Math.sin(a); for (let z = GZ0 + .03; z < GZ1; z += .06) seg(o, [c * .59, sn * .59, z], [c * .9, sn * .9, z], es * 1.4);
+    seg(o, [c * .9, sn * .9, GZ0], [c * .9, sn * .9, GZ1], es); seg(o, [c * .58, sn * .58, GZ0], [c * .58, sn * .58, GZ1], es); }
+    for (const z of [GZ0, GZ1]) { arcZ(o, 0, 0, z, .9, a0, a1, es); arcZ(o, 0, 0, z, .58, a0, a1, es); } }, F()));
+  // the windings: two bars in each slot (top and bottom coil sides) along the core; the end windings, a basket of
+  // five-sixths pitch coils flaring out past each end, all round
+  P.push(fnp((o, s, es) => { for (let k = 0; k < NSL; k++) { const a = SLA(k); if (!inSec(a, a0, a1)) continue; const c = Math.cos(a), sn = Math.sin(a);
+    for (const r of SLR) seg(o, [c * r, sn * r, GZ0 - .06], [c * r, sn * r, GZ1 + .06], es * 2.5); } }, F()));
+  P.push(fnp((o, s, es) => { for (const e of ENDW) { const p = e.pl.P; for (let i = 0; i < p.length - 1; i++) seg(o, p[i], p[i + 1], es); } }, F()));
+  P.push(fnp((o, s, es) => { for (const z of [GZ0 - .3, GZ1 + .3]) { arcZ(o, 0, 0, z, .86, 0, TAU, es); arcZ(o, 0, 0, z + (z < GZ0 ? -.04 : .04), .86, 0, TAU, es); } }, F()));
   // terminal box and bushings on top; the exciter's housing (cut)
   P.push(G.box([-.35, .98, 8.85], [.35, 1.2, 9.65], { ds: 2 }), ...[-.2, 0, .2].map(x => G.cyl([x, 1.2, 9.25], [x, 1.42, 9.25], .045, F())));
   P.push(fnp((o, s, es) => slathe(o, 0, 0, [[10.45, .2], [10.5, .42], [11.1, .42], [11.15, .2]], a0, a1, s, es), { ds: 2 }));
@@ -1005,7 +1110,8 @@ function genRotor2() {
   P.push(fnp((o, s, es) => slathe(o, 0, 0, [[GZ0 - .15, .5], [GZ1 + .15, .5]], 0, TAU, s, es, { noEdge: true }), { ds: 3.4 }));
   P.push(fnp((o, s, es) => { slathe(o, 0, 0, [[GZ0 - .45, .5], [GZ0 - .45, .53], [GZ0 - .15, .53], [GZ0 - .15, .5]], 0, TAU, s, es); slathe(o, 0, 0, [[GZ1 + .15, .5], [GZ1 + .15, .53], [GZ1 + .45, .53], [GZ1 + .45, .5]], 0, TAU, s, es); }, { ds: 1.6 }));
   P.push(fnp((o, s, es) => { for (const pa of [0, PI]) for (let m = 0; m < 4; m++) { const b = (24 + m * 12) * DEG, r = .505;
-    for (const sg of [-1, 1]) { const a = pa + sg * b; seg(o, [Math.cos(a) * r, Math.sin(a) * r, GZ0 - .15], [Math.cos(a) * r, Math.sin(a) * r, GZ1 + .15], es); }
+    for (const sg of [-1, 1]) for (const e of [-1.4 * DEG, 1.4 * DEG]) { const a = pa + sg * b + e, c = Math.cos(a), sn = Math.sin(a); seg(o, [c * r, sn * r, GZ0 - .15], [c * r, sn * r, GZ1 + .15], es);
+      for (const z of [GZ0 - .15, GZ1 + .15]) seg(o, [c * .42, sn * .42, z], [c * r, sn * r, z], es); }
     for (const z of [GZ0 - .2 - m * .05, GZ1 + .2 + m * .05]) arcZ(o, 0, 0, z, r - .02, pa - b, pa + b, es); } }));
   P.push(fnp((o, s) => { for (const pa of [0, PI]) for (let z = GZ0 + s / 2; z < GZ1; z += s) for (let a = -.3; a <= .3; a += s / .5) { const c = Math.cos(pa + a), sn = Math.sin(pa + a); o.push(c * .505, sn * .505, z, c, sn, 0); } }, { ds: 1.5 }));
   P.push(fnp((o, s, es) => { slathe(o, 0, 0, [[5.75, .16], [11.05, .16]], 0, TAU, s, es); seg(o, [.162, 0, 5.8], [.162, 0, 11.0], es * .7); slathe(o, 0, 0, [[10.55, .3], [10.95, .3]], 0, TAU, s, es);
@@ -1149,6 +1255,12 @@ function routes() {
   for (let k = 0; k < 3; k++) PL.bus.push(P_.poly(BUS_P.map(p => [p[0] + (k - 1) * .1, p[1], p[2]])));
   for (const RT of RG_P) for (let k = 0; k < 3; k++) PL.rg.push(P_.poly(offPath(RT, (k - 1) * .06, 0)));
   PL.pulse = P_.poly([...RG_P[1].slice(0, 5), ...PBR]);
+  // the power path (round 3, starboard): the core, up and out of the hot leg, up through the steam generator, along the
+  // main steam line into the HP turbine, over the casings (the crossover) to the LP, on along the set to the
+  // generator's terminals and down the bus duct into the railgun switchboard's incomer
+  { const T_ = p => [TGO[0] + p[0], TGO[1] + p[1], TGO[2] + p[2]];
+    PL.pow = smooth([[0, CORE0 + .3, RV[1]], [0, -1.05, RV[1]], ...PIPES.hot.P, [SGX, -1.6, SGZ], [SGX, 3.25, SGZ], ...PIPES.steam.P.slice(1),
+      T_([0, .75, .55]), ...CROSS.slice(1).map(T_), T_([0, 1.5, LZ1 - .2]), T_([0, 1.1, 6.3]), T_([0, 1.1, 8.9]), ...BUS_P], .3); }
   for (const k in PIPES) PLP[k] = smooth(PIPES[k].P, PIPES[k].rf);
   PLP.cross = smooth(CROSS, .4);
 }
@@ -1208,7 +1320,8 @@ function build(ctx) {
   CL.tgR = lod(tgRotor(), .6, LVF8);
   CL.genR = lod(genRotor2(), .6, LVF8);
   CL.fp = lod(feedPumpPrims(), .6, LVF8);
-  CL.rsw = lod(swbStatic(RSW.n), .6, LVF8);
+  CL.rsw = lod(rswStatic(), .6, LVF8);
+  CL.rbk = lod(brkTruck(), .4, LVF);
   for (const t of TAGDEF) TAGS.push(Object.assign({ tg: K.mkTag() }, t));
   for (let k = 0; k < 3; k++) SCT.push(K.mkTag());
   for (const k in CL) (Array.isArray(CL[k]) ? CL[k] : [CL[k]]).forEach((c, i) => { c.__n = Array.isArray(CL[k]) ? k + i : k; });
@@ -1266,7 +1379,7 @@ function state(u) {
   ST.rcp = ss(RCP_T[0], RCP_T[1], u); ST.rcpA = spA(SP.rcp, u); ST.rcpV = spR(SP.rcp, u);
   ST.tg = ss(TG_T[0], TG_T[1], u); ST.tgA = spA(SP.tg, u); ST.tgV = spR(SP.tg, u);
   ST.fp = ss(T_FP[0], T_FP[1], u); ST.fpA = spA(SP.fp, u);
-  ST.steam = ss(T_STM[0], T_STM[1], u); ST.load = ss(T_ON - .2, T_ON + .3, u) * (.72 + .28 * ss(T_FDR, T_FDR + 1.2, u));
+  ST.steam = ss(T_STM[0], T_STM[1], u); ST.load = ss(T_ON - .2, T_ON + .3, u) * (.12 + .88 * ss(T_FDR + .2, T_FDR + 7, u));   // the plant's own pumps (3 MW a set), then the power room's draw
   ST.heaters = ss(RCP_T[0] + 1, RCP_T[0] + 1.8, u) * (1 - ss(T_FULL - .4, T_FULL + .6, u)) * .8 + .2 * ss(T_FULL - .4, T_FULL + .6, u);
   return ST;
 }
@@ -1279,8 +1392,8 @@ const XB = { open: false, zo: 99, zs: 99, ko: 1, ks: 1, box: [0, 0, 0, 0, 0, 0] 
 function xray(u, XS) {
   CUR_U = u;
   XB.open = XS.zo < 90; XB.zo = XS.zo; XB.zs = XS.zs; XB.ko = XS.ko; XB.ks = XS.ks; for (let i = 0; i < 6; i++) XB.box[i] = XS.box[i];
-  let zo = 57.6 - 90.6 * ss(.4, 7.4, u), ko = 1 - ss(7.4, 8.4, u);
-  if (u > T_PULSE) { zo = -33 + 73 * ss(T_PULSE, T_PULSE + 9, u); ko = 1 - ss(T_PULSE + 8.6, T_PULSE + 10, u); }
+  let zo = 57.6 - 90.6 * ss(.4, 6.4, u), ko = 1 - ss(6.4, 7.4, u);
+  if (u > T_PULSE) { zo = -33 + 73 * ss(T_PULSE, T_PULSE + 7.6, u); ko = 1 - ss(T_PULSE + 7.2, T_PULSE + 8.6, u); }
   const w = XB.open ? ss(LEN - 5, LEN - .05, u) : 0;
   for (let i = 0; i < 6; i++) XS.box[i] = XB0[i] + (XB.box[i] - XB0[i]) * w;
   if (u < .4) { XS.zo = 99; XS.zs = 99; XS.dim = 1; return false; }                 // (the base take's window is shut before the splice; a base window shut at
@@ -1305,48 +1418,39 @@ const isOpen = z => XW.zo < 90 && z > XW.zo && z < XW.zs && z > -33 && z < 57.6;
    look between them turns by direction (slerp), never through a lerped target. While the pulse runs forward the lens
    rides with it */
 const KEYS = [
-  { t: 7.0, eye: [17.5, 12, 46], target: [2, -1, 18], fov: 46 },              // the machinery spaces open: MER 1, the reactor plant
-  { t: 11.0, eye: [14, 8, 30], target: [2.6, -2.4, 5], fov: 48 },
-  { t: 13.6, eye: [8.4, 3.4, 14.4], target: [3.8, -3.0, 1.0], fov: 46 },
-  { t: 16.2, eye: [3.6, .4, 4.8], target: [4.5, -3.2, -.4], fov: 44 },       // gas turbine generator 1 starts
-  { t: 18.6, eye: [3.7, .25, 4.0], target: [4.6, -3.25, -1.0], fov: 42 },
-  { t: 22.0, eye: [3.2, 1.2, 1.3], target: [6.3, .75, -3.1], fov: 40 },       // switchboard 1S: the breaker closes
-  { t: 24.6, eye: [3.15, 1.2, 1.0], target: [6.3, .75, -3.2], fov: 40 },
-  { t: 27.8, eye: [3.3, .8, 3.2], target: [2.6, -1.9, -.4], fov: 41 },
-  { t: 31.0, eye: [2.7, .25, 6.3], target: [-.3, -2.6, 4.4], fov: 42 },      // LM2500 1B: the enclosure off, cranking
-  { t: 36.0, eye: [2.65, .15, 4.8], target: [-.3, -2.65, 3.0], fov: 42 },     // (x0.01) the scan down the rows
-  { t: 41.0, eye: [2.6, .05, 3.3], target: [-.3, -2.7, 1.5], fov: 42 },
-  { t: 46.5, eye: [-.05, -2.45, 8.9], target: [-.3, -2.7, 2.5], fov: 22 },    // end-on: the combustor lights
-  { t: 51.5, eye: [-.08, -2.47, 8.7], target: [-.3, -2.7, 2.5], fov: 22 },
-  { t: 56.0, eye: [3.6, 1.2, 6.8], target: [-.6, -2.6, .6], fov: 40 },        // (x20) it runs up to idle
-  { t: 60.5, eye: [3.2, 1.0, 1.2], target: [-2.0, -2.7, -4.1], fov: 46 },     // the main reduction gear, exploded
-  { t: 65.5, eye: [3.0, 1.1, 1.0], target: [-2.0, -2.6, -4.0], fov: 48 },
-  { t: 70.5, eye: [2.8, 1.0, .6], target: [-2.0, -2.6, -4.1], fov: 48 },
-  { t: 74.5, eye: [2.6, -.8, -3.0], target: [-1.6, -2.4, -4.4], fov: 44 },    // the clutches in: the gears turn
-  { t: 77.0, eye: [2.6, -.75, -3.1], target: [-1.6, -2.4, -4.4], fov: 44 },
-  { t: 82.0, eye: [6.0, 4.6, -2.0], target: [1.0, -2.0, 6.0], fov: 52 },      // up and forward
-  { t: 86.0, eye: [8.5, 5.0, 8.5], target: [.8, -1.5, 18.5], fov: 52 },       // the reactor compartment: the coolant pumps start
-  { t: 90.0, eye: [7.0, 3.2, 10.6], target: [.6, -1.8, 18.4], fov: 48 },
-  { t: 94.5, eye: [4.8, 1.7, 12.2], target: [0, -1.8, 18.0], fov: 46 },       // (x600) the rods withdraw
-  { t: 99.5, eye: [3.8, 1.0, 13.3], target: [.2, -2.2, 18.2], fov: 44 },      // critical, the power rises
-  { t: 103.0, eye: [3.4, .8, 13.7], target: [.2, -2.3, 18.2], fov: 44 },
-  { t: 108.5, eye: [.6, 2.4, 13.0], target: [4.4, .2, 19.0], fov: 46 },       // (x0.1) the steam generator boils
-  { t: 112.0, eye: [.7, 2.5, 13.2], target: [4.4, .4, 19.0], fov: 44 },
-  { t: 116.0, eye: [2.5, 3.0, 16.2], target: [4.4, 2.25, 19.0], fov: 40 },    // the separators fling the water out
-  { t: 120.0, eye: [2.55, 3.05, 16.35], target: [4.4, 2.3, 19.0], fov: 40 },
-  { t: 125.0, eye: [.8, 3.2, 20.6], target: [3.3, 1.2, 24.4], fov: 48 },      // the steam out of the top, down into the turbine
-  { t: 130.0, eye: [-.2, .7, 25.0], target: [3.1, -1.3, 25.4], fov: 46 },     // (x0.01) the high-pressure turbine
-  { t: 135.0, eye: [-.3, .7, 25.6], target: [3.1, -1.3, 25.6], fov: 46 },
-  { t: 139.5, eye: [-.5, .9, 28.3], target: [3.1, -1.4, 28.4], fov: 52 },     // the low-pressure turbine, both flows
-  { t: 144.5, eye: [-.5, .9, 28.4], target: [3.1, -1.4, 28.4], fov: 52 },
-  { t: 149.0, eye: [.1, -2.3, 26.6], target: [3.0, -3.7, 28.3], fov: 50 },    // (x0.1) the condenser
-  { t: 154.0, eye: [.1, -2.6, 28.6], target: [3.0, -3.9, 29.8], fov: 50 },    // the hotwell, the feed pump
-  { t: 158.5, eye: [-.2, 1.2, 30.0], target: [3.1, -1.3, 32.8], fov: 44 },    // (x0.01) the generator
-  { t: 163.5, eye: [-.2, 1.4, 30.6], target: [3.1, -1.3, 32.9], fov: 44 },
-  { t: 167.0, eye: [-.3, 1.6, 31.6], target: [3.1, -1.3, 33.0], fov: 44 },
-  { t: 173.0, eye: [4.4, .9, 34.3], target: [1.8, -2.3, 38.3], fov: 42 },    // the railgun switchboard: the feeders close
-  { t: 175.6, eye: [4.45, .95, 34.25], target: [1.8, -2.3, 38.3], fov: 42 },
-  { t: LEN, eye: [4.45, .95, 34.25], target: [1.8, -2.3, 38.3], fov: 42 },  // (then the lens rides with the pulse: pulseCam)
+  { t: 6.0, eye: [12, 7, 26], target: [1.5, -2, 8], fov: 46 },                // the machinery spaces open: MER 1 ahead
+  { t: 9.0, eye: [7.5, 3.2, 13.8], target: [.6, -2.5, 5.0], fov: 45 },
+  { t: 11.6, eye: [3.3, .8, 7.4], target: [-.3, -2.6, 4.2], fov: 42 },        // LM2500 1B: the enclosure lifts, it cranks
+  { t: 13.2, eye: [2.7, .25, 6.3], target: [-.3, -2.6, 4.4], fov: 42 },       // (x0.01) the scan down the six sections
+  { t: 17.7, eye: [2.65, .15, 4.8], target: [-.3, -2.65, 3.0], fov: 42 },
+  { t: 22.2, eye: [2.6, .05, 3.3], target: [-.3, -2.7, 1.5], fov: 42 },
+  { t: 26.6, eye: [-.05, -2.45, 8.9], target: [-.3, -2.7, 2.5], fov: 22 },    // end-on: the flame front runs round
+  { t: 31.0, eye: [-.08, -2.47, 8.7], target: [-.3, -2.7, 2.5], fov: 22 },
+  { t: 35.6, eye: [3.2, 1.0, 1.2], target: [-2.0, -2.7, -4.1], fov: 46 },     // (x20 on the way) the main reduction gear, exploded
+  { t: 38.6, eye: [3.0, 1.1, 1.0], target: [-2.0, -2.6, -4.0], fov: 48 },
+  { t: 41.2, eye: [2.8, 1.0, .6], target: [-2.0, -2.6, -4.1], fov: 48 },
+  { t: 43.6, eye: [2.6, -.8, -3.0], target: [-1.6, -2.4, -4.4], fov: 44 },    // the clutches in: the gears turn
+  { t: 45.6, eye: [2.6, -.75, -3.1], target: [-1.6, -2.4, -4.4], fov: 44 },
+  { t: 51.0, eye: [7.0, 3.2, 10.6], target: [.6, -1.8, 18.4], fov: 48 },      // the reactor compartment: the coolant pumps start
+  { t: 54.6, eye: [4.6, 2.6, 11.4], target: [.2, -2.6, 18.2], fov: 46 },       // (x600) the rods withdraw, the flux climbs
+  { t: 58.6, eye: [3.4, 2.3, 11.2], target: [.2, -3.0, 18.3], fov: 46 },      // critical, the power rises
+  { t: 60.6, eye: [3.25, 2.25, 11.2], target: [.2, -3.0, 18.3], fov: 46 },
+  { t: 64.4, eye: [1.2, 2.2, 13.4], target: [4.4, .3, 19.0], fov: 44 },       // (x0.1) the steam generator boils
+  { t: 66.6, eye: [1.25, 2.3, 13.6], target: [4.4, .45, 19.0], fov: 44 },
+  { t: 69.4, eye: [2.5, 3.0, 16.2], target: [4.4, 2.25, 19.0], fov: 40 },     // the separators fling the water out
+  { t: 73.4, eye: [2.55, 3.05, 16.35], target: [4.4, 2.3, 19.0], fov: 40 },
+  { t: 75.7, eye: [.4, 2.6, 21.6], target: [3.2, -.6, 24.9], fov: 48 },       // the main steam line down into the HP turbine
+  { t: 77.8, eye: [-1.0, 1.1, 25.0], target: [3.1, -1.7, 25.4], fov: 46 },      // (x0.01) the steam down the line into the HP turbine
+  { t: 82.4, eye: [-1.15, 1.25, 26.4], target: [3.1, -1.75, 26.6], fov: 49 },    // a slow dolly aft along the set: the HP, then the LP
+  { t: 85.2, eye: [-1.3, 1.4, 28.2], target: [3.1, -1.85, 28.4], fov: 52 },
+  { t: 88.0, eye: [-1.3, 1.4, 28.4], target: [3.1, -1.85, 28.4], fov: 52 },
+  { t: 91.2, eye: [-.5, -1.6, 25.8], target: [3.0, -4.4, 28.4], fov: 50 },     // (x0.1) the condenser
+  { t: 95.4, eye: [-.6, -1.7, 26.6], target: [3.0, -4.5, 28.8], fov: 50 },
+  { t: 98.6, eye: [-1.2, 1.9, 29.2], target: [3.1, -2.0, 32.6], fov: 46 },     // (x0.01) the generator
+  { t: 103.4, eye: [-1.3, 2.2, 30.4], target: [3.1, -2.0, 32.9], fov: 46 },
+  { t: 106.8, eye: [-.25, .35, 34.5], target: [1.4, -2.55, 38.0], fov: 44 },   // between the boards: the feeders rack in and close
+  { t: 110.4, eye: [-.2, .3, 34.6], target: [1.4, -2.55, 38.0], fov: 44 },
+  { t: LEN, eye: [-.2, .3, 34.6], target: [1.4, -2.55, 38.0], fov: 44 },  // (then the lens rides with the pulse: pulseCam)
 ];
 /* a monotone cubic through keys (Fritsch-Butland tangents; zero at the ends and wherever a component turns) */
 function mpath(keys) {
@@ -1387,15 +1491,15 @@ function splice(ctx) {
   SPL.v1 = v;
 }
 function carried(dt) { const s = SPL.s1, v = SPL.v1, k = -(1 - Math.exp(dt)); return { eye: V.mad(s.eye, v.e, k), target: V.mad(s.target, v.t, k), fov: s.fov, roll: 0 }; }
-/* the pulse's lens: on the pulse (its path smoothed over 4 m), from behind it, above and outboard; as the pulse turns
-   in under the power room's floor the lens swings round it (135 deg, a slow eased orbit about the vertical) and ends
-   ahead of it, looking aft at the coolant pump it reaches (the camera's weights are smoothsteps: E.inOut peaks at 3x) */
+/* the pulse's lens: on the pulse (its path smoothed over 4 m), from behind it, above and inboard where the switchboard
+   shot left the lens; as the pulse runs forward the lens swings round it through port (165 deg, a slow eased orbit
+   about the vertical) and ends ahead of it, looking aft at the coolant pump it reaches, where the base lens is */
 const PF = [0, 0, 0];
 function pulseCam(u) {
   const s = pulseS(u), pl = PL.pulse; let x = 0, y = 0, z = 0;
   for (let k = -14; k <= 14; k++) { P_.polyAt(pl, E.clamp(s + k * .2, 0, pl.L), PF); x += PF[0]; y += PF[1]; z += PF[2]; }
   x /= 29; y /= 29; z /= 29;
-  const w = ss(T_PULSE + 1.5, T_PULSE + 11.5, u), a = (143 - 135 * w) * DEG, r = 5.5 + .1 * w;
+  const w = ss(T_PULSE + .4, LEN - 1.0, u), a = (190 + 165 * w) * DEG, r = 5.5 + .1 * w;
   return { eye: [x + Math.sin(a) * r, y + 2.4 - .1 * w, z + Math.cos(a) * r], target: [x, y + .1 + .1 * w, z + .3 * (1 - w)], fov: 42 + 4 * w };
 }
 /* debug: ?ecams=u:ex,ey,ez,tx,ty,tz,fov;... (ship frame) holds those cameras at those moments (read from the shoot page too) */
@@ -1406,7 +1510,7 @@ function camShip(u) {
   if (!PATH) PATH = mpath(KEYS);
   const s = PATH(u);
   let shot = { eye: s.eye.slice(), target: s.target.slice(), fov: s.fov };
-  const wf = ss(T_PULSE - .4, T_PULSE + 2.2, u);
+  const wf = ss(T_PULSE - .4, T_PULSE + 3.4, u);
   if (wf > 0) shot = blendS(shot, pulseCam(u), wf);
   return shot;
 }
@@ -1415,7 +1519,7 @@ function cam(u, ctx) {
   splice(ctx);
   const s = camShip(u), Ws = ctx.Ws;
   let shot = { eye: X.ap(Ws, s.eye), target: X.ap(Ws, s.target), fov: s.fov * DEG, roll: 0 };
-  const a = ss(0, 7.0, u), b = ss(LEN - 5, LEN, u);
+  const a = ss(0, KEYS[0].t, u), b = ss(LEN - 5, LEN, u);
   if (a < 1) shot = blendS(SPL.s0, shot, a);
   if (b > 0) shot = blendS(shot, carried(u - LEN), b);
   return shot;
@@ -1437,19 +1541,23 @@ function density() { const q = K.DQ; O.px = PX.m / q; OB.px = PX.b / q; OF.px = 
 /* debug (?eprof): points and ms per cloud in RGE.prof */
 const EPROF = QS.has('eprof');
 function profX(ml, Tw, o) { P_.np(); const t = performance.now(); P_.drawX(ml, Tw, o); const k = ml.__n || 'room', A = RGE.prof || (RGE.prof = {}); A[k] = A[k] || [0, 0]; A[k][0] += P_.np(); A[k][1] += performance.now() - t; }
-/* focus: in the close passes the part at work is drawn full, the rest of the plant sparse and dim */
-const FOCUS = [[14.0, 20.0, [4.6, -3.0, -1.0], 4.4], [20.0, 25.4, [6.2, .4, -2.6], 3.6], [28.6, 41.5, [-.3, -2.7, 3.0], 3.8], [41.5, 52.5, [-.3, -2.7, 2.6], 3.0],
-  [52.5, 57.5, [-.4, -2.7, 1.5], 4.2], [57.5, 78.0, [-2.0, -2.7, -4.1], 3.8], [87.0, 105.0, [0, -1.4, 18.0], 3.8], [105.0, 126.0, [4.4, .8, 19.0], 3.4],
-  [126.0, 137.0, [3.1, -1.3, 25.4], 3.0], [137.0, 146.0, [3.1, -1.3, 28.4], 3.2], [146.0, 156.0, [3.1, -3.6, 28.4], 3.2], [156.0, 171.0, [3.1, -1.3, 32.4], 3.2],
-  [171.0, 176.0, [1.9, -2.4, 38.4], 3.4]];
+/* focus: in the close passes the part at work is drawn full, the rest of the plant sparse and dim. Back-to-back
+   passes hand the focus over across 1.6 s (round 3: the 0.5 s hand-over popped the HP turbine in) */
+const FOCUS = [[10.0, 22.6, [-.3, -2.7, 3.0], 3.8], [22.6, 31.6, [-.3, -2.7, 2.6], 3.0], [31.6, 34.4, [-.4, -2.7, 1.0], 4.4], [34.4, 46.6, [-2.0, -2.7, -4.1], 3.8],
+  [50.4, 62.6, [0, -1.4, 18.0], 3.8], [62.6, 75.4, [4.4, .8, 19.0], 3.4], [75.4, 88.6, [3.1, -1.3, 26.6], 3.6], [88.6, 95.8, [3.1, -3.6, 28.4], 3.2],
+  [95.8, 105.6, [3.1, -1.3, 32.4], 3.2], [105.6, 111.4, [1.4, -2.4, 38.2], 2.8]];
 const FC = { p: [0, 0, 0], r: 5, k: 0 };
 function focusAt(u) {
   FC.k = 0;
   for (let i = 0; i < FOCUS.length; i++) {
-    const [a, b, p, r] = FOCUS[i], n = FOCUS[i + 1];
-    if (u >= a - .4 && u <= b) { FC.k = Math.min(ss(a - .4, a + .1, u), n && n[0] <= b + .01 ? 1 : 1 - ss(b - .5, b, u));
-      const w = n && n[0] <= b + .01 ? ss(b - .45, b + .05, u) : 0;
-      for (let j = 0; j < 3; j++) FC.p[j] = p[j] + ((n ? n[2][j] : p[j]) - p[j]) * w; FC.r = r + ((n ? n[3] : r) - r) * w; break; }
+    const [a, b, p, r] = FOCUS[i], pv = FOCUS[i - 1], n = FOCUS[i + 1], cp = pv && pv[1] >= a - .01, cn = n && n[0] <= b + .01;
+    if (u < a - 1.2 || u > b + (cn ? .4 : 0)) continue;
+    FC.k = Math.min(cp ? 1 : ss(a - 1.2, a + .3, u), cn ? 1 : 1 - ss(b - 1.0, b, u));
+    for (let j = 0; j < 3; j++) FC.p[j] = p[j]; FC.r = r;
+    const wp = cp ? 1 - ss(a - 1.2, a + .4, u) : 0, wn = cn ? ss(b - 1.2, b + .4, u) : 0;
+    if (wp > 0) { for (let j = 0; j < 3; j++) FC.p[j] += (pv[2][j] - p[j]) * wp; FC.r += (pv[3] - r) * wp; }
+    if (wn > 0) { for (let j = 0; j < 3; j++) FC.p[j] += (n[2][j] - p[j]) * wn; FC.r += (n[3] - r) * wn; }
+    break;
   }
   return FC;
 }
@@ -1467,11 +1575,11 @@ function draw(u, ctx) {
   if (XW.zo > 90) return;
   if (XB.open) ctx.XS.gain = Math.min(ss(-.1, 1.2, u), 1 - ss(LEN - 2.2, LEN - .05, u));
   const st = state(u); focusAt(u); GDIM = 1 - .62 * eoAt(u);
-  const ce = K.C.eye, fd = FC.k > .3 ? 1.3 * Math.hypot(ce[0] - FC.p[0], ce[1] - FC.p[1], ce[2] - FC.p[2]) : 0;
+  const ce = K.C.eye, fd = FC.k > .02 ? 1.3 * Math.hypot(ce[0] - FC.p[0], ce[1] - FC.p[1], ce[2] - FC.p[2]) / FC.k : 0;   // (eased with k: no step)
   O.foc = OB.foc = OF.foc = OC.foc = fd;
   OB.S = null; OB.a = .5 * GDIM; OB.keep = .62 - .3 * FC.k; X_(CL.shell, Ws, OB); OB.keep = 1;
   O.S = null; O.lime = 0; O.a = 1.1 * GDIM; O.keep = (1 - .45 * FC.k) * (1 - .5 * (1 - GDIM)); X_(CL.gtp, Ws, O); X_(CL.fwd, Ws, O); O.keep = 1;
-  O.lime = .7 * st.load; O.a = 1.1 + .5 * st.load; X_(CL.rgc, Ws, O); O.lime = 0; O.a = 1.1;
+  { const lv = .3 * ss(T_ON, T_ON + 1, u) + .4 * ss(T_PULSE, T_PULSE + 3, u); O.lime = lv; O.a = 1.1 + .7 * lv; X_(CL.rgc, Ws, O); O.lime = 0; O.a = 1.1; }
   drawGT(u, st, Ws, X_);
   drawRX(u, st, Ws, X_);
   drawTG(u, st, Ws, X_);
@@ -1550,13 +1658,13 @@ function drawRX(u, st, Ws, X_) {
   if (!(XW.zo < 24.5)) return;
   const Wm = X.mul(Ws, MIRX);
   OF.S = null; OF.lime = 0; fset(OF, FC_RV, AF, 1); X_(CL.rv, Ws, OF);
-  OC.S = null; fset(OC, FC_RV, AF * .8, 1); OC.tk = .6 * st.heat; OC.lime = .12 * st.nf * (1 - st.heat); OC.a *= 1 + .25 * st.heat; X_(CL.core, Ws, OC);
+  OC.S = null; fset(OC, FC_RV, AF * (.38 + .42 * st.nf), 1); OC.tk = .6 * st.heat; OC.lime = .12 * st.nf * (1 - st.heat); OC.a *= 1 + .25 * st.heat; X_(CL.core, Ws, OC);
   for (let b = 0; b < 3; b++) { const L = RODL[b]; L.T[1] = st.rod[b]; OF.S = L; fset(OF, FC_RV, AF, 1); OF.lime = .3 + .45 * st.rodM[b]; X_(CL.rod[b], X.mul(Ws, L), OF); }
   OF.lime = 0;
   for (let m = 0; m < 2; m++) {
     const W = m ? Wm : Ws, S = m ? MIRX : null;
     O.S = S; fset(O, m ? FC_SGm : FC_SG, 1.25, 1); X_(CL.loop, W, O);
-    OF.S = S; fset(OF, m ? FC_SGm : FC_SG, AF, 1); X_(CL.sg, W, OF); OF.a *= .55 - .25 * ss(104.0, 106.0, u) * (1 - ss(124.0, 126.0, u)); OF.keep *= .7; X_(CL.ut, W, OF); fset(OF, m ? FC_SGm : FC_SG, AF, 1);
+    OF.S = S; fset(OF, m ? FC_SGm : FC_SG, AF, 1); X_(CL.sg, W, OF); OF.a *= .55 - .25 * ss(U_SGV[0], U_SGV[1], u) * (1 - ss(U_SGV[2], U_SGV[3], u)); OF.keep *= .7; X_(CL.ut, W, OF); fset(OF, m ? FC_SGm : FC_SG, AF, 1);
     fset(OF, m ? FC_RCPm : FC_RCP, AF, 1); X_(CL.rcp, W, OF);
     const Lp = X.make(R.y(st.rcpA), [RCPX, RCPY, RCPZ]), Lq = m ? X.mul(MIRX, Lp) : Lp;
     OF.S = Lq; rotorOpts(OF, m ? FC_RCPm : FC_RCP, AF, st.rcpV); X_(CL.rcpR, X.mul(Ws, Lq), OF);
@@ -1572,12 +1680,17 @@ function drawTG(u, st, Ws, X_) {
     const Lw = X.mul(Ws, L);
     OF.S = L; fset(OF, c, AF, 1); X_(CL.tg, Lw, OF);
     fset(OF, c, AF * .5, .42); X_(CL.tgU, Lw, OF);                      // the upper halves, ghosted
-    fset(OF, c, AF * .9, .9); X_(CL.cnd, Lw, OF); fset(OF, c, AF, 1);
+    fset(OF, c, AF * 1.25, 1); X_(CL.cnd, Lw, OF); fset(OF, c, AF, 1);
     const La = X.mul(L, X.make(R.z(st.tgA * (m ? -1 : 1)), [0, 0, 0]));
     OF.S = La; rotorOpts(OF, c, AF, st.tgV); OF.lime = .08 * st.tg; X_(CL.tgR, X.mul(Ws, La), OF);
     OF.lime = .12 * st.tg; X_(CL.genR, X.mul(Ws, La), OF); OF.lime = 0;
     const Lf = m ? MIRX : ID; OF.S = Lf; fset(OF, m ? FC_FPm : FC_FP, AF, 1); X_(CL.fp, X.mul(Ws, Lf), OF);
     const Ls = m ? RSLm : RSL; O.S = Ls; fset(O, m ? FC_RSm : FC_RS, 1.3, 1); X_(CL.rsw, X.mul(Ws, Ls), O);
+    // the breaker trucks: the feeders rack in (lime while they move and as their fingers mate), lit once closed
+    for (let j = 0; j < 3; j++) { const c = RCUB[j], off = rackOff(j, u, m);
+      const Lb = X.mul(Ls, X.make(R.I(), [c.x, c.y, off])), mv = j && u > T_RACK[0] - .2 && u < fdrT(j, m) + .6 ? 1 : 0;
+      OF.S = Lb; fset(OF, m ? FC_RSm : FC_RS, AF, 1); OF.lime = (j ? (u > fdrT(j, m) ? .3 : .45 * mv) : u > T_ON ? .25 : 0); X_(CL.rbk, X.mul(Ws, Lb), OF); }
+    OF.lime = 0;
   }
   O.S = null; OF.S = null; O.keep = OF.keep = 1; OF.a = AF;
 }
@@ -1587,11 +1700,11 @@ function drawRoom(u, ctx, Ws) {
   const X_ = EPROF ? profX : P_.drawX, C_ = ctx.CL;
   if (!ALT_L) { ALT_L = P_.ALT.map((c, k) => X.make(P_.ALT_FLIP[k] ? R.y(PI) : R.I(), c)); MOD_L = P_.MOD.map(m => X.make(m.s > 0 ? R.I() : R.y(PI), m.p)); }
   const o = OR, kr = .6; o.S = null; o.a = .5; o.keep = .5; X_(C_.floor, Ws, o); o.a = .85; o.keep = kr;
-  X_(C_.racks, Ws, o); X_(C_.cab, Ws, o); X_(C_.over, Ws, o); X_(C_.cool, Ws, o); o.lime = .3 * ss(T_PULSE + 5, T_PULSE + 8, u); X_(C_.bus, Ws, o); o.lime = 0;
+  X_(C_.racks, Ws, o); X_(C_.cab, Ws, o); X_(C_.over, Ws, o); X_(C_.cool, Ws, o); o.lime = .3 * ss(T_PULSE + 4, T_PULSE + 6.5, u); X_(C_.bus, Ws, o); o.lime = 0;
   for (let k = 0; k < 4; k++) { const L = ALT_L[k]; o.S = L; const Lw = X.mul(Ws, L); X_(C_.body, Lw, o); X_(C_.bell, Lw, o); X_(C_.exc, Lw, o); X_(C_.fan, Lw, o); X_(C_.rotor, Lw, o); }
   o.keep = kr * .55; for (let k = 0; k < MOD_L.length; k++) { const L = MOD_L[k]; o.S = L; X_(C_.module, X.mul(Ws, L), o); }
   // the coolant pumps (stopped: the pulse reaches the starboard one's drive) and the valve header's handwheels
-  o.keep = .8; o.a = 1.0 + .5 * ss(T_PULSE + 2, T_PULSE + 8, u);
+  o.keep = .8; o.a = 1.0 + .5 * ss(T_PULSE + 2, T_PULSE + 6.5, u);
   if (C_.pump && P_.PUMPS) P_.PUMPS.forEach((p, i) => { const L = X.make(R.I(), p), Lw = X.mul(Ws, L); o.S = L; X_(C_.pump, Lw, o); if (C_.pstat) X_(C_.pstat, Lw, o);
     if (C_.pcoil) for (let k = 0; k < (P_.PST || 0); k++) { const Lk = X.mul(L, X.make(R.z(k / P_.PST * TAU), [0, 0, 0])); o.S = Lk; X_(C_.pcoil, X.mul(Ws, Lk), o); }
     if (C_.prot) { const Lr = X.mul(L, X.make(R.z(i), [0, 0, 0])); o.S = Lr; X_(C_.prot, X.mul(Ws, Lr), o); } });
@@ -1656,7 +1769,7 @@ function fxGT(u, st, Ws) {
   plumes(u, Ws, fc);
   for (let mi = 0; mi < 2; mi++) meshFX(MER[mi], mi, st, Ws, u);
   SWB.forEach((sw, k) => swbFX(sw, k, u, st, Ws));
-  PL.gen.forEach((pl, k) => pulses(pl, u, GT_T[k][3] - .05, 60, 2.4, .35, .9, Ws, LIME, 1));
+  PL.gen.forEach((pl, k) => pulses(pl, u, GT_T[k][3] - .05, LEN + 1, 2.4, .35, .6, Ws, LIME, 1));
   GTM.forEach((g, k) => { const [ts, tl] = GM_T[g.id]; pulses(PL.air[k], u, ts - .45, tl + (XF_T[g.id] > 1 ? 1.5 : .3), 3.0, .25, .8, Ws, WH, 1); });
   SHAFT.forEach((sh, i) => { const r = st.sh[i] / SH_RPM; if (r < .02) return;
     for (const c of sh.cpl) { const p = V.mad(sh.a, sh.d, c); if (!isOpen(p[2])) continue;
@@ -1682,23 +1795,50 @@ function combSection(L, u, eo, fc) {
       apI(L, cx + Math.cos(b) * rr, cy + Math.sin(b) * rr * .9, z - .04 - .25 * h1 * h1, Q1); odot(Q1[0], Q1[1], Q1[2], rr < .035 ? 2 : 1, rr < .035 ? HOT : LIME, eo * lit * (.55 + .45 * h2)); }
     apI(L, cx, cy, z - .05, Q1); P_.oglow(Q1[0], Q1[1], Q1[2], 12 + 26 * fl, LIME, eo * (.35 + .5 * fl) * lit); P_.oglow(Q1[0], Q1[1], Q1[2], 6, HOT, eo * .6 * lit);
   }
+  // the flame front: two bright heads running round both ways from the igniters' cup, a lime arc trailing each
+  const fr = (u - tl) / xf;
+  if (fr > 0 && fr < 1.1) for (const sg of [-1, 1]) {
+    const af = 16 / 30 * TAU + sg * E.sat(fr) * PI, fa = 1 - E.sat((fr - 1) * 10);
+    for (let j = 0; j < 30; j++) { const a = af - sg * j * .022, w = 1 - j / 30; apI(L, Math.cos(a) * .555, Math.sin(a) * .555, z - .04, Q1); P_.odot(Q1[0], Q1[1], Q1[2], j < 5 ? 3 : 2, j < 8 ? HOT : LIME, eo * w * fa); }
+    apI(L, Math.cos(af) * .555, Math.sin(af) * .555, z - .04, Q1); P_.oglow(Q1[0], Q1[1], Q1[2], 46, LIME, .85 * eo * fa); P_.oglow(Q1[0], Q1[1], Q1[2], 16, HOT, .95 * eo * fa);
+  }
   if (u > tl - .9 && u < tl + .5) for (const a of [190 * DEG, 235 * DEG]) { apI(L, Math.cos(a) * .7, Math.sin(a) * .7, 3.95, Q1); apI(L, Math.cos(a) * .6, Math.sin(a) * .6, 4.0, Q2); K.arcW(Q1, Q2, 7 + a, u * 3, eo * .9, .8); }
 }
 
 /* ================= the scan plane: a lime plane runs down a machine, naming each row as it passes =================
    rows: { d (the plane's coordinate there), zs (the row's axial stations), h, t (hub, tip radius), n blades, ph (their
    phase), rot (which rotor turns it), lab, val, num (its number on the ruler), w (slots), gap }; slots are equal time */
-function mkScan(rows, u0, u1, d0, d1, rc, numA, zOf) { let sl = 0; for (const r of rows) { r.slot = sl + (r.w || 1) / 2; sl += (r.w || 1) + (r.gap || 0); } return { rows, slots: sl, u0, u1, d0, d1, rc, numA, zOf }; }
-const SC_GT = (() => { const R = [{ d: 6.3, zs: [6.3], h: .26, t: .545, n: 34, ph: .02, rot: null, lab: 'Inlet guide vanes · variable', val: '34 vanes', num: 'IGV' }];
-  COMP.forEach((c, i) => R.push({ d: c.z, zs: [c.z], h: c.h, t: c.t, n: c.n, ph: i * .13, rot: 'g', lab: `Compressor stage ${i + 1}${i < 6 ? ' · variable stators' : ''}`, val: `${c.n} blades`, num: String(i + 1) }));
-  R.push({ d: 3.95, zs: [3.95], h: .45, t: .66, n: 0, rot: null, lab: 'Combustor · annular', val: '30 fuel nozzles', num: 'C', w: 2 });
-  HPT.forEach((h, i) => R.push({ d: h.z, zs: [h.z], h: h.h, t: h.t, n: h.n, ph: i * .2, rot: 'g', lab: `HP turbine stage ${i + 1} · drives the compressor`, val: `${h.n} blades`, num: 'H' + (i + 1), gap: i ? .6 : 0 }));
-  PTR.forEach((q, j) => R.push({ d: q.z, zs: [q.z], h: q.h, t: q.t, n: q.n, ph: j * .17, rot: 'p', lab: `Power turbine stage ${j + 1}`, val: `${q.n} blades · brake on`, num: 'P' + (j + 1) }));
-  return mkScan(R, U_SCAN[0], U_SCAN[1], 6.6, 1.4, .82, 58 * DEG, d => [d]); })();
-const SC_HP = mkScan(HPS.map((h, k) => ({ d: h.z, zs: [h.z], h: h.h, t: h.t, n: h.n, ph: k * .17, rot: 't', lab: `HP stage ${k + 1} · impulse wheel, shrouded`, val: `${h.n} blades`, num: String(k + 1) })),
-  U_HPS[0], U_HPS[1], .05, 2.0, .8, 115 * DEG, d => [d]);
-const SC_LP = mkScan(LPS.map((q, k) => ({ d: q.d, zs: [LZC - q.d, LZC + q.d], h: q.h, t: q.t, n: q.n, ph: k * .21, rot: 't', lab: k === 4 ? 'LP last stage · both flows · lacing wire' : `LP stage ${k + 1} · both flows`, val: `${q.n} blades · ${Math.round((q.t - q.h) * 100)} cm`, num: 'L' + (k + 1) })),
-  U_LPS[0], U_LPS[1], .05, 1.5, 1.34, 115 * DEG, d => [LZC - d, LZC + d]);
+/* (round 3: rows gathered in groups, each named by one tag for an equal share of the pass, 1.5 s or more; the rows
+   of a group share its time; the ruler still numbers every row) */
+function mkScan(rows, u0, u1, d0, d1, rc, numA, zOf, groups) {
+  if (groups) { const n = groups.map((_, g) => rows.filter(r => r.g === g).length); for (const r of rows) r.w = 1 / n[r.g]; }
+  let sl = 0; for (const r of rows) { r.slot = sl + (r.w || 1) / 2; sl += (r.w || 1) + (r.gap || 0); }
+  const S = { rows, slots: sl, u0, u1, d0, d1, rc, numA, zOf, groups: groups || null };
+  if (groups) groups.forEach((G_, g) => { const rs = rows.filter(r => r.g === g), a = rs[0], b = rs[rs.length - 1];
+    G_.t0 = u0 + (a.slot - a.w / 2) / sl * (u1 - u0); G_.t1 = u0 + (b.slot + b.w / 2) / sl * (u1 - u0); G_.tip = Math.max(...rs.map(r => r.t)); });
+  return S;
+}
+const rng_ = (a, b) => a === b ? `${a}` : `${a}–${b}`;
+const SC_GT = (() => { const R = [{ d: 6.3, zs: [6.3], h: .26, t: .545, n: 34, ph: .02, rot: null, num: 'IGV', g: 0 }];
+  COMP.forEach((c, i) => R.push({ d: c.z, zs: [c.z], h: c.h, t: c.t, n: c.n, ph: i * .13, rot: 'g', num: String(i + 1), g: i < 6 ? 1 : 2 }));
+  R.push({ d: 3.95, zs: [3.95], h: .45, t: .66, n: 0, rot: null, num: 'C', g: 3 });
+  HPT.forEach((h, i) => R.push({ d: h.z, zs: [h.z], h: h.h, t: h.t, n: h.n, ph: i * .2, rot: 'g', num: 'H' + (i + 1), g: 4 }));
+  PTR.forEach((q, j) => R.push({ d: q.z, zs: [q.z], h: q.h, t: q.t, n: q.n, ph: j * .17, rot: 'p', num: 'P' + (j + 1), g: 5 }));
+  const GR_ = [{ id: 'IGV', lab: 'Inlet guide vanes · variable', val: '34 vanes' },
+    { id: 'C1–6', lab: 'Compressor stages 1–6 · variable stators', val: `${rng_(COMP[0].n, COMP[5].n)} blades` },
+    { id: 'C7–16', lab: 'Compressor stages 7–16', val: `${rng_(COMP[6].n, COMP[15].n)} blades · 18 : 1` },
+    { id: 'CMB', lab: 'Combustor · annular', val: '30 fuel nozzles' },
+    { id: 'HPT', lab: 'HP turbine · 2 stages · drives the compressor', val: `${HPT[0].n} + ${HPT[1].n} blades` },
+    { id: 'PT', lab: 'Power turbine · 6 stages · to the gear', val: `${rng_(PTR[0].n, PTR[5].n)} blades · brake on` }];
+  return mkScan(R, U_SCAN[0], U_SCAN[1], 6.6, 1.4, .82, 58 * DEG, d => [d], GR_); })();
+const SC_HP = mkScan(HPS.map((h, k) => ({ d: h.z, zs: [h.z], h: h.h, t: h.t, n: h.n, ph: k * .17, rot: 't', num: String(k + 1), g: k ? (k < 6 ? 1 : 2) : 0 })),
+  U_HPS[0], U_HPS[1], .05, 2.0, .8, 115 * DEG, d => [d],
+  [{ id: 'HP1', lab: 'HP stage 1 · steam in at 6.0 MPa', val: `${HPS[0].n} blades` }, { id: 'HP2–6', lab: 'HP stages 2–6 · impulse wheels, shrouded', val: `${rng_(HPS[1].n, HPS[5].n)} blades` },
+    { id: 'HP7', lab: 'HP stage 7 · out to the crossover', val: `${HPS[6].n} blades` }]);
+const SC_LP = mkScan(LPS.map((q, k) => ({ d: q.d, zs: [LZC - q.d, LZC + q.d], h: q.h, t: q.t, n: q.n, ph: k * .21, rot: 't', num: 'L' + (k + 1), g: k < 3 ? 0 : k - 2 })),
+  U_LPS[0], U_LPS[1], .05, 1.5, 1.34, 115 * DEG, d => [LZC - d, LZC + d],
+  [{ id: 'LP1–3', lab: 'LP stages 1–3 · both flows · shrouded', val: `${rng_(LPS[0].n, LPS[2].n)} blades` }, { id: 'LP4', lab: 'LP stage 4 · both flows', val: `${LPS[3].n} blades · ${Math.round((LPS[3].t - LPS[3].h) * 100)} cm` },
+    { id: 'LP5', lab: 'LP last stage · lacing wire', val: `${LPS[4].n} blades · ${Math.round((LPS[4].t - LPS[4].h) * 100)} cm` }]);
 const SCQ = { d: 0, i: -1 };
 function scanAt(S, u) {
   const s = (u - S.u0) / (S.u1 - S.u0) * S.slots, R_ = S.rows, n = R_.length;
@@ -1817,14 +1957,15 @@ function dataPulses(pl, u, t0, Ws) {
   }
 }
 /* a stream of dots along a poly at clock c (m travelled), mirrored in x by mir, through the transform L; lanes
-   jittered round the centre line by rj */
-function flow(pl, c, gap, col, A, mir, L, rj, sz, s0, s1) {
+   jittered round the centre line by rj; zo: the ship z of L's origin (the window is tested in the ship frame; round 3:
+   it was tested on the world point, which hid every flow) */
+function flow(pl, c, gap, col, A, mir, L, rj, sz, s0, s1, zo) {
   if (A < .01) return;
   const k0 = Math.ceil(((s0 || 0) - c) / gap), k1 = Math.floor(((s1 === undefined ? pl.L : s1) - c) / gap);
   for (let k = k0; k <= k1; k++) {
     const s = c + k * gap; P_.polyAt(pl, s, Q2);
     const j1 = (K.hh(k, 3.3) - .5) * rj, j2 = (K.hh(k, 4.7) - .5) * rj, j3 = (K.hh(k, 5.9) - .5) * rj;
-    apI(L, (Q2[0] + j1) * mir, Q2[1] + j2, Q2[2] + j3, Q1); if (!isOpen(Q1[2])) continue;
+    if (!isOpen(Q2[2] + (zo || 0))) continue; apI(L, (Q2[0] + j1) * mir, Q2[1] + j2, Q2[2] + j3, Q1);
     const e = Math.min(1, (s - (s0 || 0)) / .3, ((s1 === undefined ? pl.L : s1) - s) / .3);
     P_.odot(Q1[0], Q1[1], Q1[2], sz, col, A * (.55 + .45 * K.hh(k, 8.1)) * E.sat(e));
   }
@@ -1845,6 +1986,7 @@ function fxRX(u, st, Ws) {
       apI(Ws, x + dx * d, y + dy * d, z + dz * d, Q1); odot(Q1[0], Q1[1], Q1[2], f > .4 ? 2 : 1, LIME, (.55 + .45 * st.nf) * f);
       if (f > .8 && (i & 7) === 0) oglow(Q1[0], Q1[1], Q1[2], 9, LIME, .3 * f * st.nf);
     }
+    apI(Ws, cx, (CORE0 + CORE1) / 2, cz, Q1); oglow(Q1[0], Q1[1], Q1[2], 70 + 60 * st.nf, LIME, .04 + .3 * st.nf * st.nf);   // (round 3: the flux climbing, seen)
   }
   // heat: the core glows as the power comes up
   if (st.heat > .01 && isOpen(cz)) {
@@ -1944,7 +2086,7 @@ function fxTG(u, st, Ws) {
       const nh = full ? 32 : 8, nl = full ? 40 : 10, ns = full ? 20 : 10;
       for (let l = 0; l < nh; l++) { const f = .15 + .7 * K.hh(l, 81), a0 = K.hh(l, 82) * TAU;
         streamline(L, (q, o) => hpSteam(f, a0, q, o), ns, ct / 2.2 + K.hh(l, 83), sa, full); }
-      flow(PLP.cross, ct, .06, WH, .8 * sa, 1, L, .3, 2);
+      flow(PLP.cross, ct, .06, WH, .8 * sa, 1, L, .3, 2, 0, undefined, TGO[2]);
       for (let l = 0; l < nl; l++) { const sd = l & 1 ? 1 : -1, f = .12 + .76 * K.hh(l, 84), a0 = K.hh(l, 85) * TAU;
         streamline(L, (q, o) => lpSteam(f, a0, sd, q, o), ns, ct / 1.9 + K.hh(l, 86), sa, full); }
       // the condenser: the exhaust down the neck and the lanes into the bundles, condensing on the tubes; the
@@ -1958,16 +2100,27 @@ function fxTG(u, st, Ws) {
         if (i & 1) { apI(L, x, y, z, Q1); oglow(Q1[0], Q1[1], Q1[2], 5, LIME, .3 * sa); }
         if (inW && ph > .9 && full && i % 3 === 0) { const g = (ph - .9) / .1; apI(L, x, -3.85, z, Q1); K.ringW(Q1, U_, W_, .02 + .1 * g, 14, 1, LIME, sa * .6 * (1 - g), i); } }
       for (let i = 0; i < (full ? 200 : 40); i++) { const x = (K.hh(i, 95) - .5) * 1.66, z = 3.12 + K.hh(i, 96) * 1.76; apI(L, x, -3.85 + .006 * Math.sin(fc * 3 + i), z, Q1); odot(Q1[0], Q1[1], Q1[2], 1, LIME, .4 * sa); }
+      // (round 3) the condensate curtain: sheets of drops falling off the bundles' undersides into the hotwell
+      if (full) for (const sx of [-1, 1]) for (let zi = 0; zi < 24; zi++) for (let li = 0; li < 6; li++) {
+        const i = (sx > 0 ? 1000 : 0) + zi * 6 + li, x = sx * (.18 + li * .14 + (K.hh(i, 131) - .5) * .05), z = CS0 + .1 + (zi + K.hh(i, 132)) / 24 * (CS1 - CS0 - .2);
+        const land = Math.abs(x) < .83 && z > 3.12 && z < 4.88 ? -3.85 : -3.5, y0 = -3.33, ph = frac(cf * (.9 + .4 * K.hh(i, 133)) + K.hh(i, 134)), y = y0 - (y0 - land) * ph * ph, l = .02 + .07 * ph;
+        apI(L, x, y, z, Q1); apI(L, x, y + l, z, Q2); K.lineW(Q1[0], Q1[1], Q1[2], Q2[0], Q2[1], Q2[2], 1.2, 1, LIME, sa * .75 * Math.min(1, (1 - ph) * 8));
+      }
     }
     // seawater: through the tubes aft to forward; spreading from the inlet nozzle across the aft tube sheet, gathering
     // off the forward one to the outlet
     if (st.fp > .01) {
       const cs = CK.sea(u);
-      for (let t = 0; t < CTUBE.length; t += full ? 3 : 9) { const [x, y] = CTUBE[t], o = (t % 5) * .1;
-        for (let k = Math.ceil((CS0 - cs - o) / .5); ; k++) { const z = cs + o + k * .5; if (z > CS1) break; if (z < CS0) continue; apI(L, x, y, z, Q1); odot(Q1[0], Q1[1], Q1[2], 1, WH, .5 * st.fp); } }
-      for (let i = 0; i < (full ? 140 : 30); i++) { const tb = CTUBE[Math.floor(K.hh(i, 97) * CTUBE.length)], ph = frac(cs * .9 + K.hh(i, 98)), b = Math.sin(PI * ph);
-        apI(L, 1.3 + (tb[0] - 1.3) * ph, -3.0 + (tb[1] + 3.0) * ph, CS0 - .2 + .2 * ph - .14 * b, Q1); odot(Q1[0], Q1[1], Q1[2], 1, WH, .45 * st.fp);
-        apI(L, tb[0] + (1.2 - tb[0]) * ph, tb[1] + (-1.95 - tb[1]) * ph, CS1 + .3 * ph + .14 * b, Q1); odot(Q1[0], Q1[1], Q1[2], 1, WH, .45 * st.fp); }
+      // (round 3) streaks along the tubes (every third tube; every ninth on the far set), brighter while the lens is on it
+      const cA = st.fp * (.5 + .5 * ss(U_CND[0] - 1, U_CND[0] + .5, u) * (1 - ss(U_CND[1] - .5, U_CND[1] + .5, u)));
+      for (let t = 0; t < CTUBE.length; t += full ? 3 : 9) { const [x, y] = CTUBE[t], o = (t % 7) * .086;
+        for (let k = Math.ceil((CS0 - cs - o) / .6); ; k++) { const z = cs + o + k * .6; if (z - .2 > CS1) break; if (z < CS0) continue;
+          const z0 = Math.max(CS0, z - .2), z1 = Math.min(CS1, z); apI(L, x, y, z1, Q1); apI(L, x, y, z0, Q2); K.lineW(Q1[0], Q1[1], Q1[2], Q2[0], Q2[1], Q2[2], 1.2, 1, WH, .6 * cA, WH, .02); } }
+      // the waterboxes: the seawater fanning out from the inlet nozzle across the aft tube sheet, gathering off the
+      // forward one to the outlet
+      for (let i = 0; i < (full ? 260 : 40); i++) { const tb = CTUBE[Math.floor(K.hh(i, 97) * CTUBE.length)], ph = frac(cs * .9 + K.hh(i, 98)), b = Math.sin(PI * ph);
+        apI(L, 1.3 + (tb[0] - 1.3) * ph, -3.0 + (tb[1] + 3.0) * ph, CS0 - .2 + .2 * ph - .14 * b, Q1); odot(Q1[0], Q1[1], Q1[2], 2, WH, .7 * cA * Math.min(1, b * 3));
+        apI(L, tb[0] + (1.2 - tb[0]) * ph, tb[1] + (-1.95 - tb[1]) * ph, CS1 + .3 * ph + .14 * b, Q1); odot(Q1[0], Q1[1], Q1[2], 2, WH, .7 * cA * Math.min(1, b * 3)); }
       flow(PLP.seaIn, cs, .09, WH, .6 * st.fp, m ? -1 : 1, Ws, .25, 2); flow(PLP.seaOut, cs, .09, WH, .6 * st.fp, m ? -1 : 1, Ws, .25, 2);
     }
     if (full) { scanFX(SC_HP, u, L, () => th); scanFX(SC_LP, u, L, () => th); }
@@ -1975,25 +2128,33 @@ function fxTG(u, st, Ws) {
     if (st.tg > .02) { const rt = E.sat(st.tgV / 2.5); streaks(L, 0, 0, [HPS[0].z, HPS[3].z, HPS[6].z], [HPS[0].t, HPS[3].t, HPS[6].t], th, rt, m ? -1 : 1, 8);
       streaks(L, 0, 0, [LZC - LPS[4].d, LZC - LPS[2].d, LZC + LPS[2].d, LZC + LPS[4].d], [LPS[4].t, LPS[2].t, LPS[2].t, LPS[4].t], th, rt, m ? -1 : 1, 10); }
     // the generator: the rotor's field (lime field lines from the N pole out through the stator and round to the
-    // S pole), the current alternating in the stator windings as the poles sweep past, the poles lit
+    // S pole, a field lobe turning in the air gap), the current alternating in the stator's slots and end windings as
+    // the poles sweep past (lime one way, white the other), the poles lit (N lime, S white)
     const fld = st.tg;
     if (fld > .01 && isOpen(TGO[2] + 8)) {
-      const sc = ss(155.6, 156.8, u) * (1 - ss(170.6, 172.0, u));
-      if (sc > .01) genSection(L, th, fld * sc, st.load * sc, fc, full);
-      if (u > 155.2 && u < 157.2) { const rv = ss(155.2, 157.0, u), zs = GZ0 - .7 + (GZM - GZ0 + .7) * rv, k = Math.sin(PI * E.sat((u - 155.2) / 2.0));
+      const sc = ss(U_GEN[0], U_GEN[0] + 1.2, u) * (1 - ss(U_GEN[1] - .8, U_GEN[1] + .4, u)), gv = ss(U_GEN[0] - 1.0, U_GEN[0] + .6, u) * (1 - ss(U_GEN[1] - .6, U_GEN[1] + .6, u));
+      const cv = ss(T_ON - .2, T_ON + .3, u) * (.55 + .45 * st.load);       // (the pattern's brightness: the stator carries the load from T_ON)
+      if (sc > .01) genSection(L, th, fld * sc, cv * sc, fc, full);
+      if (u > U_GEN[0] - .4 && u < U_GEN[0] + 1.6) { const rv = ss(U_GEN[0] - .4, U_GEN[0] + 1.4, u), zs = GZ0 - .7 + (GZM - GZ0 + .7) * rv, k = Math.sin(PI * E.sat((u - U_GEN[0] + .4) / 2.0));
         circ3(L, 1.02, zs, 240, LIME, .95 * k, 2); circ3(L, .8, zs, 200, LIME, .5 * k, 1); circ3(L, .55, zs, 150, LIME, .7 * k, 1); }
-      for (const pa of [th, th + PI]) for (let z = GZ0 + .2; z < GZ1; z += .55) { apI(L, Math.cos(pa) * .51, Math.sin(pa) * .51, z, Q1); oglow(Q1[0], Q1[1], Q1[2], 14, LIME, .3 * fld); }
-      const ld = st.load;
-      if (ld > .01) for (const cl of COILS) {
-        const I = -Math.cos(th - cl.t1), aI = Math.abs(I), disp = .3 * Math.sin(th - cl.t1), pl = cl.pl;
-        for (let s = frac(disp / .06) * .06; s < pl.L; s += .06) { P_.polyAt(pl, s, Q2); const mz = Q2[2];
-          if (mz > GZ0 && mz < GZ1 && !inSec(Math.atan2(Q2[1], Q2[0]), TGC[0], TGC[1])) continue;
-          apI(L, Q2[0], Q2[1], Q2[2], Q1); odot(Q1[0], Q1[1], Q1[2], 2, LIME, ld * (.12 + .88 * aI)); }
-        if (aI > .85) { const c = Math.cos(cl.t1), sn = Math.sin(cl.t1); apI(L, c * .65, sn * .65, (GZ0 + GZ1) / 2, Q1); oglow(Q1[0], Q1[1], Q1[2], 26, LIME, .35 * ld * (aI - .85) / .15); }
+      for (const pa of [th, th + PI]) for (let z = GZ0 + .2; z < GZ1; z += .55) { apI(L, Math.cos(pa) * .51, Math.sin(pa) * .51, z, Q1); oglow(Q1[0], Q1[1], Q1[2], 14, pa === th ? LIME : WH, .3 * fld); }
+      if (full && gv > .01) {
+        // the field lobe: rings of dots in the air gap along the core, bright where the poles' flux crosses it
+        for (let z = GZ0 + .15; z < GZ1; z += .3) for (let k = 0; k < 90; k++) { const a = k / 90 * TAU, c = Math.cos(a - th), ac = Math.abs(c); if (ac < .35) continue;
+          apI(L, Math.cos(a) * .545, Math.sin(a) * .545, z, Q1); odot(Q1[0], Q1[1], Q1[2], ac > .9 ? 2 : 1, c > 0 ? LIME : WH, gv * fld * (ac - .35) / .65); }
+        // the slots' bars (in the kept sector) and the end windings (all round): the current crawling along them
+        const cw = gv * cv;
+        if (cw > .01) for (let k = 0; k < NSL; k++) {
+          const a = SLA(k), I = SLS[k] * -Math.cos(th - (PI / 2 - SLP[k] * TAU / 3)), aI = Math.abs(I), col = aI < .3 ? WH : I > 0 ? LIME : HOT, A = cw * (.2 + .8 * aI * aI);
+          const off = frac(u * .9 * Math.sign(I)) * .09;
+          if (inSec(a, TGC[0], TGC[1])) for (const r of SLR) { const c = Math.cos(a) * r, sn = Math.sin(a) * r; for (let z = GZ0 + off; z < GZ1; z += .09) { apI(L, c, sn, z, Q1); odot(Q1[0], Q1[1], Q1[2], aI > .8 ? 2 : 1, col, A); } }
+          for (const e of [ENDW[k], ENDW[NSL + k]]) { const pl = e.pl; for (let s = off; s < pl.L; s += .09) { P_.polyAt(pl, s, Q2); apI(L, Q2[0], Q2[1], Q2[2], Q1); odot(Q1[0], Q1[1], Q1[2], 1, col, A * .85); } }
+        }
       }
       // the output up the bus duct: three phases pulsing in turn, running forward to the switchboard
+      const ld = cv;
       if (ld > .01) for (let k = 0; k < 3; k++) { const pl = PL.bus[k], ph = Math.abs(Math.sin(th - k * TAU / 3)), off = (u * 2.2) % .3;
-        for (let s = off; s < pl.L; s += .3) { P_.polyAt(pl, s, Q2); apI(Ws, Q2[0] * (m ? -1 : 1), Q2[1], Q2[2], Q1); if (!isOpen(Q1[2])) continue; odot(Q1[0], Q1[1], Q1[2], 2, LIME, ld * (.25 + .75 * ph)); } }
+        for (let s = off; s < pl.L; s += .3) { P_.polyAt(pl, s, Q2); if (!isOpen(Q2[2])) continue; apI(Ws, Q2[0] * (m ? -1 : 1), Q2[1], Q2[2], Q1); odot(Q1[0], Q1[1], Q1[2], 2, LIME, ld * (.25 + .75 * ph)); } }
     }
     // the feed pump's coupling turning
     if (st.fp > .02) { apI(Ws, 1.0 * (m ? -1 : 1), -4.3, 31.12, Q1); K.ringW(Q1, X.dir(Ws, [1, 0, 0]), X.dir(Ws, [0, 1, 0]), .21, 24, 1, LIME, .7 * st.fp, st.fpA); }
@@ -2016,8 +2177,13 @@ function lpSteam(f, a0, sd, q, o) {
 const SA = [0, 0, 0], SB = [0, 0, 0];
 function streamline(L, fn, ns, c, sa, full) {
   for (let k = 0; k < ns; k++) { fn(k / ns, SA); fn((k + 1) / ns, SB); apI(L, SA[0], SA[1], SA[2], Q1); apI(L, SB[0], SB[1], SB[2], Q2); K.lineW(Q1[0], Q1[1], Q1[2], Q2[0], Q2[1], Q2[2], 2.6, 1, WH, .2 * sa); }
-  for (let j = 0; j < (full ? 4 : 2); j++) { const q0 = frac(c + j / (full ? 4 : 2));
-    for (let t = 0; t < 6; t++) { const q = q0 - t * .012; if (q < 0) break; fn(Math.pow(q, .85), SA); apI(L, SA[0], SA[1], SA[2], Q1); P_.odot(Q1[0], Q1[1], Q1[2], t ? 1 : 2, WH, sa * (1 - t / 6) * Math.min(1, q0 * 10)); if (!t && full) P_.oglow(Q1[0], Q1[1], Q1[2], 6, WH, .22 * sa); } }
+  // (round 3) the packets streak: each a bright line through the passages, its tail fading behind it
+  const np = full ? 5 : 2;
+  for (let j = 0; j < np; j++) { const q0 = frac(c + j / np), e = Math.min(1, q0 * 10) * Math.min(1, (1 - q0) * 12);
+    fn(Math.pow(q0, .85), SA); apI(L, SA[0], SA[1], SA[2], Q1);
+    for (let t = 1; t <= 5; t++) { const q = q0 - t * .014; if (q < 0) break; fn(Math.pow(q, .85), SB); apI(L, SB[0], SB[1], SB[2], Q2);
+      K.lineW(Q1[0], Q1[1], Q1[2], Q2[0], Q2[1], Q2[2], 1.1, t < 2 ? 2 : 1, WH, sa * e * (1.05 - t / 5.5)); Q1[0] = Q2[0]; Q1[1] = Q2[1]; Q1[2] = Q2[2]; }
+    if (full) { fn(Math.pow(q0, .85), SA); apI(L, SA[0], SA[1], SA[2], Q1); P_.oglow(Q1[0], Q1[1], Q1[2], 7, WH, .3 * sa * e); } }
 }
 /* the generator's cross-section at its middle (an X-ray slice): rotor, air gap and stator core, the poles lit, the
    field lines out of the N pole across the gap, round the core both ways and into the S pole (dashes crawling N to
@@ -2027,7 +2193,8 @@ function circ3(L, r, z, n, col, a, sz) { for (let k = 0; k < n; k++) { const t =
 function genSection(L, th, fld, ld, fc, full) {
   const odot = P_.odot, z = GZM;
   circ3(L, .5, z, 160, WH, .6, 1); circ3(L, .58, z, 180, WH, .5, 1); circ3(L, .9, z, 280, WH, .45, 1);
-  for (let k = 0; k < 24; k++) { const a = (k + .5) / 24 * TAU; for (let r = .59; r < .74; r += .015) { apI(L, Math.cos(a) * r, Math.sin(a) * r, z, Q1); odot(Q1[0], Q1[1], Q1[2], 1, WH, .4); } }
+  for (let k = 0; k < NSL; k++) { const a = SLA(k); for (const b of [a - SLW, a + SLW]) for (let r = .585; r < .75; r += .016) { apI(L, Math.cos(b) * r, Math.sin(b) * r, z, Q1); odot(Q1[0], Q1[1], Q1[2], 1, WH, .4); }
+    for (let j = -2; j <= 2; j++) { const b = a + j * SLW / 2; apI(L, Math.cos(b) * .75, Math.sin(b) * .75, z, Q1); odot(Q1[0], Q1[1], Q1[2], 1, WH, .4); } }
   for (let i = 0; i < (full ? 900 : 120); i++) { const r = .58 + .32 * Math.sqrt(K.hh(i, 91)), a = K.hh(i, 92) * TAU; apI(L, Math.cos(a) * r, Math.sin(a) * r, z, Q1); odot(Q1[0], Q1[1], Q1[2], 1, LIME, .32 * fld); }
   for (const pa of [th, th + PI]) {
     for (let k = -16; k <= 16; k++) { const a = pa + k * .3 / 16; apI(L, Math.cos(a) * .505, Math.sin(a) * .505, z, Q1); odot(Q1[0], Q1[1], Q1[2], 2, LIME, fld); }
@@ -2048,29 +2215,53 @@ function genSection(L, th, fld, ld, fc, full) {
     for (let r = rk; r > .51; r -= st, sd += st) { apI(L, Math.cos(a1) * r, Math.sin(a1) * r, z, Q1); odot(Q1[0], Q1[1], Q1[2], 2, LIME, fld * dash(sd / .14 - fc * 1.4)); }
     for (let f = 0; f < 1; f += .02) { const x = Math.cos(a1) * .49 * (1 - 2 * f), y = Math.sin(a1) * .49 * (1 - 2 * f); apI(L, x, y, z, Q1); odot(Q1[0], Q1[1], Q1[2], 1, LIME, .35 * fld * dash(f * 6 - fc * 1.4)); }
   }
-  if (ld > .01) for (const cl of COILS) { const I = -Math.cos(th - cl.t1) * ld;
-    for (const [a, sn] of [[cl.t1, 1], [cl.t1 + PI, -1]]) { const v = I * sn, c = v > 0 ? LIME : HOT, av = Math.abs(v); apI(L, Math.cos(a) * .645, Math.sin(a) * .645, z, Q1);
-      odot(Q1[0], Q1[1], Q1[2], 3, c, .25 + .75 * av); if (av > .7) P_.oglow(Q1[0], Q1[1], Q1[2], 20, c, .45 * (av - .7) / .3); } }
+  if (ld > .01) for (let k = 0; k < NSL; k++) { const a = SLA(k), v = SLS[k] * -Math.cos(th - (PI / 2 - SLP[k] * TAU / 3)) * ld, c = v > 0 ? LIME : HOT, av = Math.abs(v);
+    for (const r of SLR) { apI(L, Math.cos(a) * r, Math.sin(a) * r, z, Q1); odot(Q1[0], Q1[1], Q1[2], 3, c, .2 + .8 * av); }
+    if (av > .8) P_.oglow(Q1[0], Q1[1], Q1[2], 16, c, .4 * (av - .8) / .2); }
 }
 const dash = x => { const f = frac(x); return f < .55 ? .35 + .65 * Math.sin(f / .55 * PI) : .1; };
-/* the railgun switchboards: generator breaker in, meters (MW, A, kV, Hz), the feeder breakers closing */
+/* the railgun switchboards: the incomer in since T_ON (its lamp, the meters: MW, A, kV, Hz; the mimic lit); the
+   feeders rack in (their fingers lime as they reach and mate with the stabs), then close: an arc struck in each pole's
+   chute, drawn up into the splitter plates and quenched, the plates lit bottom to top; the main bus carries the load
+   (dashes crawling from the incomer to the feeders), the droppers and the feeders' cables lit once they carry it */
+const LW = (L, a, b, w, col, A) => { apI(L, a[0], a[1], a[2], Q1); apI(L, b[0], b[1], b[2], Q2); K.lineW(Q1[0], Q1[1], Q1[2], Q2[0], Q2[1], Q2[2], 1.2, w, col, A); };
+const RA = [0, 0, 0], RB = [0, 0, 0];
 function rswFX(u, st, Ws, m) {
   if (!isOpen(38.2)) return;
-  const L = X.mul(Ws, m ? RSLm : RSL), on = u > T_ON ? 1 : 0, ld = st.load;
-  const la = (-55 + 110 * on) * DEG;
-  apI(L, .5, .92, .05, Q1); apI(L, .5 + Math.sin(la) * .2, .92 + Math.cos(la) * .2, .05, Q2); K.lineW(Q1[0], Q1[1], Q1[2], Q2[0], Q2[1], Q2[2], 1, 2, on ? LIME : WH, .95);
+  const L = X.mul(Ws, m ? RSLm : RSL), on = u > T_ON ? 1 : 0, ld = st.load * on, odot = P_.odot, oglow = P_.oglow;
   dials(L, [ld * 25 / 30, ld * 3470 / 5000, on * 4.16 / 6, on * .5]);
   apI(L, 1.5, 1.12, .03, Q1); apI(L, 1.5, 1.2, .03, Q2); K.lineW(Q1[0], Q1[1], Q1[2], Q2[0], Q2[1], Q2[2], .8, 1, on ? LIME : WH, .85);
-  for (let j = 0; j < 4; j++) { apI(L, 1.25 + j * .166, .86, .02, Q1); P_.odot(Q1[0], Q1[1], Q1[2], 2, j === 0 && on ? LIME : WH, j === 0 ? (on ? 1 : .2) : .5); }
-  for (let r = 0; r < 2; r++) for (let cc = 0; cc < 3; cc++) {
-    const t = (r ? T_FDR : T_ON) + cc * .08 + m * .2, c = u > t, bx = 2 + .12 + cc * .27 + .11, by = .55 + r * .62 + .21;
-    apI(L, bx, by, .035, Q1); apI(L, bx, by + (c ? .07 : -.07), .045, Q2); K.lineW(Q1[0], Q1[1], Q1[2], Q2[0], Q2[1], Q2[2], 1, 1, c ? LIME : WH, c ? .95 : .5);
-    const f = lockU(u, t); if (f > .05) { P_.oglow(Q2[0], Q2[1], Q2[2], 18, LIME, .6 * f); if (r) { apI(L, bx - .08, by + .25, .05, Q3); K.arcW(Q2, Q3, 41 + cc + m * 3, u, f * 1.4, .6); } }
+  const cl = j => j ? u > fdrT(j, m) : on > 0;
+  for (let j = 0; j < 4; j++) { const lit = j < 3 ? cl(j) : on > 0; apI(L, 1.25 + j * .166, .86, .02, Q1); odot(Q1[0], Q1[1], Q1[2], 2, lit ? LIME : WH, lit ? 1 : .25); if (lit) oglow(Q1[0], Q1[1], Q1[2], 8, LIME, .35); }
+  // the mimic: the bus across, the incomer's drop and the two feeders' drops
+  if (on) { LW(L, [1.12, 2.15, .01], [1.88, 2.15, .01], 1, LIME, .8); LW(L, [1.2, 2.15, .01], [1.2, 2.06, .01], 1, LIME, .8);
+    for (const j of [1, 2]) LW(L, [1.6 + .14 * j, 2.15, .01], [1.6 + .14 * j, 2.06, .01], 1, cl(j) ? LIME : WH, cl(j) ? .8 : .35); }
+  for (const j of [1, 2]) {
+    const c = RCUB[j], off = rackOff(j, u, m), tc = fdrT(j, m), mate = 1 - E.sat(off / .05);
+    // the fingers reaching the stabs
+    if (u > T_RACK[0] - .2 && u < tc + 1.5) for (let p = 0; p < 3; p++) for (const y of RSY) {
+      apI(L, c.x + rPole(p), c.y + y, -.64 + off, Q1); odot(Q1[0], Q1[1], Q1[2], 2, LIME, .45 + .55 * mate);
+      if (mate > .3) oglow(Q1[0], Q1[1], Q1[2], 9, LIME, .35 * mate * (1 - E.sat((u - tc - .5) / 1))); }
+    // closing: the arcs in the chutes, the plates lit as the arc is drawn up and quenched
+    const f = lockU(u, tc, 1.1);
+    if (f > .02) for (let p = 0; p < 3; p++) {
+      const x = c.x + rPole(p);
+      RA[0] = x; RA[1] = c.y + .6; RA[2] = -.36; RB[0] = x; RB[1] = c.y + .66 + .2 * Math.min(1, (u - tc) * 6); RB[2] = -.36;
+      apI(L, RA[0], RA[1], RA[2], Q3); apI(L, RB[0], RB[1], RB[2], Q4); if (f > .25) K.arcW(Q3, Q4, 60 + p + j * 3 + m * 7, u, (f - .2) * 2.2, .75);
+      oglow(Q4[0], Q4[1], Q4[2], 26, LIME, .65 * f); oglow(Q3[0], Q3[1], Q3[2], 10, HOT, .7 * f);
+      for (let k = 0; k < 8; k++) { const g = E.sat(1 - Math.abs((1 - f) * 9 - k) / 3) * f, y = c.y + .66 + k * .025; if (g > .02) LW(L, [x - .07, y, -.47], [x + .07, y, -.47], 1, LIME, g); }
+    }
+    // closed: the dropper and the feeder's cable carry the current
+    if (u > tc) { const A = .55 * E.sat((u - tc) / .4) * (.5 + .5 * ld);
+      for (let p = 0; p < 3; p++) { const x = c.x + rPole(p); LW(L, [x, RBY - .05, RBUS[p]], [x, c.y + RSY[0], RBUS[p]], 1, LIME, A); LW(L, [x, c.y + RSY[1], -.93], [x, RSW_H, -.93], 1, LIME, A); } }
   }
+  // the bus: the bars live once the incomer is in; the load crawling along them from the incomer to the feeders
+  if (on) for (let p = 0; p < 3; p++) { const zb = RBUS[p], A = .3 + .5 * ld, sp = .12, o0 = (u * (.4 + 1.2 * ld) + p * .04) % sp;
+    for (let x = .5 + o0; x < 2.55; x += sp) { apI(L, x, RBY + .052, zb, Q1); odot(Q1[0], Q1[1], Q1[2], 2, LIME, A); } }
 }
 /* the one pulse followed forward: released as the second feeders close, along the starboard feeder's middle cable
    (a tracer for the current's path, not its speed) */
-const PULSE_V = 1.9;
+const PULSE_V = 2.4;
 const pulseS = u => Math.max(0, (u - T_PULSE) * PULSE_V);
 /* the pulse: a bright head with a comet's tail along the cable, the cable behind it lit (it carries current now); a
    flash at the drive it reaches, whose terminal stays lit */
@@ -2088,12 +2279,22 @@ function pulseFX(u, Ws) {
   if (f > .02) { oglow(Q1[0], Q1[1], Q1[2], 60, LIME, .6 * f); K.ringW(Q1, X.dir(Ws, [1, 0, 0]), X.dir(Ws, [0, 0, 1]), .08 + .35 * (1 - f), 40, 1, LIME, f, u); }
   if (u > ta) oglow(Q1[0], Q1[1], Q1[2], 16, LIME, .35 * A);
 }
+/* the power path traced in lime from the core to the switchboard as the generators go onto the railgun bus: a head runs
+   it end to end (16 m/s), the path stays lit, the power crawling along it */
+function powerTrace(u, Ws) {
+  const pl = PL.pow; if (!pl || u < T_ON - .3) return;
+  const A = ss(T_ON - .3, T_ON, u) * (1 - ss(LEN - 1.6, LEN - .1, u)), head = (u - T_ON + .3) * 16, odot = P_.odot;
+  if (A < .01) return;
+  for (let s = .05; s < Math.min(head, pl.L); s += .07) { P_.polyAt(pl, s, Q2); if (!isOpen(Q2[2])) continue; apI(Ws, Q2[0], Q2[1], Q2[2], Q1); odot(Q1[0], Q1[1], Q1[2], 1, LIME, .42 * A); }
+  const o0 = (u * 1.6) % .9;
+  for (let s = o0; s < Math.min(head, pl.L); s += .9) for (let j = 0; j < 4; j++) { const q = s - j * .045; if (q < 0) continue; P_.polyAt(pl, q, Q2); if (!isOpen(Q2[2])) continue; apI(Ws, Q2[0], Q2[1], Q2[2], Q1); odot(Q1[0], Q1[1], Q1[2], j ? 1 : 2, LIME, A * (.95 - .2 * j)); }
+  if (head < pl.L + 1) { P_.polyAt(pl, Math.min(head, pl.L), Q2); if (isOpen(Q2[2])) { apI(Ws, Q2[0], Q2[1], Q2[2], Q1); P_.oglow(Q1[0], Q1[1], Q1[2], 30, LIME, .7 * A); P_.oglow(Q1[0], Q1[1], Q1[2], 9, HOT, .8 * A); } }
+}
 /* the run: current along the railgun cables (the second feeders' current follows the pulse), data along the fibre */
 function fxRun(u, st, Ws) {
-  if (u > T_ON - .2) for (let m = 0; m < 2; m++) for (let k = 0; k < PL.rg.length; k++) {
-    if (k < 3) pulses(PL.rg[k], u, T_ON + .15 + m * .2 + k * .05, LEN, 6.5, .45, .8 - .4 * ss(T_FDR - 2, T_FDR, u), Ws, LIME, m ? -1 : 1);
-    else pulses(PL.rg[k], u, T_PULSE + .1 * (k - 3) + m * .3, LEN, PULSE_V / 1.5, .45, .8, Ws, LIME, m ? -1 : 1);
-  }
+  // (round 3: no current in the railgun cables before the feeders close; both feeders' current fronts run with the pulse)
+  if (u > T_PULSE - .2) for (let m = 0; m < 2; m++) for (let k = 0; k < PL.rg.length; k++) pulses(PL.rg[k], u, T_PULSE + .1 * (k % 3) + (k < 3 ? .15 : 0) + m * .3, LEN, PULSE_V / 1.5, .45, .8, Ws, LIME, m ? -1 : 1);
+  powerTrace(u, Ws);
   PL.data.forEach((pl, k) => dataPulses(pl, u, T_FDR - .6 + (k < 4 ? 0 : .5 + .2 * k), Ws));
   pulseFX(u, Ws);
 }
@@ -2105,55 +2306,51 @@ const T_TG = p => () => [TGO[0] + p[0], TGO[1] + p[1], TGO[2] + p[2]];
 const fmt = n => Math.round(n).toLocaleString('en-US').replace(/,/g, ' ');
 const rpmS = (S, u, k) => `${fmt(Math.round(spR(S, u) / Math.max(1e-6, RATE(u)) * 60 * (k || 1) / 10) * 10)} rpm`;
 const pct = u => { const p = Math.pow(10, lpow(u)) * 100; return p < .01 ? 'source range' : p < 1 ? `${p.toFixed(2)} %` : `${Math.round(p)} %`; };
+const rodPct = () => Math.round(100 * (ST.rod[0] + ST.rod[1] + ST.rod[2]) / ROD_F);
+/* the flame front (one of its two heads): the cup it has reached */
+const flameAt = u => { const tl = GM_T['1B'][1], a = (16 + 14.5 * E.sat((u - tl) / XF_T['1B'])) / 30 * TAU; return X.ap(LG['1B'] || X.make(R.I(), GTM1B().o), [Math.cos(a) * .6, Math.sin(a) * .6, 4.1]); };
 const TAGDEF = [
-  { id: 'GTG', lab: 'Gas turbine generator 1 · Allison 501-K34', val: u => u > GT_T[0][3] + .1 ? '2.5 MW' : `${fmt(1800 * fgen(0, u))} rpm`, at: T_GTG(0, [0, 1.25, 1.2]), t0: 9.4, t1: 12.6 },
-  { id: '1S', lab: 'Main switchboard 1S', val: u => u > GT_T[0][3] ? '450 V · 60 Hz' : '', at: () => [6.4, 1.75, -1.0], t0: 11.2, t1: 13.8 },
-  { id: 'ACB', lab: 'Generator breaker', val: u => u > GT_T[0][3] + .1 ? 'closed' : 'open', at: () => [6.36, .6, -3.5], t0: 11.0, t1: 13.4 },
-  { id: 'GTM', lab: 'LM2500 gas turbine · 1B', val: () => '19.6 MW', at: T_GTM('1B', [0, 1.5, 5.0]), t0: 28.6, t1: 31.2 },
-  { id: 'STR', lab: 'Air start motor', val: () => 'bleed air', at: T_GTM('1B', [-.1, -.9, 6.3]), t0: 29.0, t1: 31.0 },
-  { id: 'CMB', lab: 'Annular combustor · 30 fuel nozzles', val: u => u > GM_T['1B'][1] ? 'light-off' : 'fuel on', at: T_GTM('1B', [.35, .6, 4.12]), t0: 45.4, t1: 51.6 },
-  { id: 'IGN', lab: 'Igniters', val: () => '', at: T_GTM('1B', [-.71, -.13, 3.95]), t0: 46.2, t1: 48.6 },
-  { id: 'PT', lab: 'Power turbine · 6 stages', val: u => u < CLU[0] ? 'brake on' : `${fmt(shRpm(0, u) * RATIO)} rpm`, at: T_GTM('1B', [.55, .6, 2.2]), t0: 53.2, t1: 56.4 },
-  { id: 'MRG', lab: 'Main reduction gear · locked train', val: () => '21.4 : 1', at: () => [-2.0, -.3, -5.2], t0: 59.0, t1: 62.4 },
+  { id: 'GTM', lab: 'LM2500 gas turbine · 1B', val: () => '19.6 MW', at: T_GTM('1B', [0, 1.5, 5.0]), t0: 9.4, t1: 12.6 },
+  { id: 'STR', lab: 'Air start motor', val: () => 'bleed air', at: T_GTM('1B', [-.1, -.9, 6.3]), t0: 11.0, t1: 13.2 },
+  { id: 'CMB', lab: 'Annular combustor · 30 fuel nozzles', val: u => u > GM_T['1B'][1] ? 'light-off' : 'fuel on', at: T_GTM('1B', [.35, .6, 4.12]), t0: 25.2, t1: 31.2 },
+  { id: 'IGN', lab: 'Igniters', val: () => 'sparking', at: T_GTM('1B', [-.71, -.13, 3.95]), t0: 25.4, t1: 27.6 },
+  { id: 'FLF', lab: 'Flame front · both ways round', val: u => `${Math.round(Math.min(u - GM_T['1B'][1], XF_T['1B']) * 10)} ms`, at: flameAt, t0: GM_T['1B'][1] + .3, t1: GM_T['1B'][1] + XF_T['1B'] + 1.0 },
+  { id: 'PT', lab: 'Power turbine · 6 stages', val: u => u < CLU[0] ? 'brake on' : `${fmt(shRpm(0, u) * RATIO)} rpm`, at: T_GTM('1B', [.55, .6, 2.2]), t0: 31.6, t1: 34.4 },
+  { id: 'MRG', lab: 'Main reduction gear · locked train', val: () => '21.4 : 1', at: () => [-2.0, -.3, -5.2], t0: 34.6, t1: 37.6 },
   { id: 'INP', lab: 'Input pinion · from the power turbine', val: () => '35 teeth', at: () => [MER[0].bx + DXI + .2 * XPV, YA + .38, ZG(MER[0]) + 1.3 * XPV], t0: XPT[0], t1: U_XP[2] + .2 },
   { id: 'RG1', lab: 'First-reduction gear', val: () => '147 teeth', at: () => [MER[0].bx + DXI + XQ[0] * .9 * XPV, YA + DYG + XQ[1] * .9 * XPV + 1.02, ZG(MER[0]) + .2 * XPV], t0: XPT[1], t1: U_XP[2] + .4 },
   { id: 'RP2', lab: 'Second-reduction pinion', val: () => '43 teeth', at: () => [MER[0].bx + DXI + XQ[0] * .9 * XPV, YA - DYG - XQ[1] * .9 * XPV - .4, ZB(MER[0])], t0: XPT[2], t1: U_XP[2] + .6 },
   { id: 'BUL', lab: 'Bull gear · double helical', val: () => '219 teeth', at: () => [MER[0].bx - 1.3, YA - 1.1, ZB(MER[0]) - 1.0 * XPV], t0: XPT[3], t1: U_XP[2] + .8 },
-  { id: 'CLU', lab: 'Clutch', val: u => u > CLU[0] ? 'engaged' : 'brake on', at: () => [-.32, -2.0, -2.6], t0: 73.4, t1: 76.6 },
-  { id: 'BG', lab: 'Bull gear · to the shaft', val: u => `${Math.round(shRpm(0, u))} rpm`, at: () => [-1.0, -1.05, -4.55], t0: 75.0, t1: 78.4 },
-  { id: 'RXC', lab: 'Reactor compartment · shielded', val: () => 'railgun power', at: () => [5.8, 2.2, 13.5], t0: 84.0, t1: 87.6 },
-  { id: 'RPV', lab: 'Reactor pressure vessel', val: () => '15.5 MPa', at: () => [-.7, 1.0, 17.4], t0: 85.0, t1: 89.0 },
-  { id: 'SGP', lab: 'Steam generator · port', val: () => '', at: () => [-4.4, 3.3, 19.0], t0: 85.6, t1: 88.6 },
-  { id: 'RCP', lab: 'Reactor coolant pump', val: u => u < RCP_T[0] ? 'stopped' : u < RCP_T[1] ? 'starting' : 'running', at: () => [RCPX, -1.3, RCPZ], t0: 86.0, t1: 90.4 },
-  { id: 'ROD', lab: 'Control rods · 9 clusters', val: u => `${Math.round(100 * (ST.rod[0] + ST.rod[1] + ST.rod[2]) / (ROD_H[0] + ROD_H[1] + ROD_H[2]))} % out`, at: () => [2 * PITCH, -1.9 + ST.rod[0], RV[1] - 2 * PITCH], t0: 92.4, t1: 97.4 },
-  { id: 'CRD', lab: 'Control rod drive mechanisms', val: u => ST.rodM[0] + ST.rodM[1] + ST.rodM[2] ? 'stepping' : '', at: () => [.43, 2.62, RV[1] - .43], t0: 92.8, t1: 96.6 },
-  { id: 'CORE', lab: 'Core · 37 fuel assemblies', val: u => u < T_CRIT ? 'subcritical' : pct(u), at: () => [.45, CORE1, RV[1] - .65], t0: 96.0, t1: 103.4 },
-  { id: 'PZR', lab: 'Pressurizer', val: () => '15.5 MPa · 345 °C', at: () => [PZ[0], 2.5, PZ[1]], t0: 99.2, t1: 102.8 },
-  { id: 'HOT', lab: 'Hot leg', val: () => '315 °C', at: () => [2.9, -.76, 18.66], t0: 100.0, t1: 103.2 },
-  { id: 'UTB', lab: 'U-tube bundle · primary water', val: () => '315 → 285 °C', at: () => [3.95, .2, 18.75], t0: 108.4, t1: 112.0 },
-  { id: 'BOIL', lab: 'Boiling off the tubes', val: () => '6.0 MPa · 276 °C', at: () => [4.1, SGW, 18.55], t0: 109.4, t1: 113.8 },
-  { id: 'SEP', lab: 'Swirl-vane separators', val: () => 'water flung out', at: () => [4.15, 2.42, 18.7], t0: 115.8, t1: 120.4 },
-  { id: 'DRY', lab: 'Chevron dryer', val: () => '', at: () => [5.0, 2.9, 19.4], t0: 117.4, t1: 120.6 },
-  { id: 'MSL', lab: 'Main steam line', val: () => '6.0 MPa', at: () => [3.62, 3.6, 22.4], t0: 121.8, t1: 125.0 },
-  { id: 'HPS', lab: 'High-pressure turbine · 7 stages', val: () => '3 600 rpm', at: T_TG([-.45, .7, 1.0]), t0: 127.8, t1: 130.6 },
-  { id: 'JNT', lab: 'Horizontal joint · casing split', val: () => '', at: T_TG([-.78, .06, 1.7]), t0: 133.2, t1: 136.0 },
-  { id: 'XOV', lab: 'Crossover · to the LP', val: () => '', at: T_TG([0, 1.75, 3.0]), t0: 135.6, t1: 138.2 },
-  { id: 'LPS', lab: 'Low-pressure turbine · double flow', val: () => '5 kPa exhaust', at: T_TG([-.7, 1.0, LZC - .8]), t0: 137.4, t1: 139.8 },
-  { id: 'CND', lab: 'Condenser · shell and tube', val: () => '5 kPa · 33 °C', at: T_TG([-1.15, -1.7, 3.3]), t0: 147.4, t1: 150.6 },
-  { id: 'TUB', lab: 'Tube bundles · seawater inside', val: () => '', at: T_TG([-.55, -2.05, 3.8]), t0: 148.4, t1: 151.4 },
-  { id: 'TSH', lab: 'Tube sheet', val: () => '', at: T_TG([-.9, -2.0, CS0]), t0: 149.4, t1: 152.0 },
-  { id: 'WBX', lab: 'Waterbox · seawater in', val: () => '20 °C', at: T_TG([1.1, -1.95, CS0 - .35]), t0: 150.6, t1: 153.2 },
-  { id: 'HWL', lab: 'Hotwell · condensate', val: () => '33 °C', at: T_TG([-.85, -3.6, 4.6]), t0: 152.0, t1: 155.0 },
-  { id: 'SWO', lab: 'Seawater out', val: () => '30 °C', at: () => [6.0, -3.0, 29.95], t0: 153.0, t1: 155.4 },
-  { id: 'FWP', lab: 'Feed pump · to the steam generators', val: () => '7 MPa', at: () => [1.0, -3.9, 30.8], t0: 153.6, t1: 155.8 },
-  { id: 'GEN', lab: 'Generator · 2 poles', val: () => '3 600 rpm · 60 Hz', at: T_TG([-.55, .95, 7.4]), t0: 157.6, t1: 160.6 },
-  { id: 'FLD', lab: 'Rotating field', val: () => 'turns with the rotor', at: T_TG([-.3, .55, GZM]), t0: 159.6, t1: 163.4 },
-  { id: 'ROT', lab: 'Rotor field winding', val: () => 'direct current', at: T_TG([-.3, .42, 8.9]), t0: 162.8, t1: 166.4 },
-  { id: 'STW', lab: 'Stator windings · 3 phases', val: () => '4 160 V', at: T_TG([-.5, .5, GZ1 + .25]), t0: 165.0, t1: 169.0 },
-  { id: 'RSB', lab: 'Railgun switchboard', val: () => '2 × 25 MW', at: () => [1.9, -1.0, 38.0], t0: 172.0, t1: 175.2 },
-  { id: 'FDR', lab: 'Feeder breakers', val: u => u > T_FDR ? 'closed' : 'open', at: () => [.9, -1.55, 38.0], t0: 173.2, t1: 176.0 },
-  { id: 'PLS', lab: 'Feeder current · to the power room', val: () => '4 160 V', at: u => { P_.polyAt(PL.pulse, Math.min(pulseS(u), PL.pulse.L), Q4); return [Q4[0], Q4[1] + .1, Q4[2]]; }, t0: T_PULSE + .6, t1: T_PULSE + 5.6 },
-  { id: 'CPD', lab: 'Coolant pump drive', val: () => 'powered', at: () => [.62, 2.4, 41.1], t0: T_PULSE + 7.4, t1: LEN - .5 },
+  { id: 'CLU', lab: 'Clutch', val: u => u > CLU[0] ? 'engaged' : 'brake on', at: () => [-.32, -2.0, -2.6], t0: 43.0, t1: 46.0 },
+  { id: 'BG', lab: 'Bull gear · to the shaft', val: u => `${Math.round(shRpm(0, u))} rpm`, at: () => [-1.0, -1.05, -4.55], t0: 44.4, t1: 47.0 },
+  { id: 'RXC', lab: 'Reactor compartment · shielded', val: () => 'railgun power', at: () => [5.8, 2.2, 13.5], t0: 48.4, t1: 51.6 },
+  { id: 'RPV', lab: 'Reactor pressure vessel', val: () => '15.5 MPa', at: () => [-.7, 1.0, 17.4], t0: 49.4, t1: 53.0 },
+  { id: 'RCP', lab: 'Reactor coolant pump', val: u => u < RCP_T[0] ? 'stopped' : u < RCP_T[1] ? 'starting' : 'running', at: () => [RCPX, -1.3, RCPZ], t0: 50.0, t1: 54.0 },
+  { id: 'ROD', lab: 'Control rods · 9 clusters', val: () => `${rodPct()} % out`, at: () => [2 * PITCH, -1.9 + ST.rod[0], RV[1] - 2 * PITCH], t0: 54.0, t1: 59.4 },
+  { id: 'CRD', lab: 'Control rod drive mechanisms', val: () => ST.rodM[0] + ST.rodM[1] + ST.rodM[2] ? 'stepping' : 'holding', at: () => [.43, 2.62, RV[1] - .43], t0: 54.4, t1: 57.6 },
+  { id: 'CORE', lab: 'Core · 37 fuel assemblies', val: u => u < T_CRIT ? 'subcritical' : pct(u), at: () => [.45, CORE1, RV[1] - .65], t0: 56.8, t1: 61.8 },
+  { id: 'PZR', lab: 'Pressurizer', val: () => '15.5 MPa · 345 °C', at: () => [PZ[0], 2.5, PZ[1]], t0: 59.2, t1: 61.8 },
+  { id: 'HOT', lab: 'Hot leg', val: () => '315 °C', at: () => [2.9, -.76, 18.66], t0: 61.0, t1: 63.6 },
+  { id: 'UTB', lab: 'U-tube bundle · primary water', val: () => '315 → 285 °C', at: () => [3.95, .2, 18.75], t0: 64.0, t1: 67.2 },
+  { id: 'BOIL', lab: 'Boiling off the tubes', val: () => '6.0 MPa · 276 °C', at: () => [4.1, SGW, 18.55], t0: 64.8, t1: 68.4 },
+  { id: 'SEP', lab: 'Swirl-vane separators', val: () => 'water flung out', at: () => [4.15, 2.42, 18.7], t0: 69.0, t1: 73.6 },
+  { id: 'DRY', lab: 'Chevron dryer', val: () => '', at: () => [5.0, 2.9, 19.4], t0: 70.4, t1: 73.4 },
+  { id: 'MSL', lab: 'Main steam line', val: () => '6.0 MPa · 276 °C', at: () => [3.62, 3.6, 22.4], t0: 73.8, t1: 76.6 },
+  { id: 'HPS', lab: 'High-pressure turbine · 7 stages', val: () => '3 600 rpm', at: T_TG([-.45, .7, 1.0]), t0: 75.8, t1: 78.4 },
+  { id: 'LPS', lab: 'Low-pressure turbine · double flow', val: () => '5 kPa exhaust', at: T_TG([-.7, 1.0, LZC - .8]), t0: 81.4, t1: 83.6 },
+  { id: 'CND', lab: 'Condenser · shell and tube', val: () => '5 kPa · 33 °C', at: T_TG([-1.15, -1.7, 3.3]), t0: 89.4, t1: 92.6 },
+  { id: 'TUB', lab: 'Tubes · seawater inside', val: () => `${CTUBE.length} tubes`, at: T_TG([-.55, -2.05, 3.8]), t0: 90.8, t1: 94.2 },
+  { id: 'WBX', lab: 'Waterbox · seawater in', val: () => '20 °C', at: T_TG([1.1, -1.95, CS0 - .35]), t0: 92.0, t1: 95.0 },
+  { id: 'HWL', lab: 'Condensate · into the hotwell', val: () => '33 °C', at: T_TG([-.85, -3.6, 4.6]), t0: 93.0, t1: 96.2 },
+  { id: 'GEN', lab: 'Generator · 2 poles', val: () => '3 600 rpm · 60 Hz', at: T_TG([-.55, .95, 7.4]), t0: 96.8, t1: 100.0 },
+  { id: 'FLD', lab: 'Rotating field', val: () => 'one turn per cycle', at: T_TG([-.3, .55, GZM]), t0: 98.6, t1: 102.6 },
+  { id: 'STW', lab: `Stator · ${NSL} slots · 3 phases`, val: () => '4 160 V', at: T_TG([-.5, .5, GZ1 + .25]), t0: 99.8, t1: 104.0 },
+  { id: 'ROT', lab: 'Rotor poles · DC field winding', val: () => '2 poles', at: T_TG([-.3, .42, 8.9]), t0: 101.0, t1: 104.8 },
+  { id: 'RSB', lab: 'Railgun switchboard · 4 160 V', val: () => '2 × 25 MW in', at: () => [1.9, -1.0, 38.0], t0: 105.6, t1: 108.6 },
+  { id: 'BRK', lab: 'Feeder breakers · draw-out', val: u => u < T_RACK[0] ? 'test position' : u < T_RACK[1] ? 'racking in' : u < T_FDR ? 'connected' : 'closed', at: () => [1.0, -1.0, 37.7], t0: 106.4, t1: 110.6 },
+  { id: 'ARC', lab: 'Arc chutes', val: () => 'the arc quenched', at: () => [.75, -1.3, 38.05], t0: T_FDR - .1, t1: T_FDR + 1.9 },
+  { id: 'PLS', lab: 'Feeder current · to the power room', val: () => '4 160 V', at: u => { P_.polyAt(PL.pulse, Math.min(pulseS(u), PL.pulse.L), Q4); return [Q4[0], Q4[1] + .1, Q4[2]]; }, t0: T_PULSE + .6, t1: T_PULSE + 5.0 },
+  { id: 'CPD', lab: 'Coolant pump drive', val: () => 'powered', at: () => [.62, 2.4, 41.1], t0: T_PULSE + 5.6, t1: LEN - .5 },
 ];
 function tags(u, ctx) {
   for (const t of TAGS) {
@@ -2164,15 +2361,16 @@ function tags(u, ctx) {
   }
   if (LG['1B']) scanTags(SC_GT, SCT[0], u, ctx, X.mul(ctx.Ws, LG['1B']));
   scanTags(SC_HP, SCT[1], u, ctx, X.mul(ctx.Ws, TGL)); scanTags(SC_LP, SCT[2], u, ctx, X.mul(ctx.Ws, TGL));
-  phaseTrace(u, ctx);
+  phaseTrace(u, ctx); fluxTrace(u, ctx);
 }
 /* the scan's tag on the row it is passing, and the ruler: each row's number left at its tip as the plane passes */
 const SCT = [];
 function scanTags(S, tg, u, ctx, L) {
   if (u < S.u0 - .2 || u > S.u1 + 3.2) return;
   const q = scanAt(S, u), A = ss(S.u0, S.u0 + .3, u) * (1 - ss(S.u1, S.u1 + .4, u)), c = Math.cos(S.numA), sn = Math.sin(S.numA);
-  if (q.i >= 0 && A > .01) { const r = S.rows[q.i], z = r.zs[r.zs.length - 1], t0 = S.u0 + (r.slot - (r.w || 1) / 2) / S.slots * (S.u1 - S.u0);
-    apI(L, c * (r.t + .04), sn * (r.t + .04), z, Q4); ctx.tagAt(tg, r.num, r.lab, r.val || '', Q4, A, (u - t0) * 2.5); }
+  // one tag per group, from the group's first row to its last (riding on the plane)
+  if (A > .01) { let g = -1; for (let k = 0; k < S.groups.length; k++) if (u >= S.groups[k].t0 - .05) g = k;
+    if (g >= 0) { const G_ = S.groups[g], zs = S.zOf(Math.max(0, q.d)), z = zs[zs.length - 1], r = G_.tip + .04; apI(L, c * r, sn * r, z, Q4); ctx.tagAt(tg, G_.id, G_.lab, G_.val, Q4, A, (u - G_.t0) * 2.5); } }
   const o = K.octx, S_ = K.S, B = ss(S.u0, S.u0 + .3, u) * (1 - ss(S.u1 + 1.6, S.u1 + 3.0, u)); if (B < .01) return;
   o.font = `500 ${Math.round(15 * S_)}px "Geist Mono", monospace`; o.textAlign = 'center'; o.textBaseline = 'bottom'; o.fillStyle = '#C6F432';
   for (const r of S.rows) { const age = u - passT(S, r); if (age < 0) continue;
@@ -2183,11 +2381,46 @@ function scanTags(S, tg, u, ctx, L) {
 /* the generator's stator currents traced beside it: three phases, 120 deg apart, scrolling as the rotor turns (two
    cycles across; x0.01: one cycle in 1.7 s); the cursor at now, each phase's value marked where the slice lights it */
 const PH_C = ['#C6F432', '#EEEEE4', '#C6F432'], PH_A = [.95, .8, .55];
+/* the neutron flux traced beside the core as the rods come out (round 3): eight decades on a log scale, from the
+   source range to full power; the rods' withdrawal under it (dashed, 0-100 % of their travel); criticality and full
+   power marked as the trace reaches them */
+const rodAt = t => { let h = 0; for (let b = 0; b < 3; b++) h += ROD_H[b] * ss(ROD_T[b][0], ROD_T[b][1], t); return h / ROD_F; };
+function fluxTrace(u, ctx) {
+  const t0 = ROD_T[0][0] - .8, t1 = T_FULL + 1.4, a = ss(t0 - .4, t0 + .6, u) * (1 - ss(T_FULL + 2.0, T_FULL + 3.0, u)); if (a < .01) return;
+  apI(ctx.Ws, -1.5, -1.6, 18.0, Q4); if (!K.pj(Q4[0], Q4[1], Q4[2])) return;
+  const S_ = K.S, W = 330 * S_, Hh = 150 * S_, o = K.octx;
+  const x0 = E.clamp(K.PJ[0] - W - 30 * S_, 40 * S_, K.BW - W - 120 * S_), y0 = E.clamp(K.PJ[1] - Hh / 2, 260 * S_, 730 * S_ - Hh);
+  const X_ = t => x0 + W * E.sat((t - t0) / (t1 - t0)), Y_ = lp => y0 + Hh * (1 - (lp + 8) / 8);
+  o.globalAlpha = .86 * a; o.fillStyle = 'rgb(11,12,10)'; o.fillRect(x0 - 8 * S_, y0 - 30 * S_, W + 82 * S_, Hh + 58 * S_);
+  K.bracket([x0 - 8 * S_, y0 - 6 * S_, x0 + W + 74 * S_, y0 + Hh + 6 * S_], '#C6F432', .7 * a, 10, 1.2);
+  o.globalAlpha = .9 * a; o.fillStyle = '#C6F432'; o.font = `500 ${Math.round(13 * S_)}px "Geist Mono", monospace`; o.textBaseline = 'bottom';
+  o.fillText('NEUTRON FLUX · LOG · 8 DECADES', x0 - 8 * S_, y0 - 10 * S_);
+  o.font = `400 ${Math.round(11 * S_)}px "Geist Mono", monospace`; o.textBaseline = 'middle';
+  for (const [lp, t] of [[0, '100 %'], [-2, '1 %'], [-4, '0.01 %'], [-6, '1E-4 %'], [-8, '1E-6 %']]) {
+    const y = Y_(lp); o.globalAlpha = .25 * a; o.strokeStyle = '#EEEEE4'; o.lineWidth = S_; o.setLineDash([2 * S_, 4 * S_]); o.beginPath(); o.moveTo(x0, y); o.lineTo(x0 + W, y); o.stroke(); o.setLineDash([]);
+    o.globalAlpha = .6 * a; o.fillStyle = '#EEEEE4'; o.fillText(t, x0 + W + 8 * S_, y); }
+  const tn = Math.min(u, t1), N = 120;
+  o.globalAlpha = .6 * a; o.strokeStyle = '#EEEEE4'; o.lineWidth = 1.2 * S_; o.setLineDash([5 * S_, 3 * S_]); o.beginPath();
+  for (let j = 0; j <= N; j++) { const t = t0 + (tn - t0) * j / N, x = X_(t), y = y0 + Hh * (1 - rodAt(t)); if (j) o.lineTo(x, y); else o.moveTo(x, y); }
+  o.stroke(); o.setLineDash([]);
+  o.globalAlpha = a; o.strokeStyle = '#C6F432'; o.lineWidth = 1.8 * S_; o.beginPath();
+  for (let j = 0; j <= N; j++) { const t = t0 + (tn - t0) * j / N, x = X_(t), y = Y_(lpow(t)); if (j) o.lineTo(x, y); else o.moveTo(x, y); }
+  o.stroke();
+  const xn = X_(tn), yn = Y_(lpow(tn)); o.fillStyle = '#C6F432'; o.beginPath(); o.arc(xn, yn, 3 * S_, 0, TAU); o.fill();
+  o.globalAlpha = .7 * a; o.fillStyle = '#EEEEE4'; o.beginPath(); o.arc(xn, y0 + Hh * (1 - rodAt(tn)), 2.2 * S_, 0, TAU); o.fill();
+  o.font = `500 ${Math.round(11 * S_)}px "Geist Mono", monospace`; o.textBaseline = 'bottom';
+  for (const [t, lab] of [[T_CRIT, 'CRITICAL'], [T_FULL, 'FULL POWER']]) { if (u < t) continue; const x = X_(t), y = Y_(lpow(t));
+    o.globalAlpha = .55 * a; o.strokeStyle = '#C6F432'; o.lineWidth = S_; o.beginPath(); o.moveTo(x, y0); o.lineTo(x, y0 + Hh); o.stroke();
+    o.globalAlpha = .95 * a * E.sat((u - t) / .3); o.fillStyle = '#C6F432'; o.fillText(lab, Math.min(x + 4 * S_, x0 + W - 70 * S_), y - 6 * S_); }
+  o.globalAlpha = .6 * a; o.fillStyle = '#EEEEE4'; o.textBaseline = 'top'; o.fillText(`RODS ${rodPct()} % OUT`, x0, y0 + Hh + 10 * S_);
+  o.globalAlpha = 1; o.textBaseline = 'alphabetic'; o.textAlign = 'left';
+}
 function phaseTrace(u, ctx) {
-  const a = ss(157.0, 158.2, u) * (1 - ss(169.4, 170.6, u)); if (a < .01) return;
-  apI(X.mul(ctx.Ws, TGL), -1.5, .7, GZM - .6, Q4); if (!K.pj(Q4[0], Q4[1], Q4[2])) return;
+  const a = ss(U_GEN[0] + 1.6, U_GEN[0] + 2.8, u) * (1 - ss(U_GEN[1] - 1.2, U_GEN[1], u)); if (a < .01) return;
+  apI(X.mul(ctx.Ws, TGL), -2.6, .7, GZM - .9, Q4); if (!K.pj(Q4[0], Q4[1], Q4[2])) return;
   const S_ = K.S, W = 360 * S_, Hh = 116 * S_, o = K.octx;
   const x0 = E.clamp(K.PJ[0] - W, 40 * S_, K.BW - W - 70 * S_), y0 = E.clamp(K.PJ[1] - Hh / 2, 250 * S_, 840 * S_ - Hh), yc = y0 + Hh / 2, amp = Hh / 2 - 8 * S_;
+  o.globalAlpha = .86 * a; o.fillStyle = 'rgb(11,12,10)'; o.fillRect(x0 - 8 * S_, y0 - 30 * S_, W + 42 * S_, Hh + 36 * S_);
   K.bracket([x0 - 8 * S_, y0 - 6 * S_, x0 + W + 34 * S_, y0 + Hh + 6 * S_], '#C6F432', .7 * a, 10, 1.2);
   o.globalAlpha = .9 * a; o.fillStyle = '#C6F432'; o.font = `500 ${Math.round(13 * S_)}px "Geist Mono", monospace`; o.textBaseline = 'bottom';
   o.fillText('STATOR CURRENT · 3 PHASES · 60 HZ', x0 - 8 * S_, y0 - 10 * S_);
@@ -2209,46 +2442,39 @@ function phaseTrace(u, ctx) {
 function readout(u) {
   let l1, l2;
   const rate = RATE(u);
-  if (u < 13.6) { l1 = 'DDG-51 · <b>machinery spaces</b>'; l2 = 'Gas turbine plant · <b>railgun reactor plant</b>'; }
-  else if (u < 25.6) {
-    const k = u < GT_T[0][3] + .3 ? 0 : u < GT_T[1][3] + .2 ? 1 : 2, [, tl, tr, tb] = GT_T[k];
-    l1 = `Electric plant · <b>gas turbine generator ${k + 1} ${u < GT_T[k][0] ? 'stopped' : u < tl ? 'starting' : u < tr ? 'light-off' : u < tb ? 'synchronising' : 'on line'}</b>`;
-    l2 = `Generator <b>${fmt(1800 * fgen(k, u))} rpm</b> · <b>${GT_T.filter(t => u > t[3]).length} × 2.5 MW</b> on line · 450 V`;
-  } else if (u < U_SCAN[0]) {
-    l1 = `LM2500 1B · <b>${u < GM_T['1B'][0] ? 'enclosure off' : 'cranking'}</b>`; l2 = `Air start motor · gas generator <b>${fmt(ngg('1B', u))} rpm</b>`;
-  } else if (u < U_EO[0]) {
-    l1 = 'LM2500 1B · <b>the gas path, row by row</b>'; l2 = 'Compressor <b>16 stages</b> · combustor · HP turbine <b>2</b> · power turbine <b>6</b> · gas generator <b>1 700 rpm</b>';
-  } else if (u < 52.4) {
+  if (u < 11.0) { l1 = 'DDG-51 · <b>machinery spaces</b>'; l2 = 'Gas turbine generators <b>3 × 2.5 MW</b> on line · 450 V · <b>railgun reactor</b> shut down'; }
+  else if (u < U_SCAN[0]) { l1 = `LM2500 1B · <b>${u < GM_T['1B'][0] ? 'enclosure off' : 'cranking'}</b>`; l2 = `Air start motor · gas generator <b>${fmt(ngg('1B', u))} rpm</b>`; }
+  else if (u < U_EO[0] + .4) {
+    l1 = 'LM2500 1B · <b>the gas path, section by section</b>'; l2 = 'Compressor <b>16 stages</b> · combustor · HP turbine <b>2</b> · power turbine <b>6</b> · cranking at <b>1 700 rpm</b>';
+  } else if (u < U_SL1) {
     const tl = GM_T['1B'][1];
-    l1 = `LM2500 1B · <b>${u < tl - .6 ? 'fuel on' : u < tl + XF_T['1B'] + .3 ? 'light-off' : 'lit'}</b>`; l2 = 'Annular combustor · <b>30 fuel nozzles</b> · the flame round in <b>26 ms</b>';
-  } else if (u < 59.0) {
-    const id = u < 55.0 ? '1B' : u < 56.0 ? '1A' : u < 56.8 ? '2A' : '2B', [, tl, ti] = GM_T[id];
+    l1 = `LM2500 1B · <b>${u < tl - .6 ? 'fuel on' : u < tl + XF_T['1B'] + .3 ? 'light-off' : 'lit'}</b>`; l2 = `Annular combustor · <b>30 fuel nozzles</b> · the flame front round in <b>${Math.round(XF_T['1B'] * 10)} ms</b>`;
+  } else if (u < 35.4) {
+    const id = u < 32.4 ? '1B' : u < 33.2 ? '1A' : u < 34.0 ? '2A' : '2B', [, tl, ti] = GM_T[id];
     l1 = `LM2500 ${id} · <b>${u < tl ? 'cranking' : u < ti ? 'light-off' : 'idle'}</b>`; l2 = `Gas generator <b>${fmt(ngg(id, u))} rpm</b> · power turbine <b>brake on</b>`;
   } else if (u < CLU[0] - .2) {
     l1 = `Main reduction gear 1 · <b>${xpAt(u) > .05 ? 'exploded' : 'locked train'}</b>`; l2 = 'Input pinion <b>35</b> · first reduction <b>147</b> · second <b>43</b> · bull gear <b>219</b> · <b>21.4 : 1</b>';
-  } else if (u < 82.0) {
+  } else if (u < 47.4) {
     const r = shRpm(0, u), r2 = shRpm(1, u);
     l1 = u < CLU[0] + .4 ? 'Main reduction gear 1 · <b>clutch in</b>' : `Shafts · <b>${Math.round(r)} rpm</b> port · <b>${Math.round(r2)}</b> stbd`;
     l2 = `Power turbine <b>${fmt(r * RATIO)} rpm</b> · 21.4 : 1 · pitch <b>0 %</b>`;
   } else if (u < ROD_T[0][0] - .2) {
     l1 = 'Railgun power · <b>pressurised-water reactor</b>';
     l2 = u < RCP_T[0] ? 'Reactor <b>shut down</b> · 165 MW thermal' : `Reactor coolant pumps <b>${u < RCP_T[1] ? 'starting' : 'running'}</b> · 15.5 MPa`;
-  } else if (u < 102.4) {
-    const out = Math.round(100 * (ST.rod[0] + ST.rod[1] + ST.rod[2]) / (ROD_H[0] + ROD_H[1] + ROD_H[2]));
-    l1 = `Reactor · <b>${u < T_CRIT ? 'rods withdrawing' : u < T_FULL - .3 ? 'critical · power rising' : 'full power'}</b>`;
-    l2 = `Rods <b>${out} % out</b> · power <b>${u < T_CRIT ? 'source range' : pct(u)}</b> · coolant <b>${Math.round(285 + 30 * ST.heat)} °C</b>`;
-  } else if (u < 114.0) { l1 = 'Steam generator · <b>boiling</b>'; l2 = 'Primary <b>315 °C</b> in, <b>285 °C</b> out · steam <b>6.0 MPa · 276 °C</b>'; }
-  else if (u < 125.4) { l1 = 'Steam separators · <b>swirl vanes</b>'; l2 = 'The water flung to the walls and back down · the steam on through the dryer'; }
-  else if (u < 145.4) {
+  } else if (u < 62.6) {
+    l1 = `Reactor · <b>${u < T_CRIT ? 'rods withdrawing' : u < T_FULL ? 'critical · power rising' : 'full power · 165 MW thermal'}</b>`;
+    l2 = `Rods <b>${rodPct()} % out</b> · power <b>${u < T_CRIT ? 'source range' : pct(u)}</b> · coolant <b>${Math.round(285 + 30 * ST.heat)} °C</b>`;
+  } else if (u < 68.8) { l1 = 'Steam generator · <b>boiling</b>'; l2 = 'Primary <b>315 °C</b> in, <b>285 °C</b> out · steam <b>6.0 MPa · 276 °C</b>'; }
+  else if (u < 74.0) { l1 = 'Steam separators · <b>swirl vanes</b>'; l2 = 'The water flung to the walls and back down · the steam on through the dryer'; }
+  else if (u < U_CND[0]) {
     l1 = 'Steam turbine · <b>3 600 rpm</b>';
-    l2 = u > U_HPS[0] - .5 && u < U_HPS[1] + 1 ? 'High-pressure turbine · <b>7 stages</b> · casing split on the horizontal joint' : u > U_LPS[0] - .5 && u < U_LPS[1] + 1 ? 'Low-pressure turbine · <b>2 × 5 stages</b> · exhaust <b>5 kPa</b>' : 'Steam <b>6.0 MPa</b> in · exhaust <b>5 kPa</b> · <b>2 × 25 MW</b>';
-  } else if (u < 156.0) { l1 = 'Condenser · <b>5 kPa · 33 °C</b>'; l2 = 'Seawater <b>20 → 30 °C</b> through the tubes · the condensate to the hotwell, back to the feed pumps'; }
-  else if (u < 171.4) { l1 = 'Generator · <b>3 600 rpm · 60 Hz</b>'; l2 = `Rotor field <b>DC</b>, turning · stator <b>4 160 V</b> · 3 phases · <b>${Math.round(25 * ST.load)} MW</b>`; }
-  else if (u < T_PULSE) { l1 = `Railgun switchboard · <b>${Math.round(50 * ST.load)} MW</b>`; l2 = `Feeder breakers <b>${u > T_FDR ? 'closed' : 'closing'}</b> · 4 160 V · 60 Hz`; }
-  else { l1 = 'Railgun power room · <b>feed live</b>'; l2 = u < T_PULSE + PULSE_L / PULSE_V ? 'Feeder <b>4 160 V</b> · current into the power room' : 'Coolant pump drives · <b>powered</b> · <b>50 MW</b> on the bus'; }
+    l2 = u > U_HPS[0] - .5 && u < U_HPS[1] + .3 ? 'High-pressure turbine · <b>7 stages</b> · casing split on the horizontal joint' : u > U_LPS[0] - .3 && u < U_LPS[1] + 1 ? 'Low-pressure turbine · <b>2 × 5 stages</b> · exhaust <b>5 kPa</b>' : 'Steam <b>6.0 MPa</b> in · exhaust <b>5 kPa</b> · <b>25 MW</b> per set';
+  } else if (u < U_CND[1]) { l1 = 'Condenser · <b>5 kPa · 33 °C</b>'; l2 = 'Seawater <b>20 → 30 °C</b> through the tubes · the condensate to the hotwell, back to the feed pumps'; }
+  else if (u < U_GEN[1]) { l1 = 'Generator · <b>3 600 rpm · 60 Hz</b>'; l2 = `Rotor field <b>DC</b>, turning · stator <b>4 160 V</b> · 3 phases · load <b>${Math.round(25 * ST.load)} MW</b> of 25`; }
+  else if (u < T_PULSE) { l1 = `Railgun switchboard · <b>${Math.round(50 * ST.load)} MW</b> of 50`; l2 = `Feeder breakers <b>${u < T_RACK[0] ? 'in test position' : u < T_RACK[1] ? 'racking in' : u < T_FDR ? 'connected · open' : 'closed'}</b> · 4 160 V · 60 Hz`; }
+  else { l1 = 'Railgun power room · <b>feed live</b>'; l2 = u < T_PULSE + PULSE_L / PULSE_V ? 'Feeder <b>4 160 V</b> · current into the power room' : `Coolant pump drives · <b>powered</b> · bus <b>${Math.round(50 * ST.load)} MW</b> of 50`; }
   return { l1, l2, rate };
 }
-
 /* ================= sound ================= */
 const SFX = () => STAGE.SFX;
 const clunk = () => { SFX().tone(120, 70, .22, 'square', .03); SFX().noise(.2, 500, 1, .04, .005); };
@@ -2257,9 +2483,6 @@ const tick = () => SFX().tone(1650, 1650, .03, 'square', .004);
 const PULSE_L = (() => { const P = [...RG_P[1].slice(0, 5), ...PBR]; let L = 0; for (let i = 1; i < P.length; i++) L += V.dist(P[i - 1], P[i]); return L; })();
 const cues = [
   [.9, () => SFX().tone(900, 2600, .9, 'sine', .012)],
-  ...GT_T.map(([a]) => [a, () => SFX().tone(180, 900, 1.2, 'sawtooth', .008)]),
-  ...GT_T.map(([, b]) => [b, () => { SFX().noise(.6, 600, .7, .03, .02); SFX().tone(300, 1400, 1.2, 'triangle', .008); }]),
-  ...GT_T.map(([, , , d]) => [d + .12, clack]),
   ...Object.values(GM_T).map(([a]) => [a, () => SFX().tone(120, 700, 1.0, 'sawtooth', .009)]),
   ...Object.entries(GM_T).map(([id, [, b]]) => [b, () => { const sl = id === '1B'; SFX().noise(sl ? 3.6 : 1.2, sl ? 260 : 400, .8, .04, sl ? 1.4 : .03); SFX().tone(sl ? 40 : 70, sl ? 120 : 260, sl ? 4 : 1.6, 'sawtooth', .012); }]),
   ...[SC_GT, SC_HP, SC_LP].flatMap(S => S.rows.map(r => [passT(S, r), tick])),
@@ -2268,18 +2491,18 @@ const cues = [
   [RCP_T[0], () => SFX().tone(50, 220, 2.6, 'sawtooth', .01)],
   ...ROD_T.map(([a, b]) => [a, () => { for (let k = 0; k < 8; k++) SFX().tone(1500, 1500, .02, 'square', .006, k * (b - a) / 8); }]),
   [T_CRIT, () => SFX().tone(420, 840, 1.6, 'sine', .01)],
-  [103.6, () => SFX().noise(6.0, 900, .6, .014, 1.5)],
-  [127.4, () => SFX().tone(55, 110, 4.0, 'sawtooth', .012)],
-  [146.6, () => SFX().noise(5.0, 700, .5, .01, 1.5)],
-  [157.2, () => SFX().tone(60, 60, 4.8, 'sine', .016)],
-  [T_FDR, clack], [T_FDR + .1, clack],
+  [T_FULL + 4.0, () => SFX().noise(6.0, 900, .6, .014, 1.5)],
+  [T_ON, () => SFX().tone(300, 900, 2.0, 'sine', .006)],
+  [U_HPS[0] - 2.6, () => SFX().tone(55, 110, 4.0, 'sawtooth', .012)],
+  [U_CND[0] + .6, () => SFX().noise(5.0, 700, .5, .01, 1.5)],
+  [U_GEN[0] + 1.6, () => SFX().tone(60, 60, 4.8, 'sine', .016)],
+  [T_RACK[0], () => SFX().tone(90, 140, T_RACK[1] - T_RACK[0], 'sawtooth', .007)], [T_RACK[1], clunk],
+  [T_FDR, () => { clack(); SFX().noise(.25, 2600, .9, .03, .004); }], [T_FDR + .12, clack],
   [T_PULSE, () => { SFX().tone(1800, 500, .5, 'sawtooth', .008); SFX().noise(.4, 4000, .5, .01, .05); }],
   [T_PULSE + PULSE_L / PULSE_V, () => { clack(); SFX().tone(220, 440, .8, 'sine', .01); }],
 ];
-const chapters = [{ t: 0, title: 'Machinery' }, { t: 12.0, title: 'Generators' }, { t: 25.0, title: 'Main engines' }, { t: 57.5, title: 'Reduction gear' },
-  { t: 78.0, title: 'Reactor' }, { t: 104.5, title: 'Steam generator' }, { t: 125.0, title: 'Steam turbine' }, { t: 145.0, title: 'Condenser' },
-  { t: 155.0, title: 'Generator' }, { t: 170.0, title: 'Power run' }];
-
+const chapters = [{ t: 0, title: 'Machinery' }, { t: 9.0, title: 'Main engines' }, { t: 34.0, title: 'Reduction gear' }, { t: 47.0, title: 'Reactor' },
+  { t: 62.6, title: 'Steam generator' }, { t: 74.0, title: 'Steam turbine' }, { t: 88.6, title: 'Condenser' }, { t: 96.0, title: 'Generator' }, { t: 104.8, title: 'Power run' }];
 /* debug: points per prim of a part at spacing sp */
 function primCounts(fn, sp) { return fn().map((pr, i) => [i, pr.t, samp([pr], sp, false).length / 6]).sort((a, b) => b[2] - a[2]).slice(0, 12); }
 const RGE = { dbg: { primCounts, vesselPrims, corePrims, sgPrims, tgStatic, tgRotor, genRotor2, structure, gtPlant, fwdStatic, state, ST, PLP, CK, XW, fxRX, isOpen, KEYS, camShip, XB, SPL }, len: LEN, build, chapters, cues, cam, draw, xray, readout, tags, info: null,
