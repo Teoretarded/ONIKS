@@ -62,7 +62,7 @@ const DRUM_R = -HZ, DRUM_Y = FL + .05, RND_Y0 = FL + 1.25;  // magazine cells: r
 const HY0 = RND_Y0 - GY;                                // the round's centre in the drum (T y)
 const NCELL = 12;
 /* sensors (T) and the elevation rams */
-const EO_P = [-1.78, 3.1, -.9], EO_H = .42;             // EO/IR director: pedestal foot, the elevation axis above it
+const EO_P = [-1.78, 3.1, -.9], EO_H = .58;             // EO/IR director: pedestal foot, the elevation axis above it
 const FC_P = [1.82, 3.1, -3.0], FC_H = .72;             // fire-control radar: mast foot, its head
 const MV_P = [0, 1.0, 2.72];                            // muzzle velocity radar (C)
 const RAM_E = s => [[s * .9, .35, 2.9], [s * .9, -.4, 1.2]];   // elevation ram: [base in T, pin in C]
@@ -438,15 +438,22 @@ function eoYoke() {
   for (const s of [-1, 1]) P.push(G.box([s * .205, .04, -.08], [s * .245, EO_H - .34 + .08, .08]), G.cyl([s * .2, EO_H - .34, 0], [s * .27, EO_H - .34, 0], .055, F()));
   return P;
 }
+/* the head: a stabilised ball turret (r 0.19 between the yoke's arms) turning on the pitch axis, its front flat with
+   the TV, IR and laser rangefinder windows in a bezel, a seam round its equator, the access panels' lines */
+const EO_R = .19, EO_ZF = .16;
 function eoHead() {
-  const P = [G.box([-.18, -.14, -.16], [.18, .14, .18], { ds: 1.1 })];
-  const win = [[-.085, .045, .058, 'TV'], [.085, .045, .066, 'IR'], [0, -.075, .032, 'LRF']];
-  for (const [x, y, r] of win) P.push(G.lathe([x, y, .18], [0, 0, 1], [[0, r], [.05, r]], {}), circ([x, y, .232], [0, 0, 1], r * .78, F()), circ([x, y, .232], [0, 0, 1], r * .4, F()));
-  P.push(G.box([-.2, .14, -.1], [.2, .165, .26], F()));
-  P.push(G.line([[-.15, -.12, -.161], [.15, -.12, -.161]], F()), G.line([[-.15, -.06, -.161], [.15, -.06, -.161]], F()));
+  const prof = []; for (let k = 0; k <= 16; k++) { const z = -EO_R + (EO_ZF + EO_R) * k / 16; prof.push([z + EO_R, Math.sqrt(Math.max(0, EO_R * EO_R - z * z))]); }
+  const P = [G.lathe([0, 0, -EO_R], [0, 0, 1], prof, { caps: true, ds: .7 })];
+  const rf = Math.sqrt(EO_R * EO_R - EO_ZF * EO_ZF);
+  P.push(circ([0, 0, EO_ZF + .002], [0, 0, 1], rf, F()), circ([0, 0, EO_ZF + .002], [0, 0, 1], rf - .012, F()));
+  for (const a of [0, PI / 2]) { const L = []; for (let k = 0; k <= 48; k++) { const b = -PI / 2 + PI * k / 48, z = Math.sin(b) * EO_R * 1.004, r = Math.cos(b) * EO_R * 1.004; if (z > EO_ZF) break; L.push(a ? [0, r, z] : [r, 0, z]); } P.push(G.line(L, F())); }
+  P.push(circ([0, 0, 0], [0, 0, 1], EO_R * 1.005, F()), circ([0, 0, -.1], [0, 0, 1], Math.sqrt(EO_R * EO_R - .01) * 1.005, F()));
+  const win = [[-.07, .04, .045, 'TV'], [.07, .04, .05, 'IR'], [0, -.07, .026, 'LRF']];
+  for (const [x, y, r] of win) P.push(G.lathe([x, y, EO_ZF - .01], [0, 0, 1], [[0, r * 1.15], [.02, r * 1.15], [.02, r]], F({ caps: true })), circ([x, y, EO_ZF + .012], [0, 0, 1], r * .78, F()), circ([x, y, EO_ZF + .012], [0, 0, 1], r * .4, F()));
+  for (const s of [-1, 1]) P.push(G.lathe([s * .17, 0, 0], [s, 0, 0], [[0, .05], [.05, .05]], F({ caps: true })));
   return P;
 }
-const EO_WIN = [[-.085, .045, .232], [.085, .045, .232], [0, -.075, .232]];
+const EO_WIN = [[-.07, .04, EO_ZF + .014], [.07, .04, EO_ZF + .014], [0, -.07, EO_ZF + .014]];
 /* the fire-control radar: mast (T), head (yaw frame at the mast top): drive, a tilted planar array */
 function fcrBase() {
   const P = [G.box([FC_P[0] - .24, FC_P[1], FC_P[2] - .24], [FC_P[0] + .24, FC_P[1] + .05, FC_P[2] + .24]), G.lathe(FC_P, [0, 1, 0], [[0, .1], [.08, .1], [.08, .08], [FC_H, .08]], {})];
@@ -561,9 +568,9 @@ function barrel() {
 const railPrims = () => [G.box([-RW, RY0, RZ0], [RW, RY1, SLV1 - .01], { ds: .9 }), G.box([-RW, -RY1, RZ0], [RW, -RY0, SLV1 - .01], { ds: .9 })];
 const insPrims = () => [-1, 1].map(s => G.box([s * IX0, -RY0, RZ0], [s * IX1, RY0, SLV1 - .01], { ds: 1.2 }));
 /* station frame (B, centred on a station): the two racetrack coils' winding packs, their turns, the formers */
-function coilPrims() {
+function coilPrims(side) {
   const P = [];
-  for (const s of [-1, 1]) {
+  for (const s of side ? [side] : [-1, 1]) {
     // the winding pack: two pancakes of REBCO tape, the turns drawn as nested racetracks; the stainless former it is
     // wound on; the clamp plates either side with their bolts; the terminal block and the joint to the leads
     const path = racetrack(s * CXC, .25, .14, 14);
@@ -590,10 +597,12 @@ function coilPrims() {
    the two tubes down to the first stage (40 K) and the second (20 K), copper discs, the braided thermal strap from
    the second stage to the coil */
 const COLD = []; for (const zc of STN) for (const s of [-1, 1]) COLD.push([s * .5, KY, zc - .14]);
-const COLD_HERO = 9;                                    // (station 4, starboard: the cold head the lens watches frost over, finer)
+const COLD_HERO = 9;
+const XST = 6;                                          // (the station drawn apart in round 3: its cold heads are COLD 12 (port), 13)                                    // (station 4, starboard: the cold head the lens watches frost over, finer)
 function cryoPrims(only) {
   const P = [];
-  for (const c of only === undefined ? COLD : [COLD[only]]) {
+  const sel = only === undefined ? COLD : Array.isArray(only) ? only.map(i => COLD[i]) : typeof only === 'object' ? COLD.filter((c, i) => !only.not.includes(i)) : [COLD[only]];
+  for (const c of sel) {
     const s = Math.sign(c[0]), [x, y, z] = c, ix = -s;                   // (ix: toward the bore)
     P.push(G.lathe(c, [0, 1, 0], [[0, .095], [.022, .095]], { caps: true, ds: .8 }));
     for (let k = 0; k < 8; k++) { const a = k / 8 * TAU; P.push(G.lathe([x + Math.cos(a) * .08, y + .022, z + Math.sin(a) * .08], [0, 1, 0], [[0, .007], [.01, .007]], F({ caps: true }))); }
@@ -620,15 +629,16 @@ function cryoPrims(only) {
   }
   return P;
 }
-const FROST = { pts: null, n: 0 };
+const FROST = { pts: null, n: 0, rng: null };            // (rng: [first, end) point per cold head (COLD order), then the headers)
 /* frost: seeded points [x, y, z (B), kind, station, order]; kind 0 a cold head (growing from its cold flange up),
    1 its flex line, 2 the helium headers (z: where the cold front reaches them), 3 a cryostat's top and its lead
    tower (as the station's coils reach 20 K). order (0..1): when, within its part's frosting, the point appears */
 function frostCloud() {
   const r = M3.rng(7741), A = [];
   const push = (x, y, z, kind, k, h) => A.push(x, y, z, kind, k, h);
+  const RG = [];
   COLD.forEach((c, i) => {
-    const k = i >> 1, ix = -Math.sign(c[0]), bz = c[2] + .11, mul = i === COLD_HERO ? 5 : 1;
+    RG.push(A.length / 6); const k = i >> 1, ix = -Math.sign(c[0]), bz = c[2] + .11, mul = i === COLD_HERO ? 5 : 1;
     // crystals: clusters of three or four dots, on the tubes and the flange (from the flange up), the buffer, the
     // valve body's couplings
     const crystal = (px, py, pz, kind, h) => { const n = 2 + Math.floor(r() * 3); for (let q = 0; q < n; q++) push(px + (r() - .5) * .007, py + (r() - .5) * .007, pz + (r() - .5) * .007, kind, k, Math.min(.999, h + .02 * r())); };
@@ -644,8 +654,10 @@ function frostCloud() {
     for (let j = 0; j < 160; j++) { const x = s * (KX0 + (KX1 - KX0) * r()), z = zc - KZ + 2 * KZ * r(); push(x, KY + .004 + .006 * r(), z, 3, k, r()); }
     for (let j = 0; j < 60; j++) { const a = r() * TAU, y = KY + .16 * r(); push(s * .45 + Math.cos(a) * .043, y, zc + .22 + Math.sin(a) * .043, 3, k, .3 + .7 * r()); }
   });
+  RG.push(A.length / 6);
   for (const s of [-1, 1]) for (let i = 0; i < 4200; i++) { const z = -2.0 + r() * (RZ1 - 1.8), a = r() * TAU, rr = .028 + .022 * r() * r(); push(s * .17 + Math.cos(a) * rr, .48 + Math.sin(a) * rr, z, 2, -1, r()); }
-  FROST.pts = new Float32Array(A); FROST.n = A.length / 6;
+  RG.push(A.length / 6);
+  FROST.pts = new Float32Array(A); FROST.n = A.length / 6; FROST.rng = RG;
   return null;
 }
 /* B: a preload clamp's wedge jaw at a band (s side; slides out s * 0.05 when unlocked) */
@@ -1333,6 +1345,8 @@ function build() {
     eoBase: lod(eoBase(), .4, LF), eoYoke: lod(eoYoke(), .4, LF), eoHead: lod(eoHead(), .4, LF), fcBase: lod(fcrBase(), .5, LF), fcHead: lod(fcrHead(), .5, LF),
     cradle: lod(cradle(), .8), barrel: lod(barrel(), .7, LM), rails: lod(railPrims(), .8), ins: lod(insPrims(), .8),
     coil: lod(coilPrims(), .45, LF), cryo: lod(cryoPrims(), .6, LF), frost: frostCloud(), cryoHero: lod(cryoPrims(COLD_HERO), .25, [.0025, .005, .01, .02, .04, .08]),
+    coilS: lod(coilPrims(1), .45, LF), coilP: lod(coilPrims(-1), .45, LF), cryoX: lod(cryoPrims({ not: [2 * XST, 2 * XST + 1] }), .6, LF),
+    cryoXP: lod(cryoPrims(2 * XST), .4, LF), cryoXS: lod(cryoPrims(2 * XST + 1), .4, LF),
     hpuBlock: lod(hpuBlock(), .3, LF), hpuSwash: lod(hpuSwash(), .3, LF), accPiston: lod(accPiston(), .3, LF),
     jawS: lod(jaw(1), .5, LF), jawP: lod(jaw(-1), .5, LF), breech: lod(breechBlock(), .6), petalT: lod(petal(1)), petalB: lod(petal(-1)),
     tray: lod(tray(), .6, LF), rhead: lod(rammerHead(), .4, LF), ramCyl: lod(ramCyl(), .5, LF), ramRod: lod(ramRod(), .5, LF), tpin: lod(trainPinion(), .4, LF),
@@ -1354,7 +1368,7 @@ window.RGP = {
   GZ, GY, M0, FL, CUT, TRN, SLV0, SLV1, EXT, MZ_E, RZ0, RZ1, ALT, ALT_FLIP, XALT, RACKS, MOD, BANDS, EL_LOAD,
   TRAY_Z, SEAT_Z, RND_H, RAM_L, HZ, HY0, HY1, DRUM_R, DRUM_Y, RND_Y0, NCELL, PIN_P, PUMPS, VALVES, FANS, CAB_X, CAB_Z, CAB_H, BRK, JOINTS,
   FROST, PETAL_HINGE, TUR_OCC, BR_OCC, RACK_OCC, CAB_OCC, MAG_CELL, SINK,
-  NST, STN, DZS, COLD, COLD_HERO, CXC, KX0, KX1, KY, KZ, CX, CY, RW, RY0, RY1, IX0, IX1,
+  NST, STN, DZS, COLD, COLD_HERO, XST, CXC, KX0, KX1, KY, KZ, CX, CY, RW, RY0, RY1, IX0, IX1,
   HYD: HYD.map(poly), HE_T: HE_T.map(poly), COOL_T: [-1, 1].map(s => poly(COOL_T(s))),
   EO_P, EO_H, EO_WIN, FC_P, FC_H, FC_A, MV_P, RAM_E, TD_P, RING_R, PIN_R, HPU, HYD_P: HYD_P.map(poly), HEC, BUS_ANCH, FEED_B, PST, stCoil,
   BUS_A: BUS_A.map(poly), BUS_B: BUS_B.map(poly), BUS_C: BUS_C.map(poly),

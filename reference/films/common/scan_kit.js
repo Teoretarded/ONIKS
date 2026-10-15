@@ -37,14 +37,39 @@ K.govern = (ms, info) => {
 };
 let pb = null, D = null, C = null, octx = null;
 
-function setup() {
+/* o (optional): { menuDim: k (the dot raster darkened by k in the menu's band, stage y 860-1010, eased in and out
+   over 40 px, so the menu row reads over bright dots), roBack: true (the readout on the tags' dark backing) } */
+function setup(o) {
+  o = o || {};
   for (const id of ['c', 'o']) { const cv = $(id); if (cv && (cv.width !== BW || cv.height !== BH)) { cv.width = BW; cv.height = BH; } }
   pb = new PointBuf($('c'), [11, 12, 10], { vignette: .55 }); D = pb.d;
   octx = $('o').getContext('2d');
   C = new Cam(BW, BH);
   Object.assign(K, { C, pb, octx });
+  K.menuDim = o.menuDim || 0;
+  const blit0 = pb.blit.bind(pb);
+  pb.blit = () => { if (K.menuDim > 0) dimBand(K.menuDim); blit0(); };
+  if (o.roBack) {
+    const s = document.createElement('style');
+    s.textContent = '#ro{background:rgba(11,12,10,.86);padding:5px 10px 4px 9px;margin:-5px 0 0 -9px}';
+    document.head.appendChild(s);
+  }
 }
 K.setup = setup;
+/* the menu band: dots pulled toward the background by k (the vignetted backdrop itself kept) */
+const DIM_Y0 = 860, DIM_Y1 = 1010, DIM_E = 40;
+function dimBand(k) {
+  const d = pb.d, bg = pb.bg, y0 = Math.max(0, Math.floor((DIM_Y0 - DIM_E) * SC)), y1 = Math.min(BH, Math.ceil((DIM_Y1 + DIM_E) * SC));
+  for (let y = y0; y < y1; y++) {
+    const ys = y / SC, w = k * (ys < DIM_Y0 ? E.ss(DIM_Y0 - DIM_E, DIM_Y0, ys) : ys > DIM_Y1 ? 1 - E.ss(DIM_Y1, DIM_Y1 + DIM_E, ys) : 1);
+    if (w < .005) continue;
+    const m = 1 - w;
+    for (let i = y * BW * 4, i1 = i + BW * 4; i < i1; i += 4) {
+      const b0 = bg[i], b1 = bg[i + 1], b2 = bg[i + 2];
+      d[i] = b0 + (d[i] - b0) * m; d[i + 1] = b1 + (d[i + 1] - b1) * m; d[i + 2] = b2 + (d[i + 2] - b2) * m;
+    }
+  }
+}
 
 /* ---------- raster ---------- */
 function dot(x, y, s, r, g, b, a) {
@@ -605,14 +630,25 @@ function mkTag() {
   const o = { el: d, b: d.children[0], i: d.children[1], v: d.children[2], key: '', on: false, w: -1 }; tagPool.push(o); return o;
 }
 const tagW = tg => { if (tg.w < 0) tg.w = tg.el.offsetWidth; return tg.w; };
-/* x, y: raster px (a projected point plus offsets scaled by K.S); the tag itself lives in the stage's 1920 x 1080 px */
-function setTag(tg, id, lab, val, cls, x, y, a) {
+/* text into an uppercased tag / readout: µ and its unit kept lower case (uppercased, "µm" reads "MM") */
+const ESC = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const MU = /[µμ][a-zA-Z]*/g, MU_H = m => '<span style="text-transform:none">µ' + m.slice(1) + '</span>';   // (the unit kept whole: µm, not µM)
+const muText = (el, s) => { s = s == null ? '' : String(s); if (MU.test(s)) { MU.lastIndex = 0; el.innerHTML = ESC(s).replace(MU, MU_H); } else el.textContent = s; };
+const muHTML = h => h.replace(MU, MU_H);
+/* x, y: raster px (a projected point plus offsets scaled by K.S); the tag itself lives in the stage's 1920 x 1080 px.
+   anc (optional, raster px [x, y]): the point the tag names; off screen, the tag is hidden */
+function tagText(tg, id, lab, val, cls) {
   const key = id + '|' + lab + '|' + val + '|' + (cls || '');
-  if (tg.key !== key) { tg.key = key; tg.w = -1; tg.b.textContent = id; tg.b.style.display = id ? '' : 'none'; tg.i.textContent = lab; tg.v.textContent = val || ''; tg.v.style.display = val ? '' : 'none'; tg.el.className = 'tag ' + (cls || ''); }
+  if (tg.key !== key) { tg.key = key; tg.w = -1; tg.h = -1; muText(tg.b, id); tg.b.style.display = id ? '' : 'none'; muText(tg.i, lab); muText(tg.v, val || ''); tg.v.style.display = val ? '' : 'none'; tg.el.className = 'tag ' + (cls || ''); }
+}
+const tagH = tg => { if (!(tg.h > 0)) tg.h = tg.el.offsetHeight || 20; return tg.h; };
+function setTag(tg, id, lab, val, cls, x, y, a, anc) {
+  tagText(tg, id, lab, val, cls);
+  if (anc && (anc[0] < 0 || anc[1] < 0 || anc[0] >= BW || anc[1] >= BH)) a = 0;
   if (SC !== 1) { x /= SC; y /= SC; }
   const w = tagW(tg);
-  // a tag pushed far off its anchor by the screen edge, or landing on the readout (top left), is hidden, not clamped
-  if (x > 1896 - w + 60 || x < -36 || y < -36 || y > 1100 || (x < 430 && y < 236) || y > 860) a = 0;   // (y > 860: the menu row)
+  // a tag the screen edge would push off its anchor, or landing on the readout (top left), is hidden, not clamped
+  if (x > 1896 - w + 10 || x < 14 || y < 14 || y > 1050 || (x < 430 && y < 236) || y > 860) a = 0;   // (y > 860: the menu row)
   tg.el.classList.remove('off');            // (a tag set again with the same text: endTags' .off must not linger under the inline opacity)
   if (x > 1896 - w) x = 1896 - w; if (x < 24) x = 24; if (y < 24) y = 24; if (y > 1040) y = 1040;
   tg.el.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
@@ -668,7 +704,29 @@ function bracket(b, col, a, len, lw) {
   octx.stroke(); octx.lineWidth = SC; octx.setLineDash(D24); octx.globalAlpha = a * .45; octx.strokeRect(x0, y0, x1 - x0, y1 - y0); octx.setLineDash([]); octx.globalAlpha = 1;
 }
 function leader(x0, y0, x1, y1, col, a) { octx.strokeStyle = col; octx.globalAlpha = a; octx.lineWidth = SC; octx.setLineDash(D23); octx.beginPath(); octx.moveTo(x0, y0); octx.lineTo(x1, y1); octx.stroke(); octx.setLineDash([]); octx.globalAlpha = 1; }
-Object.assign(K, { mkTag, setTag, beginTags, endTags, decode, flicker, bracket, leader, tagW });
+/* tags laid out together without overlapping: put() them (pri: higher keeps its place), then lay() sets them, each
+   nudged up or down a row off the ones already placed, or hidden when it still collides (raster px in, as setTag) */
+const LAYQ = [], LAYR = [];
+function put(tg, id, lab, val, cls, x, y, a, pri, anc, ld) { LAYQ.push({ tg, id, lab, val, cls, x, y, a, pri: pri || 0, anc, ld }); }
+function lay() {
+  LAYQ.sort((p, q) => q.pri - p.pri); LAYR.length = 0;
+  for (const t of LAYQ) {
+    tagText(t.tg, t.id, t.lab, t.val, t.cls);
+    const w = tagW(t.tg) + 4, h = tagH(t.tg) + 3, x = t.x / SC;
+    let y = t.y / SC, ok = t.a < .05;
+    if (!ok) for (const dy of [0, h, -h, 2 * h, -2 * h]) {
+      const yy = y + dy; let hit = false;
+      for (const r of LAYR) if (x < r[2] && x + w > r[0] && yy < r[3] && yy + h > r[1]) { hit = true; break; }
+      if (!hit) { y = yy; ok = true; break; }
+    }
+    if (!ok) t.a = 0;
+    else if (t.a >= .05) LAYR.push([x, y, x + w, y + h]);
+    setTag(t.tg, t.id, t.lab, t.val, t.cls, t.x, y * SC, t.a, t.anc);
+    if (t.ld && t.a >= .05) leader(t.ld[0], t.ld[1], t.ld[2], y * SC + t.ld[3], t.ld[4], t.ld[5]);   // (a leader to where it landed)
+  }
+  LAYQ.length = 0;
+}
+Object.assign(K, { mkTag, setTag, beginTags, endTags, decode, flicker, bracket, leader, tagW, muHTML, put, lay });
 
 /* ---------- the scan site: a coastal battery on a headland ----------
    Site frame: metres, origin on the plateau, +Z inland (north), sea to the south. o: { xf (site -> world),
@@ -1021,7 +1079,7 @@ function makeSite(o) {
         const cls = settled ? 'coral sm' : age > 0 ? 'lime sm' : 'sm';
         const lab = age < 0 ? 'UNKNOWN' : dec;
         const ta = A * (age < -.2 ? .55 : 1) * (age > ID_END + 2 ? Math.max(.5, 1 - (age - ID_END - 2) / 1.5) : 1);
-        setTag(v.tag, idd, lab, conf.toFixed(2), cls, box[0], box[1] - 24 * SC, ta);
+        put(v.tag, idd, lab, conf.toFixed(2), cls, box[0], box[1] - 24 * SC, ta, age > 0 && age < ID_END ? 5 : age > 0 ? 2 : 1 - .001 * px);
         if (age > 0 && age < ID_END) { const wa = A * E.sat(age / .2) * (1 - E.sat((age - ID_END + .6) / .6)); bracket(box, '#ffffff', wa * .9, 12); }
         else if (px > 10) { octx.strokeStyle = settled ? '#FF6A3D' : 'rgba(255,255,255,.6)'; octx.globalAlpha = A * .7; octx.lineWidth = SC; const c = Math.min(8, px * .3) * SC; const [x0, y0, x1, y1] = box; octx.beginPath(); for (const [bx, by, sx, sy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x1, y1, -1, -1], [x0, y1, 1, -1]]) { octx.moveTo(bx + sx * c, by); octx.lineTo(bx, by); octx.lineTo(bx, by + sy * c); } octx.stroke(); octx.globalAlpha = 1; }
       }
@@ -1036,12 +1094,16 @@ function makeSite(o) {
           const bb = [cxm + (b[0] - cxm) * (1.25 - .25 * pop), cym + (b[1] - cym) * (1.25 - .25 * pop), cxm + (b[2] - cxm) * (1.25 - .25 * pop), cym + (b[3] - cym) * (1.25 - .25 * pop)];
           bracket(bb, '#C6F432', A * out * (a < .1 ? (Math.floor(a * 60) % 2 ? .4 : 1) : 1), 9, 1.3);
           const lab = K.decode(q.lab, E.sat((a - .08) / .7), T, kk * 5 + v.seed);
-          const tx = kk % 2 ? bb[2] + 8 * SC : bb[0] - (8 + K.tagW(q.tg)) * SC;
-          setTag(q.tg, q.id, lab, '', 'lime sm', tx, kk % 2 ? bb[1] : bb[3] - 18 * SC, A * out);
-          leader(kk % 2 ? bb[2] : bb[0], kk % 2 ? bb[1] + 9 * SC : bb[3] - 9 * SC, kk % 2 ? bb[2] + 8 * SC : bb[0] - 8 * SC, kk % 2 ? bb[1] + 9 * SC : bb[3] - 9 * SC, '#C6F432', .8 * A * out);
+          // the first on the box's left (low), the next two on its right (high, low): the third no longer lands on the first
+          const rt = kk > 0, lo = kk !== 1;
+          tagText(q.tg, q.id, lab, '', 'lime sm');
+          const tx = rt ? bb[2] + 8 * SC : bb[0] - (8 + K.tagW(q.tg)) * SC, ty = lo ? bb[3] - 18 * SC : bb[1];
+          const lx0 = rt ? bb[2] : bb[0], lx1 = rt ? bb[2] + 8 * SC : bb[0] - 8 * SC;
+          put(q.tg, q.id, lab, '', 'lime sm', tx, ty, A * out, 4 - kk * .1, null, [lx0, ty + 9 * SC, lx1, 9 * SC, '#C6F432', .8 * A * out]);
         });
       }
     }
+    lay();
   }
   Object.assign(site, { drawGround, drawVehicles, drawBolt, overlay, ringG, TF, ID_END });
   return site;
