@@ -20,7 +20,7 @@ const PI = Math.PI, TAU = 2 * PI;
    hairline or a lit lattice, a ring's dot count, a knot as a dot or a cube) crossfade over a band instead of popping,
    one-sided faces fade out as they turn edge-on, and what is behind a fading occluder is dimmed (ORK.occK) */
 const BW = ORK.BW, BH = ORK.BH, SMOOTH = !!ORK.SMOOTH;
-const LIME = [198, 244, 50], HOT = [248, 255, 232], WH = [238, 238, 228];
+const LIME = [198, 244, 50], HOT = [248, 255, 232], WH = [238, 238, 228], CORAL = [255, 106, 61];
 const CTZ = new Uint8Array(65536); CTZ[0] = 16;
 const IP2 = new Float32Array(17); for (let i = 0; i < 17; i++) IP2[i] = 1 / (1 << i);
 for (let i = 1; i < 65536; i++) { let c = 0, v = i; while (!(v & 1)) { v >>= 1; c++; } CTZ[i] = c; }
@@ -206,12 +206,19 @@ const shade = (lam, fac) => { const w = 1 - fac; let b = .07 + .72 * (lam > 0 ? 
 /* colour state for the current primitive */
 let CR = 0, CG = 0, CB = 0, CA = 1, EM = 0;
 const O = { a: 1, col: WH, lime: 0, fx: null, keep: 1, pxf: 1, back: .11, occ: false, lc: [255, 255, 255] };
-/* fx(ch, q) -> 0..1 lime, 1..2 lime to white-hot, < 0 dimmed, 10..11 heat (warm), 11..12 heat to white-hot */
+/* fx(ch, q) -> 0..1 lime, 1..2 lime to white-hot, < 0 dimmed, 10..11 heat (warm), 11..12 heat to white-hot, 20..21 grey-dim to
+   coral, 21..22 coral to white-hot */
 const HEAT = [255, 178, 112];
 function setCol(ch, q) {
   const c = O.col; let l = O.lime, a = O.a, h = 0, w = 0;
   if (ch && O.fx) {
     const k = O.fx(ch, q);
+    if (k >= 20) {         // coral (20..21: grey-dim to coral; 21..22: coral to white-hot)
+      const c = Math.min(1, k - 20), hh = k > 21 ? Math.min(1, k - 21) : 0;
+      CR = O.col[0] + (CORAL[0] - O.col[0]) * c; CG = O.col[1] + (CORAL[1] - O.col[1]) * c; CB = O.col[2] + (CORAL[2] - O.col[2]) * c;
+      if (hh > 0) { CR += (HOT[0] - CR) * hh; CG += (HOT[1] - CG) * hh; CB += (HOT[2] - CB) * hh; }
+      EM = Math.max(c * .8, hh); CA = a * (.5 + .8 * c) * G.am; return;
+    }
     if (k >= 10) { w = Math.min(1, k - 10); if (k > 11) h = Math.min(1, k - 11); a *= 1 + .7 * w; }
     else if (k < 0) a *= Math.max(0, 1 + k);
     else if (k > 0) { if (k > l) l = Math.min(1, k); if (k > 1) h = Math.min(1, k - 1); a *= 1 + .6 * Math.min(1, k); }

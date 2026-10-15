@@ -5,8 +5,8 @@
              round (a glow swelling in the bore, rings of light at the coils), a big white flash and a lime halo over
              the crown, gas venting sideways out of eight ports round it, a plume of plasma outrunning the round (it
              swallows it) with big shock rings racing ahead of it, a cone of sparks; the sabot (the round's own: r 0.96
-             m, 8.4 m with its nose taper and 0.9 m base) splitting into four petals that hinge open from the base and
-             are flung off tumbling, with a disc of chips spreading round the rod's path
+             m, 8.4 m with its nose taper and 0.9 m base) splitting into three petals (the fab's) that peel open from the
+             base inside the first 15 ms and are flung off tumbling, with a disc of chips spreading round the rod's path
      fall    the rod (a closed shell) entering the air: a plasma sheath flowing back off its nose under an elongated
              bow shock (a paraboloid running into a long narrow cone; never a ball), an ionised wake, shock rings
              rippling down the cone on its surface (faded end-on), a growing column of hot gas and smoke that glows
@@ -26,7 +26,7 @@ window.ORFX = function (K, L, W, cfg) {
 const { V, R, X, E, rng, noise } = M3;
 const PI = Math.PI, TAU = 2 * PI, DEG = PI / 180;
 const C = K.C, LIME = K.LIME, HOT = K.HOT, WH = K.WH;
-const FIRE = [255, 196, 138], EMB = [255, 142, 84], DUST = [224, 226, 216], GREY = [150, 152, 146], SMK = [74, 76, 72];
+const FRONT = [255, 236, 204], FIRE = [255, 196, 138], EMB = [255, 142, 84], DUST = [224, 226, 216], GREY = [150, 152, 146], SMK = [74, 76, 72];
 const ss = E.ss;
 const BW = K.BW, BH = K.BH, SPX = K.S;                // (the raster: STAGE.RES; SPX stage px -> raster px)
 const HIT = W.HIT;
@@ -60,7 +60,8 @@ const mixc = (a, b, t, o) => { o[0] = a[0] + (b[0] - a[0]) * t; o[1] = a[1] + (b
 const CC = [0, 0, 0];
 /* sin / cos tables (any angle), hashes */
 const SNT = new Float32Array(4096); for (let i = 0; i < 4096; i++) SNT[i] = Math.sin(i / 4096 * TAU);
-const fs = a => SNT[((a * 651.8986469 + 1e6) | 0) & 4095], fc = a => SNT[((a * 651.8986469 + 1e6 + 1024) | 0) & 4095];
+/* (the offset is a whole number of turns, 245 x 4096: an offset of 1e6 put every ring 0.88 rad off its bearing) */
+const fs = a => SNT[((a * 651.8986469 + 1003520) | 0) & 4095], fc = a => SNT[((a * 651.8986469 + 1003520 + 1024) | 0) & 4095];
 const HH1 = new Float32Array(9000), HH2 = new Float32Array(9000); { const r = rng(4747); for (let i = 0; i < 9000; i++) { HH1[i] = r(); HH2[i] = r(); } }
 const hz1 = i => HH1[(i >>> 0) % 9000], hz2 = i => HH2[(i >>> 0) % 9000];
 /* the strike's state for this frame (set by cam(T, FC), which the film calls first, and by trail()) */
@@ -81,19 +82,24 @@ const NVT = 3200, VTP = (() => { const r = rng(5353), A = new Float32Array(NVT *
 /* m muzzle (world), d bore direction, U W perpendiculars, ax film s since the round left */
 function shot(m, d, U, Wd, ax, vis) {
   cam();
-  if (ax < -.05 || ax > 4.2) return;
+  if (ax < -.05 || ax > 8) return;
   vis = vis === undefined ? 1 : vis;
-  const tau = tauX(ax), A = vis * Math.max(0, 1 - ax / 4.2);
+  // (everything keyed on the sim time since the exit, tau: it reads the same at x1/20 or x1/100)
+  const tau = tauX(ax), A = vis * (1 - ss(.12, .3, tau));
+  if (A < .01) return;
   // the flash as the last rings discharge into the round and it leaves: a white bloom over the crown, a lime halo
-  if (ax < 1.6) {
-    const f1 = Math.exp(-Math.max(0, ax) * 4.2) * Math.min(1, (ax + .05) * 20);
+  if (tau < .08) {
+    const f1 = Math.exp(-Math.max(0, tau) / .007) * Math.min(1, (ax + .05) * 20);
     K.glowW(m[0], m[1], m[2], Math.round(90 + 620 * f1), HOT, Math.min(1, 1.35 * f1) * A);
-    K.glowW(m[0], m[1], m[2], 380, LIME, .45 * Math.exp(-Math.max(0, ax) * 1.8) * A);
+    K.glowW(m[0], m[1], m[2], 380, LIME, .45 * Math.exp(-Math.max(0, tau) / .016) * A);
   }
   if (tau <= 0) return;
   // vented gas: eight jets blowing out sideways round the crown, white then lime, spreading and thinning
   if (tau < .12) {
     const vv = 1900 * tau, va = A * Math.exp(-tau / .035);
+    // a hot jet core out of each of the eight ports (a glow riding out along it)
+    for (let q = 0; q < 8; q++) { const th = (q + .5) / 8 * TAU, ca = Math.cos(th), sa = Math.sin(th), rq = 1.4 + vv * .35;
+      K.glowW(m[0] + (U[0] * ca + Wd[0] * sa) * rq - d[0] * 2.5, m[1] + (U[1] * ca + Wd[1] * sa) * rq - d[1] * 2.5, m[2] + (U[2] * ca + Wd[2] * sa) * rq - d[2] * 2.5, 26, tau < .02 ? HOT : LIME, .5 * va); }
     for (let i = 0; i < NVT; i++) {
       const o = i * 4, th = VTP[o], u = VTP[o + 1], j = VTP[o + 2], hq = VTP[o + 3], r_ = 1.4 + vv * u, w = (.25 + .22 * u) * r_ * j;
       const ca = Math.cos(th), sa = Math.sin(th), bk = -2.5 - .25 * r_ * hq;
@@ -144,7 +150,7 @@ function bore(b0, d, z0, z1, T) {
   }
 }
 
-/* ---------- the sabot: four petals (quarter shells of the round's sabot, r 0.96 m, 8.4 m long with its tapered nose and
+/* ---------- the sabot: three petals (third shells of the round's sabot, r 0.96 m, 8.4 m long with its tapered nose and
    its 0.9 m base, from CTX.ROUND) hinging open from the base, then thrown off and tumbling; with a disc of chips from
    the base and the seals spreading round the rod (rod-relative; tau from the film's clock) ---------- */
 const SB_R = .96, SB_IN = .27, SB_L = 8.4, SB_B = .9, SB_TP = 1.6;
@@ -152,11 +158,11 @@ const PETAL = (() => {
   const r = rng(5454), P = [];
   const rad = s => s > SB_L / 2 - SB_TP ? SB_R - (SB_R - .57) * (s - (SB_L / 2 - SB_TP)) / SB_TP : SB_R;
   for (let i = 0; i < 1500; i++) {
-    const k = r(), s = -SB_L / 2 - SB_B + (SB_L + SB_B) * r(), ph = (r() - .5) * PI / 2 * .96;
+    const k = r(), s = -SB_L / 2 - SB_B + (SB_L + SB_B) * r(), ph = (r() - .5) * TAU / 3 * .96;
     // the outer skin (most), the inner face against the rod, the cut edges, the base's solid quarter
     if (k < .62) P.push(s, ph, rad(Math.max(s, -SB_L / 2)), 1);
     else if (k < .74) P.push(s, ph, SB_IN, 0);
-    else if (k < .9) P.push(s, (r() < .5 ? -1 : 1) * PI / 4 * .96, SB_IN + (rad(Math.max(s, -SB_L / 2)) - SB_IN) * r(), 2);
+    else if (k < .9) P.push(s, (r() < .5 ? -1 : 1) * PI / 3 * .96, SB_IN + (rad(Math.max(s, -SB_L / 2)) - SB_IN) * r(), 2);
     else { const sb = -SB_L / 2 - SB_B * r(); P.push(sb, ph, SB_IN + (SB_R - SB_IN) * Math.sqrt(r()), 3); }
   }
   return new Float32Array(P);
@@ -166,11 +172,11 @@ function petals(p, d, U, Wd, ax, vis) {
   cam();
   const tau = tauX(ax); if (tau < 0 || tau > 2.5) return;
   const A = (vis === undefined ? 1 : vis) * (1 - ss(1.2, 2.5, tau)), sL = SUNL;
-  for (let k = 0; k < 4; k++) {
-    const ang = k / 4 * TAU + PI / 4, rx = Math.cos(ang), ry = Math.sin(ang);
+  for (let k = 0; k < 3; k++) {
+    const ang = k / 3 * TAU + PI / 6, rx = Math.cos(ang), ry = Math.sin(ang);
     const ra = [U[0] * rx + Wd[0] * ry, U[1] * rx + Wd[1] * ry, U[2] * rx + Wd[2] * ry], ta = [U[0] * -ry + Wd[0] * rx, U[1] * -ry + Wd[1] * rx, U[2] * -ry + Wd[2] * rx];
     // hinging open about the base's outer edge, then flung off and tumbling (sim seconds)
-    const t1 = Math.max(0, tau - .005), al = .52 * ss(.003, .028, tau) + (5 + 3 * k) * Math.max(0, tau - .02) * (k % 2 ? 1 : -.8);
+    const t1 = Math.max(0, tau - .005), al = .62 * ss(.002, .016, tau) + (5 + 3 * k) * Math.max(0, tau - .02) * (k % 2 ? 1 : -.8);
     const out = (85 + 28 * k) * t1, back = (9 + 4 * k) * t1, ca = Math.cos(al), sa = Math.sin(al);
     const hx = p[0] + d[0] * (-SB_L / 2 - SB_B - back) + ra[0] * (SB_R + out), hy = p[1] + d[1] * (-SB_L / 2 - SB_B - back) + ra[1] * (SB_R + out), hz = p[2] + d[2] * (-SB_L / 2 - SB_B - back) + ra[2] * (SB_R + out);
     const glow = Math.exp(-tau / .02);
@@ -220,10 +226,14 @@ function sheath(p, D, U, Wd, heat, T) {
   cam();
   const px = p[0], py = p[1], pz = p[2];
   const dist = Math.max(1, Math.hypot(px - ex, py - ey, pz - ez)), ppm = FL / dist;
+  // the entry glow builds from 125 km (the first faint ionisation), whatever the film passes
+  const alt = Math.hypot(px - W.CE[0], py - W.CE[1], pz - W.CE[2]) - W.RE;
+  heat = Math.max(heat, Math.pow(ss(125000, 45000, alt), 1.25));
   // in the vacuum a closed shell catching the sun (the film draws it); far away only a point so it still reads
   if (heat < .015) { if (ppm < .45 * SPX) { dotW(px, py, pz, 2, HOT, 1); K.glowW(px, py, pz, 9, LIME, .35); } return; }
-  const alt = Math.hypot(px - W.CE[0], py - W.CE[1], pz - W.CE[2]) - W.RE;
   const h = heat, lo = ss(32000, 6000, alt);
+  // far away (the drop, the ground view) a hot point with a halo, so the incoming rod always reads
+  if (ppm < 2 * SPX) { const k = 1 - ppm / (2 * SPX); K.glowW(px, py, pz, Math.round(18 + 50 * h + 40 * lo), HOT, (.35 + .4 * h) * k); K.glowW(px, py, pz, Math.round(60 + 140 * h), FIRE, (.12 + .18 * h + .2 * lo) * k); dotW(px, py, pz, 2, HOT, 1); }
   // how end-on the view is (1: along the axis): rings and cones fade there
   const vd = Math.abs((px - ex) * D[0] + (py - ey) * D[1] + (pz - ez) * D[2]) / dist, side = 1 - ss(.62, .9, vd);
   // sizes (m): the bow shock's nose radius, the shoulder, the cone, the hot wake
@@ -287,6 +297,37 @@ function sheath(p, D, U, Wd, heat, T) {
       const cxr = nx - D[0] * xr, cyr = ny - D[1] * xr, czr = nz - D[2] * xr;
       ringB(cxr, cyr, czr, U, Wd, rr, n, uq < .25 ? HOT : WH, al, kq * .9, .06 + .06 * uq, .2 + .25 * uq);
       if (uq < .45) ringB(cxr + D[0] * rr * .05, cyr + D[1] * rr * .05, czr + D[2] * rr * .05, U, Wd, rr * .96, Math.round(n * .6), FIRE, al * .5, kq * 1.3, .05, .3);
+    }
+  }
+}
+
+/* the altitude ladder: a gauge riding beside the rod (7 m off it, away from the lens), a tick every 5 km of altitude
+   (10 km marks long, with their height in a dot font facing the lens), 4 m apart along the rod's axis, so they
+   scroll past its nose as it falls (the nose marks the rod's own height); the mark it is passing flares lime (the
+   rod is ours). Only while the lens rides near the rod */
+const GLY = { '0': '111101101101111', '1': '010110010010111', '2': '111001111100111', '3': '111001111001111', '4': '101101111001001', '5': '111100111001111', '6': '111100111101111', '7': '111001010010010', '8': '111101111101111', '9': '111101111001111', 'K': '101101110101101', 'M': '101111111101101', ' ': '000000000000000' };
+const LAD_K = 8 / 10000;
+function ladder(F, T, p) {
+  if (!CI || !FCs) return;
+  const dR = Math.hypot(p[0] - ex, p[1] - ey, p[2] - ez), vis = (1 - ss(90, 400, dR)) * ss(FCs.T_ON - 1.4, FCs.T_ON, T) * (1 - ss(.55, .8, Math.abs(f0 * F.DIR[0] + f1 * F.DIR[1] + f2 * F.DIR[2]))); if (vis < .02) return;
+  const D = F.DIR, Sd = CI.SD, Ud = CI.UD, hR = FCs.altOf(p);
+  const ox0 = p[0] - Sd[0] * 7 + Ud[0] * 2.5, oy0 = p[1] - Sd[1] * 7 + Ud[1] * 2.5, oz0 = p[2] - Sd[2] * 7 + Ud[2] * 2.5;
+  // the spine: a faint line of dots along the gauge
+  for (let k = -80; k <= 110; k++) { const x = k * .3; dotW(ox0 + D[0] * x, oy0 + D[1] * x, oz0 + D[2] * x, 1, WH, vis * .22 * (1 - Math.abs(k) / 95)); }
+  const h0 = Math.ceil((hR - 24 / LAD_K) / 5000) * 5000;
+  for (let h = h0; h <= hR + 18 / LAD_K && h >= 0; h += 5000) {
+    if (h > 400000) break;
+    const x = (hR - h) * LAD_K, fade = 1 - ss(12, 22, Math.abs(x)), major = h % 10000 === 0, cur = Math.abs(x) < .9;
+    const a = vis * fade * (major ? 1 : .6), col = cur ? LIME : WH;
+    const bx = ox0 + D[0] * x, by = oy0 + D[1] * x, bz = oz0 + D[2] * x, Lt = major ? 3.2 : 1.6;
+    for (let k = 0; k < (major ? 40 : 20); k++) { const q = -k * .08; dotW(bx + Sd[0] * q, by + Sd[1] * q, bz + Sd[2] * q, 1, col, a); }
+    if (!major) continue;
+    const txt = String(Math.round(h / 1000)) + ' KM', cw = .2;
+    const oxl = bx - Sd[0] * Lt + u0 * .9, oyl = by - Sd[1] * Lt + u1 * .9, ozl = bz - Sd[2] * Lt + u2 * .9;
+    for (let c = 0; c < txt.length; c++) {
+      const g = GLY[txt[c]]; if (!g) continue;
+      for (let j = 0; j < 15; j++) { if (g[j] !== '1') continue; const gx = (c * 4 + j % 3) * cw, gy = (2 - ((j / 3) | 0)) * cw;
+        for (let s2 = 0; s2 < 4; s2++) { const jx = gx + (s2 & 1) * cw * .5, jy = gy + (s2 >> 1) * cw * .5; dotW(oxl + r0 * jx + u0 * jy, oyl + r1 * jx + u1 * jy, ozl + r2 * jx + u2 * jy, 1, col, a * .95); } }
     }
   }
 }
@@ -382,6 +423,8 @@ function trail(F, T, vis) {
       }
     }
   }
+  // the altitude ladder beside the rod
+  if (FCs && T > FCs.TX && T < FCs.TI) ladder(F, T, FCs.rodAt(T));
   // the forest round the site (standing, then flattened by the strike)
   W.drawForest(FRAME.a, T, 1);
   W.drawHero(FRAME.a, T, 1);
@@ -434,8 +477,17 @@ const setProf = o => { PT = o; };
 function graze(r) { const dx = HIT[0] - ex, dz = HIT[2] - ez, d = Math.max(1, Math.hypot(dx, dz) - r * .5), dep = (ey - HIT[1]) / d; return .16 + .84 * ss(.01, .2, Math.abs(dep)); }
 /* the battery's vehicles: the four in the crater torn apart (each part flung on its own, glowing), the outer four
    tossed whole, tumbling, landing as wrecks */
-const VT = W.VEHS.map((v, vi) => {
-  const r = rng(8100 + vi), inner = v.d < 60, aH = arrive(v.d), ux = (v.x - HIT[0]) / v.d, uz = (v.z - HIT[2]) / v.d;
+/* (the facility's movers, ORTGT.movers() -> [{ parts: [{ ml }], W: { R, T } }]: vehicles, jets, cranes, tossed or torn
+   apart here from the front's arrival on; the facility stops drawing a mover once a > FX.arrive(its distance)) */
+let VT = null;
+function vtList() {
+  if (VT) return VT;
+  const L = W.VEHS.slice(), T_ = window.ORTGT;
+  if (T_ && typeof T_.movers === 'function') for (const m of T_.movers() || []) { const x = m.W.T[0], z = m.W.T[2]; L.push({ parts: m.parts, W: m.W, x, z, d: Math.max(1, Math.hypot(x - HIT[0], z - HIT[2])), c: m.W.T.slice() }); }
+  return (VT = L.map(mkVT));
+}
+function mkVT(v, vi) {
+  const r = rng(8100 + vi), inner = v.d < 320, aH = arrive(v.d), ux = (v.x - HIT[0]) / v.d, uz = (v.z - HIT[2]) / v.d;
   const mk = () => ({ R: [1, 0, 0, 0, 1, 0, 0, 0, 1], T: [0, 0, 0] });
   const parts = v.parts.map(p => {
     const mn = p.ml.mn, mx = p.ml.mx, pc = [(mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2, (mn[2] + mx[2]) / 2];
@@ -446,13 +498,13 @@ const VT = W.VEHS.map((v, vi) => {
   const v0 = inner ? 0 : 52 * Math.pow(190 / v.d, 1.4) * (.85 + .3 * r()), vy = v0 * (.42 + .2 * r()), ax = V.norm([uz + (r() - .5) * .4, (r() - .5) * .3, -ux + (r() - .5) * .4]);
   const tl = vy * 2 / 9.81, k = Math.max(1, Math.round((2.2 + 1.2 * r()) * tl / PI)), om = (k * PI + (r() < .5 ? 0 : PI * .5)) / Math.max(.3, tl);
   return { v, inner, aH, ux, uz, parts, v0, vy, ax, om, tl, Tw: mk() };
-});
+}
 /* rotation about a unit axis by angle (row-major) into o */
 function rotAx(ax, ang, o) { const c = Math.cos(ang), s = Math.sin(ang), k = 1 - c, x = ax[0], y = ax[1], z = ax[2]; o[0] = c + x * x * k; o[1] = x * y * k - z * s; o[2] = x * z * k + y * s; o[3] = y * x * k + z * s; o[4] = c + y * y * k; o[5] = y * z * k - x * s; o[6] = z * x * k - y * s; o[7] = z * y * k + x * s; o[8] = c + z * z * k; return o; }
 function mul3(A, B, o) { for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) o[i * 3 + j] = A[i * 3] * B[j] + A[i * 3 + 1] * B[3 + j] + A[i * 3 + 2] * B[6 + j]; return o; }
 const RT1 = new Array(9).fill(0), VOPT = { a: 1.25, fade: 1600, px: 3.2, px0: 10, keep: 1, tint: HOT, tk: 0 };
 function vehicles(a, vis) {
-  for (const t of VT) {
+  for (const t of vtList()) {
     const tau = a - t.aH; if (tau <= 0) continue;
     const v = t.v, Rv = v.W.R, glow = Math.exp(-tau * 2.2);
     VOPT.a = 1.25 * vis; VOPT.tint = glow > .3 ? HOT : FIRE;
@@ -504,7 +556,7 @@ function sPlasma(a, vis, hx, hy, hz) {
 const NLY = 14000, LYP = (() => { const r = rng(7575), A = new Float32Array(NLY * 3); for (let i = 0; i < NLY; i++) { A[i * 3] = (i + r()) / NLY - .5; A[i * 3 + 1] = i % 5 < 3 ? .96 + .04 * r() : Math.pow(r(), .7) * .9; A[i * 3 + 2] = r(); } return A; })();
 function sLayers(a, vis, hx, hy, hz) {
   if (a < .2 || a > 10) return;
-  const eh = ey - hy, win = .7 + (PI - .7) * ss(150, 700, eh), th0 = Math.atan2(ez - hz, ex - hx), cr = a < 1.5 ? HOT : LIME;
+  const eh = ey - hy, win = .7 + (PI - .7) * ss(150, 700, eh), th0 = Math.atan2(ez - hz, ex - hx), cr = a < 1.5 ? HOT : FRONT;
   for (let k = 0; k < 3; k++) {
     const ak = a - k * .08; if (ak <= .15) continue;
     const R0 = shockR(ak) - 4 * k, Hs = (16 + .05 * R0) * (1 - .22 * k), al = vis * ss(.2, .55, a) * Math.exp(-ak / 4.2) * (k ? .55 / k : 1) * (.45 + .55 * graze(R0));
@@ -563,6 +615,18 @@ function sFoot(a, vis, hx, hy, hz) {
       }
     }
   }
+  // the ground ripple: three low swells of soil running out behind the front, read from above as rings on the land
+  if (a > .3 && a < 14) {
+    const R0 = shockR(a);
+    for (let j = 1; j <= 3; j++) {
+      const Rr = R0 - j * (30 + 6 * a), al = vis * ss(.3, .8, a) * Math.exp(-a / 7) * (1 - .25 * j) * graze(Rr); if (al < .02 || Rr < 60) continue;
+      const n = Math.min(7000, Math.round(TAU * Rr / 2.4)), amp = 2.5 + 1.2 * j;
+      for (let k = 0; k < n; k++) {
+        const th = (k + HH2[(k + j * 977) % 9000]) / n * TAU, h1 = HH1[(k * 3 + j * 131) % 9000], rr = Rr + (h1 - .5) * 9, g = gP(rr, th);
+        dotW(hx + fc(th) * rr, g + .6 + amp * (1 - 4 * (h1 - .5) * (h1 - .5)), hz + fs(th) * rr, 1, DUST, al * (.5 + .5 * h1));
+      }
+    }
+  }
 }
 function sSurge(a, vis, hx, hy, hz) {
   // the dust skirt (base surge): a billowing wall rolling out over the ground, lit from the sun, thinning behind
@@ -618,7 +682,8 @@ function sCrater(a, vis, hx, hy, hz) {
   { const dh = Math.hypot(hx - ex, hz - ez), dep = (ey - hy) / Math.max(1, dh); vis *= ss(.02, .12, dep) * (1 - .85 * pedA(a)); if (vis < .02) return; }
   const CR = W.CRA, R0 = CR.R, SUN = W.SUN, RAY = W.RAY, RN = W.RAYN, RL = CR.RL;
   const dc = Math.max(1, Math.hypot(hx - ex, hy - ey, hz - ez)), ppm = FL / dc;
-  const hot = Math.min(1, 1.25 * Math.exp(-a / 70)) * g, al = vis * (.35 + .65 * ss(0, .6, a));
+  const hot = Math.min(1, 1.25 * Math.exp(-a / 70)) * g, al = vis * (.5 + .7 * ss(0, .6, a));
+  K.glowW(hx, hy - CR.D * .6 * g, hz, Math.min(420, Math.round(R0 * 1.3 * ppm / SPX)), FIRE, .5 * hot * vis); K.glowW(hx, hy - CR.D * .7 * g, hz, Math.min(260, Math.round(R0 * .55 * ppm / SPX)), HOT, .35 * hot * vis);
   // the bowl: dots on the deformed surface, lit from its slope, the floor hot
   const nb = Math.min(NCB, Math.max(300, Math.round(R0 * R0 * ppm * ppm * 1.2)));
   for (let i = 0; i < nb; i++) {
@@ -635,17 +700,17 @@ function sCrater(a, vis, hx, hy, hz) {
     for (let k = 0; k < nr; k++) {
       const th = (k + .5 * ring) / nr * TAU, j = 1 + .03 * fs(th * 9) + .02 * fs(th * 23 + 1), ct = fc(th), st_ = fs(th);
       const lit = .45 + .55 * Math.max(0, ct * SUN[0] + st_ * SUN[2] + .3);
-      dotL(hx + ct * rr * j, yr, hz + st_ * rr * j, lut(hot * .7 * (ring ? .4 : 1), lit), al * (ring ? .55 : .9), 1);
+      dotL(hx + ct * rr * j, yr, hz + st_ * rr * j, lut(hot * .7 * (ring ? .4 : 1), lit), al * (ring ? .75 : 1.1), ring ? 1 : 2);
     }
   }
   // the rays: streaks of bright ejecta from the rim out over the blanket, along the land's own rays
-  const nry = Math.min(NRY, Math.max(900, Math.round(R0 * R0 * 8 * ppm * ppm * .6)));
+  const nry = Math.min(NRY, Math.max(1500, Math.round(R0 * R0 * 8 * ppm * ppm)));
   for (let i = 0; i < nry; i++) {
     const o = i * 3; let th = RYP[o + 1]; const k = (th * (RN / TAU)) | 0, ry = RAY[k & (RN - 1)]; if (ry < .25) continue;
     const L = RL[k & (RN - 1)], u = 1 + (L - 1) * Math.pow(RYP[o], 1.6), d = u * R0 * (.5 + .5 * g);
     th += (RYP[o + 2] - .5) * .012;
     const ct = fc(th), st_ = fs(th), y = W.gPc(d, th) + .4;
-    const b = Math.min(1, 1.35 * al * ry * (1 - (u - 1) / (L - 1 + .01)) * (.5 + .5 * RYP[o + 2]));
+    const b = Math.min(1, 1.9 * al * ry * (1 - .8 * (u - 1) / (L - 1 + .01)) * (.5 + .5 * RYP[o + 2]));
     dotL(hx + ct * d, y, hz + st_ * d, lut(hot * .5 * Math.exp(-(u - 1) * 2), .75 + .25 * RYP[o + 2]), b, 1);
   }
 }
@@ -849,6 +914,127 @@ function cloudShadow(a) {
   S.x = HIT[0] + kx * Hc; S.z = HIT[2] + kz * Hc; S.r = (capMaj(a) + capTub(a) * .8); S.sx = HIT[0]; S.sz = HIT[2]; S.sw = stemR(.5, a) * 1.1;
   S.k = .62 * ss(2, 8, a) * (1 - ss(90, 110, a));
 }
+/* ================= the facility's destruction (the target: window.ORTGT) =================
+   The facility module (pc_orbital_railgun_target.js) draws the halls, the lines and the parked vehicles with their own
+   destruction state (a, the shock radius); this layer adds the effects round them, structure by structure, keyed on
+   the shock's arrival there (arrive(d)): roofs torn off as tumbling plates, dust and glass jetting out of the walls on
+   the side away from the strike, the collapse dust boiling up out of the footprint and drifting, fires in the
+   wreckage with smoke leaning downwind, and a debris field strewn outward over the ground. Inside the crater
+   (d < 1.15 R) a structure is simply gone (the ejecta take it).
+   The structures come from ORTGT.sites() -> [{ x, z, w, d, h, yaw, kind }] (world metres, the footprint's centre,
+   size along its own x / z, height; kind 'hall' | 'tower' | 'tank' | 'pad' | 'veh'). Until the facility lands, a
+   placeholder layout of halls round HIT (effects only) so the strike can be filmed. */
+const TG_ = { S: null };
+function tgPlaceholder() {
+  const r = rng(6464), L = [];
+  for (let i = 0; i < 46; i++) {
+    const ang = r() * TAU, d = 230 + Math.pow(r(), .7) * 1100, x = HIT[0] + Math.cos(ang) * d, z = HIT[2] + Math.sin(ang) * d;
+    if (W.ground(x, z) < 1) continue;
+    const big = r() < .35;
+    L.push({ x, z, w: big ? 120 + 160 * r() : 30 + 50 * r(), d: big ? 50 + 50 * r() : 20 + 30 * r(), h: big ? 18 + 12 * r() : 8 + 10 * r(), yaw: Math.round(r() * 4) * PI / 2 + .3, kind: big ? 'hall' : 'shed' });
+  }
+  return L;
+}
+function tgSites() {
+  if (TG_.S) return TG_.S;
+  const T_ = window.ORTGT, src = T_ && typeof T_.sites === 'function' ? T_.sites() : null, L = src && src.length ? src : tgPlaceholder();
+  const r = rng(6565), S = [];
+  for (const s of L) {
+    const dx = s.x - HIT[0], dz = s.z - HIT[2], dd = Math.max(1, Math.hypot(dx, dz));
+    const fp = Math.max(1, s.w * s.d), sz = Math.sqrt(fp);
+    S.push({ x: s.x, z: s.z, y: W.ground(s.x, s.z) - W.drop(s.x, s.z), w: s.w, dd: s.d, h: s.h || 10, yaw: s.yaw || 0, kind: s.kind || 'hall', d: dd, ux: dx / dd, uz: dz / dd, th: Math.atan2(dz, dx),
+      aH: arrive(dd), sz, nPl: Math.round(Math.min(40, Math.max(6, fp / 140))), fire: r() < (dd < 900 ? .75 : .35), seed: (r() * 1e6) | 0, kq: r() });
+  }
+  if (window.ORW_LOG) window.ORW_LOG.push('facility sites ' + S.length + (src && src.length ? '' : ' (placeholder)'));
+  return (TG_.S = S);
+}
+/* per-structure particle tables (unit: shared, scaled per site) */
+const NTJ = 420, TJ = (() => { const r = rng(6666), A = new Float32Array(NTJ * 6); for (let i = 0; i < NTJ; i++) { A[i * 6] = r() - .5; A[i * 6 + 1] = r(); A[i * 6 + 2] = r() - .5; A[i * 6 + 3] = r(); A[i * 6 + 4] = r(); A[i * 6 + 5] = r(); } return A; })();
+const NTD = 700, TDB = (() => { const r = rng(6767), A = new Float32Array(NTD * 4); for (let i = 0; i < NTD; i++) { A[i * 4] = r() - .5; A[i * 4 + 1] = Math.pow(r(), 1.6); A[i * 4 + 2] = r(); A[i * 4 + 3] = r(); } return A; })();
+const PLQ = (() => { const A = new Float32Array(25 * 2); for (let i = 0; i < 25; i++) { A[i * 2] = (i % 5) / 4 - .5; A[i * 2 + 1] = ((i / 5) | 0) / 4 - .5; } return A; })();
+/* how many of a set to draw for a structure of size R at distance (1 dot per k px^2 of its disc, capped) */
+function tgN(N, R_, x, y, z, k) { const d = Math.max(1, Math.hypot(x - ex, y - ey, z - ez) - R_ * .5), rp = R_ * FL / d; return Math.min(N, Math.round(3.1416 * rp * rp / k)); }
+function facility(a, vis) {
+  const S = tgSites(), R0 = W.CRA.R;
+  for (let si = 0; si < S.length; si++) {
+    const s = S[si], t = a - s.aH; if (t <= 0) continue;
+    if (s.d < R0 * 1.15) continue;                                   // inside the crater: gone
+    if (!K.wIn(s.x, s.y + s.h, s.z, s.sz * 2.5 + 60 * Math.min(1, t) + (t > 2 ? 40 * Math.sqrt(t) : 0))) continue;
+    const ux = s.ux, uz = s.uz, vx = -uz, vz = ux, hs = s.seed, near = 1 - ss(250, 1500, s.d), sp = .55 + .9 * near;
+    const ppm = FL / Math.max(1, Math.hypot(s.x - ex, s.y - ey, s.z - ez)), pq = ppm < .25 ? 1 : ppm < .8 ? 9 : 25;      // (px a metre: plates as 1, 9 or 25 dots)
+    // the flash-heat glow on the face toward the strike, the instant the front arrives
+    if (t < .5) K.glowW(s.x - ux * s.sz * .4, s.y + s.h * .6, s.z - uz * s.sz * .4, Math.round(Math.min(200, Math.max(4, s.sz * .7 * ppm / SPX))), HOT, (.6 * near + .2) * (1 - t / .5) * vis);
+    // roofs torn off: plates lifted and thrown outward, tumbling, landing as strewn sheets
+    for (let k = 0; k < s.nPl; k++) {
+      const h1 = hz1(hs + k * 7), h2 = hz2(hs + k * 7), h3 = hz1(hs + k * 13 + 1), tk = t - .02 * h3; if (tk <= 0) continue;
+      const v0 = (30 + 70 * h1) * sp, vy = (8 + 26 * h2) * sp, tl = 2 * vy / 9.81 + .3, tt = Math.min(tk, tl), dr = 1 / (1 + tt * .45);
+      const lat = (h3 - .5) * s.sz * .9, along = (h2 - .5) * s.sz * .9;
+      const px = s.x + ux * (along + v0 * tt * dr) + vx * lat, pz = s.z + uz * (along + v0 * tt * dr) + vz * lat;
+      const py = tk < tl ? s.y + s.h + vy * tt - 4.905 * tt * tt : gPc(Math.hypot(px - HIT[0], pz - HIT[2]), Math.atan2(pz - HIT[2], px - HIT[0])) + .4;
+      const sz_ = 3 + 6 * hz2(hs + k * 3), an = tk < tl ? (2 + 7 * h1) * tt : (2 + 7 * h1) * tl, ca = Math.cos(an), sa = Math.sin(an), cb = Math.cos(an * .7 + h2 * 3), sb = Math.sin(an * .7 + h2 * 3);
+      const lit = .35 + .65 * Math.abs(sa * SUNL[1] + ca * .3), b = vis * (tk < tl ? .85 : .55) * lit;
+      for (let q = 0; q < 25; q += pq === 25 ? 1 : pq === 9 ? 3 : 25) {
+        const lx = PLQ[q * 2] * sz_, lz = PLQ[q * 2 + 1] * sz_;
+        const x1 = lx * ca, y1 = lx * sa, z1 = lz;                                     // tumble about the plate's own axes
+        const x2 = x1, y2 = y1 * cb - z1 * sb, z2 = y1 * sb + z1 * cb;
+        dotW(px + ux * x2 + vx * z2, py + y2, pz + uz * x2 + vz * z2, 1, tk < .25 ? HOT : WH, b);
+      }
+    }
+    // dust and glass jetting out of the walls on the lee side, and the collapse dust boiling up out of the footprint
+    const nJ = tgN(NTJ, s.sz + 40 * Math.min(1, t), s.x, s.y + s.h * .5, s.z, 3.2);
+    for (let i = 0; i < nJ; i++) {
+      const o = i * 6, h1 = TJ[o + 1], h3 = TJ[o + 3], h4 = TJ[o + 4], h5 = TJ[o + 5];
+      if (h5 < .5) {
+        // a jet: out of the lee wall, fast, spreading and slowing
+        const tk = t - .03 * h3; if (tk <= 0 || tk > 7) continue;
+        const v = (50 + 90 * h1) * sp, dr = (1 - Math.exp(-tk * 2.2)) / 2.2, L = v * dr, spr = 1 + 12 * dr;
+        const px = s.x + ux * (s.sz * .5 + L) + vx * (TJ[o] * s.sz + TJ[o + 2] * spr * 3), pz = s.z + uz * (s.sz * .5 + L) + vz * (TJ[o] * s.sz + TJ[o + 2] * spr * 3);
+        const py = s.y + s.h * (.15 + .6 * h4) + 6 * dr * h3 - 1.4 * tk;
+        const al = vis * (1 - ss(2, 7, tk)) * (.5 + .5 * h3), li = lut(Math.max(0, .55 - tk * .6), .45 + .55 * h4);
+        if (py > s.y - 1) dotL(px, py, pz, li, al, 1);
+      } else {
+        // the collapse dust: a billow over the footprint, rising, swelling and drifting downwind, lit from the sun
+        const tk = t - .15 - .4 * h3; if (tk <= 0) continue;
+        const gr = 1 - Math.exp(-tk / 2.5), rise = (6 + 26 * h4) * gr + 1.5 * tk, R_ = s.sz * (.45 + .5 * gr) + 6 * tk;
+        const th = TJ[o] * TAU + .05 * tk, rq = Math.sqrt(h1) * R_, drift = 2.2 * tk;
+        const px = s.x + Math.cos(th) * rq + ux * drift, pz = s.z + Math.sin(th) * rq + uz * drift, py = s.y + s.h * .4 * (1 - gr) + rise * (.4 + .6 * h3);
+        const nl = Math.cos(th) * SUNL[0] + Math.sin(th) * SUNL[2], lit = .25 + .6 * Math.max(0, nl * .6 + SUNL[1] * .5 * h3) + .15 * h4;
+        const al = vis * ss(0, .6, tk) * (1 - ss(40, 70, tk)) * (.45 + .4 * h4);
+        dotL(px, py, pz, lut(Math.max(0, .35 - tk * .1), lit), al, tk > 3 ? 2 : 1);
+      }
+    }
+    // the debris field: rubble strewn outward from the footprint once it has come down (streaks along the blast)
+    if (t > .4) {
+      const nD = tgN(NTD, s.sz * 2.2, s.x, s.y, s.z, 2.2), sh = ss(.4, 2.4, t);
+      for (let i = 0; i < nD; i++) {
+        const o = i * 4, lat = TDB[o] * s.sz * (1 + TDB[o + 1]), out = (TDB[o + 1] * 2.6 - .3) * s.sz * sh;
+        const px = s.x + ux * out + vx * lat, pz = s.z + uz * out + vz * lat, gy = gPc(Math.hypot(px - HIT[0], pz - HIT[2]), Math.atan2(pz - HIT[2], px - HIT[0]));
+        const hot = Math.max(0, 1 - t / 25) * (TDB[o + 2] < .12 ? 1 : 0);
+        dotL(px, gy + .3 + TDB[o + 3] * 1.2 * (1 - TDB[o + 1]), pz, lut(hot * .8, .4 + .5 * TDB[o + 3]), vis * (.55 + .35 * TDB[o + 2]), 1);
+      }
+    }
+    // fires in the wreckage: flickering flames low in the footprint, smoke leaning downwind
+    if (s.fire && t > .6) {
+      const fa = vis * ss(.6, 2, t) * (1 - ss(80, 110, t)), fr = Math.floor(FRAME.T * 24);
+      for (let f = 0; f < 4; f++) {
+        const fx_ = s.x + vx * (hz1(hs + f * 31) - .5) * s.sz * .8 + ux * (hz2(hs + f * 31) - .3) * s.sz * .6, fz_ = s.z + vz * (hz1(hs + f * 31) - .5) * s.sz * .8 + uz * (hz2(hs + f * 31) - .3) * s.sz * .6, fy_ = s.y + 1;
+        const fl = .6 + .4 * hz1(hs + f * 5 + fr * 17);
+        K.glowW(fx_, fy_ + 3, fz_, Math.round(Math.min(60, Math.max(3, (6 + s.sz * .06) * ppm / SPX))), FIRE, .45 * fa * fl);
+        const nF = tgN(90, 12, fx_, fy_, fz_, 3);
+        for (let i = 0; i < nF; i++) {
+          const h1 = hz1(hs + f * 997 + i), h2 = hz2(hs + f * 991 + i), life = .6 + .8 * h2, ph = ((FRAME.T * 1.3 + h1 * 7) % life) / life;
+          dotW(fx_ + (h1 - .5) * 8 * (1 - ph), fy_ + ph * (6 + 10 * h2), fz_ + (h2 - .5) * 8 * (1 - ph), 1, ph < .35 ? HOT : ph < .7 ? FIRE : EMB, fa * (1 - ph) * (.6 + .4 * fl));
+        }
+        const nS = tgN(140, 60, fx_, fy_ + 60, fz_, 5);
+        for (let i = 0; i < nS; i++) {
+          const h1 = hz1(hs + f * 577 + i * 3), h2 = hz2(hs + f * 571 + i * 3), ph = ((FRAME.T * .18 + h1) % 1), hgt = ph * (90 + 60 * h2), w_ = 3 + hgt * .35;
+          const px = fx_ + ux * hgt * .7 + vx * (h2 - .5) * w_, pz = fz_ + uz * hgt * .7 + vz * (h2 - .5) * w_, py = fy_ + 8 + hgt;
+          dotL(px, py, pz, lut(0, .3 + .5 * h2), fa * .55 * (1 - ph), ph > .5 ? 2 : 1);
+        }
+      }
+    }
+  }
+}
 function strike(a, vis) {
   cam();
   if (a < 0) return;
@@ -859,11 +1045,15 @@ function strike(a, vis) {
   sFoot(a, vis, hx, hy, hz); sCrater(a, vis, hx, hy, hz); if (PT) PT.lap(2);
   sSurge(a, vis, hx, hy, hz); if (PT) PT.lap(3);
   sEject(a, vis, hx, hy, hz); if (PT) PT.lap(4);
+  facility(a, vis); if (PT) PT.lap(4);
   sPedestal(a, vis, hx, hy, hz); if (PT) PT.lap(5);
   sStem(a, vis, hx, hy, hz); if (PT) PT.lap(6);
   sCap(a, vis, hx, hy, hz); if (PT) PT.lap(7);
   sCond(a, vis, hx, hy, hz); if (PT) PT.lap(8);
   vehicles(a, vis); if (PT) PT.lap(9);
+  // the stand in silhouette against the flash and the plasma dome (the ground camera)
+  if (W.heroSil) { const k = a < 1.6 ? ss(.004, .03, a) * (1 - ss(.7, 1.6, a)) : .8 * ss(2.3, 2.7, a) * (1 - ss(3.4, 4.2, a)); if (k > .02) W.heroSil(a, vis * k); }
+  // (in the slow-motion beat the stand stands backlit against the fireball and the cloud)
 }
 /* the white-out: overlay alpha */
 const flashA = a => a < 0 ? 0 : a < .02 ? .95 : .95 * Math.exp(-(a - .02) * 9);
@@ -879,22 +1069,20 @@ function debris(p, t, vis) { }
    Every shot carries an explicit up vector (turned into the film camera's roll), so there are no roll flips; blends
    turn the look about an axis (never a lerp of near-opposite directions), ease with a smoothstep (peak 1.5x the mean
    rate) and last 3 s or more; the look turns at most about 40 deg/s.
-     exit     beside the round as it leaves the muzzle (x1/20), handed over from the film's camera, then riding with
-              the rod as it speeds up, falling in behind it and looking down the path at the Earth
-     coast    a slow orbit round the rod to its front quarter as the Earth comes up (the vacuum, x9)
-     entry    beside and ahead of the rod while the sheath forms and the trail thickens
-     incoming the lens drops away from the rod to the forest floor 1.5 km from the target (3 s), the rod kept in view,
-              then eases onto a still frame from the floor in front of the lens up through the crowns, the target on
-              the horizon; the streak enters it from the top and crosses it (the flash throws the trunks' shadows
-              across the floor toward the lens)
-     strike   held through the flash and the plasma dome; a turn and a crane (3.5 s) to a frame 5 m up in the stand,
-              26 m nearer the strike, 62 deg off it (the world's BEAT), as the shock layers come over the forest; the
-              slow-motion beat (x1/20) as the front's lime layer and its wall of dust sweep through the trees toward the
-              lens and tear them apart, a slow push in; a crane up out of the flattened stand, an aerial arc round the
-              cloud, then the crater from 1.3 km out and 0.8 km up, looking down 32 deg toward the platform's side;
-              that is the last frame (REST): the film's climb takes off from it at T_RET - 0.1 with no blend
-   Measured every 0.1 s from the hand-in to T_RET + 4 s: the look turns at most 38 deg/s (the ride at T_ON + 4, and
-   the film's climb after T_RET) */
+     exit     beside the round as it leaves the muzzle, handed over from the film's camera at T_ON - 1.6
+     coast    behind and above the rod (15-20 m), looking down its path at the Earth: the coast grows under it, the
+              look leaning at most 6 deg off the rod (it stays in the middle third)
+     entry    swinging round to its side (26 m) as the sheath forms from 125 km, the altitude ladder scrolling past
+     drop     (3.4 s, from ~110 km) out to the rod's side to 2.6 km, the whole glowing trail slanting over the horizon;
+              then a dive about the ground camera, the look held near the horizon (the land rising), easing up onto
+     incoming the floor 1.5 km from the target, looking up between the rod and the target; the rod's halo comes in
+              from the top; the trees' silhouettes, the flash
+     strike   held while the front tears through the facility toward the lens; a turn (3.4 s) to the beat, 5 m up in
+              the stand 34 deg off the strike, the fireball and the stand backlit, the slow motion (x1/20) as the
+              front's wall of dust sweeps through the trees; a crane up out of the flattened stand turning back onto
+              the wrecked facility; a low pass over it round the stem; up and round to the crater, pushed in from
+              820 m (REST, the last frame: the film's climb takes off from it at T_RET - 0.1 with no blend)
+   Measured every 0.1 s from the hand-in to T_RET: the look turns at most 40 deg/s, the roll at most 30 deg/s */
 const kk = (T, a, b) => E.ss(a, b, T);
 const Y_ = [0, 1, 0];
 /* a unit vector made perpendicular to f */
@@ -943,7 +1131,6 @@ let CI = null, CI_K = '';
 /* the round's centre: in the bore before the exit (its u^2 run down the barrel), then the rod's fall */
 function roundAt(F, T) { if (T >= F.TX) return F.rodAt(T); const u = Math.max(0, (T - F.TF) / (F.TX - F.TF)); return V.mad(F.MZ0, F.DIRP, -125 * (F.TX - F.TF) * (1 - u * u)); }
 function camInit(F) {
-  const X0 = F.TX, TI = F.TI;
   const UPH = V.norm(V.sub(HIT, F.CE));
   const N_ = V.norm(V.sub(F.DIRP, V.mul(UPH, V.dot(F.DIRP, UPH))));
   let S_ = V.norm(V.cross(UPH, N_)); if (V.dot(S_, SUNL) < 0) S_ = V.mul(S_, -1);
@@ -952,95 +1139,140 @@ function camInit(F) {
   // the rod's frame: heading, the side the camera rides on (the sun's), up off the path
   const PX = V.sub(F.PW1([1, 0, 0]), F.PW1([0, 0, 0])), D = F.DIRP, SD = V.dot(F.SIDE, PX) <= 0 ? F.SIDE : V.mul(F.SIDE, -1), UD = V.norm(V.cross(V.cross(D, UPH), D));
   const UDs = V.dot(UD, UPH) < 0 ? V.mul(UD, -1) : UD;
-  // the sim time a -> film time (bisection on the film's clock)
-  const tOfA = av => { let lo = TI, hi = F.T_RET + 30; for (let i = 0; i < 50; i++) { const m = (lo + hi) / 2; if (F.aOf(m) < av) lo = m; else hi = m; } return (lo + hi) / 2; };
-  CI = { UPH, N_, S_, at, up, D, SD, UD: UDs, tOfA };
-  // the ride's parameters over film time from the exit: azimuth from behind the rod toward its side (deg), elevation
-  // (deg), distance (m), the look's lean from the rod toward the path ahead (0..1), the fov
-  CI.R = t => t - X0;
-  CI.AZ = track([[3.2, 29], [4.9, 30], [7.4, 66], [9.6, 116], [11.0, 134], [12.0, 140]]);
-  CI.EL = track([[3.2, 14], [4.9, 22], [7.4, 13], [9.6, 0], [11.0, -6], [12.0, -8]]);
-  CI.DS = track([[3.2, 22], [4.9, 80], [7.4, 120], [9.6, 160], [11.0, 200], [12.0, 230]]);
-  CI.LA = track([[3.2, .45], [4.9, .72], [7.4, .55], [9.6, .16], [11.0, 0], [12.0, 0]]);
-  CI.FV = track([[3.2, 50], [4.9, 52], [7.4, 50], [9.6, 48], [12.0, 48]]);
+  // the sim time a -> film time (bisection on the film's clock); the film time the rod passes an altitude
+  const tOfA = av => { let lo = F.TI, hi = F.T_RET + 30; for (let i = 0; i < 50; i++) { const m = (lo + hi) / 2; if (F.aOf(m) < av) lo = m; else hi = m; } return (lo + hi) / 2; };
+  const tAlt = h => { let lo = F.TX, hi = F.TI; for (let i = 0; i < 50; i++) { const m = (lo + hi) / 2; if (F.altOf(F.rodAt(m)) > h) lo = m; else hi = m; } return (lo + hi) / 2; };
+  CI = { UPH, N_, S_, at, up, D, SD, UD: UDs, tOfA, tAlt };
+  // the ride (keyed on film time from the hand-in, T_ON - 1.6, to the drop, when the rod is at ~108 km): behind and
+  // above the rod with the Earth under it, swinging round to its side and front quarter as the sheath forms; the
+  // distance held at 22-36 m, so the rod (8.4 m) and its sheath fill the middle of the frame; the look on the rod,
+  // leaning at most 6 deg down the path (the rod stays in the centre third)
+  const tD1 = F.TI - 2.8, tD0 = Math.max(F.T_ON + 3.5, tD1 - 3.4), T0 = F.T_ON - 1.6, tm = (T0 + tD0 - 3) / 2;
+  CI.T0 = T0; CI.tD0 = tD0; CI.tD1 = tD1;
+  CI.AZ = track([[T0, 29], [T0 + 1.7, 30], [tm, 34], [tD0 - 3.2, 38], [tD0, 96]]);
+  CI.EL = track([[T0, 14], [T0 + 1.7, 22], [tm, 27], [tD0 - 3.2, 24], [tD0, 3]]);
+  CI.DS = track([[T0, 22], [T0 + 1.7, 17], [tm, 15], [tD0 - 3.2, 17], [tD0, 26]]);
+  CI.LA = track([[T0, 0], [T0 + 1.7, .7], [tm, 1], [tD0 - 3.2, .8], [tD0, 0]]);
+  CI.FV = track([[T0, 50], [T0 + 1.7, 50], [tm, 48], [tD0, 46]]);
+  // the drop's middle direction from the rod: out to its side, level, a little below (the trail seen broadside)
+  { const sh = V.norm(V.sub(SD, V.mul(UPH, V.dot(SD, UPH)))), hs = V.norm(V.add(V.mul(sh, Math.cos(50 * DEG)), V.mul(N_, Math.sin(38 * DEG)))); CI.DM = V.norm(V.sub(V.mul(hs, Math.cos(10 * DEG)), V.mul(UPH, Math.sin(10 * DEG)))); }
   // the ground camera: on the forest floor 1.5 km out (the world's G2, the hero stand round it), at eye height
   const Gc = V.mad(W.G2, UPH, 1.7);
   CI.Gc = Gc; CI.aG = arrive(Math.hypot(W.G2[0] - HIT[0], W.G2[2] - HIT[2])); CI.tG = tOfA(CI.aG);
   CI.alG = Math.atan2(V.dot(V.sub(W.G2, HIT), S_), V.dot(V.sub(W.G2, HIT), N_));
-  // the incoming frame: still, from the target on the horizon (15 deg above the frame's foot, the forest floor below
-  // it) up through the crowns; the rod's streak enters from the top about a second out
-  // (the floor in front of the lens in its lower part, for the flash's shadows; the streak enters from the top)
-  const hor = v => V.norm(V.sub(v, V.mul(UPH, V.dot(v, UPH)))), fR = V.norm(V.sub(F.rodAt(TI - 1.1), Gc)), fH = V.norm(V.sub(up(8), Gc));
-  const hz_ = slerpV(hor(fR), hor(fH), .62), elI = Math.asin(V.dot(fH, UPH)) + 15 * DEG;
-  CI.FIN = V.norm(V.add(V.mul(hz_, Math.cos(elI)), V.mul(UPH, Math.sin(elI)))); CI.FVIN = 64 * DEG;
-  // the beat: 5 m up in the stand, 62 deg off the strike on the side away from the sun, 4 deg up, a slow push in
+  // the incoming view from the floor: looking up between the rod and a point 10 deg over the target, so both are in
+  // frame and the crowns frame the sky; it settles on the target as the rod comes down (held from the strike on)
+  CI.QI = up(265); CI.FVIN = 70 * DEG;
+  // the beat: 5 m up in the stand, 34 deg off the strike on the side away from the sun, 9 deg up, a slow push in
   const az = W.BEAT.az, hz = [Math.cos(az), 0, Math.sin(az)], hp = V.norm(V.sub(hz, V.mul(UPH, V.dot(hz, UPH))));
-  CI.FB = V.norm(V.add(V.mul(hp, Math.cos(4 * DEG)), V.mul(UPH, Math.sin(4 * DEG))));
+  CI.FB = V.norm(V.add(V.mul(hp, Math.cos(9 * DEG)), V.mul(UPH, Math.sin(9 * DEG))));
   CI.HB = hp; CI.Bc = W.BEAT.cam;
-  CI.tTurn0 = tOfA(.75); CI.tTurn1 = Math.max(CI.tTurn0 + 3.4, tOfA(2.86) + .7);
-  // the rise: from the beat's last frame (keyed on film time from the end of the slow motion to T_RET)
-  CI.T_RISE = Math.max(CI.tTurn1 + 2, tOfA(3.3) - .1);
+  { const th = V.sub(HIT, CI.Bc), hh = V.norm(V.sub(th, V.mul(UPH, V.dot(th, UPH)))); CI.HH = hh; }
+  CI.tTurn0 = tOfA(1.7); CI.tTurn1 = Math.max(CI.tTurn0 + 3.4, tOfA(2.86) + .7);     // (the ground view holds while the front tears through the facility toward the lens)
+  // the crane: once the front has passed the lens, straight up out of the flattened stand to 210 m, the look tipping
+  // down 36 deg onto the canopy (the front racing on over the forest, the trees laid flat behind it, the dust)
+  const dB = Math.hypot(CI.Bc[0] - HIT[0], CI.Bc[2] - HIT[2]);
+  CI.T_RISE = Math.max(CI.tTurn1 + 2.5, tOfA(arrive(dB + 6)) + .2); CI.T_CR = CI.T_RISE + 3.6;
   CI.Tend = F.T_RET - .1;          // the film's climb takes off from the last frame (REST) at T_RET - 0.1: no blend needed
-  const T0 = CI.T_RISE, DS = F.T_RET - .15 - T0, kt = fr => T0 + DS * fr, aT = fr => Math.max(0, F.aOf(kt(fr)));
+  const TS = CI.T_CR, DS = F.T_RET - .15 - TS, kt = fr => TS + DS * fr, aT = fr => Math.max(0, F.aOf(kt(fr)));
   const k = (fr, eye, target, fov, stop) => ({ t: kt(fr), eye, target, fov: fov * DEG, stop });
-  const B1 = shotBeat(F, T0), al = CI.alG;
+  const B1 = shotCrane(F, TS), al = CI.alG;
+  // then an arc round the cloud (the front racing out at x4 below) and a push in on the crater: the last frame (REST)
   CI.SP = mkPath([
     k(0, B1.eye, V.mad(B1.eye, B1.f, 1500), B1.fov / DEG, true),
-    k(.24, V.add(at(al - .02, 1560, 70), V.mul(hp, 40)), up(120 + capH(aT(.24)) * .3), 54),
-    k(.48, at(al - .26, 2700, 640), up(capH(aT(.48)) * .48), 50),
-    k(.74, at(.5, 3900, 1100), up(capH(aT(.74)) * .32), 46),
-    k(1, at(.3, 1300, 820), up(0), 46, true),
+    // a low pass over the wrecked facility round the stem, then up and round to the crater
+    k(.26, at(al + .32, 1050, 190), up(60), 54),
+    k(.52, at(al + .95, 760, 240), up(capH(aT(.52)) * .08), 52),
+    k(.76, at(al + 1.5, 1300, 600), up(0), 48),
+    k(1, at(al + 1.85, 820, 620), up(0), 46, true),
   ]);
 }
 /* the ride with the rod (the exit, the speed-up, the coast, the entry) */
 function shotRide(F, T) {
-  const t = CI.R(T), p = roundAt(F, T), D = CI.D, S = CI.SD, U = CI.UD;
-  const az = CI.AZ(t) * DEG, el = CI.EL(t) * DEG, d = CI.DS(t), la = CI.LA(t);
+  const p = roundAt(F, T), D = CI.D, S = CI.SD, U = CI.UD;
+  const az = CI.AZ(T) * DEG, el = CI.EL(T) * DEG, d = CI.DS(T), la = CI.LA(T);
   const ce = Math.cos(el), o = V.add(V.mul(D, -ce * Math.cos(az) * d), V.add(V.mul(S, ce * Math.sin(az) * d), V.mul(U, Math.sin(el) * d)));
-  const eye = V.add(p, o), tg = V.mad(p, D, 4 - 30 * ss(9, 12.6, t)), toRod = V.norm(V.sub(tg, eye));
-  const ahead = V.norm(V.add(V.mul(D, Math.cos(.38)), V.mul(U, Math.sin(.38))));
-  const f = slerpV(toRod, ahead, la);
-  return { eye, f, up: orth(f, U) || U, fov: CI.FV(t) * DEG, tg };
+  const eye = V.add(p, o), toRod = V.norm(V.sub(p, eye));
+  // a lean of at most 6 deg toward the path ahead (the Earth): the rod stays in the centre third
+  const ah = V.sub(D, V.mul(toRod, V.dot(D, toRod))), lh = V.len(ah);
+  const f = lh > 1e-6 ? V.norm(V.add(V.mul(toRod, Math.cos(6 * DEG * la)), V.mul(ah, Math.sin(6 * DEG * la) / lh))) : toRod;
+  return { eye, f, up: orth(f, U) || U, fov: CI.FV(T) * DEG, tg: p };
 }
-/* the ground camera while the rod comes in: a still frame up through the crowns */
-function shotIncoming(F, T) { return { eye: CI.Gc, f: CI.FIN, up: orth(CI.FIN, CI.UPH), fov: CI.FVIN }; }
+/* the ground camera while the rod comes in: up between the rod and the target (held once it has struck) */
+function shotIncoming(F, T) {
+  const Gc = CI.Gc, r = V.norm(V.sub(F.rodAt(Math.min(T, F.TI)), Gc)), q = V.norm(V.sub(CI.QI, Gc)), f0 = slerpV(r, q, .52 + .48 * ss(F.TI - 1.9, F.TI - .25, T));
+  // as the drop lands the look is low (4 deg up, the trees round the lens) and tips up to the rod over 1.5 s
+  const hz = V.norm(V.sub(f0, V.mul(CI.UPH, V.dot(f0, CI.UPH)))), fLow = V.norm(V.add(V.mul(hz, Math.cos(4 * DEG)), V.mul(CI.UPH, Math.sin(4 * DEG)))), f = slerpV(fLow, f0, ss(CI.tD1 - .2, CI.tD1 + 1.3, T));
+  return { eye: Gc, f, up: orth(f, CI.UPH), fov: CI.FVIN };
+}
+/* the drop from the rod to the forest floor (tD0..tD1, 3.4 s), in two moves with no black sky in between:
+   out to the rod's side (the eye about the rod, its distance log-mixed from the ride's to 2.6 km, a little below it:
+   the sheath, then the whole glowing trail slanting down across the frame over the horizon and the coast); then a dive
+   to the floor (the eye about the ground camera, log-mixed down to it), the look held near the horizon toward the rod
+   (the coast and the forest rising, the rod climbing out of the top of the frame) and easing up onto the ground view,
+   where the rod comes back in from the top. Ends exactly on the ground camera, at rest */
+const DROP_M = .5;
+function shotDrop(F, T) {
+  const w = E.sat((T - CI.tD0) / (CI.tD1 - CI.tD0)), P = F.rodAt(T), up_ = orthUp(w);
+  if (w < DROP_M) {
+    const u = w / DROP_M, A = shotRide(F, CI.tD0), da = V.sub(A.eye, F.rodAt(CI.tD0)), la = V.len(da);
+    const dir = slerpV(V.mul(da, 1 / la), CI.DM, ss(0, 1, u)), dist = Math.exp(Math.log(la) + (Math.log(2600) - Math.log(la)) * ss(.3, 1, u));
+    const eye = V.mad(P, dir, dist), f = V.norm(V.sub(P, eye));
+    return { eye, f, up: orth(f, up_) || CI.UPH, fov: A.fov + (54 * DEG - A.fov) * ss(0, 1, u) };
+  }
+  const u = (w - DROP_M) / (1 - DROP_M), E1 = V.mad(P, CI.DM, 2600), G = CI.Gc, Pg = V.mad(G, CI.UPH, -1.5);
+  const da = V.sub(E1, Pg), la = V.len(da), g = ss(0, 1, u), dir = slerpV(V.mul(da, 1 / la), CI.UPH, g), dist = Math.exp(Math.log(la) + (Math.log(1.5) - Math.log(la)) * g * g * (3 - 2 * g));
+  const eye = V.mad(Pg, dir, dist);
+  // the look no longer follows the rod (it races off at 30 km/s): it levels to 6 deg over the horizon, then eases up
+  // onto the ground view
+  const B = shotIncoming(F, T), fJ = CI.fJ || (CI.fJ = V.norm(V.mul(CI.DM, -1)));
+  const elv = v => Math.asin(E.clamp(V.dot(v, CI.UPH), -1, 1)), hzv = v => V.norm(V.sub(v, V.mul(CI.UPH, V.dot(v, CI.UPH))));
+  const hz = slerpV(hzv(fJ), hzv(B.f), ss(0, 1, u)), eJ = elv(fJ), e1 = eJ + (-15 * DEG - eJ) * ss(0, .7, u), e2 = e1 + (elv(B.f) - e1) * ss(.55, 1, u);
+  const f = V.norm(V.add(V.mul(hz, Math.cos(e2)), V.mul(CI.UPH, Math.sin(e2))));
+  return { eye, f, up: orth(f, up_) || CI.UPH, fov: 54 * DEG + (B.fov - 54 * DEG) * ss(.4, 1, u) };
+}
+const orthUp = w => V.norm(V.lerp(CI.UD, CI.UPH, ss(0, 1, w)));
 /* the beat among the trees: a slow push in and a drift down (film time from the turn) */
 function shotBeat(F, T) {
   const u = ss(0, 1, E.sat((T - CI.tTurn1) / Math.max(1, CI.T_RISE - CI.tTurn1)));
   const eye = V.add(V.mad(CI.Bc, CI.HB, 3.2 * u - .8), V.mul(CI.UPH, -.7 * u)), f = V.norm(V.add(CI.FB, V.mul(CI.UPH, -.02 * u)));
   return { eye, f, up: orth(f, CI.UPH), fov: (58 - 3 * u) * DEG };
 }
+/* the crane out of the stand: straight up to 210 m, the look tipping down onto the canopy, the lens easing back */
+function shotCrane(F, T) {
+  // up out of the stand to 230 m, turning from the beat's look back onto the flattened facility (the front racing
+  // away below, the debris, the standing shells, the fires, the stem)
+  const u = ss(CI.T_RISE, CI.T_CR, T), B = shotBeat(F, CI.T_RISE), h = 230 * u, pt = (4 - 26 * u) * DEG;
+  const eye = V.add(V.mad(B.eye, CI.HB, -50 * u), V.mul(CI.UPH, h)), hz = slerpV(CI.HB, CI.HH, ss(0, 1, u)), f = V.norm(V.add(V.mul(hz, Math.cos(pt)), V.mul(CI.UPH, Math.sin(pt))));
+  return { eye, f, up: orth(f, CI.UPH), fov: B.fov + (54 * DEG - B.fov) * u };
+}
 function shotStrike(F, T, a) {
   if (T < CI.tTurn0) return shotIncoming(F, T);
   if (T < CI.tTurn1) { const m = mixS(shotIncoming(F, T), shotBeat(F, CI.tTurn1), kk(T, CI.tTurn0, CI.tTurn1)); m.up = orth(m.f, CI.UPH); return m; }
   if (T < CI.T_RISE) return shotBeat(F, T);
+  if (T < CI.T_CR) return shotCrane(F, T);
   const s = CI.SP(T), f = V.norm(V.sub(s.target, s.eye));
   return { eye: s.eye, f, up: orth(f, CI.UPH) || CI.UPH, fov: s.fov };
 }
 function shotAll(F, T) {
-  const X0 = F.TX, a = F.aOf(T);
-  if (T < X0 + 11.8) return shotRide(F, T);
-  if (T < F.TI - .9) {
-    // dropping away from the rod to the forest floor (3 s): the eye about the rod; the look kept on the rod (from the
-    // ride's aim, seen from the moving eye), easing from 1.4 s into the drop onto the still frame by 0.9 s before the
-    // strike (the streak then enters it from the top)
-    const A = T < X0 + 14.8 ? shotRide(F, T) : null, B = shotIncoming(F, T), w = kk(T, X0 + 11.8, X0 + 14.8), m = A ? mixS(A, B, w, F.rodAt(T)) : B;
-    const tg = A ? V.lerp(A.tg, F.rodAt(T), ss(0, .4, w)) : F.rodAt(T), f = slerpV(V.norm(V.sub(tg, m.eye)), B.f, ss(X0 + 13.2, F.TI - .9, T));
-    return { eye: m.eye, f, up: orth(f, V.lerp(CI.UD, CI.UPH, w)) || CI.UPH, fov: m.fov };
-  }
+  const a = F.aOf(T);
+  if (T < CI.tD0) return shotRide(F, T);
+  if (T < CI.tD1) return shotDrop(F, T);
   if (T < F.TI) return shotIncoming(F, T);
   return shotStrike(F, T, Math.max(0, a));
 }
 function camHook(T, F) {
   FCs = F;
   FRAME.T = T; FRAME.a = F.aOf(T); W.CRA.a = FRAME.a; cloudShadow(FRAME.a);
-  { const ld = FRAME.a > 0 ? ss(.2, 1.5, FRAME.a) * (1 - ss(F.T_RET + .5, F.T_RET + 2, T)) : 0; W.GOPT.pxm = K.HQ ? 1 : 1 + .22 * ld; W.GOPT.fbud = K.HQ ? 1 : 1 - .45 * ld; }   // (HQ: no load sharing)
+  { const ld = FRAME.a > 0 ? ss(.2, 1.5, FRAME.a) * (1 - ss(F.T_RET + .5, F.T_RET + 2, T)) : 0; W.GOPT.pxm = K.HQ ? 1 : 1 + .4 * ld; W.GOPT.ld = ld; W.GOPT.fbud = K.HQ ? 1 : 1 - .45 * ld; }   // (HQ: no load sharing)
   W.GOPT.hz = 1; W.GOPT.hk = 0;
-  const key = F.TX + ',' + F.TI + ',' + F.T_RET;
+  const key = F.TX + ',' + F.TI + ',' + F.T_RET + ',' + F.T_ON;
   if (!CI || key !== CI_K) { CI_K = key; camInit(F); }
   // the film's camera rides beside the round through the exit and hands in to this one over T_ON - 1.6 .. T_ON + 1.1
   if (T < F.T_ON - 1.6 || T > CI.Tend) return null;
   const o = outS(shotAll(F, T));
+  // high over the site the land lattice thins further (load sharing with the strike's clouds; not in HQ)
+  if (!K.HQ && W.GOPT.ld > 0) W.GOPT.pxm = 1 + (.4 + 1.1 * ss(120, 400, o.eye[1] - HIT[1])) * W.GOPT.ld;
   // dust in the air round the ground camera: the stand reads in front of a fading forest (no bright horizon line)
   { const e = o.eye, dG = Math.hypot(e[0] - W.G2[0], e[1] - W.G2[1], e[2] - W.G2[2]), g = 1 - ss(80, 500, dG); W.GOPT.hz = 1 + 10 * g; W.GOPT.hk = .92 * (1 - ss(16, 110, dG)); }
   // the shock reaching the lens: a jolt, then a sway in the wind (film seconds, so slow motion sways slowly)

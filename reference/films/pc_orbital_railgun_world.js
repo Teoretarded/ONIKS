@@ -19,6 +19,10 @@ const PI = Math.PI, TAU = 2 * PI, DEG = PI / 180;
 const BW = K.BW, BH = K.BH;                       // (the raster: STAGE.RES)
 const C = K.C;
 const LIME = K.LIME, HOT = K.HOT, WH = K.WH, FIRE_ = [255, 196, 138];
+/* the strike's front is never lime (lime is for own forces and scans): a lime ring colour from the film turns warm white */
+const FRONT = [255, 236, 204];
+const shc = () => { const c = SH.col; return !c ? HOT : c[1] > c[0] + 20 ? FRONT : c; };
+let SHC = HOT;
 const RE = 6371000, CE = [0, -RE, 0];
 const CTZ = new Uint8Array(65536); CTZ[0] = 16; for (let i = 1; i < 65536; i++) { let c = 0, v = i; while (!(v & 1)) { v >>= 1; c++; } CTZ[i] = c; }
 const IP2 = new Float32Array(17); for (let i = 0; i < 17; i++) IP2[i] = 1 / (1 << i);
@@ -97,7 +101,7 @@ function interpH(Pa) {
    CRA.a (sim s since the strike, set each frame by the FX module before the ground is drawn): a bowl 2R wide and D deep
    with a sharp raised rim, the ejecta blanket thinning outward, bright ejecta rays over a scorched skirt, the floor
    glowing for a while. Shaded from its own slopes so it reads from above. */
-const CRA = { a: -1, R: 160, D: 44, H: 15, x: 0, z: 0 };
+const CRA = { a: -1, R: 200, D: 52, H: 18, x: 0, z: 0 };
 const RAYN = 1024, RAY = new Float32Array(RAYN);
 { const r = rng(5858), sp = []; for (let i = 0; i < 30; i++) sp.push([r() * TAU, .018 + .06 * r() * r(), .4 + .6 * r(), 2.5 + 5.5 * r()]);
   for (let i = 0; i < RAYN; i++) { const t = i / RAYN * TAU; let v = 0; for (const [c, w, h] of sp) { let d = Math.abs(t - c); if (d > PI) d = TAU - d; const q = h * Math.exp(-(d * d) / (w * w)); if (q > v) v = q; } RAY[i] = v; }
@@ -227,7 +231,7 @@ function drawPatch(Pa, vis, pxf, lit) {
             const d = Math.sqrt(d2); let kl = 0;
             if (d < Q.r0 && d > Q.rIn) kl = Q.k * EXN[((Q.r0 - d) * Q.wdi) | 0];
             if (d < Q.gR) { const gl = Q.g * EXN[(d * Q.gri) | 0]; if (gl > kl) kl = gl; }
-            if (kl > .02) { const fl = kl * .9 * a * cmp * gg * hv * Math.min(1, bb / 255 * 2.4); if (b < fl) b = fl; const kk = kl > 1 ? 1 : kl; cr += (SH.col[0] - cr) * kk; cg += (SH.col[1] - cg) * kk; cb += (SH.col[2] - cb) * kk; }
+            if (kl > .02) { const fl = kl * .9 * a * cmp * gg * hv * Math.min(1, bb / 255 * 2.4); if (b < fl) b = fl; const kk = kl > 1 ? 1 : kl; cr += (SHC[0] - cr) * kk; cg += (SHC[1] - cg) * kk; cb += (SHC[2] - cb) * kk; }
             if (!crOn && d < Q.dr) b *= 1 - Q.dark * (1 - d / Q.dr);
           }
         }
@@ -317,7 +321,7 @@ function drawSea(S, vis, seaT, pxf) {
         let b = bb * vs * gg * a * wv * cmp * hv, cr = WH[0], cg = WH[1], cb = WH[2];
         if (sh) {
           const qx = x - hx, qz = z - hz, d2 = qx * qx + qz * qz;
-          if (d2 < rA2) { const d = Math.sqrt(d2); let kl = 0; if (d < Q.r0 && d > Q.rIn) kl = Q.k * EXN[((Q.r0 - d) * Q.wdi) | 0]; if (d < Q.gR) { const gl = Q.g * EXN[(d * Q.gri) | 0]; if (gl > kl) kl = gl; } if (kl > .02) { const fl = kl * .8 * a * cmp * gg * hv * Math.min(1, bb / 255 * 2.4); if (b < fl) b = fl; const kk = kl > 1 ? 1 : kl; cr += (SH.col[0] - cr) * kk; cg += (SH.col[1] - cg) * kk; cb += (SH.col[2] - cb) * kk; } }
+          if (d2 < rA2) { const d = Math.sqrt(d2); let kl = 0; if (d < Q.r0 && d > Q.rIn) kl = Q.k * EXN[((Q.r0 - d) * Q.wdi) | 0]; if (d < Q.gR) { const gl = Q.g * EXN[(d * Q.gri) | 0]; if (gl > kl) kl = gl; } if (kl > .02) { const fl = kl * .8 * a * cmp * gg * hv * Math.min(1, bb / 255 * 2.4); if (b < fl) b = fl; const kk = kl > 1 ? 1 : kl; cr += (SHC[0] - cr) * kk; cg += (SHC[1] - cg) * kk; cb += (SHC[2] - cb) * kk; } }
         }
         if (b < .015) continue;
         if (b > 1) b = 1;
@@ -487,13 +491,14 @@ CRA.x = HIT[0]; CRA.z = HIT[2];
 /* the ground camera's clearing (the FX module films the strike from here) */
 const G2 = (() => { const d = V.norm([-.55, 0, .83]), x = HIT[0] + d[0] * 1500, z = HIT[2] + d[2] * 1500; return [x, ground(x, z) - drop(x, z), z]; })();
 const HERO_R = 62;                                    // the hero stand round the ground camera (full tree models)
-/* the slow-motion beat's camera (the FX module): 26 m nearer the strike than G2 and 5 m up, looking 62 deg off the
+/* the slow-motion beat's camera (the FX module): 26 m nearer the strike than G2 and 5 m up, looking 34 deg off the
    strike on the side away from the sun (the stand lit from behind the lens, the fireball at the frame's edge); the
    front crosses its stand in the middle of the beat. Azimuths in the x-z plane (atan2(z, x)) */
 const BEAT = (() => {
   const hx = HIT[0] - G2[0], hz = HIT[2] - G2[2], l = Math.hypot(hx, hz), h = [hx / l, hz / l];
   let p = [-h[1], h[0]]; if (p[0] * SUN[0] + p[1] * SUN[2] > 0) p = [h[1], -h[0]];
-  const k = 62 * DEG, L = [Math.cos(k) * h[0] + Math.sin(k) * p[0], Math.cos(k) * h[1] + Math.sin(k) * p[1]];
+  // (34 deg off the strike: the fireball and the rising cloud in the frame's side, the stand backlit against them)
+  const k = 34 * DEG, L = [Math.cos(k) * h[0] + Math.sin(k) * p[0], Math.cos(k) * h[1] + Math.sin(k) * p[1]];
   const cx = G2[0] + h[0] * 26, cz = G2[2] + h[1] * 26;
   return { toHit: Math.atan2(h[1], h[0]), az: Math.atan2(L[1], L[0]), side: Math.atan2(p[1], p[0]), cam: [cx, ground(cx, cz) - drop(cx, cz) + 5, cz] };
 })();
@@ -529,7 +534,7 @@ const SM = makeSea(R_M[0], R_M[1], R_M[2], R_M[3], R_M[3], (x, z) => deep(x, z, 
 const SN = makeSea(R_SN[0], R_SN[1], R_SN[2], R_SN[3], R_SN[3], null, (x, z) => wIn_(x, z, R_SN));
 lapW('sea');
 function drawSite(vis, seaT, pxf) {
-  let n = 0;
+  let n = 0; SHC = shc();
   { const h = C.eye[1] - HIT[1], dh = Math.hypot(C.eye[0] - HIT[0], C.eye[2] - HIT[2]); pxf *= (1 + .28 * E.ss(900, 2600, h) * (1 - E.ss(6000, 12000, dh))) * GOPT.pxm; }
   n += drawPatch(PO, vis, pxf); n += drawPatch(PR, vis, pxf); n += drawPatch(PM, vis, pxf); n += drawPatch(PI_, vis, pxf); n += drawPatch(PG_, vis, pxf);
   const ps = pxf * 1.4;
@@ -544,7 +549,8 @@ const VEH = [
 ];
 const VM = {};
 const vehModel = kind => VM[kind] || (VM[kind] = K.lodModel(kind === 'tel' ? HD.tel() : kind === 'radar' ? HD.radar() : HD.pantsir(), kind === 'radar' ? { mast: 1, ant: PI * .5 } : {}, [.06, .12, .24, .48, .96], 77 + kind.length, .9));
-const VEHS = VEH.map(([key, kind, x, z, yaw, chip]) => { const gy = ground(x, z) - drop(x, z); const Wv = X.make(R.y(yaw), [x, gy, z]); const parts = vehModel(kind); return { key, kind, x, z, chip, W: Wv, parts, d: Math.hypot(x - HIT[0], z - HIT[2]), c: [x, gy + 2, z] }; });
+/* the coastal battery is retired (the strike now hits the facility, pc_orbital_railgun_target.js): ?battery brings it back */
+const VEHS = (STAGE.Q && STAGE.Q.has('battery') ? VEH : []).map(([key, kind, x, z, yaw, chip]) => { const gy = ground(x, z) - drop(x, z); const Wv = X.make(R.y(yaw), [x, gy, z]); const parts = vehModel(kind); return { key, kind, x, z, chip, W: Wv, parts, d: Math.hypot(x - HIT[0], z - HIT[2]), c: [x, gy + 2, z] }; });
 lapW('vehicles');
 const VO = { a: 1.25, fade: 1600, px: 3.2, px0: 10, keep: 1 };
 function drawVehicles(gone) { for (const v of VEHS) { if (gone && gone(v)) continue; for (const p of v.parts) K.drawLod(p.ml, v.W, VO); } }
@@ -596,6 +602,14 @@ const TPL = (() => {
   return A;
 })();
 const RTH = 640, RFL = 1900, RBD = 3000;            // thrown inside, laid flat inside, bent inside
+/* the facility's ground (pc_orbital_railgun_target.js: ORTGT.sites() footprints, ORTGT.clear(x, z) for its roads,
+   aprons and runway) is kept clear of trees */
+const TGF = (() => { const T_ = window.ORTGT, S = T_ && typeof T_.sites === 'function' ? T_.sites() || [] : []; return { S, clear: T_ && typeof T_.clear === 'function' ? T_.clear : null }; })();
+const onFacility = (x, z) => {
+  if (TGF.clear && TGF.clear(x, z)) return true;
+  for (const s of TGF.S) { const dx = x - s.x, dz = z - s.z, c = Math.cos(s.yaw || 0), sn = Math.sin(s.yaw || 0), lx = dx * c + dz * sn, lz = -dx * sn + dz * c; if (Math.abs(lx) < s.w / 2 + 14 && Math.abs(lz) < s.d / 2 + 14) return true; }
+  return false;
+};
 const FOR = (() => {
   const r = rng(6161), SP = 11, R1 = 3000, L = [];
   for (let gz = -R1; gz <= R1; gz += SP) for (let gx = -R1; gx <= R1; gx += SP) {
@@ -604,6 +618,7 @@ const FOR = (() => {
     const d = Math.hypot(x - HIT[0], z - HIT[2]); if (d < 150 || d > R1) continue;
     const cz = coastZ(x); if (z - cz < 60) continue;
     if (roadD(x, z) < 7 || Math.hypot(x - SITE_C[0], z - SITE_C[1]) < 175 || Math.hypot(x - G2[0], z - G2[2]) < HERO_R) continue;
+    if (onFacility(x, z)) continue;
     const st = .5 + .45 * noise(x / 360, z / 360, 6.1) + .3 * noise(x / 95, z / 95, 2.3);
     const dg = Math.hypot(x - G2[0], z - G2[2]), dens = Math.max(E.ss(.42, .7, st), .85 * (1 - E.ss(160, 420, dg))) * (1 - E.ss(2300, R1, d)) * E.ss(60, 170, z - cz);
     if (rr > dens * .92) continue;
@@ -791,7 +806,7 @@ function drawForest(a, T, vis) {
   FD_ = K.pb.d; FU_ = u32();
   const F_ = FOR, TL = F_.TL, TV = F_.TV, F = C.fl, HZ = hazeK(), e = C.eye, f = C.f;
   { const Q = FC_; Q[0] = e[0]; Q[1] = e[1]; Q[2] = e[2]; Q[3] = f[0]; Q[4] = f[1]; Q[5] = f[2]; Q[6] = C.r[0]; Q[7] = C.r[1]; Q[8] = C.r[2]; Q[9] = C.u[0]; Q[10] = C.u[1]; Q[11] = C.u[2]; Q[12] = C.fl; Q[13] = C.cx + C.shake[0]; Q[14] = C.near; Q[15] = C.cy + C.shake[1]; }
-  const scanC = SH.col || HOT;
+  const scanC = shc();
   // pass 1: the visible tiles and the dots they want (the near trees counted one by one)
   let want = 0;
   for (let t = 0; t < F_.nt; t++) {
@@ -886,7 +901,7 @@ function heroTpl(kind, seed) {
 }
 const HTPL = [heroTpl(0, 901), heroTpl(1, 902), heroTpl(2, 903), heroTpl(3, 904)];
 for (const t of HTPL) t.np = (t.TRK.length + t.WOOD.length + t.LEAF.length) / HS;
-const HBUDGET = 250000 * K.S * K.S * (K.HQ ? 2 : 1);       // the stand's points a frame
+const HBUDGET = 100000 * K.S * K.S * (K.HQ ? 5 : 1);       // (live: 100k, the budget thins the small trees first; HQ renders 500k)       // the stand's points a frame
 const HERO = (() => {
   const r = rng(9090), L = [], toHit = BEAT.toHit, adiff = (a, b) => Math.abs(((a - b + 3 * PI) % TAU) - PI);
   // the beat's frame first (key trees by hand: near ones left and right, a middle ground, a back row), then the
@@ -1038,7 +1053,7 @@ function drawHero(a, T, vis) {
     // the front's lime layer only where it can touch this tree (its distance from the strike, to first order)
     const band = Rf > 0 && Math.abs(h.d - Rf) < (moving ? 220 : H + 6), dR = h.d - Rf;
     const vf = h.vf;
-    const fl = a > 0 ? 1.35 * Math.exp(-a * 2.4) : 0, smo = a > .05 ? E.ss(.05, .6, a) : 0, rim = a > 0 ? .55 * E.ss(.4, 1.6, a) * Math.exp(-a / 9) : 0;
+    const fl = a > 0 ? 1.35 * Math.exp(-a * 2.4) : 0, smo = a > .05 ? E.ss(.05, .6, a) : 0, rim = a > 0 ? .9 * E.ss(.3, 1.4, a) * Math.exp(-a / 16) : 0;
     const bark = (T_.birch ? 1 : .8) * vis * bc, wood = .8 * vis * bc, leaf = (T_.con ? .92 : 1) * vis * bc;
     if (moving) h.GF.fill(0);
     // the trunk (stump below the break, the top above it; the whole tree when it is uprooted)
@@ -1056,8 +1071,8 @@ function drawHero(a, T, vis) {
       }
       { const l = nx * S0 + nz * S2 + .25; b *= .3 + .95 * (l > 0 ? l : 0); }
       if (fl > .03 && face > 0) { const k = Math.min(1, fl * face); if (b < k) b = k; cr = 255; cg = 196 + 50 * k; cb = 138 + 90 * k; }
-      else if (rim > .03 && face > .2) { const k = rim * face * TR[o + 7]; if (b < k) { b = k; cr = 255; cg = 184; cb = 120; } }
-      if (band) { const q = dR + (x - bx) * ux + (z - bz) * uz; if (q > -3 && q < 1.5) { const k = q < 0 ? 1 + q / 3 : 1 - q / 1.5; if (b < .95 * k) b = .95 * k; cr = 198 + (cr - 198) * (1 - k); cg = 244; cb = 50 + (cb - 50) * (1 - k); } }
+      else if (rim > .03 && face > .1) { const k = Math.min(1, rim * face * (.6 + .4 * TR[o + 7])); if (b < k) b = k; cr += (255 - cr) * k; cg += (176 - cg) * k; cb += (112 - cb) * k; }
+      if (band) { const q = dR + (x - bx) * ux + (z - bz) * uz; if (q > -3 && q < 1.5) { const k = q < 0 ? 1 + q / 3 : 1 - q / 1.5; if (b < .95 * k) b = .95 * k; cr = 255; cg = 236 + (cg - 236) * (1 - k); cb = 204 + (cb - 204) * (1 - k); } }
       { const dx = x - ex, dy = y - ey, dz = z - ez, zc = dx * f0 + dy * f1 + dz * f2; if (zc < near) continue;
         const iz = F / zc, sx = cx + (dx * r0 + dy * r1 + dz * r2) * iz; if (sx < 0 || sx >= BW) continue;
         const sy = cy - (dx * u0 + dy * u1 + dz * u2) * iz; if (sy < 0 || sy >= BH) continue;
@@ -1076,7 +1091,7 @@ function drawHero(a, T, vis) {
         else { X_ = h.up || ga >= h.hb ? HXU : HXS; const dx = x - X_[9], dy = y - X_[10], dz = z - X_[11]; x = X_[0] * dx + X_[1] * dy + X_[2] * dz + X_[12]; y = X_[3] * dx + X_[4] * dy + X_[5] * dz + X_[13]; z = X_[6] * dx + X_[7] * dy + X_[8] * dz + X_[14]; }
       }
       if (fl > .03) { const k = Math.min(1, fl * .7); if (b < k) b = k; cr = 255; cg = 196; cb = 138; }
-      if (band) { const q = dR + (x - bx) * ux + (z - bz) * uz; if (q > -3 && q < 1.5) { const k = q < 0 ? 1 + q / 3 : 1 - q / 1.5; if (b < .95 * k) b = .95 * k; cr = 198; cg = 244; cb = 50; } }
+      if (band) { const q = dR + (x - bx) * ux + (z - bz) * uz; if (q > -3 && q < 1.5) { const k = q < 0 ? 1 + q / 3 : 1 - q / 1.5; if (b < .95 * k) b = .95 * k; cr = 255; cg = 236; cb = 204; } }
       put(x, y, z, cr, cg, cb, b);
     }
     // foliage: scorched and smoking on the strike's side; stripped as the front passes, streaming out in the wind
@@ -1090,7 +1105,7 @@ function drawHero(a, T, vis) {
       const burn = a > .08 && face > .15 && hq < .3;
       if (a > .25 && face > 0) b *= 1 - .5 * face;      // charred
       if (fl > .03 && face > 0) { const k = Math.min(1, fl * face * 1.2); if (b < k) b = k; cr = 255; cg = 196 + 55 * k; cb = 138 + 100 * k; }
-      else if (rim > .03 && face > .25) { const k = rim * face * (.6 + .4 * hq); if (b < k) { b = k; cr = 255; cg = 180 + 30 * hq; cb = 116; } }
+      else if (rim > .03 && face > .1) { const k = Math.min(1, rim * face * (.6 + .4 * hq)); if (b < k) b = k; cr += (255 - cr) * k; cg += (180 + 30 * hq - cg) * k; cb += (116 - cb) * k; }
       if (burn && fl < .5) { const fk = HF[(j * 7 + frm * 31 + ti * 5) & 4095], k = (.3 + .5 * fk) * Math.min(1, a * 3); if (b < k) b = k; cr = 255; cg = 142 + 54 * fk; cb = 84 + 50 * fk; }
       if (moving) {
         const tp = a - (h.AH + ((x - bx) * ux + (z - bz) * uz) / vf) - .003 - .03 * hq * hq;
@@ -1105,8 +1120,8 @@ function drawHero(a, T, vis) {
           if (!h.GF[g]) { groupPose(h, g, tau, ga, HXG); h.XG.set(HXG, g * 15); h.GF[g] = 1; }
           const q = g * 15, XG = h.XG, dx = x - XG[q + 9], dy = y - XG[q + 10], dz = z - XG[q + 11]; x = XG[q] * dx + XG[q + 1] * dy + XG[q + 2] * dz + XG[q + 12]; y = XG[q + 3] * dx + XG[q + 4] * dy + XG[q + 5] * dz + XG[q + 13]; z = XG[q + 6] * dx + XG[q + 7] * dy + XG[q + 8] * dz + XG[q + 14];
         } else { const X_ = h.up || ga >= h.hb ? HXU : HXS, dx = x - X_[9], dy = y - X_[10], dz = z - X_[11]; x = X_[0] * dx + X_[1] * dy + X_[2] * dz + X_[12]; y = X_[3] * dx + X_[4] * dy + X_[5] * dz + X_[13]; z = X_[6] * dx + X_[7] * dy + X_[8] * dz + X_[14]; }
-        if (band) { const q = dR + (x - bx) * ux + (z - bz) * uz; if (q > -3 && q < 1.5) { const k = q < 0 ? 1 + q / 3 : 1 - q / 1.5; if (b < .95 * k) b = .95 * k; cr = 198; cg = 244; cb = 50; } }
-      } else if (band) { const q = dR + (x - bx) * ux + (z - bz) * uz; if (q > -3 && q < 1.5) { const k = q < 0 ? 1 + q / 3 : 1 - q / 1.5; if (b < .95 * k) b = .95 * k; cr = 198; cg = 244; cb = 50; } }
+        if (band) { const q = dR + (x - bx) * ux + (z - bz) * uz; if (q > -3 && q < 1.5) { const k = q < 0 ? 1 + q / 3 : 1 - q / 1.5; if (b < .95 * k) b = .95 * k; cr = 255; cg = 236; cb = 204; } }
+      } else if (band) { const q = dR + (x - bx) * ux + (z - bz) * uz; if (q > -3 && q < 1.5) { const k = q < 0 ? 1 + q / 3 : 1 - q / 1.5; if (b < .95 * k) b = .95 * k; cr = 255; cg = 236; cb = 204; } }
       { const dx = x - ex, dy = y - ey, dz = z - ez, zc = dx * f0 + dy * f1 + dz * f2; if (zc < near) continue;
         const iz = F / zc, sx = cx + (dx * r0 + dy * r1 + dz * r2) * iz; if (sx < 0 || sx >= BW) continue;
         const sy = cy - (dx * u0 + dy * u1 + dz * u2) * iz; if (sy < 0 || sy >= BH) continue;
@@ -1141,11 +1156,13 @@ function drawHero(a, T, vis) {
   // with the trunks' shadows; the lime layer of the front; then the light litter lifted and streamed downwind
   const dG = Math.hypot(ex - G2[0], ey - G2[1], ez - G2[2]), fv = vis * (1 - E.ss(16, 110, dG));
   if (fv > .02) {
-    const fl = a > 0 ? 1.5 * Math.exp(-a * 2.2) : 0, hot = a > 0 ? Math.exp(-a * 1.5) : 0, sc = SH.col || HOT;
+    const fl = a > 0 ? 1.5 * Math.exp(-a * 2.2) : 0, hot = a > 0 ? Math.exp(-a * 1.5) : 0, sc = shc(), fbl = a > 0 ? .62 * E.ss(.4, 2, a) * Math.exp(-a / 14) : 0;
     const onA = K.wIn(FLA[0], FLA[1], FLA[2], FLA[3]), onB = K.wIn(FLBc[0], FLBc[1], FLBc[2], FLBc[3]);
+    const fst = K.HQ ? 1 : 2;      // (live: every other floor point of each half, the dots a little brighter)
     for (let i = onA ? 0 : 1; i < (onA || onB ? NFLR : 0); i += onA && onB ? 1 : 2) {
+      if (fst > 1 && (i & 2)) continue;
       const o = i * FS, h1 = FLR[o + 4], h2 = FLR[o + 5], d = FLR[o + 3];
-      let x = FLR[o], y = FLR[o + 1], z = FLR[o + 2], b = FLB[i] * fv, cr = 228, cg = 224, cb = 208;
+      let x = FLR[o], y = FLR[o + 1], z = FLR[o + 2], b = FLB[i] * fv * (fst > 1 ? 1.2 : 1), cr = 228, cg = 224, cb = 208;
       const t = a - FLR_AH[i];
       if (t > 0) {
         const ux = (x - HIT[0]) / d, uz = (z - HIT[2]) / d;
@@ -1157,13 +1174,14 @@ function drawHero(a, T, vis) {
       }
       // the flash outshines the sun: the floor goes dark but where the strike lights it, the trunks' shadows across it
       if (fl > .03) { const e = fl > 1 ? 1 : fl, k = (.2 + 1.1 * fl) * (1 - .95 * FLR[o + 7]) * (.6 + .4 * h2); b *= 1 - .85 * e; if (b < k) { b = k > 1 ? 1 : k; const w = k > 1 ? 1 : k; cr = 255; cg = 210 + 40 * w; cb = 150 + 90 * w; } }
+      if (fbl > .03 && fl < .3) { const k = fbl * (1 - .9 * FLR[o + 7]) * (.55 + .45 * h2); if (b < k) { b = k; cr = 255; cg = 178 + 30 * h2; cb = 112 + 30 * h2; } }
       if (Rf > 0) { const q = d - Rf; if (q > -3 && q < 1.5) { const k = q < 0 ? 1 + q / 3 : 1 - q / 1.5; if (b < .9 * k) b = .9 * k; cr = sc[0]; cg = sc[1]; cb = sc[2]; } }
       put(x, y, z, cr, cg, cb, b);
     }
   }
   // the front's wall in the beat's view: dust and torn needles in a band just behind the front, its leading face lime
   if (Rf > BW_R - 170 && Rf < BW_R + 70 && dG < 400 && K.wIn(HIT[0] + Math.cos(BW_TH) * Rf, BEAT.cam[1], HIT[2] + Math.sin(BW_TH) * Rf, 160)) {
-    const sc = SH.col || HOT, fa = vis * E.ss(BW_R - 170, BW_R - 120, Rf) * (1 - E.ss(BW_R + 30, BW_R + 70, Rf));
+    const sc = shc(), fa = vis * E.ss(BW_R - 170, BW_R - 120, Rf) * (1 - E.ss(BW_R + 30, BW_R + 70, Rf));
     for (let k = 0; k < 65; k++) FWG[k] = gP(Rf - 8, BW_TH + (k / 64 - .5) * .21);
     for (let i = 0; i < NFW; i++) {
       const o = i * 4, h3 = FWP[o + 3], u = FWP[o + 1], v = FWP[o + 2], q = FWP[o] + .004 * fsin(h3 * 40 + Rf * .05 + 1e4) / .2, th = BW_TH + q * .2;
@@ -1175,10 +1193,44 @@ function drawHero(a, T, vis) {
   }
   return HCNT;
 }
+/* the stand against the flash: the near trunks and limbs (standing: before the front reaches the stand) written over
+   the glow behind them, dark, with a hot rim on the side facing the strike, so the trees stand in silhouette against
+   the flash and the plasma dome (called by the FX module after the strike is drawn; k 0..1) */
+function blPx(D, q, m, k, cr, cg, cb) { q <<= 2; D[q] = D[q] * m + cr * k; D[q + 1] = D[q + 1] * m + cg * k; D[q + 2] = D[q + 2] * m + cb * k; }
+function heroSil(a, k) {
+  if (k < .02) return 0;
+  const e = C.eye, f = C.f, r = C.r, u = C.u, F = C.fl, cx = C.cx + C.shake[0], cy = C.cy + C.shake[1], near = C.near, D = K.pb.d;
+  if (Math.hypot(e[0] - G2[0], e[1] - G2[1], e[2] - G2[2]) > 160) return 0;
+  const ex = e[0], ey = e[1], ez = e[2]; let n = 0;
+  for (const h of HERO) {
+    if (a > h.AH) continue;
+    if (!K.wIn(h.x, h.y + h.H * .5, h.z, h.H * .8)) continue;
+    const T_ = HTPL[h.kind], H = h.H, sw = h.sw, yc = h.yc, ys = h.ys, bx = h.x, by = h.y, bz = h.z, ux = h.ux, uz = h.uz;
+    // the trunks only (the limbs are lost in the glow), thinned with distance (2x2 dots up close)
+    const zt = K.WZ[0], st = zt > 45 ? 3 : zt > 22 ? 2 : 1;
+    for (let pass = 0; pass < 1; pass++) {
+      const A = T_.TRK, nA = A.length / HS;
+      for (let j = 0; j < nA; j += st) {
+        const o = j * HS, lx = A[o], ly = A[o + 1], lz = A[o + 2];
+        const x = bx + (lx * yc + lz * ys) * sw, y = by + ly * H, z = bz + (-lx * ys + lz * yc) * sw;
+        const dx = x - ex, dy = y - ey, dz = z - ez, zc = dx * f[0] + dy * f[1] + dz * f[2]; if (zc < near) continue;
+        const iz = F / zc, sx = cx + (dx * r[0] + dy * r[1] + dz * r[2]) * iz; if (sx < 0 || sx >= BW - 1) continue;
+        const sy = cy - (dx * u[0] + dy * u[1] + dz * u[2]) * iz; if (sy < 0 || sy >= BH - 1) continue;
+        const nx = A[o + 3] * yc + A[o + 5] * ys, nz = -A[o + 3] * ys + A[o + 5] * yc, face = -(nx * ux + nz * uz);
+        let cr = 13, cg = 13, cb = 12;
+        if (face > .3) { const q = k * (face - .3) / .7; cr = 13 + 242 * q; cg = 13 + 196 * q; cb = 12 + 126 * q; }
+        const p = (sy | 0) * BW + (sx | 0), m = 1 - k;
+        blPx(D, p, m, k, cr, cg, cb); if (zc < 30 || st > 1) { blPx(D, p + 1, m, k, cr, cg, cb); blPx(D, p + BW, m, k, cr, cg, cb); blPx(D, p + BW + 1, m, k, cr, cg, cb); }
+        n++;
+      }
+    }
+  }
+  return n;
+}
 const GH = (() => { const x = BEAT.cam[0] + 50 * Math.cos(BEAT.az), z = BEAT.cam[2] + 50 * Math.sin(BEAT.az); return [x, z, 58, 78 * 78, 78]; })();
 const FWG = new Float32Array(65), NFW = 20000, FWP = (() => { const r = rng(9292), A = new Float32Array(NFW * 4); for (let i = 0; i < NFW; i++) { A[i * 4] = r() - .5; A[i * 4 + 1] = Math.pow(r(), 1.7); A[i * 4 + 2] = Math.pow(r(), 1.9); A[i * 4 + 3] = r(); } return A; })();
 const BW_R = Math.hypot(BEAT.cam[0] - HIT[0], BEAT.cam[2] - HIT[2]), BW_TH = Math.atan2(BEAT.cam[2] + 30 * Math.sin(BEAT.az) - HIT[2], BEAT.cam[0] + 30 * Math.cos(BEAT.az) - HIT[0]);
 
 return { RE, CE, coastZ, coastBig, ground, roadD, HIT, makePatch, drawPatch, makeSea, drawSea, drawGlobe, drawLimb, STARS, CLOUD, GLB, PO, PR, PM, PI_, PG_, SO, SR, SM, SN, SH, LG, drop, SPAN, drawSite, VEHS, drawVehicles, GC,
-  gP, gPc, CRA, CSH, GOPT, craterDy, craterSl, craterG, RAY, RAYN, FOR, setShock, drawForest, G2, SUN, hazeK, HERO, HTPL, drawHero, HERO_R, BEAT };
+  gP, gPc, CRA, CSH, GOPT, craterDy, craterSl, craterG, RAY, RAYN, FOR, setShock, drawForest, G2, SUN, hazeK, HERO, HTPL, drawHero, heroSil, HERO_R, BEAT };
 };

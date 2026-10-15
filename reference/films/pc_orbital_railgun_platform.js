@@ -53,9 +53,11 @@ const TEL_Z = TEL_S1.map(s => (NSEG - 1) * LSEG + s);
 const Z_TELEND = TEL_Z[2] + TEL_L, CROWN_L = 4.5, Z_MZ = Z_TELEND + CROWN_L;
 const Z_BARREL = (NSEG - 1) * LSEG + TEL_S1[0];                   // the segments end here (the stages overlap them)
 const COL_R = 15, COL_L = 2.2;
-const Z_RND = -6, RND_L = 8.4, RND_R = .96, ROD_L = 6, ROD_R = .25;
-const HSG_R = 21, HSG_Z0 = -40, HSG_Z1 = 0, CHT_Z0 = -15, CHT_R = 1.95;
-const BLK_Z = [-15.8, -13.4], LOCK_Z = [-12.6, -7.4, -2.0], CLAMP_Z = [-8.4, -3.6];
+/* the round: a 21 m package in three sabot sections round an 18 m tungsten rod (0.3 m across, 24.6 t), a 1.6 m armature
+   behind; it sits centred at Z_RND in a 26 m chamber */
+const Z_RND = -12.5, RND_L = 21, RND_R = .96, ROD_L = 18, ROD_R = .15, ARM_L = 1.6, RND_SEC = 3;
+const HSG_R = 21, HSG_Z0 = -40, HSG_Z1 = 0, CHT_Z0 = -26, CHT_R = 1.95;
+const BLK_Z = [-27.8, -25.4], LOCK_Z = [-24.6, -15.2, -4.2], CLAMP_Z = [-19.8, -10.2], COIL_Z = [[-23.5, -16], [-14, -6.5]];
 const BAY_C = [0, 0, -80], BAY_H = [28, 22, 36];
 const SR = 24, SZ0 = -116, SZ1 = -598, NSB = 34, SBAY = (SZ0 - SZ1) / NSB;
 const SWZ = [-190, -134], SWX = 30, SWY = 28, SWS = [[12, -194, 1], [-12, -194, 1], [12, -130, -1], [-12, -130, -1]];      // the rotary switches: x, z, facing
@@ -73,7 +75,9 @@ const PYL = [PI / 4, 3 * PI / 4, 5 * PI / 4, 7 * PI / 4], SHOE_R = RING_R - RSEC
 // the construction ring
 const CR_R = 92, NCN = 24, CRCH = 2 * CR_R * Math.sin(PI / NCN), CRSEC = [10, 14], CR_ST = 78, CR_CO = [36, 44], CR_RX = 52, CR_DOCK = -24;
 // the reactor and its radiators
-const REA_Z0 = -690, REA_Z1 = -610, CORE_R = 28, HS_R = 28.4, CS_R = 30.8, SHELL_R = 31.8, FUEL_R = 21, DRUM_RC = 24.6, DRUM_R = 2.3, NDRUM = 12;
+/* the core's layers (radii, m): fuel to 15, the reflector with twelve control drums (r 18.2) to 21, the vessel to 22, the
+   hot shoe to 23.6, the couples' legs to 28.4, the cold shoe to 30, coolant channels, the shell to 31.8 */
+const REA_Z0 = -690, REA_Z1 = -610, CORE_R = 22, HS_R = 23.6, CS_R = 28.4, CSO_R = 30, SHELL_R = 31.8, FUEL_R = 15, DRUM_RC = 18.2, DRUM_R = 2.2, NDRUM = 12;
 const NFIN = 12, NFP = 6, FPW = 14, FIN_Z0 = -682, FIN_L = 64, FPHI_S = 84 * DEG;
 // the engines (stern)
 const NENG = 4, ENG_Z = Z_STERN, BELL_L = 38, BELL_R0 = 4.6, BELL_R1 = 15, EXT_L = 19, EXT_R1 = 20;
@@ -372,11 +376,25 @@ function makeCollar(name, mast) {
   B.done(); return B;
 }
 const collarM = makeCollar('collarM', true), collarE = makeCollar('collarE', false);
+/* a lock jaw (one per face of a segment's front collar; canonical on the top face): a 4.4 m block with a hooked lip that a
+   ram drives 3.4 m back over the previous segment's end collar, its teeth biting the flange; the housing it slides in
+   (rails, a ram cylinder) stays on the collar */
+const JAW_Y = COL_R * C30, JAW_S = 3.6;
 const jaw = mk('jaw'); jaw.chunk('j');
-for (const x of [-3.4, 3.4]) jaw.box([x - 1, COL_R * C30 + .1, .3], [x + 1, COL_R * C30 + 1.2, 3.8], .07, { br: 1, edge: .85, ch: 15, q: 0 });
+jaw.box([-2.2, JAW_Y + .1, -.2], [2.2, JAW_Y + 2.0, 4.6], .06, { br: 1, edge: .9, ch: 15, q: 0 });
+jaw.box([-2.2, JAW_Y - 1.1, -1.1], [2.2, JAW_Y + 2.0, -.2], .05, { br: 1.1, edge: .95, ch: 15, q: 0 });
+for (let k = 0; k < 5; k++) { const x = -1.8 + k * .9; jaw.box([x - .25, JAW_Y - 1.6, -1.1], [x + .25, JAW_Y - 1.1, -.5], .05, { br: 1.1, edge: .9, ch: 15, q: 0 }); }
+for (const z of [1.2, 2.4, 3.6]) jaw.line([-2.2, JAW_Y + 2.02, z], [2.2, JAW_Y + 2.02, z], .5, 15, 0);
+jaw.lathe([0, JAW_Y + 1.05, 4.6], ZA, [[0, .7], [.4, .7], [.4, .35]], { cell: .05, br: 1, ch: 15, q: 0 });
 jaw.done();
+const jawH = mk('jawH'); jawH.chunk('h');
+for (const s of [1, -1]) jawH.box([Math.min(s * 2.3, s * 2.65), JAW_Y, .2], [Math.max(s * 2.3, s * 2.65), JAW_Y + 1.6, 8.4], .06, { br: .9, edge: .85 });
+jawH.box([-2.65, JAW_Y, 8.4], [2.65, JAW_Y + 2.4, 9.6], .06, { br: .95, edge: .9 });
+jawH.lathe([0, JAW_Y + 1.05, 9.6], ZA, [[0, 0], [0, 1.15], [4.6, 1.15], [4.6, 0]], { cell: .06, br: 1, seams: 8 });
+jawH.done();
 const sleeve = mk('sleeve'); sleeve.chunk('s');
-sleeve.lathe([0, 0, 0], ZA, [[0, LINER_R + .05], [0, LINER_R + .4], [3.4, LINER_R + .4], [3.4, LINER_R + .05]], { cell: .07, br: 1, seams: 8, ch: 2, q: 1.7 });
+sleeve.lathe([0, 0, 0], ZA, [[0, LINER_R + .05], [0, LINER_R + .4], [3.4, LINER_R + .4], [3.4, LINER_R + .05]], { cell: .07, br: 1, seams: 8, ch: 15, q: 1 });
+{ const P_ = []; for (let i = 0; i <= 96; i++) { const u = i / 96, t = u * 4 * TAU; P_.push([Math.cos(t) * (LINER_R + .44), Math.sin(t) * (LINER_R + .44), .2 + 3 * u]); } sleeve.poly(P_, false, .9, 15, 1); }
 sleeve.done();
 
 /* ---- the muzzle stages (layer 2, built whole) ---- */
@@ -428,12 +446,12 @@ const root = mk('root');
 /* ---- chamber (inside the housing) ---- */
 root.chunk('chamber');
 root.lathe([0, 0, CHT_Z0], ZA, [[0, BORE_R + .05], [0, CHT_R + .5], [1.2, CHT_R + .5], [1.2, CHT_R], [-CHT_Z0, CHT_R], [-CHT_Z0, BORE_R + .05]], { cell: .11, br: .95, seams: 16, sbr: .3, ch: 9, q: 4 });
-for (const z of [-14, -11, -9, -6, -3, -1]) root.ringP([0, 0, z], XA, YA, CHT_R + .03, .4, 9, 4, 2);
-for (const z of [[-10.8, -6.8], [-5.4, -1.4]]) {
+for (const z of [-25, -21, -17, -13, -9, -5, -1]) root.ringP([0, 0, z], XA, YA, CHT_R + .03, .4, 9, 4, 2);
+for (const z of COIL_Z) {
   root.lathe([0, 0, z[0]], ZA, [[0, CHT_R + .2], [0, 4.4], [z[1] - z[0], 4.4], [z[1] - z[0], CHT_R + .2]], { cell: .12, br: .95, seams: 24, sbr: .32, ch: 9, q: 0 });
   for (let k = 1; k < 5; k++) root.ringP([0, 0, z[0] + (z[1] - z[0]) * k / 5], XA, YA, 4.42, .45, 9, 0, 1);
 }
-for (let m = 0; m < NMAG; m++) { const t = PI / 2 + m * TAU / NMAG; root.tube([Math.cos(t) * MAG_RC, Math.sin(t) * MAG_RC, -14], [Math.cos(t) * MAG_RC, Math.sin(t) * MAG_RC, 0], MAG_R, .72, 4, -7); }
+for (let m = 0; m < NMAG; m++) { const t = PI / 2 + m * TAU / NMAG; root.tube([Math.cos(t) * MAG_RC, Math.sin(t) * MAG_RC, CHT_Z0 + 1], [Math.cos(t) * MAG_RC, Math.sin(t) * MAG_RC, 0], MAG_R, .72, 4, -7); }
 root.chunk('transfer');
 for (let k = 0; k < 8; k++) { const t = k / 8 * TAU; root.line([Math.cos(t) * 1.35, Math.sin(t) * 1.35, -44], [Math.cos(t) * 1.35, Math.sin(t) * 1.35, BLK_Z[0] - .3], .5); }
 for (let z = -44; z <= BLK_Z[0] - .2; z += 2) root.ringP([0, 0, z], XA, YA, 1.38, .55, 0, 0, 2);
@@ -491,7 +509,7 @@ TANKS.forEach(([z0, z1], ci) => {
 /* ---- the switchyard: a hall round the spine with four rotary switches on its sides, two capacitor banks; seen from
    the open well in the deck above it ---- */
 root.chunk('swhall');
-const CAPS = [];
+const CAPS = [], CAP_HERO = [];
 {
   const [z0, z1] = SWZ;
   root.box([-SWX, -SWY, z0], [SWX, SWY, z1], .16, { br: .82, edge: .78, skip: ['x-', 'x+'] });
@@ -509,17 +527,35 @@ const CAPS = [];
     root.box([x - .8, SWY + .2, z - .8], [x + .8, SWY + 7, z + .8], .06, { br: .9, edge: .8 });
     root.tube([x, SWY + 1, z], [x * .4, SWY + 6.6, f > 0 ? z0 + 6 : z1 - 6], .45, .7, 2, -162);
   }
-  // capacitor banks on the hall's roof: two racks of 4 x 12 cans (ch 19, q the can's fill order)
+  // capacitor banks on the hall's roof: two racks of 4 x 12 modules (each 4.2 x 5.2 x 3.2 m: a stack of film plates in a
+  // case, two terminals, a charge bar on top lit as it fills: ch 19, q the module's fill order); a copper bus bar along
+  // each row to the rack's main bus, coolant manifolds down each column, radiator panels at the rack's ends; the hero
+  // module (CAP_HERO, starboard outer corner) is left open: the film draws its insides cut away
   root.chunk('caps');
   for (const s of [1, -1]) {
     root.box([s * 4, SWY, z0 + 4], [s * 26, SWY + .8, z1 - 4], .2, { br: .8, edge: .7 });
-    for (let i = 0; i < 4; i++) for (let j = 0; j < 12; j++) {
-      const x = s * (7 + i * 5.4), z = z0 + 8 + j * 4.2, q = j * 4 + i + (s > 0 ? 0 : 48);
-      root.lathe([x, SWY + .8, z], YA, [[0, 0], [0, 1.6], [5.2, 1.6], [5.6, 1.1], [6, 0]], { cell: .08, br: .9, seams: 6, ch: 19, q });
-      root.ringP([x, SWY + 6.05, z], XA, ZA, .6, .8, 19, q);
-      CAPS.push([x, SWY + 6, z]);
+    for (const x of [4.6, 25.4]) for (const z of [z0 + 4.6, z1 - 4.6]) root.tube([s * x, SWY + .8, z], [s * x, SWY + 7.6, z], .3, .6);
+    root.tube([s * 4.6, SWY + 7.6, z0 + 4.6], [s * 4.6, SWY + 7.6, z1 - 4.6], .25, .5); root.tube([s * 25.4, SWY + 7.6, z0 + 4.6], [s * 25.4, SWY + 7.6, z1 - 4.6], .25, .5);
+    for (let i = 0; i < 4; i++) {
+      const x = s * (7 + i * 5.4);
+      // the column's coolant manifolds (supply and return) along the modules' feet
+      for (const dx of [-2.45, 2.45]) root.tube([x + dx, SWY + 1.3, z0 + 6.4], [x + dx, SWY + 1.3, z1 - 6.4], .22, .62, 21, -1);
+      for (let j = 0; j < 12; j++) {
+        const z = z0 + 8 + j * 4.2, q = j * 4 + i + (s > 0 ? 0 : 48);
+        CAPS.push([x, SWY + 6, z]);
+        if (s > 0 && i === 3 && j === 11) { CAP_HERO.push(x, SWY + .8, z); continue; }
+        root.box([x - 2.1, SWY + .8, z - 1.6], [x + 2.1, SWY + 6, z + 1.6], .09, { br: .85, edge: .8 });
+        root.panel([x - 1.6, SWY + 6.03, z - .5], [3.2, 0, 0], [0, 0, 1], .08, { n: YA, br: 1.1, edge: .9, ch: 19, q });
+        for (const dz of [-1.1, 1.1]) root.lathe([x + 1.4, SWY + 6, z + dz], YA, [[0, .38], [.7, .38], [.7, .2], [.95, .2]], { cell: .05, br: 1, ch: 19, q });
+        for (const dy of [2.2, 4.2]) root.line([x - 2.12, SWY + .8 + dy, z - 1.6], [x - 2.12, SWY + .8 + dy, z + 1.6], .35, 0, 0, 2);
+        for (const dx of [-2.45, 2.45]) root.tube([x + dx * .87, SWY + 1.3, z], [x + dx, SWY + 1.3, z], .12, .5);
+      }
     }
+    // a bus bar along each row over the terminals, out to the rack's main bus, which runs to the switches
+    for (let j = 0; j < 12; j++) { const z = z0 + 8 + j * 4.2; for (const dz of [-1.1, 1.1]) root.box([s * 7.6, SWY + 6.95, z + dz - .14], [s * 24.4, SWY + 7.25, z + dz + .14], .06, { br: 1, edge: .85, ch: 19, q: j * 4 + (s > 0 ? 0 : 48) + 3 }); root.tube([s * 7.6, SWY + 7.1, z], [s * 4.5, SWY + 6.4, z], .2, .7, 2, -162); }
     root.tube([s * 4.5, SWY + 6.4, z0 + 6], [s * 4.5, SWY + 6.4, z1 - 6], .5, .7, 2, -162);
+    // radiator panels standing at the rack's ends (the modules' heat)
+    for (const z of [z0 + 4.8, z1 + .6]) for (let k = 0; k < 4; k++) root.panel([s * (6 + k * 5.4), SWY + .8, z], [s * 3, 0, 0], [0, 6.4, 0], .14, { n: [0, 0, z < -162 ? -1 : 1], two: true, br: .7, edge: .7, seams: [0, 8], sbr: .3, ch: 21, q: -1 });
   }
 }
 /* ---- the thrust frame between the stern and the reactor ---- */
@@ -609,20 +645,25 @@ hall.done();
 
 /* ================= the reactor (behind the stern) ================= */
 const RL = REA_Z1 - REA_Z0;
-/* the cutaway: a quarter taken out facing port and up (its centre at CUT_A): the shell (and the four fins over it) open
-   over +-60 deg, the cold shoe over +-52, the core and the hot shoe over +-45 (the film sets the clip planes) */
-const CUT_A = 135 * DEG, CUT_W = { shell: 60 * DEG, cold: 52 * DEG, core: 45 * DEG };
+/* the cutaway: a true quarter taken out facing port and up (its centre at CUT_A, +-45 deg), shell to axis; the film draws
+   its cut faces from cached samples (the layers in colour) and clips the shell and the fins over the window */
+const CUT_A = 135 * DEG, CUT_W = { shell: 45 * DEG, cold: 45 * DEG, core: 45 * DEG };
 /* ---- the core (the heat source, its domes) and the hot shoe, in slabs (for culling and the cutaway's clip) ---- */
 const coreB = mk('core');
-coreB.chunk('aft'); coreB.lathe([0, 0, REA_Z0 - 16], ZA, [[0, 0], [0, 7], [4, 16], [10, 24], [16, CORE_R]], { cell: .32, br: .9, seams: 24, sbr: .3, ch: 5, q: 0, solid: true });
+coreB.chunk('aft'); coreB.lathe([0, 0, REA_Z0 - 16], ZA, [[0, 0], [0, 8], [4, 18], [10, 27], [16, SHELL_R]], { cell: .32, br: .9, seams: 24, sbr: .3, ch: 5, q: 0, solid: true });
 for (let k = 0; k < 8; k++) {
   coreB.chunk('c' + k);
   const z0 = REA_Z0 + k * RL / 8;
   coreB.lathe([0, 0, z0], ZA, [[0, CORE_R], [RL / 8, CORE_R]], { cell: .32, br: .9, seams: 24, sbr: .3, ch: 5, q: 0, solid: true, rings: k === 0 });
   if (k > 0 && k < 7) coreB.lathe([0, 0, z0], ZA, [[0, HS_R], [RL / 8, HS_R]], { cell: .3, br: .7, rings: false, ch: 5, q: 1, solid: true });
 }
-coreB.chunk('fwd'); coreB.lathe([0, 0, REA_Z1], ZA, [[0, CORE_R], [8, 20], [12, 15], [12, 0]], { cell: .32, br: .9, seams: 24, sbr: .3, ch: 5, q: 0, solid: true });
+coreB.chunk('fwd'); coreB.lathe([0, 0, REA_Z1], ZA, [[0, SHELL_R], [8, 22], [12, 15], [12, 0]], { cell: .32, br: .9, seams: 24, sbr: .3, ch: 5, q: 0, solid: true });
 coreB.done();
+/* the domes alone (drawn with the cutaway, clipped) */
+const domes = mk('domes');
+domes.chunk('aft'); domes.lathe([0, 0, REA_Z0 - 16], ZA, [[0, 0], [0, 8], [4, 18], [10, 27], [16, SHELL_R]], { cell: .32, br: .9, seams: 24, sbr: .3, ch: 5, q: 0, solid: true });
+domes.chunk('fwd'); domes.lathe([0, 0, REA_Z1], ZA, [[0, SHELL_R], [8, 22], [12, 15], [12, 0]], { cell: .32, br: .9, seams: 24, sbr: .3, ch: 5, q: 0, solid: true });
+domes.done();
 /* the fuel (only inside the core's window): element columns on a hex pitch, the core vessel's inner wall */
 const fuel = mk('fuel');
 {
@@ -646,7 +687,7 @@ drum.lathe([0, 0, REA_Z0 + 4], ZA, [[0, 0], [0, DRUM_R], [RL - 8, DRUM_R], [RL -
 drum.panel([DRUM_R * .2, -DRUM_R * .95, REA_Z0 + 5], [0, DRUM_R * 1.9, 0], [0, 0, RL - 10], [.2, .5], { n: XA, two: true, br: 1.2, edge: .9, ch: 5, q: 5 });
 drum.done();
 const DRUMS = [];
-for (let k = 0; k < NDRUM; k++) { const t = k * TAU / NDRUM, da = Math.abs(Math.atan2(Math.sin(t - CUT_A), Math.cos(t - CUT_A))); if (da < CUT_W.core + .06) DRUMS.push(t); }
+for (let k = 0; k < NDRUM; k++) { const t = (k + .5) * TAU / NDRUM, da = Math.abs(Math.atan2(Math.sin(t - CUT_A), Math.cos(t - CUT_A))); if (da < CUT_W.core + .06) DRUMS.push(t); }
 /* the cold shoe, the shell (jacket) */
 const coldB = mk('cold');
 for (let k = 0; k < 8; k++) { coldB.chunk('k' + k); coldB.lathe([0, 0, REA_Z0 + k * RL / 8], ZA, [[0, CS_R], [RL / 8, CS_R]], { cell: .3, br: .6, rings: k === 0, seams: 48, sbr: .2, solid: true }); }
@@ -656,7 +697,7 @@ for (let k = 0; k < 8; k++) { jacket.chunk('j' + k); jacket.lathe([0, 0, REA_Z0 
 jacket.done();
 /* ---- the Seebeck couples (only those in the cold shoe's window): rows of p/n legs between the hot shoe and the cold
    shoe, in series ---- */
-const NCP = 160, CP_ROWS = 8, CP_Z0 = REA_Z0 + 8, CP_DZ = (RL - 16) / (CP_ROWS - 1);
+const NCP = 160, CP_ROWS = 16, CP_Z0 = REA_Z0 + 8, CP_DZ = (RL - 16) / (CP_ROWS - 1);
 const couples = mk('couples');
 const CP_I0 = Math.floor((CUT_A - CUT_W.cold) / TAU * NCP), CP_I1 = Math.ceil((CUT_A + CUT_W.cold) / TAU * NCP);
 for (let row = 0; row < CP_ROWS; row++) {
@@ -703,13 +744,13 @@ for (let f = 0; f < NFIN; f++) { const t = f * TAU / NFIN + PI / NFIN; PUMPS.pus
 
 /* ================= the radiator fins: accordion panels (instanced 72) ================= */
 const finP = mk('finP'); finP.chunk('p');
-finP.panel([.1, 0, .2], [FPW - .2, 0, 0], [0, 0, FIN_L - .4], .14, { n: YA, two: true, br: .72, edge: .7, seams: [0, 0], ch: 6, q: 0 });
+finP.panel([.1, 0, .2], [FPW - .2, 0, 0], [0, 0, FIN_L - .4], .14, { n: YA, two: true, br: 1.05, edge: .8, seams: [0, 0], ch: 6, q: 0 });
 for (let k = 1; k < 16; k++) finP.line([.2, .06, FIN_L * k / 16], [FPW - .2, .06, FIN_L * k / 16], .42, 6, 0, FIN_L / 16 * (1 << (k % 2 ? 0 : 1)));
 for (const x of [.3, FPW / 2, FPW - .3]) finP.line([x, .1, .2], [x, .1, FIN_L - .2], .55, 6, 0);
 for (const z of [3, FIN_L / 2, FIN_L - 3]) finP.lathe([0, 0, z - 1.4], ZA, [[0, .55], [2.8, .55]], { cell: .06, br: 1 });
 finP.done();
 const finLo = mk('finLo'); finLo.chunk('p');
-finLo.panel([.1, 0, .2], [FPW - .2, 0, 0], [0, 0, FIN_L - .4], .3, { n: YA, two: true, br: .72, edge: .7, ch: 6, q: 0 });
+finLo.panel([.1, 0, .2], [FPW - .2, 0, 0], [0, 0, FIN_L - .4], .3, { n: YA, two: true, br: 1.0, edge: .8, ch: 6, q: 0 });
 finLo.done();
 
 /* ================= the engines (stern, translation only): mounts, gimballed bells, sliding extensions ================= */
@@ -951,11 +992,19 @@ function ringChordBody(name, len, sec, lo, ch) {
   B.done(); return B;
 }
 const rChord = ringChordBody('rChord', RCH, RSEC, false, 10), rChordLo = ringChordBody('rChordLo', RCH, RSEC, true, 10);
+/* ---- the construction rings: the stabiliser rings' 56 nodes regrouped into five rings (12, 11, 11, 11, 11 nodes) on
+   34 m chords, one per build layer; ring A's nodes go to rings 0, 1 and five of 2, ring B's the rest (contiguous arcs) ---- */
+const NSCR = 5, SC_N = [12, 11, 11, 11, 11], SC_CH = 34, SC_R = SC_N.map(n => SC_CH / (2 * Math.sin(PI / n))), Z_FORM = -12;
+const SC_G0 = [0]; for (let L_ = 1; L_ < NSCR; L_++) SC_G0.push(SC_G0[L_ - 1] + SC_N[L_ - 1]);
+/* slot (ring L, s) <-> global node g (ring A 0..27, ring B 28..55): slots in order are the nodes in order */
+const SC_GI = new Int32Array(NRN * 2), SC_MAP = [];
+for (let L_ = 0, q = 0; L_ < NSCR; L_++) for (let s = 0; s < SC_N[L_]; s++, q++) { SC_GI[q] = q; SC_MAP.push([L_, s]); }
+const scChord = ringChordBody('scChord', SC_CH, [7, 10], false, 10), scChordLo = ringChordBody('scChordLo', SC_CH, [7, 10], true, 10);
 /* a node: a housing open fore and aft round its momentum wheel (local as the chord, centred on the node) */
 const rNode = mk('rNode'); rNode.chunk('n');
 {
   const hx = 7, hy = 6, hz = 10;
-  rNode.obox([0, 0, 0], XA, YA, ZA, [hx, hy, hz], .2, { br: .88, edge: .9, skip: ['z-', 'z+'], ch: 10, q: 0 });
+  rNode.obox([0, 0, 0], XA, YA, ZA, [hx, hy, hz], .3, { br: .88, edge: .9, skip: ['z-', 'z+'], ch: 10, q: 0 });
   for (const s of [1, -1]) { rNode.ringP([0, 0, s * hz], XA, YA, 5.6, .8, 10, 0); for (let k = 0; k < 4; k++) { const t = PI / 4 + k * PI / 2; rNode.line([Math.cos(t) * 5.6, Math.sin(t) * 5.6, s * hz], [Math.sign(Math.cos(t)) * hx, Math.sign(Math.sin(t)) * hy, s * hz], .6, 10, 0); } }
   rNode.lathe([0, 0, -hz], ZA, [[0, 1.2], [2 * hz, 1.2]], { cell: .08, br: .9, seams: 8, ch: 10, q: 0 });
   for (const s of [1, -1]) light(rNode, [hx + .3, s * (hy - 1), 0], -2);
@@ -963,7 +1012,7 @@ const rNode = mk('rNode'); rNode.chunk('n');
 }
 rNode.done();
 const rRotor = mk('rRotor'); rRotor.chunk('r');
-rRotor.lathe([0, 0, -.7], ZA, [[0, 1.4], [0, 5.1], [1.4, 5.1], [1.4, 1.4]], { cell: .12, br: .95, seams: 6, sbr: .7, ch: 10, q: 2, rings: true });
+rRotor.lathe([0, 0, -.7], ZA, [[0, 1.4], [0, 5.1], [1.4, 5.1], [1.4, 1.4]], { cell: .22, br: .95, seams: 6, sbr: .7, ch: 10, q: 2, rings: true });
 for (let k = 0; k < 6; k++) { const t = k / 6 * TAU; for (const s of [1, -1]) rRotor.line([Math.cos(t) * 1.4, Math.sin(t) * 1.4, s * .72], [Math.cos(t) * 5.1, Math.sin(t) * 5.1, s * .72], .9, 10, 2); }
 rRotor.done();
 /* the bearing shoe on each pylon head, hugging the ring's inner face (local as the chord, at its centre) */
@@ -1050,8 +1099,10 @@ rod.ringP([0, 0, -ROD_L / 2 + .9], XA, YA, ROD_R * 1.02, .55, 8, 0); rod.ringP([
 rod.done();
 const sabot = mk('sabot'); sabot.chunk('s');
 sabot.lathe([0, 0, -RND_L / 2], ZA, [[0, ROD_R + .02], [0, RND_R], [RND_L - 1.6, RND_R], [RND_L, ROD_R + .3]], { cell: .05, br: .62, seams: 4, sbr: .6, rings: true, rbr: .5, ch: 8, q: 1 });
-sabot.lathe([0, 0, -RND_L / 2 - .9], ZA, [[0, .3], [0, RND_R * .99], [.9, RND_R * .99], [.9, .3]], { cell: .05, br: .9, seams: 16, ch: 8, q: 2 });
-for (const z of [-2.4, 0, 2]) sabot.ringP([0, 0, z], XA, YA, RND_R * 1.01, .5, 8, 1);
+sabot.lathe([0, 0, -RND_L / 2 - ARM_L], ZA, [[0, .3], [0, RND_R * .99], [ARM_L, RND_R * .99], [ARM_L, .3]], { cell: .05, br: .9, seams: 16, ch: 8, q: 2 });
+// the three sections' joints (bright bands), and rings along each
+for (let k = 1; k < RND_SEC; k++) { const z = -RND_L / 2 + k * RND_L / RND_SEC; sabot.ringP([0, 0, z - .1], XA, YA, RND_R * 1.02, .9, 8, 1); sabot.ringP([0, 0, z + .1], XA, YA, RND_R * 1.02, .9, 8, 1); }
+for (let k = 0; k < RND_SEC * 3; k++) sabot.ringP([0, 0, -RND_L / 2 + (k + .5) * RND_L / (RND_SEC * 3)], XA, YA, RND_R * 1.01, .45, 8, 1);
 sabot.done();
 /* the rotary switch: a disc facing X with three contact blades */
 const swDisc = mk('sw'); swDisc.chunk('d');
@@ -1061,14 +1112,14 @@ swDisc.done();
 
 /* ---------------- poses (preallocated) ---------------- */
 const mkRing = n => { const o = { F: xf(), C: xf(), psi: 0, tilt: 0, nodes: [], chords: [], rotors: [], shoes: [], shoeP: [], head: [] }; for (let i = 0; i < n; i++) { o.nodes.push(xf()); o.chords.push(xf()); o.rotors.push(xf()); } for (let p = 0; p < 4; p++) { o.shoes.push(xf()); o.shoeP.push([0, 0, 0]); o.head.push([0, 0, 0]); } return o; };
-const PP = { W: null, seg: [], bay: [], colS: [], colE: [], jaws: [], sleeves: [], tel: [], crown: xf(), iris: [], muzzle: [0, 0, 0],
+const PP = { W: null, seg: [], bay: [], colS: [], colE: [], jaws: [], jawH: [], sleeves: [], tel: [], crown: xf(), iris: [], muzzle: [0, 0, 0],
   fins: [], bells: [], exts: [], act: [], block: xf(), locks: [], clamps: [], round: xf(), roundOn: false, switches: [], laser: [],
   align: { e: [], r: [] }, rings: [mkRing(NRN), mkRing(NRN)], ring: { r: RING_R, k: 0, hk: 0, psi: 0 }, nodes: null,
   cr: { F: xf(), rim: xf(), nodes: [], chords: [], z: CR_DOCK }, arms: [], drums: [], pumps: [] };
 PP.nodes = PP.rings[0].nodes;
 for (let s = 0; s < NSEG; s++) { PP.seg.push(xf()); PP.colS.push(xf()); PP.colE.push(xf()); }
 for (let k = 0; k < NB; k++) PP.bay.push(xf());
-for (let j = 0; j < NSEG; j++) { PP.sleeves.push(xf()); const J = []; for (let f = 0; f < 6; f++) J.push(xf()); PP.jaws.push(J); }
+for (let j = 0; j < NSEG; j++) { PP.sleeves.push(xf()); const J = [], H = []; for (let f = 0; f < 6; f++) { J.push(xf()); H.push(xf()); } PP.jaws.push(J); PP.jawH.push(H); }
 for (let k = 0; k < NTEL; k++) PP.tel.push(xf());
 for (let k = 0; k < 6; k++) PP.iris.push(xf());
 for (let k = 0; k < NFIN * NFP; k++) PP.fins.push(xf());
@@ -1084,6 +1135,9 @@ for (let k = 0; k < DRUMS.length; k++) PP.drums.push(xf());
 for (let k = 0; k < PUMPS.length; k++) PP.pumps.push(xf());
 PP.secs = [xf(), xf(), xf(), xf(), xf(), xf()];
 PP.crawl = []; for (let k = 0; k < NCRAWL; k++) PP.crawl.push(xf());
+PP.crawlB = xf();
+PP.nodeX = []; PP.rotorX = []; PP.scChords = []; PP.scF = []; for (let g = 0; g < NRN * 2; g++) { PP.nodeX.push(xf()); PP.rotorX.push(xf()); PP.scChords.push(xf()); } for (let k = 0; k < 5; k++) PP.scF.push(xf());
+PP.scTh = new Float64Array(5);
 
 /* the rings' gimbal axis (platform XY, unit): the film sets it from the slew's axis */
 const GAX = [1, 0, 0];
@@ -1114,6 +1168,38 @@ function poseRing(R, W, zR, st, ri) {
     apTo(R.shoeP[p], R.shoes[p], [-3, 0, 0]); apTo(R.head[p], W, PYH[ri * 4 + p]);
   }
 }
+/* the nodes (in their stabiliser rings, in flight, or in a construction ring) and the construction rings' frames and
+   chords. st.sc: { z [5] (a ring's plane, platform z; NaN: not a ring), u [56] (each node's morph 0..1) } */
+const NDP = [0, 0, 0];
+function scNode(P, W, st, g, u, o) {
+  const ri = g < NRN ? 0 : 1, i = g % NRN, [L_, s] = SC_MAP[g], R_ = P.rings[ri];
+  if (u <= 0) { const N = R_.nodes[i]; for (let k = 0; k < 9; k++) o.R[k] = N.R[k]; o.T[0] = N.T[0]; o.T[1] = N.T[1]; o.T[2] = N.T[2]; return o; }
+  const n = SC_N[L_], ths = P.scTh[L_] + s * TAU / n, zs = st.sc.z[L_], rs = SC_R[L_];
+  if (u >= 1) return mulTo(o, W, rot(L1, 2, ths, 0, 0, 0, Math.cos(ths) * rs, Math.sin(ths) * rs, zs));
+  const thb = R_.psi + i * TAU / NRN; let d = ths - thb; d -= TAU * Math.round(d / TAU);
+  const r = RING_R + (rs - RING_R) * E.ss(.45, 1, u), z = RING_Z[ri] + (zs - RING_Z[ri]) * E.ss(0, .7, u), th = thb + d * E.ss(.1, .9, u);
+  return mulTo(o, W, rot(L1, 2, th, 0, 0, 0, Math.cos(th) * r, Math.sin(th) * r, z));
+}
+function poseSC(P, W, st) {
+  const sc = st.sc, NN = NRN * 2;
+  // each construction ring's slot 0 angle: centred on the arc of nodes it is made from (so the arc curls, not swirls)
+  for (let L_ = 0; L_ < NSCR; L_++) {
+    let cx = 0, cy = 0; const n = SC_N[L_];
+    for (let s = 0; s < n; s++) { const g = SC_G0[L_] + s, ri = g < NRN ? 0 : 1, t = P.rings[ri].psi + (g % NRN) * TAU / NRN; cx += Math.cos(t); cy += Math.sin(t); }
+    P.scTh[L_] = Math.atan2(cy, cx) - (n - 1) / 2 * TAU / n;
+    if (sc && !isNaN(sc.z[L_])) mulTo(P.scF[L_], W, tr(L1, 0, 0, sc.z[L_]));
+  }
+  for (let g = 0; g < NN; g++) {
+    const ri = g < NRN ? 0 : 1, i = g % NRN, S = st.rings[ri];
+    scNode(P, W, st, g, sc ? sc.u[g] : 0, P.nodeX[g]);
+    mulTo(P.rotorX[g], P.nodeX[g], rot(L1, 2, S.rotor + i * .7, 0, 0, 0, 0, 0, 0));
+  }
+  if (sc) for (let L_ = 0; L_ < NSCR; L_++) {
+    if (isNaN(sc.z[L_])) continue;
+    const n = SC_N[L_], ca = Math.cos(PI / n) * SC_R[L_];
+    for (let s = 0; s < n; s++) { const am = P.scTh[L_] + (s + .5) * TAU / n; mulTo(P.scChords[SC_G0[L_] + s], W, rot(L1, 2, am, 0, 0, 0, Math.cos(am) * ca, Math.sin(am) * ca, sc.z[L_])); }
+  }
+}
 function pose(W, st) {
   const P = PP; P.W = W;
   // the barrel: straight, built in place
@@ -1124,15 +1210,16 @@ function pose(W, st) {
     if (st.flex) { addFlex(P.colS[s], st, s * LSEG, 1); addFlex(P.colE[s], st, s * LSEG + LSEG, 1); }
   }
   for (let j = 1; j < NSEG; j++) {
-    for (let f = 0; f < 6; f++) mulTo(P.jaws[j][f], P.colS[j], rot(L1, 2, f * PI / 3, 0, 0, 0, 0, 0, -3.4 * st.jaw[j]));
+    for (let f = 0; f < 6; f++) { mulTo(P.jaws[j][f], P.colS[j], rot(L1, 2, f * PI / 3, 0, 0, 0, 0, 0, JAW_S * (1 - st.jaw[j]))); mulTo(P.jawH[j][f], P.colS[j], rot(L1, 2, f * PI / 3, 0, 0, 0, 0, 0, 0)); }
     mulTo(P.sleeves[j], P.colE[j - 1], rot(L1, 2, st.sleeve[j] * 3 * TAU, 0, 0, 0, 0, 0, COL_L - 3.4 + 1.7 * st.sleeve[j]));
   }
   for (let k = 0; k < NTEL; k++) { mulTo(P.tel[k], W, tr(L1, 0, 0, TEL_Z[k])); if (st.flex) addFlex(P.tel[k], st, Z_MZ - 40 + 15 * k, 1); }
   mulTo(P.crown, P.tel[2], tr(L1, 0, 0, TEL_L));
-  for (let k = 0; k < 6; k++) { mulTo(L2, P.crown, rot(L1, 2, k * PI / 3 + PI / 6, 0, 0, 0, 0, 0, CROWN_L + .05)); mulTo(P.iris[k], L2, rot(L1, 0, -st.iris * 1.75, 0, IRIS_R, 0, 0, 0, 0)); }
+  for (let k = 0; k < 6; k++) { mulTo(L2, P.crown, rot(L1, 2, k * PI / 3 + PI / 6, 0, 0, 0, 0, 0, CROWN_L + .05)); mulTo(P.iris[k], L2, rot(L1, 0, -(st.irisP ? st.irisP[k] : st.iris) * 1.75, 0, IRIS_R, 0, 0, 0, 0)); }
   apTo(P.muzzle, P.crown, [0, 0, CROWN_L]);
   // the stabiliser rings
   for (let ri = 0; ri < NRING; ri++) poseRing(P.rings[ri], W, RING_Z[ri], st, ri);
+  poseSC(P, W, st);
   P.ring.psi = st.rings[0].psi;
   // the construction ring: a static core, the spinning rim
   const C = st.cr; P.cr.z = C.z;
@@ -1147,12 +1234,16 @@ function pose(W, st) {
     mulTo(L3, L2, rot(L1, 1, C.arms * 1.9, 0, 0, 0, 0, 0, 0)); mulTo(P.arms[k], W, L3);
   }
   // the fins: accordion chains
-  const phi = FPHI_S * (1 - st.fin);
+  // (each fin unfolds hinge by hinge, root first, the twelve in a wave round the shell; each panel's angle is its own,
+  // alternating sides while folded)
   for (let f = 0; f < NFIN; f++) {
-    const t = f * TAU / NFIN;
+    const t = f * TAU / NFIN, ff = E.clamp(st.fin * 1.22 - f * .018, 0, 1);
     mulTo(L3, W, rot(L1, 2, t, 0, 0, 0, Math.cos(t) * SHELL_R, Math.sin(t) * SHELL_R, FIN_Z0));
-    let px = 0, py = 0;
-    for (let j = 0; j < NFP; j++) { const th = (j % 2 ? -1 : 1) * phi; mulTo(P.fins[f * NFP + j], L3, rot(L1, 2, th, 0, 0, 0, px, py, 0)); px += Math.cos(th) * FPW; py += Math.sin(th) * FPW; }
+    let px = 0, py = 0, a = 0;
+    for (let j = 0; j < NFP; j++) {
+      const u = E.ss(j * .1, j * .1 + .5, ff), phi = FPHI_S * (1 - u), th = (j % 2 ? -1 : 1) * phi;
+      a = th; mulTo(P.fins[f * NFP + j], L3, rot(L1, 2, a, 0, 0, 0, px, py, 0)); px += Math.cos(a) * FPW; py += Math.sin(a) * FPW;
+    }
   }
   for (let k = 0; k < DRUMS.length; k++) { const t = DRUMS[k]; mulTo(P.drums[k], W, rot(L1, 2, t + PI + st.drum * PI, 0, 0, 0, Math.cos(t) * DRUM_RC, Math.sin(t) * DRUM_RC, 0)); }
   for (let k = 0; k < PUMPS.length; k++) mulTo(P.pumps[k], W, rot(L1, 2, st.pump + k, 0, 0, 0, PUMPS[k][0], PUMPS[k][1], PUMPS[k][2]));
@@ -1170,7 +1261,7 @@ function pose(W, st) {
   // the chamber
   mulTo(P.block, W, tr(L1, 0, -5.6 * (1 - st.breech), 0));
   for (let k = 0; k < 3; k++) mulTo(P.locks[k], W, rot(L1, 2, (st.lock - 1) * PI / 6, 0, 0, 0, 0, 0, LOCK_Z[k] - .5 * (1 - Math.min(1, st.lock * 2))));
-  for (let k = 0; k < 12; k++) { const t = PI / 6 + (k % 6) * PI / 3; mulTo(L2, W, rot(L1, 2, t, 0, 0, 0, 0, 0, CLAMP_Z[k < 6 ? 0 : 1])); mulTo(P.clamps[k], L2, tr(L1, 1.25 * (1 - st.clamp), 0, 0)); }
+  for (let k = 0; k < 12; k++) { const t = PI / 6 + (k % 6) * PI / 3; mulTo(L2, W, rot(L1, 2, t, 0, 0, 0, 0, 0, CLAMP_Z[k < 6 ? 0 : 1])); mulTo(P.clamps[k], L2, tr(L1, 1.25 * (1 - (st.clampK ? st.clampK[k] : st.clamp)), 0, 0)); }
   P.roundOn = st.roundZ !== null && st.roundZ !== undefined;
   if (P.roundOn) { mulTo(P.round, W, tr(L1, 0, 0, st.roundZ)); if (st.flex) addFlex(P.round, st, st.roundZ, 1); }
   for (let k = 0; k < 4; k++) { const [x, z, f] = SWS[k]; mulTo(L2, W, rot(L1, 1, -f * PI / 2, 0, 0, 0, x, SWY + 7, z - 1.3 * f)); mulTo(P.switches[k], L2, rot(L1, 0, (x > 0 ? 1 : -1) * st.sw * PI / 3, 0, 0, 0, 0, 0, 0)); }
@@ -1202,7 +1293,7 @@ function poseCrawlers(P, st) {
    interiors, X-ray), skinOcc, ring (the stabiliser rings), cr (the construction ring), wave(worldPos) -> lime 0..1 } */
 const OB = {}, OS = {}, OC_ = {}, OF = {}, OR_ = {}, OCR = {};
 const OPL = [{}, {}, {}, {}, {}], CLP = [new Float64Array(4), new Float64Array(4), new Float64Array(4), new Float64Array(4), new Float64Array(4)];
-const FL3 = [0, 0, 0, 0, 0], WP = [0, 0, 0];
+const FL3 = [0, 0, 0, 0, 0, 0], WP = [0, 0, 0];
 let LKc = null, FRESH = 20;
 /* the projected radius (px) of a sphere of radius r at local point lc under Tw */
 function lodPx(Tw, lc, r) { apTo(WP, Tw, lc); const C = ORK.C, e = C.eye, d = Math.hypot(WP[0] - e[0], WP[1] - e[1], WP[2] - e[2]); return r * C.fl / Math.max(1, d); }
@@ -1270,10 +1361,14 @@ function draw(P, st, LK) {
   L.draw(pylons, P.W, LK.ring || o); L.draw(engMount, P.W, o);
   // the reactor
   CUR.inst = 6;
-  L.draw(coreB, P.W, LK.core || o); L.draw(coldB, P.W, LK.cold || LK.jk || o); L.draw(jacket, P.W, LK.jk || o);
-  if (LK.cp) L.draw(couples, P.W, LK.cp);
-  if (LK.fuel) for (let k = 0; k < DRUMS.length; k++) L.draw(drum, P.drums[k], LK.core || LK.fuel);
-  if (LK.sec && st.cut) { const H = [st.cut.hk, st.cut.hc, st.cut.hs], SB = [secCore, secCp, secSh]; for (let i = 0; i < 6; i++) if (H[i >> 1] > .01) L.draw(SB[i >> 1], P.secs[i], LK.sec); }
+  // (LK.xr: the film draws the cutaway's insides from cached samples; only the shell and the domes are drawn, clipped)
+  if (LK.xr) { L.draw(domes, P.W, LK.core || o); L.draw(jacket, P.W, LK.jk || o); }
+  else {
+    L.draw(coreB, P.W, LK.core || o); L.draw(coldB, P.W, LK.cold || LK.jk || o); L.draw(jacket, P.W, LK.jk || o);
+    if (LK.cp) L.draw(couples, P.W, LK.cp);
+    if (LK.fuel) for (let k = 0; k < DRUMS.length; k++) L.draw(drum, P.drums[k], LK.core || LK.fuel);
+    if (LK.sec && st.cut) { const H = [st.cut.hk, st.cut.hc, st.cut.hs], SB = [secCore, secCp, secSh]; for (let i = 0; i < 6; i++) if (H[i >> 1] > .01) L.draw(SB[i >> 1], P.secs[i], LK.sec); }
+  }
   for (let k = 0; k < PUMPS.length; k++) { CUR.k = k; const px = lodPx(P.pumps[k], [0, 0, 0], 2); if (SMOOTH_) drawA(apW(px, 2), impeller, P.pumps[k], o); else if (px > 2) L.draw(impeller, P.pumps[k], o); }
   // the barrel, layer by layer up to each layer's front
   CUR.inst = 1;
@@ -1300,6 +1395,7 @@ function draw(P, st, LK) {
     }
     const o3 = lo_(3, z0, z1), w3 = o3 ? apW(px, 4) * wSk : 0;
     for (let f = 0; f < 6; f++) {
+      if (k === st.heroBay) st.flapAt(k, FL3, f);
       mulTo(L2, Tb, rot(L1, 2, f * PI / 3, 0, 0, 0, 0, 0, 0));
       if (w3 > 0) { mulTo(L4, L2, rot(L1, 2, FL3[2], 0, CAS_Y, 0, 0, FL3[1], 0)); L.G.am = am1 * w3; instX(px, 90, cas, casLo, L4, o3, [0, CAS_Y, 5], Math.max(fresh(st, 3, zc), FL3[4])); L.G.am = am1; }
       if (o4) { mulTo(L4, L2, rot(L1, 2, -FL3[0], 0, 0, 0, HR / 2, HA, 0)); instX(px, 110, flap, flapLo, L4, o4, [-HR / 2, 0, 5], Math.max(fresh(st, 4, zc), FL3[3])); }
@@ -1323,9 +1419,10 @@ function draw(P, st, LK) {
       const k = s * NBAY + b, Tb = P.bay[k], z0 = z0s + b * BAYL, z1 = z0 + BAYL, zc = z0 + 5;
       if (st.front[0] <= z0) break;
       CUR.z = z0; CUR.k = k;
-      const px = lodPx(Tb, [0, 0, 5], 16);
-      if (SMOOTH_) { const wb = wBay * apW(px, .8); if (wb <= 0) continue; L.G.am = amS * wb; bayS(st, LK, k, Tb, z0, z1, zc, px); L.G.am = amS; continue; }
+      const px = lodPx(Tb, [0, 0, 5], 16), fk = st.focusK || 0, fm = fk > 0 ? (k === st.heroBay ? 1 + 1.3 * fk : 1 - .55 * fk) : 1;
+      if (SMOOTH_) { const wb = wBay * apW(px, .8); if (wb <= 0) continue; L.G.am = amS * wb * fm; bayS(st, LK, k, Tb, z0, z1, zc, px); L.G.am = amS; continue; }
       if (px < .8) continue;
+      L.G.am = amS * fm;          // (the hero bay's close-up: it brightens, the bays round it dim)
       st.flapAt(k, FL3);
       const open = FL3[0] > .01 || FL3[1] > .01;
       const o2 = lo_(2, z0, z1), o4 = lo_(4, z0, z1), skin = o4 === OS && !open && LK.skinOcc;
@@ -1337,10 +1434,12 @@ function draw(P, st, LK) {
       }
       const o3 = lo_(3, z0, z1);
       for (let f = 0; f < 6; f++) {
+        if (k === st.heroBay) st.flapAt(k, FL3, f);
         mulTo(L2, Tb, rot(L1, 2, f * PI / 3, 0, 0, 0, 0, 0, 0));
         if (o3 && (open || !skin) && px > 4) { mulTo(L4, L2, rot(L1, 2, FL3[2], 0, CAS_Y, 0, 0, FL3[1], 0)); inst(px > 90 ? cas : casLo, L4, o3, [0, CAS_Y, 5], Math.max(fresh(st, 3, zc), FL3[4])); }
         if (o4) { mulTo(L4, L2, rot(L1, 2, -FL3[0], 0, 0, 0, HR / 2, HA, 0)); inst(px > 110 ? flap : flapLo, L4, o4, [-HR / 2, 0, 5], Math.max(fresh(st, 4, zc), FL3[3])); }
       }
+      L.G.am = amS;
     }
     CUR.z = z0s; CUR.k = s;
     const oc = lo_(2, z0s, z0s + COL_L);
@@ -1352,41 +1451,48 @@ function draw(P, st, LK) {
   for (let j = 1; j < NSEG; j++) {
     if (st.front[2] < j * LSEG + COL_L) break;
     CUR.z = j * LSEG; CUR.k = j;
-    { const wj = apW(lodPx(P.colS[j], [0, 0, 0], 16), 3); if (wj > 0) for (let f = 0; f < 6; f++) instA(wj, jaw, P.jaws[j][f], OC_, [0, HA + 2, 2], 0); }
+    { const wj = apW(lodPx(P.colS[j], [0, 0, 0], 16), 3); if (wj > 0) for (let f = 0; f < 6; f++) { CUR.j = 0; instA(wj, jaw, P.jaws[j][f], OC_, [0, HA + 2, 2], 0); instA(wj * apW(lodPx(P.colS[j], [0, 0, 0], 16), 8), jawH, P.jawH[j][f], OC_, [0, HA + 2, 5], 0); } }
     CUR.z = j * LSEG - 1.7; if ((st.sleeve[j] > .01 || LK.bar) && st.front[0] > j * LSEG + 2) inst(sleeve, P.sleeves[j], OB, [0, 0, 1.7], 0);
   }
   for (let k = 0; k < NTEL; k++) { const z0 = TEL_Z[k], oT = lo_(2, z0, z0 + TEL_L); if (!oT) continue; CUR.z = z0; CUR.k = k; inst(tel[k], P.tel[k], oT, [0, 0, 18], fresh(st, 2, z0 + 18)); }
-  { const oK = lo_(2, Z_TELEND, Z_MZ); if (oK) { CUR.z = Z_TELEND; inst(crown, P.crown, oK, [0, 0, 2], fresh(st, 2, Z_TELEND)); if (st.front[4] > Z_MZ) for (let k = 0; k < 6; k++) inst(iris, P.iris[k], OC_, [0, -2, 0], fresh(st, 4, Z_MZ)); } }
-  // the stabiliser rings: nodes, chords, wheels, shoes (smeared when they spin fast on screen)
+  { const oK = lo_(2, Z_TELEND, Z_MZ); if (oK) { CUR.z = Z_TELEND; inst(crown, P.crown, oK, [0, 0, 2], fresh(st, 2, Z_TELEND)); if (st.front[4] > Z_MZ) for (let k = 0; k < 6; k++) { CUR.k = k; inst(iris, P.iris[k], OC_, [0, -2, 0], fresh(st, 4, Z_MZ)); } } }
+  // the stabiliser rings: nodes, chords, wheels, shoes (smeared when they spin fast on screen); broken up, their nodes
+  // fly to (and ride in) the five construction rings, their chords dissolving and short ones condensing between them
+  const SC = st.sc;
   for (let ri = 0; ri < NRING; ri++) {
     const R_ = P.rings[ri], bl = st.blur ? st.blur[ri] : 0, a0 = OR_.a === undefined ? 1 : OR_.a;
     CUR.inst = 2; CUR.k = ri; CUR.z = RING_Z[ri];
     OR_.a = a0 * (1 - .8 * bl); OR_.keep = 1 - .7 * bl;
-    if (SMOOTH_) {
-      // (the nodes fade out into the smear from blur 0.7 to 0.85; the near detail fades in over [260, 390] px)
-      const wn = apW(lodPx(R_.F, [0, 0, 0], RING_R), 260), am1 = L.G.am, nb = 1 - E.ss(.7, .85, bl);
-      if (nb > 0) {
-        L.G.am = am1 * nb;
-        for (let i = 0; i < NRN; i++) {
-          CUR.j = i;
-          inst(rNode, R_.nodes[i], OR_, [0, 0, 0], 0);
-          instW(wn * apW(lodPx(R_.chords[i], [0, 0, 0], RCH / 2), 90), rChord, rChordLo, R_.chords[i], OR_, [0, 0, 0], 0);
-          const wr = wn > 0 ? wn * apW(lodPx(R_.rotors[i], [0, 0, 0], 5), 6) : 0; if (wr > 0) { L.G.am = am1 * nb * wr; inst(rRotor, R_.rotors[i], OR_, [0, 0, 0], 0); L.G.am = am1 * nb; }
-        }
-        L.G.am = am1;
+    const wn = SMOOTH_ ? apW(lodPx(R_.F, [0, 0, 0], RING_R), 260) : lodPx(R_.F, [0, 0, 0], RING_R) < 260 ? 0 : 1, am1 = L.G.am, nb = SMOOTH_ ? 1 - E.ss(.7, .85, bl) : bl < .85 ? 1 : 0;
+    if (nb > 0) {
+      L.G.am = am1 * nb;
+      for (let i = 0; i < NRN; i++) {
+        const g = ri * NRN + i, u0 = SC ? SC.u[g] : 0, u1 = SC ? SC.u[ri * NRN + (i + 1) % NRN] : 0, Nx = P.nodeX[g];
+        CUR.j = i; CUR.k = ri;
+        // (a node in its construction ring is drawn below with that ring's LOD)
+        const nearN = u0 > .5 && SC ? apW(lodPx(Nx, [0, 0, 0], 60), 12) : wn;
+        const pf_ = OR_.pxf; if (u0 > 0) OR_.pxf = (pf_ || 1) * 1.6; inst(rNode, Nx, OR_, [0, 0, 0], 0); OR_.pxf = pf_;
+        const ac = 1 - E.sat(Math.max(u0, u1) * 6);
+        if (ac > 0) { L.G.am = am1 * nb * ac; if (SMOOTH_) instW(wn * apW(lodPx(R_.chords[i], [0, 0, 0], RCH / 2), 90), rChord, rChordLo, R_.chords[i], OR_, [0, 0, 0], 0); else inst(!wn || lodPx(R_.chords[i], [0, 0, 0], RCH / 2) < 90 ? rChordLo : rChord, R_.chords[i], OR_, [0, 0, 0], 0); L.G.am = am1 * nb; }
+        const wr = nearN > 0 ? nearN * apW(lodPx(P.rotorX[g], [0, 0, 0], 5), u0 > 0 ? 14 : 6) : 0;
+        if (wr > 0) { L.G.am = am1 * nb * wr; inst(rRotor, P.rotorX[g], OR_, [0, 0, 0], 0); L.G.am = am1 * nb; }
       }
-    } else {
-      const far = lodPx(R_.F, [0, 0, 0], RING_R) < 260;
-      if (bl < .85) for (let i = 0; i < NRN; i++) {
-        CUR.j = i;
-        inst(rNode, R_.nodes[i], OR_, [0, 0, 0], 0);
-        inst(far || lodPx(R_.chords[i], [0, 0, 0], RCH / 2) < 90 ? rChordLo : rChord, R_.chords[i], OR_, [0, 0, 0], 0);
-        if (!far && lodPx(R_.rotors[i], [0, 0, 0], 5) > 6) inst(rRotor, R_.rotors[i], OR_, [0, 0, 0], 0);
-      }
+      L.G.am = am1;
     }
     OR_.a = a0; OR_.keep = 1;
     for (let p = 0; p < 4; p++) inst(rShoe, R_.shoes[p], OR_, [0, 0, 0], 0);
     if (bl > .02) smear(R_.C, RING_R, RSEC, bl, OR_);
+  }
+  // the construction rings' chords (condensing as each pair of nodes arrives)
+  if (SC) for (let L_ = 0; L_ < NSCR; L_++) {
+    if (SC.z[L_] === null || isNaN(SC.z[L_])) continue;
+    const n = SC_N[L_], g0 = SC_G0[L_], am1 = L.G.am, w = apW(lodPx(P.scF[L_], [0, 0, 0], SC_R[L_]), 30);
+    for (let s = 0; s < n; s++) {
+      const ua = SC.u[SC_GI[g0 + s]], ub = SC.u[SC_GI[g0 + (s + 1) % n]], ac = E.sat((Math.min(ua, ub) - .86) / .14);
+      if (ac <= 0) continue;
+      CUR.k = L_; CUR.j = s; CUR.inst = 2;
+      const pf_ = OR_.pxf; OR_.pxf = (pf_ || 1) * 1.6; L.G.am = am1 * ac; instX(lodPx(P.scChords[g0 + s], [0, 0, 0], SC_CH / 2) * w, 150, scChord, scChordLo, P.scChords[g0 + s], OR_, [0, 0, 0], SC.fresh ? SC.fresh[L_] : 0); L.G.am = am1; OR_.pxf = pf_;
+    }
   }
   // the construction ring: the static core, the rim (smeared when fast), the docking arms
   {
@@ -1408,11 +1514,16 @@ function draw(P, st, LK) {
   // fins (sparser lattice: big flat panels), engines
   CUR.inst = 4;
   const finFar = lodPx(P.W, [0, 0, FIN_Z0 + FIN_L / 2], 40) < 40, wfn = SMOOTH_ ? apW(lodPx(P.W, [0, 0, FIN_Z0 + FIN_L / 2], 40), 40) : 0;
+  // (solid panels at 1.8x the lattice spacing; a panel still folded into its fin's stack drawn sparse)
+  const OFn = LK.fin || OF, pf0 = OFn.pxf, kp0 = OFn.keep === undefined ? 1 : OFn.keep;
   for (let f = 0; f < NFIN; f++) for (let j = 0; j < NFP; j++) {
-    CUR.k = f; CUR.j = j; CUR.z = FIN_Z0; const T_ = P.fins[f * NFP + j];
-    if (SMOOTH_) drawW(wfn > 0 ? wfn * apW(lodPx(T_, [FPW / 2, 0, FIN_L / 2], 30), 110) : 0, finP, finLo, T_, LK.fin || OF);
-    else L.draw(finFar || lodPx(T_, [FPW / 2, 0, FIN_L / 2], 30) < 110 ? finLo : finP, T_, LK.fin || OF);
+    CUR.k = f; CUR.j = j; CUR.z = FIN_Z0; const T_ = P.fins[f * NFP + j], ff = E.clamp(st.fin * 1.22 - f * .018, 0, 1);
+    const fold = E.ss(j * .1, j * .1 + .5, ff) < .05;
+    OFn.pxf = 1.8; OFn.keep = kp0 * (j > 0 && fold ? .3 : 1);
+    if (SMOOTH_) drawW(wfn > 0 ? wfn * apW(lodPx(T_, [FPW / 2, 0, FIN_L / 2], 30), 110) : 0, finP, finLo, T_, OFn);
+    else L.draw(finFar || ff < .02 || lodPx(T_, [FPW / 2, 0, FIN_L / 2], 30) < 110 ? finLo : finP, T_, OFn);
   }
+  OFn.pxf = pf0; OFn.keep = kp0;
   for (let e = 0; e < NENG; e++) { CUR.k = e; CUR.z = ENG_Z; L.draw(bell, P.bells[e], OC_); L.draw(ext, P.exts[e], OC_); }
   // the chamber's moving parts and the round
   CUR.inst = 0; CUR.z = 0; CUR.k = -1;
@@ -1426,6 +1537,8 @@ function draw(P, st, LK) {
   if (P.roundOn) { L.draw(sabot, P.round, ox); L.draw(rod, P.round, ox); }
   for (let k = 0; k < 4; k++) { CUR.k = k; L.draw(swDisc, P.switches[k], o); }
   { const wc = apW(lodPx(P.W, [0, 0, -300], 300), 120); if (wc > 0) { poseCrawlers(P, st); for (let k = 0; k < NCRAWL; k++) drawA(wc * apW(lodPx(P.crawl[k], [0, 1, 0], 4), 1.5), crawler, P.crawl[k], LK.hull || o); } }
+  // a crawler riding the new barrel's top behind the build (8 m against the 26 m hex: the scale)
+  if (st.crawlB !== null && st.crawlB !== undefined) { mulTo(P.crawlB, P.W, tr(L1, 0, HA + .15, st.crawlB)); CUR.k = -1; drawA(apW(lodPx(P.crawlB, [0, 1, 0], 4), 1.5), crawler, P.crawlB, LK.hull || o); }
 }
 /* a fast-spinning ring as its swept surface: rings of dots at the section's corners and middle (Tc: the ring's frame,
    not spinning) */
@@ -1509,7 +1622,7 @@ function occlude(P, st, oo) {
   const W = P.W;
   if (oo.cutK !== undefined) {
     const a0 = CUT_A + oo.cutK, sp = (TAU - 2 * oo.cutK) / 3;
-    for (let i = 0; i < 3; i++) { CPOLY[0][0] = 0; CPOLY[0][1] = 0; for (let j = 0; j < 3; j++) { const a = a0 + sp * (i + j / 2); CPOLY[j + 1][0] = Math.cos(a) * CORE_R; CPOLY[j + 1][1] = Math.sin(a) * CORE_R; } occPoly(W, CPOLY, 1, REA_Z1, REA_Z0); }
+    for (let i = 0; i < 3; i++) { CPOLY[0][0] = 0; CPOLY[0][1] = 0; for (let j = 0; j < 3; j++) { const a = a0 + sp * (i + j / 2); CPOLY[j + 1][0] = Math.cos(a) * SHELL_R; CPOLY[j + 1][1] = Math.sin(a) * SHELL_R; } occPoly(W, CPOLY, 1, REA_Z1, REA_Z0); }
   }
   else if (oo.coreTo !== undefined) { if (oo.coreTo > REA_Z0) occPrism(W, 16, CORE_R, 0, REA_Z0, oo.coreTo); }
   else if (oo.core !== false) occPrism(W, 16, SHELL_R, 0, REA_Z0, REA_Z1);
@@ -1529,23 +1642,25 @@ const BAYX = X.make(R.I(), BAY_C.slice()), CHAMBERX = X.make(R.I(), [0, 0, Z_RND
 /* ---------------- points of interest (platform frame; the camera frames them) ---------------- */
 const POI = {
   prow: [0, 0, Z_PROW], stern: [0, 0, Z_STERN], hullMid: [0, 20, -320], bridge: [0, TOWER.yb + TOWER.h + 8, TOWER.z1 - 16], tower: [0, TOWER.yb + TOWER.h / 2, (TOWER.z0 + TOWER.z1) / 2],
+  gauge: [Math.cos(CUT_A) * (SHELL_R + 17), Math.sin(CUT_A) * (SHELL_R + 17), REA_Z1 + 3], finRoot: [SHELL_R + 4, 0, FIN_Z0 + FIN_L / 2],
   reactor: [0, 0, (REA_Z0 + REA_Z1) / 2], cut: [Math.cos(CUT_A) * SHELL_R, Math.sin(CUT_A) * SHELL_R, (REA_Z0 + REA_Z1) / 2], cutDir: [Math.cos(CUT_A), Math.sin(CUT_A), 0],
   fins: [0, 0, FIN_Z0 + FIN_L / 2], finTip: [SHELL_R + NFP * FPW, 0, FIN_Z0 + FIN_L / 2], pumps: PUMPS[3].slice(),
   ringA: [0, 0, RING_Z[0]], ringB: [0, 0, RING_Z[1]], rings: [0, 0, (RING_Z[0] + RING_Z[1]) / 2], ringR: RING_R, pylonHead: PYH[0].slice(), ringNode: [RING_R, 0, RING_Z[0]],
   nozzles: ENG_P.map(([x, y]) => [x, y, ENG_Z - 11 - BELL_L]), engine: [ENG_P[0][0], ENG_P[0][1], ENG_Z - 20],
-  chamber: [0, 0, Z_RND], breech: [0, 0, -14.6], bay: BAY_C.slice(), switchyard: [0, SWY + 7, -162], switches: SWS.map(([x, z]) => [x, SWY + 7, z]), well: [0, WELL.y, (WELL.z0 + WELL.z1) / 2], caps: [15, SWY + 6, -162],
+  chamber: [0, 0, Z_RND], breech: [0, 0, (BLK_Z[0] + BLK_Z[1]) / 2], bay: BAY_C.slice(), switchyard: [0, SWY + 7, -162], switches: SWS.map(([x, z]) => [x, SWY + 7, z]), capHero: [CAP_HERO[0], CAP_HERO[1] + 2.6, CAP_HERO[2]], well: [0, WELL.y, (WELL.z0 + WELL.z1) / 2], caps: [15, SWY + 6, -162],
   hab: [HAB.x1 + 2.4, 27 * kz(HAB.z), HAB.z], crew: [HAB.x1 + 5, 27 * kz(HAB.z) + 1, HAB.z - 4.2], antennas: [0, D2.y1 * kz(-280) + 8, -280],
   laserEmit: LZ.emit.slice(), laserMid: LZ.mid.slice(), laserProw: LZ.prow.slice(), alignPost: [Math.cos(ALN[0]) * ALN_R, Math.sin(ALN[0]) * ALN_R, Z_PROW + 2],
+  heroBay: [0, 0, 4 * BAYL + 5], heroBayEye: [22, 17, 26], scForm: [0, 0, Z_FORM], scR: SC_R.slice(), round: [0, 0, Z_RND], roundNose: [0, 0, Z_RND + RND_L / 2],
   crDock: [0, 0, CR_DOCK], muzzle: [0, 0, Z_MZ], collar: k => [0, 0, k * LSEG], collarMast: k => [0, BEAM_Y, k * LSEG + 1.1],
 };
 
-return { bodies, root, rods: [rod], rodBody: rod, sabot, capD, pose, draw, occlude, stats, CUR, LTS, PP, POI, setGimbal, GAX, segPt,
-  HR, HA, NSEG, LSEG, BAYL, NBAY, NB, BORE_R, LINER_R, NMAG, MAG_RC, MAG_R, CRING_R, NTEL, TEL_R, TEL_L, TEL_S0, TEL_S1, TEL_Z, Z_TELEND, CROWN_L, Z_MZ, COL_R, COL_L, IRIS_R,
-  Z_RND, RND_L, RND_R, ROD_L, ROD_R, HSG_R, HSG_Z0, HSG_Z1, BLK_Z, LOCK_Z, BAY_C, BAY_H, SR, SZ0, SZ1, SWZ, SWX, SWY, SWS, CAPS,
+return { scNode, NSCR, SC_N, SC_CH, SC_R, SC_G0, SC_MAP, Z_FORM, bodies, root, rods: [rod], rodBody: rod, sabot, capD, pose, draw, occlude, stats, CUR, LTS, PP, POI, setGimbal, GAX, segPt,
+  HR, HA, JAW_Y, JAW_S, NSEG, LSEG, BAYL, NBAY, NB, BORE_R, LINER_R, NMAG, MAG_RC, MAG_R, CRING_R, NTEL, TEL_R, TEL_L, TEL_S0, TEL_S1, TEL_Z, Z_TELEND, CROWN_L, Z_MZ, COL_R, COL_L, IRIS_R,
+  Z_RND, RND_L, RND_R, ROD_L, ROD_R, ARM_L, RND_SEC, COIL_Z, CLAMP_Z, HSG_R, HSG_Z0, HSG_Z1, BLK_Z, LOCK_Z, BAY_C, BAY_H, SR, SZ0, SZ1, SWZ, SWX, SWY, SWS, CAPS, CAP_HERO,
   Z_PROW, Z_STERN, KS, kz, HP, C0, D2, D3, WELL, TOWER, HAB, NCRAWL,
   NRING, RING_R, RING_Z, NRN, RCH, RSEC, PYL, SHOE_R, CR_R, NCN, CR_ST, CR_CO, CR_RX, CR_DOCK, ALN, ALN_R,
   HUB_Z: (RING_Z[0] + RING_Z[1]) / 2, HUB_R: 32, NND: NRN, CHORD: RCH, HC: RCH / 2, KAPPA_S: 0, RST_R: RING_R,
-  REA_Z0, REA_Z1, CORE_R, HS_R, CS_R, SHELL_R, FUEL_R, DRUM_RC, DRUM_R, DRUMS, PUMPS, CUT_A, CUT_W, NFIN, NFP, FPW, FIN_Z0, FIN_L,
+  REA_Z0, REA_Z1, CORE_R, HS_R, CS_R, CSO_R, SHELL_R, FUEL_R, DRUM_RC, DRUM_R, DRUMS, PUMPS, CUT_A, CUT_W, NFIN, NFP, FPW, FIN_Z0, FIN_L,
   NENG, ENG_P, ENG_Z, BELL_L, BELL_R1, EXT_L, ENG_R: Math.hypot(ENG_P[0][0], ENG_P[0][1]), ENG_Z0: ENG_Z, ENG_TH: ENG_Z - 11,
   LZ, BEAM_Y, NCP, CP_ROWS, CP_Z0, CP_DZ, TANKS, TANK_RC, TANK_R,
   BAYX, CHAMBERX, xf, mulTo, rot, rotAx, tr, apTo };
