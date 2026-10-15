@@ -3224,7 +3224,7 @@ const occIn = (X_, r, z0, z1) => { const h = r * .66; OMN[0] = -h; OMN[1] = -h; 
 function pieceOcc(u) {
   const st = PIECE.st, X_ = PIECE.X;
   if (st === 'green') occIn(X_, D.rg, -D.Lg / 2 + .05, D.Lg / 2 - .05);
-  else if (st === 'sint' && u > 12.6) occIn(X_, D.rs, -D.Ls / 2 + .05, D.Ls / 2 - .05);
+  else if (st === 'sint' && u > 12.6) { if (K.SMOOTH) K.occA(E.ss(12.6, 12.85, u)); occIn(X_, D.rs, -D.Ls / 2 + .05, D.Ls / 2 - .05); K.occA(1); }
   else if (st === 'forge') { occIn(X_, D.rs, R4S.xt + .05, Math.min(XF - .05, R4S.xt + D.Ls - .05)); if (R4S.f > .1) occIn(X_, D.rf, XF + .05, XF + R4S.f * D.Lf / (D.Ls - D.LT) - .05); }
   else if (st === 'forged' || st === 'turn' || st === 'turned' || st === 'mill') occIn(X_, RR, -RL / 2 + D.LT + .05, RL / 2 - D.LN - .05);
   else if (st === 'body' || st === 'coat' || st === 'coated' || st === 'mated') occIn(X_, RR, -RL / 2 + D.LT + .05, RL / 2 - D.LN - D.dbore - .05);
@@ -3239,7 +3239,9 @@ function machOcc() {
   for (const o of OCCS) {
     if (OCC_OFF[o.g]) continue;
     const cx = (o.mn[0] + o.mx[0]) / 2 - EB[0], cy = (o.mn[1] + o.mx[1]) / 2 - EB[1], cz = (o.mn[2] + o.mx[2]) / 2 - EB[2];
-    if (cx * cx + cy * cy + cz * cz > 1300) continue;
+    const d2 = cx * cx + cy * cy + cz * cz;
+    if (d2 > 1300) continue;
+    if (K.SMOOTH && d2 > 1050) { K.occA(1 - (d2 - 1050) / 250); K.occBox(BWX, o.mn, o.mx); K.occA(1); continue; }   // (SMOOTH: fading out from 32 to 36 m)
     K.occBox(BWX, o.mn, o.mx);
   }
 }
@@ -3382,7 +3384,7 @@ function drawLens(u) {
   }
 }
 function lensTags(u) {
-  const T = (key, beat, d0, lab, val) => { const L_ = LNS[key], b = BW_[beat], w0 = b[0] + d0, w1 = b[1] - 1.7; if (U_ < w0 || U_ > w1) return; const a = tw(U_, w0, w1); lp(L_, L_.h, L_.h, TP2); if (!K.pj(TP2[0], TP2[1], TP2[2])) return; const tg = BXT[key] || (BXT[key] = K.mkTag()); K.setTag(tg, '', K.decode(lab, sat((U_ - w0) / .6), FXU, key.length), val, 'lime sm', K.PJ[0] + 8, K.PJ[1] - 26, a); };
+  const T = (key, beat, d0, lab, val) => { const L_ = LNS[key], b = BW_[beat], w0 = b[0] + d0, w1 = b[1] - 1.7; if (U_ < w0 || U_ > w1) return; const a = tw(U_, w0, w1); lp(L_, L_.h, L_.h, TP2); if (!K.pj(TP2[0], TP2[1], TP2[2])) return; const tg = BXT[key] || (BXT[key] = K.mkTag()); K.setTag(tg, '', K.decode(lab, sat((U_ - w0) / .6), FXU, key.length), val, 'lime sm', K.PJ[0] + 8 * K.S, K.PJ[1] - 26 * K.S, a); };
   T('wmap', 'C5', .9, `WAFER MAP ×1.2 · ${NF} DIES`, u > CUTZ[1] + .2 ? `${NF - BADD.size} GOOD` : 'PROBING');
   T('dmap', 'C6', 1.1, 'DIE MAP ×11 · 2 CORES · MEMORY · PADS', `${Math.floor(NWIRE * lin(u, C6T.wire[0], C6T.wire[1]))}/${NWIRE}`);
   T('ct', 'C10', 1.1, 'CT SLICE ×1.2 · THE SHELL ONLY', 'VOIDS 0');
@@ -3398,11 +3400,12 @@ const TP2 = [0, 0, 0];
 function tag(id, lab, val, x, y, z, a, age, side, world, lift) {
   if (a < .01) return;
   if (world) { TP[0] = x; TP[1] = y; TP[2] = z; } else apX(BWX, x, y, z, TP);
-  if (!K.pj(TP[0], TP[1], TP[2]) || !K.onS(-40)) return;
-  const sx = K.PJ[0], sy = K.PJ[1], s = side || (sx > 1100 ? 1 : -1), dx = 54 * s, lx = sx + dx, ly = sy - 50 - (lift || 0), tg = tgOf(id + lab.slice(0, 12));
-  K.leader(sx, sy, lx, ly, '#C6F432', .8 * a); K.dot(sx, sy, 3, LIME[0], LIME[1], LIME[2], a);
+  const S = K.S;                                             // (raster px: the offsets are stage px x S)
+  if (!K.pj(TP[0], TP[1], TP[2]) || !K.onS(-40 * S)) return;
+  const sx = K.PJ[0], sy = K.PJ[1], s = side || (sx > 1100 * S ? 1 : -1), dx = 54 * s * S, lx = sx + dx, ly = sy - 50 * S - (lift || 0) * S, tg = tgOf(id + lab.slice(0, 12));
+  K.leader(sx, sy, lx, ly, '#C6F432', .8 * a); K.dot(sx, sy, Math.round(3 * S), LIME[0], LIME[1], LIME[2], a);
   const w = K.tagW(tg);
-  K.setTag(tg, id, K.decode(lab, sat(age / .6), FXU, id.length + lab.length), val, 'lime sm', dx > 0 ? lx + 4 : lx - 4 - w, ly - 12, a);
+  K.setTag(tg, id, K.decode(lab, sat(age / .6), FXU, id.length + lab.length), val, 'lime sm', dx > 0 ? lx + 4 * S : lx - 4 * S - w * S, ly - 12 * S, a);
 }
 const tw = (u, a, b) => sat((u - a) / .25) * (1 - sat((u - b + .3) / .3));
 /* a tag shown from from to to seconds after beat id starts */
@@ -3415,20 +3418,20 @@ const BXT = {};
 /* a bracket round a box (bay min / max) with a short placard */
 function boxTag(key, lab, val, mn, mx, a, age, X_) {
   if (a < .01) return;
-  const b = K.boxOf(mn, mx, X_ || BWX, 6); if (!b) return;
+  const b = K.boxOf(mn, mx, X_ || BWX, 6 * K.S); if (!b) return;
   K.bracket(b, '#C6F432', .85 * a, 10, 1.2);
   const tg = BXT[key] || (BXT[key] = K.mkTag());
-  K.setTag(tg, '', K.decode(lab, sat(age / .6), FXU, key.length), val, 'lime sm', b[2] + 6, b[1] - 2, a);
+  K.setTag(tg, '', K.decode(lab, sat(age / .6), FXU, key.length), val, 'lime sm', b[2] + 6 * K.S, b[1] - 2 * K.S, a);
 }
 function scanTags(u) {
   for (const s of SCANS) {
     const [a0, a1, k, lab, val, mn, mx] = s, w0 = unwarp(a0), w1 = Math.max(unwarp(a1) + 2.6, w0 + 3.2), U = U_;
     if (U < w0 || U > w1) continue;
-    const X_ = scanFrames(u, k), b = K.boxOf(mn, mx, X_, 6); if (!b) continue;
+    const X_ = scanFrames(u, k), b = K.boxOf(mn, mx, X_, 6 * K.S); if (!b) continue;
     const a = tw(U, w0, w1);
     K.bracket(b, '#C6F432', .9 * a, 10, 1.3);
     const tg = BXT[k] || (BXT[k] = K.mkTag());
-    K.setTag(tg, '', K.decode(lab, sat((U - w0) / .6), FXU, k.length), val, 'lime sm', b[2] + 6, b[1] - 2, a);
+    K.setTag(tg, '', K.decode(lab, sat((U - w0) / .6), FXU, k.length), val, 'lime sm', b[2] + 6 * K.S, b[1] - 2 * K.S, a);
   }
 }
 function tags(u0, ctx) {

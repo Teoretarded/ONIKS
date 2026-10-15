@@ -9,6 +9,10 @@ const { V, R, X, E, rng } = M3;
 const PI = Math.PI, DEG = PI / 180, TAU = PI * 2;
 const K = ORK; K.setup();
 const C = K.C, octx = K.octx, LIME = K.LIME, HOT = K.HOT, WH = K.WH, HEAT = ORL.HEAT;
+/* the raster is K.BW x K.BH (STAGE.RES); S converts stage px (tag offsets, glow sizes, the shake) to raster px.
+   SMOOTH (?hq=1 renders, ?smooth=1): the occluders that switch (the X-rays, the barrel's skins, the whole set by the
+   camera's distance) fade over 0.15-0.3 s, and the platform fades out with distance instead of vanishing */
+const S = K.S, SMOOTH = K.SMOOTH, BW = K.BW, BH = K.BH, R3 = Math.round(3 * S);
 STAGE.fit(); STAGE.SFX.kind = 'pc';
 const $ = id => document.getElementById(id);
 const LOG = []; window.ORW_LOG = LOG;
@@ -747,7 +751,7 @@ function drawCRFX(T, PP) {
 const NPL = 3200, PLM = (() => { const r = rng(7171), A = new Float32Array(NPL * 4); for (let i = 0; i < NPL; i++) { A[i * 4] = r(); A[i * 4 + 1] = r() * TAU; A[i * 4 + 2] = Math.sqrt(r()); A[i * 4 + 3] = r(); } return A; })();
 const PE = [0, 0, 0], PD = [0, 0, 0], PG = [0, 0, 0];
 /* a glow of world radius wr at p (screen size from its depth) */
-function glowR(x, y, z, wr, col, a) { if (!K.pj(x, y, z)) return; const px = Math.min(140, wr * C.fl / Math.max(1, K.PJ[2])); if (px < 1.5) { K.dotW(x, y, z, 1, col, a); return; } K.glowW(x, y, z, Math.round(px), col, a); }
+function glowR(x, y, z, wr, col, a) { if (!K.pj(x, y, z)) return; const px = Math.min(140, wr * C.fl / Math.max(1, K.PJ[2]) / S); if (px < 1.5) { K.dotW(x, y, z, 1, col, a); return; } K.glowW(x, y, z, Math.round(px), col, a); }
 /* an engine's plume: a white-hot throat, a filled cone of dots streaming out, a glowing column, shock diamonds */
 function plume(ex, d, U, Wd, I, T, len, r0, spread, seed) {
   if (I < .02) return;
@@ -1239,12 +1243,12 @@ function partTags(T, PP) {
     if (T < t.t0 || T > t.t1) continue;
     const a = E.sat((T - t.t0) / .2) * (1 - E.sat((T - t.t1 + .4) / .4));
     t.v2 = null;
-    const p = tagPoint(t, T, PP); if (!K.pj(p[0], p[1], p[2]) || !K.onS(-40)) continue;
-    const x = K.PJ[0], y = K.PJ[1], dx = x > 1100 ? 54 : -54, lx = x + dx;
-    K.leader(x, y, lx, y - 50, '#C6F432', .8 * a);
-    K.dot(x, y, 3, LIME[0], LIME[1], LIME[2], a);
+    const p = tagPoint(t, T, PP); if (!K.pj(p[0], p[1], p[2]) || !K.onS(-40 * S)) continue;
+    const x = K.PJ[0], y = K.PJ[1], dx = x > 1100 * S ? 54 * S : -54 * S, lx = x + dx;
+    K.leader(x, y, lx, y - 50 * S, '#C6F432', .8 * a);
+    K.dot(x, y, R3, LIME[0], LIME[1], LIME[2], a);
     const w = K.tagW(t.tg);
-    K.setTag(t.tg, t.id, K.decode(t.lab, E.sat((T - t.t0) / .7), T, +t.id), t.v2 || t.val, 'lime sm', dx > 0 ? lx + 4 : lx - 4 - w, y - 62, a);
+    K.setTag(t.tg, t.id, K.decode(t.lab, E.sat((T - t.t0) / .7), T, +t.id), t.v2 || t.val, 'lime sm', dx > 0 ? lx + 4 * S : lx - 4 * S - w * S, y - 62 * S, a);
   }
 }
 const T_PLAT = K.mkTag(), T_ROD = K.mkTag(), T_SITE = K.mkTag();
@@ -1273,20 +1277,20 @@ function markTags(T, Wt, PP) {
   if (PP && (T < 3.4 || inMove || T > DUR - 3.4)) {
     const a0 = T < 3.4 ? 1 - ss(3.0, 3.4, T) : T > DUR - 3.4 ? ss(DUR - 3.4, DUR - 2.6, T) : ss(MOVE[0] + 1.6, MOVE[0] + 2.2, T) * (1 - ss(MOVE[1] - 1.0, MOVE[1] - .4, T));
     const lab = inMove ? 'TO STATION' : 'RAILGUN PLATFORM', val = inMove ? `${(V.dist(Wt.T, SAT) / 1000).toFixed(2)} KM` : `${Math.round(ALT / 1000)} KM UP`;
-    const b = platBox(PP, 8), px = b ? Math.max(b[2] - b[0], b[3] - b[1]) : 1e9;
-    const wb = b && b[1] > 70 ? 1 - ss(1300, 1600, px) : 0;
-    if (a0 * wb > .01) { K.bracket(b, '#C6F432', .8 * a0 * wb, 14, 1.2); K.setTag(T_PLAT, '', lab, val, 'lime sm', Math.max(b[0], b[2] - K.tagW(T_PLAT)), b[1] - 26, a0 * wb); }
+    const b = platBox(PP, 8 * S), px = b ? Math.max(b[2] - b[0], b[3] - b[1]) / S : 1e9;
+    const wb = b && b[1] > 70 * S ? 1 - ss(1300, 1600, px) : 0;
+    if (a0 * wb > .01) { K.bracket(b, '#C6F432', .8 * a0 * wb, 14, 1.2); K.setTag(T_PLAT, '', lab, val, 'lime sm', Math.max(b[0], b[2] - K.tagW(T_PLAT) * S), b[1] - 26 * S, a0 * wb); }
   }
   if (T > T_ON - .6 && T < TI - .3) {
     const p = rodAt(T);
-    if (K.pj(p[0], p[1], p[2]) && K.onS(-40)) { const a = ss(T_ON - .6, T_ON - .1, T) * (1 - ss(TI - .9, TI - .3, T)); K.leader(K.PJ[0], K.PJ[1], K.PJ[0] + 40, K.PJ[1] - 44, '#C6F432', .8 * a); K.setTag(T_ROD, 'ROD', `ALT ${(altOf(p) / 1000).toFixed(1)} KM`, `${(vAt(sOf(T)) / 1000).toFixed(2)} KM/S`, 'lime sm', K.PJ[0] + 44, K.PJ[1] - 58, a); }
+    if (K.pj(p[0], p[1], p[2]) && K.onS(-40 * S)) { const a = ss(T_ON - .6, T_ON - .1, T) * (1 - ss(TI - .9, TI - .3, T)); K.leader(K.PJ[0], K.PJ[1], K.PJ[0] + 40 * S, K.PJ[1] - 44 * S, '#C6F432', .8 * a); K.setTag(T_ROD, 'ROD', `ALT ${(altOf(p) / 1000).toFixed(1)} KM`, `${(vAt(sOf(T)) / 1000).toFixed(2)} KM/S`, 'lime sm', K.PJ[0] + 44 * S, K.PJ[1] - 58 * S, a); }
   }
   if (T > TX + 11.5 && T < TI + .1) {
     const a = ss(TX + 11.7, TX + 12.3, T) * (1 - ss(TI - .15, TI + .05, T));
     let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9, n = 0;
-    W.VEHS.forEach(v => { if (v.d > 80) return; const b = K.boxOf([-3, 0, -6], [3, 4, 6], v.W, 2); if (!b) return; n++; x0 = Math.min(x0, b[0]); y0 = Math.min(y0, b[1]); x1 = Math.max(x1, b[2]); y1 = Math.max(y1, b[3]); });
-    if (n && x1 - x0 < 900 && x1 - x0 > 6) { SB[0] = x0 - 10; SB[1] = y0 - 10; SB[2] = x1 + 10; SB[3] = y1 + 10; K.bracket(SB, '#FF6A3D', .8 * a, 12, 1.2); K.setTag(T_SITE, 'SITE', 'COASTAL BATTERY', SITE_VAL, 'coral sm', Math.max(24, SB[0]), SB[1] - 26, a); }
-    else if (K.pj(HIT[0], HIT[1] + 30, HIT[2]) && K.onS(-40)) { const x = K.PJ[0], y = K.PJ[1]; K.leader(x, y, x - 60, y - 60, '#FF6A3D', .8 * a); K.setTag(T_SITE, 'SITE', 'COASTAL BATTERY', SITE_VAL, 'coral sm', x - 64 - K.tagW(T_SITE), y - 72, a); }
+    W.VEHS.forEach(v => { if (v.d > 80) return; const b = K.boxOf([-3, 0, -6], [3, 4, 6], v.W, 2 * S); if (!b) return; n++; x0 = Math.min(x0, b[0]); y0 = Math.min(y0, b[1]); x1 = Math.max(x1, b[2]); y1 = Math.max(y1, b[3]); });
+    if (n && x1 - x0 < 900 * S && x1 - x0 > 6 * S) { SB[0] = x0 - 10 * S; SB[1] = y0 - 10 * S; SB[2] = x1 + 10 * S; SB[3] = y1 + 10 * S; K.bracket(SB, '#FF6A3D', .8 * a, 12, 1.2); K.setTag(T_SITE, 'SITE', 'COASTAL BATTERY', SITE_VAL, 'coral sm', Math.max(24 * S, SB[0]), SB[1] - 26 * S, a); }
+    else if (K.pj(HIT[0], HIT[1] + 30, HIT[2]) && K.onS(-40 * S)) { const x = K.PJ[0], y = K.PJ[1]; K.leader(x, y, x - 60 * S, y - 60 * S, '#FF6A3D', .8 * a); K.setTag(T_SITE, 'SITE', 'COASTAL BATTERY', SITE_VAL, 'coral sm', x - 64 * S - K.tagW(T_SITE) * S, y - 72 * S, a); }
   }
 }
 
@@ -1365,7 +1369,7 @@ function render(TR) {
   if (iq) { CTX.T = TR; CTX.u = sg.u; CTX.Tb = T; CTX.Wt = Wt; CTX.st = st; CTX.PP = null; CTX.camOld = camAt(iq.at); }
   FILM.apply(C, iq ? iq.mod.cam(sg.u, CTX) : camAt(T));
   const ax = T - TX, a = aOf(T);
-  C.shake = ax > 0 && ax < 1.4 ? FILM.shake(T, 6 * (1 - ax / 1.4), 26) : T > TF && T < TX ? FILM.shake(T, 1.2, 34) : a > 0 && a < 3 ? FILM.shake(T, 9 * (1 - a / 3), 22) : [0, 0];
+  C.shake = ax > 0 && ax < 1.4 ? FILM.shake(T, 6 * (1 - ax / 1.4) * S, 26) : T > TF && T < TX ? FILM.shake(T, 1.2 * S, 34) : a > 0 && a < 3 ? FILM.shake(T, 9 * (1 - a / 3) * S, 22) : [0, 0];
   const alt = V.dist(C.eye, CE) - RE;
   C.near = alt > 100000 ? .08 : .1; C.update();
   K.pb.clear(); K.occReset();
@@ -1380,11 +1384,26 @@ function render(TR) {
   if (PROF) prof('pose');
   // X-rays: the reactor's cutaway, the housing (chamber), the bay's walls and the prow's plating (the insert)
   const cut = CUT.open, xh = Math.max(xr(T, [UNLK[0] - .4, UNLK[0] + .4, COILW[1] + .6, COILW[1] + 1.6]), iq ? 1 : 0), xb = Math.max(xr(T, [BRO[0], AT_FAB, BRC[0], BRC[1]]), iq ? 1 : 0);
-  const shutT = T < FLW[0][0] || T > FLB[1] + .2;
-  for (let s = 0; s < NSEG; s++) SKIN[s] = shutT && st.front[4] >= (s + 1) * LSEG + 30;
-  SKIN[NSEG] = shutT && st.front[4] > 1e8;
+  let occW = 1;
+  if (SMOOTH) {
+    // the skins' occluders fade (0.25 s) as the flaps start to open and once they have closed, and over the last 6 m
+    // of each segment's build (its first 6 m taken apart); the X-rays' occluders over their ramps; the whole set
+    // fades out between 8 and 9 km from the platform
+    const shA = 1 - ss(FLW[0][0], FLW[0][0] + .25, T) + ss(FLB[1] + .05, FLB[1] + .3, T), f4 = st.front[4];
+    for (let s = 0; s < NSEG; s++) SKIN[s] = shA * E.sat((f4 - ((s + 1) * LSEG + 24)) / 6);
+    SKIN[NSEG] = shA * (f4 > 1e8 ? 1 : E.sat((f4 - Z_MZ + 6) / 7));
+    occW = 1 - ss(8000, 9000, dPlat);
+  } else {
+    const shutT = T < FLW[0][0] || T > FLB[1] + .2;
+    for (let s = 0; s < NSEG; s++) SKIN[s] = shutT && st.front[4] >= (s + 1) * LSEG + 30;
+    SKIN[NSEG] = shutT && st.front[4] > 1e8;
+  }
   if (ORL.G.clip) ORL.G.clip.on = false;
-  if (PP && dPlat < 9000 && !hideBase) { P.occlude(PP, st, { skin: SKIN, hsg: xh < .5, hullF: xb < .3, cutK: cut > .01 ? CUT.hk : undefined }); ORL.G.occ = true; } else ORL.G.occ = false;
+  if (PP && (SMOOTH ? occW > .002 : dPlat < 9000) && !hideBase) {
+    K.occM(occW);
+    P.occlude(PP, st, { skin: SKIN, hsg: SMOOTH ? 1 - ss(.3, .7, xh) : xh < .5, hullF: SMOOTH ? 1 - ss(.15, .45, xb) : xb < .3, cutK: cut > .01 ? CUT.hk : undefined });
+    K.occM(1); ORL.G.occ = true;
+  } else ORL.G.occ = false;
   if (PROF) prof('occlude');
   K.drawStars(W.STARS, .9 * (1 - ss(20000, 3000, alt)), TR);
   if (PROF) prof('stars');
@@ -1415,8 +1434,10 @@ function render(TR) {
     DOHF.keep = 1 - .92 * xb; DOHF.a = 1 - .9 * xb;
     DOX.a = 1 + .3 * xh; DOX.lime = .25 * xh;
     LOOK.cp = cut > .02 ? DOC : null; LOOK.fuel = cut > .02 ? DOF : null; LOOK.sec = cut > .02 ? DOS : null; DOS.a = E.sat(cut * 1.4); DOS.pxf = .55; DOFin.a = 1 - .55 * cut; DOFin.keep = 1 - .55 * cut;
-    LOOK.wave = ST.wave > 0 ? waveFn : null; LOOK.skinOcc = ORL.G.occ;
+    LOOK.wave = ST.wave > 0 ? waveFn : null; LOOK.skinOcc = ORL.G.occ && occW >= .998;
+    if (SMOOTH) ORL.G.am = 1 - ss(46000, 60000, dPlat);          // (fading out with distance before it is dropped)
     P.draw(PP, st, LOOK);
+    ORL.G.am = 1;
     if (PROF) prof('platform');
     PPS = PP.switches; drawPower(T, Wt); drawCutaway(T, Wt); drawRingFX(T, Wt, PP); drawSwarm(T, PP); drawCRFX(T, PP); drawEngines(T, Wt, PP); drawLasers(T, PP); drawFields(T, Wt); drawDischarge(T, Wt); drawFlapFronts(T, Wt);
     if (T > TF && T < TX && FX.bore) FX.bore(Wt.T, X.dir(Wt, [0, 0, 1]), Math.max(Z_CH, rodZof(T) - 90), rodZof(T) - 4, T);
@@ -1436,11 +1457,11 @@ function render(TR) {
   }
   if (iq && iq.mod.draw) iq.mod.draw(sg.u, CTX);
   if (PROF) prof('fx');
-  octx.clearRect(0, 0, 1920, 1080);
+  octx.clearRect(0, 0, BW, BH);
   let fl = 0;
   if (ax > 0 && ax < .6) fl = .18 * Math.exp(-ax * 7);
   if (a >= 0) fl = Math.max(fl, FX.flashA(a));
-  if (fl > .004) { octx.fillStyle = `rgba(240,246,226,${fl.toFixed(3)})`; octx.fillRect(0, 0, 1920, 1080); }
+  if (fl > .004) { octx.fillStyle = `rgba(240,246,226,${fl.toFixed(3)})`; octx.fillRect(0, 0, BW, BH); }
   if (iq) { if (iq.mod.tags) iq.mod.tags(sg.u, CTX); }
   else { if (PP && dPlat < 2500) partTags(T, PP); markTags(T, Wt, PP); }
   if (PROF) prof('overlay');
@@ -1485,11 +1506,11 @@ const cues = [
 ];
 /* the inserts: built, placed, the chapters and cues mapped onto the film clock */
 function tagAt(tg, id, lab, val, p, a, age) {
-  if (a < .01 || !K.pj(p[0], p[1], p[2]) || !K.onS(-40)) return;
-  const x = K.PJ[0], y = K.PJ[1], dx = x > 1100 ? 54 : -54, lx = x + dx;
-  K.leader(x, y, lx, y - 50, '#C6F432', .8 * a); K.dot(x, y, 3, LIME[0], LIME[1], LIME[2], a);
+  if (a < .01 || !K.pj(p[0], p[1], p[2]) || !K.onS(-40 * S)) return;
+  const x = K.PJ[0], y = K.PJ[1], dx = x > 1100 * S ? 54 * S : -54 * S, lx = x + dx;
+  K.leader(x, y, lx, y - 50 * S, '#C6F432', .8 * a); K.dot(x, y, R3, LIME[0], LIME[1], LIME[2], a);
   const w = K.tagW(tg);
-  K.setTag(tg, id, K.decode(lab, E.sat(age / .7), FXT, id.length), val, 'lime sm', dx > 0 ? lx + 4 : lx - 4 - w, y - 62, a);
+  K.setTag(tg, id, K.decode(lab, E.sat(age / .7), FXT, id.length), val, 'lime sm', dx > 0 ? lx + 4 * S : lx - 4 * S - w * S, y - 62 * S, a);
 }
 const BAYf = Tb => X.mul(platAt(Tb), P.BAYX), CHAMBERf = Tb => X.mul(platAt(Tb), P.CHAMBERX);
 const CTX = { K, L: ORL, P, W, FX, M3, V, R, X, E, LIME, HOT, WH, CORAL: K.CORAL, T: 0, u: 0, Tb: 0, Wt: null, PP: null, st: null, camOld: null, tagAt, SAT, CE, RE, HIT, L_SUN, PW0, PW1, camAt: t => camAt(t),

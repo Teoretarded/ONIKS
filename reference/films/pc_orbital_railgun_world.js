@@ -16,7 +16,7 @@ OPT = OPT || {};
 'use strict';
 const { V, R, X, E, rng, noise, fbm } = M3;
 const PI = Math.PI, TAU = 2 * PI, DEG = PI / 180;
-const BW = 1920, BH = 1080;
+const BW = K.BW, BH = K.BH;                       // (the raster: STAGE.RES)
 const C = K.C;
 const LIME = K.LIME, HOT = K.HOT, WH = K.WH, FIRE_ = [255, 196, 138];
 const RE = 6371000, CE = [0, -RE, 0];
@@ -418,8 +418,8 @@ function drawGlobeSet(G, vis, pxf, inner, kind) {
           const zq = qx * f[0] + qy * f[1] + qz * f[2]; if (zq < 50) continue;
           const sx = cx + F * (qx * r[0] + qy * r[1] + qz * r[2]) / zq; if (sx < 0 || sx >= BW) continue;
           const sy = cy - F * (qx * u[0] + qy * u[1] + qz * u[2]) / zq; if (sy < 0 || sy >= BH) continue;
-          if (K.occT(sx, sy, zq)) continue;
-          const bb = as * (.55 + .9 * h3); if (bb < .02) continue;
+          const ok = K.occK(sx, sy, zq); if (!ok) continue;
+          const bb = as * (.55 + .9 * h3) * ok; if (bb < .02) continue;
           const qq = ((sy | 0) * BW + (sx | 0)) << 2, R_ = 236 * bb, G_ = 238 * bb, B_ = 230 * bb;
           if (D[qq + 1] < G_) U32[qq >> 2] = 0xff000000 | ((B_ > 255 ? 255 : B_) << 16) | ((G_ > 255 ? 255 : G_) << 8) | (R_ > 255 ? 255 : R_);
           cnt++;
@@ -431,8 +431,8 @@ function drawGlobeSet(G, vis, pxf, inner, kind) {
       if (kind !== 1 && inner < 1) { const d2 = px * px + pz * pz; if (d2 < 1.6e9) { a *= 1 - (1 - inner) * (1 - E.ss(OUT_R[0], OUT_R[1], Math.sqrt(d2))); if (a < .02) continue; } }
       const sx = cx + F * (dx * r[0] + dy * r[1] + dz * r[2]) / zc; if (sx < 0 || sx >= BW) continue;
       const sy = cy - F * (dx * u[0] + dy * u[1] + dz * u[2]) / zc; if (sy < 0 || sy >= BH) continue;
-      if (K.occT(sx, sy, zc)) continue;
-      let bb = P[j + 3] * vis * a;
+      const ok = K.occK(sx, sy, zc); if (!ok) continue;
+      let bb = P[j + 3] * vis * a * ok;
       if (kind === 1) bb *= .9;
       if (bb < .02) continue;
       const qq = ((sy | 0) * BW + (sx | 0)) << 2, R_ = 236 * bb, G_ = 238 * bb, B_ = 230 * bb;
@@ -471,7 +471,7 @@ function drawLimb(vis) {
       if (!((c0 & c1 & 16) || (c0 & c1 & 15))) {
         for (let q = 0; q < LPER; q++) {
           P(ph + (g * LPER + q) / LIMB_N * TAU, LP);
-          if (K.pj(LP[0], LP[1], LP[2]) && !(K.occOn() && K.occT(K.PJ[0], K.PJ[1], K.PJ[2]))) K.dot(K.PJ[0], K.PJ[1], 1, col[0], col[1], col[2], al);
+          if (K.pj(LP[0], LP[1], LP[2])) { const ok = K.occK(K.PJ[0], K.PJ[1], K.PJ[2]); if (ok) K.dot(K.PJ[0], K.PJ[1], 1, col[0], col[1], col[2], al * ok); }
         }
       }
       c0 = c1;
@@ -650,7 +650,7 @@ function setShock(arrive, shockR) {
   for (const h of HERO) { h.AH = arrive(h.d); h.vf = 8 / Math.max(1e-4, arrive(h.d + 4) - arrive(h.d - 4)); }
   for (let i = 0; i < NFLR; i++) FLR_AH[i] = arrive(FLR[i * FS + 3]);
 }
-const FBUDGET = 75000;
+const FBUDGET = 75000 * K.S * K.S * (K.HQ ? 2 : 1);           // (x S^2 at a higher res, x 2 in HQ)
 const treeN = hpx => { if (hpx < 6) return .06 * hpx * hpx; const q = hpx - 6, n = 2.16 + 1.5 * q + .01 * q * q; return n < NTP ? n : NTP; };
 /* per-tree pose scratch: base, bent axes (scaled), unbent axes (for the stump), local sun / strike directions */
 const TP = new Float64Array(32);
@@ -886,7 +886,7 @@ function heroTpl(kind, seed) {
 }
 const HTPL = [heroTpl(0, 901), heroTpl(1, 902), heroTpl(2, 903), heroTpl(3, 904)];
 for (const t of HTPL) t.np = (t.TRK.length + t.WOOD.length + t.LEAF.length) / HS;
-const HBUDGET = 250000;       // the stand's points a frame
+const HBUDGET = 250000 * K.S * K.S * (K.HQ ? 2 : 1);       // the stand's points a frame
 const HERO = (() => {
   const r = rng(9090), L = [], toHit = BEAT.toHit, adiff = (a, b) => Math.abs(((a - b + 3 * PI) % TAU) - PI);
   // the beat's frame first (key trees by hand: near ones left and right, a middle ground, a back row), then the

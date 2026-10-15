@@ -1213,6 +1213,36 @@ function inst(B, Tw, o, lc, fresh) {
   o.lime = l;
   L.draw(B, Tw, o);
 }
+/* SMOOTH (ORK.SMOOTH): a body swap at th px (the detailed body above it) crossfades over [th, 1.5 th], each side fading
+   over half of it (no dip in between); a body that appears at th px fades in over the same; HQ moves the swaps to 0.6 x
+   their size (the detailed bodies sooner). G.am is the lattice's opacity multiplier */
+const SMOOTH_ = !!ORK.SMOOTH, LODK = ORK.HQ ? .6 : 1;
+/* (the weight of a body that appears above th px: 0 / 1, or SMOOTH a ramp over [th, 1.5 th]) */
+const apW = (px, th) => !SMOOTH_ ? (px > th ? 1 : 0) : (th *= LODK, px <= th ? 0 : px >= th * 1.5 ? 1 : (px - th) / (th * .5));
+/* hi at weight w, lo at 1 - w (between, each at twice its share, capped at 1: max-blended, the pair never dips) */
+function instW(w, hi, lo, Tw, o, lc, fr) {
+  if (w >= 1) { inst(hi, Tw, o, lc, fr); return; }
+  if (w <= 0) { inst(lo, Tw, o, lc, fr); return; }
+  const am = L.G.am;
+  L.G.am = am * Math.min(1, 2 * (1 - w)); inst(lo, Tw, o, lc, fr);
+  L.G.am = am * Math.min(1, 2 * w); inst(hi, Tw, o, lc, fr);
+  L.G.am = am;
+}
+function drawW(w, hi, lo, Tw, o) {
+  if (w >= 1) { L.draw(hi, Tw, o); return; }
+  if (w <= 0) { L.draw(lo, Tw, o); return; }
+  const am = L.G.am;
+  L.G.am = am * Math.min(1, 2 * (1 - w)); L.draw(lo, Tw, o);
+  L.G.am = am * Math.min(1, 2 * w); L.draw(hi, Tw, o);
+  L.G.am = am;
+}
+const instX = (px, th, hi, lo, Tw, o, lc, fr) => { if (!SMOOTH_) inst(px > th ? hi : lo, Tw, o, lc, fr); else instW(apW(px, th), hi, lo, Tw, o, lc, fr); };
+function instA(w, B, Tw, o, lc, fr) {
+  if (w <= 0) return;
+  if (w >= 1) { inst(B, Tw, o, lc, fr); return; }
+  const am = L.G.am; L.G.am = am * w; inst(B, Tw, o, lc, fr); L.G.am = am;
+}
+const drawA = (w, B, Tw, o) => { if (w <= 0) return; if (w >= 1) { L.draw(B, Tw, o); return; } const am = L.G.am; L.G.am = am * w; L.draw(B, Tw, o); L.G.am = am; };
 const setO = (dst, src, l0) => { for (const k in dst) delete dst[k]; Object.assign(dst, src); dst.l0 = l0 === undefined ? (src.lime || 0) : l0; dst.lime = dst.l0; return dst; };
 /* the camera-space clip plane z > front (platform frame) for a build layer */
 function frontPlane(o, W, front) {
@@ -1244,13 +1274,37 @@ function draw(P, st, LK) {
   if (LK.cp) L.draw(couples, P.W, LK.cp);
   if (LK.fuel) for (let k = 0; k < DRUMS.length; k++) L.draw(drum, P.drums[k], LK.core || LK.fuel);
   if (LK.sec && st.cut) { const H = [st.cut.hk, st.cut.hc, st.cut.hs], SB = [secCore, secCp, secSh]; for (let i = 0; i < 6; i++) if (H[i >> 1] > .01) L.draw(SB[i >> 1], P.secs[i], LK.sec); }
-  for (let k = 0; k < PUMPS.length; k++) { CUR.k = k; if (lodPx(P.pumps[k], [0, 0, 0], 2) > 2) L.draw(impeller, P.pumps[k], o); }
+  for (let k = 0; k < PUMPS.length; k++) { CUR.k = k; const px = lodPx(P.pumps[k], [0, 0, 0], 2); if (SMOOTH_) drawA(apW(px, 2), impeller, P.pumps[k], o); else if (px > 2) L.draw(impeller, P.pumps[k], o); }
   // the barrel, layer by layer up to each layer's front
   CUR.inst = 1;
   for (let L_ = 0; L_ < 5; L_++) if (st.front[L_] > -1e8 && st.front[L_] < 1e8) frontPlane(CLP[L_], P.W, st.front[L_]);
   const OL = [OB, OB, OC_, OB, OS];
   for (let L_ = 0; L_ < 5; L_++) { setO(OPL[L_], OL[L_], OL[L_].l0); OPL[L_].clipP = CLP[L_]; OPL[L_].pxf = OL[L_].pxf; OPL[L_].pxl = OL[L_].pxl; }
   const lo_ = (L_, z0, z1) => { const s = lay(st, L_, z0, z1); return s === 0 ? null : s === 1 ? OL[L_] : OPL[L_]; };
+  /* (SMOOTH) one bay, its swaps crossfaded; the interior behind a whole, closed skin is not drawn, and fades in as the
+     flaps crack open (10 deg or 0.4 m of cassette) and out over the 8 m after the skin's front passes the bay */
+  const bayS = (st, LK, k, Tb, z0, z1, zc, px) => {
+    st.flapAt(k, FL3);
+    const o2 = lo_(2, z0, z1), o4 = lo_(4, z0, z1);
+    const wSk = o4 === OS && LK.skinOcc ? Math.max(E.sat(Math.max(FL3[0] / (PI / 18), FL3[1] / .4)), 1 - E.sat((st.front[4] - z1) / 8)) : 1;
+    if (o2) instX(px, 70, bayFr, bayLo, Tb, o2, [0, 0, 5], fresh(st, 2, zc));
+    const wIn = LK.bar ? 1 : wSk, am1 = L.G.am;
+    if (wIn > 0) {
+      const o0 = lo_(0, z0, z1), o1 = lo_(1, z0, z1), wc = apW(px, 5) * wIn;
+      if (wc > 0) {
+        L.G.am = am1 * wc;
+        if (o0) instX(px, 80, bayCore, bayCoreLo, Tb, o0, [0, 0, 5], fresh(st, 0, zc));
+        if (o1) instX(px, 80, bayIn, bayInLo, Tb, o1, [0, 0, 5], fresh(st, 1, zc));
+        L.G.am = am1;
+      }
+    }
+    const o3 = lo_(3, z0, z1), w3 = o3 ? apW(px, 4) * wSk : 0;
+    for (let f = 0; f < 6; f++) {
+      mulTo(L2, Tb, rot(L1, 2, f * PI / 3, 0, 0, 0, 0, 0, 0));
+      if (w3 > 0) { mulTo(L4, L2, rot(L1, 2, FL3[2], 0, CAS_Y, 0, 0, FL3[1], 0)); L.G.am = am1 * w3; instX(px, 90, cas, casLo, L4, o3, [0, CAS_Y, 5], Math.max(fresh(st, 3, zc), FL3[4])); L.G.am = am1; }
+      if (o4) { mulTo(L4, L2, rot(L1, 2, -FL3[0], 0, 0, 0, HR / 2, HA, 0)); instX(px, 110, flap, flapLo, L4, o4, [-HR / 2, 0, 5], Math.max(fresh(st, 4, zc), FL3[3])); }
+    }
+  };
   for (let s = 0; s < NSEG; s++) {
     const z0s = s * LSEG;
     if (st.front[0] <= z0s) break;
@@ -1258,13 +1312,19 @@ function draw(P, st, LK) {
     st.flapAt(s * NBAY, FL3); let shut = FL3[0] < .01 && FL3[1] < .01;
     if (shut) { st.flapAt(s * NBAY + NBAY - 1, FL3); shut = FL3[0] < .01 && FL3[1] < .01; }
     const whole = st.front[4] >= z0s + LSEG + 40 && fresh(st, 4, z0s + LSEG) < .01;
-    const lo = shut && whole && pxs < 26 && !LK.bar;
-    if (lo) { CUR.z = z0s; CUR.k = s * NBAY; inst(segLo, P.seg[s], OS, [0, 0, LSEG / 2], 0); }
+    const lo0 = shut && whole && pxs < 26 && !LK.bar;
+    // (SMOOTH: the segment's lo body and its bays crossfade over [26, 39] px)
+    let wLo = lo0 ? 1 : 0, wBay = lo0 ? 0 : 1;
+    if (SMOOTH_ && shut && whole && !LK.bar) { const w = apW(pxs, 26); wLo = w <= 0 ? 1 : w >= 1 ? 0 : Math.min(1, 2 * (1 - w)); wBay = w <= 0 ? 0 : w >= 1 ? 1 : Math.min(1, 2 * w); }
+    const lo = wBay <= 0;
+    if (wLo > 0) { CUR.z = z0s; CUR.k = s * NBAY; instA(wLo, segLo, P.seg[s], OS, [0, 0, LSEG / 2], 0); }
+    const amS = L.G.am;
     for (let b = 0; b < NBAY && !lo; b++) {
       const k = s * NBAY + b, Tb = P.bay[k], z0 = z0s + b * BAYL, z1 = z0 + BAYL, zc = z0 + 5;
       if (st.front[0] <= z0) break;
       CUR.z = z0; CUR.k = k;
       const px = lodPx(Tb, [0, 0, 5], 16);
+      if (SMOOTH_) { const wb = wBay * apW(px, .8); if (wb <= 0) continue; L.G.am = amS * wb; bayS(st, LK, k, Tb, z0, z1, zc, px); L.G.am = amS; continue; }
       if (px < .8) continue;
       st.flapAt(k, FL3);
       const open = FL3[0] > .01 || FL3[1] > .01;
@@ -1292,7 +1352,7 @@ function draw(P, st, LK) {
   for (let j = 1; j < NSEG; j++) {
     if (st.front[2] < j * LSEG + COL_L) break;
     CUR.z = j * LSEG; CUR.k = j;
-    if (lodPx(P.colS[j], [0, 0, 0], 16) > 3) for (let f = 0; f < 6; f++) inst(jaw, P.jaws[j][f], OC_, [0, HA + 2, 2], 0);
+    { const wj = apW(lodPx(P.colS[j], [0, 0, 0], 16), 3); if (wj > 0) for (let f = 0; f < 6; f++) instA(wj, jaw, P.jaws[j][f], OC_, [0, HA + 2, 2], 0); }
     CUR.z = j * LSEG - 1.7; if ((st.sleeve[j] > .01 || LK.bar) && st.front[0] > j * LSEG + 2) inst(sleeve, P.sleeves[j], OB, [0, 0, 1.7], 0);
   }
   for (let k = 0; k < NTEL; k++) { const z0 = TEL_Z[k], oT = lo_(2, z0, z0 + TEL_L); if (!oT) continue; CUR.z = z0; CUR.k = k; inst(tel[k], P.tel[k], oT, [0, 0, 18], fresh(st, 2, z0 + 18)); }
@@ -1302,12 +1362,27 @@ function draw(P, st, LK) {
     const R_ = P.rings[ri], bl = st.blur ? st.blur[ri] : 0, a0 = OR_.a === undefined ? 1 : OR_.a;
     CUR.inst = 2; CUR.k = ri; CUR.z = RING_Z[ri];
     OR_.a = a0 * (1 - .8 * bl); OR_.keep = 1 - .7 * bl;
-    const far = lodPx(R_.F, [0, 0, 0], RING_R) < 260;
-    if (bl < .85) for (let i = 0; i < NRN; i++) {
-      CUR.j = i;
-      inst(rNode, R_.nodes[i], OR_, [0, 0, 0], 0);
-      inst(far || lodPx(R_.chords[i], [0, 0, 0], RCH / 2) < 90 ? rChordLo : rChord, R_.chords[i], OR_, [0, 0, 0], 0);
-      if (!far && lodPx(R_.rotors[i], [0, 0, 0], 5) > 6) inst(rRotor, R_.rotors[i], OR_, [0, 0, 0], 0);
+    if (SMOOTH_) {
+      // (the nodes fade out into the smear from blur 0.7 to 0.85; the near detail fades in over [260, 390] px)
+      const wn = apW(lodPx(R_.F, [0, 0, 0], RING_R), 260), am1 = L.G.am, nb = 1 - E.ss(.7, .85, bl);
+      if (nb > 0) {
+        L.G.am = am1 * nb;
+        for (let i = 0; i < NRN; i++) {
+          CUR.j = i;
+          inst(rNode, R_.nodes[i], OR_, [0, 0, 0], 0);
+          instW(wn * apW(lodPx(R_.chords[i], [0, 0, 0], RCH / 2), 90), rChord, rChordLo, R_.chords[i], OR_, [0, 0, 0], 0);
+          const wr = wn > 0 ? wn * apW(lodPx(R_.rotors[i], [0, 0, 0], 5), 6) : 0; if (wr > 0) { L.G.am = am1 * nb * wr; inst(rRotor, R_.rotors[i], OR_, [0, 0, 0], 0); L.G.am = am1 * nb; }
+        }
+        L.G.am = am1;
+      }
+    } else {
+      const far = lodPx(R_.F, [0, 0, 0], RING_R) < 260;
+      if (bl < .85) for (let i = 0; i < NRN; i++) {
+        CUR.j = i;
+        inst(rNode, R_.nodes[i], OR_, [0, 0, 0], 0);
+        inst(far || lodPx(R_.chords[i], [0, 0, 0], RCH / 2) < 90 ? rChordLo : rChord, R_.chords[i], OR_, [0, 0, 0], 0);
+        if (!far && lodPx(R_.rotors[i], [0, 0, 0], 5) > 6) inst(rRotor, R_.rotors[i], OR_, [0, 0, 0], 0);
+      }
     }
     OR_.a = a0; OR_.keep = 1;
     for (let p = 0; p < 4; p++) inst(rShoe, R_.shoes[p], OR_, [0, 0, 0], 0);
@@ -1319,28 +1394,38 @@ function draw(P, st, LK) {
     CUR.inst = 3; CUR.k = -1; CUR.z = st.cr.z;
     inst(crCore, P.cr.F, OCR, [0, 0, 0], 0);
     OCR.a = a0 * (1 - .8 * bl); OCR.keep = 1 - .7 * bl;
-    const far = lodPx(P.cr.F, [0, 0, 0], CR_R) < 220;
-    if (bl < .85) for (let i = 0; i < NCN; i++) { CUR.j = i; inst(crNode, P.cr.nodes[i], OCR, [0, 0, 0], 0); inst(far || bl > .3 ? crChordLo : crChord, P.cr.chords[i], OCR, [0, 0, 0], 0); }
+    if (SMOOTH_) {
+      const wn = apW(lodPx(P.cr.F, [0, 0, 0], CR_R), 220) * (1 - E.ss(.22, .38, bl)), am1 = L.G.am, nb = 1 - E.ss(.7, .85, bl);
+      if (nb > 0) { L.G.am = am1 * nb; for (let i = 0; i < NCN; i++) { CUR.j = i; inst(crNode, P.cr.nodes[i], OCR, [0, 0, 0], 0); instW(wn, crChord, crChordLo, P.cr.chords[i], OCR, [0, 0, 0], 0); } L.G.am = am1; }
+    } else {
+      const far = lodPx(P.cr.F, [0, 0, 0], CR_R) < 220;
+      if (bl < .85) for (let i = 0; i < NCN; i++) { CUR.j = i; inst(crNode, P.cr.nodes[i], OCR, [0, 0, 0], 0); inst(far || bl > .3 ? crChordLo : crChord, P.cr.chords[i], OCR, [0, 0, 0], 0); }
+    }
     OCR.a = a0; OCR.keep = 1;
     if (bl > .02) smear(P.cr.F, CR_R, CRSEC, bl, OCR);
     CUR.inst = 0; for (let k = 0; k < 4; k++) inst(dockArm, P.arms[k], OC_, [0, 0, 8], 0);
   }
   // fins (sparser lattice: big flat panels), engines
   CUR.inst = 4;
-  const finFar = lodPx(P.W, [0, 0, FIN_Z0 + FIN_L / 2], 40) < 40;
-  for (let f = 0; f < NFIN; f++) for (let j = 0; j < NFP; j++) { CUR.k = f; CUR.j = j; CUR.z = FIN_Z0; const T_ = P.fins[f * NFP + j]; L.draw(finFar || lodPx(T_, [FPW / 2, 0, FIN_L / 2], 30) < 110 ? finLo : finP, T_, LK.fin || OF); }
+  const finFar = lodPx(P.W, [0, 0, FIN_Z0 + FIN_L / 2], 40) < 40, wfn = SMOOTH_ ? apW(lodPx(P.W, [0, 0, FIN_Z0 + FIN_L / 2], 40), 40) : 0;
+  for (let f = 0; f < NFIN; f++) for (let j = 0; j < NFP; j++) {
+    CUR.k = f; CUR.j = j; CUR.z = FIN_Z0; const T_ = P.fins[f * NFP + j];
+    if (SMOOTH_) drawW(wfn > 0 ? wfn * apW(lodPx(T_, [FPW / 2, 0, FIN_L / 2], 30), 110) : 0, finP, finLo, T_, LK.fin || OF);
+    else L.draw(finFar || lodPx(T_, [FPW / 2, 0, FIN_L / 2], 30) < 110 ? finLo : finP, T_, LK.fin || OF);
+  }
   for (let e = 0; e < NENG; e++) { CUR.k = e; CUR.z = ENG_Z; L.draw(bell, P.bells[e], OC_); L.draw(ext, P.exts[e], OC_); }
   // the chamber's moving parts and the round
   CUR.inst = 0; CUR.z = 0; CUR.k = -1;
   const ox = LK.x || o;
-  if (lodPx(P.W, [0, 0, -8], 10) > 4) {
-    L.draw(block, P.block, ox);
-    for (let k = 0; k < 3; k++) L.draw(lockR, P.locks[k], ox);
-    for (let k = 0; k < 12; k++) L.draw(clampJ, P.clamps[k], ox);
-  }
+  { const wc = apW(lodPx(P.W, [0, 0, -8], 10), 4);
+    if (wc > 0) {
+      drawA(wc, block, P.block, ox);
+      for (let k = 0; k < 3; k++) drawA(wc, lockR, P.locks[k], ox);
+      for (let k = 0; k < 12; k++) drawA(wc, clampJ, P.clamps[k], ox);
+    } }
   if (P.roundOn) { L.draw(sabot, P.round, ox); L.draw(rod, P.round, ox); }
   for (let k = 0; k < 4; k++) { CUR.k = k; L.draw(swDisc, P.switches[k], o); }
-  if (lodPx(P.W, [0, 0, -300], 300) > 120) { poseCrawlers(P, st); for (let k = 0; k < NCRAWL; k++) if (lodPx(P.crawl[k], [0, 1, 0], 4) > 1.5) L.draw(crawler, P.crawl[k], LK.hull || o); }
+  { const wc = apW(lodPx(P.W, [0, 0, -300], 300), 120); if (wc > 0) { poseCrawlers(P, st); for (let k = 0; k < NCRAWL; k++) drawA(wc * apW(lodPx(P.crawl[k], [0, 1, 0], 4), 1.5), crawler, P.crawl[k], LK.hull || o); } }
 }
 /* a fast-spinning ring as its swept surface: rings of dots at the section's corners and middle (Tc: the ring's frame,
    not spinning) */
@@ -1414,9 +1499,12 @@ function occBoxV(Tw, mn, mx) {
   if (!ORK.wIn(PL[0], PL[1], PL[2], Math.hypot(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]) / 2)) return;
   ORK.occBox(Tw, mn, mx);
 }
-/* oo: { skin (segments whose skin is built and closed: an array of booleans), hsg, hullF (the forward hull occludes),
-   core (false: none), coreTo (the core only up to that z), cutK (the cutaway's core half-angle: the core outside it) } */
+/* oo: { skin (segments whose skin is built and closed: an array of booleans, or opacities 0..1), hsg, hullF (the
+   forward hull occludes; false, true or an opacity), core (false: none), coreTo (the core only up to that z), cutK (the
+   cutaway's core half-angle: the core outside it) }. An opacity under 1 makes a fading occluder (ORK.occA): what is
+   behind it dims instead of vanishing */
 const CPOLY = [[0, 0], [0, 0], [0, 0], [0, 0]];
+const opa = v => v === false ? 0 : v === true || v === undefined ? 1 : +v;
 function occlude(P, st, oo) {
   const W = P.W;
   if (oo.cutK !== undefined) {
@@ -1425,13 +1513,13 @@ function occlude(P, st, oo) {
   }
   else if (oo.coreTo !== undefined) { if (oo.coreTo > REA_Z0) occPrism(W, 16, CORE_R, 0, REA_Z0, oo.coreTo); }
   else if (oo.core !== false) occPrism(W, 16, SHELL_R, 0, REA_Z0, REA_Z1);
-  if (oo.hsg !== false) occPrism(W, 6, HSG_R, PI / 6, HSG_Z0, HSG_Z1);
-  for (let i = 0; i < HULL_ZS.length - 1; i++) { if (i === 0 && oo.hullF === false) continue; occPoly(W, HULL_POLY, kz(HULL_ZS[i]), HULL_ZS[i], HULL_ZS[i + 1]); }
+  { const a = opa(oo.hsg); if (a > 0) { ORK.occA(a); occPrism(W, 6, HSG_R, PI / 6, HSG_Z0, HSG_Z1); ORK.occA(1); } }
+  for (let i = 0; i < HULL_ZS.length - 1; i++) { const a = i === 0 ? opa(oo.hullF) : 1; if (a <= 0) continue; ORK.occA(a); occPoly(W, HULL_POLY, kz(HULL_ZS[i]), HULL_ZS[i], HULL_ZS[i + 1]); ORK.occA(1); }
   occPoly(W, D2_POLY, kz(D2.z1), D2.z1, -400); occPoly(W, D2_POLY, kz(-400), -400, Z_STERN);
   occPoly(W, D3_POLY, kz(D3.z1), D3.z1, Z_STERN);
   occBoxV(W, [-TOWER.x, TOWER.yb, TOWER.z0], [TOWER.x, TOWER.yb + TOWER.h, TOWER.z1]);
-  if (oo.skin) for (let s = 0; s < NSEG; s++) if (oo.skin[s]) occPrism(P.seg[s], 6, HR, PI / 6, COL_L, LSEG - COL_L);
-  if (oo.skin && oo.skin[NSEG]) for (let k = 0; k < NTEL; k++) occPrism(P.tel[k], 6, TEL_R[k], PI / 6, 0, TEL_L);
+  if (oo.skin) for (let s = 0; s < NSEG; s++) if (oo.skin[s]) { ORK.occA(opa(oo.skin[s])); occPrism(P.seg[s], 6, HR, PI / 6, COL_L, LSEG - COL_L); ORK.occA(1); }
+  if (oo.skin && oo.skin[NSEG]) { ORK.occA(opa(oo.skin[NSEG])); for (let k = 0; k < NTEL; k++) occPrism(P.tel[k], 6, TEL_R[k], PI / 6, 0, TEL_L); ORK.occA(1); }
   for (let e = 0; e < NENG; e++) { const [x, y] = ENG_P[e]; occBoxV(W, [x - 12, y - 12, ENG_Z - 7.6], [x + 12, y + 12, ENG_Z]); }
 }
 const stats = () => { let n = 0; for (const B of bodies) n += B.L.length / 10 + B.T.length / 10 + B.P.length / 23 + B.Y.length + B.N.length / 7 + B.Rg.length / 14; return { bodies: bodies.length, prims: Math.round(n), lights: LTS.length }; };

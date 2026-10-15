@@ -13,12 +13,22 @@
 const { V, R, X, E, Cam, rng, noise, fbm } = M3;
 const PI = Math.PI, TAU = 2 * PI, DEG = PI / 180;
 const LIME = [198, 244, 50], CORAL = [255, 106, 61], WH = [238, 238, 228], HOT = [248, 255, 232];
-const BW = 1920, BH = 1080;
+/* the dot raster: STAGE.RES (?res=1080|1440|2160, 16:9) -> BW x BH (the camera's focal length and centre follow it, so
+   the framing is the same). K.S converts stage px (the 1920 x 1080 HTML layer: tag offsets, line widths, glow sizes) to
+   raster px; setTag, leader and bracket take raster px. Dot sizes and dot / line steps stay in raster px (finer at a
+   higher res). HQ (?hq=1, video renders): a fixed denser lattice (K.PXK), every LOD / density switch crossfaded and
+   the occluders faded (SMOOTH). SMOOTH alone: ?smooth=1 (live). Neither changes a 1080 frame unless asked for. */
+const SQ = new URLSearchParams(location.search), RS = (window.STAGE && STAGE.RES) || { W: 1920, H: 1080, S: 1 };
+const BW = RS.W, BH = RS.H, SC = RS.S;
+const HQ = SQ.has('hq') && SQ.get('hq') !== '0', SMOOTH = SQ.has('smooth') ? SQ.get('smooth') !== '0' : HQ, RENDER = !!(window.STAGE && STAGE.RENDER);
 const $ = id => document.getElementById(id);
-const K = { LIME, CORAL, WH, HOT, BW, BH, PI, TAU, DEG };
+const K = { LIME, CORAL, WH, HOT, BW, BH, S: SC, HQ, SMOOTH, RENDER, PI, TAU, DEG };
+/* HQ: the lattice's dot spacing x PXK (denser), the LOD clouds' pixel budget / DQ (finer levels) */
+K.PXK = HQ ? .86 : 1; K.DQ = HQ ? 1.3 : 1;
 let pb = null, D = null, C = null, octx = null;
 
 function setup() {
+  for (const id of ['c', 'o']) { const cv = $(id); if (cv && (cv.width !== BW || cv.height !== BH)) { cv.width = BW; cv.height = BH; } }
   pb = new PointBuf($('c'), [11, 12, 10], { vignette: .55 }); D = pb.d;
   octx = $('o').getContext('2d');
   C = new Cam(BW, BH);
@@ -48,10 +58,12 @@ function pj(x, y, z) {
   PJ[2] = zc; return true;
 }
 const onS = m => PJ[0] > -m && PJ[1] > -m && PJ[0] < BW + m && PJ[1] < BH + m;
-function dotW(x, y, z, s, c, a) { if (pj(x, y, z) && !(OCC_ON && occT(PJ[0], PJ[1], PJ[2]))) dot(PJ[0], PJ[1], s, c[0], c[1], c[2], a); }
+function dotW(x, y, z, s, c, a) { if (pj(x, y, z)) { if (OCC_ON) { const k = occK(PJ[0], PJ[1], PJ[2]); if (!k) return; a *= k; } dot(PJ[0], PJ[1], s, c[0], c[1], c[2], a); } }
 function addW(x, y, z, s, c, a) { if (pj(x, y, z) && onS(s)) add(PJ[0], PJ[1], s, c[0], c[1], c[2], a); }
 /* a straight dotted line between two world points (clipped at the near plane), optional glow every 3rd dot */
 const CA = new Float64Array(3), CB = new Float64Array(3);
+/* a line's glow squares: sized in stage px, dimmed by the denser dots per stage px at a higher res */
+const G9 = Math.round(9 * SC), G21 = Math.round(21 * SC), GI = 1 / SC;
 function toCam(x, y, z, o) {
   const e = C.eye, dx = x - e[0], dy = y - e[1], dz = z - e[2], r = C.r, u = C.u, f = C.f;
   o[0] = dx * r[0] + dy * r[1] + dz * r[2]; o[1] = dx * u[0] + dy * u[1] + dz * u[2]; o[2] = dx * f[0] + dy * f[1] + dz * f[2];
@@ -71,9 +83,10 @@ function lineW(ax, ay, az, bx, by, bz, step, s, c, a, gc, g1, g2) {
   for (let k = 0; k <= m; k++) {
     const t = k / m, x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t;
     if (x < -30 || y < -30 || x > BW + 30 || y > BH + 30) continue;
-    if (occ && occT(x, y, 1 / (iza + (izb - iza) * t))) continue;
-    dot(x, y, s, c[0], c[1], c[2], a);
-    if (gc && (k % 3) === 0) { add(x, y, 9, gc[0], gc[1], gc[2], g1 * a); if (g2 && (k % 6) === 0) add(x, y, 21, gc[0], gc[1], gc[2], g2 * a); }
+    let aa = a;
+    if (occ) { const ok = occK(x, y, 1 / (iza + (izb - iza) * t)); if (!ok) continue; aa = a * ok; }
+    dot(x, y, s, c[0], c[1], c[2], aa);
+    if (gc && (k % 3) === 0) { add(x, y, G9, gc[0], gc[1], gc[2], g1 * aa * GI); if (g2 && (k % 6) === 0) add(x, y, G21, gc[0], gc[1], gc[2], g2 * aa * GI); }
   }
 }
 /* a ring of dots: centre c, in-plane unit axes U, W, radius r */
@@ -82,11 +95,13 @@ function ringW(c, U, W, r, n, s, col, a, ph) {
   ph = ph || 0;
   for (let k = 0; k < n; k++) {
     const t = ph + k / n * TAU, cs = Math.cos(t) * r, sn = Math.sin(t) * r;
-    if (pj(c[0] + U[0] * cs + W[0] * sn, c[1] + U[1] * cs + W[1] * sn, c[2] + U[2] * cs + W[2] * sn) && !(OCC_ON && occT(PJ[0], PJ[1], PJ[2]))) dot(PJ[0], PJ[1], s, col[0], col[1], col[2], a);
+    if (!pj(c[0] + U[0] * cs + W[0] * sn, c[1] + U[1] * cs + W[1] * sn, c[2] + U[2] * cs + W[2] * sn)) continue;
+    let aa = a; if (OCC_ON) { const ok = occK(PJ[0], PJ[1], PJ[2]); if (!ok) continue; aa = a * ok; }
+    dot(PJ[0], PJ[1], s, col[0], col[1], col[2], aa);
   }
 }
-/* soft round additive glow (screen px radius), falling off as (1 - d^2)^2 */
-function soft(x, y, rad, r, g, b, a) {
+/* soft round additive glow (raster px radius), falling off as (1 - d^2)^2; K.soft takes stage px */
+function softR(x, y, rad, r, g, b, a) {
   if (a < .003 || rad < .5) return;
   const x0 = Math.max(0, Math.floor(x - rad)), x1 = Math.min(BW - 1, Math.ceil(x + rad)), y0 = Math.max(0, Math.floor(y - rad)), y1 = Math.min(BH - 1, Math.ceil(y + rad));
   if (x0 > x1 || y0 > y1) return;
@@ -104,15 +119,17 @@ function soft(x, y, rad, r, g, b, a) {
     }
   }
 }
-/* glow at a world point: small ones as stacked squares, big ones soft and round */
+const soft = SC === 1 ? softR : (x, y, rad, r, g, b, a) => softR(x, y, rad * SC, r, g, b, a);
+/* glow at a world point (px: its size in stage px): small ones as stacked squares, big ones soft and round */
 function glowW(x, y, z, px, col, a) {
+  if (SC !== 1) px *= SC;
   if (!pj(x, y, z) || !onS(px)) return;
-  if (OCC_ON && occT(PJ[0], PJ[1], PJ[2])) return;
-  if (px <= 12) { const q = [px, px * .55, px * .28]; for (let k = 0; k < 3; k++) add(PJ[0], PJ[1], Math.max(1, Math.round(q[k])), col[0], col[1], col[2], a * (.25 + .3 * k)); return; }
-  soft(PJ[0], PJ[1], px * .6, col[0], col[1], col[2], a * .55);
-  soft(PJ[0], PJ[1], px * .22, col[0], col[1], col[2], a * .8);
+  if (OCC_ON) { const ok = occK(PJ[0], PJ[1], PJ[2]); if (!ok) return; a *= ok; }
+  if (px <= 12 * SC) { const q = [px, px * .55, px * .28]; for (let k = 0; k < 3; k++) add(PJ[0], PJ[1], Math.max(1, Math.round(q[k])), col[0], col[1], col[2], a * (.25 + .3 * k)); return; }
+  softR(PJ[0], PJ[1], px * .6, col[0], col[1], col[2], a * .55);
+  softR(PJ[0], PJ[1], px * .22, col[0], col[1], col[2], a * .8);
 }
-Object.assign(K, { soft, dot, add, pj, PJ, onS, dotW, addW, lineW, ringW, glowW, toCam });
+Object.assign(K, { soft, softR, dot, add, pj, PJ, onS, dotW, addW, lineW, ringW, glowW, toCam });
 
 /* stars: unit directions at infinity */
 function stars(n, seed) {
@@ -132,8 +149,8 @@ function drawStars(S, a, T, minY) {
     const zc = dx * f[0] + dy * f[1] + dz * f[2]; if (zc < .05) continue;
     const sx = cx + F * (dx * r[0] + dy * r[1] + dz * r[2]) / zc, sy = cy - F * (dx * u[0] + dy * u[1] + dz * u[2]) / zc;
     if (sx < 0 || sy < 0 || sx >= BW || sy >= BH) continue;
-    if (OCC_ON && occT(sx, sy, 1e12)) continue;
-    dot(sx, sy, 1, 225, 228, 222, S[j + 3] * a * (.8 + .2 * Math.sin(T * 1.3 + S[j + 4])));
+    let ok = 1; if (OCC_ON) { ok = occK(sx, sy, 1e12); if (!ok) continue; }
+    dot(sx, sy, 1, 225, 228, 222, S[j + 3] * a * (.8 + .2 * Math.sin(T * 1.3 + S[j + 4])) * ok);
   }
 }
 Object.assign(K, { stars, drawStars });
@@ -255,7 +272,8 @@ function runPts(P, i0, i1, sp, o) {
     const iz = F / zc;
     const sx = cx + (a00 * px + a01 * py + a02 * pz + b0) * iz; if (sx < 0 || sx >= BW) continue;
     const sy = cy - (a10 * px + a11 * py + a12 * pz + b1) * iz; if (sy < 0 || sy >= BH) continue;
-    if (oc) { const t = ((sy | 0) >> 2) * OW + ((sx | 0) >> 2); if (OC_[t] && zc > OZ_[t] * 1.015 + .06) continue; }
+    let att = 1;
+    if (oc) { const t = ((sy | 0) >> 2) * OW + ((sx | 0) >> 2), q_ = OC_[t]; if (q_) { if (zc > OZ_[t] * 1.015 + .06) continue; if ((q_ & 2) && zc > OZF[t] * 1.015 + .06) att = 1 - OAF[t]; } }
     const nx = P[j + 3], ny = P[j + 4], nz = P[j + 5];
     let b;
     if (nx === 0 && ny === 0 && nz === 0) b = .5;
@@ -283,6 +301,7 @@ function runPts(P, i0, i1, sp, o) {
         }
       }
     }
+    b *= att;
     if (b < .02) continue;
     if (b > 1) b = 1;
     const pxs = sp * iz * big;
@@ -292,13 +311,21 @@ function runPts(P, i0, i1, sp, o) {
     } else pb.dot(sx, sy, 2, r, g, bl, b);
   }
 }
-/* ---------- occlusion: 4 px tiles holding the nearest depth of convex occluders (after pe_aegis_scope's occHouse) */
-const OW = 480, OH = 270, OZ = new Float32Array(OW * OH), OC = new Uint8Array(OW * OH);
-let OCC_ON = false;
-function occReset() { if (OCC_ON) { OZ.fill(1e9); OC.fill(0); } OCC_ON = false; }
+/* ---------- occlusion: 4 px tiles (raster px) holding the nearest depth of convex occluders (after pe_aegis_scope's
+   occHouse). OC: bit 1 an opaque occluder (depth OZ), bit 2 a fading one (SMOOTH: K.occA(a) / K.occM(m) give the
+   occluders that follow an opacity; the nearest fading depth OZF and its opacity OAF): what lies behind a fading
+   occluder is dimmed by 1 - OAF instead of hidden, so an occluder switched off (an X-ray, a skin opening) fades out
+   over its owner's ramp instead of popping. occK(x, y, z) -> 0 hidden .. 1 clear */
+const OW = Math.ceil(BW / 4), OH = Math.ceil(BH / 4), ON = OW * OH, OZ = new Float32Array(ON), OC = new Uint8Array(ON);
+const OZF = new Float32Array(ON), OAF = new Float32Array(ON);
+let OCC_ON = false, OCF_ON = false, OCC_A = 1, OCC_M = 1;
+const OCS_T = 30000 * SC * SC;
+function occReset() { if (OCC_ON) { OZ.fill(1e9); OC.fill(0); } if (OCF_ON) { OZF.fill(1e9); OAF.fill(0); } OCC_ON = false; OCF_ON = false; }
 const NE = new Float64Array(32), NF = new Float64Array(32), NR = new Float64Array(32), NU = new Float64Array(32);
 /* planes [[nx, ny, nz, d]...] (inside: n.p <= d), corners (world) for the screen bounds */
 function occPlanes(planes, corners) {
+  const al = OCC_A * OCC_M; if (al <= .002) return;
+  const fade = al < .998;
   let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
   let behind = 0;
   for (const c of corners) { if (!pj(c[0], c[1], c[2])) behind++; else { x0 = Math.min(x0, PJ[0]); x1 = Math.max(x1, PJ[0]); y0 = Math.min(y0, PJ[1]); y1 = Math.max(y1, PJ[1]); } }
@@ -307,9 +334,10 @@ function occPlanes(planes, corners) {
   const tx0 = Math.max(0, Math.floor(x0 / 4)), tx1 = Math.min(OW - 1, Math.floor(x1 / 4)), ty0 = Math.max(0, Math.floor(y0 / 4)), ty1 = Math.min(OH - 1, Math.floor(y1 / 4));
   if (tx1 < tx0 || ty1 < ty0) return;
   if (!OCC_ON) { OZ.fill(1e9); OC.fill(0); OCC_ON = true; }
+  if (fade && !OCF_ON) { OZF.fill(1e9); OAF.fill(0); OCF_ON = true; }
   const e = C.eye, f = C.f, r = C.r, u = C.u, np = planes.length, FL = C.fl, cx = C.cx + C.shake[0], cy = C.cy + C.shake[1];
   for (let i = 0; i < np; i++) { const p = planes[i]; NE[i] = p[3] - (p[0] * e[0] + p[1] * e[1] + p[2] * e[2]); NF[i] = p[0] * f[0] + p[1] * f[1] + p[2] * f[2]; NR[i] = p[0] * r[0] + p[1] * r[1] + p[2] * r[2]; NU[i] = p[0] * u[0] + p[1] * u[1] + p[2] * u[2]; }
-  const S = OCC_S || ((tx1 - tx0) * (ty1 - ty0) > 30000 ? 2 : 1), H = S * 2;
+  const S = OCC_S || ((tx1 - tx0) * (ty1 - ty0) > OCS_T ? 2 : 1), H = S * 2;
   for (let ty = ty0 - ty0 % S; ty <= ty1; ty += S) {
     const b = (ty * 4 + H - cy) / FL;
     for (let tx = tx0 - tx0 % S; tx <= tx1; tx += S) {
@@ -323,7 +351,8 @@ function occPlanes(planes, corners) {
         if (tin >= tout) break;
       }
       if (tin >= tout || tout <= C.near) continue;
-      for (let v = 0; v < S; v++) for (let w = 0; w < S; w++) { const yy = ty + v, xx = tx + w; if (yy >= OH || xx >= OW) continue; const k = yy * OW + xx; if (tin < OZ[k]) OZ[k] = tin; OC[k] = 1; }
+      if (fade) { for (let v = 0; v < S; v++) for (let w = 0; w < S; w++) { const yy = ty + v, xx = tx + w; if (yy >= OH || xx >= OW) continue; const k = yy * OW + xx; if (tin < OZF[k]) OZF[k] = tin; if (al > OAF[k]) OAF[k] = al; OC[k] |= 2; } continue; }
+      for (let v = 0; v < S; v++) for (let w = 0; w < S; w++) { const yy = ty + v, xx = tx + w; if (yy >= OH || xx >= OW) continue; const k = yy * OW + xx; if (tin < OZ[k]) OZ[k] = tin; OC[k] |= 1; }
     }
   }
 }
@@ -345,19 +374,56 @@ function occBox(Tw, mn, mx) {
    (its inset is then wider than the coarser steps) */
 let OCC_S = 0;
 const occS = s => { OCC_S = s; };
-/* is a screen point at depth z behind an occluder */
-function occT(x, y, z) { if (!OCC_ON) return false; const t = ((y | 0) >> 2) * OW + ((x | 0) >> 2); return t >= 0 && t < OW * OH && OC[t] > 0 && z > OZ[t] * 1.015 + .06; }
-Object.assign(K, { occReset, occPlanes, occBox, occT, occS, OZ, OC, OW, occOn: () => OCC_ON });
+/* is a screen point at depth z behind an (opaque) occluder */
+function occT(x, y, z) { if (!OCC_ON) return false; const t = ((y | 0) >> 2) * OW + ((x | 0) >> 2); return t >= 0 && t < ON && (OC[t] & 1) > 0 && z > OZ[t] * 1.015 + .06; }
+/* how much of a screen point at depth z shows: 0 behind an opaque occluder, 1 - its opacity behind a fading one, else 1 */
+function occK(x, y, z) {
+  if (!OCC_ON) return 1;
+  const t = ((y | 0) >> 2) * OW + ((x | 0) >> 2); if (t < 0 || t >= ON) return 1;
+  const c = OC[t]; if (!c) return 1;
+  if (z > OZ[t] * 1.015 + .06) return 0;
+  return (c & 2) && z > OZF[t] * 1.015 + .06 ? 1 - OAF[t] : 1;
+}
+/* the opacity of the occluders that follow (a: this one's, m: a multiplier for all; 1 = opaque) */
+const occA = a => { OCC_A = a; }, occM = m => { OCC_M = m; };
+Object.assign(K, { occReset, occPlanes, occBox, occT, occK, occA, occM, occS, OZ, OC, OZF, OAF, OW, OH, occOn: () => OCC_ON, occFade: () => OCF_ON });
 
 let NPTS = 0;
+/* SMOOTH: the LOD pick for a cell as a crossfade (after scan_kit's lodPick): the coarsest level whose dots land at most
+   P px apart (F focal px, d distance), from lmin up; each switch between two levels a ramp `band` of an octave wide
+   centred on it: LP.a with weight LP.wa, LP.b (the neighbour, -1 none) with LP.wb, each drawn on a stable per-point
+   dither (keep x weight), so detail fades in and out with distance instead of popping cell by cell */
+const LP = { a: 0, wa: 1, b: -1, wb: 0 };
+function lodPick(sp, nl, F, d, P, lmin, band) {
+  let li = nl - 1; while (li > lmin && sp[li] * F / d > P) li--;
+  LP.a = li; LP.wa = 1; LP.b = -1; LP.wb = 0;
+  if (band <= 0 || nl < 2) return LP;
+  const s = sp[li] * F / d; if (s > P) return LP;
+  const h = band * .5, t = Math.log(P / s) / Math.log(li < nl - 1 ? sp[li + 1] / sp[li] : sp[li] / sp[li - 1]);
+  if (t < h && li > lmin) { const w = .5 - t / (2 * h); LP.b = li - 1; LP.wb = w; LP.wa = 1 - w; }
+  else if (t > 1 - h && li < nl - 1) { const w = Math.min(.5, (t - 1 + h) / (2 * h)); LP.b = li + 1; LP.wb = w; LP.wa = 1 - w; }
+  return LP;
+}
+K.lodPick = lodPick; K.LP = LP;
 function drawLod(ml, Tw, o) {
   prep(Tw);
-  const CH = ml.ch, SD = ml.sd, nl = ml.nl, F = C.fl, oo = opt(o), PX = oo.px, PX0 = oo.px0;
+  const CH = ml.ch, SD = ml.sd, nl = ml.nl, F = C.fl, oo = opt(o), PX = oo.px / K.DQ, PX0 = oo.px0 / K.DQ, kp = oo.keep;
   const ex = XM[12], ey = XM[13], ez = XM[14];
   for (let c = 0; c < ml.nch; c++) {
     const q = c * SD, mx = CH[q], my = CH[q + 1], mz = CH[q + 2], rad = CH[q + 3];
     if (!sphereIn(mx, my, mz, rad)) continue;
     const dx = mx - ex, dy = my - ey, dz = mz - ez, d = Math.max(.05, Math.sqrt(dx * dx + dy * dy + dz * dz) - rad * .7);
+    if (SMOOTH) {
+      lodPick(ml.sp, nl, F, d, PX, HQ ? 0 : 1, HQ ? 1 : .5);
+      if (!HQ && LP.a === 1 && LP.b < 0 && ml.sp[1] * F / d > PX0) LP.a = 0;
+      let la = LP.a, lb = LP.b; const wa = LP.wa, wb = LP.wb;
+      if (oo.lb) { la = Math.min(nl - 1, la + oo.lb); if (lb >= 0) lb = Math.min(nl - 1, lb + oo.lb); if (lb === la) lb = -1; }
+      let i0 = CH[q + 4 + la * 2], i1 = CH[q + 5 + la * 2];
+      if (i1 > i0) { oo.keep = kp * (lb >= 0 ? wa : 1); runPts(ml.lv[la], i0, i1, ml.sp[la], oo); NPTS += i1 - i0; }
+      if (lb >= 0) { i0 = CH[q + 4 + lb * 2]; i1 = CH[q + 5 + lb * 2]; if (i1 > i0) { oo.keep = kp * wb; runPts(ml.lv[lb], i0, i1, ml.sp[lb], oo); NPTS += i1 - i0; } }
+      oo.keep = kp;
+      continue;
+    }
     let li = nl - 1; while (li > 1 && ml.sp[li] * F / d > PX) li--;
     if (li === 1 && ml.sp[1] * F / d > PX0) li = 0;
     if (oo.lb) li = Math.min(nl - 1, li + oo.lb);
@@ -626,22 +692,39 @@ function mkTag() {
   $('ui').insertBefore(d, $('menu'));
   const o = { el: d, b: d.children[0], i: d.children[1], v: d.children[2], key: '', on: false, w: -1 }; tagPool.push(o); return o;
 }
+/* (the tag's width in stage px: x K.S for raster px) */
 const tagW = tg => { if (tg.w < 0) tg.w = tg.el.offsetWidth; return tg.w; };
+/* x, y: raster px (a projected point plus offsets scaled by K.S); the tag itself lives in the stage's 1920 x 1080 px */
 function setTag(tg, id, lab, val, cls, x, y, a) {
   const key = id + '|' + lab + '|' + val + '|' + (cls || '');
   if (tg.key !== key) { tg.key = key; tg.w = -1; tg.b.textContent = id; tg.b.style.display = id ? '' : 'none'; tg.i.textContent = lab; tg.v.textContent = val || ''; tg.v.style.display = val ? '' : 'none'; tg.el.className = 'tag ' + (cls || ''); }
+  if (SC !== 1) { x /= SC; y /= SC; }
   const w = tagW(tg);
   // a tag pushed far off its anchor by the screen edge, or landing on the readout (top left), is hidden, not clamped
   if (x > 1896 - w + 60 || x < -36 || y < -36 || y > 1100 || (x < 430 && y < 236)) a = 0;
   if (x > 1896 - w) x = 1896 - w; if (x < 24) x = 24; if (y < 24) y = 24; if (y > 1040) y = 1040;
   tg.el.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
   tg.el.classList.remove('off');            // (a tag set again with the same text: endTags' .off must not linger under the inline opacity)
-  tg.el.style.opacity = a === undefined ? '' : Math.max(0, Math.min(1, a)).toFixed(2);
+  if (RENDER) tg.tgt = a === undefined ? 1 : Math.max(0, Math.min(1, a));
+  else tg.el.style.opacity = a === undefined ? '' : Math.max(0, Math.min(1, a)).toFixed(2);
   tg.on = true;
 }
 function beginTags() { for (const t of tagPool) t.on = false; }
-/* (the inline opacity setTag left would override .off: cleared, so a tag nobody set this frame really goes) */
-function endTags() { for (const t of tagPool) if (!t.on && !t.el.classList.contains('off')) { t.el.classList.add('off'); t.el.style.opacity = ''; } }
+/* (the inline opacity setTag left would override .off: cleared, so a tag nobody set this frame really goes).
+   Renders have no CSS transitions: the tags' .25 s opacity fade is stepped here per frame instead (STAGE.frameDt) */
+function endTags() {
+  if (RENDER) {
+    const st = (STAGE.frameDt || 1 / 60) / .25;
+    for (const t of tagPool) {
+      const tgt = t.on ? t.tgt : 0, c0 = t.cur || 0, c = c0 + Math.max(-st, Math.min(st, tgt - c0));
+      t.cur = c;
+      if (c <= 0 && !t.on) { if (!t.el.classList.contains('off')) { t.el.classList.add('off'); t.el.style.opacity = ''; } }
+      else { t.el.classList.remove('off'); t.el.style.opacity = c.toFixed(3); }
+    }
+    return;
+  }
+  for (const t of tagPool) if (!t.on && !t.el.classList.contains('off')) { t.el.classList.add('off'); t.el.style.opacity = ''; }
+}
 const GLY = '·:+×/\\|-=', HOTC = 'ABCDEFGHKMNPRSTVXYZ0123456789/·-';
 function decode(s, k, t, seed) {
   if (k >= 1) return s;
@@ -665,13 +748,15 @@ function flicker(a, t0, t1) {
   if (w < .06) return .2; if (w < .12) return .9; if (w < .16) return .1; if (w < .22) return .6;
   return 0;
 }
+/* (b, x, y in raster px; len, lw in stage px) */
+const D24 = [2 * SC, 4 * SC], D23 = [2 * SC, 3 * SC];
 function bracket(b, col, a, len, lw) {
-  const [x0, y0, x1, y1] = b, c = Math.min(len || 14, (x1 - x0) * .35, (y1 - y0) * .35);
-  octx.strokeStyle = col; octx.globalAlpha = a; octx.lineWidth = lw || 1.5; octx.beginPath();
+  const [x0, y0, x1, y1] = b, c = Math.min((len || 14) * SC, (x1 - x0) * .35, (y1 - y0) * .35);
+  octx.strokeStyle = col; octx.globalAlpha = a; octx.lineWidth = (lw || 1.5) * SC; octx.beginPath();
   for (const [px, py, sx, sy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x1, y1, -1, -1], [x0, y1, 1, -1]]) { octx.moveTo(px + sx * c, py); octx.lineTo(px, py); octx.lineTo(px, py + sy * c); }
-  octx.stroke(); octx.lineWidth = 1; octx.setLineDash([2, 4]); octx.globalAlpha = a * .45; octx.strokeRect(x0, y0, x1 - x0, y1 - y0); octx.setLineDash([]); octx.globalAlpha = 1;
+  octx.stroke(); octx.lineWidth = SC; octx.setLineDash(D24); octx.globalAlpha = a * .45; octx.strokeRect(x0, y0, x1 - x0, y1 - y0); octx.setLineDash([]); octx.globalAlpha = 1;
 }
-function leader(x0, y0, x1, y1, col, a) { octx.strokeStyle = col; octx.globalAlpha = a; octx.lineWidth = 1; octx.setLineDash([2, 3]); octx.beginPath(); octx.moveTo(x0, y0); octx.lineTo(x1, y1); octx.stroke(); octx.setLineDash([]); octx.globalAlpha = 1; }
+function leader(x0, y0, x1, y1, col, a) { octx.strokeStyle = col; octx.globalAlpha = a; octx.lineWidth = SC; octx.setLineDash(D23); octx.beginPath(); octx.moveTo(x0, y0); octx.lineTo(x1, y1); octx.stroke(); octx.setLineDash([]); octx.globalAlpha = 1; }
 Object.assign(K, { mkTag, setTag, beginTags, endTags, decode, flicker, bracket, leader, tagW });
 
 /* ---------- the scan site: a coastal battery on a headland ----------

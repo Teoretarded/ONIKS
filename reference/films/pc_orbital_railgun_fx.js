@@ -28,7 +28,7 @@ const PI = Math.PI, TAU = 2 * PI, DEG = PI / 180;
 const C = K.C, LIME = K.LIME, HOT = K.HOT, WH = K.WH;
 const FIRE = [255, 196, 138], EMB = [255, 142, 84], DUST = [224, 226, 216], GREY = [150, 152, 146], SMK = [74, 76, 72];
 const ss = E.ss;
-const BW = 1920, BH = 1080;
+const BW = K.BW, BH = K.BH, SPX = K.S;                // (the raster: STAGE.RES; SPX stage px -> raster px)
 const HIT = W.HIT;
 const SUNL = V.norm([-.4, .7, -.35]);
 
@@ -55,7 +55,7 @@ function dotP(x, y, z, cr, cg, cb, a) {
   if (a > 1) a = 1;
   const p = (sy | 0) * BW + (sx | 0), G_ = cg * a; if (DD[(p << 2) + 1] < G_) U32[p] = 0xff000000 | ((cb * a) << 16) | (G_ << 8) | (cr * a);
 }
-function dotCol(x, y, z, s, r, g, b, a) { if (a < .015) return; if (K.pj(x, y, z) && PJ[0] >= 0 && PJ[1] >= 0 && PJ[0] < BW && PJ[1] < BH) { if (K.occT(PJ[0], PJ[1], PJ[2])) return; K.dot(PJ[0], PJ[1], s, r, g, b, a > 1 ? 1 : a); } }
+function dotCol(x, y, z, s, r, g, b, a) { if (a < .015) return; if (K.pj(x, y, z) && PJ[0] >= 0 && PJ[1] >= 0 && PJ[0] < BW && PJ[1] < BH) { const ok = K.occK(PJ[0], PJ[1], PJ[2]); if (!ok) return; K.dot(PJ[0], PJ[1], s, r, g, b, (a > 1 ? 1 : a) * ok); } }
 const mixc = (a, b, t, o) => { o[0] = a[0] + (b[0] - a[0]) * t; o[1] = a[1] + (b[1] - a[1]) * t; o[2] = a[2] + (b[2] - a[2]) * t; return o; };
 const CC = [0, 0, 0];
 /* sin / cos tables (any angle), hashes */
@@ -106,7 +106,7 @@ function shot(m, d, U, Wd, ax, vis) {
   const xf = 7600 * tau, pa = A * Math.exp(-tau / .07);
   if (pa > .02) {
     psys(NPL, .45 * xf + 4, m[0] + d[0] * xf * .5, m[1] + d[1] * xf * .5, m[2] + d[2] * xf * .5, 1.4, 16000); const st = PS_ST, sz = PS_S;
-    { const c_ = V.mad(m, d, xf * .93), dd = Math.max(1, Math.hypot(c_[0] - ex, c_[1] - ey, c_[2] - ez)); K.glowW(c_[0], c_[1], c_[2], Math.min(360, Math.round((6 + .3 * xf) * FL / dd)), tau < .02 ? HOT : LIME, .32 * pa * Math.exp(-tau / .025)); }
+    { const c_ = V.mad(m, d, xf * .93), dd = Math.max(1, Math.hypot(c_[0] - ex, c_[1] - ey, c_[2] - ez)); K.glowW(c_[0], c_[1], c_[2], Math.min(360, Math.round((6 + .3 * xf) * FL / dd / SPX)), tau < .02 ? HOT : LIME, .32 * pa * Math.exp(-tau / .025)); }
     for (let i = 0; i < NPL; i += st) {
       const o = i * 4, u = PLM[o], q = PLM[o + 1], th = PLM[o + 2] + u * 2.1, hq = PLM[o + 3];
       const x_ = xf * u * (1 - .1 * q * q), rr = (1.2 + .26 * x_) * q * (1 + .12 * fs(th * 5 + u * 13 + tau * 40)), cs = fc(th) * rr, sn = fs(th) * rr;
@@ -221,7 +221,7 @@ function sheath(p, D, U, Wd, heat, T) {
   const px = p[0], py = p[1], pz = p[2];
   const dist = Math.max(1, Math.hypot(px - ex, py - ey, pz - ez)), ppm = FL / dist;
   // in the vacuum a closed shell catching the sun (the film draws it); far away only a point so it still reads
-  if (heat < .015) { if (ppm < .45) { dotW(px, py, pz, 2, HOT, 1); K.glowW(px, py, pz, 9, LIME, .35); } return; }
+  if (heat < .015) { if (ppm < .45 * SPX) { dotW(px, py, pz, 2, HOT, 1); K.glowW(px, py, pz, 9, LIME, .35); } return; }
   const alt = Math.hypot(px - W.CE[0], py - W.CE[1], pz - W.CE[2]) - W.RE;
   const h = heat, lo = ss(32000, 6000, alt);
   // how end-on the view is (1: along the axis): rings and cones fade there
@@ -231,8 +231,8 @@ function sheath(p, D, U, Wd, heat, T) {
   const nx = px + D[0] * 3.1, ny = py + D[1] * 3.1, nz = pz + D[2] * 3.1;
   const fr = Math.floor(T * 30);
   // the stagnation light at the nose and an ionisation streak down the first part of the wake (glows strung along the axis)
-  K.glowW(nx, ny, nz, Math.min(140, 5 + Rn * 1.8 * ppm), HOT, .3 * h + .25 * lo);
-  for (let k = 1; k <= 5; k++) { const x = Lw * .035 * k * k; K.glowW(nx - D[0] * x, ny - D[1] * x, nz - D[2] * x, Math.min(110, 3 + (Rs * (1 + .25 * k)) * ppm * 1.2), k < 3 ? FIRE : EMB, (.16 + .12 * lo) * h * (1 - k / 6)); }
+  K.glowW(nx, ny, nz, Math.min(140, 5 + Rn * 1.8 * ppm / SPX), HOT, .3 * h + .25 * lo);
+  for (let k = 1; k <= 5; k++) { const x = Lw * .035 * k * k; K.glowW(nx - D[0] * x, ny - D[1] * x, nz - D[2] * x, Math.min(110, 3 + (Rs * (1 + .25 * k)) * ppm * 1.2 / SPX), k < 3 ? FIRE : EMB, (.16 + .12 * lo) * h * (1 - k / 6)); }
   // the bow shock: a paraboloid over the nose, then a cone opening narrowly down the wake, shimmering
   {
     const n = Math.min(NBS, Math.max(220, Math.round((Rs * Rs + Lc * Rs * .3) * ppm * ppm * 1.6)));
@@ -302,7 +302,7 @@ const th3 = i => { const s = Math.sin(i * 39.425 + 4.1) * 15731.3712; return s -
 /* the column's radius (m) for an age (film s, aged as the film's ageAt) and a height */
 const colR = (age, alt) => Math.min(330, 5 + 36 * Math.sqrt(age)) * (.3 + .7 * ss(108000, 26000, alt)) * (1 + 1.1 * ss(24000, 2000, alt));
 const NCHK = 2048, CK_ST = new Int32Array(NCHK), CK_RP = new Int32Array(NCHK), CK_ZM = new Float64Array(NCHK), CK_DM = new Float64Array(NCHK), CK_ON = new Uint8Array(NCHK);
-const TBUDGET = 36000;
+const TBUDGET = 36000 * SPX * SPX * (K.HQ ? 2 : 1);           // (x SPX^2 at a higher res, x 2 in HQ)
 function trail(F, T, vis) {
   cam();
   if (FCs) { FRAME.T = T; FRAME.a = FCs.aOf(T); W.CRA.a = FRAME.a; }
@@ -418,7 +418,7 @@ function dotL(x, y, z, li, a, s) {
    when even every particle leaves gaps */
 let PS_ST = 1, PS_S = 1;
 function psys(N, R_, x, y, z, k, cap) {
-  const d = Math.max(1, Math.hypot(x - ex, y - ey, z - ez) - R_ * .5), rpx = R_ * FL / d, area = 3.1416 * rpx * rpx, nmax = Math.min(area / (k || 2.6), cap || 1e9);
+  const d = Math.max(1, Math.hypot(x - ex, y - ey, z - ez) - R_ * .5), rpx = R_ * FL / d, area = 3.1416 * rpx * rpx, nmax = Math.min(area / (k || 2.6), (cap || 1e9) * SPX * SPX);
   PS_ST = Math.max(1, Math.min(24, Math.ceil(N / Math.max(1, nmax)))); PS_S = area / (N / PS_ST) > 6 ? 2 : 1;
 }
 /* particle tables */
@@ -736,7 +736,8 @@ const PDC = billowCloud(9393, 110, (r, b, C) => { const th = r() * TAU, ph = r()
 const NPDC = PDC.length / CS, PDK = pack(PDC);
 if (window.ORW_LOG) window.ORW_LOG.push('mushroom clouds ' + NCAPC + ' / ' + NSTC + ' / ' + NPDC);
 /* dot budgets per frame (the counts follow the size on screen up to these) */
-const B_CAP = 80000, B_STEM = 24000, B_PED = 18000;
+/* (the budgets are for a 1080 raster: x SPX^2 at a higher res, so a capped cloud keeps its dots per stage px; x 1.5 in HQ) */
+const BK = SPX * SPX * (K.HQ ? 1.5 : 1), B_CAP = 80000 * BK, B_STEM = 24000 * BK, B_PED = 18000 * BK;
 const S0 = SUNL[0], S1 = SUNL[1], S2 = SUNL[2];
 /* the count of a set to draw for a disc of radius R_ (m) at (x, y, z): about one dot per k px^2, capped */
 function setN(N, R_, x, y, z, k, cap) {
@@ -1033,7 +1034,7 @@ function shotAll(F, T) {
 function camHook(T, F) {
   FCs = F;
   FRAME.T = T; FRAME.a = F.aOf(T); W.CRA.a = FRAME.a; cloudShadow(FRAME.a);
-  { const ld = FRAME.a > 0 ? ss(.2, 1.5, FRAME.a) * (1 - ss(F.T_RET + .5, F.T_RET + 2, T)) : 0; W.GOPT.pxm = 1 + .22 * ld; W.GOPT.fbud = 1 - .45 * ld; }
+  { const ld = FRAME.a > 0 ? ss(.2, 1.5, FRAME.a) * (1 - ss(F.T_RET + .5, F.T_RET + 2, T)) : 0; W.GOPT.pxm = K.HQ ? 1 : 1 + .22 * ld; W.GOPT.fbud = K.HQ ? 1 : 1 - .45 * ld; }   // (HQ: no load sharing)
   W.GOPT.hz = 1; W.GOPT.hk = 0;
   const key = F.TX + ',' + F.TI + ',' + F.T_RET;
   if (!CI || key !== CI_K) { CI_K = key; camInit(F); }

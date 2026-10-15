@@ -15,7 +15,11 @@
 'use strict';
 const { V, R, X, E } = M3;
 const PI = Math.PI, TAU = 2 * PI;
-const BW = 1920, BH = 1080;
+/* the raster (ORK: STAGE.RES); all spacings and switch thresholds here are raster px. SMOOTH (ORK.SMOOTH: ?hq=1 or
+   ?smooth=1): the switches between representations (a chunk or a part as one dot, greebles as edges only, a tube as a
+   hairline or a lit lattice, a ring's dot count, a knot as a dot or a cube) crossfade over a band instead of popping,
+   one-sided faces fade out as they turn edge-on, and what is behind a fading occluder is dimmed (ORK.occK) */
+const BW = ORK.BW, BH = ORK.BH, SMOOTH = !!ORK.SMOOTH;
 const LIME = [198, 244, 50], HOT = [248, 255, 232], WH = [238, 238, 228];
 const CTZ = new Uint8Array(65536); CTZ[0] = 16;
 const IP2 = new Float32Array(17); for (let i = 0; i < 17; i++) IP2[i] = 1 / (1 << i);
@@ -24,17 +28,25 @@ const NT = 4096, COS = new Float32Array(NT), SIN = new Float32Array(NT);
 for (let i = 0; i < NT; i++) { COS[i] = Math.cos(i / NT * TAU); SIN[i] = Math.sin(i / NT * TAU); }
 const pow2 = x => { let p = 1; while (p < x && p < 65536) p <<= 1; return p; };
 
-let K = null, C = null, D = null, U32 = null, OZ = null, OC = null, OW = 480;
-/* per-frame globals */
-const G = { PXF: 3.4, PXL: 1.5, SEAMPX: 7, zref: 400, g0: 1.25, g1: .0004, gmin: .55, hz: .45, hz0: 1.2, hzMax: 2.6, noBack: true, occ: false, dots: 0, clip: null };
+let K = null, C = null, D = null, U32 = null, OZ = null, OC = null, OZF = null, OAF = null, OW = 480;
+/* per-frame globals (am: an opacity multiplier for everything drawn, for crossfades between bodies) */
+const G = { PXF: 3.4, PXL: 1.5, SEAMPX: 7, zref: 400, g0: 1.25, g1: .0004, gmin: .55, hz: .45, hz0: 1.2, hzMax: 2.6, noBack: true, occ: false, dots: 0, clip: null, am: 1 };
 /* depth haze in the dots: beyond hz0 x zref the lattice thins out (and the gain dims it) */
 const thin = z => { const k = z / G.zref - G.hz0; return k <= 0 ? 1 : Math.min(G.hzMax, 1 + G.hz * k); };
+/* (PXF, PXL: the dot spacings asked for, x ORK.PXK: the HQ lattice is denser) */
 function frame(o) {
-  K = window.ORK; C = K.C; D = K.pb.d; if (!U32 || U32.buffer !== D.buffer) U32 = new Uint32Array(D.buffer); OZ = K.OZ; OC = K.OC; OW = K.OW;
+  K = window.ORK; C = K.C; D = K.pb.d; if (!U32 || U32.buffer !== D.buffer) U32 = new Uint32Array(D.buffer); OZ = K.OZ; OC = K.OC; OZF = K.OZF; OAF = K.OAF; OW = K.OW;
   Object.assign(G, o || {});
-  G.g1 = .5 / (2.6 * G.zref);
+  const pk = K.PXK || 1;
+  if (pk !== 1) { if (o && o.PXF) G.PXF = o.PXF * pk; if (o && o.PXL) G.PXL = o.PXL * pk; G.SEAMPX = ((o && o.SEAMPX) || 7) * pk; }
+  G.g1 = .5 / (2.6 * G.zref); G.am = 1;
   G.dots = 0; G.by = { l: 0, r: 0, t: 0, p: 0, y: 0, n: 0 };
 }
+/* SMOOTH crossfade weight of the detailed side of a switch at value v, threshold t (switching up at t), band b x t:
+   0 below t, 1 from t (1 + b) */
+const xw = (v, t, b) => v <= t ? 0 : v >= t * (1 + b) ? 1 : (v - t) / (t * b);
+/* behind a fading occluder (bit 2 of the tile): the share that shows */
+const occF = (t, z) => (OC[t] & 2) && z > OZF[t] * 1.015 + .06 ? 1 - OAF[t] : 1;
 const gain = z => { const g = G.g0 - G.g1 * z; return g < G.gmin ? G.gmin : g; };
 
 /* ---------------- build ---------------- */
@@ -209,7 +221,7 @@ function setCol(ch, q) {
   EM = Math.max(w * .85, h * .9, (l - O.lime > 0 ? l - O.lime : 0) * .55);
   if (w > 0) { CR += (HEAT[0] - CR) * w; CG += (HEAT[1] - CG) * w; CB += (HEAT[2] - CB) * w; }
   if (h > 0) { CR += (HOT[0] - CR) * h; CG += (HOT[1] - CG) * h; CB += (HOT[2] - CB) * h; }
-  CA = a;
+  CA = a * G.am;
 }
 
 /* clips: a convex region cut out of a body (an X-ray that slices a part open, a growth front). Up to 8 planes, all
@@ -289,8 +301,9 @@ function lineC0(ax, ay, az, bx, by, bz, bri, step) {
   } else for (let k = k0; k <= k1; k++) {
     const t = k * im, x = x0 + dx * t, y = y0 + dy * t;
     const z = 1 / (iza + (izb - iza) * t);
-    if (occ) { const ot = ((y | 0) >> 2) * OW + ((x | 0) >> 2); if (OC[ot] && z > OZ[ot] * 1.015 + .06) continue; }
-    let gg = g0 - g1 * z; if (gg < gm) gg = gm;
+    let ok = 1;
+    if (occ) { const ot = ((y | 0) >> 2) * OW + ((x | 0) >> 2); if (OC[ot]) { if (z > OZ[ot] * 1.015 + .06) continue; ok = occF(ot, z); } }
+    let gg = g0 - g1 * z; if (gg < gm) gg = gm; gg *= ok;
     const q = ((y | 0) * BW + (x | 0)) << 2, R_ = r * gg, G_ = g * gg, B_ = b * gg;
     if (D[q + 1] < G_) U32[q >> 2] = 0xff000000 | ((B_ > 255 ? 255 : B_) << 16) | ((G_ > 255 ? 255 : G_) << 8) | (R_ > 255 ? 255 : R_);
   }
@@ -301,8 +314,9 @@ function dotC(x, y, z, s, r, g, b) {
   if (z < C.near || (CL && clipped(x, y, z))) return;
   const F = C.fl, sx = C.cx + C.shake[0] + F * x / z, sy = C.cy + C.shake[1] - F * y / z;
   if (sx < 0 || sy < 0 || sx >= BW || sy >= BH) return;
-  if (G.occ && O.occ && K.occT(sx, sy, z)) return;
-  const gg = gain(z);
+  let ok = 1;
+  if (G.occ && O.occ) { ok = K.occK(sx, sy, z); if (!ok) return; }
+  const gg = gain(z) * ok;
   if (s <= 1) { const q = ((sy | 0) * BW + (sx | 0)) << 2; if (D[q] < r * gg) D[q] = r * gg; if (D[q + 1] < g * gg) D[q + 1] = g * gg; if (D[q + 2] < b * gg) D[q + 2] = b * gg; }
   else K.pb.dot(sx, sy, s, r * gg, g * gg, b * gg, 1);
   G.dots++;
@@ -330,10 +344,12 @@ function panelK(nu, nv, nx, ny, nz, br, two) {
   let back = false;
   if (fac < 0) { if (two) { fac = -fac; lam = -lam * .7; } else { if (G.noBack) return; back = true; } }
   PB = back ? Math.max(O.back, EM * .6) * br : Math.max(shade(lam, fac), EM) * br;
+  if (SMOOTH && !two && G.noBack && fac < .06) PB *= fac / .06;          // (a one-sided face fades out as it turns edge-on)
   PBK = back ? 2.2 : 1;
   if (PB * CA < .01) return;
   tileK(0, nu, 0, nv);
 }
+const SPLIT_A = 400000 * ORK.S * ORK.S;
 function tileK(i0, i1, j0, j1) {
   const n = C.near, F = C.fl;
   // corners
@@ -359,7 +375,7 @@ function tileK(i0, i1, j0, j1) {
     }
     if (x1 < 0 || y1 < 0 || x0 >= BW || y0 >= BH) return;
     if (zmax > 1.7 * zmin && (di > 2 || dj > 2)) { split(i0, i1, j0, j1); return; }
-    if ((x1 - x0) * (y1 - y0) > 400000 && (di > 4 || dj > 4)) { split(i0, i1, j0, j1); return; }
+    if ((x1 - x0) * (y1 - y0) > SPLIT_A && (di > 4 || dj > 4)) { split(i0, i1, j0, j1); return; }
   }
   const zm = Math.max(n, zmin), pxf = G.PXF * O.pxf * PBK * thin(zm);
   // the cells' lengths as seen (foreshortened across the view ray at the tile's middle): a face seen obliquely
@@ -392,7 +408,7 @@ function tileK(i0, i1, j0, j1) {
       if (CL && clipped(x, y, z)) continue;
       const sx = cx + x * iz; if (sx < 0 || sx >= BW) continue;
       const sy = cy - y * iz; if (sy < 0 || sy >= BH) continue;
-      if (occ) { const ot = ((sy | 0) >> 2) * OW + ((sx | 0) >> 2); if (OC[ot] && z > OZ[ot] * 1.015 + .06) continue; }
+      if (occ) { const ot = ((sy | 0) >> 2) * OW + ((sx | 0) >> 2); if (OC[ot]) { if (z > OZ[ot] * 1.015 + .06) continue; a *= occF(ot, z); } }
       let gg = g0 - g1 * z; if (gg < gm) gg = gm; a *= gg;
       const q = ((sy | 0) * BW + (sx | 0)) << 2, R_ = r * a, G_ = g * a, B_ = b * a;
       if (D[q + 1] < G_) U32[q >> 2] = 0xff000000 | ((B_ > 255 ? 255 : B_) << 16) | ((G_ > 255 ? 255 : G_) << 8) | (R_ > 255 ? 255 : R_);
@@ -482,8 +498,9 @@ function latheK(Y) {
         if (CL && clipped(ccx + rx * rr, ccy + ry * rr, pz)) continue;
         const iz = F / pz, sx = cx + (ccx + rx * rr) * iz; if (sx < 0 || sx >= BW) continue;
         const sy = cy - (ccy + ry * rr) * iz; if (sy < 0 || sy >= BH) continue;
-        if (occ) { const ot = ((sy | 0) >> 2) * OW + ((sx | 0) >> 2); if (OC[ot] && pz > OZ[ot] * 1.015 + .06) continue; }
-        let gg = g0 - g1 * pz; if (gg < gm) gg = gm;
+        let ok = 1;
+        if (occ) { const ot = ((sy | 0) >> 2) * OW + ((sx | 0) >> 2); if (OC[ot]) { if (pz > OZ[ot] * 1.015 + .06) continue; ok = occF(ot, pz); } }
+        let gg = g0 - g1 * pz; if (gg < gm) gg = gm; gg *= ok;
         const k = b * al * gg * ca, q = ((sy | 0) * BW + (sx | 0)) << 2, R_ = CR * k, G_ = CG * k, B_ = CB * k;
         if (D[q + 1] < G_) U32[q >> 2] = 0xff000000 | ((B_ > 255 ? 255 : B_) << 16) | ((G_ > 255 ? 255 : G_) << 8) | (R_ > 255 ? 255 : R_);
         cnt++;
@@ -499,6 +516,14 @@ function tubeK(ax, ay, az, bx, by, bz, r, bri) {
   if (az < n && bz < n) return;
   const F = C.fl;
   const za = Math.max(n, az), zb = Math.max(n, bz), wa = r * F / za, wb = r * F / zb;
+  if (SMOOTH) {
+    // (the hairline hands over to the two silhouettes from 1.1 to 2.2 px wide)
+    const ws = xw(Math.max(wa, wb), 1.1, 1);
+    if (ws < 1) lineC(ax, ay, az, bx, by, bz, bri * (1 - ws), PXLc);
+    if (ws <= 0) return;
+    tubeS(ax, ay, az, bx, by, bz, r, bri, wa, wb, ws);
+    return;
+  }
   if (wa < 1.1 && wb < 1.1) { lineC(ax, ay, az, bx, by, bz, bri, PXLc); return; }
   // clip at near
   if (az < n) { const t = (n - az) / (bz - az); ax += (bx - ax) * t; ay += (by - ay) * t; az = n; }
@@ -527,6 +552,33 @@ function tubeK(ax, ay, az, bx, by, bz, r, bri) {
   }
 }
 
+/* (SMOOTH) a tube's silhouettes at weight ws and its lit rows: a power-of-two count (the newest half fading in as it
+   doubles), the whole lattice fading in from 3.2 to 4.8 px wide, so no row ever jumps */
+function tubeS(ax, ay, az, bx, by, bz, r, bri, wa, wb, ws) {
+  const n = C.near;
+  if (az < n) { const t = (n - az) / (bz - az); ax += (bx - ax) * t; ay += (by - ay) * t; az = n; }
+  else if (bz < n) { const t = (n - bz) / (az - bz); bx += (ax - bx) * t; by += (ay - by) * t; bz = n; }
+  const ex = bx - ax, ey = by - ay, ez = bz - az, mx = (ax + bx) * .5, my = (ay + by) * .5, mz = (az + bz) * .5;
+  let px = ey * mz - ez * my, py = ez * mx - ex * mz, pz = ex * my - ey * mx;
+  const pl = Math.sqrt(px * px + py * py + pz * pz) || 1; px /= pl; py /= pl; pz /= pl;
+  lineC(ax + px * r, ay + py * r, az + pz * r, bx + px * r, by + py * r, bz + pz * r, bri * ws, PXLc);
+  lineC(ax - px * r, ay - py * r, az - pz * r, bx - px * r, by - py * r, bz - pz * r, bri * ws, PXLc);
+  const wm = Math.max(wa, wb), wr = xw(wm, 3.2, .5);
+  if (wr <= 0) return;
+  let qx = py * ez - pz * ey, qy = pz * ex - px * ez, qz = px * ey - py * ex;
+  const ql = Math.sqrt(qx * qx + qy * qy + qz * qz) || 1; qx /= ql; qy /= ql; qz /= ql;
+  if (qx * mx + qy * my + qz * mz > 0) { qx = -qx; qy = -qy; qz = -qz; }
+  const rf = 2 * wm / (G.PXF * O.pxf * 1.5), R = Math.min(32, pow2(rf)), fo = R > 1 && R < 32 ? Math.min(1, Math.max(0, 2 * rf / R - 1)) : 1;
+  const lx = XM[15], ly = XM[16], lz = XM[17];
+  for (let k = 1; k < R; k++) {
+    const th = -PI / 2 + PI * k / R, c = Math.cos(th), s = Math.sin(th);
+    const ox = (px * s + qx * c) * r, oy = (py * s + qy * c) * r, oz = (pz * s + qz * c) * r;
+    const nx = ox / r, ny = oy / r, nz = oz / r, lam = nx * lx + ny * ly + nz * lz;
+    const b = Math.max(shade(lam, c), EM) * bri * .95 * wr * (k & 1 ? fo : 1);
+    if (b > .004) lineC(ax + ox, ay + oy, az + oz, bx + ox, by + oy, bz + oz, b, G.PXF * O.pxf * 1.3);
+  }
+}
+
 /* ring kernel: model-space record at j in Rg (centre, U, W, r), drawn at the screen line step */
 function ringK(Rg, j, bri, sp) {
   const x = Rg[j], y = Rg[j + 1], z = Rg[j + 2], r = Rg[j + 9];
@@ -539,17 +591,21 @@ function ringK(Rg, j, bri, sp) {
   if (czm > n + r) { const sx = cx + F * cxm / czm, sy = cy - F * cym / czm; if (sx + rp < 0 || sx - rp >= BW || sy + rp < 0 || sy - rp >= BH) return; }
   let fa = 1;
   if (sp > 0) { const px = sp * F / Math.max(n, czm); if (px < G.SEAMPX * .5) return; if (px < G.SEAMPX) fa = px / G.SEAMPX * 2 - 1; }
-  if (rp < .6) { dotC(cxm, cym, czm, 1, CR * bri * CA * .7 * fa, CG * bri * CA * .7 * fa, CB * bri * CA * .7 * fa); return; }
-  const m = Math.min(NT, Math.max(8, pow2(TAU * rp / (PXLc * 1.15 * thin(czm))))), st = NT / m;
-  const r_ = CR * bri * CA * fa, g_ = CG * bri * CA * fa, b_ = CB * bri * CA * fa, g0 = G.g0, g1 = G.g1, gm = G.gmin, occ = G.occ && O.occ;
+  // (SMOOTH: the ring and its dot crossfade from 0.6 to 1.2 px; the newest half of its dots fades in as the count doubles)
+  let wr = 1;
+  if (SMOOTH) { wr = xw(rp, .6, 1); if (wr < 1) { const k_ = bri * CA * .7 * fa * (1 - wr); dotC(cxm, cym, czm, 1, CR * k_, CG * k_, CB * k_); } if (wr <= 0) return; }
+  else if (rp < .6) { dotC(cxm, cym, czm, 1, CR * bri * CA * .7 * fa, CG * bri * CA * .7 * fa, CB * bri * CA * .7 * fa); return; }
+  const need = TAU * rp / (PXLc * 1.15 * thin(czm)), m = Math.min(NT, Math.max(8, pow2(need))), st = NT / m, fo = m > 8 && m < NT ? Math.min(1, Math.max(0, 2 * need / m - 1)) : 1;
+  const r_ = CR * bri * CA * fa * wr, g_ = CG * bri * CA * fa * wr, b_ = CB * bri * CA * fa * wr, g0 = G.g0, g1 = G.g1, gm = G.gmin, occ = G.occ && O.occ;
   let cnt = 0;
   for (let k = 0; k < NT; k += st) {
     const cs = COS[k], sn = SIN[k], pz = czm + uz * cs + wz * sn; if (pz < n) continue;
     if (CL && clipped(cxm + ux * cs + wx * sn, cym + uy * cs + wy * sn, pz)) continue;
     const sx = cx + F * (cxm + ux * cs + wx * sn) / pz; if (sx < 0 || sx >= BW) continue;
     const sy = cy - F * (cym + uy * cs + wy * sn) / pz; if (sy < 0 || sy >= BH) continue;
-    if (occ) { const ot = ((sy | 0) >> 2) * OW + ((sx | 0) >> 2); if (OC[ot] && pz > OZ[ot] * 1.015 + .06) continue; }
-    let gg = g0 - g1 * pz; if (gg < gm) gg = gm;
+    let ok = 1;
+    if (occ) { const ot = ((sy | 0) >> 2) * OW + ((sx | 0) >> 2); if (OC[ot]) { if (pz > OZ[ot] * 1.015 + .06) continue; ok = occF(ot, pz); } }
+    let gg = g0 - g1 * pz; if (gg < gm) gg = gm; gg *= ok * (SMOOTH && (k & st) ? fo : 1);
     const q = ((sy | 0) * BW + (sx | 0)) << 2, R_ = r_ * gg, G_ = g_ * gg, B_ = b_ * gg;
     if (D[q + 1] < G_) U32[q >> 2] = 0xff000000 | ((B_ > 255 ? 255 : B_) << 16) | ((G_ > 255 ? 255 : G_) << 8) | (R_ > 255 ? 255 : R_);
     cnt++;
@@ -561,7 +617,15 @@ function ringK(Rg, j, bri, sp) {
 function knotK(x, y, z, s, bri) {
   if (z < C.near) return;
   const F = C.fl, w = s * F / z;
-  if (w < 2.6) { dotC(x, y, z, w > 1.5 ? 2 : 1, CR * bri * CA, CG * bri * CA, CB * bri * CA); return; }
+  let ca0 = -1;
+  if (SMOOTH) {
+    // (the dot hands over to the cube from 2.6 to 5.2 px)
+    const wk = xw(w, 2.6, 1);
+    if (wk < 1) { const k_ = bri * CA * (1 - wk); dotC(x, y, z, w > 1.5 ? 2 : 1, CR * k_, CG * k_, CB * k_); }
+    if (wk <= 0) return;
+    ca0 = CA; CA *= wk;
+  }
+  else if (w < 2.6) { dotC(x, y, z, w > 1.5 ? 2 : 1, CR * bri * CA, CG * bri * CA, CB * bri * CA); return; }
   const h = s * .5, nc = Math.max(1, Math.min(48, Math.round(w / (G.PXF * O.pxf)))), cl = s / nc;
   for (let f = 0; f < 6; f++) {
     const a = f >> 1, sg = f & 1 ? -1 : 1, b1 = (a + 1) % 3, b2 = (a + 2) % 3;
@@ -578,16 +642,19 @@ function knotK(x, y, z, s, bri) {
     lineC(p0x, p0y, p0z, p1x, p1y, p1z, e, PXLc); lineC(p0x, p0y, p0z, p3x, p3y, p3z, e, PXLc);
     lineC(p1x, p1y, p1z, p1x + vx * s, p1y + vy * s, p1z + vz * s, e, PXLc); lineC(p3x, p3y, p3z, p3x + ux * s, p3y + uy * s, p3z + uz * s, e, PXLc);
   }
+  if (ca0 >= 0) CA = ca0;
 }
-/* a status light: a hard dot, a small additive halo when lit (lv 0..1+) */
+/* a status light: a hard dot, a small additive halo when lit (lv 0..1+; the halo sized in stage px) */
+const LH5 = Math.round(5 * ORK.S), LH3 = Math.round(3 * ORK.S);
 function lightK(x, y, z, lv) {
   if (z < C.near || lv < .02 || (CL && clipped(x, y, z))) return;
   const F = C.fl, sx = C.cx + C.shake[0] + F * x / z, sy = C.cy + C.shake[1] - F * y / z;
   if (sx < 4 || sy < 4 || sx >= BW - 4 || sy >= BH - 4) return;
-  if (G.occ && O.occ && K.occT(sx, sy, z)) return;
-  const k = Math.min(1, lv) * O.a, c = O.lc;
+  let ok = 1;
+  if (G.occ && O.occ) { ok = K.occK(sx, sy, z); if (!ok) return; }
+  const k = Math.min(1, lv) * O.a * G.am * ok, c = O.lc;
   K.pb.dot(sx, sy, 2, c[0] * k, c[1] * k, c[2] * k, 1);
-  if (lv > .25) { const a = (lv - .25) * .5 * O.a; K.pb.add(sx, sy, 5, c[0], c[1], c[2], a * .22); K.pb.add(sx, sy, 3, c[0], c[1], c[2], a * .4); }
+  if (lv > .25) { const a = (lv - .25) * .5 * O.a * G.am * ok; K.pb.add(sx, sy, LH5, c[0], c[1], c[2], a * .22); K.pb.add(sx, sy, LH3, c[0], c[1], c[2], a * .4); }
   G.dots++;
 }
 
@@ -596,7 +663,7 @@ function lightK(x, y, z, lv) {
 function chunkHidden(x, y, z, r) {
   if (!K.occOn()) return false;
   const F = C.fl, cx = C.cx + C.shake[0], cy = C.cy + C.shake[1], zn = z - r, sx = cx + F * x / z, sy = cy - F * y / z, pr = F * r / zn;
-  if (pr > 400) return false;
+  if (pr > 400 * ORK.S) return false;
   for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
     const px = sx + (i / 3 * 2 - 1) * pr, py = sy + (j / 3 * 2 - 1) * pr;
     if (px < 0 || py < 0 || px >= BW || py >= BH) return false;
@@ -611,11 +678,11 @@ function draw(B, Tw, o) {
   o = o || {};
   O.a = o.a === undefined ? 1 : o.a; O.col = o.col || WH; O.lime = o.lime || 0; O.fx = o.fx || null; O.keep = o.keep === undefined ? 1 : o.keep;
   O.pxf = (o.pxf || 1) / Math.sqrt(Math.max(.12, O.keep)); O.back = o.back === undefined ? .11 : o.back; O.occ = !!o.occ; O.lc = o.lc || [255, 255, 255];
-  if (O.a < .01) return;
+  if (O.a * G.am < .01) return;
   clipOn(o); PXLc = G.PXL * (o.pxl || 1);
   prep(Tw, o.L || [0, 1, 0]);
   clipModel(o);
-  const lime0 = O.lime;
+  const lime0 = O.lime, am0 = G.am;
   const L = B.L, T = B.T, P = B.P, N = B.N, Rg = B.Rg, F = C.fl, PXL = PXLc, near = C.near, off = B.off, SEAMPX = G.SEAMPX;
   const b9 = XM[9], b10 = XM[10], b11 = XM[11];
   for (const c of B.CH) {
@@ -629,11 +696,20 @@ function draw(B, Tw, o) {
     if (O.occ && G.occ && CAM[2] - c.r > near * 4 && chunkHidden(CAM[0], CAM[1], CAM[2], c.r)) continue;
     const lit = B.lit[c.i], cl = B.lime[c.i];
     if (cl > .01) { O.lime = Math.max(lime0, Math.min(1, cl)); } else O.lime = lime0;
-    // far away: the whole chunk under a pixel or two
-    if (CAM[2] > near && c.r * F / CAM[2] < .7) { setCol(0, 0); dotC(CAM[0], CAM[1], CAM[2], 1, CR * .5 * CA, CG * .5 * CA, CB * .5 * CA); continue; }
+    // far away: the whole chunk under a pixel or two (SMOOTH: the dot and the chunk crossfade from 0.7 to 1.4 px)
+    let wc = 1;
+    if (SMOOTH) {
+      G.am = am0;
+      if (CAM[2] > near) { wc = xw(c.r * F / CAM[2], .7, 1); if (wc < 1) { setCol(0, 0); const k_ = .5 * CA * (1 - wc); dotC(CAM[0], CAM[1], CAM[2], 1, CR * k_, CG * k_, CB * k_); } }
+      if (wc <= 0) continue;
+      G.am = am0 * wc;
+    }
+    else if (CAM[2] > near && c.r * F / CAM[2] < .7) { setCol(0, 0); dotC(CAM[0], CAM[1], CAM[2], 1, CR * .5 * CA, CG * .5 * CA, CB * .5 * CA); continue; }
     let lastCh = -1, lastQ = -1, d0 = G.dots; if (G.tm) G.tm.t = performance.now();
-    // a body marked coarse (greebles) draws only its edges while a chunk is small on screen
-    const coarse = B.coarse && c.r * F < B.coarse * CAM[2];
+    // a body marked coarse (greebles) draws only its edges while a chunk is small on screen (SMOOTH: the rest fades in
+    // over twice that size)
+    let coarse = B.coarse && c.r * F < B.coarse * CAM[2], wq = 1;
+    if (SMOOTH && B.coarse && !coarse) wq = xw(c.r * F / (B.coarse * CAM[2]), 1, 1);
     for (let k = c.l0; k < c.l1; k++) {
       if (O.keep < .9 && ((k * .7548776662) % 1) > O.keep * 1.6 + .2) continue;
       const j = k * 10, ch = L[j + 7], q = L[j + 8], sp = L[j + 9];
@@ -653,6 +729,7 @@ function draw(B, Tw, o) {
       ringK(Rg, j, Rg[j + 10] * (1 + lit), Rg[j + 13]);
     }
     G.by.r += G.dots - d0; d0 = G.dots; if (G.tm) { const n = performance.now(); G.tm.r += n - G.tm.t; G.tm.t = n; }
+    if (wq < 1) { G.am = am0 * wc * wq; lastCh = -1; }
     for (let k = coarse ? c.t1 : c.t0; k < c.t1; k++) {
       const j = k * 10, ch = T[j + 8], q = T[j + 9];
       if (ch !== lastCh || q !== lastQ) { setCol(ch, q); lastCh = ch; lastQ = q; }
@@ -666,9 +743,14 @@ function draw(B, Tw, o) {
       if (ch !== lastCh || q !== lastQ) { setCol(ch, q); lastCh = ch; lastQ = q; }
       const x = P[j], y = P[j + 1], z = P[j + 2];
       Pox = XM[0] * x + XM[1] * y + XM[2] * z + XM[9]; Poy = XM[3] * x + XM[4] * y + XM[5] * z + XM[10]; Poz = XM[6] * x + XM[7] * y + XM[8] * z + XM[11];
-      { // a face under a couple of pixels: one dot for it
+      let wf = 1;
+      { // a face under a couple of pixels: one dot for it (SMOOTH: the dot fades in from 0.5 px and hands over to the
+        // face from 1.7 to 3.4 px)
         const S = P[j + 18] * P[j + 9] + P[j + 19] * P[j + 10];
-        if (Poz > near + S && S * F < 1.7 * Poz) { if (S * F > .5 * Poz) dotC(Pox, Poy, Poz, 1, CR * P[j + 14] * .45 * CA, CG * P[j + 14] * .45 * CA, CB * P[j + 14] * .45 * CA); continue; }
+        if (SMOOTH) {
+          if (Poz > near + S) { const s = S * F / Poz; if (s < 3.4) { wf = xw(s, 1.7, 1); const wd = (1 - wf) * xw(s, .5, 1); if (wd > 0) { const k_ = P[j + 14] * .45 * CA * wd; dotC(Pox, Poy, Poz, 1, CR * k_, CG * k_, CB * k_); } if (wf <= 0) continue; } }
+        }
+        else if (Poz > near + S && S * F < 1.7 * Poz) { if (S * F > .5 * Poz) dotC(Pox, Poy, Poz, 1, CR * P[j + 14] * .45 * CA, CG * P[j + 14] * .45 * CA, CB * P[j + 14] * .45 * CA); continue; }
       }
       const nx = P[j + 11], ny = P[j + 12], nz = P[j + 13], ncx = XM[0] * nx + XM[1] * ny + XM[2] * nz, ncy = XM[3] * nx + XM[4] * ny + XM[5] * nz, ncz = XM[6] * nx + XM[7] * ny + XM[8] * nz;
       // a one-sided face turned away (its plane's side is the same at every point): skipped
@@ -677,19 +759,25 @@ function draw(B, Tw, o) {
       Pvx = XM[0] * P[j + 6] + XM[1] * P[j + 7] + XM[2] * P[j + 8]; Pvy = XM[3] * P[j + 6] + XM[4] * P[j + 7] + XM[5] * P[j + 8]; Pvz = XM[6] * P[j + 6] + XM[7] * P[j + 7] + XM[8] * P[j + 8];
       Plu = P[j + 18]; Plv = P[j + 19];
       Pwx = XM[0] * P[j + 20] + XM[1] * P[j + 21] + XM[2] * P[j + 22]; Pwy = XM[3] * P[j + 20] + XM[4] * P[j + 21] + XM[5] * P[j + 22]; Pwz = XM[6] * P[j + 20] + XM[7] * P[j + 21] + XM[8] * P[j + 22];
-      panelK(P[j + 9], P[j + 10], ncx, ncy, ncz, P[j + 14] * (1 + lit), P[j + 15]);
+      if (wf < 1) { const ca = CA; CA *= wf; panelK(P[j + 9], P[j + 10], ncx, ncy, ncz, P[j + 14] * (1 + lit), P[j + 15]); CA = ca; }
+      else panelK(P[j + 9], P[j + 10], ncx, ncy, ncz, P[j + 14] * (1 + lit), P[j + 15]);
     }
     G.by.p += G.dots - d0; d0 = G.dots; if (G.tm) { const n = performance.now(); G.tm.p += n - G.tm.t; G.tm.t = n; }
     for (let k = coarse ? c.y1 : c.y0; k < c.y1; k++) {
       const Y = B.Y[k];
       if (Y.ch !== lastCh || Y.q !== lastQ) { setCol(Y.ch, Y.q); lastCh = Y.ch; lastQ = Y.q; }
-      { // a part under a couple of pixels: one dot for it
+      let wl = 1;
+      { // a part under a couple of pixels: one dot for it (SMOOTH: fading in from 0.25 px, handing over from 0.9 to 1.8)
         const c_ = Y.cc; toCam(c_[0], c_[1], c_[2]);
-        if (CAM[2] > near + Y.crad && Y.crad * F < .9 * CAM[2]) { if (Y.crad * F > .25 * CAM[2]) dotC(CAM[0], CAM[1], CAM[2], 1, CR * Y.br * .45 * CA, CG * Y.br * .45 * CA, CB * Y.br * .45 * CA); continue; }
+        if (SMOOTH) {
+          if (CAM[2] > near + Y.crad) { const s = Y.crad * F / CAM[2]; if (s < 1.8) { wl = xw(s, .9, 1); const wd = (1 - wl) * xw(s, .25, 1); if (wd > 0) { const k_ = Y.br * .45 * CA * wd; dotC(CAM[0], CAM[1], CAM[2], 1, CR * k_, CG * k_, CB * k_); } if (wl <= 0) continue; } }
+        }
+        else if (CAM[2] > near + Y.crad && Y.crad * F < .9 * CAM[2]) { if (Y.crad * F > .25 * CAM[2]) dotC(CAM[0], CAM[1], CAM[2], 1, CR * Y.br * .45 * CA, CG * Y.br * .45 * CA, CB * Y.br * .45 * CA); continue; }
       }
-      const br = Y.br; Y.br = br * (1 + lit); latheK(Y); Y.br = br;
+      const br = Y.br; Y.br = br * (1 + lit) * wl; latheK(Y); Y.br = br;
     }
     G.by.y += G.dots - d0; d0 = G.dots; if (G.tm) { const n = performance.now(); G.tm.y += n - G.tm.t; G.tm.t = n; }
+    if (wq < 1) { G.am = am0 * wc; lastCh = -1; }
     for (let k = c.n0; k < c.n1; k++) {
       const j = k * 7, ch = N[j + 5], q = N[j + 6];
       toCam(N[j], N[j + 1], N[j + 2]);
@@ -699,7 +787,7 @@ function draw(B, Tw, o) {
     }
     G.by.n += G.dots - d0; if (G.tm) { const n = performance.now(); G.tm.n += n - G.tm.t; G.tm.t = n; }
   }
-  XM[9] = b9; XM[10] = b10; XM[11] = b11; O.lime = lime0;
+  XM[9] = b9; XM[10] = b10; XM[11] = b11; O.lime = lime0; G.am = am0;
 }
 
 /* the world-space centre of a chunk (by tag) under Tw */
