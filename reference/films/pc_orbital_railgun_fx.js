@@ -112,7 +112,7 @@ function shot(m, d, U, Wd, ax, vis) {
   const xf = 7600 * tau, pa = A * Math.exp(-tau / .07);
   if (pa > .02) {
     psys(NPL, .45 * xf + 4, m[0] + d[0] * xf * .5, m[1] + d[1] * xf * .5, m[2] + d[2] * xf * .5, 1.4, 16000); const st = PS_ST, sz = PS_S;
-    { const c_ = V.mad(m, d, xf * .93), dd = Math.max(1, Math.hypot(c_[0] - ex, c_[1] - ey, c_[2] - ez)); K.glowW(c_[0], c_[1], c_[2], Math.min(360, Math.round((6 + .3 * xf) * FL / dd / SPX)), tau < .02 ? HOT : LIME, .32 * pa * Math.exp(-tau / .025)); }
+    { const c_ = V.mad(m, d, xf * .93), dd = Math.max(1, Math.hypot(c_[0] - ex, c_[1] - ey, c_[2] - ez)); K.glowW(c_[0], c_[1], c_[2], Math.min(360, Math.round((6 + .3 * xf) * FL / dd / SPX)), tau < .02 ? HOT : LIME, .5 * pa * Math.exp(-tau / .04)); }
     for (let i = 0; i < NPL; i += st) {
       const o = i * 4, u = PLM[o], q = PLM[o + 1], th = PLM[o + 2] + u * 2.1, hq = PLM[o + 3];
       const x_ = xf * u * (1 - .1 * q * q), rr = (1.2 + .26 * x_) * q * (1 + .12 * fs(th * 5 + u * 13 + tau * 40)), cs = fc(th) * rr, sn = fs(th) * rr;
@@ -157,7 +157,7 @@ const SB_R = .96, SB_IN = .27, SB_L = 8.4, SB_B = .9, SB_TP = 1.6;
 const PETAL = (() => {
   const r = rng(5454), P = [];
   const rad = s => s > SB_L / 2 - SB_TP ? SB_R - (SB_R - .57) * (s - (SB_L / 2 - SB_TP)) / SB_TP : SB_R;
-  for (let i = 0; i < 1500; i++) {
+  for (let i = 0; i < 3600; i++) {
     const k = r(), s = -SB_L / 2 - SB_B + (SB_L + SB_B) * r(), ph = (r() - .5) * TAU / 3 * .96;
     // the outer skin (most), the inner face against the rod, the cut edges, the base's solid quarter
     if (k < .62) P.push(s, ph, rad(Math.max(s, -SB_L / 2)), 1);
@@ -179,7 +179,9 @@ function petals(p, d, U, Wd, ax, vis) {
     const t1 = Math.max(0, tau - .005), al = .62 * ss(.002, .016, tau) + (5 + 3 * k) * Math.max(0, tau - .02) * (k % 2 ? 1 : -.8);
     const out = (85 + 28 * k) * t1, back = (9 + 4 * k) * t1, ca = Math.cos(al), sa = Math.sin(al);
     const hx = p[0] + d[0] * (-SB_L / 2 - SB_B - back) + ra[0] * (SB_R + out), hy = p[1] + d[1] * (-SB_L / 2 - SB_B - back) + ra[1] * (SB_R + out), hz = p[2] + d[2] * (-SB_L / 2 - SB_B - back) + ra[2] * (SB_R + out);
-    const glow = Math.exp(-tau / .02);
+    const glow = Math.exp(-tau / .02), dz = Math.max(1, Math.hypot(hx - ex, hy - ey, hz - ez)), psz = FL / dz > 28 * SPX ? 2 : 1;
+    // the hinge line at the base glowing as the petal tears free (the seals burning off)
+    if (tau < .02) K.glowW(hx, hy, hz, Math.round(Math.min(90, 1.6 * FL / dz / SPX + 6)), HOT, .55 * (1 - tau / .02) * A);
     for (let i = 0; i < PETAL.length; i += 4) {
       const s = PETAL[i] + SB_L / 2 + SB_B, ph = PETAL[i + 1], rr = PETAL[i + 2], kind = PETAL[i + 3], cp = Math.cos(ph), sp = Math.sin(ph);
       // in the hinge frame: along d, out along ra (from the hinge, inward is negative), across along ta
@@ -187,8 +189,8 @@ function petals(p, d, U, Wd, ax, vis) {
       const x = hx + d[0] * vd2 + ra[0] * vr2 + ta[0] * vt, y = hy + d[1] * vd2 + ra[1] * vr2 + ta[1] * vt, z = hz + d[2] * vd2 + ra[2] * vr2 + ta[2] * vt;
       // light: the skin's normal (out from the axis, tipped by the hinge), the sun; the inner face and the cut edges dim
       const nr = cp * ca, nd = -cp * sa, nt = sp, lam = (ra[0] * nr + d[0] * nd + ta[0] * nt) * sL[0] + (ra[1] * nr + d[1] * nd + ta[1] * nt) * sL[1] + (ra[2] * nr + d[2] * nd + ta[2] * nt) * sL[2];
-      const b = kind === 1 ? .35 + .65 * (lam > 0 ? lam : 0) : kind === 0 ? .25 : .45;
-      dotW(x, y, z, 1, glow > .3 && (kind === 3 || kind === 0) ? HOT : WH, A * b * (i % 12 === 0 ? 1.15 : 1));
+      const b = kind === 1 ? .5 + .6 * (lam > 0 ? lam : 0) : kind === 0 ? .35 : .85;
+      dotW(x, y, z, kind === 2 ? psz : 1, glow > .3 && (kind === 3 || kind === 0 || kind === 2) ? HOT : WH, A * b * (i % 12 === 0 ? 1.15 : 1));
     }
   }
   // the chips: a disc spreading round the rod's path, glinting as they tumble
