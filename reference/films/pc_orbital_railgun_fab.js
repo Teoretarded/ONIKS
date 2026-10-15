@@ -1,29 +1,24 @@
 /* ORBITAL · RAILGUN insert: the fabrication bay (window.ORFAB; the contract is in pc_orbital_railgun_film.js,
-   "inserted sequences"). The platform makes its one round on board: a tungsten rod and the sealed payload capsule
-   that rides in its nose. One continuous take through a 70 m bay, microgravity throughout (no pours: augers and
-   pushers move the powder, chips and sparks fly straight into the extraction hoods).
-     Rod line (port side, the bar lying across the line, +Z of the rod frame = its nose): powder dosing (auger feed
-     into an isostatic mould), cold isostatic pressing (a wire-wound vessel in a pit under a rolling yoke frame), the
-     hydrogen sintering furnace (a clamshell tube furnace, ×5k), radial forging (an induction coil, four hammers,
-     the entry manipulator), turning and grinding, nose and fin machining (the ogive, the nose cap parted off, the
-     capsule bay bored, six fin slots), plasma spray coating, laser metrology.
-     Capsule line (starboard, the clean side): wafer handling, an EUV scanner (tin droplets, the CO2 drive laser, the
-     collector, the illuminator's facet mirrors, the reticle and wafer stages scanning together at 4:1, six
-     projection mirrors), etch, deposition, dicing, die and wire bonding into the control module, casing machining,
-     the shielding wrap, assembly and the laser seam weld, a CT inspection of the sealed capsule (outside only).
-     Then the capsule is mated into the rod's nose bay, the nose cap torqued down, and the round rises through the
-     roof hatch toward the chamber.
-   A transfer gantry carries the rod between stations; the bay is drawn with the platform's lattice renderer (ORL).
-   Round 2 (the review's 4/10): the insert runs about 3.5 minutes on two clocks (u, the film's; a, the machines': the
-   beats hold the camera several seconds on each station while it works, the moves between them slow and eased, look
-   under 40 deg/s, no roll); the splices carry the base camera's own motion in and out; the station on screen is lit
-   (key light, a lamp and its dust cone, the deck's pool), the rest dimmed; every machine is dressed from the kit
-   (cabinets, screens with live traces, gauges, motors, pipes, hoses, trays, rails, chains, hoods, cells, skins on all
-   boxes); magnified views float by the parts at the dicer (wafer map), the bonder (die map) and the CT (the shell's
-   slice); the mating is shown in X-ray; the round turns once on the elevator (the turntable) as it rises.
-   Frames: the bay (metres): +Z down the hall, +Y up off the deck, +X starboard; origin on the deck at the hall's
-   centre line by the entrance. World = BAY(Tb) (from the film, when it gives one) ∘ bay. Render is a pure function
-   of u (s into the insert). ?fcam=ex,ey,ez,tx,ty,tz,fov sets a debug camera in the bay frame, ?fabL=9 a rod length. */
+   "inserted sequences"). The platform makes its one round on board, and the bay's back half is the platform's mind.
+   One continuous take through a 70 m bay, microgravity throughout (augers and pushers move the powder, chips and
+   sparks fly straight into the extraction hoods).
+     The round line (port side, the bar lying across the line, +Z of the rod frame = its nose): the core's powder dosed
+     and cold-isostatically pressed (a wire-wound vessel in a pit), hydrogen-sintered (a clamshell furnace), radially
+     forged, turned and ground, the ogive and the fin slots milled; the casing's five sections faced, slid over the
+     core and orbit-welded joint by joint; the fill mixed in three vessels and poured through the casing's ports (a
+     closed casing: only its level is shown, in X-ray), cured in a split oven; the round carried to the lift station
+     and inspected (an X-ray ring along it, then a scan back).
+     Then the camera turns to the back of the bay: the chip fab (wafers, an EUV scanner and its light path, etch and
+     deposition, dicing, bonding) that makes the processors of the platform's AI, and the data hall they run in (four
+     rows of racks, contained cold aisles, fibre trunks, the cooling plant). Then back to the round: the travelling
+     column lifts it, turns it once round (the turntable) onto the bore's axis, the sabot's petals close round it, the
+     armature behind, and it slides out through the port to the chamber.
+   Clocks: u (s into the insert, the film's); a, the round line's (a monotone warp of u through the beats' ends); the
+   chip fab's own (it works while the camera is there); and the readout's fabrication clock (hours before the shot,
+   its rate the time compression on screen). Lighting: the station on screen keyed (from the camera's side) and its
+   lamp lit, the rest of the hall dimmed. Frames: the bay (metres): +Z down the hall, +Y up off the deck, +X starboard;
+   origin on the deck at the hall's centre line by the entrance. World = BAY(Tb) (from the film, when it gives one) ∘
+   bay. Render is a pure function of u. ?fcam=ex,ey,ez,tx,ty,tz,fov sets a debug camera (bay), ?fabL=17 a core length. */
 (function () {
 'use strict';
 const { V, R, X, E, rng } = M3;
@@ -39,16 +34,15 @@ const QS = new URLSearchParams(location.search);
    in a). The beats below hold the camera on each station for several seconds while it works and give the moves
    between stations their own slow seconds; a(u) is a monotone cubic through the beats' ends (rates ease, no jumps).
    [id, duration (u), a at its end]; ids starting with m are the camera's moves. */
+/* Round 3: fewer, longer holds; the stations between them (dosing, turning) work while the camera follows the round;
+   the reveal (AI*) holds the round line still while the chip fab and the hall work on their own clock */
 const BEATS = [
-  ['IN', 7.5, 2.2], ['mIN', 3.4, 3.0],
-  ['R1', 6.0, 6.1], ['m12', 3.0, 7.3], ['R2', 6.0, 9.9], ['m23', 3.0, 11.0], ['R3', 5.5, 13.1], ['m34', 3.0, 14.05],
-  ['R4', 6.5, 16.9], ['m45', 3.0, 17.75], ['R5', 5.5, 19.97], ['m56', 3.0, 20.7], ['R6', 7.0, 23.47], ['m67', 3.0, 24.25],
-  ['R7', 5.5, 26.27], ['m78', 3.0, 27.05], ['R8', 5.0, 28.8], ['mX1', 2.6, 29.5], ['XO', 2.4, 30.3], ['mX2', 2.4, 31.0],
-  ['C1', 5.0, 33.4], ['mC12', 3.0, 34.5], ['C2a', 4.0, 36.0], ['mC2a', 1.8, 36.4], ['C2b', 4.2, 37.9], ['mC2b', 2.0, 38.1], ['C2c', 5.2, 40.45],
-  ['mC23', 2.6, 40.7], ['vC23', 1.2, 40.8], ['mC23b', 2.6, 40.95], ['C34', 8.0, 45.3], ['mC45', 5.4, 45.6], ['C5', 5.5, 47.65], ['mC56', 6.8, 47.85], ['C6', 6.5, 50.15],
-  ['mC67', 5.4, 50.4], ['C7', 5.5, 52.5], ['mC78', 5.4, 52.7], ['C8', 5.5, 54.85], ['mC89', 5.2, 55.1], ['C9', 6.5, 57.8],
-  ['mC9T', 5.0, 58.1], ['C10', 6.0, 60.1], ['mMT', 4.2, 60.4], ['MTv', 2.0, 60.75], ['mMT2', 2.6, 61.0], ['MT', 9.0, 64.0],
-  ['TRa', 1.4, 64.3], ['TRb', 5.0, 65.8], ['TRc', 3.4, 66.8], ['TRd', 6.5, 70.0],
+  ['IN', 7.5, 2.2], ['mIN', 3.6, 6.0], ['R2', 7.0, 9.9], ['m23', 3.0, 11.0], ['R3', 6.0, 13.1], ['m34', 3.0, 14.05],
+  ['R4', 6.5, 16.9], ['m46', 4.6, 20.7], ['R6', 6.5, 23.47], ['m67', 3.0, 24.45], ['R7', 8.0, 27.15], ['m78', 3.0, 28.0],
+  ['R8', 9.0, 30.7], ['mMT', 6.5, 58.0], ['MT', 8.0, 63.7],
+  ['mAI', 8.0, 63.75], ['AI1', 8.5, 63.8], ['mAI2', 6.0, 63.83], ['AI2', 8.0, 63.86], ['mAI3', 4.0, 63.88], ['AI3a', 4.5, 63.9], ['mAI3b', 2.0, 63.91],
+  ['AI3b', 6.0, 63.93], ['mAI4', 4.5, 63.95], ['AI4', 9.0, 64.0], ['mTR', 8.0, 64.3],
+  ['TRb', 9.0, 65.8], ['TRc', 3.2, 66.8], ['TRd', 6.0, 70.0],
 ];
 const BW_ = {}, KU = [0], KA = [0];
 { let u = 0; for (const [id, d, a1] of BEATS) { BW_[id] = [u, u + d]; u += d; KU.push(u); KA.push(a1); } }
@@ -76,10 +70,12 @@ function unwarp(a) {
   return (lo + hi) / 2;
 }
 const WIN = BW_;
-const SEQ = [['IN', 'IN'], ['R1', 'R1'], ['R2', 'R2'], ['R3', 'R3'], ['R4', 'R4'], ['R5', 'R5'], ['R6', 'R6'], ['R7', 'R7'], ['R8', 'R8'], ['XO', 'mX2'],
-  ['C1', 'C1'], ['C2', 'C2c'], ['C34', 'C34'], ['C5', 'C5'], ['C6', 'C6'], ['C7', 'C7'], ['C8', 'C8'], ['C9', 'C9'], ['C10', 'C10'], ['MT', 'MT'], ['TR', 'TRd']];
-/* the station on screen at u: each owns its hold and the move into it */
-const stationAt = u => { for (const [s, last] of SEQ) if (u < BW_[last][1]) return s; return 'TR'; };
+/* the station working on screen in each beat (a move shows the station the part is passing) */
+const BST = { IN: 'IN', mIN: 'R1', R2: 'R2', m23: 'R3', R3: 'R3', m34: 'R4', R4: 'R4', m46: 'R5', R6: 'R6', m67: 'R7', R7: 'R7', m78: 'R8',
+  R8: 'R8', mMT: 'MT', MT: 'MT', mAI: 'AI', AI1: 'AI', mAI2: 'C2', AI2: 'C2', mAI3: 'C34', AI3a: 'C5', mAI3b: 'C6', AI3b: 'C6', mAI4: 'AI', AI4: 'AI',
+  mTR: 'TR', TRb: 'TR', TRc: 'TR', TRd: 'TR' };
+const beatAt = u => { for (const [id] of BEATS) if (u < BW_[id][1]) return id; return 'TRd'; };
+const stationAt = u => { const b = beatAt(u); if (b === 'mIN' && warp(u) < 3.0) return 'IN'; return BST[b]; };
 let U_ = 0, A_ = 0;                                             // this frame's u and a
 
 /* ---------------- the bay ---------------- */
@@ -89,7 +85,7 @@ const HALL = { x0: -30, x1: 26, y1: 44, z0: -10, z1: 62 };
 const LOC = { R: [-1, 0, 0, 0, 1, 0, 0, 0, -1], T: [-2, -22, 26] };     // this frame -> the bay's (BAY)
 const PORT = [-2, 22, -10], PORT_R = 2.3;
 const XR = -11, YR = 1.5;                                  // the rod line: the bar's axis (across the line) and height
-const ZR = { R1: 2.5, R2: 8, R3: 15, R4: 23, R5: 31, R6: 38.5, R7: 45.5, R8: 52.5, MT: -5 };
+const ZR = { R1: 3.6, R2: 8, R3: 15, R4: 23, R5: 31, R6: 38.5, R7: 45.5, R8: 52.5, MT: -5 };
 const XV = -12;                                          // the isostatic press's axis (vertical, in its pit)
 const XF = -12.5;                                          // the forge's hammer plane
 const XC = 7.5;                                            // the capsule line
@@ -136,13 +132,19 @@ const BWX = mkX();                                           // bay -> world
 const LB = V.norm([.32, 1, -.42]), LW = [0, 1, 0];           // the bay's key light (bay, world)
 const LIME = [198, 244, 50], HOT = [248, 255, 232], WH = [238, 238, 228];
 const XA = [1, 0, 0], YA = [0, 1, 0], ZA = [0, 0, 1];
-/* the rod (set in build from the platform's, else 9 m x 0.6 m) and its stages' sizes */
-let RL = 6, RR = .25;
+/* the round (from the film's CTX.ROUND at build, else a 17 m core in a 20.5 m sabot): a long tungsten core, a
+   segmented casing round it with its fill, fins, the sabot's petals and the armature */
+let RL = 17, RR = .32, RNDL = 20.5, RNDR = 1.1;
+const NPET = 3;
+let SABL = 8.4, SABR = .96, ARML = .9;
 const D = {};
-function dims(P) {
+function dims(P, RO) {
   const fl = parseFloat(QS.get('fabL'));
-  if (fl > 0) { RL = fl; RR = fl / 30; }
-  else if (P && P.ROD_L) { RL = P.ROD_L; RR = P.ROD_R; }
+  if (fl > 0) { RL = fl; RR = fl / 53; }
+  else if (RO && RO.rodLen) { RL = RO.rodLen; RR = RO.rodR; }
+  else if (P && P.ROD_L && P.ROD_L > 10) { RL = P.ROD_L; RR = P.ROD_R; }
+  RNDL = RO && RO.len > RL ? RO.len : RL * 1.2; RNDR = RO && RO.r ? RO.r : Math.max(.96, RR * 3.4);
+  SABL = RNDL; SABR = RNDR; ARML = RO && RO.armature ? RO.armature : 1.2;
   D.M = 19.25 * PI * RR * RR * RL;                           // t (tungsten, 19.25 t/m3)
   D.Lb = 1.137 * RL; D.rb = 1.48 * RR;                       // the loose powder in its mould (45 % dense)
   D.Lg = 1.006 * RL; D.rg = 1.312 * RR;                      // the pressed compact (65 %)
@@ -150,10 +152,14 @@ function dims(P) {
   D.rf = 1.04 * RR; D.LT = RL / 9;                           // forged; the tail left unforged (gripped)
   D.Lf = (D.Ls - D.LT) * (D.rs / D.rf) * (D.rs / D.rf) * .945; // the forged length (the tail aside)
   D.crop = D.LT + D.Lf - RL;                                 // turned off the nose end at R5
-  D.LN = .156 * RL;                                          // the nose cap
-  D.rc = .667 * RR; D.Lc = 2.67 * RR;                        // the capsule
-  D.rbore = D.rc + .01; D.dbore = D.Lc + .15;                // the nose bay
+  D.LN = Math.min(.156 * RL, 7 * RR);                        // the ogive
+  D.rc = .16; D.Lc = .5;                                     // (the AI module's size: the bonder's board)
+  D.rbore = .1; D.dbore = .1;
   D.rcore = .87 * RR;                                        // the tail between the fins
+  D.rcas = Math.min(1.75 * RR, RNDR * .72);                  // the casing (its sections slid over the core)
+  D.zc0 = -RL / 2 + D.LT + .25; D.zc1 = RL / 2 - D.LN - .15; D.NSEC = 5;
+  D.secL = (D.zc1 - D.zc0) / D.NSEC;
+  D.Mc = D.M + 7.8 * PI * (D.rcas * D.rcas - (D.rcas - .03) ** 2) * (D.zc1 - D.zc0) + 1.7 * PI * ((D.rcas - .03) ** 2 - RR * RR) * (D.zc1 - D.zc0);
   D.mass = m => `${m.toFixed(1)} T`;
 }
 
@@ -165,7 +171,7 @@ const O = {
   pow: OPT({ a: .78, pxf: .62, col: [226, 222, 206] }), hot: OPT({ a: 1.4, pxf: .7, col: [255, 214, 160] }),
   glass: OPT({ a: .5, pxf: 1.3, keep: .7 }), hot3: OPT({ a: .6, pxf: 1.2, col: [255, 160, 80] }), lime: OPT({ a: 1, lime: 1, pxf: .9 }),
   hot2: OPT({ a: 1.4, pxf: .8, col: [255, 200, 140] }), forg: OPT({ a: .8, pxf: 1.0, col: [212, 208, 198] }),
-  heroG: OPT({ a: 1.3, pxf: .78 }), xrod: OPT({ a: .95, pxf: .9 }), xbay: OPT({ a: 1.2, pxf: .8 }), capx: OPT({ a: 1.25, pxf: .8 }), coat: OPT({ a: .95, pxf: .62, col: [224, 226, 212] }), wrap: OPT({ a: 1, pxf: .8 }), pet: OPT({ a: 1.0, pxf: 1.25 }),
+  heroG: OPT({ a: 1.3, pxf: .78 }), xrod: OPT({ a: .95, pxf: .9 }), xbay: OPT({ a: 1.2, pxf: .8 }), capx: OPT({ a: 1.25, pxf: .8 }), coat: OPT({ a: .95, pxf: .62, col: [224, 226, 212] }), wrap: OPT({ a: 1, pxf: .8 }), pet: OPT({ a: 1.0, pxf: 1.25 }), fillo: OPT({ a: .9, pxf: .8, col: [215, 212, 196] }),
 };
 const allO = () => Object.values(O);
 let FXF = null;
@@ -240,7 +246,7 @@ function faceF(mn, mx, f) {
 const fpm = (F, s, t, e) => { const a = s / F.Lu, b = t / F.Lv, k = e === undefined ? .006 : e; return [F.o[0] + F.u[0] * a + F.v[0] * b + F.n[0] * k, F.o[1] + F.u[1] * a + F.v[1] * b + F.n[1] * k, F.o[2] + F.u[2] * a + F.v[2] * b + F.n[2] * k]; };
 function frm(B, F, s0, t0, s1, t1, br, e) { const a = fpm(F, s0, t0, e), b = fpm(F, s1, t0, e), c = fpm(F, s1, t1, e), d = fpm(F, s0, t1, e); B.line(a, b, br); B.line(b, c, br); B.line(c, d, br); B.line(d, a, br); }
 /* status lights: ch 3, q = kind * 1000 + id: 5 steady, 6 blinking, 7 lit while station id (STN index) is on screen */
-const STN = ['R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'R8', 'MT', 'C1', 'C2', 'C34', 'C5', 'C6', 'C7', 'C8', 'C9', 'C10'];
+const STN = ['R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'R8', 'MT', 'C1', 'C2', 'C34', 'C5', 'C6', 'AI'];
 const lightQ = (kind, st, k) => kind * 1000 + STN.indexOf(st) * 20 + (k || 0);
 /* an equipment cabinet: doors (gaps, pressed panels, handles, hinges, louvres), a plinth, a light stack, optional
    screen [s0, t0, s1, t1] (m on the front face, returned as a frame for live drawing), gauges [[s, t, r]] */
@@ -1030,7 +1036,7 @@ function drawR5(u) {
 }
 
 /* ---------------- R6 · nose and fin machining ---------------- */
-const OGV = [20.9, 21.75], PART = [21.75, 22.0], BORE = [22.05, 22.35], FINS = [22.4, 23.35];
+const OGV = [20.9, 22.25], PART = [99, 99.1], BORE = [99, 99.1], FINS = [22.4, 23.35];
 const ogR = s => { const R_ = RR, Ln = D.LN, rho = (R_ * R_ + Ln * Ln) / (2 * R_); return Math.max(.012, Math.sqrt(Math.max(0, rho * rho - s * s)) + R_ - rho); };
 function buildR6() {
   const z = ZR.R6, xa = XR - RL / 2;
@@ -1097,7 +1103,7 @@ function drawR6(u) {
   L.draw(BB.r6, BWX, O.st);
   // the ram follows the cut: the nose (contouring, parting, boring), then the tail (fins)
   let hx, hy;
-  if (u < BORE[1] + .05) { const xo = XR + R6S.oz; hx = u < OGV[1] ? xo + .1 : XR + RL / 2 - D.LN + .35; hy = YR + ogR(R6S.oz - (RL / 2 - D.LN)) + .87; }
+  if (u < FINS[0] - .05) { const xo = XR + R6S.oz; hx = u < OGV[1] ? xo + .1 : XR + RL / 2 - D.LN + .35; hy = YR + ogR(R6S.oz - (RL / 2 - D.LN)) + .87; }
   else { const k = R6S.fin % 1; hx = XR - RL / 2 + .05 + D.LT * (k < .85 ? k / .85 : 1 - (k - .85) / .15); hy = YR + D.rs + .86 + (k > .85 ? .25 : 0); }
   if (u < OGV[0] - .1) { hx = XR + RL / 2 + .4; hy = YR + 1.6; }
   hx = Math.min(hx, XR + RL / 2 + .6); R6HX = hx; R6HY = hy;
@@ -1111,16 +1117,6 @@ function drawR6(u) {
   if (u > OGV[0] && u < OGV[1]) spray(u, OGV[0], OGV[1], 60, XR + R6S.oz, YR + ogR(R6S.oz - (RL / 2 - D.LN)), z - .05, .3, .8, -.5, .35, 1, 2.6, .45, WH, .95, 1, 31);
   if (u > PART[0] && u < PART[1]) spray(u, PART[0], PART[1], 60, XR + RL / 2 - D.LN, YR - RR, z, 0, -.4, -.9, .4, 2, 6, .35, GLC, 1, 1, 32);
   if (u > FINS[0] && u < FINS[1]) spray(u, FINS[0], FINS[1], 50, hx, YR + D.rs, z - .05, .2, .85, -.45, .35, 1, 2.4, .4, WH, .9, 1, 33);
-  // the robot takes the cap onto the shuttle
-  at(XF4, BWX, SHUT_X(u), 0, SHUT_Z(u)); L.draw(BB.shuttle, XF4, O.mc);
-  const s6 = BB.arm6; capPose(u);
-  const gx = CAPW[0] + D.LN * .45, gy = CAPW[1] + ogR(D.LN * .45) + .03, gz = CAPW[2];
-  AD[0] = 0; AD[1] = -1; AD[2] = 0;
-  if (u < 21.55 || u > 22.8) { AP[0] = -2.8; AP[1] = 2.3; AP[2] = z - 1.2; }
-  else if (u < 21.9) { const w = kk(u, 21.55, 21.9); AP[0] = mix(-2.8, gx, w); AP[1] = mix(2.3, gy, w); AP[2] = mix(z - 1.2, gz, w); }
-  else if (u < 22.4) { AP[0] = gx; AP[1] = gy; AP[2] = gz; }
-  else { const w = kk(u, 22.4, 22.8); AP[0] = mix(gx, -2.8, w); AP[1] = mix(gy, 2.3, w); AP[2] = mix(gz, z - 1.2, w); }
-  armPose(s6, AB6, AP, AD, 0); armDraw(s6, O.mc);
 }
 const CAPW = [0, 0, 0], XSH = -3.3;
 /* the nose cap's base centre (bay; its axis along +x): on the rod, carried to the shuttle, riding it */
@@ -1132,163 +1128,297 @@ function capPose(u) {
   return CAPW;
 }
 
-/* ---------------- R7 · plasma spray coating ---------------- */
-const SPR = [24.55, 25.95];
+/* ---------------- R7 · the casing: five sections faced at their ends, slid over the core from the tail and orbit-welded
+   joint by joint (in microgravity the core hangs in the headstock's collet by its ogive alone) ---------------- */
+const CS0 = 24.55, CSD = .46, CSEND = CS0 + 5 * CSD;            // the first section's slot, each slot (a), the tail ring
+const CSW = k => { const t0 = CS0 + k * CSD; return [t0, t0 + .12, t0 + .32, t0 + .33, t0 + .45]; };   // lift, push, weld
+const XRK = 2.6;                                                 // the magazine behind the line (+z)
+const R7S = { k: -1, ph: '', sx: 0, sy: 0, sz: 0, wx: 0, wOn: 0, fOn: 0, ldx: 0, ldz: 0 };
+/* section k's centre on the core (bay x) and in the rack */
+const secX = k => XR + D.zc1 - (k + .5) * D.secL;
+const rackX = k => XR - RL / 2 + 1.2 + k * (D.secL + .35) + D.secL / 2;
+const entX = () => XR - RL / 2 - .5 - D.secL / 2;
 function buildR7() {
-  const z = ZR.R7, xa = XR - RL / 2, xb = XR + RL / 2;
+  const z = ZR.R7, xn = XR + RL / 2, xt = XR - RL / 2, rc = D.rcas, L_ = D.secL;
   BB.r7 = mkB('r7', B => {
-    for (const x of [XR - RL * .3, XR + RL * .25]) { B.chunk('roll'); bx(B, x - .4, 0, z - .6, x + .4, YR - RR - .3, z + .6, .05, { br: .8 }); for (const s of [-1, 1]) B.cyl([x - .3, YR - RR - .14, z + s * .3], [x + .3, YR - RR - .14, z + s * .3], .16, { cell: .025, br: .95, caps: true }); }
-    // the robot's track along the bar (the -z side), the booth's frame and its hood
-    B.chunk('track'); bx(B, xa - .5, 0, z - 2.6, xb + .5, .3, z - 1.9, .08, { br: .6, occ: 'r7' });
-    B.chunk('booth');
-    for (const x of [xa - 1.2, xb + 1.2]) for (const zz of [z - 3.2, z + 1.6]) B.tube([x, 0, zz], [x, 5.4, zz], .06, .5);
-    for (const zz of [z - 3.2, z + 1.6]) B.tube([xa - 1.2, 5.4, zz], [xb + 1.2, 5.4, zz], .06, .5);
-    B.panel([xa - 1.2, 0, z + 1.6], [xb - xa + 2.4, 0, 0], [0, 4.8, 0], .3, { n: [0, 0, -1], br: .16, edge: .4 });
-    B.chunk('hood'); bx(B, xa - .6, 4.6, z - .9, xb + .6, 5.2, z + 1.3, .1, { br: .6 });
-    B.cyl([XR, 5.2, z + .2], [XR, 8.0, z + .2], .5, { cell: .08, br: .6 });
+    // the headstock: its body beyond the nose, the collet ring round the ogive's shoulder, its drive
+    B.chunk('head'); bx(B, xn + .25, 0, z - 1.2, xn + 2.4, 3.1, z + 1.2, .07, { br: .85 });
+    const xc = xn - D.LN * .55, rcol = ogR(D.LN * .45) + .06;
+    B.lathe([xc, YR, z], XA, [[0, rcol], [0, rcol + .22], [D.LN * .55 + .3, rcol + .22], [D.LN * .55 + .3, .2]], { cell: .03, br: .95, seams: 12, rbr: .8 });
+    bolts(B, [xc - .005, YR, z], YA, ZA, rcol + .14, 12, .025);
+    motor(B, [xn + 2.4, 3.4, z], [xn + .6, 3.4, z], .32, { feet: true });
+    // the entry: the facing ring's stand at the tail end, the pusher's rails, the magazine behind, the loader's beam
+    B.chunk('entry'); bx(B, xt - .55, 0, z - .45, xt - .15, YR - rc - .32, z + .45, .04, { br: .85 });
+    for (const dz of [-.95, -.65]) rail(B, [xt - L_ - 1.6, .2, z + dz], [xn - D.LN - .2, .2, z + dz], .05, .75);
+    bx(B, xt - L_ - 1.7, 0, z - 1.1, xn - D.LN, .19, z - .5, .1, { br: .5 });
+    B.chunk('rack');
+    for (let k = 0; k <= 5; k++) { const x = XR - RL / 2 + 1.2 - .18 + k * (L_ + .35); bx(B, x - .08, 0, z + XRK - .7, x + .08, YR - rc - .05, z + XRK + .7, .03, { br: .8 }); B.ring([x, YR, z + XRK], YA, ZA, rc + .03, 16, .7, 0, 0, PI * .55, PI * 1.45); }
+    bx(B, xt + .9, 0, z + XRK - .8, xt + 1.2 + 5 * (L_ + .35), .12, z + XRK + .8, .1, { br: .5 });
+    B.chunk('beam'); for (const zz of [z - .2, z + XRK + .2]) bx(B, xt - L_ - 1.5, 4.9, zz - .12, xn - D.LN, 5.15, zz + .12, .04, { br: .75 });
+    for (const x of [xt - L_ - 1.5, xn - D.LN]) for (const zz of [z - .2, z + XRK + .2]) B.tube([x, 0, zz], [x, 4.9, zz], .07, .6);
+    // the welder's rail (aisle side, below), the hood over the joints with its duct
+    B.chunk('wrail'); rail(B, [xt - .5, .55, z - 1.45], [xn - D.LN, .55, z - 1.45], .06, .8); bx(B, xt - .6, 0, z - 1.6, xn - D.LN + .1, .5, z - 1.3, .08, { br: .55 });
+    hood(B, xt, xn - D.LN, z - 1.0, z + .9, 3.4, .5, .3, 11);
+    B.knot([xn + 1.3, 3.2, z - 1.2], .1, 1, 3, 1018);
+  }, .6);
+  // a casing section (axis +Z from 0 to its length): the tube, its end rings, two fill ports on top, weld preps
+  BB.sec = mkB('sec', B => {
+    B.lathe([0, 0, 0], ZA, [[0, rc - .03], [0, rc + .03], [.06, rc + .03], [.06, rc], [L_ - .06, rc], [L_ - .06, rc + .03], [L_, rc + .03], [L_, rc - .03]], { cell: .035, br: .9, rbr: .85, seams: 12, sbr: .35 });
+    B.lathe([0, 0, .04], ZA, [[0, rc - .03], [L_ - .08, rc - .03]], { cell: .06, br: .25, two: true, rings: false });
+    for (const f of [.25, .75]) { const p = [0, rc, L_ * f]; B.cyl(p, [0, rc + .07, L_ * f], .07, { cell: .012, br: 1, caps: true }); B.ringP([0, rc + .071, L_ * f], XA, ZA, .045, .9); }
+    for (let k = 1; k < 4; k++) B.ringP([0, 0, L_ * k / 4], XA, YA, rc + .004, .4);
   });
-  BB.arm7 = mkArm({ H: .8, L1: 1.3, L2: 1.25, LT: .55, r: .17 });
-  BB.gun = mkB('gun', B => { B.cyl([0, 0, -.38], [0, 0, 0], .07, { cell: .015, br: 1, caps: true }); B.lathe([0, 0, 0], ZA, [[0, .05], [.08, .03]], { cell: .01, br: 1 }); B.tube([0, .07, -.3], [0, .2, -.45], .02, .8); });
-  BB.trackCar = mkB('tc', B => B.box([-.5, .3, -.45], [.5, .6, .45], .04, { br: .9, edge: .8 }));
+  BB.face = mkB('fc', B => {                                   // the facing ring (axis +Z): three tool posts inward
+    B.lathe([0, 0, -.08], ZA, [[0, rc + .12], [0, rc + .3], [.16, rc + .3], [.16, rc + .12]], { cell: .025, br: .9, seams: 12 });
+    for (let k = 0; k < 3; k++) { const a = k / 3 * TAU; B.obox([Math.cos(a) * (rc + .07), Math.sin(a) * (rc + .07), 0], [Math.cos(a), Math.sin(a), 0], [-Math.sin(a), Math.cos(a), 0], ZA, [.06, .04, .05], .01, { br: 1, edge: .9 }); }
+  }, 1);
+  BB.pushr = mkB('pr', B => {                                  // the push ring (axis +Z) on its carriage's arm (down to -y, toward -z)
+    B.lathe([0, 0, -.1], ZA, [[0, rc - .02], [0, rc + .12], [.1, rc + .12], [.1, rc - .02]], { cell: .025, br: .95, seams: 8 });
+    B.box([-.08, -(YR - .2), -.12], [.08, -rc - .1, .02], .03, { br: .9, edge: .85 });
+    B.box([-.35, -(YR - .2) - .02, -.25], [.35, -(YR - .2) + .2, .25], .03, { br: .9, edge: .85 });
+  }, 1);
+  BB.orb = mkB('ob', B => {                                    // the orbital welder: a split ring on its rail carriage, the torch (local +y)
+    B.lathe([0, 0, -.07], ZA, [[0, rc + .14], [0, rc + .26], [.14, rc + .26], [.14, rc + .14]], { cell: .025, br: .95, seams: 16 });
+    B.box([-.14, -(YR - .55), -.18], [.14, -rc - .26, .18], .03, { br: .9, edge: .85 });
+  }, 1);
+  BB.jring = mkB('jr', B => { B.lathe([0, 0, -.03], ZA, [[0, rc + .032], [.06, rc + .032]], { cell: .015, br: 1.15, rbr: 1 }); }, 1);
+  BB.torch = mkB('tc', B => { B.box([-.04, rc + .1, -.04], [.04, rc + .22, .04], .01, { br: 1, edge: .9 }); B.cyl([0, rc + .1, 0], [0, rc + .03, 0], .015, { cell: .004, br: 1 }); }, 1);
+  BB.ldr = mkB('ld', B => { B.box([-.4, -.15, -.25], [.4, .15, XRK + .65], .03, { br: .9, edge: .85 }); B.box([-.25, -.45, -.2], [.25, -.15, .2], .03, { br: .9, edge: .85 }); }, 1);
 }
-const R7S = { cz: 0, spin: 0 };
 function r7State(u) {
-  R7S.cz = -RL / 2 + (RL - D.LN) * kk(u, SPR[0], SPR[1]);  // coated below this (rod frame)
-  R7S.spin = u * 4.0;
+  const S = R7S; S.k = -1; S.wOn = 0; S.fOn = 0;
+  S.ldx = rackX(0); S.ldz = ZR.R7 + XRK;
+  for (let k = 0; k < D.NSEC; k++) {
+    const [l0, l1, p1, w0, w1] = CSW(k);
+    if (u < l0 - .06 || u > w1) continue;
+    S.k = k;
+    if (u < l0) { S.ph = 'reach'; const t = kk(u, l0 - .06, l0); S.ldx = mix(entX(), rackX(k), k ? t : 1); S.ldz = ZR.R7 + XRK; }
+    else if (u < l1) { S.ph = 'lift'; const t = kk(u, l0, l1); S.sx = mix(rackX(k), entX(), t); S.sz = mix(ZR.R7 + XRK, ZR.R7, t); S.sy = YR + .7 * Math.sin(PI * t); S.ldx = S.sx; S.ldz = S.sz; }
+    else if (u < p1) { S.ph = 'push'; const t = kk(u, l1, p1); S.sx = mix(entX(), secX(k), t); S.sy = YR; S.sz = ZR.R7; S.ldx = entX(); S.ldz = ZR.R7;
+      const tail = S.sx - D.secL / 2, xf = XR - RL / 2 - .35; S.fOn = tail < xf && tail > xf - D.secL ? 1 : 0; }
+    else { S.ph = 'weld'; S.sx = secX(k); S.sy = YR; S.sz = ZR.R7; S.wOn = ss(w0, w0 + .02, u) * (1 - ss(w1 - .02, w1, u)); S.ldx = entX(); S.ldz = ZR.R7; }
+  }
+  // the welder: parked at the tail, to each new joint (the section's front), the tail ring at the end
+  const jx = k => XR + D.zc1 - k * D.secL;
+  let wx = XR - RL / 2 - .2;
+  for (let k = 0; k < D.NSEC; k++) { const [, , p1, w0] = CSW(k); if (u > p1 - .1) wx = u < w0 ? mix(wx, jx(k), kk(u, p1 - .1, w0)) : jx(k); }
+  if (u > CSEND - .05) { wx = u < CSEND + .03 ? mix(wx, XR + D.zc0, kk(u, CSEND - .05, CSEND + .03)) : XR + D.zc0; if (u > CSEND + .03 && u < CSEND + .17) S.wOn = ss(CSEND + .03, CSEND + .05, u) * (1 - ss(CSEND + .15, CSEND + .17, u)); }
+  S.wx = wx;
 }
+/* the sections not yet on the core: on the rack, in the loader, sliding on */
+const nSecOn = u => { let n = 0; for (let k = 0; k < D.NSEC; k++) if (u > CSW(k)[2]) n++; return n; };
 function drawR7(u) {
-  const z = ZR.R7, gx = XR + R7S.cz, on = ss(SPR[0] - .1, SPR[0] + .05, u) * (1 - ss(SPR[1], SPR[1] + .1, u));
+  const z = ZR.R7, S = R7S, rc = D.rcas;
   L.draw(BB.r7, BWX, O.st);
-  const base = [gx - .2, .3, z - 2.25];
-  at(XF4, BWX, base[0], 0, base[2]); L.draw(BB.trackCar, XF4, O.mc);
-  AP[0] = gx; AP[1] = YR + .02; AP[2] = z - RR - .16; AD[0] = 0; AD[1] = 0; AD[2] = 1;
-  if (u < SPR[0] - .3 || u > SPR[1] + .3) { AP[1] = YR + .9; AP[2] = z - 1.0; }
-  armPose(BB.arm7, base, AP, AD, 0); armDraw(BB.arm7, O.mc);
-  const W_ = BB.arm7.P.tip; atL(XF4, BWX, W_[0], W_[1], W_[2], 0, 0, 1, 0, 1, 0); L.draw(BB.gun, XF4, O.hero);
-  if (on > .02) {
-    // the plume: a white-hot core at the nozzle, molten particles straight onto the bar
-    apX(BWX, gx, YR + .02, z - RR - .14, PW); K.glowW(PW[0], PW[1], PW[2], 70, HOT, .6 * on); K.glowW(PW[0], PW[1], PW[2], 20, [255, 255, 255], 1 * on);
-    spray(u, SPR[0], SPR[1], 260, gx, YR + .02, z - RR - .15, 0, 0, 1, .2, .6, 1.4, .14, HOT, on, 2, 41);
-    spray(u, SPR[0], SPR[1], 60, gx, YR + .02, z - RR - .15, 0, 0, 1, .35, .5, 1.1, .16, GLC, on * .9, 1, 42);
-    apX(BWX, gx, YR, z - RR, PW); K.glowW(PW[0], PW[1], PW[2], 30, GLC, .4 * on);
+  if (u < 27.2) for (let k = 0; k < D.NSEC; k++) {
+    const [l0, , p1] = CSW(k);
+    if (u >= l0 && u <= p1) continue;                          // (the moving one below; the placed ones ride the piece)
+    if (u < l0) { atL(XF4, BWX, rackX(k) - D.secL / 2, YR, z + XRK, 1, 0, 0, 0, 1, 0); L.draw(BB.sec, XF4, O.heroD); }
+  }
+  if (S.k >= 0 && (S.ph === 'lift' || S.ph === 'push')) { atL(XF4, BWX, S.sx - D.secL / 2, S.sy, S.sz, 1, 0, 0, 0, 1, 0); L.draw(BB.sec, XF4, O.hero); }
+  // the loader's carriage and its two hooks
+  const lx = S.ldx, lz = S.ldz, hy = S.ph === 'lift' ? S.sy + rc + .05 : YR + rc + 1.2;
+  at(XF4, BWX, lx, 5.4, lz - XRK / 2 + .1); L.draw(BB.ldr, XF4, O.mc);
+  for (const dx of [-.6, .6]) { apX(BWX, lx + dx, 4.95, lz, PW); apX(BWX, lx + dx, hy, lz, PW2); K.lineW(PW[0], PW[1], PW[2], PW2[0], PW2[1], PW2[2], 2, 1, WH, .7); }
+  // the push ring behind the moving section
+  const px = S.ph === 'push' ? S.sx - D.secL / 2 - .02 : entX() - D.secL / 2 - .4;
+  atL(XF4, BWX, px, YR, z, 1, 0, 0, 0, 1, 0); L.draw(BB.pushr, XF4, O.mc);
+  // the facing ring turns while a section's end passes through it; its chips fly up into the hood
+  const xf = XR - RL / 2 - .35;
+  at2(XF4, BWX, xf, YR, z, 1, PI / 2, 2, S.fOn ? U_ * 9 : 0); L.draw(BB.face, XF4, O.mc);
+  if (S.fOn) for (let k = 0; k < 3; k++) spray(u, CSW(S.k)[1], CSW(S.k)[2], 40, xf, YR + Math.cos(k * 2.1 + U_ * 9) * (rc + .05), z + Math.sin(k * 2.1 + U_ * 9) * (rc + .05), 0, .85, -.4, .4, 1.2, 3, .4, WH, .9, -1, 61 + k);
+  // the orbital welder at its joint: the torch orbits, the joint glows, sparks up into the hood
+  at2(XF4, BWX, S.wx, YR, z, 1, PI / 2, -1, 0); L.draw(BB.orb, XF4, O.mc);
+  const ta = U_ * 5.5;
+  at2(XF4, BWX, S.wx, YR, z, 1, PI / 2, 2, ta); L.draw(BB.torch, XF4, O.hero);
+  if (S.wOn > .02) {
+    const c = Math.cos(ta), s = Math.sin(ta);
+    apX(BWX, S.wx, YR + c * (rc + .03), z + s * (rc + .03), PW); K.glowW(PW[0], PW[1], PW[2], 46, HOT, .7 * S.wOn); K.glowW(PW[0], PW[1], PW[2], 14, [255, 255, 255], S.wOn); K.glowW(PW[0], PW[1], PW[2], 30, LIME, .25 * S.wOn);
+    for (let k = 0; k < 72; k++) { const a = k / 72 * TAU; if (((ta - a) % TAU + TAU) % TAU > TAU * .9) continue; apX(BWX, S.wx, YR + Math.cos(a) * (rc + .032), z + Math.sin(a) * (rc + .032), PW); K.dotW(PW[0], PW[1], PW[2], 2, GLC, .8 * S.wOn); }
+    spray(u, CS0, CSEND + .2, 90, S.wx, YR + c * (rc + .03), z + s * (rc + .03), .1, .75 + .2 * c, .3 * s, .45, 1.5, 4.5, .55, GLC, S.wOn, -1.6, 71);
+    spray(u, CS0, CSEND + .2, 40, S.wx, YR + rc + .2, z, 0, 1, 0, .12, 2.5, 4, 1.1, GLC, .5 * S.wOn, -2.2, 72);
   }
 }
 
-/* ---------------- R8 · laser metrology ---------------- */
-const MET = [27.25, 28.35];
+/* ---------------- R8 · the fill bay and the curing oven: the fill mixed in three vessels on the mezzanine, poured
+   through the casing's ports (a closed casing, shown only by the level along it), then cured in a split oven ---------------- */
+const MIX = [27.6, 28.2], FL = [28.15, 29.0], CU = [29.15, 30.55];
+const MXX = [-5.2, 0, 5.2], YMZ = 4.6;                          // the vessels (x from the bar's centre), the mezzanine's deck
+const R8S = { mix: 0, fill: 0, heat: 0, close: 0, head: 0 };
 function buildR8() {
-  const z = ZR.R8, xa = XR - RL / 2, xb = XR + RL / 2;
+  const z = ZR.R8, xa = XR - RL / 2, xb = XR + RL / 2, zm = z + 3.1, ol = RL + 2.2, ow = 1.7, oh = 3.0;
   BB.r8 = mkB('r8', B => {
-    for (const x of [XR - RL * .28, XR + RL * .22]) { B.chunk('vb'); bx(B, x - .45, 0, z - .55, x + .45, YR - RR - .12, z + .55, .06, { br: .7, occ: 'r8' }); B.panel([x - .45, YR - RR - .12, z - .55], [.9, 0, 0], [0, .3, .3], .05, { br: .9, edge: .8 }); B.panel([x - .45, YR - RR - .12, z + .55], [0, .3, -.3], [.9, 0, 0], .05, { br: .9, edge: .8 }); }
-    B.chunk('rails'); for (const dz of [-1.35, 1.35]) bx(B, xa - .8, 0, z + dz - .12, xb + .8, .22, z + dz + .12, .08, { br: .65 });
-    // the laser tracker on its tripod (aisle side)
-    B.chunk('trk'); const tx = -3.6, tz = z - 2.2;
-    for (let k = 0; k < 3; k++) { const a = k / 3 * TAU; B.tube([tx + Math.cos(a) * .55, 0, tz + Math.sin(a) * .55], [tx, 1.25, tz], .025, .7); }
-    B.box([tx - .16, 1.25, tz - .16], [tx + .16, 1.6, tz + .16], .02, { br: 1, edge: .9 }); B.lathe([tx, 1.6, tz], YA, [[0, .1], [.14, .1]], { cell: .01, br: 1 });
-    B.knot([tx, 1.78, tz], .06, 1, 3, 1014);
-  });
-  BB.hoop = mkB('hoop', B => {                               // origin on the rod axis; the hoop in the y-z plane
-    B.lathe([-.09, 0, 0], XA, [[0, 1.05], [.18, 1.05]], { cell: .03, br: .95, two: true, rbr: .9 });
-    B.lathe([-.09, 0, 0], XA, [[0, .95], [.18, .95]], { cell: .04, br: .6, two: true, rings: false });
-    for (const s of [-1, 1]) bx(B, -.25, -YR, s * 1.35 - .14, .25, -1.0, s * 1.35 + .14, .04, { br: .9 });
-    for (const s of [-1, 1]) B.box([-.12, -1.0, s * 1.0 - .08], [.12, -.6, s * 1.0 + .08], .03, { br: .9, edge: .8 });
-    for (let k = 0; k < 4; k++) { const a = PI / 4 + k * PI / 2; B.obox([0, Math.cos(a) * .9, Math.sin(a) * .9], XA, [0, Math.cos(a), Math.sin(a)], [0, -Math.sin(a), Math.cos(a)], [.09, .08, .07], .015, { br: 1, edge: .9 }); }
-  });
-}
-const R8S = { hx: 0, on: 0 };
-function r8State(u) { R8S.hx = XR - RL / 2 - .3 + (RL - D.LN + .5) * kk(u, MET[0], MET[1]); R8S.on = ss(MET[0] - .05, MET[0] + .1, u) * (1 - ss(MET[1], MET[1] + .15, u)); }
-function drawR8(u) {
-  const z = ZR.R8;
-  L.draw(BB.r8, BWX, O.st);
-  at(XF4, BWX, R8S.hx, YR, z); L.draw(BB.hoop, XF4, O.mc);
-  if (R8S.on > .02) {
-    // four lime fans onto the bar, the measured ring on its surface
-    const x = R8S.hx;
-    for (let k = 0; k < 4; k++) {
-      const a = PI / 4 + k * PI / 2, c = Math.cos(a), s = Math.sin(a);
-      for (let j = -3; j <= 3; j++) {
-        const b = a + j * .16, cb = Math.cos(b), sb = Math.sin(b);
-        apX(BWX, x, YR + c * .82, z + s * .82, PW); apX(BWX, x, YR + cb * (RR + .004), z + sb * (RR + .004), PW2);
-        K.lineW(PW[0], PW[1], PW[2], PW2[0], PW2[1], PW2[2], 2.2, 1, LIME, .55 * R8S.on);
-      }
+    // the cradle: three yokes under the round (it is held at its tail ring and nose)
+    for (const x of [xa + .6, XR, xb - D.LN - .4]) { B.chunk('yoke'); bx(B, x - .25, 0, z - .6, x + .25, YR - D.rcas - .05, z + .6, .04, { br: .85 }); B.ring([x, YR, z], YA, ZA, D.rcas + .05, 16, .8, 0, 0, PI * .6, PI * 1.4); }
+    // the mezzanine: columns, its deck and railing, a stair
+    B.chunk('mez');
+    for (const x of [xa - 1, XR, xb + 1]) for (const zz of [zm - 1.6, zm + 1.6]) B.tube([x, 0, zz], [x, YMZ, zz], .1, .65);
+    B.panel([xa - 1, YMZ, zm - 1.6], [0, 0, 3.2], [RL + 2, 0, 0], .2, { n: YA, br: .4, edge: .8, two: true, seams: [10, 2], sbr: .3 });
+    railing(B, [[xa - 1, YMZ, zm - 1.6], [xb + 1, YMZ, zm - 1.6]], 1.0);
+    ladder(B, [xb + 1.3, 0, zm], [xb + 1.3, YMZ + 1, zm], .5);
+    // the vessels: jacketed shells on legs, dished heads, outlet valves, the agitators' gearboxes and motors
+    for (const dx of MXX) {
+      const x = XR + dx; B.chunk('vsl');
+      B.lathe([x, YMZ + .5, zm], YA, [[0, .12], [.35, .85], [2.2, .85], [2.45, .6], [2.5, 0]], { cell: .05, br: .55, two: true, rings: true, rbr: .8, seams: 12, sbr: .3 });
+      B.lathe([x, YMZ + .9, zm], YA, [[0, .92], [1.5, .92]], { cell: .08, br: .3, two: true, rings: false });
+      for (let k = 0; k < 4; k++) { const a = k / 4 * TAU + .4; B.tube([x + Math.cos(a) * .8, YMZ, zm + Math.sin(a) * .8], [x + Math.cos(a) * .85, YMZ + 1.0, zm + Math.sin(a) * .85], .05, .6); }
+      bx(B, x - .22, YMZ + 3.0, zm - .22, x + .22, YMZ + 3.35, zm + .22, .03, { br: .9 }); motor(B, [x, YMZ + 3.35, zm], [x, YMZ + 3.95, zm], .17, { up: ZA });
+      B.cyl([x, YMZ + .5, zm], [x, YMZ - .2, zm], .07, { cell: .015, br: .85 }); B.ringP([x, YMZ - .2, zm], XA, ZA, .1, .9);
+      B.ringP([x + .86, YMZ + 1.6, zm], [0, 0, 1], YA, .1, .9); B.ringP([x + .86, YMZ + 1.6, zm], [0, 0, 1], YA, .07, .5);           // a sight glass
+      B.knot([x + .4, YMZ + 3.05, zm - .5], .06, 1, 3, lightQ(7, 'R8', 4 + (dx > 0 ? 2 : dx < 0 ? 0 : 1)));
     }
-    for (let k = 0; k < 96; k++) { const a = k / 96 * TAU; apX(BWX, x, YR + Math.cos(a) * (RR + .005), z + Math.sin(a) * (RR + .005), PW); K.dotW(PW[0], PW[1], PW[2], 2, LIME, R8S.on); }
-    apX(BWX, x, YR, z, PW); K.glowW(PW[0], PW[1], PW[2], 22, LIME, .25 * R8S.on);
-    // the tracker's beam to the reflector on the front face
-    apX(BWX, -3.6, 1.72, z - 2.2, PW); apX(BWX, XR + RL / 2 - D.LN + .01, YR + RR * .7, z, PW2); K.lineW(PW[0], PW[1], PW[2], PW2[0], PW2[1], PW2[2], 3, 1, LIME, .8 * R8S.on);
+    // the manifold under the deck, the drop pipes to the pour bridge over the round, its five heads' slides
+    B.chunk('pipe'); pipe(B, [[XR + MXX[0], YMZ - .2, zm], [XR + MXX[0], YMZ - .5, zm], [XR + MXX[2], YMZ - .5, zm], [XR + MXX[2], YMZ - .2, zm]], .06, .7);
+    pipe(B, [[XR, YMZ - .5, zm], [XR, YMZ - .5, z + .6], [XR, 3.6, z + .6]], .06, .7);
+    bx(B, xa - .3, 3.55, z + .35, xb - D.LN, 3.8, z + .85, .04, { br: .85 });
+    for (const x of [xa - .3, xb - D.LN]) B.tube([x, 0, z + .6], [x, 3.55, z + .6], .07, .6);
+    // the oven's rails both sides, its control cabinet, the heat exchanger
+    B.chunk('orail'); for (const zz of [z - 2.3, z + 2.3]) for (const dz of [-.55, .55]) rail(B, [xa - 1.4, .05, zz + dz], [xb + 1.0, .05, zz + dz], .06, .7);
+    cab(B, [xb + 1.6, 0, z - 2.2], [xb + 2.6, 2.3, z - .2], { front: 'x+', st: 'R8', id: 'r8', screen: [.3, 1.25, 1.7, 1.9], gauges: [[.5, .95, .09], [.9, .95, .09]], estop: [1.6, 1.0] });
+  }, .6);
+  // an oven half (its open side toward the round, -z: local -Z), heaters lining it (lit with the cure)
+  BB.ovH = mkB('ovh', B => {
+    const x0 = -ol / 2, x1 = ol / 2;
+    B.chunk('box');
+    B.panel([x0, 0, 0], [ol, 0, 0], [0, oh, 0], .12, { n: ZA, br: .7, edge: .8, seams: [12, 3], sbr: .35 });
+    B.panel([x0, oh, -ow], [ol, 0, 0], [0, 0, ow], .12, { n: YA, br: .75, edge: .8, seams: [12, 2], sbr: .3 });
+    for (const x of [x0, x1]) B.panel([x, 0, -ow], [0, 0, ow], [0, oh, 0], .1, { n: [x < 0 ? -1 : 1, 0, 0], br: .65, edge: .8 });
+    for (let k = 0; k <= 12; k++) B.line([x0 + k * ol / 12, 0, .005], [x0 + k * ol / 12, oh, .005], .45);
+    B.chunk('heat'); for (let j = 0; j < 4; j++) B.tube([x0 + .3, .5 + j * .65, -.15], [x1 - .3, .5 + j * .65, -.15], .03, .8, 20, j);
+    for (const x of [x0 + .5, x1 - .5]) { B.cyl([x, .0, -ow * .5], [x, -.15, -ow * .5], .14, { cell: .02, br: .85, caps: true }); }
+    motor(B, [x1 - .3, oh + .3, -ow * .5], [x1 - 1.2, oh + .3, -ow * .5], .14, {}); B.box([x0 + 1, oh, -.6], [x0 + 2.2, oh + .45, -.2], .03, { br: .85, edge: .85 });
+  }, .6);
+  BB.agit = mkB('ag', B => { B.cyl([0, 0, 0], [0, 0, 2.4], .04, { cell: .01, br: .95 }); for (const zz of [.5, 1.4]) for (let k = 0; k < 3; k++) { const a = k / 3 * TAU; B.obox([Math.cos(a) * .32, Math.sin(a) * .32, zz], [Math.cos(a), Math.sin(a), 0], [-Math.sin(a), Math.cos(a), .3], ZA, [.28, .02, .08], .01, { br: 1, edge: .9 }); } }, 1);
+  BB.phead = mkB('ph', B => { B.box([-.12, 0, -.12], [.12, .5, .12], .02, { br: .95, edge: .85 }); B.cyl([0, 0, 0], [0, -.14, 0], .05, { cell: .008, br: 1, caps: true }); B.ringP([0, -.14, 0], XA, ZA, .06, .9); }, 1);
+  S_.fill = rodSet(D.rcas - .045, .9);
+}
+function r8State(u) {
+  R8S.mix = ss(MIX[0], MIX[0] + .1, u) * (1 - ss(FL[1], FL[1] + .1, u));
+  R8S.fill = lin(u, FL[0], FL[1]);
+  R8S.close = kk(u, CU[0], CU[0] + .25) * (1 - kk(u, CU[1] - .2, CU[1]));
+  R8S.heat = ss(CU[0] + .25, CU[0] + .45, u) * (1 - ss(CU[1] - .45, CU[1] - .2, u));
+  R8S.head = kk(u, FL[0] - .12, FL[0]) * (1 - kk(u, FL[1], FL[1] + .12));
+}
+const PORTZ = [];                                              // the fill ports (rod frame z)
+function drawR8(u) {
+  const z = ZR.R8, zm = z + 3.1, ow = 1.7, gap = .25;
+  L.draw(BB.r8, BWX, O.st);
+  // the agitators turning (the vessels are drawn faint: the swirl seen through them)
+  for (const dx of MXX) spin(BB.agit, [XR + dx, YMZ + 3.0, zm], [0, -1, 0], U_ * 4 * R8S.mix + dx, O.mc);
+  if (R8S.mix > .02) for (const dx of MXX) for (let i = 0; i < 70; i++) {
+    const j = (i * 13 + 7 + (dx + 6) * 31) & 8191, r = .1 + .7 * RND[j], a = RND[(j + 1) & 8191] * TAU + U_ * (1.5 + 2 / r) * R8S.mix, y = YMZ + .9 + 1.6 * RND[(j + 2) & 8191];
+    apX(BWX, XR + dx + Math.cos(a) * r, y, zm + Math.sin(a) * r, PW); K.dotW(PW[0], PW[1], PW[2], 1, WH, .5 * R8S.mix);
   }
+  // the pour heads down onto the ports, the fill's packets down the drop pipe and along the bridge
+  if (!PORTZ.length) for (let k = 0; k < D.NSEC; k++) for (const f of [.25, .75]) PORTZ.push(D.zc1 - (k + 1) * D.secL + D.secL * f);
+  const hy = YR + D.rcas + .08 + (3.4 - YR - D.rcas) * (1 - R8S.head);
+  for (let i = 0; i < PORTZ.length; i += 2) { at(XF4, BWX, XR + PORTZ[i], hy + .14, z); L.draw(BB.phead, XF4, O.mc); apX(BWX, XR + PORTZ[i], 3.55, z + .3, PW); apX(BWX, XR + PORTZ[i], hy + .64, z, PW2); K.lineW(PW[0], PW[1], PW[2], PW2[0], PW2[1], PW2[2], 2, 1, WH, .7); }
+  if (R8S.fill > 0 && R8S.fill < 1) {
+    for (let i = 0; i < 30; i++) { const ph = (i / 30 + U_ * .9) % 1; let x, y, zz; if (ph < .3) { x = XR; y = YMZ - .5 - (YMZ - 4.1) * ph / .3; zz = mix(zm, z + .6, ph / .3); } else { const q = (ph - .3) / .7, tgt = PORTZ[(i * 2) % PORTZ.length]; x = XR + tgt * q; y = 3.67; zz = z + .6; } apX(BWX, x, y, zz, PW); K.dotW(PW[0], PW[1], PW[2], 2, LIME, .9); }
+  }
+  // the split oven: the halves roll in from both sides, the heaters glow with the cure
+  const zo = (1 - R8S.close) * 2.6 + gap * R8S.close;
+  O.mcx.keep = .85 - .5 * R8S.close; O.mcx.a = .9 - .4 * R8S.close;
+  atL(XF4, BWX, XR, 0, z + ow + zo, 0, 0, 1, 0, 1, 0); L.draw(BB.ovH, XF4, R8S.close > .02 ? O.mcx : O.st);
+  atL(XF4, BWX, XR, 0, z - ow - zo, 0, 0, -1, 0, 1, 0); L.draw(BB.ovH, XF4, R8S.close > .02 ? O.mcx : O.st);
+  if (R8S.heat > .02) { GLC3[1] = 120 + 60 * R8S.heat; GLC3[2] = 60 + 40 * R8S.heat; for (let i = 0; i <= 8; i++) { apX(BWX, XR - RL / 2 + RL * i / 8, YR + .3, z, PW); K.glowW(PW[0], PW[1], PW[2], 90, GLC3, .14 * R8S.heat); } }
 }
 
 /* ---------------- the mating station and the port elevator: up to the port, out to the chamber ---------------- */
-let XMO = -2, XFM = 0;                                        // the rod's centre at the station (on the port's axis), its front face
-const LIFT = [64.3, 65.8], SAB = [65.25, 66.55], ARMT = [66.2, 66.75], PUSH = [66.8, 69.95];
-let ZCH = -46;                                                // the chamber (the round's seat) on the bore's axis, this frame
+let XMO = -2, XFM = 0;                                        // the round's centre at the station (on the port's axis), its nose
+const LIFT = [64.3, 65.8], SAB = [65.9, 66.55], ARMT = [66.4, 66.85], PUSH = [66.9, 69.95];
+const INSP = [58.45, 61.55, 61.75, 63.6];                       // the inspection ring: the X-ray pass, then the scan back
+let ZCH = -46, ZCOL = -1;                                      // the chamber (the round's seat), the column's turning station (z)
 const RX = mkX();
-/* the round's frame (rod frame) at the station: on the elevator's saddle, up to the port, turned onto the bore's axis
-   (nose to the chamber), slid out through the port and the transfer cage to its seat */
+/* the lift: the travelling column carries the round up, back from the wall, turns it once round (the turntable) and on
+   to the bore's axis (nose to the chamber) at the port's height; then it slides out through the port to its seat */
+const liftK = u => lin(u, LIFT[0], LIFT[1]);
+const elevY = u => { const k = liftK(u); return YR + (9 - YR) * kk(k, 0, .3) + 7 * kk(k, .3, .8) + (PORT[1] - 16 - YR + YR) * kk(k, .8, 1); };
+const elevZ = u => ZR.MT + (ZCOL - ZR.MT) * kk(liftK(u), .18, .48);
+const elevA = u => PI / 2 + (PI / 2 + TAU) * kk(liftK(u), .38, .97);
 function roundAt(u) {
-  const k = kk(u, LIFT[0], LIFT[1]), y = YR + (PORT[1] - YR) * Math.pow(k, 1.25);
-  const a = PI / 2 + PI / 2 * kk(u, LIFT[0] + .3, LIFT[1] - .1) + TAU * kk(u, LIFT[0] - .25, LIFT[1] - .05);
-  const p = u < PUSH[0] ? 0 : u > PUSH[1] ? 1 : E.inOut(lin(u, PUSH[0], PUSH[1]));
-  return at(RX, BWX, XMO, y, ZR.MT + (ZCH - ZR.MT) * p, 1, a);
+  const p = u < PUSH[0] ? 0 : u > PUSH[1] ? 1 : E.inOut(lin(u, PUSH[0], PUSH[1])), z = elevZ(u);
+  return at(RX, BWX, XMO, elevY(u), z + (ZCH - z) * p, 1, elevA(u));
 }
-const elevY = u => YR + (PORT[1] - YR) * Math.pow(kk(u, LIFT[0], LIFT[1]), 1.25);
-const NPET = 3, SABL = 8.4, SABR = .96, ARML = .9;
 function buildMT() {
-  const z = ZR.MT; XMO = PORT[0]; XFM = XMO + RL / 2 - D.LN;
+  const z = ZR.MT, rc = D.rcas; XMO = PORT[0]; XFM = XMO + RL / 2;
+  ZCOL = Math.max(ZR.MT, Math.min(2.4, HALL.z0 + RL / 2 + 1.1));
   BB.mt = mkB('mt', B => {
-    // the elevator's rails up the front wall under the port, its head at the port
-    for (const s of [-1, 1]) { B.chunk('rail'); bx(B, XMO + s * 1.0 - .2, 0, HALL.z0 + .05, XMO + s * 1.0 + .2, PORT[1] - .6, HALL.z0 + .55, .08, { br: .8 }); }
-    B.chunk('head'); bx(B, XMO - 1.6, PORT[1] - 3.4, HALL.z0 + .05, XMO + 1.6, PORT[1] - 2.7, HALL.z0 + 1.2, .05, { br: .85 });
-    for (let k = 0; k < 6; k++) B.knot([XMO + 1.25, 2 + k * 3.4, HALL.z0 + .6], .1, 1, 3, 1015 + k);
+    // the column's floor rails (from the station back to the turning point), the port's head on the wall
+    for (const s of [-1, 1]) { B.chunk('rail'); rail(B, [XMO + s * .9, .02, z - 1.6], [XMO + s * .9, .02, ZCOL + 1.6], .12, .8); }
+    bx(B, XMO - 1.3, 0, z - 1.7, XMO + 1.3, .08, ZCOL + 1.7, .1, { br: .4, plain: true });
+    B.chunk('head'); bx(B, XMO - 2.4, PORT[1] - 3.4, HALL.z0 + .05, XMO + 2.4, PORT[1] - 2.7, HALL.z0 + 1.2, .05, { br: .85 });
+    for (let k = 0; k < 6; k++) B.knot([XMO + 2.6, 2 + k * 3.4, HALL.z0 + .6], .1, 1, 3, 1015 + k);
+    // the inspection ring's rails along the round (both sides)
+    for (const s of [-1, 1]) rail(B, [XMO - RL / 2 - 1.5, .02, z + s * 1.3], [XMO + RL / 2 + 1.5, .02, z + s * 1.3], .1, .75);
   });
-  BB.elev = mkB('ev', B => {                                  // origin: under the round's centre (the saddle's top), the arm back to the wall
-    B.box([-.8, -1.0, -(ZR.MT - HALL.z0) + .55], [.8, .2, -(ZR.MT - HALL.z0) + 1.5], .05, { br: .9, edge: .8 });
-    B.box([-.35, -.8, -(ZR.MT - HALL.z0) + 1.5], [.35, -.35, -.6], .05, { br: .9, edge: .8 });
-    B.cyl([0, -.62, 0], [0, -.35, 0], .7, { cell: .03, br: .9, caps: true, seams: 12 });
-    // the carriage's skin, its guide rollers on the wall's rails, the slewing ring's teeth and drive, a cable loop
-    const zw = -(ZR.MT - HALL.z0);
-    detailBox(B, [-.8, -1.0, zw + .55], [.8, .2, zw + 1.5]); detailBox(B, [-.35, -.8, zw + 1.5], [.35, -.35, -.6]);
-    for (const sx of [-1, 1]) for (const y of [-.85, .05]) { B.cyl([sx * 1.0, y, zw + .62], [sx * 1.0, y, zw + .78], .1, { cell: .015, br: .9, caps: true }); B.ringP([sx * 1.0, y, zw + .79], XA, YA, .04, .8); }
-    for (let k = 0; k < 48; k++) { const t = k / 48 * TAU; B.line([Math.cos(t) * .7, -.4, Math.sin(t) * .7], [Math.cos(t) * .76, -.4, Math.sin(t) * .76], .55); }
-    motor(B, [.85, -.1, -.3], [.85, -.4, -.3], .1, { up: ZA });
-    hose(B, [[.5, -.4, zw + 1.5], [.7, -1.2, zw + .9], [.9, -.5, -.6]], .25, .5);
-  });
+  // the column: a carriage on the rails, four telescoping stages, the slewing head under the saddle
+  BB.colBase = mkB('cb', B => { B.box([-1.2, 0, -1.2], [1.2, .55, 1.2], .05, { br: .9, edge: .8 }); detailBox(B, [-1.2, 0, -1.2], [1.2, .55, 1.2]); for (const s of [-1, 1]) for (const zz of [-.9, .9]) B.cyl([s * .9, .08, zz - .15], [s * .9, .08, zz + .15], .08, { cell: .012, br: .9, caps: true }); motor(B, [1.25, .3, -.6], [1.25, .3, .4], .14, {}); B.knot([-1.0, .6, 1.0], .07, 1, 3, 1021); }, .6);
+  BB.colSt = [0, 1, 2, 3].map(i => mkB('cs', B => { const r = .55 - i * .1; B.cyl([0, 0, 0], [0, 5.2, 0], r, { cell: .04, br: .85 - i * .03, rings: true, seams: 8, sbr: .35 }); B.ringP([0, 5.18, 0], XA, ZA, r + .03, .9); }, .6));
+  BB.slew = mkB('sw', B => { B.cyl([0, -.62, 0], [0, -.3, 0], .8, { cell: .03, br: .9, caps: true, seams: 12 }); for (let k = 0; k < 48; k++) { const t = k / 48 * TAU; B.line([Math.cos(t) * .8, -.46, Math.sin(t) * .8], [Math.cos(t) * .86, -.46, Math.sin(t) * .86], .55); } motor(B, [.95, -.2, -.3], [.95, -.6, -.3], .12, { up: ZA }); }, .6);
   BB.saddle = mkB('sd', B => {                                // turns with the round (its +Z along the round)
-    for (const zz of [-RL * .3, RL * .25]) { B.box([-.3, -RR - .35, zz - .25], [.3, -RR - .05, zz + .25], .03, { br: .9, edge: .85 }); B.ring([0, 0, zz], XA, YA, RR + .05, 16, .8, 0, 0, PI * 1.1, PI * 1.9); }
-    B.box([-.18, -RR - .35, -RL * .3], [.18, -RR - .25, RL * .25], .03, { br: .85, edge: .8 });
-    // rollers under the round, the clamp arms and their cylinders
+    for (const zz of [-RL * .3, RL * .25]) { B.box([-.4, -rc - .4, zz - .3], [.4, -rc - .05, zz + .3], .03, { br: .9, edge: .85 }); B.ring([0, 0, zz], XA, YA, rc + .05, 16, .8, 0, 0, PI * 1.1, PI * 1.9); }
+    B.box([-.25, -rc - .5, -RL * .3], [.25, -rc - .3, RL * .25], .03, { br: .85, edge: .8 });
     for (const zz of [-RL * .3, RL * .25]) for (const s of [-1, 1]) {
-      const a = PI * 1.5 + s * .5, cx = Math.cos(a) * (RR + .06), cy = Math.sin(a) * (RR + .06);
-      B.cyl([cx, cy, zz - .12], [cx, cy, zz + .12], .05, { cell: .01, br: .95, caps: true });
-      B.line([s * .3, -RR - .2, zz], [s * (RR + .1), 0, zz], .8); B.cyl([s * .3, -RR - .3, zz], [s * .32, -RR - .05, zz + .1], .03, { cell: .008, br: .85 });
+      const a = PI * 1.5 + s * .5, cx = Math.cos(a) * (rc + .06), cy = Math.sin(a) * (rc + .06);
+      B.cyl([cx, cy, zz - .14], [cx, cy, zz + .14], .06, { cell: .01, br: .95, caps: true });
+      B.line([s * .4, -rc - .25, zz], [s * (rc + .12), 0, zz], .8); B.cyl([s * .4, -rc - .35, zz], [s * .42, -rc - .05, zz + .1], .035, { cell: .008, br: .85 });
     }
   });
-  BB.arm9 = mkArm({ H: 1.0, L1: 1.5, L2: 1.4, LT: .5, r: .19 });
-  // the sabot: three petals (a sleeve round the rod, tapered at the front) and the armature's disc pack behind them
-  const ri = RR + .02, ro = SABR, z0 = -SABL / 2, zt = z0 + SABL - 1.6, z1 = z0 + SABL, rt = RR + .3, NF_ = 14;
+  // the inspection ring: a source and a detector arc in a ring round the round, on two carriages
+  const ri = rc + .55;
+  BB.insp = mkB('ir', B => {
+    B.lathe([-.25, 0, 0], XA, [[0, ri], [0, ri + .35], [.5, ri + .35], [.5, ri]], { cell: .04, br: .9, seams: 16, sbr: .4, rbr: .8 });
+    for (let k = 0; k < 24; k++) { const a = k / 24 * TAU; B.knot([.26, Math.cos(a) * (ri + .18), Math.sin(a) * (ri + .18)], .025, .8); }
+    B.box([-.3, ri - .1, -.3], [.3, ri + .55, .3], .03, { br: 1, edge: .9 });              // the source's housing (top)
+    for (const s of [-1, 1]) { B.box([-.2, -(YR), s * 1.3 - .2], [.2, -ri * .4, s * 1.3 + .2], .03, { br: .85, edge: .85 }); B.box([-.4, -YR, s * 1.3 - .35], [.4, -YR + .25, s * 1.3 + .35], .03, { br: .9 }); }
+  }, .6);
+  // the sabot: three petals (a sleeve round the casing, tapered at the front) and the armature's disc pack behind them
+  const ri_ = rc + .02, ro = Math.max(SABR, rc + .25), z0 = -SABL / 2, zt = z0 + SABL - Math.min(3.2, SABL * .16), z1 = z0 + SABL, rt = rc + .3, NF_ = 14;
   BB.petals = [];
   for (let k = 0; k < NPET; k++) BB.petals.push(mkB('pt', B => {
     const a0 = k / NPET * TAU + .04, a1 = (k + 1) / NPET * TAU - .04, P_ = (a, r, z) => [Math.cos(a) * r, Math.sin(a) * r, z];
     for (let f = 0; f < NF_; f++) {
       const b0 = a0 + (a1 - a0) * f / NF_, b1 = a0 + (a1 - a0) * (f + 1) / NF_, bm = (b0 + b1) / 2, n = [Math.cos(bm), Math.sin(bm), 0];
-      B.panel(P_(b0, ro, z0), V.sub(P_(b1, ro, z0), P_(b0, ro, z0)), [0, 0, zt - z0], .035, { n, br: .85, edge: false });
+      B.panel(P_(b0, ro, z0), V.sub(P_(b1, ro, z0), P_(b0, ro, z0)), [0, 0, zt - z0], .05, { n, br: .85, edge: false });
       const t0 = P_(b0, ro, zt), t1 = P_(b1, ro, zt), t2 = P_(b0, rt, z1);
-      B.panel(t0, V.sub(t1, t0), V.sub(t2, t0), .035, { n: V.norm([n[0] * 1.6, n[1] * 1.6, ro - rt]), br: .85, edge: false });
-      B.panel(P_(b0, ri, z0), V.sub(P_(b1, ri, z0), P_(b0, ri, z0)), [0, 0, SABL], .06, { n: [-n[0], -n[1], 0], br: .3, edge: false });
-      B.panel(P_(b0, ri, z0), V.sub(P_(b1, ri, z0), P_(b0, ri, z0)), V.sub(P_(b0, ro, z0), P_(b0, ri, z0)), .04, { n: [0, 0, -1], br: .7, edge: false, two: true });
+      B.panel(t0, V.sub(t1, t0), V.sub(t2, t0), .05, { n: V.norm([n[0] * 1.6, n[1] * 1.6, ro - rt]), br: .85, edge: false });
+      B.panel(P_(b0, ri_, z0), V.sub(P_(b1, ri_, z0), P_(b0, ri_, z0)), [0, 0, SABL], .08, { n: [-n[0], -n[1], 0], br: .3, edge: false });
+      B.panel(P_(b0, ri_, z0), V.sub(P_(b1, ri_, z0), P_(b0, ri_, z0)), V.sub(P_(b0, ro, z0), P_(b0, ri_, z0)), .05, { n: [0, 0, -1], br: .7, edge: false, two: true });
     }
-    for (const a of [a0, a1]) { B.panel(P_(a, ri, z0), V.sub(P_(a, ro, z0), P_(a, ri, z0)), [0, 0, zt - z0], .03, { n: [-Math.sin(a), Math.cos(a), 0], br: .7, two: true, edge: .9 }); B.line(P_(a, ro, zt), P_(a, rt, z1), .9); }
-    for (const z of [z0, -2.4, 0, 2]) B.ring([0, 0, z], XA, YA, ro * 1.003, 20, .7, 18, 1, a0, a1);
+    for (const a of [a0, a1]) { B.panel(P_(a, ri_, z0), V.sub(P_(a, ro, z0), P_(a, ri_, z0)), [0, 0, zt - z0], .04, { n: [-Math.sin(a), Math.cos(a), 0], br: .7, two: true, edge: .9 }); B.line(P_(a, ro, zt), P_(a, rt, z1), .9); }
+    for (let j = 0; j <= 6; j++) B.ring([0, 0, z0 + (zt - z0) * j / 6], XA, YA, ro * 1.003, 20, j % 3 ? .55 : .8, 18, 1, a0, a1);
     B.ring([0, 0, zt], XA, YA, ro * 1.003, 20, .9, 18, 1, a0, a1); B.ring([0, 0, z1], XA, YA, rt, 12, .9, 18, 1, a0, a1);
-  }, 1));;
-  BB.armat = mkB('am', B => { B.lathe([0, 0, z0 - ARML], ZA, [[0, .3], [0, ro * .99], [ARML, ro * .99], [ARML, .3]], { cell: .03, br: .95, seams: 16, rbr: .8 }); for (let k = 1; k < 6; k++) B.ringP([0, 0, z0 - ARML + k * ARML / 6], XA, YA, ro, .55); });
+  }, 1));
+  BB.armat = mkB('am', B => { B.lathe([0, 0, z0 - ARML], ZA, [[0, .3], [0, ro * .99], [ARML, ro * .99], [ARML, .3]], { cell: .04, br: .95, seams: 16, rbr: .8 }); for (let k = 1; k < 6; k++) B.ringP([0, 0, z0 - ARML + k * ARML / 6], XA, YA, ro, .55); });
+}
+/* the inspection ring's x and what it shows: the X-ray pass tail to nose, the lime scan back */
+const INS = { x: 0, xr: 0, sc: 0 };
+function inspState(u) {
+  const x0 = XMO - RL / 2 - 1.0, x1 = XMO + RL / 2 + .6;
+  INS.x = u < INSP[0] ? x0 : u < INSP[1] ? mix(x0, x1, kk(u, INSP[0], INSP[1])) : u < INSP[2] ? x1 : u < INSP[3] ? mix(x1, x0, kk(u, INSP[2], INSP[3])) : x0;
+  INS.xr = ss(INSP[0] - .1, INSP[0] + .15, u) * (1 - ss(INSP[1] + .05, INSP[2], u));
+  INS.sc = ss(INSP[2] - .05, INSP[2] + .1, u) * (1 - ss(INSP[3] - .1, INSP[3] + .05, u));
 }
 function drawMT(u) {
-  const z = ZR.MT, y = elevY(u), a = PI / 2 + PI / 2 * kk(u, LIFT[0] + .3, LIFT[1] - .1) + TAU * kk(u, LIFT[0] - .25, LIFT[1] - .05);
+  const z = elevZ(u), y = elevY(u), a = elevA(u);
   L.draw(BB.mt, BWX, O.st);
-  at(XF4, BWX, XMO, y - RR - .35, z); L.draw(BB.elev, XF4, O.mc);
+  at(XF4, BWX, XMO, 0, z); L.draw(BB.colBase, XF4, O.mc);
+  const top = y - D.rcas - .95;
+  const ext = Math.max(0, top - 5.7);
+  for (let i = 0; i < 4; i++) { at(XF4, BWX, XMO, top - 5.2 - ext * (1 - i / 3), z); L.draw(BB.colSt[i], XF4, O.mc); }
+  at(XF4, BWX, XMO, y - D.rcas - .05, z, 1, a); L.draw(BB.slew, XF4, O.mc);
   if (u < PUSH[0] + .4) { at(XF4, BWX, XMO, y, z, 1, a); L.draw(BB.saddle, XF4, O.mc); }
+  // the inspection ring
+  if (u > INSP[0] - 2 && u < INSP[3] + 1.5) {
+    at(XF4, BWX, INS.x, YR, ZR.MT); L.draw(BB.insp, XF4, O.mc);
+    const ri = D.rcas + .5;
+    if (INS.xr > .02) {                                       // the source's fan through the round onto the detector arc
+      for (let k = -4; k <= 4; k++) { const b = PI * 1.5 + k * .09; apX(BWX, INS.x, YR + ri + .1, ZR.MT, PW); apX(BWX, INS.x, YR + Math.sin(b) * ri, ZR.MT + Math.cos(b) * ri, PW2); K.lineW(PW[0], PW[1], PW[2], PW2[0], PW2[1], PW2[2], 3, 1, LIME, .35 * INS.xr); }
+      apX(BWX, INS.x, YR + ri + .1, ZR.MT, PW); K.glowW(PW[0], PW[1], PW[2], 20, LIME, .6 * INS.xr);
+    }
+    if (INS.sc > .02) for (let k = 0; k < 96; k++) { const b = k / 96 * TAU; apX(BWX, INS.x + .02, YR + Math.cos(b) * (D.rcas + .012), ZR.MT + Math.sin(b) * (D.rcas + .012), PW); K.dotW(PW[0], PW[1], PW[2], 2, LIME, INS.sc); }
+  }
   drawSabot(u);
 }
 const XPT = mkX();
@@ -1296,9 +1426,9 @@ const XPT = mkX();
    slides on behind */
 function drawSabot(u) {
   if (u < SAB[0] - .3) return;
-  const R_ = roundAt(u);
+  const R_ = roundAt(u), d0 = 2.2 + 1.6 * SABR;
   for (let k = 0; k < NPET; k++) {
-    const t = kk(u, SAB[0] + k * .12, SAB[1] - (2 - k) * .1), d = 2.6 * (1 - t) * (1 - t), am = (k + .5) / NPET * TAU, tw_ = .5 * (1 - t);
+    const t = kk(u, SAB[0] + k * .12, SAB[1] - (2 - k) * .1), d = d0 * (1 - t) * (1 - t), am = (k + .5) / NPET * TAU, tw_ = .5 * (1 - t);
     if (u < SAB[0] + k * .12 - .25) continue;
     at2(XPT, R_, Math.cos(am) * d, Math.sin(am) * d, (1 - t) * (k - 1) * .8, 2, tw_ * (k - 1), -1, 0);
     O.pet.lime = t > .97 ? .55 * (1 - kk(u, SAB[1], SAB[1] + .5)) : .15 * (1 - t);
@@ -1620,108 +1750,51 @@ function drawR6x(u) {
   trace('r6', s => .3 + .5 * Math.abs(Math.sin(s * 22 + 1)) * (s < .35 ? 1 : .6), lin(u, OGV[0], FINS[1]), 1); trace('r6p', s => 1 - s * .3, lin(u, OGV[0], FINS[1]), .8);
 }
 
-/* R7 · the spray booth: acoustic walls with a window, the hood, two powder feeders with hoses to the gun, the power
-   supply and chiller (fans turning), the turning rollers' drive, the robot's track chain, overspray drawn up */
+/* R7 · the casing line: its zone, the control cabinet (the weld's trace), a pendant, the section magazine's tray,
+   the welder's cable chain */
 function dressR7() {
-  const z = ZR.R7, xa = XR - RL / 2, xb = XR + RL / 2, wx0 = xa - 1.2, wx1 = xb + 1.2;
+  const z = ZR.R7, xa = XR - RL / 2, xb = XR + RL / 2;
   BB.r7x = mkB('r7x', B => {
-    zone(B, -19, 41.6, -4.8, 47.8);
-    B.chunk('walls');
-    B.panel([wx0, 0, z + 1.6], [wx1 - wx0, 0, 0], [0, 5.4, 0], .07, { n: [0, 0, -1], br: .2, edge: .6, seams: [12, 12], sbr: .25 });
-    B.panel([wx0, 0, z - 3.2], [0, 0, 4.8], [0, 5.4, 0], .07, { n: XA, br: .18, edge: .6, seams: [12, 12], sbr: .25 });
-    const W = faceF([wx1, 0, z - 3.2], [wx1 + .05, 5.4, z + 1.6], 'x-');
-    B.panel([wx1, 0, z - 3.2], [0, 0, 4.8], [0, 5.4, 0], .09, { n: [-1, 0, 0], br: .14, edge: .6 });
-    frm(B, W, 1.4, 1.2, 3.6, 2.6, .9, -.01); frm(B, W, 1.45, 1.25, 3.55, 2.55, .5, -.01);
-    for (const x of [wx0, wx1]) B.tube([x, 0, z - 3.2], [x, 5.4, z - 3.2], .05, .7);
-    B.tube([wx0, 5.4, z - 3.2], [wx1, 5.4, z - 3.2], .05, .7);
-    for (let x = wx0 + .6; x < wx1; x += 1.2) B.line([x, 5.4, z - 3.2], [x, 0, z - 3.21], .15);
-    B.chunk('feed');
-    for (const [k, zz] of [[0, 42.6], [1, 43.7]]) { const x = wx0 - 1.0; B.cyl([x, 1.0, zz], [x, 1.7, zz], .28, { cell: .03, br: .8, rings: true }); B.lathe([x, .6, zz], YA, [[0, .05], [.4, .28]], { cell: .03, br: .8 }); for (const [dx, dz] of [[.25, .25], [-.25, .25], [.25, -.25], [-.25, -.25]]) B.tube([x + dx, 0, zz + dz], [x + dx * .8, 1.0, zz + dz * .8], .02, .55); motor(B, [x, 2.2, zz], [x, 1.72, zz], .1, { up: ZA }); B.knot([x + .3, 1.5, zz], .04, 1, 3, lightQ(6, 'R7', k)); }
-    cab(B, [-19.0, 0, 44.4], [-17.6, 2.3, 47.0], { front: 'x+', st: 'R7', id: 'r7', screen: [.5, 1.3, 1.6, 1.9], gauges: [[1.95, 1.6, .1], [2.3, 1.6, .1]], estop: [2.2, 1.15] });
-    B.box([-18.9, 0, 41.8], [-17.7, 1.3, 44.0], .05, { br: .55, edge: .8 }); for (const zz of [42.4, 43.4]) B.ringP([-18.3, 1.31, zz], XA, ZA, .32, .7);
-    for (const x of [XR - RL * .3, XR + RL * .25]) motor(B, [x, YR - RR - .14, z + 1.05], [x, YR - RR - .14, z + .62], .12, {});
-    B.chunk('track'); for (let x = xa - .4; x < xb + .5; x += .1) B.line([x, .31, z - 2.6], [x, .31, z - 2.45], .3);
-    tray(B, [-18.3, 5.8, 47.4], [-6.0, 5.8, 47.4], .3);
+    zone(B, xa - D.secL - 2, z - 2.0, xb + 2.6, z + XRK + 1.1);
+    cab(B, [xb + 3.0, 0, z + .4], [xb + 4.1, 2.3, z + 2.8], { front: 'x-', st: 'R7', id: 'r7', screen: [.4, 1.25, 1.9, 1.9], gauges: [[.5, .95, .09], [.85, .95, .09]], estop: [2.0, 1.1] });
+    pendant(B, [xb + 2.4, 0, z - 2.2], 1.55, .55, nrm([-.6, 0, .8]), 'r7p');
+    tray(B, [xa - 2, 5.9, z - 2.0], [xb + 3.5, 5.9, z - 2.0], .3);
+    for (let k = 0; k < D.NSEC; k++) B.line([rackX(k) - D.secL / 2 + .1, .13, z + XRK - .78], [rackX(k) + D.secL / 2 - .1, .13, z + XRK - .78], .8, 10, 0);
   });
-  BB.chfan = fanB(.28, 5);
 }
 function drawR7x(u) {
-  const z = ZR.R7, xa = XR - RL / 2, on = ss(SPR[0] - .1, SPR[0] + .05, u) * (1 - ss(SPR[1], SPR[1] + .1, u));
+  const z = ZR.R7;
   L.draw(BB.r7x, BWX, O.st);
-  for (const zz of [42.4, 43.4]) spin(BB.chfan, [-18.3, 1.33, zz], YA, U_ * 18 + zz, O.mc);
-  const base = [XR + R7S.cz - .2, .3, z - 2.25];
-  chainW([xa - .6, .32, z - 2.85], XA, YA, base[0] - (xa - .6), .22, 9, .16, 1);
-  // the feed hoses (powder, gas, water) from the booth's wall to the gun, sagging
-  const T = BB.arm7.P.tip, w = BB.arm7.P.el;
-  for (let k = 0; k < 3; k++) {
-    const a = [xa - 1.15, 1.6 + k * .12, 42.7 + k * .5], m = [w[0], w[1] + .15, w[2] - .1], n = 8;
-    let px = a[0], py = a[1], pz = a[2];
-    for (let j = 1; j <= n * 2; j++) { const t = j / (n * 2), q = t < .5 ? V.lerp(a, m, t * 2) : V.lerp(m, T, t * 2 - 1), sg = .35 * Math.sin(PI * t); apX(BWX, px, py, pz, PW); apX(BWX, q[0], q[1] - sg, q[2], PW2); K.lineW(PW[0], PW[1], PW[2], PW2[0], PW2[1], PW2[2], 2, 1, WH, .6); px = q[0]; py = q[1] - sg; pz = q[2]; }
-  }
-  if (on > .02) { spray(u, SPR[0], SPR[1], 140, XR + R7S.cz, YR + .2, z - RR, 0, 1, .1, .5, .6, 1.3, 2.4, [230, 225, 205], .45 * on, 1, 111); spray(u, SPR[0], SPR[1], 50, XR, 5.3, z + .2, 0, 1, 0, .1, 2, 3.5, 1.2, [230, 225, 205], .4 * on, 1, 112); }
-  needle(GAUGES.r70, .1 + .8 * on); needle(GAUGES.r71, .3 + .4 * on);
-  trace('r7', s => .5 + .3 * Math.sin(s * 9) * .3 + .2 * (s > .1 ? 1 : 0), lin(u, SPR[0], SPR[1]), 1);
+  chainW([XR - RL / 2 - .4, .56, z - 1.75], XA, YA, R7S.wx - (XR - RL / 2 - .4), .18, RL + 1, .14, 1);
+  needle(GAUGES.r70, .1 + .8 * R7S.wOn); needle(GAUGES.r71, .2 + .6 * lin(u, CS0, CSEND));
+  trace('r7', s => .3 + .5 * (Math.floor(s * 5) % 2 ? .8 : .3), lin(u, CS0, CSEND + .2), 1); trace('r7p', s => s, lin(u, CS0, CSEND), .8);
 }
-
-/* R8 · metrology: a thermal tent, the hoop's linear-motor track and cable chain, the tracker head turning to its
-   target, probes clipped to the rod, the workstation with the measured profile */
+/* R8 · the fill bay: a zone, gauges on the vessels' panel, the fill and the cure on the cabinet's screen */
 function dressR8() {
   const z = ZR.R8, xa = XR - RL / 2, xb = XR + RL / 2;
   BB.r8x = mkB('r8x', B => {
-    zone(B, -17.4, 49.4, -2.4, 55.0);
-    frameB(B, [xa - 1.6, 0, z - 1.9], [xb + 1.8, 3.4, z + 1.9], .03, .45, ['y+']);
-    for (let x = xa - 1.5; x < xb + 1.8; x += .3) B.line([x, 3.4, z + 1.9], [x, .2, z + 1.9], .12);
-    B.chunk('mag'); for (const dz of [-1.35, 1.35]) for (let x = xa - .7; x < xb + .8; x += .08) B.knot([x, .23, z + dz], .025, .55);
-    B.chunk('probe');
-    for (let k = 0; k < 4; k++) { const x = xa + .8 + k * 1.2; B.box([x - .03, YR + RR, z - .03], [x + .03, YR + RR + .06, z + .03], .01, { br: 1, edge: .9 }); hose(B, [[x, YR + RR + .06, z], [x + .4, .9, z + .9], [xb + 1.2, .9, z + 1.5]], .1, .4); }
-    B.box([xb + 1.1, 0, z + 1.4], [xb + 1.4, .95, z + 1.7], .02, { br: .8, edge: .85 });
-    cab(B, [-17.0, 0, 51.0], [-15.8, 1.0, 54.0], { front: 'x+', st: 'R8', lights: false, louvre: false, doors: 2 });
-    cab(B, [-16.9, 1.0, 51.4], [-16.7, 1.6, 52.5], { front: 'x+', id: 'r8a', st: 'R8', noDoors: true, lights: false, plinth: false, top: false, screen: [.05, .05, 1.05, .55] });
-    cab(B, [-16.9, 1.0, 52.6], [-16.7, 1.6, 53.7], { front: 'x+', id: 'r8b', st: 'R8', noDoors: true, lights: false, plinth: false, top: false, screen: [.05, .05, 1.05, .55] });
-    tray(B, [-16.4, 3.6, 54.4], [-3.4, 3.6, 54.4], .3);
+    zone(B, xa - 1.6, z - 4.4, xb + 1.4, z + 4.8);
+    cab(B, [xa - 2.6, YMZ, z + 2.1], [xa - 1.4, YMZ + 2.0, z + 4.1], { front: 'x+', st: 'R8', id: 'r8m', screen: [.3, 1.1, 1.7, 1.75], gauges: [[.4, .75, .08], [.75, .75, .08]] });
+    tray(B, [xa - 1, 7.4, z + 4.2], [xb + 1, 7.4, z + 4.2], .3);
   });
-  BB.trkh = mkB('tkh', B => { B.box([-.09, -.09, -.06], [.09, .09, .12], .01, { br: .95, edge: .9 }); B.cyl([0, 0, .12], [0, 0, .2], .05, { cell: .008, br: 1, caps: true }); B.ringP([0, 0, .2], XA, YA, .05, 1); for (const s of [-1, 1]) B.box([s * .12 - .02, -.12, -.08], [s * .12 + .02, .1, .05], .008, { br: .9 }); }, 1);
 }
 function drawR8x(u) {
-  const z = ZR.R8;
   L.draw(BB.r8x, BWX, O.st);
-  chainW([XR - RL / 2 - .6, .24, z - 1.7], XA, YA, R8S.hx - (XR - RL / 2 - .6), .18, 8, .14, 1);
-  const tg = [XR + RL / 2 - D.LN + .01, YR + RR * .7, z], hd = [-3.6, 1.72, z - 2.2], d = nrm(sub(tg, hd));
-  atL(XF4, BWX, hd[0], hd[1], hd[2], d[0], d[1], d[2], 0, 1, 0); L.draw(BB.trkh, XF4, O.hero);
-  const p = lin(u, MET[0], MET[1]);
-  // the straightness as it is measured: a lime trace riding over the rod behind the hoop (deviation x2000), with ticks
-  if (u > MET[0]) {
-    const x0 = XR - RL / 2 + .1, x1 = Math.min(R8S.hx, XR + RL / 2 - D.LN), yb = YR + RR + .32, dev = x => .05 * Math.sin(x * 2.1 + 1) + .03 * Math.sin(x * 5.3) + .015 * Math.sin(x * 11.7);
-    const a = 1 - ss(MET[1] + .4, MET[1] + .9, u);
-    let px = x0, py = yb + dev(x0);
-    for (let x = x0 + .05; x <= x1; x += .05) { const y = yb + dev(x); apX(BWX, px, py, z, PW); apX(BWX, x, y, z, PW2); K.lineW(PW[0], PW[1], PW[2], PW2[0], PW2[1], PW2[2], 1.2, 1, LIME, .9 * a); px = x; py = y; }
-    for (let x = x0; x <= x1; x += .5) { apX(BWX, x, yb - .12, z, PW); apX(BWX, x, yb + .12, z, PW2); K.lineW(PW[0], PW[1], PW[2], PW2[0], PW2[1], PW2[2], 3, 1, WH, .35 * a); }
-    apX(BWX, x0, yb, z, PW); apX(BWX, x1, yb, z, PW2); K.lineW(PW[0], PW[1], PW[2], PW2[0], PW2[1], PW2[2], 4, 1, WH, .3 * a);
-  }
-  trace('r8a', s => .5 + .3 * Math.sin(s * 31) * .15 + .05 * Math.sin(s * 7), p, 1); trace('r8b', s => .45 + .1 * s, p, 1, WH);
+  needle(GAUGES.r80, .1 + .8 * R8S.heat); needle(GAUGES.r81, R8S.fill); needle(GAUGES.r8m0, .2 + .6 * R8S.mix); needle(GAUGES.r8m1, R8S.fill);
+  trace('r8', s => s < .3 ? s * 2.4 : s < .8 ? .72 : .72 - (s - .8) * 3, lin(u, CU[0], CU[1]), 1, GLC); trace('r8m', s => s, R8S.fill, 1);
 }
-
-/* MT · the mating cell: the robot's tool stand (gripper, nutrunner), the elevator's screw and chain, the cell's
-   cabinet, the floor zone */
+/* MT · the inspection and lift station: the floor zone, the cell's cabinet, the ring's cable chain */
 function dressMT() {
   BB.mtx = mkB('mtx', B => {
-    zone(B, -6.2, -9.4, 5.6, -.6);
-    B.chunk('stand'); B.box([4.0, 0, -4.6], [4.6, 1.1, -3.4], .04, { br: .6, edge: .85 });
-    for (let k = 0; k < 3; k++) { const zz = -4.4 + k * .4; B.cyl([4.3, 1.1, zz], [4.3, 1.4, zz], .07, { cell: .01, br: .9, caps: true }); B.box([4.22, 1.4, zz - .06], [4.38, 1.55, zz + .06], .01, { br: .95 }); }
-    for (const s of [-1, 1]) B.line([XMO + s * 1.0, .2, HALL.z0 + .58], [XMO + s * 1.0, PORT[1] - .8, HALL.z0 + .58], .5);
-    B.cyl([XMO + 1.45, 0, HALL.z0 + .35], [XMO + 1.45, PORT[1] - 2.8, HALL.z0 + .35], .08, { cell: .02, br: .7, rings: false });
-    for (let y = .5; y < PORT[1] - 3; y += .25) B.ringP([XMO + 1.45, y, HALL.z0 + .35], XA, ZA, .1, .4);
-    motor(B, [XMO + 1.45, PORT[1] - 2.0, HALL.z0 + .35], [XMO + 1.45, PORT[1] - 2.7, HALL.z0 + .35], .2, { up: ZA });
-    cab(B, [4.2, 0, -8.8], [5.6, 2.3, -6.4], { front: 'x-', st: 'MT', id: 'mt', screen: [.3, 1.3, 1.6, 1.95], gauges: [[1.9, 1.6, .1]], estop: [2.1, 1.1] });
-    tray(B, [4.9, 2.6, -6.2], [4.9, 2.6, -1.0], .3);
-    for (const x of [XMO - 2.4, XMO + 2.4]) { B.box([x - .15, 0, -5.4], [x + .15, .9, -4.6], .03, { br: .7, edge: .8 }); B.knot([x, .95, -5.0], .05, 1, 3, lightQ(7, 'MT', x > 0 ? 1 : 0)); }
+    zone(B, XMO - RL / 2 - 2, ZR.MT - 2.2, XMO + RL / 2 + 2, ZR.MT + 2.2);
+    cab(B, [XMO + RL / 2 + 2.6, 0, ZR.MT - 2.4], [XMO + RL / 2 + 3.6, 2.3, ZR.MT], { front: 'x-', st: 'MT', id: 'mt', screen: [.3, 1.3, 1.9, 1.95], gauges: [[2.1, 1.6, .1]], estop: [2.1, 1.1] });
   });
 }
 function drawMTx(u) {
   L.draw(BB.mtx, BWX, O.st);
-  chainW([XMO - 1.55, .3, HALL.z0 + .4], YA, [0, 0, 1], Math.max(.5, elevY(u) - 1.8), .25, 26, .16, 1);
-  needle(GAUGES.mt0, u > MTT.torque[0] ? lin(u, MTT.torque[0], MTT.torque[1]) : .05);
-  trace('mt', s => s < .5 ? s * 1.6 : .8, lin(u, MTT.torque[0], MTT.torque[1]), 1);
+  chainW([XMO - RL / 2 - 1.2, .05, ZR.MT - 1.6], XA, YA, INS.x - (XMO - RL / 2 - 1.2), .2, RL + 3, .16, 1);
+  needle(GAUGES.mt0, INS.xr * .8 + INS.sc * .5);
+  trace('mt', s => .5 + .3 * Math.sin(s * 30) * .3 + .1 * (s > .5 ? 1 : 0), lin(u, INSP[0], INSP[3]), 1);
 }
 
 /* ---------------- the rod's journey: the gantry's keys and holds ---------------- */
@@ -1729,7 +1802,7 @@ let PIECE = { st: '', X: mkX(), e: 0, held: false };
 function buildJourney() {
   const xe1 = XR + D.Lb / 2 + .26, ytopV = (VY0 + .5) + D.Lb, gx3 = XR + D.Lg / 2 - .4, gx3s = XR + D.Ls / 2 - .4;
   const xF = XF - .4, gxF = xF - .4;                         // the sintered bar's +Z end on the entry table
-  const xFe = XF + D.Lf - .5, x5 = XR + RL / 2 + D.crop - .5, x6 = XR + RL / 2 - .5, x7 = XR + RL / 2 - D.LN - .5, xm = XMO + RL / 2 - D.LN - 1.2;
+  const xFe = XF + D.Lf - .5, x5 = XR + RL / 2 + D.crop - .5, x6 = XR + RL / 2 - .5, x7 = XR + RL / 2 - D.LN - .5, x7c = XR + RL / 2 - D.LN - 1.2, xm = XMO + RL / 2 - D.LN - 1.2;
   D.xF = xF;
   GK = [
     [0, -6, 12, -1, 0], [5.3, -6, 12, -1, 0],
@@ -1741,11 +1814,11 @@ function buildJourney() {
     [16.55, xFe, 8, ZR.R4, 0], [16.8, xFe, YR, ZR.R4, 0], [16.88, xFe, YR, ZR.R4, 0], [17.15, xFe, 5, ZR.R4, 0], [17.6, x5, 5, ZR.R5, 0], [17.85, x5, YR, ZR.R5, 0], [17.9, x5, YR, ZR.R5, 0], [18.15, x5, 7, ZR.R5, 0],
     [19.6, x6, 7, ZR.R5, 0], [19.9, x6, YR, ZR.R5, 0], [19.95, x6, YR, ZR.R5, 0], [20.2, x6, 5, ZR.R5, 0], [20.55, x6, 5, ZR.R6, 0], [20.8, x6, YR, ZR.R6, 0], [20.85, x6, YR, ZR.R6, 0], [21.1, x6 + 1.5, 7, ZR.R6, 0],
     [23.2, x7, 7, ZR.R6, 0], [23.45, x7, YR, ZR.R6, 0], [23.5, x7, YR, ZR.R6, 0], [23.75, x7, 5, ZR.R6, 0], [24.1, x7, 5, ZR.R7, 0], [24.35, x7, YR, ZR.R7, 0], [24.4, x7, YR, ZR.R7, 0], [24.65, x7, 7, ZR.R7, 0],
-    [25.95, x7, 7, ZR.R7, 0], [26.2, x7, YR, ZR.R7, 0], [26.25, x7, YR, ZR.R7, 0], [26.5, x7, 5, ZR.R7, 0], [26.85, x7, 5, ZR.R8, 0], [27.1, x7, YR, ZR.R8, 0], [27.15, x7, YR, ZR.R8, 0], [27.4, x7, 7, ZR.R8, 0],
-    [28.45, x7 - .7, 7, ZR.R8, 0], [28.7, x7 - .7, YR, ZR.R8, 0], [28.75, x7 - .7, YR, ZR.R8, 0], [29.2, x7 - .7, 9, ZR.R8, 0], [57.0, xm, 9, ZR.MT, 0], [57.8, xm, YR, ZR.MT, 0], [57.9, xm, YR, ZR.MT, 0], [58.5, xm, 10, ZR.MT, 0], [80, xm, 10, ZR.MT, 0],
+    [26.9, x7c, 7, ZR.R7, 0], [27.15, x7c, YR, ZR.R7, 0], [27.2, x7c, YR, ZR.R7, 0], [27.45, x7c, 5, ZR.R7, 0], [27.8, x7c, 5, ZR.R8, 0], [28.0, x7c, YR, ZR.R8, 0], [28.05, x7c, YR, ZR.R8, 0], [28.3, x7c, 8, ZR.R8, 0],
+    [30.65, x7c, 8, ZR.R8, 0], [30.9, x7c, YR, ZR.R8, 0], [30.95, x7c, YR, ZR.R8, 0], [31.4, x7c, 12, ZR.R8, 0], [57.0, xm, 12, ZR.MT, 0], [57.8, xm, YR, ZR.MT, 0], [57.9, xm, YR, ZR.MT, 0], [58.4, xm, 12, ZR.MT, 0], [59.6, xm, 12, 30, 0], [80, xm, 12, 30, 0],
   ];
   GH = [[6.15, 7.9, D.Lb / 2 + .26, 'mould'], [9.8, 11.3, D.Lg / 2 - .4, 'green'], [13.0, 14.12, D.Ls / 2 - .4, 'sint'], [16.85, 17.88, RL / 2 + D.crop - .5, 'forged'],
-    [19.93, 20.83, RL / 2 - .5, 'turned'], [23.48, 24.38, RL / 2 - D.LN - .5, 'body'], [26.23, 27.13, RL / 2 - D.LN - .5, 'coated'], [28.73, 57.88, RL / 2 - D.LN - 1.2, 'coated']];
+    [19.93, 20.83, RL / 2 - .5, 'turned'], [23.48, 24.38, RL / 2 - D.LN - .5, 'body'], [27.18, 28.03, RL / 2 - D.LN - 1.2, 'cased'], [30.93, 57.88, RL / 2 - D.LN - 1.2, 'cured']];
 }
 /* where the rod is and what it is, at u (rod frame: +Z the nose) */
 function pieceAt(u) {
@@ -1758,34 +1831,27 @@ function pieceAt(u) {
   else if (u < 16.85) { P.st = 'forge'; at2(P.X, BWX, 0, YR, ZR.R4, 1, PI / 2, 2, u < FG0 ? 0 : R4S.spin); }
   else if (u < 19.93) { P.st = 'turn'; at2(P.X, BWX, XR, YR, ZR.R5, 1, PI / 2, 2, u > 17.95 && u < 19.8 ? R5S.spin : 0); }
   else if (u < 23.48) { P.st = 'mill'; at2(P.X, BWX, XR, YR, ZR.R6, 1, PI / 2, 2, R6S.spin); }
-  else if (u < 26.23) { P.st = 'coat'; at2(P.X, BWX, XR, YR, ZR.R7, 1, PI / 2, 2, u > SPR[0] - .2 && u < SPR[1] + .2 ? R7S.spin : 0); }
-  else if (u < 28.73) { P.st = 'coated'; at(P.X, BWX, XR, YR, ZR.R8, 1, PI / 2); }
-  else { P.st = u < MATE[0] ? 'coated' : 'mated'; const R_ = roundAt(u); for (let i = 0; i < 9; i++) P.X.R[i] = R_.R[i]; for (let i = 0; i < 3; i++) P.X.T[i] = R_.T[i]; }
+  else if (u < 27.18) { P.st = 'case'; at(P.X, BWX, XR, YR, ZR.R7, 1, PI / 2); }
+  else if (u < 30.93) { P.st = 'fill'; at(P.X, BWX, XR, YR, ZR.R8, 1, PI / 2); }
+  else { P.st = 'done'; const R_ = roundAt(u); for (let i = 0; i < 9; i++) P.X.R[i] = R_.R[i]; for (let i = 0; i < 3; i++) P.X.T[i] = R_.T[i]; }
   return P;
 }
-const MATE = [61.4, 62.0];
-/* the finished rod (rod frame): tail (core + fins), body, front face with the bay; o for the body, oc coated */
-const XRAYW = [60.85, 61.15, 63.1, 63.5];
-function drawFinished(X_, o, cz) {
-  // cz: coated below this (rod frame); -inf none, +inf all
+/* the round (rod frame): the core (tail with its fins, the body, the ogive), the casing's sections on it (ns of them,
+   their joints welded), the fill (X-ray: the casing faint, the core and the fill's front seen through it) */
+const XRS = mkX();
+let XRV = 0;                                                   // the X-ray's share this frame (the fill, the inspection)
+function drawRound(X_, ns, nw, o, xr, fillTo) {
   const t0 = -RL / 2, t1 = -RL / 2 + D.LT, f = RL / 2 - D.LN;
-  const xr = A_ > XRAYW[0] && A_ < XRAYW[3] ? ss(XRAYW[0], XRAYW[1], A_) * (1 - ss(XRAYW[2], XRAYW[3], A_)) : 0;
-  if (xr > .02 && cz >= f) {
-    // the rod up to the nose bay as it is; the bay's length X-rayed (sparse, dim) with its bore's walls in lime
-    const zb = f - D.dbore - .3;
-    run(S_.core, X_, t0, 1, D.LT, O.coat); capAt(S_.core, X_, t0, O.coat); for (let k = 0; k < 6; k++) L.draw(BB.fins[k], X_, O.coat);
-    run(S_.trn, X_, t1, 1, zb - t1, O.coat);
-    O.xrod.keep = 1 - .8 * xr; O.xrod.a = (1 - .55 * xr) * OA_X; run(S_.trn, X_, zb, 1, f - zb, O.xrod);
-    O.xbay.lime = .7 * xr; L.draw(BB.bay, X_, O.xbay);
-    return;
-  }
-  const oT = cz > t1 ? O.coat : o;
-  run(S_.core, X_, t0, 1, D.LT, oT); capAt(S_.core, X_, t0, oT);
-  for (let k = 0; k < 6; k++) L.draw(BB.fins[k], X_, oT);
-  if (cz <= t1) run(S_.trn, X_, f, -1, f - t1, o);
-  else if (cz >= f) run(S_.trn, X_, t1, 1, f - t1, O.coat);
-  else { run(S_.trn, X_, t1, 1, cz - t1, O.coat); run(S_.trn, X_, f, -1, f - cz, o); }
-  L.draw(BB.bay, X_, cz >= f ? O.coat : o);
+  const oc = xr > .02 ? O.xrod : o;
+  if (xr > .02) { O.xrod.keep = 1; O.xrod.a = OA_X * (1 - .2 * xr); O.xrod.lime = .25 * xr; }
+  run(S_.core, X_, t0, 1, D.LT, oc); capAt(S_.core, X_, t0, oc); for (let k = 0; k < 6; k++) L.draw(BB.fins[k], X_, oc);
+  run(S_.trn, X_, t1, 1, f - t1, oc);
+  for (let i = 0; i < BB.ogs.length; i++) L.draw(BB.ogs[i], X_, o);
+  if (fillTo !== undefined && fillTo > D.zc0) { O.fillo.lime = xr > .02 ? .5 : .1; run(S_.fill, X_, D.zc0, 1, Math.min(D.zc1, fillTo) - D.zc0, O.fillo); }
+  const os = xr > .02 ? O.capx : O.heroG;
+  if (xr > .02) { O.capx.keep = 1 - .75 * xr; O.capx.a = 1.1 * (1 - .4 * xr); O.capx.lime = .3 * xr; }
+  for (let k = 0; k < Math.min(ns, D.NSEC); k++) { at(XRS, X_, 0, 0, D.zc1 - (k + 1) * D.secL); L.draw(BB.sec, XRS, os); }
+  for (let k = 0; k < Math.min(nw, D.NSEC + 1); k++) { at(XRS, X_, 0, 0, D.zc1 - k * D.secL); L.draw(BB.jring, XRS, O.heroG); }
 }
 function drawPiece(u) {
   const P = PIECE, X_ = P.X, st = P.st;
@@ -1857,23 +1923,21 @@ function drawPiece(u) {
     capAt(S_.sint[S_.sint.length - 1], X_, -RL / 2, O.heroG);
     // the body, the nose (blank above the contouring front, the ogive's slices beyond it), then the cap leaves
     run(S_.trn, X_, t1, 1, zf - t1, O.heroG);
-    if (u < PART[1]) {
+    {
       const oz = R6S.oz; if (oz > zf + .001) run(S_.trn, X_, zf, 1, oz - zf, O.heroG);
       if (oz < RL / 2 - .01) capAt(S_.trn, X_, oz, O.heroG);
       const NS = BB.ogs.length; for (let i = 0; i < NS; i++) { const sa = zf + D.LN * i / NS; if (sa >= oz - 1e-4) L.draw(BB.ogs[i], X_, O.hero); }
       if (oz > RL / 2 - .01) capAt(S_.trn, X_, RL / 2, O.heroG);
     }
-    if (u >= PART[1]) L.draw(BB.bay, X_, O.hero);
     return;
   }
-  if (st === 'body') { drawFinished(X_, O.heroG, -99); return; }
-  if (st === 'coat') { drawFinished(X_, O.heroG, u < SPR[0] ? -99 : R7S.cz); return; }
-  if (st === 'coated') { drawFinished(X_, O.heroG, 99); return; }
-  if (st === 'mated') { drawFinished(X_, O.heroG, 99); return; }
+  const N = D.NSEC;
+  if (st === 'body') { drawRound(X_, 0, 0, O.heroG, 0); return; }
+  if (st === 'case') { let nw = 0; for (let k = 0; k < N; k++) if (u > CSW(k)[4]) nw++; if (u > CSEND + .17) nw++; drawRound(X_, nSecOn(u), nw, O.heroG, 0); return; }
+  if (st === 'cased') { drawRound(X_, N, N + 1, O.heroG, 0); return; }
+  if (st === 'fill') { XRV = ss(FL[0] - .12, FL[0] + .03, u) * (1 - ss(FL[1] + .02, FL[1] + .15, u)); drawRound(X_, N, N + 1, O.heroG, XRV, u < FL[0] ? undefined : D.zc0 + (D.zc1 - D.zc0) * R8S.fill); return; }
+  if (st === 'cured' || st === 'done') { XRV = INS.xr; drawRound(X_, N, N + 1, O.heroG, XRV); return; }
 }
-const XCAP = mkX();
-/* the nose cap after the part-off: held by the robot, then on the shuttle */
-function drawCapAt(u) { capPose(u); atL(XCAP, BWX, CAPW[0], CAPW[1], CAPW[2], 1, 0, 0, 0, 1, 0); L.draw(BB.cap, XCAP, O.hero); }
 
 /* ---------------- the lime scan: a plane sweeping a part's box (its frame), the films' identification look ---------------- */
 const SW0 = [0, 0, 0], SW1 = [0, 0, 0], SWC = [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]];
@@ -2011,6 +2075,11 @@ function buildC2() {
       const n = mirN3([LX, a[0], a[1]], [LX, c[0], c[1]], [LX, b[0], b[1]]), [U, W] = L.perp(n);
       B.chunk('fm');
       for (let i = -3; i <= 3; i++) for (let j = -2; j <= 2; j++) B.knot([LX + U[0] * i * .045 + W[0] * j * .045, c[0] + U[1] * i * .045 + W[1] * j * .045, c[1] + U[2] * i * .045 + W[2] * j * .045], .036, 1, 15, 2);
+      // its mount: a backing plate, a strut back to a hub, the hub's arm to the frame's wall (x 6.7)
+      const cc = [LX, c[0], c[1]], bp = V.mad(cc, n, -.03), hub = V.mad(cc, n, -.22);
+      B.panel(add(add(bp, mul(U, -.17)), mul(W, -.12)), mul(U, .34), mul(W, .24), .02, { n: mul(n, -1), br: .55, edge: .9, two: true });
+      for (const [su, sw] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) B.line(add(add(bp, mul(U, su * .14)), mul(W, sw * .09)), hub, .7);
+      B.knot(hub, .03, .9); B.tube(hub, [6.72, hub[1], hub[2]], .02, .75); B.ringP([6.73, hub[1], hub[2]], YA, ZA, .05, .8);
     }
     // the source vessel: its cone to the intermediate focus, the drum, the droplet generator and catcher
     B.chunk('src');
@@ -2040,6 +2109,11 @@ function buildC2() {
       B.chunk('m' + i);
       B.lathe(V.mad(m, n, -.002), n, [[0, 0], [0, r]], { cell: .005, br: 1.2, two: true, rings: false, ch: 15, q: 10 + i });
       B.ringP(m, U, W, r, 1, 15, 10 + i); B.lathe(V.mad(m, n, -.06), n, [[0, r * .95], [.05, r * .95]], { cell: .015, br: .6 });
+      // the mirror's cell on three flexure legs to a hub, the hub on an arm from the optics box's frame (x 6.7)
+      const hub = V.mad(m, n, -.24); B.lathe(V.mad(m, n, -.11), n, [[0, r * .3], [.03, r * .3]], { cell: .01, br: .8, caps: true });
+      for (let k = 0; k < 3; k++) { const a = k / 3 * TAU + .5, p = add(V.mad(m, n, -.08), add(mul(U, Math.cos(a) * r * .9), mul(W, Math.sin(a) * r * .9))); B.line(p, hub, .75); B.knot(p, .012, .9); }
+      B.knot(hub, .03, .95); B.tube(hub, [6.72, hub[1], hub[2]], .02, .75); B.ringP([6.73, hub[1], hub[2]], YA, ZA, .05, .8);
+      for (const s_ of [-1, 1]) B.line(add(hub, [0, s_ * .04, 0]), [6.72, hub[1] + s_ * .12, hub[2]], .5);
     }
   });
   BB.reticle = mkB('ret', B => { B.box([-.125, .0, -.125], [.125, .05, .125], .015, { br: .9, edge: .8 }); B.box([-.076, -.007, -.076], [.076, 0, .076], .006, { br: 1, edge: 1, ch: 15, q: 5 }); for (let k = -3; k <= 3; k++) B.line([-.07, -.0072, k * .02], [.07, -.0072, k * .02], .6, 15, 5); });
@@ -2088,7 +2162,7 @@ function lightPath(P, u, a, speed, gap) {
 const DPAT = [[-.8, .15, -.05, .8], [.05, .15, .8, .8], [-.8, -.55, .2, .05], [.32, -.55, .8, -.18], [-.75, -.9, .75, -.84], [-.75, .84, .75, .9]];
 let DPON = false;
 function drawC2(u) {
-  DPON = U_ > BW_.C2c[0] - 1.5 && U_ < BW_.C2c[1] + 2;
+  DPON = U_ > BW_.AI2[0] + 3 && U_ < BW_.AI2[1] + 2;
   const xr = ss(33.2, 33.9, u) * (1 - ss(40.3, 41.0, u)), on = ss(33.6, 34.4, u) * (1 - ss(40.1, 40.5, u));
   O.mcx.keep = .9 - .5 * xr; O.mcx.a = .92 - .35 * xr;
   L.draw(BB.c2, BWX, xr > .02 ? O.mcx : O.st);
@@ -2285,7 +2359,7 @@ function buildC6() {
   });
   BB.mcover = mkB('mc', B => { const r = D.rc - .043; B.lathe([0, .006, 0], YA, [[0, r], [.045, r], [.055, r - .01], [.055, 0]], { cell: .005, br: 1, rbr: .9, seams: 12 }); });
 }
-const DIEP = [0, 0, 0], BHP = [0, 0, 0];
+const DIEP = [0, 0, 0], BHP = [0, 0, 0], MODX = mkX();
 function c6State(u) {
   const w = C6.w, b = C6.b, dW = [w[0] + .013, w[1] + .001, w[2] - .0165], up = .12, dY = b[1] + .0068;
   DIEP[0] = dW[0]; DIEP[1] = dW[1]; DIEP[2] = dW[2];
@@ -2332,305 +2406,6 @@ function drawC6(u) {
       K.lineW(WIRE[0], WIRE[1], WIRE[2], WIRE2[0], WIRE2[1], WIRE2[2], 1.2, 1, age < .25 ? LIME : WH, u > C6T.lid[1] ? 0 : 1);
     }
   }
-}
-
-/* ---------------- C7 · casing machining ---------------- */
-const C7 = { z: ZC.C7, t: [7.5, .9, ZC.C7] };
-const CUT7 = [50.45, 51.75], BORE7 = [51.8, 52.15];
-function buildC7() {
-  const z = C7.z;
-  BB.c7 = mkB('c7', B => {
-    B.chunk('base'); bx(B, 5.8, 0, z - 1.3, 9.4, .7, z + 1.3, .07, { br: .8, occ: 'c7' });
-    B.chunk('encl'); for (const x of [5.8, 9.4]) for (const zz of [z - 1.3, z + 1.3]) B.tube([x, .7, zz], [x, 2.7, zz], .04, .55);
-    B.line([5.8, 2.7, z - 1.3], [9.4, 2.7, z - 1.3], .5); B.line([5.8, 2.7, z + 1.3], [9.4, 2.7, z + 1.3], .5); B.line([5.8, 2.7, z - 1.3], [5.8, 2.7, z + 1.3], .5); B.line([9.4, 2.7, z - 1.3], [9.4, 2.7, z + 1.3], .5);
-    B.panel([9.4, .7, z - 1.3], [0, 0, 2.6], [0, 2.0, 0], .15, { n: [-1, 0, 0], br: .12, edge: .3, two: true });
-    B.chunk('trun'); bx(B, 6.9, .7, z - .45, 8.1, .8, z + .45, .03, { br: .85 });
-    B.knot([9.35, 2.6, z + 1.25], .06, 1, 3, 1032);
-    B.chunk('lidfix'); B.cyl([8.65, .7, z - .75], [8.65, .82, z - .75], .2, { cell: .01, br: .85, caps: true });
-  });
-  BB.c7col = mkB('c7c', B => { B.box([-.2, 0, -.2], [.2, 1.2, .2], .03, { br: .9, edge: .85 }); B.box([-.03, -.33, -.03], [.03, 0, .03], .006, { br: 1, edge: .9 }); });
-  BB.c7rot = mkB('c7r', B => { B.cyl([0, -.1, 0], [0, 0, 0], .28, { cell: .015, br: .9, caps: true, seams: 12 }); for (let k = 0; k < 3; k++) { const a = k / 3 * TAU; B.box([Math.cos(a) * .22 - .03, 0, Math.sin(a) * .22 - .03], [Math.cos(a) * .22 + .03, .06, Math.sin(a) * .22 + .03], .01, { br: 1, edge: .9 }); } });
-  S_.cblank = rodSet(D.rc - .004, .85, 1 / 512); S_.cwall = rodSet(D.rc - .03, 1, 1 / 512);
-}
-function drawC7(u) {
-  const t = C7.t, sp = u * 6;
-  L.draw(BB.c7, BWX, O.st);
-  at(XF4, BWX, t[0], t[1], t[2], 1, sp); L.draw(BB.c7rot, XF4, O.mc);
-  // the tool down the side as the blank turns, then into the top for the bore
-  const yf = t[1] + .03 + (D.Lc - .03) * (1 - kk(u, CUT7[0], CUT7[1]));
-  let hx = t[0] - D.rc + .028, hy = yf + .33;
-  if (u < CUT7[0] - .15 || u > BORE7[1] + .15) { hx = t[0] - .7; hy = t[1] + D.Lc + .6; }
-  else if (u < CUT7[0]) { const k = kk(u, CUT7[0] - .15, CUT7[0]); hx = mix(t[0] - .7, hx, k); hy = mix(t[1] + D.Lc + .6, hy, k); }
-  else if (u > CUT7[1] && u < BORE7[0]) { const k = kk(u, CUT7[1], BORE7[0]); hx = mix(hx, t[0], k); hy = mix(hy, t[1] + D.Lc + .35, k); }
-  else if (u >= BORE7[0]) { const k = Math.sin(PI * lin(u, BORE7[0], BORE7[1])); hx = t[0]; hy = t[1] + D.Lc + .35 - .3 * k; }
-  at(XF4, BWX, hx, hy, t[2]); L.draw(BB.c7col, XF4, O.mc);
-  if (u > CUT7[0] && u < CUT7[1]) spray(u, CUT7[0], CUT7[1], 70, t[0] - D.rc + .03, yf, t[2] - .04, -.6, .3, -.75, .4, .8, 2, .4, WH, .9, 1, 71);
-  if (u > BORE7[0] && u < BORE7[1]) spray(u, BORE7[0], BORE7[1], 40, t[0], t[1] + D.Lc, t[2], 0, 1, 0, .6, .6, 1.4, .35, WH, .9, 1, 72);
-}
-
-/* ---------------- C8 · the shielding wrap ---------------- */
-const C8 = { z: ZC.C8, c: [7.5 - D.Lc / 2, 1.25, ZC.C8] };
-const NLAY = 12, WRAP = [52.75, 54.75];
-function buildC8() {
-  const z = C8.z; C8.c[0] = 7.5 - D.Lc / 2; const x0 = C8.c[0], x1 = x0 + D.Lc;
-  BB.c8 = mkB('c8', B => {
-    B.chunk('base'); bx(B, x0 - .9, 0, z - .8, x1 + .9, .75, z + .8, .06, { br: .8, occ: 'c8' });
-    bx(B, x0 - .8, .75, z - .35, x0 - .15, 1.6, z + .35, .03, { br: .9, occ: 'c8' }); bx(B, x1 + .15, .75, z - .3, x1 + .7, 1.5, z + .3, .03, { br: .9, occ: 'c8' });
-    B.cyl([x0 - .15, 1.25, z], [x0 + .02, 1.25, z], .1, { cell: .01, br: .95, caps: true }); B.cyl([x1 - .02, 1.25, z], [x1 + .15, 1.25, z], .06, { cell: .01, br: .95, caps: true });
-    bx(B, x0 - .3, .75, z - .75, x1 + .3, .85, z - .6, .03, { br: .7 });
-    B.knot([x1 + .65, 1.52, z], .06, 1, 3, 1033);
-  });
-  BB.thead = mkB('th', B => {                                // origin: its foot on the rail; the roller at (0, .42, .27)
-    B.box([-.12, 0, -.08], [.12, .12, .08], .015, { br: .9, edge: .8 });
-    B.box([-.04, .12, -.03], [.04, .42, .03], .01, { br: .9, edge: .8 }); B.box([-.03, .38, .0], [.03, .44, .27], .008, { br: .9, edge: .8 });
-    B.lathe([0, .66, -.03], ZA, [[0, .03], [0, .15], [.06, .15], [.06, .03]], { cell: .006, br: .95, rbr: .9 });
-    B.cyl([0, .42, .24], [0, .42, .3], .022, { cell: .004, br: 1, caps: true });
-  });
-  BB.wrap = mkB('wr', B => {
-    for (let l = 0; l < NLAY; l++) {
-      const r = D.rc - .03 + .0025 * (l + 1), turns = 9, P = [];
-      for (let k = 0; k <= turns * 24; k++) { const a = k / 24 * TAU + l * .7, zz = .04 + (D.Lc - .1) * k / (turns * 24); P.push([Math.cos(a) * r, Math.sin(a) * r, zz]); }
-      B.chunk('l' + l); B.poly(P, false, .75, 17, l);
-    }
-  });
-}
-const C8S = { lay: 0, hx: 0, sp: 0 };
-function c8State(u) {
-  const t = lin(u, WRAP[0], WRAP[1]) * NLAY; C8S.lay = u < WRAP[0] ? 0 : t;
-  const k = t % 1, dir = Math.floor(t) % 2 ? -1 : 1;
-  C8S.hx = .04 + (D.Lc - .1) * (dir > 0 ? k : 1 - k);
-  C8S.sp = u * 9;
-}
-function drawC8(u) {
-  L.draw(BB.c8, BWX, O.st);
-  const c = C8.c, x = c[0] + (u > WRAP[0] && u < WRAP[1] ? C8S.hx : -.2);
-  at(XF4, BWX, x, .83, c[2] - D.rc - .3); L.draw(BB.thead, XF4, O.mc);
-  if (u > WRAP[0] && u < WRAP[1]) { apX(BWX, x, .83 + .66 - .15, c[2] - D.rc - .33, PW); apX(BWX, x, c[1], c[2] - D.rc, PW2); K.lineW(PW[0], PW[1], PW[2], PW2[0], PW2[1], PW2[2], 1.5, 1, LIME, .7); }
-}
-
-/* ---------------- C9 · assembly and the laser seam weld ---------------- */
-const C9 = { z: ZC.C9, t: [7.5, .9, ZC.C9], tray: [6.2, .9, ZC.C9 + 1.0], lidp: [6.2, .9, ZC.C9 - 1.0], rb: [5.0, 0, ZC.C9] };
-const C9T = { mod: [55.15, 55.9], lid: [55.95, 56.6], weld: [56.65, 57.55] };
-function buildC9() {
-  const z = C9.z, t = C9.t;
-  BB.c9 = mkB('c9', B => {
-    B.chunk('base'); bx(B, 6.9, 0, z - .6, 8.4, .78, z + .6, .05, { br: .8, occ: 'c9' });
-    B.cyl([t[0], .78, t[2]], [t[0], .86, t[2]], .26, { cell: .012, br: .9, caps: true, seams: 12 });
-    for (const p of [C9.tray, C9.lidp]) bx(B, p[0] - .25, 0, p[2] - .25, p[0] + .25, p[1], p[2] + .25, .04, { br: .8 });
-    B.chunk('laser'); bx(B, 8.9, 0, z - .15, 9.2, 2.2, z + .15, .03, { br: .85 }); bx(B, t[0] + D.rc + .1, 2.05, z - .1, 9.2, 2.2, z + .1, .02, { br: .85 });
-    B.knot([9.05, 2.25, z], .06, 1, 3, 1034);
-  });
-  BB.lhead = mkB('lh', B => { B.cyl([0, 0, 0], [0, .35, 0], .05, { cell: .01, br: 1, caps: true }); B.lathe([0, 0, 0], [0, -1, 0], [[0, .05], [.06, .02]], { cell: .006, br: 1 }); B.box([-.04, .35, -.04], [.04, .5, .04], .01, { br: .9 }); });
-  BB.arm9c = mkArm({ H: .8, L1: 1.0, L2: .95, LT: .3, r: .13 });
-}
-const C9P = { home: [6.3, 1.7, ZC.C9 + .4] };
-function c9Arm(u) {
-  const t = C9.t, mt = C9.tray, lp = C9.lidp, top = t[1] + D.Lc, H = C9P.home;
-  const g1 = [mt[0], mt[1] + .02 + .075, mt[2]], above = [t[0], top + .3, t[2]], inCan = [t[0], t[1] + .035 + .075, t[2]];
-  const lg = [lp[0], lp[1] + .07, lp[2]], lidOn = [t[0], top + .02, t[2]];
-  const seg = (a, b, k, lift) => { AP[0] = mix(a[0], b[0], k); AP[1] = mix(a[1], b[1], k) + (lift || 0) * Math.sin(PI * k); AP[2] = mix(a[2], b[2], k); };
-  const m = C9T.mod, l = C9T.lid;
-  if (u < m[0]) seg(H, H, 0);
-  else if (u < m[0] + .22) seg(H, g1, kk(u, m[0], m[0] + .22));
-  else if (u < m[0] + .48) seg(g1, above, kk(u, m[0] + .22, m[0] + .48), .15);
-  else if (u < m[1]) seg(above, inCan, kk(u, m[0] + .48, m[1]));
-  else if (u < l[0] + .1) seg(inCan, lg, kk(u, m[1], l[0] + .1), .35);
-  else if (u < l[1]) seg(lg, lidOn, kk(u, l[0] + .1, l[1]), .3);
-  else seg(lidOn, H, kk(u, l[1], l[1] + .45), .1);
-  AD[0] = 0; AD[1] = -1; AD[2] = 0;
-}
-function drawC9(u) {
-  L.draw(BB.c9, BWX, O.st);
-  const t = C9.t, sy = t[1] + D.Lc - .05;
-  at(XF4, BWX, t[0] + D.rc + .2, sy + .5, t[2], 2, .4); L.draw(BB.lhead, XF4, O.mc);
-  const on = ss(C9T.weld[0] - .05, C9T.weld[0] + .05, u) * (1 - ss(C9T.weld[1] - .05, C9T.weld[1] + .05, u));
-  if (on > .02) {
-    apX(BWX, t[0] + D.rc + .2 - Math.sin(.4) * 0, sy + .5, t[2], PW); apX(BWX, t[0] + D.rc + .002, sy, t[2], PW2);
-    K.lineW(PW[0], PW[1], PW[2], PW2[0], PW2[1], PW2[2], 1.2, 1, HOT, .8 * on);
-    K.glowW(PW2[0], PW2[1], PW2[2], 60, HOT, .7 * on); K.glowW(PW2[0], PW2[1], PW2[2], 16, [255, 255, 255], on); K.glowW(PW2[0], PW2[1], PW2[2], 34, LIME, .3 * on);
-    spray(u, C9T.weld[0], C9T.weld[1], 140, t[0] + D.rc, sy, t[2], .5, .7, -.3, .6, .6, 1.8, .3, GLC, on, 2, 91);
-  }
-  c9Arm(u); armPose(BB.arm9c, C9.rb, AP, AD, 0); armDraw(BB.arm9c, O.mc);
-}
-
-/* ---------------- C10 · CT inspection of the sealed capsule (its outside only) ---------------- */
-const C10 = { z: ZC.C10, t: [7.5, .9, ZC.C10], src: [5.95, 1.3, ZC.C10], det: 9.75 };
-const CT = [58.2, 60.05];
-function buildC10() {
-  const z = C10.z, t = C10.t;
-  BB.c10 = mkB('c10', B => {
-    B.chunk('cab');
-    for (const x of [5.0, 10.2]) for (const zz of [z - 1.1, z + 1.1]) B.tube([x, 0, zz], [x, 2.4, zz], .04, .55);
-    B.line([5.0, 2.4, z - 1.1], [10.2, 2.4, z - 1.1], .5); B.line([5.0, 2.4, z + 1.1], [10.2, 2.4, z + 1.1], .5); B.line([5.0, 2.4, z - 1.1], [5.0, 2.4, z + 1.1], .5); B.line([10.2, 2.4, z - 1.1], [10.2, 2.4, z + 1.1], .5);
-    B.panel([5.0, 0, z + 1.1], [5.2, 0, 0], [0, 2.4, 0], .2, { n: [0, 0, -1], br: .1, edge: .3, two: true });
-    bx(B, 5.0, 0, z - 1.1, 10.2, .7, z + 1.1, .1, { br: .55, occ: 'c10' });
-    B.chunk('src'); B.cyl([5.25, 1.3, z], [5.95, 1.3, z], .14, { cell: .015, br: .95, caps: true, seams: 6 }); bx(B, 5.15, .7, z - .18, 5.6, 1.16, z + .18, .03, { br: .85 });
-    B.chunk('det'); bx(B, 9.75, 1.05, z - .23, 9.85, 1.55, z + .23, .012, { br: .95 }); bx(B, 9.85, .7, z - .1, 10.0, 1.4, z + .1, .02, { br: .8 });
-    for (let k = 1; k < 8; k++) B.line([9.749, 1.05 + k * .0625, z - .23], [9.749, 1.05 + k * .0625, z + .23], .3);
-    B.cyl([t[0], .7, t[2]], [t[0], t[1], t[2]], .18, { cell: .012, br: .9, caps: true, seams: 12 });
-    B.knot([10.15, 2.35, z + 1.05], .06, 1, 3, 1035);
-  });
-}
-const CTS = { h: 0, on: 0 };
-function c10State(u) { CTS.on = ss(CT[0] - .1, CT[0] + .1, u) * (1 - ss(CT[1], CT[1] + .2, u)); CTS.h = C10.t[1] + .02 + (D.Lc - .04) * kk(u, CT[0] + .15, CT[1] - .1); }
-function drawC10(u) {
-  L.draw(BB.c10, BWX, O.st);
-  if (CTS.on < .02) return;
-  const s = C10.src, z = C10.z, a = CTS.on;
-  // the cone of the beam: the focal spot to the detector's corners (faint lime)
-  for (const [dy, dz] of [[-.24, -.22], [-.24, .22], [.24, -.22], [.24, .22], [0, 0]]) { apX(BWX, s[0], s[1], s[2], PW); apX(BWX, C10.det - .002, 1.3 + dy, z + dz, PW2); K.lineW(PW[0], PW[1], PW[2], PW2[0], PW2[1], PW2[2], 4, 1, LIME, .3 * a); }
-  apX(BWX, s[0], s[1], s[2], PW); K.glowW(PW[0], PW[1], PW[2], 16, LIME, .6 * a);
-  // the scan plane: a lime ring round the capsule's skin at its height, a faint square plane across it
-  const h = CTS.h, t = C10.t, r = D.rc + .006;
-  for (let k = 0; k < 90; k++) { const an = k / 90 * TAU; apX(BWX, t[0] + Math.cos(an) * r, h, t[2] + Math.sin(an) * r, PW); K.dotW(PW[0], PW[1], PW[2], 2, LIME, a); }
-  for (let k = -4; k <= 4; k++) { apX(BWX, t[0] - .38, h, t[2] + k * .09, PW); apX(BWX, t[0] + .38, h, t[2] + k * .09, PW2); K.lineW(PW[0], PW[1], PW[2], PW2[0], PW2[1], PW2[2], 5, 1, LIME, .18 * a); apX(BWX, t[0] + k * .09, h, t[2] - .38, PW); apX(BWX, t[0] + k * .09, h, t[2] + .38, PW2); K.lineW(PW[0], PW[1], PW[2], PW2[0], PW2[1], PW2[2], 5, 1, LIME, .18 * a); }
-  // the detector reads (a bright band where the plane's shadow falls)
-  apX(BWX, C10.det - .003, 1.3 + (h - 1.3) * .6, z, PW); K.glowW(PW[0], PW[1], PW[2], 22, LIME, .35 * a);
-}
-
-/* ---------------- the capsule: can, wrap, lid (frame: the base at 0, axis +Z) ---------------- */
-function buildCapsule() {
-  const r = D.rc, Lc = D.Lc, rw = r - .03;
-  BB.can = mkB('cn', B => {
-    B.lathe([0, 0, 0], ZA, [[0, 0], [0, r], [.025, r], [.025, rw], [Lc - .05, rw], [Lc - .05, rw - .012], [Lc - .065, rw - .012]], { cell: .005, br: .95, rbr: .8 });
-    B.lathe([0, 0, .03], ZA, [[0, rw - .012], [Lc - .1, rw - .012]], { cell: .01, br: .3, two: true, rings: false });
-  });
-  BB.lid = mkB('ld', B => { B.lathe([0, 0, 0], ZA, [[0, rw], [0, r], [.035, r], [.045, r - .015], [.045, .06], [.06, .06], [.06, 0]], { cell: .005, br: 1, rbr: .85 }); });
-  BB.wrapS = mkB('ws', B => B.lathe([0, 0, .035], ZA, [[0, r - .001], [Lc - .09, r - .001]], { cell: .005, br: .85, rings: true, rbr: .75, seams: 24, sbr: .3 }));
-  BB.seam = mkB('sm', B => { B.ringP([0, 0, Lc - .05], XA, YA, r + .002, 1); B.ringP([0, 0, .025], XA, YA, r + .002, .8); });
-}
-const CAPS = { X: mkX(), C: [0, 0, 0], f: [0, 1, 0] };
-const MODX = mkX(), XLID = mkX();
-/* the capsule at u: C7 (cut from the blank), C8 (wrapped), C9 (assembled, welded), C10, then over to the mating */
-/* the capsule between C7, C8 and C9: lifted by a handler on the clean room's overhead rail, turned, set down */
-const TRF = [[52.48, 52.68], [54.86, 55.06]];
-BB.hand = null;
-const HTIP = [0, 0, 0];
-function handOn() {
-  if (!BB.hand) BB.hand = mkB('hd', B => { B.box([-.05, -.05, .0], [.05, .05, .12], .01, { br: .95, edge: .9 }); for (const s of [-1, 1]) B.box([s * (D.rc + .01) - .012, -.03, -.06], [s * (D.rc + .01) + .012, .03, .04], .006, { br: 1, edge: .9 }); }, 1);
-  at(XF4, CAPS.X, 0, 0, D.Lc); L.draw(BB.hand, XF4, O.mc);
-  apX(CAPS.X, 0, 0, D.Lc + .12, HTIP); apX(BWX, 0, 2.6, 0, PW2); const up = dirX(BWX, 0, 1, 0, [0, 0, 0]), dy = 2.6 - (V.dot(sub(HTIP, BWX.T), up));
-  K.lineW(HTIP[0], HTIP[1], HTIP[2], HTIP[0] + up[0] * dy, HTIP[1] + up[1] * dy, HTIP[2] + up[2] * dy, 2, 1, WH, .6);
-}
-function drawCapsule(u) {
-  const r = D.rc, Lc = D.Lc;
-  for (const [k, w] of TRF.entries()) if (u >= w[0] && u < w[1]) {
-    const t = kk(u, w[0], w[1]), up = Math.sin(PI * t) * .45;
-    const A = k === 0 ? [C7.t[0], C7.t[1], C7.t[2]] : [C8.c[0] + Lc / 2, C8.c[1], C8.c[2]], Bp = k === 0 ? [C8.c[0] + Lc / 2, C8.c[1], C8.c[2]] : [C9.t[0], C9.t[1] + Lc / 2, C9.t[2]];
-    if (k === 0) A[1] += Lc / 2;
-    const ang = k === 0 ? PI / 2 * kk(t, .2, .8) : PI / 2 * (1 - kk(t, .2, .8));
-    const cx = mix(A[0], Bp[0], t), cy = mix(A[1], Bp[1], t) + up, cz = mix(A[2], Bp[2], t);
-    // axis turns from up (+y) to along +x (lying in the wrap's centres) and back
-    const ax = [Math.sin(ang), Math.cos(ang), 0];
-    atL(CAPS.X, BWX, cx - ax[0] * Lc / 2, cy - ax[1] * Lc / 2, cz, ax[0], ax[1], ax[2], 0, 0, 1);
-    L.draw(BB.can, CAPS.X, O.hero); if (k === 1) L.draw(BB.wrapS, CAPS.X, O.heroD);
-    handOn();
-    return;
-  }
-  if (u > 49.4 && u < TRF[0][0]) {
-    const t = C7.t; at2(CAPS.X, BWX, t[0], t[1], t[2], 1, u * 6, 0, -PI / 2);
-    const fr = .03 + (Lc - .03) * (1 - kk(u, CUT7[0], CUT7[1]));
-    run(S_.cblank, CAPS.X, 0, 1, fr, O.hero); capAt(S_.cblank, CAPS.X, 0, O.hero); capAt(S_.cblank, CAPS.X, fr, O.hero);
-    if (Lc - fr > .002) run(S_.cwall, CAPS.X, Lc, -1, Lc - fr, O.hero);
-    if (u < BORE7[0] + .15) capAt(S_.cwall, CAPS.X, Lc, O.hero);
-    else L.draw(BB.can, CAPS.X, O.hero);
-    return;
-  }
-  if (u >= TRF[0][1] && u < TRF[1][0]) {
-    const c = C8.c; at2(CAPS.X, BWX, c[0], c[1], c[2], 1, PI / 2, 2, C8S.sp);
-    L.draw(BB.can, CAPS.X, O.hero); L.draw(BB.wrap, CAPS.X, O.wrap);
-    if (u > WRAP[0] && u < WRAP[1]) {
-      const l = Math.floor(C8S.lay), rr = r - .03 + .0025 * (l + 1), dir = l % 2 ? -1 : 1;
-      for (let k = 0; k < 48; k++) { const a = -C8S.sp + PI * 1.5 - k * .1, zz = C8S.hx - dir * k * .0016; apX(CAPS.X, Math.cos(a) * rr, Math.sin(a) * rr, zz, PW); K.dotW(PW[0], PW[1], PW[2], 2, LIME, 1 - k / 48); }
-    }
-    return;
-  }
-  if (u >= TRF[1][1] && u < MON[0]) {
-    capsuleX(u);
-    L.draw(BB.can, CAPS.X, O.hero); L.draw(BB.wrapS, CAPS.X, O.heroD);
-    // the module going in, the lid (on its fixture, carried by the robot, then on)
-    if (u < C9T.mod[1]) { const tip = BB.arm9c.P.tip, held = u > C9T.mod[0] + .22; at(MODX, BWX, held ? tip[0] : C9.tray[0], held ? tip[1] - .075 : C9.tray[1] + .02, held ? tip[2] : C9.tray[2]); L.draw(BB.board, MODX, O.hero); L.draw(BB.mcover, MODX, O.hero); }
-    if (u < C9T.lid[1]) { const tip = BB.arm9c.P.tip, held = u > C9T.lid[0] + .1; atL(XLID, BWX, held ? tip[0] : C9.lidp[0], held ? tip[1] - .06 : C9.lidp[1] + .005, held ? tip[2] : C9.lidp[2], 0, 1, 0, 0, 0, 1); L.draw(BB.lid, XLID, O.hero); }
-    else { at(XLID, CAPS.X, 0, 0, Lc - .05); L.draw(BB.lid, XLID, O.hero); }
-    if (u > C9T.weld[0]) drawSeam(u, CAPS.X);
-    return;
-  }
-  if (u >= MON[0] && u < XRAYW[3]) drawCapsuleTransfer(u);                // (then sealed in the nose: not drawn)
-}
-/* the capsule's frame from C9 to the end (base at 0, axis +Z) */
-function capsuleX(u) {
-  if (u >= MON[0]) { if (u >= MATE2[2]) return at(CAPS.X, roundAt(u), 0, 0, RL / 2 - D.LN - D.dbore + .02); capsulePose(u); const C = CAPS.C, f = CAPS.f, Lc = D.Lc; return atL(CAPS.X, BWX, C[0] - f[0] * Lc / 2, C[1] - f[1] * Lc / 2, C[2] - f[2] * Lc / 2, f[0], f[1], f[2], 0, 0, 1); }
-  const inC9 = u < 57.8, t = inC9 ? C9.t : C10.t;
-  const sp = inC9 ? TAU * lin(u, C9T.weld[0], C9T.weld[1]) : TAU + (u > CT[0] ? (u - CT[0]) * 2.4 : 0);
-  let tx = t[0], ty = t[1], tz = t[2];
-  if (u > 57.8 && u < 58.05) { const k = kk(u, 57.8, 58.05); tx = mix(C9.t[0], C10.t[0], k); tz = mix(C9.t[2], C10.t[2], k); ty = t[1] + .6 * Math.sin(PI * k); }
-  return at2(CAPS.X, BWX, tx, ty, tz, 1, sp, 0, -PI / 2);
-}
-function drawSeam(u, X_) {
-  const t = lin(u, C9T.weld[0], C9T.weld[1]), n = Math.floor(120 * t), r = D.rc;
-  if (u > C9T.weld[1] + .4) { L.draw(BB.seam, X_, O.lime); return; }
-  for (let k = 0; k < n; k++) {
-    const a = -k / 120 * TAU, age = (n - k) / 120 * (C9T.weld[1] - C9T.weld[0]);
-    apX(X_, Math.cos(a) * (r + .003), Math.sin(a) * (r + .003), D.Lc - .05, PW);
-    K.dotW(PW[0], PW[1], PW[2], 2, age < .12 ? HOT : age < .5 ? LIME : WH, age < .12 ? 1 : .85);
-  }
-}
-/* the capsule from the CT over the aisle (hung from the monorail by its lid) to the mating robot, which lays it along
-   -x and pushes it into the nose bay; then it rides the rod up */
-const MON = [60.1, 60.95], MATE2 = [61.0, 61.45, 62.0];
-const MONB = [0, 1.55, ZR.MT + 1.6];
-function capsulePose(u) {
-  const Lc = D.Lc, xf = XFM, C = CAPS.C, f = CAPS.f;
-  if (u < MON[1]) {
-    const k = kk(u, MON[0] + .15, MON[1]), up = kk(u, MON[0], MON[0] + .15);
-    C[0] = mix(C10.t[0], MONB[0], k); C[1] = mix(C10.t[1] + Lc / 2, 1.9, up) - (1.9 - MONB[1]) * kk(u, MON[1] - .2, MON[1]); C[2] = mix(C10.t[2], MONB[2], k);
-    f[0] = 0; f[1] = 1; f[2] = 0; return;
-  }
-  if (u < MATE2[1]) {
-    const k = kk(u, MATE2[0], MATE2[1]), a = k * PI / 2;
-    C[0] = mix(MONB[0], xf + Lc / 2 + .35, k); C[1] = mix(MONB[1], YR, k); C[2] = mix(MONB[2], ZR.MT, k);
-    f[0] = Math.sin(a); f[1] = Math.cos(a); f[2] = 0; return;
-  }
-  const k = kk(u, MATE2[1], MATE2[2]);
-  C[0] = mix(xf + Lc / 2 + .35, xf - D.dbore + Lc / 2 + .02, k); C[1] = YR; C[2] = ZR.MT; f[0] = 1; f[1] = 0; f[2] = 0;
-}
-function drawCapsuleTransfer(u) {
-  const Lc = D.Lc;
-  if (u >= MATE2[2]) at(CAPS.X, roundAt(u), 0, 0, RL / 2 - D.LN - D.dbore + .02);     // in the bay: it rides the round
-  else { capsulePose(u); const C = CAPS.C, f = CAPS.f; atL(CAPS.X, BWX, C[0] - f[0] * Lc / 2, C[1] - f[1] * Lc / 2, C[2] - f[2] * Lc / 2, f[0], f[1], f[2], 0, 0, 1); }
-  const xr = A_ > XRAYW[0] && A_ < XRAYW[3] ? ss(XRAYW[0], XRAYW[1], A_) * (1 - ss(XRAYW[2], XRAYW[3], A_)) : 0, oc = xr > .02 ? O.capx : O.hero;
-  O.capx.lime = .45 * xr;
-  L.draw(BB.can, CAPS.X, oc); L.draw(BB.wrapS, CAPS.X, xr > .02 ? O.capx : O.heroD);
-  at(XLID, CAPS.X, 0, 0, Lc - .05); L.draw(BB.lid, XLID, oc); L.draw(BB.seam, CAPS.X, O.lime);
-}
-/* the monorail (CT -> mating) and its carriage */
-function buildMono() {
-  MONB[0] = XFM + 1.7;
-  BB.mono = mkB('mono', B => {
-    const a = [C10.t[0], 2.6, C10.t[2]], b = [MONB[0], 2.6, MONB[2]];
-    B.chunk('rail'); const d = V.norm(V.sub(b, a)), sd = [-d[2], 0, d[0]];
-    for (const s of [-.06, .06]) B.line(V.add(a, V.mul(sd, s)), V.add(b, V.mul(sd, s)), .7);
-    B.line(V.add(a, [0, .12, 0]), V.add(b, [0, .12, 0]), .6);
-    for (let k = 0; k <= 4; k++) { const p = V.lerp(a, b, k / 4); B.tube([p[0], 0, p[2]], [p[0], 2.72, p[2]], .05, .5); }
-  });
-  BB.monoCar = mkB('mcar', B => { B.box([-.16, 2.45, -.16], [.16, 2.75, .16], .02, { br: .95, edge: .85 }); });
-  BB.monoClamp = mkB('mcl', B => { B.box([-.05, .0, -D.rc - .05], [.05, .08, D.rc + .05], .01, { br: .95, edge: .85 }); for (const s of [-1, 1]) B.box([-.04, -.12, s * (D.rc + .015) - .015], [.04, .0, s * (D.rc + .015) + .015], .008, { br: 1, edge: .9 }); });
-}
-const MCL = [0, 0, 0];
-function drawMono(u) {
-  L.draw(BB.mono, BWX, O.mc);
-  let x = C10.t[0], z = C10.t[2], cy = 2.2;
-  if (u > MON[0] - .35 && u < MON[1] + .02) {
-    capsulePose(Math.max(u, MON[0])); const C = CAPS.C;
-    if (u < MON[0]) { const k = kk(u, MON[0] - .35, MON[0]); cy = mix(2.2, C[1], k); } else cy = C[1];
-    x = C[0]; z = C[2];
-  } else if (u >= MON[1] + .02 && u < MON[1] + .8) {
-    const k = kk(u, MON[1] + .02, MON[1] + .8); capsulePose(MON[1]);
-    x = mix(MONB[0], C10.t[0], k); z = mix(MONB[2], C10.t[2], k); cy = mix(CAPS.C[1], 2.2, kk(u, MON[1] + .02, MON[1] + .25));
-  }
-  at(XF4, BWX, x, 0, z); L.draw(BB.monoCar, XF4, O.mc);
-  at(XF4, BWX, x, cy + .04, z); L.draw(BB.monoClamp, XF4, O.mc);
-  apX(BWX, x, 2.45, z, PW); apX(BWX, x, cy + .12, z, PW2); K.lineW(PW[0], PW[1], PW[2], PW2[0], PW2[1], PW2[2], 2, 1, WH, .7);
 }
 
 /* ======================== the capsule line's dressing (the clean room) ======================== */
@@ -2811,99 +2586,6 @@ function drawC6x(u) {
   at(XF4, BWX, WHX[0], WHX[1] - .02, WHX[2] - .18); L.draw(BB.horn, XF4, O.hero);
   needle(GAUGES.c6c0, u > C6T.wire[0] && u < C6T.wire[1] ? .7 : .2);
 }
-/* C7 · the turn-mill: a turret of tools, coolant jets, the tool magazine, the door parked open, a chip tray */
-function dressC7() {
-  const z = C7.z, t = C7.t;
-  BB.c7x = mkB('c7x', B => {
-    B.chunk('door'); B.panel([5.8, .7, z - 1.3], [0, 0, 1.2], [0, 1.9, 0], .08, { n: [-1, 0, 0], br: .08, edge: .85, two: true }); frm(B, faceF([5.8, .7, z - 1.3], [5.85, 2.6, z - .1], 'x-'), .15, .5, 1.05, 1.6, .6, .01);
-    rail(B, [5.79, 2.62, z - 1.3], [5.79, 2.62, z + 1.3], .03);
-    B.chunk('mag'); B.lathe([9.0, 1.6, z + .9], XA, [[0, .38], [.1, .38]], { cell: .02, br: .8, rbr: .9 }); for (let k = 0; k < 12; k++) { const a = k / 12 * TAU; B.cyl([9.0, 1.6 + Math.cos(a) * .32, z + .9 + Math.sin(a) * .32], [8.85, 1.6 + Math.cos(a) * .32, z + .9 + Math.sin(a) * .32], .02, { cell: .005, br: 1 }); }
-    B.chunk('cool'); for (const a of [0, 2.1, 4.2]) { const p = [t[0] + Math.cos(a) * .45, 1.4, t[2] + Math.sin(a) * .45]; hose(B, [[t[0] + Math.cos(a) * .6, 2.6, t[2] + Math.sin(a) * .6], p], .05, .55); B.knot(p, .015, .9); }
-    B.chunk('tray'); B.box([6.0, .7, z - 1.2], [9.2, .74, z + 1.2], .05, { br: .4, edge: .6 }); for (let x = 6.1; x < 9.2; x += .12) B.line([x, .745, z - 1.15], [x, .745, z + 1.15], .2);
-    cell(B, 5.8, 9.4, z - 1.3, z + 1.3, .7, 2.7, 'x-', 'C7');
-    cab(B, [9.7, 0, z - 1.2], [10.5, 2.1, z + 1.0], { front: 'x-', st: 'C7', id: 'c7', screen: [.3, 1.25, 1.6, 1.8], gauges: [[1.85, 1.5, .08]] });
-  });
-  BB.turret = mkB('tur', B => { B.lathe([0, 0, -.06], ZA, [[0, .2], [.12, .2]], { cell: .01, br: .85, rbr: .9 }); for (let k = 0; k < 8; k++) { const a = k / 8 * TAU; B.box([Math.cos(a) * .2 - .03, Math.sin(a) * .2 - .03, -.03], [Math.cos(a) * .2 + .03, Math.sin(a) * .2 + .03, .03], .006, { br: .95 }); B.line([Math.cos(a) * .23, Math.sin(a) * .23, 0], [Math.cos(a) * .3, Math.sin(a) * .3, 0], .9); } }, 1);
-}
-function drawC7x(u) {
-  const t = C7.t;
-  L.draw(BB.c7x, BWX, O.st);
-  spin(BB.turret, [t[0] - .95, 1.55, t[2] - .25], XA, Math.floor(lin(u, CUT7[0], BORE7[1]) * 3) * TAU / 8, O.mc);
-  if (u > CUT7[0] && u < BORE7[1]) for (const a of [0, 2.1]) spray(u, CUT7[0], BORE7[1], 30, t[0] + Math.cos(a) * .45, 1.4, t[2] + Math.sin(a) * .45, -Math.cos(a) * .6, -.4, -Math.sin(a) * .6, .2, .6, 1.2, .3, [200, 230, 255], .55, 1, 130 + a);
-  trace('c7', s => .2 + .6 * s, lin(u, CUT7[0], BORE7[1]), 1); needle(GAUGES.c70, u > CUT7[0] && u < BORE7[1] ? .65 : .1);
-}
-/* C8 · the wrap: the foil spool on its payoff, the dancer arm keeping the tension, guide rollers, the foil running
-   to the capsule, the counter */
-function dressC8() {
-  const z = C8.z, c = C8.c;
-  BB.c8x = mkB('c8x', B => {
-    B.chunk('pay'); B.box([c[0] + D.Lc / 2 - .15, 0, z - 1.6], [c[0] + D.Lc / 2 + .15, 1.5, z - 1.35], .02, { br: .8, edge: .85 });
-    B.ringP([c[0] + D.Lc / 2, 1.0, z - 1.3], XA, YA, .03, .9); B.ringP([c[0] + D.Lc / 2, 1.38, z - .95], XA, YA, .025, .9);
-    for (const y of [1.0, 1.38]) B.cyl([c[0] + D.Lc / 2 - .1, y, y === 1 ? z - 1.3 : z - .95], [c[0] + D.Lc / 2 + .1, y, y === 1 ? z - 1.3 : z - .95], .02, { cell: .005, br: .9 });
-    cell(B, 6.25, 8.75, z - 1.75, z + .8, .75, 2.1, 'x-', 'C8');
-    cab(B, [9.4, 0, z - 1.0], [10.2, 1.9, z + 1.0], { front: 'x-', st: 'C8', id: 'c8', screen: [.3, 1.15, 1.6, 1.65], gauges: [[1.85, 1.4, .08]] });
-  });
-  BB.c8spool = mkB('c8s', B => { B.lathe([0, 0, -.06], ZA, [[0, .05], [0, .2], [.12, .2], [.12, .05]], { cell: .01, br: .85, rbr: .9 }); for (let k = 0; k < 6; k++) B.ringP([0, 0, -.04 + k * .016], XA, YA, .12 + .01 * (k % 2), .5); }, 1);
-  BB.dancer = mkB('dnc', B => { B.box([-.015, -.015, 0], [.015, .015, .45], .006, { br: .9, edge: .85 }); B.cyl([-.08, 0, .45], [.08, 0, .45], .025, { cell: .005, br: .95, caps: true }); }, 1);
-}
-function drawC8x(u) {
-  const z = C8.z, c = C8.c, on = u > WRAP[0] && u < WRAP[1];
-  L.draw(BB.c8x, BWX, O.st);
-  const sx = c[0] + D.Lc / 2, sp = [sx, 1.15, z - 1.55], rr = .2 - .07 * C8S.lay / NLAY;
-  spin(BB.c8spool, sp, XA, -C8S.lay * 9, O.mc);
-  const da = .5 + .25 * Math.sin(U_ * 3.1) * (on ? 1 : 0), dp = [sx, 1.0 + Math.sin(da) * .45, z - 1.3 + Math.cos(da) * .45];
-  atL(XF4, BWX, sx, 1.0, z - 1.3, 0, Math.sin(da), Math.cos(da), 1, 0, 0); L.draw(BB.dancer, XF4, O.mc);
-  if (on || u < WRAP[0]) {
-    const wx = c[0] + C8S.hx, pts = [[sx, sp[1] + rr, sp[2]], dp, [sx, 1.38, z - .95], [wx, c[1] + D.rc, z - .02]];
-    for (let i = 0; i < 3; i++) { apX(BWX, ...pts[i], PW); apX(BWX, ...pts[i + 1], PW2); K.lineW(PW[0], PW[1], PW[2], PW2[0], PW2[1], PW2[2], 1.5, 1, i === 2 ? LIME : WH, .8); }
-  }
-  trace('c8', s => s, C8S.lay / NLAY, 1); needle(GAUGES.c80, on ? .55 + .05 * Math.sin(U_ * 5) : .05);
-}
-/* C9 · assembly, the seam weld and the leak test: the fibre from the laser source, the fume nozzle, the camera, the
-   helium bell lowered over the sealed can */
-const C9BELL = [57.5, 57.62, 57.82, 57.95];
-function dressC9() {
-  const z = C9.z, t = C9.t;
-  BB.c9x = mkB('c9x', B => {
-    cell(B, 6.85, 9.35, z - .65, z + .65, .78, 2.4, 'x-', 'C9');
-    cab(B, [9.6, 0, z - 1.3], [10.6, 2.0, z - .1], { front: 'x-', st: 'C9', id: 'c9', screen: [.25, 1.2, 1.0, 1.7], gauges: [[.35, .8, .07], [.75, .8, .07]] });
-    hose(B, [[9.05, 2.2, z], [9.4, 2.6, z - .6], [9.9, 2.0, z - .7]], .25, .7);
-    B.chunk('fume'); B.cyl([t[0] + D.rc + .45, t[1] + D.Lc + .2, t[2] - .35], [t[0] + D.rc + .1, t[1] + D.Lc - .02, t[2] - .12], .04, { cell: .01, br: .8 }); hose(B, [[t[0] + D.rc + .45, t[1] + D.Lc + .2, t[2] - .35], [9.3, 2.6, z - 1.0]], .2, .45);
-    B.chunk('bellpost'); B.box([t[0] - .05, .78, t[2] + .55], [t[0] + .05, 2.4, t[2] + .65], .01, { br: .85, edge: .85 }); rail(B, [t[0], .8, t[2] + .54], [t[0], 2.4, t[2] + .54], .03);
-    B.box([C9.rb[0] - .35, 0, C9.rb[2] - .35], [C9.rb[0] + .35, .2, C9.rb[2] + .35], .03, { br: .7, edge: .8 }); bolts(B, [C9.rb[0], .201, C9.rb[2]], XA, ZA, .28, 8, .03);
-  });
-  BB.bell = mkB('bel', B => { B.lathe([0, 0, 0], YA, [[0, .26], [.8, .26], [.95, .18], [1.0, 0]], { cell: .02, br: .6, two: true, rbr: .9 }); B.ringP([0, .01, 0], XA, ZA, .28, 1); B.box([-.05, .3, .25], [.05, .5, .62], .01, { br: .85 }); hose(B, [[0, 1.0, 0], [.4, 1.3, .3], [.9, .6, .6]], .1, .5); }, 1);
-}
-function drawC9x(u) {
-  const t = C9.t;
-  L.draw(BB.c9x, BWX, O.st);
-  const dn = kk(u, C9BELL[0], C9BELL[1]) * (1 - kk(u, C9BELL[2], C9BELL[3]));
-  at(XF4, BWX, t[0], t[1] + .02 + 1.2 * (1 - dn), t[2]); L.draw(BB.bell, XF4, O.mc);
-  if (dn > .95) { apX(BWX, t[0], t[1] + .5, t[2], PW); K.glowW(PW[0], PW[1], PW[2], 20, LIME, .2); }
-  trace('c9', s => (u > 57.6 ? Math.exp(-s * 6) * .8 + .05 : .5), lin(u, C9T.weld[0], 57.8), 1); needle(GAUGES.c90, u > C9T.weld[0] && u < C9T.weld[1] ? .8 : .05); needle(GAUGES.c91, dn * .1);
-}
-/* C10 · the CT cabinet: the tube's housing (fins, high-voltage cable to its generator), the detector's back with fins,
-   the manipulator's lift, lead walls with the door parked open, the reconstruction screen */
-function dressC10() {
-  const z = C10.z, t = C10.t;
-  BB.c10x = mkB('c10x', B => {
-    B.chunk('tube'); for (let k = 0; k < 7; k++) B.ringP([5.32 + k * .08, 1.3, z], YA, ZA, .19, .55); hose(B, [[5.3, 1.45, z], [4.9, 2.6, z + .5], [4.6, 1.6, z + 1.6]], .2, .8);
-    cab(B, [4.0, 0, z + 1.3], [5.0, 1.8, z + 2.3], { front: 'x+', st: 'C10', id: 'c10g', gauges: [[.3, 1.3, .08], [.7, 1.3, .08]] });
-    B.chunk('det'); for (let k = 0; k < 6; k++) B.line([9.86, 1.08 + k * .08, z - .22], [9.86, 1.08 + k * .08, z + .22], .5); for (let x = 9.88; x < 10.0; x += .03) B.line([x, 1.06, z - .2], [x, 1.53, z - .2], .35);
-    B.chunk('lift'); rail(B, [t[0] - .3, .7, t[2] + .45], [t[0] - .3, 2.2, t[2] + .45], .03); B.box([t[0] - .4, .7, t[2] + .4], [t[0] - .2, 2.3, t[2] + .55], .02, { br: .6, edge: .85 });
-    B.chunk('walls'); B.panel([5.0, 0, z + 1.1], [5.2, 0, 0], [0, 2.4, 0], .06, { n: [0, 0, -1], br: .16, edge: .7, seams: [10, 6], sbr: .25 });
-    B.panel([10.2, 0, z - 1.1], [0, 0, 2.2], [0, 2.4, 0], .06, { n: [-1, 0, 0], br: .16, edge: .7 });
-    B.panel([5.0, 2.4, z - 1.1], [5.2, 0, 0], [0, 0, 2.2], .1, { n: YA, br: .14, edge: .7 });
-    B.panel([5.0, .7, z - 1.1], [0, 0, -.9], [0, 1.7, 0], .06, { n: [0, 0, -1], br: .2, edge: .8, two: true });
-    for (let k = 0; k < 3; k++) B.knot([10.15, 2.3, z - .9 + k * .1], .03, 1, 3, lightQ(k ? 5 : 8, 'C10', k));
-    cab(B, [10.6, 0, z - 1.0], [11.4, 2.1, z + 1.2], { front: 'x-', st: 'C10', id: 'c10', screen: [.25, 1.15, 1.95, 1.9], doors: 2 });
-  });
-}
-function drawC10x(u) {
-  L.draw(BB.c10x, BWX, O.st);
-  needle(GAUGES.c10g0, CTS.on * .85); needle(GAUGES.c10g1, CTS.on * .6);
-}
-
 /* ---------------- the wafer between the machines ---------------- */
 const XWF = mkX();
 const W3 = { out: [40.15, 40.45], carry: [[40.6, 40.98], [42.42, 42.78], [44.87, 45.22]], toDice: [45.4, 45.65], toBond: [47.5, 47.75] };
@@ -2933,63 +2615,103 @@ function drawWafer(u) {
   if (WP.st === 'track' && u < W1.inL[1]) { at(XF4, BWX, WP.x, WP.y, WP.z); L.draw(BB.carrier, XF4, O.mc); }
 }
 
-/* ---------------- the mating: the robot puts the capsule in the bay, then the nose cap on, and torques it ---------------- */
-const MTT = { capPick: [62.1, 62.35], capMove: [62.35, 62.75], capIn: [62.75, 63.0], torque: [63.05, 63.45], scan: [63.5, 63.95] };
-const ABM = [0, 0, -2.9];
-const CAPM = { tq: 0 };
-/* the nose cap's base (bay; axis +x) once the robot has it; false before */
-function capMate(u) {
-  if (u < MTT.capPick[1]) return false;
-  const xf = XFM, sx = SHUT_X(u) - D.LN / 2, sy = .5 + RR + .02, sz = SHUT_Z(u);
-  if (u < MTT.capMove[1]) { const k = kk(u, MTT.capMove[0], MTT.capMove[1]); CAPW[0] = mix(sx, xf + .35, k); CAPW[1] = mix(sy, YR, k) + .5 * Math.sin(PI * k); CAPW[2] = mix(sz, ZR.MT, k); }
-  else if (u < MTT.capIn[1]) { const k = kk(u, MTT.capIn[0], MTT.capIn[1]); CAPW[0] = mix(xf + .35, xf, k); CAPW[1] = YR; CAPW[2] = ZR.MT; }
-  else { CAPW[0] = xf; CAPW[1] = YR; CAPW[2] = ZR.MT; }
-  CAPM.tq = u < MTT.torque[0] ? 0 : PI / 4 * kk(u, MTT.torque[0], MTT.torque[1]);
-  return true;
+/* ======================== the platform's AI: the data hall (starboard, behind the chip fab) and its cooling plant ========================
+   Four rows of racks in two pods (cold aisles contained under glass, hot aisles between the backs), cable trays and
+   fibre trunks overhead (light pulses running along them, one trunk out to the port: the AI lays the gun), the coolant
+   distribution units and the loop's mains along the wall, the plant's heat exchangers in the clean room's front bay.
+   The chip fab makes the AI's own processors; the hall is what they run in. */
+const DH = { z0: 5.4, seg: 7.2, gap: 1.2, nseg: 6, nr: 12, rw: .6, rd: 1.2, rh: 2.3 };
+const ROWS = [[15.0, 1], [17.6, -1], [20.2, 1], [22.8, -1]];    // [centre x, the side the fronts face]
+const TRUNK = [[18.9, 3.4, 56], [18.9, 3.4, 3.2], [8.2, 7.6, 3.2], [-2, 7.6, 3.2], [-2, 20.2, -9.6]];   // the fibre trunk to the port
+let NRACK = 0;
+function buildAI() {
+  NRACK = ROWS.length * DH.nseg * DH.nr;
+  BB.dh = mkB('dh', B => {
+    for (const [x, f] of ROWS) for (let s = 0; s < DH.nseg; s++) {
+      const z0 = DH.z0 + s * (DH.seg + DH.gap), z1 = z0 + DH.seg, x0 = x - DH.rd / 2, x1 = x + DH.rd / 2, xf = f > 0 ? x1 : x0, xb = f > 0 ? x0 : x1;
+      B.chunk('row');
+      B.box([x0, 0, z0], [x1, DH.rh, z1], .1, { br: .55, edge: .8 });
+      B.panel([xf + f * .008, .05, z0], [0, 0, DH.seg], [0, DH.rh - .1, 0], .06, { n: [f, 0, 0], br: .3, edge: .7, seams: [DH.nr, 7], sbr: .28 });
+      for (let k = 0; k <= DH.nr; k++) B.line([xf + f * .012, 0, z0 + k * DH.rw], [xf + f * .012, DH.rh, z0 + k * DH.rw], .7);
+      B.panel([xb - f * .008, .05, z0], [0, 0, DH.seg], [0, DH.rh - .1, 0], .1, { n: [-f, 0, 0], br: .22, edge: .6, seams: [DH.nr * 2, 6], sbr: .25 });   // the rear doors' coils
+      for (let k = 0; k < DH.nr; k++) { const zz = z0 + (k + .5) * DH.rw; B.cyl([xb, .25, zz], [xb, -.05, zz], .03, { cell: .008, br: .6 }); }
+      B.chunk('top'); tray(B, [x, DH.rh + .5, z0], [x, DH.rh + .5, z1], .45, 6);
+      for (let k = 0; k < DH.nr; k += 2) B.line([x, DH.rh, z0 + (k + .5) * DH.rw], [x, DH.rh + .5, z0 + (k + .5) * DH.rw], .4);
+    }
+    // the cold aisles' containment: glass roofs, door frames at the segments' ends
+    B.chunk('cont');
+    for (const xa of [15.6, 20.8]) for (let s = 0; s < DH.nseg; s++) {
+      const z0 = DH.z0 + s * (DH.seg + DH.gap), z1 = z0 + DH.seg;
+      B.panel([xa, DH.rh + .02, z0], [1.4, 0, 0], [0, 0, DH.seg], .2, { n: YA, br: .08, edge: .55, two: true, seams: [2, 12], sbr: .2 });
+      for (const zz of [z0, z1]) { B.line([xa, 0, zz], [xa, DH.rh, zz], .7); B.line([xa + 1.4, 0, zz], [xa + 1.4, DH.rh, zz], .7); B.line([xa, DH.rh, zz], [xa + 1.4, DH.rh, zz], .7); B.line([xa + .7, 0, zz], [xa + .7, DH.rh - .1, zz], .45); B.line([xa + .55, 1.1, zz], [xa + .55, 1.3, zz], .9); }
+    }
+    // the raised floor's grid, the partition from the clean room (mullions), the loop's mains and the CDUs along the wall
+    B.chunk('floor');
+    for (let z = 2.4; z <= 58.2; z += 1.2) B.line([14.2, .006, z], [25.6, .006, z], .14);
+    for (let x = 14.4; x <= 25.6; x += 1.2) B.line([x, .006, 2.4], [x, .006, 58.2], .14);
+    for (let z = 2.4; z <= 58.2; z += 1.8) B.line([14.1, 0, z], [14.1, 7.2, z], .35);
+    B.line([14.1, 7.2, 2.4], [14.1, 7.2, 58.2], .5); B.line([14.1, 2.6, 2.4], [14.1, 2.6, 58.2], .3);
+    B.chunk('mains');
+    for (const [y, r] of [[.55, .22], [1.2, .22]]) { B.cyl([25.1, y, 3.0], [25.1, y, 57.5], r, { cell: .06, br: .7, rings: false, seams: 6, sbr: .35 }); for (let z = 4; z < 57; z += 3) B.ringP([25.1, y, z], XA, YA, r * 1.15, .7); }
+    for (let s = 0; s < DH.nseg; s++) {
+      const zc = DH.z0 + s * (DH.seg + DH.gap) + DH.seg / 2;
+      cab(B, [23.9, 0, zc - .9], [24.8, 2.0, zc + .9], { front: 'x-', st: 'AI', id: 'cdu' + s, gauges: [[.45, 1.45, .08], [.85, 1.45, .08]], screen: [.3, .9, 1.5, 1.25], doors: 2 });
+      for (const y of [.55, 1.2]) pipe(B, [[24.8, y + .3, zc], [25.1, y, zc]], .06, .65, false);
+    }
+    // the plant: three heat exchangers and their pumps in the clean room's front bay, the mains across to the hall
+    B.chunk('plant');
+    for (const x of [5.0, 8.0, 11.0]) {
+      B.lathe([x, 1.25, 4.0], ZA, [[0, 0], [.25, .85], [6.2, .85], [6.45, 0]], { cell: .06, br: .7, rings: true, rbr: .8, seams: 10, sbr: .3 });
+      for (let k = 0; k < 4; k++) B.ringP([x, 1.25, 4.6 + k * 1.6], XA, YA, .9, .8);
+      for (const zz of [5.0, 9.4]) bx(B, x - .55, 0, zz - .15, x + .55, .45, zz + .15, .03, { br: .8 });
+      motor(B, [x + .9, .45, 12.0], [x + .9, .45, 11.0], .22, { feet: true });
+      B.lathe([x + .9, .45, 12.35], ZA, [[0, .3], [.35, .3]], { cell: .03, br: .85, caps: true });
+      pipe(B, [[x, 2.1, 7.0], [x, 3.0, 7.0], [13.8, 3.0, 7.0], [25.1, 3.0, 7.0], [25.1, 1.4, 7.0]], .12, .65);
+    }
+  }, .6);
 }
-function mateArm(u) {
-  ABM[0] = XFM + 2.3;
-  const home = [XFM + 2.2, 2.4, -3.3];
-  let roll = 0;
-  const set = (x, y, z, dx, dy, dz) => { AP[0] = x; AP[1] = y; AP[2] = z; AD[0] = dx; AD[1] = dy; AD[2] = dz; };
-  if (u < MON[1] - .35) set(home[0], home[1], home[2], 0, -1, 0);
-  else if (u < MATE2[2] + .05) {
-    capsulePose(Math.max(u, MON[1])); const C = CAPS.C, f = CAPS.f, e = D.Lc / 2 + .02, g = [C[0] + f[0] * e, C[1] + f[1] * e, C[2] + f[2] * e];
-    if (u < MON[1]) { const k = kk(u, MON[1] - .35, MON[1]); set(mix(home[0], g[0], k), mix(home[1], g[1], k), mix(home[2], g[2], k), 0, -1, 0); }
-    else set(g[0], g[1], g[2], -f[0], -f[1], -f[2]);
+/* the status lights: each rack's few LEDs, blinking (a pure function of time and the rack) */
+const AIP = [0, 0, 0];
+function drawAI(u, a) {
+  L.draw(BB.dh, BWX, O.st);
+  if (a < .02) return;
+  const e = K.C.eye; toBay(e, AIP);
+  for (let r = 0; r < ROWS.length; r++) {
+    const [x, f] = ROWS[r], xf = x + f * (DH.rd / 2 + .015);
+    for (let s = 0; s < DH.nseg; s++) {
+      const z0 = DH.z0 + s * (DH.seg + DH.gap), zc = z0 + DH.seg / 2, d2 = (AIP[0] - xf) ** 2 + (AIP[2] - zc) ** 2;
+      if (d2 > 2500) continue;
+      for (let k = 0; k < DH.nr; k++) for (let j = 0; j < 7; j++) {
+        const id = ((r * 97 + s * 31 + k) * 7 + j), h = hh(id * .37, j * 1.3), on = Math.floor(U_ * (2 + 6 * h) + h * 9) % 3 !== 0;
+        if (!on && h > .3) continue;
+        apX(BWX, xf, .25 + j * .29 + .05 * h, z0 + (k + .5) * DH.rw + (h - .5) * .3, PW);
+        K.dotW(PW[0], PW[1], PW[2], h < .22 ? 3 : 2, h < .22 ? LIME : WH, a * (on ? 1 : .25));
+      }
+    }
   }
-  else if (u < MTT.capPick[0]) {
-    const k = kk(u, MATE2[2] + .05, MTT.capPick[0]); capPose(u);
-    const g = [CAPW[0] + D.LN * .45, CAPW[1] + ogR(D.LN * .45) + .03, CAPW[2]], s = [XFM + .15, YR, ZR.MT];
-    set(mix(s[0], g[0], k), mix(s[1], g[1], k) + .5 * Math.sin(PI * k), mix(s[2], g[2], k), mix(-1, 0, k), mix(0, -1, k), 0);
+  // the trunks: light packets running out of the hall to the fab and on to the port
+  let Ltot = 0; for (let i = 1; i < TRUNK.length; i++) Ltot += V.dist(TRUNK[i - 1], TRUNK[i]);
+  for (let i = 1; i < TRUNK.length; i++) { const p = TRUNK[i - 1], q = TRUNK[i]; apX(BWX, p[0], p[1], p[2], PW); apX(BWX, q[0], q[1], q[2], PW2); K.lineW(PW[0], PW[1], PW[2], PW2[0], PW2[1], PW2[2], 3, 1, LIME, .3 * a); }
+  for (let n = 0; n < 60; n++) {
+    let s_ = ((n / 60) + U_ * .06) % 1 * Ltot, i = 1;
+    while (i < TRUNK.length - 1 && s_ > V.dist(TRUNK[i - 1], TRUNK[i])) { s_ -= V.dist(TRUNK[i - 1], TRUNK[i]); i++; }
+    const p = TRUNK[i - 1], q = TRUNK[i], k = Math.min(1, s_ / V.dist(p, q));
+    apX(BWX, p[0] + (q[0] - p[0]) * k, p[1] + (q[1] - p[1]) * k, p[2] + (q[2] - p[2]) * k, PW); K.dotW(PW[0], PW[1], PW[2], 3, LIME, a); K.glowW(PW[0], PW[1], PW[2], 8, LIME, .3 * a);
   }
-  else if (u < MTT.torque[1] + .05) {
-    if (!capMate(u)) capPose(u);
-    const k = kk(u, MTT.capMove[0], MTT.capMove[1]);
-    // the grip moves from over the cap to its tip, the tool turning from down to along -x
-    set(CAPW[0] + D.LN * mix(.45, 1, k) + .02 * k, CAPW[1] + (ogR(D.LN * .45) + .03) * (1 - k), CAPW[2], -k, -(1 - k), 0);
-    roll = CAPM.tq;
+  // each row's own trunk on its tray
+  for (let r = 0; r < ROWS.length; r++) for (let n = 0; n < 14; n++) {
+    const x = ROWS[r][0], zz = DH.z0 + ((n / 14 + U_ * .05 * (r % 2 ? -1 : 1) + 1) % 1) * (DH.nseg * (DH.seg + DH.gap) - DH.gap);
+    apX(BWX, x, DH.rh + .56, zz, PW); K.dotW(PW[0], PW[1], PW[2], 2, LIME, .8 * a);
   }
-  else { const k = kk(u, MTT.torque[1] + .05, MTT.torque[1] + .5); set(mix(XFM + D.LN + .02, home[0], k), mix(YR, home[1], k), mix(ZR.MT, home[2], k), -1 + k, -k, 0); }
-  const l = Math.hypot(AD[0], AD[1], AD[2]) || 1; AD[0] /= l; AD[1] /= l; AD[2] /= l;
-  armPose(BB.arm9, ABM, AP, AD, roll);
+  for (let s = 0; s < DH.nseg; s++) { needle(GAUGES['cdu' + s + '0'], .55 + .1 * Math.sin(U_ + s)); needle(GAUGES['cdu' + s + '1'], .4); trace('cdu' + s, x_ => .5 + .25 * Math.sin(x_ * 18 + U_ * 2 + s), 1, .8); }
 }
-const XCM = mkX();
-function drawMating(u) {
-  if (u < 58) return;
-  mateArm(u); armDraw(BB.arm9, O.mc);
-  if (u >= MTT.capIn[1]) { capMate(u); at2(XCM, roundAt(u), 0, 0, RL / 2 - D.LN, -1, 0, 2, CAPM.tq); L.draw(BB.cap, XCM, O.hero); }
-  else if (capMate(u)) { at2(XCM, BWX, CAPW[0], CAPW[1], CAPW[2], 1, PI / 2, 2, CAPM.tq); L.draw(BB.cap, XCM, O.hero); }
-  else if (u > MTT.capPick[0] - .3) { const tip = BB.arm9.P.tip, held = u > MTT.capPick[0] + .12; capPose(u); if (held) { CAPW[0] = tip[0] - D.LN * .45; CAPW[1] = tip[1] - ogR(D.LN * .45) - .03; CAPW[2] = tip[2]; } atL(XCAP, BWX, CAPW[0], CAPW[1], CAPW[2], 1, 0, 0, 0, 1, 0); L.draw(BB.cap, XCAP, O.hero); }
-  // the torque ticks (eight bolts) and the scan ring over the joint
-  if (u > MTT.torque[0] && u < MTT.torque[1] + .3) {
-    const n = Math.floor(8 * lin(u, MTT.torque[0], MTT.torque[1]));
-    for (let k = 0; k < n; k++) { const a = k / 8 * TAU + CAPM.tq; apX(BWX, XFM + .004, YR + Math.cos(a) * (RR - .045), ZR.MT + Math.sin(a) * (RR - .045), PW); K.glowW(PW[0], PW[1], PW[2], 9, LIME, .8); }
-  }
-  if (u > MTT.scan[0] && u < MTT.scan[1] + .1) {
-    const zf = RL / 2 - D.LN, zz = RL / 2 - (D.LN + D.dbore + .2 + .0) * kk(u, MTT.scan[0], MTT.scan[1]), R_ = roundAt(u);
-    for (let k = 0; k < 96; k++) { const a = k / 96 * TAU, rr = zz > zf ? ogR(zz - zf) + .006 : RR + .006; apX(R_, Math.cos(a) * rr, Math.sin(a) * rr, zz, PW); K.dotW(PW[0], PW[1], PW[2], 2, LIME, .95); }
-  }
+/* the chip fab's own clock (it runs while the camera is there: the reveal) */
+let AF_ = 30.6;
+const AFK = [];                                                 // [u, af] keys, set from the beats
+function afAt(u) {
+  if (!AFK.length || u <= AFK[0][0]) return AFK.length ? AFK[0][1] : 30.6;
+  for (let i = 1; i < AFK.length; i++) if (u < AFK[i][0]) return mix(AFK[i - 1][1], AFK[i][1], (u - AFK[i - 1][0]) / (AFK[i][0] - AFK[i - 1][0]));
+  return AFK[AFK.length - 1][1];
 }
 
 /* ---------------- the camera (bay frame) ----------------
@@ -2998,41 +2720,46 @@ function drawMating(u) {
    (no roll). At the splices the camera continues the base take's own camera (ctx.camAt either side of the splice
    time, so position and velocity match) and blends into or out of the bay's path: eye lerp, look and up slerped. */
 const SH = [];                                                // holds: {id, u0, u1, e0, e1, g0, g1, f0, f1}
-const HD = (id, e0, e1, g0, g1, f0, f1) => { const [u0, u1] = BW_[id]; SH.push({ id, u0, u1, e0, e1, g0, g1, f0, f1: f1 === undefined ? f0 : f1 }); };
+const HD = (id, e0, e1, g0, g1, f0, f1) => { if (!BW_[id]) return; const [u0, u1] = BW_[id]; SH.push({ id, u0, u1, e0, e1, g0, g1, f0, f1: f1 === undefined ? f0 : f1 }); };
+/* the moves: the look follows the part being carried (the rod on the gantry, the wafer, the capsule), the eye rides
+   along with it (k: the share of the part's motion the eye takes) and rises clear of the machines (lift, m) */
+const MV = {};
 function buildCam() {
   SH.length = 0;
   const T = id => BW_[id];
   HD('IN', [-1.5, 26, -7.5], [-2.6, 20.5, -5.2], [-2, 2, 28], [-5, 1.5, 19], 52, 50);
-  HD('R1', [-3.6, 3.8, -3.6], [-4.1, 3.3, -2.7], [-9.8, 1.3, 2.6], [-9.5, 1.4, 2.8], 46, 44);
-  HD('R2', [-5.4, 7.6, 2.6], [-6.0, 6.8, 3.3], [-12, -.6, 8], [-12, -1.2, 8], 50, 48);
+  HD('R2', [-4.4, 5.6, .4], [-5.6, 6.6, 3.0], [-11, .6, 5.6], [-12, -.9, 8], 48, 48);
   HD('R3', [-4.8, 3.9, 9.4], [-5.3, 3.4, 10.2], [-10.8, 1.5, 15], [-10.6, 1.4, 15.1], 46, 44);
   HD('R4', [-5.2, 2.9, 18.2], [-6.0, 2.5, 19.0], [-12.2, 1.6, 23], [-12.0, 1.5, 23], 50, 47);
-  HD('R5', [-6.2, 2.5, 26.4], [-6.8, 2.2, 27.0], [-11, 1.4, 31], [-10.6, 1.4, 31], 46, 44);
   HD('R6', [-4.8, 2.7, 34.4], [-6.0, 2.5, 34.9], [-8.9, 1.6, 38.5], [-12.4, 1.5, 38.5], 44, 46);
-  HD('R7', [-6.2, 2.5, 40.6], [-6.9, 2.2, 41.3], [-10.6, 1.6, 45.4], [-10.4, 1.5, 45.5], 46, 44);
-  HD('R8', [-5.0, 2.5, 48.0], [-5.5, 2.2, 48.6], [-10.2, 1.5, 52.5], [-10.0, 1.5, 52.5], 46, 44);
-  HD('XO', [-.6, 6.4, 44.2], [.9, 6.0, 45.2], [-.5, 1.6, 56], [2.2, 1.3, 55.5], 52, 50);
-  HD('C1', [4.7, 1.7, 51.8], [4.9, 1.6, 52.2], [7.6, 1.02, 54.0], [7.4, 1.02, 54.0], 40, 38);
-  HD('C2a', [4.5, 2.6, 49.6], [4.6, 2.6, 48.8], [7.5, 2.0, 48.3], [7.5, 2.0, 47.6], 46, 46);
-  HD('C2b', [4.6, 2.8, 46.6], [4.8, 2.7, 44.0], [7.5, 2.6, 45.6], [7.5, 2.5, 43.0], 46, 46);
-  HD('C2c', [5.6, 2.1, 43.4], [6.0, 1.85, 42.7], [7.5, 1.0, 42.4], [7.5, 1.0, 42.4], 40, 36);
-  HD('vC23', [4.1, 3.5, 38.6], [4.0, 3.4, 37.4], [7.0, 1.3, 36.2], [7.0, 1.2, 35.2], 44, 44);
-  HD('C34', [4.2, 3.0, 32.4], [4.4, 2.8, 33.0], [7.2, 1.2, 33.5], [7.2, 1.2, 33.5], 44, 42);
-  HD('C5', [5.7, 1.38, 25.95], [6.3, 1.22, 26.45], [7.05, 1.02, 27.0], [7.05, 1.0, 27.0], 36, 32);
-  HD('C6', [6.3, 1.42, 21.0], [7.25, 1.24, 21.5], [7.8, 1.0, 22.35], [8.2, .99, 22.2], 36, 32);
-  HD('C7', [5.5, 1.62, 16.7], [6.4, 1.48, 17.35], [7.5, 1.3, 18.0], [7.5, 1.28, 18.0], 36, 32);
-  HD('C8', [6.0, 2.3, 12.0], [6.55, 1.95, 12.55], [7.5, 1.25, 13.45], [7.5, 1.25, 13.45], 38, 34);
-  HD('C9', [5.4, 1.68, 7.75], [6.35, 1.52, 8.4], [7.3, 1.28, 9.0], [7.5, 1.22, 9.0], 38, 34);
-  HD('C10', [5.4, 1.78, 6.5], [6.4, 1.58, 5.5], [7.6, 1.3, 4.5], [7.6, 1.3, 4.5], 38, 34);
-  HD('MTv', [5.6, 3.0, 4.8], [4.4, 2.8, 2.8], [4.6, 2.0, .6], [2.6, 1.8, -1.8], 44, 44);
-  HD('MT', [3.0, 2.2, -1.0], [2.4, 1.9, -1.6], [.3, 1.5, -5.0], [.2, 1.5, -5.0], 44, 40);
-  // the round: a turn on the saddle, up the wall with it (it turns once round on its way: the turntable), the sabot closing
-  HDt('TRa', T('MT')[1] + 1.2, T('TRa')[1] + .2, [3.2, 2.6, .2], [3.6, 3.2, .7], [-2, 1.6, -5], [-2, 2.2, -5], 46, 46);
-  { const u0 = T('TRb')[0] + .8, u1 = T('TRb')[1] - .2, y0 = elevY(warp(u0)), y1 = elevY(warp(u1)); HDt('TRb', u0, u1, [4.4, y0 + 1.6, 1.6], [3.4, y1 + 1.2, 1.0], [-2, y0, -5], [-2, y1, -5.3], 46, 48); }
-  HDt('TRc', T('TRc')[0] + .6, T('TRc')[1] - .4, [3.4, 23.3, 1.6], [3.0, 23.0, 1.0], [-2, 22, -6.5], [-2, 22, -7.4], 48, 48);
-  HDt('TRd', T('TRd')[0] + 1.4, LEN, [.6, 23.3, 1.8], [-1.4, 22.7, -18.0], [-2, 22, -9], [-2, 22, -40], 48, 50);   // behind the round, out through the port
-  // the MT hold ends before its beat does (the move to the saddle shot)
-  SH.find(h => h.id === 'MT').u1 = T('MT')[1] - .4;
+  HD('R7', [4.5, 6.0, 39.0], [3.5, 5.4, 40.0], [-11.5, 1.0, 46.0], [-10.5, 1.0, 45.8], 56, 54);
+  HD('R8', [.5, 5.2, 45.5], [-.5, 4.6, 46.5], [-11, 2.8, 53.5], [-11, 2.4, 53.0], 56, 54);
+  HD('MT', [9, 5, 4.5], [7.5, 4.2, 3.2], [-2.5, 1.6, -5], [-2, 1.6, -5], 52, 50);
+  // the reveal: the turn to the back of the bay, the whole fab and the hall from high up, then down into them
+  HD('AI1', [1.5, 15, -8.5], [4, 12.5, 2], [14, 1.5, 30], [11, 1.5, 36], 56, 54);
+  HD('AI2', [4.5, 2.7, 49.4], [4.6, 2.8, 46.4], [7.5, 2.1, 48.0], [7.5, 2.4, 45.0], 48, 48);
+  HD('AI3a', [4.6, 2.3, 24.6], [5.4, 1.8, 25.4], [7.2, 1.0, 27], [7.1, 1.0, 27], 40, 36);
+  HD('AI3b', [4.8, 2.2, 19.8], [5.6, 1.7, 20.6], [7.6, 1.0, 22.4], [7.7, 1.0, 22.4], 40, 36);
+  HD('AI4', [19, 6.5, 2.5], [19, 5.6, 10.0], [19, .5, 26], [19, .5, 34], 50, 48);
+  // the round on the column: up and once round (the turntable), the petals closing, out through the port
+  HD('TRb', [10, 4.5, 10], [1, 24, 13], [-2, 3, -2], [-2, 17.5, -1], 54, 54);
+  HD('TRc', [-7, 26, 9], [-9, 26, 6.5], [-2, 21.5, -1], [-2, 21.5, -2.5], 52, 52);
+  HD('TRd', [-11, 27, 3.5], [-17, 29, -3], [-2, 21.5, -8], [-2, 21, -18], 50, 48);   // (to the base camera's side: port, high, looking at the chamber)
+  { const H = id => SH.find(h => h.id === id); H('TRb').u1 -= 1.2; H('TRc').u0 += .6; H('TRc').u1 -= .6; H('TRd').u0 += .8; }   // (eased moves between the round's shots)
+  // the moves: the part followed, the share of its motion the eye takes (k), the lift (m), the aisle the eye pulls
+  // toward (x), the share of the part's height the look takes (vy); or a crane through a point (via: eye, look)
+  const mv = (id, o) => { if (BW_[id]) MV[id] = Object.assign({ u0: BW_[id][0], u1: BW_[id][1], part: null, k: .5, lift: 0, ax: null, vy: .45, via: null, pw: 0 }, o); };
+  mv('mIN', { part: 'rod', k: 0, vy: 1 });
+  for (const id of ['m23', 'm34', 'm46', 'm67', 'm78']) mv(id, { part: 'rod', k: .55, lift: 1.2, ax: -3.4 });
+  mv('mMT', { part: 'rod', k: 1, lift: 4.5, vy: 1 });
+  mv('mAI', { via: [[2, 9, -7.5], [12, 2.0, 12]] });
+  mv('mAI3', { part: 'waf', via: [[4.0, 3.6, 36], [7.5, 1.2, 33]], pw: .3 });
+  mv('mAI4', { via: [[11, 6.0, 14], [19, 1.0, 22]] });
+  mv('mAI2', { via: [[6, 7, 30], [7.5, 1.5, 42]] });
+  mv('mTR', { via: [[12, 12, 8], [0, 6, -2]] });
+  // the chip fab's clock through the reveal
+  AFK.length = 0;
+  for (const [u, af] of [[T('mAI')[0], 32.8], [T('AI1')[0], 33.4], [T('AI2')[0], 34.6], [T('AI2')[1], 40.0], [T('AI3a')[0], 45.55], [T('AI3a')[0] + 3.0, 47.6], [T('AI3a')[1], 47.7], [T('AI3b')[0], 47.8], [T('AI3b')[0] + 3.4, 49.8], [T('AI3b')[1], 50.1], [T('AI4')[1], 50.3]]) AFK.push([u, af]);
 }
 const HDt = (id, u0, u1, e0, e1, g0, g1, f0, f1) => SH.push({ id, u0, u1, e0, e1, g0, g1, f0, f1: f1 === undefined ? f0 : f1 });
 const lerp3 = (o, a, b, t) => { o[0] = a[0] + (b[0] - a[0]) * t; o[1] = a[1] + (b[1] - a[1]) * t; o[2] = a[2] + (b[2] - a[2]) * t; return o; };
@@ -3042,7 +2769,7 @@ function herm(o, p0, m0, p1, m1, t, h) {
   return o;
 }
 const CB_ = { eye: [0, 0, 0], target: [0, 0, 0], fov: 1 };
-const VA = [0, 0, 0], VB = [0, 0, 0];
+const VA = [0, 0, 0], VB = [0, 0, 0], VV = [0, 0, 0];
 function camBay(u) {
   const dc = window.FABCAM || DBGC;
   if (dc) return { eye: dc.slice(0, 3), target: dc.slice(3, 6), fov: (dc[6] || 50) * DEG };
@@ -3061,7 +2788,42 @@ function camBay(u) {
   herm(o.target, s.g1, VA, n.g0, VB, t, h);
   const fa = (s.f1 - s.f0) / da, fb = (n.f1 - n.f0) / db, t2 = t * t, t3 = t2 * t;
   o.fov = ((2 * t3 - 3 * t2 + 1) * s.f1 + (t3 - 2 * t2 + t) * h * fa + (-2 * t3 + 3 * t2) * n.f0 + (t3 - t2) * h * fb) * DEG;
+  // a following move: the look onto the part (smoothed over 1.2 s), the eye carried along part way, lifted and
+  // pulled toward the aisle; or a crane through a waypoint
+  for (const id in MV) {
+    const m = MV[id]; if (u <= m.u0 || u >= m.u1) continue;
+    const w = Math.sin(PI * (u - m.u0) / (m.u1 - m.u0)) ** 2;
+    PSM[0] = PSM[1] = PSM[2] = 0; let ws = 0;
+    if (m.part) for (let j = -3; j <= 3; j++) { const wj = 4 - Math.abs(j); partPos(m.part, warp(u + j * .2), PPB); PSM[0] += wj * PPB[0]; PSM[1] += wj * PPB[1]; PSM[2] += wj * PPB[2]; ws += wj; }
+    if (m.via) {
+      // a crane through the waypoint: the eye a Hermite curve through it (velocity-matched at the holds), the look
+      // turned by slerp hold -> waypoint -> hold (it never whips past the eye)
+      const ve = m.via[0], g = [0, 0, 0];
+      for (let k = 0; k < 3; k++) g[k] = m.via[1][k] + (ws ? m.pw * (PSM[k] / ws - m.via[1][k]) : 0);
+      for (let k = 0; k < 3; k++) { VA[k] = (s.e1[k] - s.e0[k]) / da; VB[k] = (n.e1[k] - n.e0[k]) / db; VV[k] = (n.e0[k] - s.e1[k]) / h; }
+      if (t < .5) herm(o.eye, s.e1, VA, ve, VV, t * 2, h / 2); else herm(o.eye, ve, VV, n.e0, VB, t * 2 - 1, h / 2);
+      const fs = nrm(sub(s.g1, s.e1)), fv = nrm(sub(g, ve)), fn = nrm(sub(n.g0, n.e0)), ds = V.dist(s.g1, s.e1), dv = V.dist(g, ve), dn = V.dist(n.g0, n.e0);
+      const f = m.lookVia ? (t < .5 ? slerp(fs, fv, smoother(t * 2)) : slerp(fv, fn, smoother(t * 2 - 1))) : slerp(fs, fn, smoother(t)), dd = mix(ds, dn, smoother(t)) * (1 + .6 * Math.sin(PI * t));
+      for (let k = 0; k < 3; k++) o.target[k] = o.eye[k] + f[k] * dd;
+      if (m.part) pieceAt(A_);
+      break;
+    }
+    PSM[1] = o.target[1] + (PSM[1] / ws - o.target[1]) * m.vy; PSM[1] *= ws;
+    for (let k = 0; k < 3; k++) { const d = PSM[k] / ws - o.target[k]; o.target[k] += w * d; o.eye[k] += w * m.k * d; }
+    o.eye[1] += m.lift * w;
+    if (m.ax !== null) o.eye[0] += w * .8 * (m.ax - o.eye[0]);
+    pieceAt(A_);
+    break;
+  }
   return o;
+}
+/* where the part being carried is (bay), at the machines' time a */
+const PPB = [0, 0, 0], PSM = [0, 0, 0];
+function toBay(w, o) { const M = BWX.R, t = BWX.T, dx = w[0] - t[0], dy = w[1] - t[1], dz = w[2] - t[2]; o[0] = M[0] * dx + M[3] * dy + M[6] * dz; o[1] = M[1] * dx + M[4] * dy + M[7] * dz; o[2] = M[2] * dx + M[5] * dy + M[8] * dz; return o; }
+function partPos(part, a, o) {
+  if (part === 'rod') { pieceAt(a); toBay(PIECE.X.T, o); if (PIECE.st === 'forge') { o[0] = XF + 1.5; } return o; }
+  if (part === 'waf') { if (wafPos(a)) return toBay(XWF.T, o); o[0] = C6.w[0]; o[1] = C6.w[1]; o[2] = C6.w[2]; return o; }
+  o[0] = C6.b[0]; o[1] = C6.b[1]; o[2] = C6.b[2]; return o;
 }
 const DBGC = (() => { const q = QS.get('fcam'); return q ? q.split(',').map(Number) : null; })();
 /* a shot as a basis: eye, look f, up, fov, target distance (the Cam's own convention: r from the world's +Y, then roll) */
@@ -3122,19 +2884,28 @@ function cam(u, ctx) {
 
 /* ---------------- the key light: the station on screen lit, the rest of the hall dimmed ---------------- */
 const ACT = {}; for (const s of STN) ACT[s] = 0;
-const HOLDST = { C2a: 'C2', C2b: 'C2', C2c: 'C2', vC23: 'C34', MTv: 'MT', TRa: 'MT', TRb: 'MT', TRc: 'MT', TRd: 'MT' };
+const HOLDST = { AI1: 'AI', AI2: 'C2', AI3a: 'C5', AI3b: 'C6', AI4: 'AI', TRb: 'MT', TRc: 'MT', TRd: 'MT' };
+/* the stations a move passes (lit as the part goes by) */
+const PASS = { mIN: ['R1'], m46: ['R5'], mAI3: ['C34'], mAI: ['AI'], mAI4: ['AI'] };
 let WIDE = 0;                                                  // the overviews: everything half lit
 function activity(u) {
   for (const s of STN) ACT[s] = 0; WIDE = 0;
   for (const h of SH) {
     const w = ss(h.u0 - 2.4, h.u0 - .2, u) * (1 - ss(h.u1 + .2, h.u1 + 2.4, u)); if (w <= 0) continue;
-    if (h.id === 'IN' || h.id === 'XO') { WIDE = Math.max(WIDE, w); continue; }
+    if (h.id === 'IN' || h.id === 'AI1') WIDE = Math.max(WIDE, w * (h.id === 'AI1' ? .8 : 1));
+    if (h.id === 'IN') continue;
     const st = HOLDST[h.id] || h.id; if (w > ACT[st]) ACT[st] = w;
+  }
+  for (const id in MV) { const m = MV[id]; if (u > m.u0 && u < m.u1) WIDE = Math.max(WIDE, Math.sin(PI * (u - m.u0) / (m.u1 - m.u0)) ** 2); }
+  for (const id in PASS) {
+    const b = BW_[id]; if (!b || u < b[0] - .5 || u > b[1] + .5) continue;
+    const L_ = PASS[id], n = L_.length;
+    for (let i = 0; i < n; i++) { const c = b[0] + (b[1] - b[0]) * (i + .5) / n, hw = (b[1] - b[0]) / n * .75 + .6, w = Math.max(0, 1 - Math.abs(u - c) / hw); if (w > ACT[L_[i]]) ACT[L_[i]] = E.inOut(w); }
   }
 }
 const gainOf = st => { const b = .36 + .34 * WIDE; return b + (1.3 - b) * (ACT[st] || 0); };
-const STC = { R1: [-10, 2.5], R2: [-12, 8], R3: [-11, 15], R4: [-12, 23], R5: [-11, 31], R6: [-10, 38.5], R7: [-11, 45.5], R8: [-10, 52.5], MT: [-1, -4.5],
-  C1: [7.6, 53.8], C2: [7.5, 45], C34: [7.4, 33.5], C5: [7.2, 27], C6: [7.4, 22.4], C7: [7.4, 18], C8: [7.4, 13.5], C9: [7.2, 9], C10: [7.5, 4.5] };
+const STC = { R1: [-10, 3.6], R2: [-12, 8], R3: [-11, 15], R4: [-12, 23], R5: [-11, 31], R6: [-10, 38.5], R7: [-11, 45.5], R8: [-10, 52.5], MT: [-1, -4.5],
+  C1: [7.6, 53.8], C2: [7.5, 45], C34: [7.4, 33.5], C5: [7.2, 27], C6: [7.4, 22.4], AI: [19, 22] };
 let DECKI = null;
 /* the deck's light pool under the station on screen (per tile, the lattice's chunk light) */
 function deckPool() {
@@ -3146,10 +2917,10 @@ function deckPool() {
   }
 }
 /* the work lamps: a lamp over the station on screen, its cone picked out by drifting dust (the key light made visible) */
-const LAMPY = { C1: 5.2, C2: 5.6, C34: 5.0, C5: 4.6, C6: 4.6, C7: 4.8, C8: 4.6, C9: 4.8, C10: 4.8, MT: 6.5 };
+const LAMPY = { C1: 5.2, C2: 5.6, C34: 5.0, C5: 4.6, C6: 4.6, MT: 6.5, R7: 7.5, R8: 9.5 };
 function lamps() {
   for (const st of STN) {
-    const a = ACT[st]; if (a < .05) continue;
+    const a = ACT[st]; if (a < .05 || st === 'AI') continue;
     const c = STC[st], y0 = LAMPY[st] || 7.5, R = st[0] === 'C' ? 1.5 : 2.6;
     for (let k = 0; k < 24; k++) { const t = k / 24 * TAU; apX(BWX, c[0] + Math.cos(t) * .35, y0, c[1] + Math.sin(t) * .35, PW); K.dotW(PW[0], PW[1], PW[2], 2, WH, .8 * a); }
     apX(BWX, c[0], y0 - .05, c[1], PW); K.glowW(PW[0], PW[1], PW[2], 26, [255, 250, 232], .35 * a);
@@ -3168,7 +2939,17 @@ function keyLight() {
   const ex = M[0] * dx + M[3] * dy + M[6] * dz, ez = M[2] * dx + M[5] * dy + M[8] * dz, g = K.C.target, gx = M[0] * (g[0] - t[0]) + M[3] * (g[1] - t[1]) + M[6] * (g[2] - t[2]), gz = M[2] * (g[0] - t[0]) + M[5] * (g[1] - t[1]) + M[8] * (g[2] - t[2]);
   let vx = ex - gx, vz = ez - gz; const l = Math.hypot(vx, vz) || 1; vx /= l; vz /= l;
   LKEY[0] = .62 * vx + .25 * vz; LKEY[1] = 1; LKEY[2] = .62 * vz - .25 * vx;
-  const n = Math.hypot(LKEY[0], LKEY[1], LKEY[2]); dirX(BWX, LKEY[0] / n, LKEY[1] / n, LKEY[2] / n, LW);
+  const n = Math.hypot(LKEY[0], LKEY[1], LKEY[2]); LKEY[0] /= n; LKEY[1] /= n; LKEY[2] /= n; dirX(BWX, LKEY[0], LKEY[1], LKEY[2], LW);
+  // the active station's key: from the camera's right, in front and above, so its faces model (the rim comes from
+  // the lattice's own edge term and the rim lamp behind it)
+  KEY3[0] = .45 * vx - .8 * vz; KEY3[1] = .95; KEY3[2] = .45 * vz + .8 * vx;
+  const m = Math.hypot(KEY3[0], KEY3[1], KEY3[2]); KEY3[0] /= m; KEY3[1] /= m; KEY3[2] /= m;
+}
+const KEY3 = [0, 1, 0], LMIX = [0, 0, 0];
+/* the light the next draws take: the hall's (a 0) or the active station's key (a 1) */
+function setLight(a) {
+  for (let k = 0; k < 3; k++) LMIX[k] = LKEY[k] + (KEY3[k] - LKEY[k]) * a;
+  const n = Math.hypot(LMIX[0], LMIX[1], LMIX[2]) || 1; dirX(BWX, LMIX[0] / n, LMIX[1] / n, LMIX[2] / n, LW);
 }
 /* ---------------- the frame ---------------- */
 let LASTU = -1, LASTT = -1;
@@ -3182,7 +2963,7 @@ function update(u, ctx) {
   dirX(BWX, LB[0], LB[1], LB[2], LW);
   activity(U_);
   r1State(u); r2State(u); r3State(u); r4State(u); r5State(u); r6State(u); r7State(u); r8State(u);
-  c2State(u); c34State(u); c5State(u); c6State(u); c8State(u); c10State(u);
+  AF_ = afAt(U_); c2State(AF_); c34State(AF_); c5State(AF_); c6State(AF_); inspState(u);
   pieceAt(u);
 }
 let FXU = 0;
@@ -3195,7 +2976,7 @@ function fxf(ch, q) {
         if (kind === 5) return on;
         if (kind === 6) return on * (Math.floor(U_ * 1.4 + k * .37) % 2 ? 1 : .2);
         if (kind === 7) return on * (.2 + .9 * (ACT[st] || 0));
-        if (kind === 8) return on * ((st === 'C10' ? CTS.on > .05 : R2S.p > .03) ? (Math.floor(U_ * 3) % 2 ? 1.6 : .2) : .15);
+        if (kind === 8) return on * (R2S.p > .03 ? (Math.floor(U_ * 3) % 2 ? 1.6 : .2) : .15);
       }
       if (q >= 1000) return lightOn(u, 0) * (q % 3 === 1 ? (Math.floor(u * 1.7 + q) % 2 ? 1 : .3) : 1);
       return lightOn(u, NLIGHT[q] || 0);
@@ -3205,11 +2986,11 @@ function fxf(ch, q) {
     case 12: return R3S.heat > .02 ? 1 + R3S.heat : 0;
     case 13: return R4S.ind > .01 ? (q === 9 ? .6 * R4S.ind : .5 * R4S.ind + R4S.ind * (.6 + .4 * Math.sin(u * 40 + q))) : 0;
     case 14: { const j = q % 36, sg = (q / 36) | 0, k = Math.floor(j / 6); return R6S.fin > k + (sg + 1) / 4 * .85 ? -1 : 0; }
-    case 15: { const on = ss(33.6, 34.4, u) * (1 - ss(40.1, 40.5, u)); return on * (.35 + .25 * Math.sin(u * 9 + q)); }
-    case 16: return q === 1 ? .9 * PLE(u) : .9 * PLD(u);
-    case 17: return q < C8S.lay - 1 ? 0 : q < C8S.lay ? .8 : -1;
+    case 15: { const f = AF_, on = ss(33.6, 34.4, f) * (1 - ss(40.1, 40.5, f)); return on * (.35 + .25 * Math.sin(f * 9 + q)); }
+    case 16: return q === 1 ? .9 * PLE(AF_) : .9 * PLD(AF_);
     case 18: return R3S.heat > .02 ? 10 + 1.7 * R3S.heat : 0;                      // the furnace's elements
-    case 19: return u > 47.8 && u < 50.1 ? 10.7 : 0;                                // the bond stage's heater
+    case 19: return AF_ > 47.8 && AF_ < 50.1 ? 10.7 : 0;                              // the bond stage's heater
+    case 20: return R8S.heat > .02 ? 10 + 1.4 * R8S.heat : 0;                       // the curing oven's elements
   }
   return 0;
 }
@@ -3227,8 +3008,12 @@ function pieceOcc(u) {
   else if (st === 'sint' && u > 12.6) { if (K.SMOOTH) K.occA(E.ss(12.6, 12.85, u)); occIn(X_, D.rs, -D.Ls / 2 + .05, D.Ls / 2 - .05); K.occA(1); }
   else if (st === 'forge') { occIn(X_, D.rs, R4S.xt + .05, Math.min(XF - .05, R4S.xt + D.Ls - .05)); if (R4S.f > .1) occIn(X_, D.rf, XF + .05, XF + R4S.f * D.Lf / (D.Ls - D.LT) - .05); }
   else if (st === 'forged' || st === 'turn' || st === 'turned' || st === 'mill') occIn(X_, RR, -RL / 2 + D.LT + .05, RL / 2 - D.LN - .05);
-  else if (st === 'body' || st === 'coat' || st === 'coated' || st === 'mated') occIn(X_, RR, -RL / 2 + D.LT + .05, RL / 2 - D.LN - D.dbore - .05);
-  if (u > C9T.lid[1] && u < MATE2[1]) { capsuleX(u); occIn(CAPS.X, D.rc - .03, .04, D.Lc - .07); }
+  else if (st === 'body') occIn(X_, RR, -RL / 2 + D.LT + .05, RL / 2 - D.LN - .05);
+  else if (st === 'case') { const zl = D.zc1 - nSecOn(u) * D.secL; occIn(X_, RR, -RL / 2 + D.LT + .05, zl - .05); if (zl < D.zc1 - .1) occIn(X_, D.rcas, zl + .05, D.zc1 - .05); }
+  else if (st === 'cased' || st === 'fill' || st === 'cured' || st === 'done') {
+    const xr = st === 'fill' ? ss(FL[0] - .12, FL[0] + .03, u) * (1 - ss(FL[1] + .02, FL[1] + .15, u)) : st === 'cased' ? 0 : INS.xr;
+    if (xr < .05) occIn(X_, D.rcas, D.zc0 + .05, D.zc1 - .05);
+  }
 }
 /* the machines' solid blocks near the lens (not while X-rayed) */
 const EB = [0, 0, 0];
@@ -3264,8 +3049,6 @@ function scanFrames(u, k) {
     case 'wid': return at(XSN, BWX, C1.pre[0], C1.pre[1], C1.pre[2]);
     case 'dic': return XTAB;
     case 'mod': return at(XSN, BWX, C6.b[0], C6.b[1], C6.b[2]);
-    case 'cas': return at2(XSN, BWX, C7.t[0], C7.t[1], C7.t[2], 0, -PI / 2, -1, 0);
-    case 'cap': return capsuleX(u);
   }
   return BWX;
 }
@@ -3285,7 +3068,7 @@ function draw(u0, ctx) {
   // the splices: the base scene (drawn under this) fades out as the bay fades in, and back at the end
   if (BASEW > .001) { if (BASEW < .999) fadeBase(BASEW); } else K.pb.clear();
   if (!OA) { OL = allO(); OA = OL.map(o => o.a); }
-  const fd = 1 - BASEW, gain = g => { for (let i = 0; i < OL.length; i++) OL[i].a = OA[i] * fd * g; }, G = st => gain(gainOf(st));
+  const fd = 1 - BASEW, gain = g => { for (let i = 0; i < OL.length; i++) OL[i].a = OA[i] * fd * g; }, G = st => { gain(gainOf(st)); setLight(ACT[st] || 0); };
   gain(1);
   const late = BASEW > .96, tr = U_ > BW_.TRc[0];
   if (late && !tr) return;
@@ -3295,17 +3078,16 @@ function draw(u0, ctx) {
   // the closing crossfade: the base scene back, the round alone (bright) sliding on to its seat in the chamber
   if (late) { L.G.occ = false; gain(1.2 / Math.max(fd, .01)); drawSabot(u); drawPiece(u); return; }
   deckOcc(); machOcc(); pieceOcc(u); L.G.occ = true;
-  gain(.85 + .3 * WIDE); L.draw(BB.hall, BWX, O.hall);
+  setLight(0); gain(.85 + .3 * WIDE); L.draw(BB.hall, BWX, O.hall);
   gain(1); drawGantry(O.mc);
   G('R1'); drawR1(u); drawR1x(u); G('R2'); drawR2(u); drawR2x(u); G('R3'); drawR3(u); drawR3x(u); G('R4'); drawR4(u); drawR4x(u);
   G('R5'); drawR5(u); drawR5x(u); G('R6'); drawR6(u); drawR6x(u); G('R7'); drawR7(u); drawR7x(u); G('R8'); drawR8(u); drawR8x(u); G('MT'); drawMTx(u); if (tr) gain(1.2 / Math.max(fd, .01)); drawMT(u);
-  gain(.8 + .3 * WIDE); L.draw(BB.crx, BWX, O.hallL);
-  G('C1'); drawC1(u); drawC1x(u); G('C2'); drawC2(u); drawC2x(u); G('C34'); drawC34(u); drawC34x(u); G('C5'); drawC5(u); drawC5x(u); G('C6'); drawC6(u); drawC6x(u);
-  G('C7'); drawC7(u); drawC7x(u); G('C8'); drawC8(u); drawC8x(u); G('C9'); drawC9(u); drawC9x(u); G('C10'); drawC10(u); drawC10x(u);
-  gain(1); drawMono(u);
-  gain(tr ? 1.2 / Math.max(fd, .01) : 1.15); drawPiece(u);                 // (the round stays bright out to the splice)
-  if (u >= PART[1] && u < MTT.capPick[0] - .3) drawCapAt(u);
-  drawWafer(u); drawCapsule(u); drawMating(u); drawScans(u); drawLens(u); lamps();
+  setLight(0); gain(.8 + .3 * WIDE); L.draw(BB.crx, BWX, O.hallL);
+  const f = AF_;                                               // (the chip fab and the hall on their own clock)
+  G('C1'); drawC1(f); drawC1x(f); G('C2'); drawC2(f); drawC2x(f); G('C34'); drawC34(f); drawC34x(f); G('C5'); drawC5(f); drawC5x(f); G('C6'); drawC6(f); drawC6x(f);
+  G('AI'); drawAI(f, Math.max(.35, ACT.AI || 0, WIDE));
+  setLight(1); gain(tr ? 1.2 / Math.max(fd, .01) : U_ > BW_.TRb[0] - 1 ? 1.45 : 1.15); drawPiece(u);                 // (the round stays bright out to the splice)
+  gain(1); drawWafer(f); drawScans(f); drawLens(f); lamps();
 }
 
 /* ---------------- magnified inspection views (the films' X-ray look): a hairline frame floating by the part, a
@@ -3333,20 +3115,22 @@ function lensFrame(L_, a) {
   K.dotW(LB2[0], LB2[1], LB2[2], 3, LIME, a);
 }
 function buildLens() {
-  mkLens('wmap', 'C5', .2, C5.t, .62, .36, -.5);
-  mkLens('dmap', 'C6', .2, C6.b, .55, .16, -.5);
-  mkLens('ct', 'C10', .24, [C10.t[0], C10.t[1] + D.Lc / 2, C10.t[2]], -.75, .42, -.3);
+  mkLens('wmap', 'AI3a', .2, C5.t, .62, .36, -.5);
+  mkLens('dmap', 'AI3b', .2, C6.b, .55, .16, -.5);
+  mkLens('xs', 'MT', 2.3, [XMO - RL * .3, YR + .3, ZR.MT], 3.2, 4.2, -3.0);
 }
+/* u at the chip fab's time af (its keys are piecewise linear) */
+function afInv(af) { for (let i = 1; i < AFK.length; i++) if (af <= AFK[i][1] && AFK[i][1] > AFK[i - 1][1]) return AFK[i - 1][0] + (AFK[i][0] - AFK[i - 1][0]) * sat((af - AFK[i - 1][1]) / (AFK[i][1] - AFK[i - 1][1])); return LEN; }
 const lensA = (beat, d0, d1) => { const b = BW_[beat]; return tw(U_, b[0] + d0, b[1] - d1); };
 /* the defective dies (a few at the edge): their field indices */
 const BADD = new Set([0, 9, 47]);
 function drawLens(u) {
   // the wafer map at the dicer: 2x, the dies, the streets as they are cut, then the probe results
-  let a = lensA('C5', .8, 1.8);
+  let a = lensA('AI3a', .5, .2);
   if (a > .02) {
     const L_ = LNS.wmap, k = 1.2; lensFrame(L_, a);
     lcirc(L_, 0, 0, WRAD * k, 72, WH, .8 * a); lline(L_, -.012 * k, -WRAD * k + .006, .012 * k, -WRAD * k + .006, WH, a);
-    const res = lin(u, CUTZ[1] - .05, CUTZ[1] + .2);
+    const res = sat((U_ - afInv(CUTZ[1] - .1)) / 1.6);
     for (let i = 0; i < NF; i++) {
       const f = FIELDS[i], x0 = (f[0] - .0125) * k, x1 = (f[0] + .0125) * k, y0 = (f[1] - .016) * k, y1 = (f[1] + .016) * k;
       const col = res > 0 && i / NF < res ? (BADD.has(i) ? K.CORAL || [255, 106, 61] : LIME) : WH;
@@ -3355,10 +3139,10 @@ function drawLens(u) {
     }
     for (let j = 0; j < C5S.nx; j++) { const o = streetX(j) * k, hh_ = Math.sqrt(Math.max(0, (WRAD * k) ** 2 - o * o)); lline(L_, -hh_, o, hh_, o, LIME, .5 * a, 3); }
     for (let j = 0; j < C5S.nz; j++) { const o = streetZ(j) * k, hh_ = Math.sqrt(Math.max(0, (WRAD * k) ** 2 - o * o)); lline(L_, o, -hh_, o, hh_, LIME, .5 * a, 3); }
-    if (res > 0 && res < 1) { const y = -WRAD * k + 2 * WRAD * k * res; lline(L_, -WRAD * k, y, WRAD * k, y, LIME, a, 1); }
+    if (res > 0 && res < 1) { const y = -WRAD * k + 2 * WRAD * k * res; for (let j = 0; j < 4; j++) lline(L_, -WRAD * k, y - j * .004, WRAD * k, y - j * .004, LIME, a * (1 - j * .25), 1); lp(L_, 0, y, LA); K.glowW(LA[0], LA[1], LA[2], 30, LIME, .3 * a); }
   }
   // the die map at the bonder: 14x, the blocks, the pad ring, the pads lighting as the wires land
-  a = lensA('C6', 1.0, 1.8);
+  a = lensA('AI3b', .5, .2);
   if (a > .02) {
     const L_ = LNS.dmap, k = 11, w = .0125 * k, h = .0155 * k; lensFrame(L_, a);
     lrect(L_, -w, -h, w, h, WH, .9 * a, 1.2); lrect(L_, -w * .86, -h * .88, w * .86, h * .88, WH, .4 * a, 2);
@@ -3369,25 +3153,36 @@ function drawLens(u) {
     lcirc(L_, -.55 * w, -.72 * h, .1 * w, 24, WH, .7 * a);
     const nw = Math.floor(NWIRE * lin(u, C6T.wire[0], C6T.wire[1]));
     for (let i = 0; i < 7; i++) for (const s of [-1, 1]) { const x = (-.75 + i * .25) * w, y = s * .94 * h, on = (i * 2 + (s > 0 ? 1 : 0)) < nw; lrect(L_, x - .03 * w, y - .025 * h, x + .03 * w, y + .025 * h, on ? LIME : WH, (on ? 1 : .5) * a, 1); if (on) lline(L_, x, y, x, y + s * .12 * h, LIME, .8 * a, 1.5); }
-    const sc = lin(u, 48.4, 49.7); if (sc > 0 && sc < 1) { const x = -w + 2 * w * sc; lline(L_, x, -h, x, h, LIME, a, 1); }
+    const sc = sat((U_ - afInv(48.4)) / 2.0); if (sc > 0 && sc < 1) { const x = -w + 2 * w * sc; for (let j = 0; j < 4; j++) lline(L_, x - j * .004, -h, x - j * .004, h, LIME, a * (1 - j * .25), 1); lp(L_, x, 0, LA); K.glowW(LA[0], LA[1], LA[2], 30, LIME, .3 * a); }
   }
-  // the CT slice: 3x, the casing wall, the twelve foil layers, the welds at the ends; the inside not shown (sealed)
-  a = lensA('C10', 1.0, 1.6);
-  if (a > .02 && CTS.on > .02) {
-    const L_ = LNS.ct, k = 1.2, r = D.rc * k, t = C10.t, hrel = (CTS.h - t[1]) / D.Lc; lensFrame(L_, a);
-    const lidZ = hrel > (D.Lc - .07) / D.Lc, baseZ = hrel < .06;
-    lcirc(L_, 0, 0, r, 64, WH, a); lcirc(L_, 0, 0, (D.rc - .03) * k, 56, WH, .8 * a);
-    if (!lidZ && !baseZ) for (let l = 0; l < NLAY; l++) lcirc(L_, 0, 0, (D.rc - .03 + .0025 * (l + 1)) * k, 48, LIME, .35 * a);
-    if (lidZ || baseZ) { lcirc(L_, 0, 0, (D.rc + .002) * k, 64, LIME, a); lcirc(L_, 0, 0, (D.rc - .015) * k, 56, LIME, .6 * a); }
-    for (let j = -4; j <= 4; j++) { const y = j * .1 * r, x = Math.sqrt(Math.max(0, (r * .8) ** 2 - y * y)); lline(L_, -x, y - x * .3, x, y + x * .3, WH, .1 * a, 4); }
-    const bx_ = L_.h - .05, y0 = -L_.h + .06, y1 = L_.h - .06; lline(L_, bx_, y0, bx_, y1, WH, .5 * a, 2); lline(L_, bx_ - .03, y0 + (y1 - y0) * hrel, bx_ + .03, y0 + (y1 - y0) * hrel, LIME, a, 1);
+  // the inspection: the slice under the ring (core, fill, casing; the fins at the tail) and the round's section built
+  // up slice by slice behind it as the ring travels (its height x6)
+  a = lensA('MT', .9, .6);
+  if (a > .02 && LNS.xs) {
+    const L_ = LNS.xs, h = L_.h, ks = h * .38 / D.rcas, cx = -h * .55, xr = INS.xr, zr = INS.x - XMO, fz = zr / RL + .5;
+    lensFrame(L_, a);
+    lcirc(L_, cx, 0, D.rcas * ks, 64, WH, a); lcirc(L_, cx, 0, (D.rcas - .03) * ks, 56, WH, .6 * a);
+    const onBody = zr > D.zc0 && zr < D.zc1, onTail = zr > -RL / 2 && zr < -RL / 2 + D.LT;
+    if (onBody || onTail) lcirc(L_, cx, 0, RR * ks, 48, LIME, (xr > .02 ? 1 : .5) * a);
+    if (onBody) for (let j = 0; j < 3; j++) lcirc(L_, cx, 0, (RR + (D.rcas - .03 - RR) * (j + 1) / 4) * ks, 40, WH, .25 * a);
+    if (onTail) for (let k = 0; k < 6; k++) { const t = k / 6 * TAU; lline(L_, cx + Math.cos(t) * D.rcore * ks, Math.sin(t) * D.rcore * ks, cx + Math.cos(t) * D.rs * ks, Math.sin(t) * D.rs * ks, LIME, a); }
+    // the section: x across the round's length, y x6
+    const x0 = -h * .02, x1 = h * .92, ky = 6 * (x1 - x0) / RL, X_ = z => x0 + (x1 - x0) * (z / RL + .5);
+    lrect(L_, X_(-RL / 2), -D.rcas * ky, X_(D.zc1), D.rcas * ky, WH, .35 * a, 3);
+    const n = Math.floor(64 * sat(fz));
+    for (let i = 0; i < n; i++) {
+      const z = -RL / 2 + RL * (i + .5) / 64, x = X_(z), core = z < RL / 2 - D.LN ? RR : ogR(z - (RL / 2 - D.LN)), cas = z > D.zc0 && z < D.zc1;
+      lline(L_, x, -core * ky, x, core * ky, LIME, (i > n - 4 ? 1 : .55) * a, 1.5);
+      if (cas) { lline(L_, x, core * ky, x, D.rcas * ky, WH, .35 * a, 2); lline(L_, x, -D.rcas * ky, x, -core * ky, WH, .35 * a, 2); }
+    }
+    if (n > 0 && n < 64) { const x = X_(-RL / 2 + RL * n / 64); lline(L_, x, -h * .5, x, h * .5, LIME, a, 1); }
   }
 }
 function lensTags(u) {
-  const T = (key, beat, d0, lab, val) => { const L_ = LNS[key], b = BW_[beat], w0 = b[0] + d0, w1 = b[1] - 1.7; if (U_ < w0 || U_ > w1) return; const a = tw(U_, w0, w1); lp(L_, L_.h, L_.h, TP2); if (!K.pj(TP2[0], TP2[1], TP2[2])) return; const tg = BXT[key] || (BXT[key] = K.mkTag()); K.setTag(tg, '', K.decode(lab, sat((U_ - w0) / .6), FXU, key.length), val, 'lime sm', K.PJ[0] + 8 * K.S, K.PJ[1] - 26 * K.S, a); };
-  T('wmap', 'C5', .9, `WAFER MAP ×1.2 · ${NF} DIES`, u > CUTZ[1] + .2 ? `${NF - BADD.size} GOOD` : 'PROBING');
-  T('dmap', 'C6', 1.1, 'DIE MAP ×11 · 2 CORES · MEMORY · PADS', `${Math.floor(NWIRE * lin(u, C6T.wire[0], C6T.wire[1]))}/${NWIRE}`);
-  T('ct', 'C10', 1.1, 'CT SLICE ×1.2 · THE SHELL ONLY', 'VOIDS 0');
+  const T = (key, beat, d0, lab, val) => { const L_ = LNS[key], b = BW_[beat], w0 = b[0] + d0, w1 = Math.max(b[1] - .3, w0 + 3.1); if (U_ < w0 || U_ > w1) return; const a = tw(U_, w0, w1); lp(L_, L_.h, L_.h, TP2); if (!K.pj(TP2[0], TP2[1], TP2[2])) return; const tg = BXT[key] || (BXT[key] = K.mkTag()); K.setTag(tg, '', K.decode(lab, sat((U_ - w0) / .6), FXU, key.length), val, 'lime sm', K.PJ[0] + 8 * K.S, K.PJ[1] - 26 * K.S, a); };
+  T('wmap', 'AI3a', .6, `WAFER MAP ×1.2 · ${NF} DIES`, u > CUTZ[1] + .2 ? `${NF - BADD.size} GOOD` : 'PROBING');
+  T('dmap', 'AI3b', .6, 'DIE MAP ×11 · 2 CORES · MEMORY · PADS', `${Math.floor(NWIRE * lin(u, C6T.wire[0], C6T.wire[1]))}/${NWIRE}`);
+  T('xs', 'MT', 1.0, 'X-RAY · SECTION BUILT SLICE BY SLICE (HEIGHT ×6)', `${Math.round(100 * sat((INS.x - XMO) / RL + .5))} %`);
 }
 
 /* ---------------- tags and readout ----------------
@@ -3396,21 +3191,29 @@ function lensTags(u) {
 const TG = {};
 const tgOf = k => TG[k] || (TG[k] = K.mkTag());
 const TP = [0, 0, 0];
-const TP2 = [0, 0, 0];
+const TP2 = [0, 0, 0], CAPT = [0, 0, 0];
 function tag(id, lab, val, x, y, z, a, age, side, world, lift) {
   if (a < .01) return;
   if (world) { TP[0] = x; TP[1] = y; TP[2] = z; } else apX(BWX, x, y, z, TP);
   const S = K.S;                                             // (raster px: the offsets are stage px x S)
-  if (!K.pj(TP[0], TP[1], TP[2]) || !K.onS(-40 * S)) return;
-  const sx = K.PJ[0], sy = K.PJ[1], s = side || (sx > 1100 * S ? 1 : -1), dx = 54 * s * S, lx = sx + dx, ly = sy - 50 * S - (lift || 0) * S, tg = tgOf(id + lab.slice(0, 12));
-  K.leader(sx, sy, lx, ly, '#C6F432', .8 * a); K.dot(sx, sy, Math.round(3 * S), LIME[0], LIME[1], LIME[2], a);
-  const w = K.tagW(tg);
+  if (!K.pj(TP[0], TP[1], TP[2])) return;
+  // an anchor drifting off the frame keeps its tag at the frame's edge (the tag stays legible for its whole window)
+  const px = K.PJ[0], py = K.PJ[1], mx = 90 * S, my = 110 * S, sx = Math.min(K.BW - mx, Math.max(mx, px)), sy = Math.min(K.BH - my, Math.max(my, py)), off = sx !== px || sy !== py;
+  if (off && (Math.abs(sx - px) > 500 * S || Math.abs(sy - py) > 400 * S)) return;
+  const tg = tgOf(id + lab.slice(0, 12)), w = K.tagW(tg);
+  let s = side || (sx > 1100 * S ? -1 : 1);
+  if (s > 0 && sx / S + 58 + w > 1880) s = -1; else if (s < 0 && sx / S - 58 - w < 40) s = 1;
+  const dx = 54 * s * S, lx = sx + dx;
+  let ly = sy - 50 * S - (lift || 0) * S;
+  if ((dx > 0 ? lx / S + 4 : lx / S - 4 - w) < 440 && ly / S < 250) ly = 262 * S;          // (clear of the readout)
+  K.leader(sx, sy, lx, ly, '#C6F432', .8 * a); if (!off) K.dot(sx, sy, Math.round(3 * S), LIME[0], LIME[1], LIME[2], a);
   K.setTag(tg, id, K.decode(lab, sat(age / .6), FXU, id.length + lab.length), val, 'lime sm', dx > 0 ? lx + 4 * S : lx - 4 * S - w * S, ly - 12 * S, a);
 }
 const tw = (u, a, b) => sat((u - a) / .25) * (1 - sat((u - b + .3) / .3));
 /* a tag shown from from to to seconds after beat id starts */
 function T_(beat, from, to, id, lab, val, p, side, lift) {
-  const b0 = BW_[beat][0], w0 = b0 + from, w1 = b0 + to, U = U_;
+  if (!BW_[beat]) return;
+  const b0 = BW_[beat][0], w0 = b0 + from, w1 = Math.max(b0 + to, w0 + 3.1), U = U_;
   if (U < w0 - .1 || U > w1 + .1) return;
   tag(id, lab, val, p[0], p[1], p[2], tw(U, w0, w1), U - w0, side, false, lift);
 }
@@ -3425,7 +3228,7 @@ function boxTag(key, lab, val, mn, mx, a, age, X_) {
 }
 function scanTags(u) {
   for (const s of SCANS) {
-    const [a0, a1, k, lab, val, mn, mx] = s, w0 = unwarp(a0), w1 = Math.max(unwarp(a1) + 2.6, w0 + 3.2), U = U_;
+    const [a0, a1, k, lab, val, mn, mx] = s, w0 = afInv(a0), w1 = Math.max(afInv(a1) + 2.6, w0 + 3.2), U = U_;
     if (U < w0 || U > w1) continue;
     const X_ = scanFrames(u, k), b = K.boxOf(mn, mx, X_, 6 * K.S); if (!b) continue;
     const a = tw(U, w0, w1);
@@ -3435,89 +3238,84 @@ function scanTags(u) {
   }
 }
 function tags(u0, ctx) {
-  update(u0, ctx); const u = A_; FXU = u;
-  scanTags(u); lensTags(u);
-  const z1 = ZR.R1, xe = XR + D.Lb / 2, zf = XR + RL / 2 - D.LN, M = D.M;
+  update(u0, ctx); const u = A_, f = AF_; FXU = u;
+  scanTags(f); lensTags(f);
+  const z1 = ZR.R1, xe = XR + D.Lb / 2, zf = XR + RL / 2 - D.LN, M = D.M, rc = D.rcas;
   const T3 = Math.round(20 + 2380 * Math.min(1, R3S.heat / .99));
-  T_('IN', 4.4, 8.8, '', 'FABRICATION BAY · ONE ROUND', '70 M', [-2, 12, 22], 1);
-  T_('IN', 5.0, 9.8, '', 'ROD LINE · 8 STATIONS', 'PORT', [-11, 3.5, 24], -1);
-  T_('IN', 5.4, 10.0, '', 'CAPSULE LINE · CLEAN ROOM ISO 3', 'STARBOARD', [8, 3.5, 30], 1);
-  // the rod line
-  T_('R1', .3, 5.8, 'R1', 'POWDER DOSING · AUGER FEED', `${(M * 1.046 * R1S.fill).toFixed(1)} T`, [xe + 2.25, 4.4, z1], 1);
-  T_('R1', 1.0, 5.8, '', 'TUNGSTEN POWDER · 4.2 µm GRAIN', '99.95 %', [XR - 2, YR + D.rb, z1], -1);
-  T_('R1', 2.2, 5.8, '', 'VIBRATING BED · UNBALANCED MOTORS', '50 HZ', [XR + 2.2, .3, z1 - 1.25], -1, 60);
+  T_('IN', 5.4, 8.8, '', 'FABRICATION BAY · ONE ROUND', '70 M', [-2, 12, 22], 1);
+  T_('IN', 5.8, 9.4, '', 'ROUND LINE · 8 STATIONS', 'PORT', [-11, 3.5, 24], -1);
+  // the core
   T_('R2', .4, 5.8, 'R2', 'COLD ISOSTATIC PRESS · WATER', `${Math.round(310 * R2S.p)} MPA`, [XV, 1.6, ZR.R2], 1);
   T_('R2', 1.4, 5.8, '', 'WIRE-WOUND VESSEL · 26 LAYERS', '', [XV - 1.25, -3, ZR.R2], -1);
-  T_('R2', 2.6, 5.8, '', 'INTENSIFIER · HIGH-PRESSURE PUMP', '310 MPA', [-7.5, 2.1, 9.9], 1, 40);
-  T_('R2', 3.2, 5.8, '', 'COMPACT · 65 % DENSE', `Ø ${Math.round(2000 * mix(D.rb - .01, D.rg, R2S.shrink))} MM`, [XV, -4.5, ZR.R2 - .3], -1, 70);
+  T_('R2', 3.2, 6.8, '', 'COMPACT · 65 % DENSE', `Ø ${Math.round(2000 * mix(D.rb - .01, D.rg, R2S.shrink))} MM`, [XV, -4.5, ZR.R2 - .3], -1, 70);
   T_('R3', .3, 5.3, 'R3', 'SINTERING FURNACE · HYDROGEN (H₂)', `${T3} °C`, [XR + 3, YR + FR + .3, ZR.R3 - .4], 1);
-  T_('R3', 1.2, 5.3, '', 'LID CYLINDERS · HYDRAULIC', '', LIDC[1], 1, 70);
-  T_('R3', 2.0, 5.3, '', 'DENSITY 65 → 94 %', `Ø ${Math.round(2000 * mix(D.rg, D.rs, R3S.shrink))} MM`, [XR - 2.5, YR + .5, ZR.R3], -1);
-  T_('R3', 2.6, 5.3, '', 'H₂ BURN-OFF FLARE', '', [-16.0, 3.7, 17.0], -1, 50);
+  T_('R3', 2.0, 5.6, '', 'DENSITY 65 → 94 %', `Ø ${Math.round(2000 * mix(D.rg, D.rs, R3S.shrink))} MM`, [XR - 2.5, YR + .5, ZR.R3], -1);
   T_('R4', .3, 6.3, 'R4', 'RADIAL FORGE · 4 HAMMERS', '840 BLOWS/MIN', [XF, 4.8, ZR.R4 - 1.5], 1);
   T_('R4', 1.0, 6.3, '', 'INDUCTION COIL · 1450 °C', '', [(COIL_X[0] + COIL_X[1]) / 2, YR + .6, ZR.R4], -1);
-  T_('R4', 1.8, 6.3, '', `Ø ${Math.round(D.rs * 2000)} → ${Math.round(D.rf * 2000)} MM`, `${Math.round(100 * R4S.f / (D.Ls - D.LT))} %`, [XF + 1.8, YR + .4, ZR.R4], 1, 40);
-  T_('R4', 2.6, 6.3, '', 'MANIPULATOR · GRIPS THE TAIL', '', [R4S.man - .8, 3.2, ZR.R4], -1, 60);
-  T_('R5', .3, 5.3, 'R5', 'TURNING · CUBIC BORON NITRIDE (CBN) TOOL', `Ø ${(RR * 2000).toFixed(1)} MM`, [XR + R5S.tc, YR + .5, ZR.R5 - RR], 1);
-  T_('R5', 2.4, 5.3, '', 'GRINDING · ROUGHNESS Ra 0.2 µm', '±5 µm', [XR + R5S.gc, YR - .6, ZR.R5 - RR - .6], -1, 30);
-  T_('R5', 1.0, 5.0, '', 'LEAD SCREW · CARRIAGE FEED', '0.6 MM/REV', [XR - 2, .8, ZR.R5 + .55], -1, 80);
-  T_('R6', .3, 3.6, 'R6', 'OGIVE · 5-AXIS MILL', `${(D.LN * 1000).toFixed(0)} MM`, [zf + D.LN * .5, YR + .35, ZR.R6], 1);
+  T_('R4', 2.2, 6.3, '', `Ø ${Math.round(D.rs * 2000)} → ${Math.round(D.rf * 2000)} MM`, `${Math.round(100 * R4S.f / (D.Ls - D.LT))} %`, [XF + 1.8, YR + .4, ZR.R4], 1, 40);
+  { const P = PIECE.X.T, w0 = BW_.m46[0] + .6, w1 = w0 + 3.4; if (U_ > w0 - .1 && U_ < w1 + .1) tag('R5', 'TURNING AND GRINDING · Ra 0.2 µm', `Ø ${(RR * 2000).toFixed(1)} MM`, P[0], P[1], P[2], tw(U_, w0, w1), U_ - w0, 1, true, 30); }
+  T_('R6', .3, 3.8, 'R6', 'OGIVE · 5-AXIS MILL', `${(D.LN * 1000).toFixed(0)} MM`, [zf + D.LN * .5, YR + .35, ZR.R6], 1);
   T_('R6', 1.2, 4.6, '', 'TOOL CAROUSEL · 16 TOOLS', '', [XR + RL / 2 + 1.4, 3.9, ZR.R6 + .1], 1, 80);
-  T_('R6', 2.6, 6.0, '', 'NOSE CAP · PARTED OFF', '', [zf + D.LN * .5, YR + .5, ZR.R6], -1, 40);
-  T_('R6', 3.4, 6.8, '', `NOSE BAY · Ø ${Math.round(D.rbore * 2000)} MM`, `${Math.round(D.dbore * 1000)} DEEP`, [zf, YR + D.rbore, ZR.R6], 1);
-  T_('R6', 3.8, 6.8, '', 'FINS · 6 SLOTS', `${Math.min(6, Math.floor(R6S.fin))}/6`, [XR - RL / 2 + D.LT * .5, YR + D.rs, ZR.R6], -1);
-  T_('R7', .3, 5.3, 'R7', 'PLASMA SPRAY · HAFNIUM CARBIDE (HfC)', '0.4 MM', [XR + R7S.cz, YR + .3, ZR.R7 - RR], 1);
-  T_('R7', 1.2, 5.3, '', 'PLASMA · 14 000 K', '', [XR + R7S.cz, YR + .02, ZR.R7 - RR - .16], -1);
-  T_('R7', 2.0, 5.3, '', 'POWDER FEEDERS · ARGON CARRIER', '', [XR - RL / 2 - 2.2, 2.2, 43.2], -1, 60);
-  T_('R8', .3, 4.8, 'R8', 'LASER METROLOGY · 4 GAUGES', `Ø ${(RR * 2000 + .8).toFixed(3)} MM`, [R8S.hx, YR + 1.05, ZR.R8], 1);
-  T_('R8', 1.0, 4.8, '', 'STRAIGHTNESS', '0.03 MM/M', [XR - 2, YR + RR, ZR.R8], -1);
-  T_('R8', 1.8, 4.8, '', 'LASER TRACKER', '±15 µm', [-3.6, 1.8, ZR.R8 - 2.2], 1, 60);
-  { const P = PIECE.X.T, w0 = BW_.mX1[0] + .4, w1 = w0 + 5.2; if (U_ > w0 - .1 && U_ < w1 + .1) tag('', 'ROD · FINISHED · TO THE MATING', `${M.toFixed(1)} T`, P[0], P[1], P[2], tw(U_, w0, w1), U_ - w0, -1, true); }
-  T_('XO', 0, 4.6, '', 'CAPSULE LINE · CLEAN ROOM ISO 3', 'STARBOARD', [8, 2.6, 53], 1);
-  // the capsule line
-  T_('C1', .3, 4.8, 'C1', 'WAFER · 300 MM SILICON', '', [C1.pre[0], 1.15, C1.pre[2]], -1);
-  T_('C1', .8, 4.8, '', 'FRONT-OPENING POD (FOUP) · 25 WAFERS', '', [C1.foup[0], 1.32, C1.foup[2]], 1);
-  T_('C1', 2.0, 4.8, '', 'ROBOT · SCARA ARM', '', [SCA.cx, 1.2, C1.z], -1, 60);
-  T_('C2a', .2, 3.9, 'C2', 'EXTREME-ULTRAVIOLET (EUV) SCANNER', '13.5 NM', [7.5, 3.95, 46.5], 1);
-  T_('C2a', .9, 3.9, '', 'TIN DROPLETS · 50 000 /S', '27 µm', [LX, 2.6, LP.pl[1]], 1, 40);
-  T_('C2a', 1.4, 3.9, '', 'CO₂ DRIVE LASER', '20 KW', [LX, 2.0, 49.2], -1);
-  T_('C2a', 2.0, 3.9, '', 'COLLECTOR MIRROR · Ø 650 MM', '', [LX, 2.33, 48.0], -1, 60);
-  T_('C2b', .2, 4.1, '', 'FACET MIRRORS · ILLUMINATOR', '', [LX, LP.ffm[0], LP.ffm[1]], -1);
-  T_('C2b', 1.0, 4.1, '', 'RETICLE · 4× THE PRINT', `${(EXS.rz * 1000).toFixed(0)} MM`, [LX, 3.56, LP.ret[1] + EXS.rz], 1);
-  T_('C2b', 1.8, 4.1, '', 'PROJECTION · 6 MIRRORS · NUMERICAL APERTURE (NA) 0.33', '', [LX, 2.6, 43.2], -1, 50);
-  T_('C2c', .2, 5.1, '', 'WAFER STAGE · 26 × 33 MM FIELDS', `${Math.max(0, EXS.k + 1)}/${NF}`, [LX + EXS.wx, EXPO[1], EXPO[2] + EXS.wz], 1);
-  T_('C2c', 1.2, 5.1, '', 'OVERLAY 1.1 NM · CRITICAL DIMENSION (CD)', '13 NM', [LX + .014, EXPO[1] + .003, EXPO[2]], -1);
-  const [ex, ez] = chC(TH_ETCH), [dx_, dz_] = chC(TH_DEP);
-  T_('C34', .3, 4.4, 'C3', 'PLASMA ETCH · INDUCTIVELY COUPLED (ICP)', '13.56 MHZ', [ex, 1.75, ez], -1);
-  T_('C34', 1.0, 4.4, '', 'VACUUM ROBOT · 6 PORTS', '', [CC[0], 1.5, CC[2]], 1, 60);
-  T_('C34', 3.8, 7.9, 'C4', 'COPPER DEPOSITION · PHYSICAL VAPOUR (PVD)', '40 NM', [dx_, 1.75, dz_], -1);
-  T_('C34', 4.4, 7.9, '', 'GAS BOX · 18 FLOW CONTROLLERS', '', [10.36, 1.7, 33.4], 1);
-  T_('C5', .3, 5.3, 'C5', 'DICING · Ø 56 MM DIAMOND BLADE', '30 000 RPM', [C5.t[0], C5.t[1] + .07, C5.t[2]], -1);
-  T_('C5', 1.0, 5.3, '', 'STREETS · 35 µm KERF', `${C5S.nx + C5S.nz}/22`, [C5S.tx, C5.t[1], C5S.tz - .15], 1, 50);
-  T_('C6', .3, 3.4, 'C6', 'DIE BOND · ±3 µm', '26 × 33 MM', [DIEP[0], DIEP[1] + .002, DIEP[2]], -1);
-  T_('C6', 2.0, 6.3, '', 'WIRE BOND · 25 µm GOLD · ULTRASONIC', `${Math.floor(NWIRE * lin(u, C6T.wire[0], C6T.wire[1]))}/${NWIRE}`, [C6.b[0], C6.b[1] + .01, C6.b[2] + .026], 1);
-  T_('C6', 4.2, 6.4, '', 'CONTROL MODULE · SEALED', '', [C6.b[0], C6.b[1] + .06, C6.b[2]], -1, 40);
-  T_('C7', .3, 5.3, 'C7', 'CASING · TURN-MILL', `Ø ${Math.round(D.rc * 2000)} MM`, [C7.t[0] - D.rc, C7.t[1] + D.Lc * .7, C7.t[2]], -1);
-  T_('C7', 1.0, 5.3, '', 'TITANIUM Ti-6Al-4V · ±5 µm', '', [C7.t[0] + D.rc, C7.t[1] + D.Lc * .4, C7.t[2]], 1);
-  T_('C8', .3, 5.3, 'C8', 'SHIELDING WRAP · TANTALUM FOIL', `${Math.min(NLAY, Math.floor(C8S.lay))}/${NLAY}`, [C8.c[0] + D.Lc / 2, C8.c[1] + D.rc, C8.c[2]], 1);
-  T_('C8', 1.2, 5.3, '', 'DANCER ARM · 40 N TENSION', '', [C8.c[0] + D.Lc / 2, 1.4, C8.c[2] - 1.1], -1);
-  T_('C9', .3, 3.4, 'C9', 'ASSEMBLY · MODULE IN, LID ON', '', [C9.t[0], C9.t[1] + D.Lc + .1, C9.t[2]], -1);
-  T_('C9', 2.6, 6.4, '', 'LASER SEAM WELD · 2 KW FIBRE', u > C9T.weld[1] ? 'SEALED' : `${Math.round(360 * lin(u, C9T.weld[0], C9T.weld[1]))}°`, [C9.t[0] + D.rc, C9.t[1] + D.Lc - .05, C9.t[2]], 1);
-  T_('C10', .3, 5.8, 'C10', 'COMPUTED TOMOGRAPHY (CT) · 450 KV', `${Math.round(100 * lin(u, CT[0] + .15, CT[1] - .1))} %`, [C10.src[0], C10.src[1] + .2, C10.src[2]], -1);
-  { const t = C10.t, r = D.rc + .01, Lc = D.Lc, h = CTS.h, c0 = BW_.C10[0];
-    const bt = (key, lab, val, mn, mx, from) => { const w0 = c0 + from, w1 = c0 + 5.9; if (U_ > w0 - .1 && U_ < w1 + .1) boxTag(key, lab, val, mn, mx, tw(U_, w0, w1), U_ - w0); };
-    if (h > t[1] + .03) bt('ctb', 'BASE WELD · OK', '', [t[0] - r, t[1], t[2] - r], [t[0] + r, t[1] + .05, t[2] + r], 1.2);
-    if (h > t[1] + Lc - .06) bt('ctl', 'LID SEAM · OK', '0 VOIDS', [t[0] - r, t[1] + Lc - .08, t[2] - r], [t[0] + r, t[1] + Lc + .02, t[2] + r], 2.6); }
-  T_('MTv', 0, 4.4, '', 'PAYLOAD CAPSULE · SEALED', `${Math.round(D.rc * 2000)} × ${Math.round(D.Lc * 1000)} MM`, [CAPS.C[0], CAPS.C[1] + D.rc, CAPS.C[2]], 1);
-  T_('MT', .4, 4.4, 'M', 'NOSE BAY · X-RAY', `Ø ${Math.round(D.rbore * 2000)} MM`, [XFM - .3, YR + D.rbore, ZR.MT], -1);
-  T_('MT', 4.6, 8.8, '', 'NOSE CAP · 8 BOLTS', u > MTT.torque[0] ? `${Math.round(1200 * lin(u, MTT.torque[0], MTT.torque[1]))} N·M` : '', [XFM + D.LN * .4, YR + .25, ZR.MT], 1);
-  { const R_ = roundAt(u); apX(R_, 0, RR + .05, 0, TP2); const b0 = BW_.TRa[0], w0 = b0 + .2, w1 = BW_.TRc[1]; if (U_ > w0 && U_ < w1 + .1) tag('', `ROUND · ${D.M.toFixed(1)} T · ${RL.toFixed(1)} M`, 'TO THE CHAMBER', TP2[0], TP2[1], TP2[2], tw(U_, w0, w1), U_ - w0, -1, true); }
-  { const R_ = roundAt(u); apX(R_, 0, SABR, 0, TP2); const w0 = BW_.TRc[0] + .3, w1 = BW_.TRd[1] - 1.2; if (U_ > w0 && U_ < w1 + .1) tag('', 'SABOT · 3 PETALS · ARMATURE', `${SABL} M`, TP2[0], TP2[1], TP2[2], tw(U_, w0, w1), U_ - w0, 1, true, 40); }
+  T_('R6', 3.0, 6.4, '', 'FINS · 6 SLOTS', `${Math.min(6, Math.floor(R6S.fin))}/6`, [XR - RL / 2 + D.LT * .5, YR + D.rs, ZR.R6], -1);
+  // the casing, the fill, the cure
+  { let nw = 0; for (let k = 0; k < D.NSEC; k++) if (u > CSW(k)[4]) nw++; if (u > CSEND + .17) nw++;
+    T_('R7', .3, 4.2, 'R7', `CASING · ${D.NSEC} SECTIONS · STEEL`, `${nSecOn(u)}/${D.NSEC}`, [XR + D.zc1 - D.secL * 1.5, YR + rc + .15, ZR.R7], -1);
+    T_('R7', 1.0, 4.6, '', 'FACING HEAD · JOINT FACES ±20 µm', '', [XR - RL / 2 - .35, YR + rc + .35, ZR.R7], 1, 30);
+    T_('R7', 4.2, 7.8, '', 'ORBITAL WELD · EACH JOINT 360°', `${nw}/${D.NSEC + 1}`, [XR + D.zc1 - D.secL * 3, YR + rc + .4, ZR.R7 - .3], 1, 30);
+    T_('R7', 4.6, 7.8, '', 'CORE · HELD BY ITS OGIVE (MICROGRAVITY)', '', [XR + RL / 2 - D.LN * .55, YR + .7, ZR.R7], -1, 60); }
+  T_('m78', .4, 3.6, 'R8', 'FILL · MIXED IN 3 VESSELS', '', [XR, YMZ + 3.5, ZR.R8 + 3.1], 1);
+  T_('R8', .5, 4.4, '', 'POUR · 10 PORTS · CLOSED CASING (X-RAY)', `${Math.round(100 * R8S.fill)} %`, [XR - 3, YR + rc + .3, ZR.R8], -1);
+  T_('R8', 4.8, 8.8, '', 'CURING OVEN · 160 °C · 4 H', `${Math.round(20 + 140 * R8S.heat)} °C`, [XR + RL / 2 - 1, 3.2, ZR.R8 - 1.8], 1);
+  { const P = PIECE.X.T, w0 = BW_.mMT[0] + .6, w1 = w0 + 3.4; if (U_ > w0 - .1 && U_ < w1 + .1) tag('', `ROUND · CORE AND CASING · ${D.Mc.toFixed(0)} T`, `${RL.toFixed(1)} M`, P[0], P[1], P[2], tw(U_, w0, w1), U_ - w0, -1, true); }
+  // the inspection
+  T_('MT', .4, 4.4, 'MT', 'INSPECTION RING · X-RAY', INS.xr > .05 ? 'SCANNING' : 'DONE', [XMO - RL / 2 - 1.0, YR + rc + 1.2, ZR.MT], -1);
+  T_('MT', 3.8, 7.8, '', 'CORE STRAIGHT · FILL 0 VOIDS · JOINTS 6/6', '', [XMO + RL * .25, YR + rc + .2, ZR.MT], 1, 30);
+  // the reveal: the chip fab and the hall
+  T_('AI1', 1.0, 8.4, '', 'PLATFORM AI · AUTONOMOUS · NO CREW', '', [19.5, 4.2, 30], 1);
+  T_('AI1', 2.2, 8.4, '', 'CHIP FAB · ITS OWN PROCESSORS', 'ISO 3', [8, 7.4, 40], -1);
+  T_('AI1', 3.4, 8.4, '', `DATA HALL · ${NRACK} RACKS · 2.4 MW`, '', [20, 2.8, 14], 1, 40);
+  T_('AI1', 4.6, 8.4, '', 'FIBRE TRUNK · TO THE FAB AND THE GUN', '', [18.9, 3.4, 30], -1, 30);
+  T_('AI2', .2, 3.9, 'C2', 'EXTREME-ULTRAVIOLET (EUV) SCANNER', '13.5 NM', [7.5, 3.95, 46.5], 1);
+  T_('AI2', .6, 3.8, '', 'TIN DROPLETS · 50 000 /S', '27 µm', [LX, 2.6, LP.pl[1]], 1, 40);
+  T_('AI2', 1.0, 4.2, '', 'COLLECTOR MIRROR · Ø 650 MM', '', [LX, 2.33, 48.0], -1, 60);
+  T_('AI2', 4.2, 7.8, '', 'PROJECTION · 6 MIRRORS ON FLEXURE MOUNTS', '', [LX, 2.6, 43.2], -1, 50);
+  T_('AI2', 4.6, 7.8, '', 'RETICLE · 4× THE PRINT', `${(EXS.rz * 1000).toFixed(0)} MM`, [LX, 3.56, LP.ret[1] + EXS.rz], 1);
+  T_('AI3a', .3, 4.2, 'C5', 'DICING · Ø 56 MM DIAMOND BLADE', '30 000 RPM', [C5.t[0], C5.t[1] + .07, C5.t[2]], -1);
+  T_('AI3b', .3, 4.2, 'C6', 'DIE BOND · AI PROCESSOR · ±3 µm', `${Math.floor(NWIRE * lin(f, C6T.wire[0], C6T.wire[1]))}/${NWIRE} WIRES`, [C6.b[0], C6.b[1] + .01, C6.b[2]], -1);
+  T_('AI4', .4, 4.4, '', 'COLD AISLE · CONTAINED · 22 °C', '', [16.3, 2.2, 22], 1);
+  T_('AI4', 1.4, 5.4, '', 'RACK · 42 U · 40 KW · LIQUID-COOLED DOORS', '', [15.6, 1.6, 17.5], -1, 40);
+  T_('AI4', 4.6, 8.6, '', 'FIBRE · 400 Gb/s PER LINK', '', [17.6, DH.rh + .56, 24], 1, 30);
+  // the round on the column, the sabot
+  { const R_ = roundAt(u); apX(R_, 0, rc + .1, 0, TP2); const w0 = BW_.TRb[0] + .6, w1 = w0 + 5.2; if (U_ > w0 - .1 && U_ < w1 + .1) tag('', `ROUND · ${D.Mc.toFixed(0)} T · ${RL.toFixed(1)} M`, 'THE TURNTABLE · 1 TURN', TP2[0], TP2[1], TP2[2], tw(U_, w0, w1), U_ - w0, -1, true); }
+  { const R_ = roundAt(u); apX(R_, 0, SABR, 0, TP2); const w0 = BW_.TRc[0] + .3, w1 = BW_.TRd[1] - 1.2; if (U_ > w0 && U_ < w1 + .1) tag('', `SABOT · ${NPET} PETALS · ARMATURE`, `${SABL.toFixed(1)} M`, TP2[0], TP2[1], TP2[2], tw(U_, w0, w1), U_ - w0, 1, true, 40); }
 }
 const r2 = (x, n) => { const p = Math.pow(10, Math.max(0, Math.floor(Math.log10(Math.max(1, x))) - (n - 1))); return Math.round(x / p) * p; };
+/* the fabrication's own clock: it ran hours before the shot (the readout's T counts to the base take's T at the
+   splice); its rate is the station's time compression x the beats' warp, integrated over the insert */
+const NOM = { IN: 2, R1: 600, R2: 600, R3: 5000, R4: 60, R5: 120, R6: 300, R7: 600, R8: 3000, MT: 30, AI: 1, C1: 2, C2: 3, C34: 60, C5: 10, C6: 4, TR: 1 };
+const FABST = { C1: 1, C2: 1, C34: 1, C5: 1, C6: 1 };
+const afRate = u => (afAt(u + .02) - afAt(u - .02)) / .04;
+const rateAt = u => { const s = stationAt(u); return s === 'AI' ? 1 : NOM[s] * (FABST[s] ? afRate(u) : wrate(u)); };
+const CLK = [], CLKDT = .05;
+let ENDC = null;
+function buildClock() {
+  CLK.length = 0; let acc = 0; CLK.push(0);
+  for (let u = 0; u < LEN; u += CLKDT) { const m = u + CLKDT / 2; acc += rateAt(m) * CLKDT; CLK.push(acc); }
+}
+const clockAt = u => { const i = Math.max(0, Math.min(CLK.length - 2, Math.floor(u / CLKDT))), f = E.clamp(u / CLKDT - i, 0, 1); return CLK[i] + (CLK[i + 1] - CLK[i]) * f; };
+function fabClock(u) {
+  if (ENDC === null) { ENDC = -20.4; try { const d = window.STAGE && STAGE.dbg && STAGE.dbg(); if (d && d.simClock) ENDC = d.simClock(CTX.AT_FAB !== undefined ? CTX.AT_FAB : 149.2); } catch (e) { /* the harness: no film */ } }
+  const t = ENDC - (CLK[CLK.length - 1] - clockAt(u)), a = Math.abs(t), sg = t < 0 ? '−' : '+';
+  const h = Math.floor(a / 3600), m = Math.floor((a % 3600) / 60), sec = Math.floor(a % 60);
+  return `T${sg}${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+}
 function readout(u0, ctx) {
+  const r = readStation(u0, ctx), s = stationAt(u0);
+  return { l1: r.l1, l2: `${r.l2}<br>Fabrication · <b>${fabClock(u0)}</b>`, rate: Math.max(1, r2(rateAt(u0), 2)) };
+}
+function readStation(u0, ctx) {
   update(u0, ctx);
-  const u = A_, s = stationAt(u0), M = D.M, wr = wrate(u0), R = n => Math.max(1, r2(n * wr, 2));
+  const u = A_, s = stationAt(u0), M = D.M, wr = wrate(u0), R = n => Math.max(1, r2(n * wr, 2)), RF = n => Math.max(1, r2(n * afRate(u0), 2));
   switch (s) {
     case 'IN': return { l1: 'Fabrication bay · <b>70 m</b> · 2 lines', l2: `Rod · <b>${RL.toFixed(1)} m</b> · Ø <b>${Math.round(RR * 2000)} mm</b> · <b>${M.toFixed(1)} t</b>`, rate: R(2) };
     case 'R1': return { l1: `Powder · <b>${(M * 1.046 * R1S.fill).toFixed(1)} t</b> of ${(M * 1.046).toFixed(1)}`, l2: 'Tungsten <b>99.95 %</b> · auger fed', rate: R(600) };
@@ -3525,21 +3323,17 @@ function readout(u0, ctx) {
     case 'R3': { const T = Math.round(20 + 2380 * Math.min(1, R3S.heat / .99)); return { l1: `Sinter · H₂ · <b>${T} °C</b>`, l2: `Density <b>${Math.round(65 + 29 * R3S.shrink)} %</b> · 6 h`, rate: R(5000) }; }
     case 'R4': return { l1: `Radial forge · <b>${Math.round(100 * R4S.f / (D.Ls - D.LT))} %</b>`, l2: 'Bar <b>1450 °C</b> · 2.4 m/min', rate: R(60) };
     case 'R5': return u < GRIND[0] ? { l1: `Turning · Ø <b>${(RR * 2000).toFixed(1)} mm</b>`, l2: 'Feed <b>0.6 mm/rev</b> · 40 rpm', rate: R(120) } : { l1: 'Grinding · Ra <b>0.2 µm</b>', l2: 'Wheel <b>Ø 1240 mm</b> · 30 m/s', rate: R(120) };
-    case 'R6': return u < PART[1] ? { l1: `Ogive · <b>${(D.LN * 1000).toFixed(0)} mm</b>`, l2: 'Mill-turn · <b>5 axes</b>', rate: R(300) } : u < FINS[0] ? { l1: 'Nose cap · <b>parted</b>', l2: `Bay · Ø <b>${Math.round(D.rbore * 2000)} mm</b>`, rate: R(300) } : { l1: `Fins · <b>${Math.min(6, Math.floor(R6S.fin))}/6</b>`, l2: 'Slot depth <b>85 mm</b>', rate: R(300) };
-    case 'R7': return { l1: 'Plasma spray · <b>HfC</b>', l2: `Coat <b>0.40 mm</b> · ${Math.round(100 * (R7S.cz + RL / 2) / (RL - D.LN))} %`, rate: R(60) };
-    case 'R8': return { l1: `Ø <b>${(RR * 2000 + .8).toFixed(3)} mm</b> · ±0.005`, l2: 'Straightness <b>0.03 mm/m</b>', rate: R(10) };
-    case 'XO': return { l1: 'Rod <b>done</b> · to the mating', l2: `<b>${M.toFixed(1)} t</b> · 8 stations`, rate: R(60) };
-    case 'C1': return { l1: 'Wafer · <b>300 mm</b> · silicon', l2: 'FOUP · <b>25</b> slots · prealign', rate: R(2) };
-    case 'C2': return { l1: 'EUV · <b>13.5 nm</b> · NA 0.33', l2: `Field <b>${Math.max(0, EXS.k + 1)}/${NF}</b> · overlay 1.1 nm`, rate: R(3) };
-    case 'C34': return u < 42.6 ? { l1: 'Plasma etch · <b>CF₄/O₂</b>', l2: 'Depth <b>120 nm</b> · 13.56 MHz', rate: R(60) } : { l1: 'PVD · <b>copper</b> · 40 nm', l2: 'Target <b>18 kW</b>', rate: R(60) };
-    case 'C5': return { l1: `Dicing · <b>${C5S.nx + C5S.nz}/22</b> streets`, l2: 'Blade <b>Ø 56 mm</b> · 30 000 rpm', rate: R(10) };
-    case 'C6': return { l1: 'Die bond · <b>±3 µm</b>', l2: `Wire bond · <b>${Math.floor(NWIRE * lin(u, C6T.wire[0], C6T.wire[1]))}/${NWIRE}</b> · 25 µm gold`, rate: R(4) };
-    case 'C7': return { l1: 'Casing · <b>Ti-6Al-4V</b>', l2: `Ø <b>${Math.round(D.rc * 2000)} mm</b> · ±5 µm`, rate: R(300) };
-    case 'C8': return { l1: `Shield · tantalum · <b>${Math.min(NLAY, Math.floor(C8S.lay))}/${NLAY}</b>`, l2: 'Tension <b>40 N</b>', rate: R(120) };
-    case 'C9': return u < C9T.weld[0] ? { l1: 'Assembly · <b>module in</b>', l2: 'Lid · <b>seated</b>', rate: R(2) } : { l1: 'Laser seam · <b>2.0 kW</b>', l2: `Fibre · 1070 nm · <b>${u > C9T.weld[1] ? 'sealed' : Math.round(360 * lin(u, C9T.weld[0], C9T.weld[1])) + '°'}</b>`, rate: R(2) };
-    case 'C10': return { l1: 'CT · <b>450 kV</b> · 1800 views', l2: `Scan <b>${Math.round(100 * lin(u, CT[0] + .15, CT[1] - .1))} %</b> · defects 0`, rate: R(30) };
-    case 'MT': return { l1: 'Mating · <b>capsule in the nose bay</b>', l2: `Nose cap · <b>8 bolts</b> · ${Math.round(1200 * lin(u, MTT.torque[0], MTT.torque[1]))} N·m`, rate: R(1) };
-    case 'TR': return { l1: `Round · <b>${M.toFixed(1)} t</b> · ${RL.toFixed(1)} m`, l2: u < SAB[0] ? 'Lift · <b>to the port</b>' : 'Sabot · <b>closed</b> · to the chamber', rate: R(1) };
+    case 'R6': return u < FINS[0] ? { l1: `Ogive · <b>${(D.LN * 1000).toFixed(0)} mm</b>`, l2: 'Mill-turn · <b>5 axes</b>', rate: R(300) } : { l1: `Fins · <b>${Math.min(6, Math.floor(R6S.fin))}/6</b>`, l2: 'Slot depth <b>85 mm</b>', rate: R(300) };
+    case 'R7': { let nw = 0; for (let k = 0; k < D.NSEC; k++) if (u > CSW(k)[4]) nw++; if (u > CSEND + .17) nw++; return { l1: `Casing · <b>${nSecOn(u)}/${D.NSEC}</b> sections on`, l2: `Orbital welds · <b>${nw}/${D.NSEC + 1}</b>`, rate: R(NOM.R7) }; }
+    case 'R8': return u < CU[0] ? { l1: `Fill · <b>${Math.round(100 * R8S.fill)} %</b> poured`, l2: 'Three vessels · <b>mixing</b>', rate: R(NOM.R8) } : { l1: `Cure · <b>${Math.round(20 + 140 * R8S.heat)} °C</b>`, l2: 'Split oven · <b>closed</b>', rate: R(NOM.R8) };
+    case 'MT': return u < 58 ? { l1: `Round · <b>${D.Mc.toFixed(0)} t</b> · to the lift`, l2: 'Gantry · <b>over the hall</b>', rate: R(NOM.MT) } : { l1: `Inspection · <b>${INS.xr > .05 ? 'X-ray' : INS.sc > .05 ? 'scan' : 'done'}</b>`, l2: 'Core straight · fill <b>0 voids</b>', rate: R(NOM.MT) };
+    case 'AI': return { l1: 'Platform AI · <b>autonomous</b>', l2: `Data hall · <b>${NRACK} racks</b> · 2.4 MW`, rate: 1 };
+    case 'C1': return { l1: 'Wafer · <b>300 mm</b> · silicon', l2: 'Chip fab · <b>the AI’s processors</b>', rate: RF(NOM.C1) };
+    case 'C2': return { l1: 'EUV · <b>13.5 nm</b> · NA 0.33', l2: `Field <b>${Math.max(0, EXS.k + 1)}/${NF}</b> · overlay 1.1 nm`, rate: RF(NOM.C2) };
+    case 'C34': return AF_ < 42.6 ? { l1: 'Plasma etch · <b>CF₄/O₂</b>', l2: 'Depth <b>120 nm</b> · 13.56 MHz', rate: RF(NOM.C34) } : { l1: 'PVD · <b>copper</b> · 40 nm', l2: 'Target <b>18 kW</b>', rate: RF(NOM.C34) };
+    case 'C5': return { l1: `Dicing · <b>${C5S.nx + C5S.nz}/22</b> streets`, l2: 'Blade <b>Ø 56 mm</b> · 30 000 rpm', rate: RF(NOM.C5) };
+    case 'C6': return { l1: 'Die bond · <b>AI processor</b> · ±3 µm', l2: `Wire bond · <b>${Math.floor(NWIRE * lin(AF_, C6T.wire[0], C6T.wire[1]))}/${NWIRE}</b> · 25 µm gold`, rate: RF(NOM.C6) };
+    case 'TR': return { l1: `Round · <b>${D.Mc.toFixed(0)} t</b> · ${RL.toFixed(1)} m`, l2: u < LIFT[1] ? 'Column · <b>up and once round</b>' : u < PUSH[0] ? 'Sabot · <b>closing</b>' : 'Through the port · <b>to the chamber</b>', rate: R(NOM.TR) };
   }
   return { l1: '', l2: '', rate: 1 };
 }
@@ -3547,7 +3341,7 @@ function readout(u0, ctx) {
 /* ---------------- build ---------------- */
 function build(ctx) {
   CTX = ctx; K = ctx.K; L = ctx.L; Body = L.Body; P_ = ctx.P;
-  dims(P_);
+  dims(P_, ctx.ROUND);
   // the hall is the platform's bay (its half extents), seen from the front wall; the chamber on the bore's axis
   if (ctx.BAY_HALF) {
     const [hx, hy, hz] = ctx.BAY_HALF;
@@ -3558,16 +3352,13 @@ function build(ctx) {
   }
   for (const o of allO()) o.fx = fxf;
   buildHall(); buildGantry(); buildR1(); buildR2(); buildR3(); buildR4(); buildR5(); buildR6(); buildR7(); buildR8(); buildMT();
-  buildC1(); buildC2(); buildC34(); buildC5(); buildC6(); buildC7(); buildC8(); buildC9(); buildC10(); buildCapsule(); buildMono();
+  buildC1(); buildC2(); buildC34(); buildC5(); buildC6(); buildAI();
   dressR1(); dressR2(); dressR3(); dressR4(); dressR5(); dressR6(); dressR7(); dressR8(); dressMT();
-  dressCR(); dressC1(); dressC2(); dressC34(); dressC5(); dressC6(); dressC7(); dressC8(); dressC9(); dressC10();
-  buildJourney(); buildCam(); buildLens();
+  dressCR(); dressC1(); dressC2(); dressC34(); dressC5(); dressC6();
+  buildJourney(); buildCam(); buildLens(); buildClock();
   const W_ = WRAD, rc = D.rc, Lc = D.Lc;
-  SCANS.push([32.15, 32.5, 'wid', 'WAFER ID · NOTCH 0.0°', 'LOT 01', [-W_, -.002, -W_], [W_, .02, W_], 0]);
   SCANS.push([47.42, 47.62, 'dic', 'DIES · 64 GOOD', 'KERF 35 µm', [-W_, -.002, -W_], [W_, .02, W_], 2]);
   SCANS.push([49.72, 49.94, 'mod', 'BOND CHECK · 28 WIRES', 'PULL 9 gf', [-rc + .04, 0, -rc + .04], [rc - .04, .065, rc - .04], 0]);
-  SCANS.push([52.2, 52.45, 'cas', 'CMM · CASING', '±4 µm', [-rc, -rc, 0], [rc, rc, Lc], 2]);
-  SCANS.push([57.58, 57.8, 'cap', 'HELIUM LEAK', '< 1E-9 mbar·L/s', [-rc - .01, -rc - .01, 0], [rc + .01, rc + .01, Lc], 2]);
 }
 
 /* ---------------- sound ---------------- */
@@ -3582,23 +3373,18 @@ const cues = [
   [11.3, clunk], [11.55, sfx(S => S.tone(48, 64, 1.1, 'sawtooth', .016))], [12.55, whir(.4)],
   ...[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(k => [14.35 + k * .21, sfx(S => S.noise(.07, 900, 1, .05, .002))]),
   [17.9, clunk], [18.15, sfx(S => S.tone(320, 360, .85, 'sawtooth', .008))], [19.05, sfx(S => S.noise(.7, 3200, .5, .03, .02))],
-  [20.85, clunk], [20.9, sfx(S => S.tone(260, 300, .85, 'sawtooth', .008))], [21.75, sfx(S => S.tone(2200, 1500, .25, 'sawtooth', .012))], ...[0, 1, 2, 3, 4, 5].map(k => [22.4 + k * .158, tick]),
-  [24.55, sfx(S => S.noise(1.45, 1400, .7, .045, .05))], [27.25, sfx(S => S.tone(900, 1800, .35, 'sine', .014))],
-  [28.9, sfx(S => S.noise(1.6, 700, .6, .03, .5))],
-  [31.2, tick], [32.05, sfx(S => S.tone(600, 1200, .45, 'sine', .01))],
-  [34.4, sfx(S => S.tone(1400, 1400, .05, 'square', .01))], [35.5, sfx(S => S.tone(1900, 2100, 4.6, 'sine', .006))],
-  [41.15, sfx(S => S.tone(110, 115, 1.1, 'sawtooth', .01))], [42.95, sfx(S => S.tone(150, 160, 1.7, 'sawtooth', .009))],
-  [45.65, sfx(S => S.tone(3000, 3100, 1.8, 'sine', .006))], ...[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(k => [48.7 + k * .1, tick]),
-  [50.45, sfx(S => S.tone(300, 340, 1.4, 'sawtooth', .007))], [52.75, whir(2.0)],
-  [55.95, clunk], [56.65, sfx(S => S.noise(.9, 5000, .5, .03, .02))], [57.58, sfx(S => S.tone(900, 1800, .3, 'sine', .012))],
-  [58.2, sfx(S => S.tone(700, 1400, 1.8, 'sine', .006))], [61.45, clunk], ...[0, 1, 2, 3, 4, 5, 6, 7].map(k => [63.05 + k * .05, tick]), [63.5, sfx(S => S.tone(900, 1800, .35, 'sine', .012))],
+  [20.85, clunk], [20.9, sfx(S => S.tone(260, 300, .85, 'sawtooth', .008))], ...[0, 1, 2, 3, 4, 5].map(k => [22.4 + k * .158, tick]),
+  [24.35, clunk], ...[0, 1, 2, 3, 4].map(k => [CS0 + k * CSD + .12, whir(.6)]), ...[0, 1, 2, 3, 4, 5].map(k => [k < 5 ? CS0 + k * CSD + .33 : CSEND + .03, sfx(S => S.noise(.6, 2600, .5, .03, .03))]),
+  [27.6, sfx(S => S.tone(70, 90, 1.6, 'sawtooth', .01))], [28.15, sfx(S => S.noise(1.4, 500, .6, .03, .3))], [29.15, clunk], [29.4, sfx(S => S.tone(60, 62, 2.0, 'sine', .014))], [30.55, clunk],
+  [31.0, whir(2.0)], [57.8, clunk], [58.45, sfx(S => S.tone(700, 1400, 1.8, 'sine', .006))], [61.75, sfx(S => S.tone(900, 1800, .35, 'sine', .012))],
   [64.3, whir(1.5)], [65.6, clunk], [66.3, clunk], [66.8, sfx(S => S.noise(2.6, 600, .7, .05, .4))],
 ];
+const fabCues = [[34.4, sfx(S => S.tone(1400, 1400, .05, 'square', .01))], [35.5, sfx(S => S.tone(1900, 2100, 4.6, 'sine', .006))], [45.65, sfx(S => S.tone(3000, 3100, 1.8, 'sine', .006))], ...[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(k => [48.7 + k * .1, tick])];
 window.ORFAB = {
   len: LEN, at: 32.6,
-  chapters: [{ t: 0, title: 'Fabrication' }, { t: WIN.mIN[0], title: 'Rod' }, { t: WIN.mX2[0], title: 'Capsule' }, { t: WIN.mC12[0], title: 'Lithography' }, { t: WIN.mC23[0], title: 'Chip' }, { t: WIN.mC67[0], title: 'Casing' }, { t: WIN.mMT[0], title: 'Mating' }, { t: WIN.TRa[0], title: 'Round' }],
-  cues: cues.map(([a, fn]) => [unwarp(a), fn]), build, cam, draw, readout, tags,
-  dbg: () => ({ BW: BW_, SH, LNS, ACT, warp, unwarp, A: A_, D, RL, RR, GP, PIECE, BWX, BB, O, S_, R1S, R2S, R3S, R4S, R5S, R6S, R7S, R8S, EXS, C5S, C8S, CTS, BASEW }),
+  chapters: [{ t: 0, title: 'Fabrication' }, { t: WIN.mIN[0], title: 'Core' }, { t: WIN.m67[0], title: 'Casing' }, { t: WIN.m78[0], title: 'Fill' }, { t: WIN.mMT[0], title: 'Inspection' }, { t: WIN.mAI[0], title: 'Platform AI' }, { t: WIN.mTR[0], title: 'Round' }],
+  get cues() { return cues.map(([a, fn]) => [unwarp(a), fn]).concat(fabCues.map(([a, fn]) => [afInv(a), fn])); }, build, cam, draw, readout, tags,
+  dbg: () => ({ camBay: u => { const c = camBay(u); return { eye: c.eye.slice(), target: c.target.slice(), fov: c.fov }; }, stationAt, beatAt, clockAt, CLK, BW: BW_, SH, LNS, ACT, warp, unwarp, A: A_, D, RL, RR, GP, PIECE, BWX, BB, O, S_, R1S, R2S, R3S, R4S, R5S, R6S, R7S, R8S, EXS, C5S, INS, AFK, afAt, BASEW }),
 };
 Object.defineProperty(window.ORFAB, 'hideBase', { get: () => BASEW < .001, configurable: true });
 })();
