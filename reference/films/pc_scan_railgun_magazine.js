@@ -149,7 +149,8 @@ function camS(u) {
     // (the move: the target slides, the line of sight turns at an even rate (slerp), the distance eases between; a
     // pull-back widens first and turns after, a push-in turns first and narrows after; the field of view in ratio)
     const p = shotAt(SEQ[i - 1][0], u), r = (u - q[1]) / (q[2] - q[1]), zo = s.fov > p.fov * 1.8, zi = s.fov < p.fov / 1.8;
-    const w = sm(zo ? (r - .3) / .7 : zi ? r / .7 : r), wf = sm(zo ? r / .7 : zi ? (r - .3) / .7 : r);
+    // (a zoom runs over .85 of the move, never a crash: the moves that zoom are 3.6 s or longer)
+    const w = sm(zo ? (r - .3) / .7 : zi ? r / .7 : r), wf = sm(zo ? r / .85 : zi ? (r - .15) / .85 : r);
     const da = V.sub(p.target, p.eye), db = V.sub(s.target, s.eye), la = V.len(da), lb = V.len(db), A = V.mul(da, 1 / la), B = V.mul(db, 1 / lb);
     const c = E.clamp(V.dot(A, B), -1, 1), an = Math.acos(c);
     let d;
@@ -385,8 +386,38 @@ function deckPrims() {
     for (let x = -4.2; x <= 4.21; x += .6) if (hw(z, YD) > Math.abs(x)) P.push(G.line([[x, YD, z], [x, YH, z]], F()));
   }
   for (const [x, z] of [[-1.2, 43.0], [1.2, 43.0], [-1.2, 46.8], [1.2, 46.8], [-1.2, 50.6], [1.2, 50.6]]) P.push(G.box([x - .07, YH - .32, z - .5], [x + .07, YH - .26, z + .5], F({ edgeOnly: true })));
+  // the dressing: spares racks along the sides (uprights, four shelves, cases on them), ladder cable trays under the
+  // deckhead each side and across, a control cabinet on the forward bulkhead
+  for (const [s, z0, z1] of DRESS_RK) {
+    const xi = s * (hw(z0, YD) - .7), xo = s * (hw(z0, YD) - .12), hR = 1.55, n = Math.max(2, Math.round((z1 - z0) / .55));
+    for (let i = 0; i <= n; i++) { const z = z0 + (z1 - z0) * i / n; for (const x of [xi, xo]) P.push(G.box([x - .025, YD, z - .025], [x + .025, YD + hR, z + .025], F({ edgeOnly: true }))); }
+    for (let k = 0; k < 4; k++) {
+      const y = YD + .14 + k * .45;
+      P.push(G.box([Math.min(xi, xo), y, z0], [Math.max(xi, xo), y + .03, z1], { edgeOnly: true }));
+      for (let i = 0; i < n; i++) {                                      // the cases (one bay in five left empty)
+        if ((i * 7 + k * 3 + (s > 0 ? 2 : 0)) % 5 === 4) continue;
+        const za = z0 + (z1 - z0) * i / n + .05, zb = z0 + (z1 - z0) * (i + 1) / n - .05, hc = k === 3 ? .22 : .3;
+        P.push(G.box([Math.min(xi, xo) + .05, y + .03, za], [Math.max(xi, xo) - .05, y + .03 + hc, zb], F({ edgeOnly: true })));
+      }
+    }
+  }
+  for (const s of [-1, 1]) {
+    const yt = YH - .34, L0 = [], L1 = [], C0 = [];
+    for (let z = ZA + .05; z <= ZF - .05 + .001; z += .3) { const w = hw(z, yt) - .25; L0.push([s * w, yt, z]); L1.push([s * (w - .32), yt, z]); C0.push([s * (w - .16), yt + .05, z]); }
+    P.push(G.line(L0), G.line(L1), G.line(C0, F()));
+    for (let i = 0; i < L0.length; i++) P.push(G.line([L0[i], L1[i]], F()));
+  }
+  for (const z of [44.6, 50.0]) {
+    const yt = YH - .3, w = hw(z, yt) - .6;
+    for (const dz of [-.16, .16]) P.push(G.line([[-w, yt, z + dz], [w, yt, z + dz]]));
+    for (let x = -w; x <= w + .001; x += .3) P.push(G.line([[x, yt, z - .16], [x, yt, z + .16]], F()));
+  }
+  P.push(G.box(DRESS_CAB[0], DRESS_CAB[1], { edgeOnly: true }), G.box([DRESS_CAB[0][0] + .06, YD + .95, DRESS_CAB[0][2] - .005], [DRESS_CAB[1][0] - .06, YD + 1.4, DRESS_CAB[0][2]], F({ edgeOnly: true })));
   return P;
 }
+/* the deck's dressing: racks [side, z0, z1]; the control cabinet's box (its face aft) */
+const DRESS_RK = [[-1, 42.0, 44.4], [-1, 45.0, 46.6], [-1, 48.6, 51.2], [1, 49.4, 51.6]];
+const DRESS_CAB = [[.3, YD, ZF - .55], [1.3, YD + 1.8, ZF - .12]];
 function trackPrims() {
   const P = [], z0 = ZC - .8, z1 = ZR + .8;
   for (const s of [-1, 1]) { P.push(G.box([XA + s * .29 - .03, YD, z0], [XA + s * .29 + .03, YD + .07, z1])); P.push(G.line([[XA + s * .29, YD + .071, z0], [XA + s * .29, YD + .071, z1]], F())); }
@@ -988,9 +1019,10 @@ function SHOTS() {
     rack: u => sh([1.9, .5, 41.95], [-.55, -.6, 43.35], 40),
     carry: u => sh([1.2, .5, 42.0], [-1.4, -.66, 43.5], 38),
     co_head: u => { const z = hz(u); return sh(L(C1 * 2.3, S1 * 2.3, z - .9), L(0, 0, z + .05), 30); },
-    co_arm: prof(.085, 1.62, -.15, 8.6, .05),
-    co_hand: prof(.038, 1.62, -.1, 5.4, .005),
-    co_fing: prof(.021, 1.62, -.1, 3.3, 0),
+    // (framed with the rod above the middle of the picture, the ring's lower arms clear of the menu row)
+    co_arm: prof(.05, 1.62, -.15, 9.6, .05),
+    co_hand: prof(-.008, 1.62, -.1, 7.5, .005),
+    co_fing: prof(-.01, 1.62, -.1, 3.6, 0),
     co_track: u => { const z = Math.min(hz(u), ZC + .9); return sh(L(1.5, .75, z - .85), L(0, 0, z + .08), 26); },
     co_done: u => sh(L(C1 * 1.8, S1 * 1.8, ZC + CO.Z1 - .6), L(0, .03, ZC + CO.Z1), 16),
     co_test: u => sh(L(1.6, 1.0, ZC - .8), L(0, -.02, ZC + .25), 40),
@@ -1005,17 +1037,17 @@ function SHOTS() {
     unl: u => sh([1.4, .8, 48.0], [-1.2, -.45, 48.6], 46),
     hero: orbit,
     // rising with the round on the base camera's own line of sight (the move back to it is then a dolly)
-    up: u => { const y = (u < U.dn0 ? cradleAt(u) : YCT) + .8; return sh(V.mad([CX, y, CZ], dO, -2.7), [CX, y, CZ], 46); },
+    up: u => { const y = (u < U.dn0 ? cradleAt(u) : YCT) + .8; return sh(V.mad([CX, y, CZ], dO, -3.8), [CX, y, CZ], 46); },
   };
 }
 /* the cut: [shot, u0, u1] (the move into it runs u0 -> u1; it holds until the next one starts) */
 function SEQUENCE() {
   return [
     ['old', 0, 0], ['wide', 2.0, 8.4], ['rack', 8.8, 12.0], ['carry', 12.2, 14.4],
-    ['co_head', 15.4, 17.8], ['co_arm', 17.8, 20.4], ['co_hand', 20.6, 22.8], ['co_fing', 28.6, 31.2], ['co_track', 35.8, 39.0], ['co_done', 39.4, 41.0], ['co_test', 43.2, 45.0],
-    ['shut', 45.4, 47.2], ['gr_wide', 47.6, 49.6], ['gr_front', 50.0, 52.2], ['gr_done', 56.6, 58.8],
-    ['shut', 59.2, 60.8], ['press', 61.4, 63.6], ['ring', 66.8, 69.2], ['whole', 72.4, 75.8], ['tol', 78.0, 81.4],
-    ['unl', 83.6, 86.0], ['hero', 89.8, 92.2], ['up', 95.0, 97.8], ['oldX', 98.6, 102.2],
+    ['co_head', 15.4, 17.4], ['co_arm', 17.4, 21.0], ['co_hand', 21.2, 23.8], ['co_fing', 28.2, 31.8], ['co_track', 34.2, 38.8], ['co_done', 39.2, 41.4], ['co_test', 41.6, 45.2],
+    ['gr_wide', 45.3, 49.7], ['gr_front', 50.0, 52.2], ['gr_done', 55.4, 59.0],
+    ['press', 59.2, 63.4], ['ring', 66.2, 69.8], ['whole', 72.2, 75.8], ['tol', 78.0, 81.4],
+    ['unl', 82.8, 86.4], ['hero', 89.8, 92.2], ['up', 95.0, 97.8], ['oldX', 98.6, 102.2],
   ];
 }
 
@@ -1274,6 +1306,20 @@ function drawFX(u, s, ctx, q) {
     for (let z = ZF; z >= ZA - .01; z -= .33) seg(-(P_.hullAt(z, RV_Y) - .12), z);
     seg(P_.hullAt(ZA, RV_Y) - .12, ZA);
   }
+  // the deck's light fittings lit (a tube along each, a soft pool under it), the cabinet's status lights
+  if (revealed(YH - .34)) {
+    const A = .35 + .65 * FW.deck;
+    for (const [x, z] of [[-1.2, 43.0], [1.2, 43.0], [-1.2, 46.8], [1.2, 46.8], [-1.2, 50.6], [1.2, 50.6]]) {
+      ap(WS, x, YH - .335, z - .45, Q1); ap(WS, x, YH - .335, z + .45, Q2);
+      K.lineW(Q1[0], Q1[1], Q1[2], Q2[0], Q2[1], Q2[2], 1.6, 1, WH, .8 * A, WH, .12 * A, .05);
+      ap(WS, x, YH - .4, z, Q3); oglow(Q3[0], Q3[1], Q3[2], 30, WH, .07 * A);
+    }
+  }
+  if (revealed(YD + 1.5)) {
+    const c = DRESS_CAB, A = .4 + .6 * FW.deck, fr2 = Math.floor(ctx.T * 2);
+    for (let i = 0; i < 6; i++) { ap(WS, c[0][0] + .15 + i * .14, YD + 1.55, c[0][2] - .01, Q1); const on = K.hh(i * 3.3, fr2 >> (i & 1)) > .3; odot(Q1[0], Q1[1], Q1[2], 2, on ? LIME : WH, (on ? .9 : .35) * A); }
+    for (let k = 0; k < 4; k++) { const y = YD + 1.0 + k * .1, w = .25 + .5 * K.hh(k * 1.7, Math.floor(ctx.T * 1.5)); ap(WS, c[0][0] + .1, y, c[0][2] - .01, Q1); ap(WS, c[0][0] + .1 + w * (c[1][0] - c[0][0] - .2), y, c[0][2] - .01, Q2); K.lineW(Q1[0], Q1[1], Q1[2], Q2[0], Q2[1], Q2[2], 1, 1, LIME, .55 * A); }
+  }
   if (!revealed(-1.4)) return;
   const fr = Math.floor(ctx.T * 30);
   // the arm's drives: a lime ring while a joint turns, the motor's marker dots turning with it
@@ -1326,7 +1372,11 @@ function drawFX(u, s, ctx, q) {
         const i3 = i * 3, f = m.fire[i], h0 = a * 9 + i;
         ap(Th, m.tip[i3], m.tip[i3 + 1], m.tip[i3 + 2], Q1);
         odot(Q1[0], Q1[1], Q1[2], 1, f > 0 ? HOT : WH, (f > 0 ? 1 : .6 * m.o2) * mk);
-        if (f <= 0) continue;
+        // between strokes the beam stays on at low power (every one of the 72 visible), its spot a faint lime point
+        if (f <= 0) {
+          if (m.o2 > .9 && s.wr > .5) { ap(Th, m.spot[i3], m.spot[i3 + 1], m.spot[i3 + 2], Q2); K.lineW(Q1[0], Q1[1], Q1[2], Q2[0], Q2[1], Q2[2], .6, 1, LIME, .4 * mk); odot(Q2[0], Q2[1], Q2[2], 1, LIME, .55 * mk); }
+          continue;
+        }
         const fk = (.72 + .28 * K.hh(h0 * 1.37, ff)) * mk, sx = m.spot[i3], sy = m.spot[i3 + 1], sz = m.spot[i3 + 2];
         ap(Th, sx, sy, sz, Q2);
         K.lineW(Q1[0], Q1[1], Q1[2], Q2[0], Q2[1], Q2[2], .8, 1, LIME, .95 * fk, LIME, .14 * fk, .035 * fk);
@@ -1343,6 +1393,18 @@ function drawFX(u, s, ctx, q) {
           const P1 = p(age), P0 = p(Math.max(0, age - .005)), k = 1 - age / life;
           ap(Th, P0[0], P0[1], P0[2], Q2); ap(Th, P1[0], P1[1], P1[2], Q3);
           K.lineW(Q2[0], Q2[1], Q2[2], Q3[0], Q3[1], Q3[2], 1, 1, k > .6 ? HOT : LIME, .9 * k * mk);
+        }
+      }
+    }
+    // the ink filling each channel behind its hand: a molten band at the front cooling to lime along the trace
+    if (s.wr > .02 && s.laid > -8 && s.laid < 8) {
+      const RFw = W(s.RF), z1 = s.laid, A = s.wr;
+      for (let a = 0; a < RGR.NTR; a++) {
+        for (let k = 0; k <= 14; k++) {
+          const z = z1 - .09 * k / 14, th = RGR.thAt(a, z), r = Math.min(RGR.RL, RGR.surfR(z) - .0002);
+          ap(RFw, Math.cos(th) * r, Math.sin(th) * r, z, Q2);
+          if (k) K.lineW(Q3[0], Q3[1], Q3[2], Q2[0], Q2[1], Q2[2], 1.3, 1, k < 4 ? HOT : LIME, A * (1 - k / 15) * .95, LIME, .12 * A * (1 - k / 15), .01);
+          Q3[0] = Q2[0]; Q3[1] = Q2[1]; Q3[2] = Q2[2];
         }
       }
     }

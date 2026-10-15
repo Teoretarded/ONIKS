@@ -1238,6 +1238,9 @@ function drawSink(mode, u, T, ctx) {
   DM = mode; DU = u; PRF = RGK.prof || null; if (PRF) PT = performance.now(); SCZ = scanAt(u);
   if (FILM.duration) { const D = FILM.duration, per = p => D / Math.max(1, Math.round(D / p)); PER6 = per(6); PER12 = per(12); }
   UW = C.eye[1] < -.12;
+  // (across the surface nothing switches: from .6 m above it down to it what is under the water clears (its
+  // extinction thins out and the mechanisms fade in); under it the motes and the surface overhead fade in)
+  const gA = ss(.6, -.12, C.eye[1]), gU = ss(-.12, -.8, C.eye[1]);
   XFK.ws = Ws; SWS = Ws; WS_ = Ws;
   // the focus on the camera's subject (inserts); a lens inside the hull is in the dry X-ray space: no veil, no sea
   // surface overhead, no motes
@@ -1252,7 +1255,9 @@ function drawSink(mode, u, T, ctx) {
     // from above the water: only what reaches the surface (and the glow of hot banks under it, the hull just under
     // the surface while the lens comes down to it)
     if (shipD > 2600) return;
-    if (mode && shipD < 40 && C.eye[1] < (mode === 1 ? 16 : 6)) drawBody(s, Ws, TR, { sub: mode === 1 ? 2.6 : 1.3, fog: 0 }, false);
+    if (mode && shipD < 40 && C.eye[1] < (mode === 1 ? 16 : 6)) {
+      drawBody(s, Ws, TR, { sub: (mode === 1 ? 4.2 : 3.4) / Math.max(.04, 1 - gA), fog: 0, ma: gA }, false);
+    }
     if (mode === 2 || hot > .05 || thB(T - 6) > .1) surface(TR, fadeEnd);
     if (mode === 2 && shipD < 400) irSurface(fadeEnd * ss(.5, 2.5, u));
     if (hot > .05) {
@@ -1263,9 +1268,9 @@ function drawSink(mode, u, T, ctx) {
   }
   pk('state'); if (!inHull) veil(); pk('veil');
   occHull(Ws); pk('occ');
-  if (!inHull) ceiling(TR, 1); pk('ceil');
+  if (!inHull) ceiling(TR, gU); pk('ceil');
   drawBody(s, Ws, TR, { fog: 60, sub: 0 }, true);
-  if (!inHull) snow(TR, 1); pk('snow');
+  if (!inHull) snow(TR, gU); pk('snow');
   if (hot > .05 || mode === 2) bubbles(TR, fadeEnd, true); pk('bub');
   if (mode === 2) surface(TR, fadeEnd);
   // the banks light the water round them
@@ -1334,10 +1339,11 @@ function drawBody(s, Ws, TR, ex, uw) {
     D_(side ? CLK_.side : CLK_.keel, XFK.bun[bi], { a: seen ? (DM === 2 ? 1.15 : 1.8) : .55, edge: 1, amb: .3, heat: 1, foc: true, HZ: b.HZ, hz0: -B.L / 2, hL: B.L, portal: pr(0, yb, 0), xr: seen ? 0 : 3, S: X.mul(c.F, X.make(R.I(), [0, yb, 0])), px: 6.2, scan: true }); pk(side ? 'bunS' : 'bunK');
   });
   pk('cells');
-  if (uw || DM === 1) {
-    hoses(s, TR, 1, s.flow); pk('hoses'); flowDots(Ws, s, TR, 1); tubeFlow(s, TR, 1, uw); pk('flow');
-    valveFX(s, Ws); valvesW(s, 1); rams(s, 1); jacks(s, 1); pk('mech');
-    if (uw && DM === 2) { seaFlow(s, CLK, 1); pk('seaflow'); }
+  const ma = uw || DM === 1 ? 1 : ex.ma || 0;               // (above the surface they fade in as the lens nears it)
+  if (ma > .01) {
+    hoses(s, TR, ma, s.flow); pk('hoses'); flowDots(Ws, s, TR, ma); tubeFlow(s, TR, ma, uw || ma > .5); pk('flow');
+    if (ma > .5) valveFX(s, Ws); valvesW(s, ma); rams(s, ma); jacks(s, ma); pk('mech');
+    if (DM === 2) { seaFlow(s, CLK, ma); pk('seaflow'); }
     scanPlane(Ws);
   }
 }
@@ -1403,6 +1409,7 @@ function valveFX(s, Ws) {
 const toShip = (Ws, p) => { const M = Ws.R, x = p[0] - Ws.T[0], y = p[1] - Ws.T[1], z = p[2] - Ws.T[2]; return [M[0] * x + M[3] * y + M[6] * z, M[1] * x + M[4] * y + M[7] * z, M[2] * x + M[5] * y + M[8] * z]; };
 const dirShip = (Ws, v) => { const M = Ws.R; return [M[0] * v[0] + M[3] * v[1] + M[6] * v[2], M[1] * v[0] + M[4] * v[1] + M[7] * v[2], M[2] * v[0] + M[5] * v[1] + M[8] * v[2]]; };
 const sm5 = w => { w = E.sat(w); return w * w * w * (w * (w * 6 - 15) + 10); };
+const sm3 = w => { w = E.sat(w); return w * w * (3 - 2 * w); };
 const DBG = (() => {
   let s = STAGE.Q.get('cam');
   try { if (!s && window.parent !== window) s = new URLSearchParams(parent.location.search).get('cam'); } catch (e) {}
@@ -1434,7 +1441,8 @@ function camAtRig(rig, u, ctx) {
   const Ws = ctx.Ws, UA = rig.UA, UB = rig.UB;
   if (u >= UA && u <= UB) { const s = rig.P(u); return { eye: X.ap(Ws, s.eye), target: X.ap(Ws, s.target), fov: s.fov }; }
   const o = ctx.camOld, st = u < UA;
-  const g = st ? 1 - sm5(u / UA) : sm5((u - UB) / (rig.len - UB));          // the base camera's share
+  // (a cubic ease, its peak rate 1.5x the mean: the splices' swings stay under 35°/s)
+  const g = st ? 1 - sm3(u / UA) : sm3((u - UB) / (rig.len - UB));          // the base camera's share
   const du = st ? u : u - rig.len, VO = st ? rig.VA : rig.VB;               // the base camera carried on its own motion
   const ve = dirShip(Ws, VO.eye), vt = dirShip(Ws, VO.target);
   const eB = V.mad(toShip(Ws, o.eye), ve, du * g), tB = V.mad(toShip(Ws, o.target), vt, du * g), fB = o.fov + VO.fov * du * g;
@@ -1448,7 +1456,7 @@ function camAtRig(rig, u, ctx) {
    toward the lens (the lens backing off with it); under the keel to the bays; the scan from forward; up past the hull
    to the base camera */
 const CAM_D = [
-  [5.4, [10.9, 2.5, 46.4], [0.8, -1.7, 41.8], 46],
+  [6.0, [10.9, 2.5, 46.4], [0.8, -1.7, 41.8], 46],
   [8.8, [7.4, -1.3, 45.6], [0.6, -3.0, 41.3], 48],
   [12.0, [4.0, -2.4, 45.2], [1.6, -3.9, 41.7], 48],
   [16.0, [3.5, -2.9, 44.2], [2.05, -3.8, 41.75], 46],
@@ -1458,8 +1466,8 @@ const CAM_D = [
   [34.6, [9.6, -8.0, 41.2], [6.9, -5.2, 39.0], 48],
   [38.6, [8.4, -9.4, 44.2], [1.2, -6.8, 40.6], 52],
   [42.4, [6.6, -10.4, 45.2], [0.2, -7.6, 41.0], 52],
-  [46.6, [12.8, -6.6, 54.2], [2.4, -4.4, 41.8], 54],
-  [49.6, [12.6, -1.6, 47.4], [3.0, -1.4, 45.6], 50],
+  [45.9, [12.8, -6.6, 54.2], [2.4, -4.4, 41.8], 54],
+  [48.6, [12.4, -.9, 48.4], [2.6, 1.4, 45.4], 50],
 ];
 /* RGKR: from the way home down off the starboard bow through the warm patch, under the surface: the purge's slug down
    the mains; one bundle held close as it goes white-hot and cools; down and back for the plumes and the keel banks;
@@ -1473,7 +1481,7 @@ const CAM_R = [
   [22.4, [10.6, -9.4, 48.8], [2.6, -4.2, 40.2], 54],
   [26.4, [11.0, -7.2, 46.6], [4.0, -4.0, 41.0], 52],
   [29.0, [9.2, -2.6, 46.8], [4.6, -1.6, 43.0], 50],
-  [31.0, [10.0, 2.4, 47.8], [4.4, 1.6, 43.4], 48],
+  [31.0, [10.0, 2.4, 47.8], [2.4, 3.6, 44.8], 48],
 ];
 let RIG_D = null, RIG_R = null;
 function camD(u, ctx) { STAMP = ctx.T; MODE = 1; UU = u; return camAtRig(RIG_D, u, ctx); }
@@ -1629,6 +1637,14 @@ function irInset(u, ctx) {
   g.font = `400 ${10.5 * S}px "Geist Mono", monospace`; g.textBaseline = 'top';
   g.fillStyle = '#C6F432'; g.fillText('IR · SEA SURFACE', x0, y0 + h + 7 * S);
   g.fillStyle = 'rgba(238,238,228,.7)'; g.textAlign = 'right'; g.fillText(`+${irPeak().toFixed(1)} °C · BOW →`, x0 + w, y0 + h + 7 * S); g.textAlign = 'left';
+  // the heat dumped against the pulse bank it came from: the bar is the 160 MJ bank, the tick the shot's waste heat
+  { const yb = y0 + h + 26 * S, hb = 7 * S, dumped = qAt(QR.cum, u), kx = v => x0 + w * Math.min(1, v / BANK_MJ);
+    g.fillStyle = 'rgba(11,12,10,.84)'; g.fillRect(x0, yb - 2 * S, w, hb + 4 * S);
+    g.strokeStyle = 'rgba(238,238,228,.55)'; g.strokeRect(x0 + .5, yb + .5, w - 1, hb - 1);
+    g.fillStyle = 'rgba(198,244,50,.85)'; g.fillRect(x0 + 1, yb + 1, Math.max(0, kx(dumped) - x0 - 2), hb - 2);
+    g.strokeStyle = 'rgba(255,106,61,.9)'; g.beginPath(); g.moveTo(kx(WASTE_MJ) + .5, yb - 3 * S); g.lineTo(kx(WASTE_MJ) + .5, yb + hb + 3 * S); g.stroke();
+    g.fillStyle = '#C6F432'; g.fillText(`TO SEA ${dumped.toFixed(1)} MJ`, x0, yb + hb + 6 * S);
+    g.fillStyle = 'rgba(238,238,228,.7)'; g.textAlign = 'right'; g.fillText(`SHOT ${WASTE_MJ} MJ · BANK ${BANK_MJ} MJ`, x0 + w, yb + hb + 6 * S); g.textAlign = 'left'; }
   g.restore();
 }
 /* from above the water: the patch as a lime tint on the surface (the grid's cells as dots, a little jitter) */
@@ -1646,6 +1662,7 @@ function irSurface(fade) {
   }
 }
 /* the heat dumped in RGKR: P (MW) = rated x flow x the banks' mean heat; the store's content the rest to come */
+const BANK_MJ = 160, WASTE_MJ = 64;                         // the pulse bank's store, a shot's waste heat (96 MJ out of the bank, 32 MJ out of the muzzle)
 let QR = null;
 function buildQR() {
   const n = Math.ceil(LEN_R / .05) + 1, P = new Float64Array(n), cum = new Float64Array(n);
