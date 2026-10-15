@@ -175,7 +175,13 @@ const RENDER = {
       await loadSvgs();
       if (STAGE.err) throw new Error(STAGE.err);
       const D = FILM.duration, TO = TO_Q === null ? D : Math.max(FROM, Math.min(D, TO_Q)), N = Math.round((TO - FROM) * FPS);
-      const job = { film: STAGE.PAGE, w: W, h: H, fps: FPS, from: FROM, to: TO, dur: D, frames: N, chunk: CHUNK, hq: HQ, ui: UI, fmt: 'rgb24', z: 1,
+      // a code stamp (the newest Last-Modified of the page's scripts): the server resumes only a render of the same code
+      let stamp = '';
+      try {
+        const ms = await Promise.all([...document.scripts].filter(s => s.src).map(s => fetch(s.src, { method: 'HEAD', cache: 'no-store' }).then(r => Date.parse(r.headers.get('Last-Modified') || '') || 0).catch(() => 0)));
+        stamp = String(Math.max(0, ...ms));
+      } catch (e) {}
+      const job = { film: STAGE.PAGE, w: W, h: H, fps: FPS, from: FROM, to: TO, dur: D, frames: N, chunk: CHUNK, hq: HQ, ui: UI, fmt: 'rgb24', z: 1, stamp,
         crf: +Q.get('crf') || 14, maxrate: Q.get('maxrate') || '' };
       const js = await post('/render/start', JSON.stringify(job));
       RENDER.job = js;

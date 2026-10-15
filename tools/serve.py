@@ -75,6 +75,20 @@ class Job:
         self.maxrate, self.bufsize = (mr, f'{float(mr[:-1]) * 2:g}{mr[-1]}') if mr and mr[-1] in 'kM' else (None, None)
         self.dir = os.path.join(RENDERS, '.parts', self.id)
         os.makedirs(self.dir, exist_ok=True)
+        # resume only the same render: a job.json whose frame count, duration or code stamp differs (the film was
+        # edited since) means the old chunks are stale -> start over
+        old = os.path.join(self.dir, 'job.json')
+        if os.path.exists(old):
+            try:
+                with open(old) as f:
+                    o = json.load(f)
+                same = all(o.get(k) == spec.get(k) for k in ('frames', 'dur', 'from', 'to', 'w', 'h', 'fps', 'stamp'))
+            except (OSError, ValueError):
+                same = False
+            if not same:
+                for f in glob.glob(os.path.join(self.dir, 'c*')):
+                    os.remove(f)
+                log(f'{self.id}: stale chunks cleared (the film or the job changed)')
         self.out = os.path.join(RENDERS, self.id + '.mp4')
         self.lock = threading.Lock()
         self.q = queue.Queue(maxsize=90)        # (deflated frames ~1 MB: a backlog while the encoder is behind)
@@ -203,7 +217,7 @@ class Job:
         wav = os.path.join(self.dir, 'audio.wav')
         args = [FFMPEG, '-hide_banner', '-loglevel', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', lst]
         if os.path.exists(wav):
-            args += ['-i', wav, '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '384k', '-ar', '48000', '-shortest']
+            args += ['-i', wav, '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '384k', '-ar', '48000']   # (no -shortest: the sound is the frames' length exactly; with very large video packets -shortest dropped the last frames)
         else:
             args += ['-map', '0:v:0', '-c:v', 'copy']
         tmp = self.out[:-4] + '.tmp.mp4'
