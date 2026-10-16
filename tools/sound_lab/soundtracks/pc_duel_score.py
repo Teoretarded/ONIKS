@@ -216,7 +216,7 @@ def brass_swell(M, t, d, notes, v0, v1, bus='m_low', seed=0, stop=None):
     M.add(bus, t, fn, dur=d + 2, why='brass')
 
 
-def build(M, t0, t1, peak=0.85, seed=40, stop=None, theme_horns=False, gain=-4.0):
+def build(M, t0, t1, peak=0.85, seed=40, stop=None, theme_horns=False, gain=-4.0, dip=0.0, dip_len=3.0, ramp=True):
     """A build from t0 to `stop`: the ostinato (celli, violas, basses; violins in the last half) in sixteenths,
     tremolo strings climbing Dm - Bb - Gm - A, brass swelling under each chord, the frame drum doubling up, a
     timpani roll and a cymbal roll into the stop; everything cut dead at stop. theme_horns: the theme in the
@@ -266,8 +266,13 @@ def build(M, t0, t1, peak=0.85, seed=40, stop=None, theme_horns=False, gain=-4.0
             t += b * BEAT
         M.add('m_low', tt, lambda: _cut(I('FHornSus').legato(notes, seed + 5), stop - tt), dur=t + 3, why='theme horns')
     # the stop: the music buses closed (their reverb included), so the shot comes out of a held breath
+    # dip: the last dip_len s eased down by dip dB (the foley takes over; the next moment must be the loudest)
     for b in ('m_str', 'm_ost', 'm_pno', 'm_low', 'm_perc'):
-        M.auto(b, [(t0 - 0.5, 0.0), (t0 + 0.5, gain), (stop - 0.01, gain), (stop + 0.004, -90.0), (stop + 2.5, -90.0), (stop + 2.6, 0.0)])
+        pts = [(t0 - 0.5, 0.0), (t0 + 0.5, gain)] if ramp else [(t0, gain)]
+        if dip:
+            pts += [(stop - dip_len, gain), (stop - dip_len * 0.4, gain + dip * 0.7)]
+        pts += [(stop - 0.01, gain + dip), (stop + 0.004, -90.0), (stop + 2.5, -90.0), (stop + 2.6, 0.0)]
+        M.auto(b, pts)
 
 
 def theme(M, t0, vel=0.35, bus='m_pno', octave=0, seed=50, last=None, last_len=None):
@@ -305,13 +310,18 @@ def compose(M, T, log=print):
         a, b = r
         pedal(M, a + 2.0, b + 4.0, (26, 38), 0.32, seed=1)
         piano_sparse(M, a + 6.0, b, [69, 65, 62, 64, 60, 57], every=3, vel=0.3)
+    elif at('powerroom', note=False) is not None:     # (the cut: the station and the helium plant only) the pedal
+        b = at('powerroom', note=False)               # rising out of the sea, two piano notes
+        pedal(M, 0.6, b + 3.0, (26, 38), 0.27, seed=1, breathe=4)
+        piano_sparse(M, 0.6, b - 1.0, [69, 65], every=2, vel=0.27)
     # ---- 2. the power room: the harmony moves, the ostinato arrives in eighths
-    r = run('powerroom', 'cryo') or run('powerroom', 'coils')
+    a, tco = at('powerroom', note=False), at('coils', note=False)
+    r = (a, tco) if a is not None and tco is not None and tco > a else (run('powerroom', 'cryo') or run('powerroom', 'coils'))
     if r:
         a, b = r
         chords(M, a, b + 2, ['Dm', 'Bb', 'F', 'C', 'Dm', 'Bb', 'Gm', 'Asus'], 2, 0.3, seed=11)
         pedal(M, a, b + 2, (26,), 0.28, seed=2)
-        ostinato(M, a + 4 * BAR, b, ['Dm', 'Bb', 'F', 'C'], 0.34, grow=0.4, sixteenths=False, rests=0.35, seed=21)
+        ostinato(M, a + (2 if b - a < 30 else 4) * BAR, b, ['Dm', 'Bb', 'F', 'C'], 0.34, grow=0.4, sixteenths=False, rests=0.35, seed=21)
         piano_sparse(M, a + 2 * BAR, b, [74, 72, 69, 77], every=4, vel=0.28)
     # ---- 2b. the coils: the ostinato in sixteenths, the frame drum under it
     r = T.span('coils', note=False)
@@ -321,12 +331,14 @@ def compose(M, T, log=print):
         ostinato(M, a, b, ['Dm', 'Bb', 'Gm', 'Asus'], 0.36, grow=0.35, seed=22, layers=('vc', 'cb'), rests=0.15)
         drums(M, a + 2 * BAR, b, 0.36, pattern='x.......', seed=23)
     # ---- 3. hydraulics to the load: tension (tremolo, the pedal, timpani)
-    r = run('hydraulics', 'load')
+    r = run('hydraulics', 'load') if T.span('hydraulics', note=False) else run('sensors', 'load')
     if r:
         a, b = r
-        chords(M, a, b, ['Dm', 'Gm', 'Bb', 'Asus'], 4, 0.28, seed=21, top=True, dyn_shape=(0.5, 1.0, 0.6))
-        pedal(M, a, b, (26, 33), 0.28, seed=3)
-        timp_pattern(M, a + 2 * BAR, b, 0.3, every=4)
+        chords(M, a, b, ['Dm', 'Gm', 'Bb', 'Asus'], 4 if b - a > 40 else 2, 0.3, seed=21, top=True, dyn_shape=(0.5, 1.0, 0.6))
+        pedal(M, a, b, (26, 33), 0.3, seed=3)
+        timp_pattern(M, a + 2 * BAR, b, 0.32, every=4 if b - a > 40 else 2)
+        if b - a < 40:         # (the cut: keep the momentum from the coils into the charge, low and quiet)
+            ostinato(M, a, b, ['Dm', 'Gm', 'Bb', 'Asus'], 0.3, grow=0.5, sixteenths=False, rests=0.25, seed=24, layers=('vc',))
     # ---- 4. the charge: the first build, cut a beat before the shot
     tf = getattr(T, 'shot', None) or at('fire', note=False)
     tc = at('charge', note=False)
@@ -345,30 +357,45 @@ def compose(M, T, log=print):
                                                                               attack=0.05)),
                                                 (0.0, I('ContrabassSusVB').swell(26, 5.0, [(0, 0.8), (5, 0.3)], 72, release=2.5, attack=0.05))]),
               dur=9, why='hit brass')
-        M.add('m_perc', th, lambda: SM.kit('bass_drum').hit(0.95, 1), dur=5, why='hit drum')
-        M.add('m_perc', th + 0.01, lambda: SM.kit('giant_drum').hit(0.9, 2), dur=5, why='hit drum')
+        M.add('m_perc', th, lambda: SM.kit('bass_drum').hit(0.8, 1), dur=5, why='hit drum')
+        M.add('m_perc', th + 0.01, lambda: SM.kit('giant_drum').hit(0.75, 2), dur=5, why='hit drum')
     # ---- 6b. the orbital ship seen: a cold, low pedal, a few piano notes far apart
     r = run('orbit', 'orbit') or T.span('debris', note=False)
     rs = at('rings', note=False)
     if r:
         a, b = r[0], (rs if rs is not None and rs > r[0] else r[1])
         pedal(M, a + 1.0, b + 1.0, (26, 33), 0.26, seed=7)
-        piano_sparse(M, a + 2.0, b, [57, 53, 50, 52], every=3, vel=0.26, seed=8)
+        if b - a > 30:
+            piano_sparse(M, a + 2.0, b, [57, 53, 50, 52], every=3, vel=0.26, seed=8)
+        else:                  # (the cut: the break) a low brass groan under the V, the strings holding
+            M.add('m_low', a + 3.0, lambda d=max(4.0, b - a - 3.0): _place([
+                (0, I('TromboneSus').swell(38, d, [(0, 0.15), (d * 0.6, 0.42), (d, 0.12)], 75, release=2.0, attack=1.5)),
+                (0, I('TubaSus').swell(33, d, [(0, 0.15), (d * 0.6, 0.45), (d, 0.12)], 76, release=2.0, attack=1.5))]),
+                dur=b - a + 3, why='break brass')
     # ---- 7. the orbital ship rebuilds: the ostinato again, darker, the timpani
     r = run('rings', 'orb_charge') or run('orbit', 'orb_charge')
     to = at('orb_fire', note=False)
     if r:
         a, b = r
-        b = min(b, to) if to is not None else b
+        b = to if to is not None and to > a else b       # (to the orbital shot itself, not its chapter)
+        st = b - 0.3 if to is not None and b >= to - 0.01 else b       # (the held breath before the orbital shot)
         chords(M, a, b, ['Gm', 'Dm', 'Bb', 'A'], 2, 0.3, seed=31)
-        ostinato(M, a + 2 * BAR, b, ['Gm', 'Dm', 'Bb', 'A'], 0.34, grow=0.6, seed=33, layers=('vc', 'cb'), rests=0.2)
+        ostinato(M, a + 2 * BAR, b, ['Gm', 'Dm', 'Bb', 'A'], 0.34, grow=0.9, seed=33, layers=('vc', 'cb'), rests=0.2, stop=st)
+        ostinato(M, a + (b - a) * 0.45, b, ['Gm', 'Dm', 'Bb', 'A'], 0.3, grow=0.8, seed=35, layers=('va', 'vn'), rests=0.3, stop=st)
         timp_pattern(M, a, b, 0.34, every=2)
-        drums(M, a + 4 * BAR, b, 0.38, pattern='x.......', seed=34, grow=0.4)
+        drums(M, a + 4 * BAR, st, 0.38, pattern='x.......', seed=34, grow=0.5)
+        drums(M, a + (b - a) * 0.6, st, 0.36, pattern='x...x.x.', seed=36, grow=0.6)
+        tq = at('orb_charge', note=False)
+        if tq is not None and a < tq < st - 3:      # its charge: the brass swelling in under the ostinato
+            brass_swell(M, tq, st - tq, (38, 45, 62), 0.2, 0.7, seed=37, stop=st)
+        if st < b:
+            for bb in ('m_str', 'm_ost', 'm_pno', 'm_low', 'm_perc'):
+                M.auto(bb, [(st - 0.02, 0.0), (st, -90.0), (b - 0.01, -90.0)])     # (the build after it sets its own level)
     # ---- 8. its shot and the fall: the big build with the theme in the horns, cut with the foley before the strike
     ts = at('strike', note=False)
     stop = getattr(T, 'strike_hole', None) or (ts - 0.4 if ts is not None else None)
     if to is not None and ts is not None and ts > to:
-        build(M, to, ts, 1.0, seed=80, stop=stop, theme_horns=True, gain=-6.0)
+        build(M, to, ts, 1.0, seed=80, stop=stop, theme_horns=True, gain=-10.0, dip=-7.0, dip_len=3.0, ramp=False)
     # ---- 9. after the strike: silence, then the low chord under the water, the theme at the surface
     tu = getattr(T, 'lens_under', None) or at('underwater', note=False)
     tsu = getattr(T, 'lens_up', None) or at('surface', note=False)
@@ -383,7 +410,7 @@ def compose(M, T, log=print):
     if tsu is not None:
         # the theme twice (the second an octave up, ending on the tonic), its last note landing ~5 s before the end
         L1 = theme_len()
-        last_at = end - 5.5
+        last_at = end - 7.5
         s2 = last_at - (L1 - THEME[-1][1] * BEAT)
         s1 = s2 - L1
         if s1 < tsu + 0.5:
@@ -391,7 +418,7 @@ def compose(M, T, log=print):
             s2 = max(tsu + 0.8, s2)
         if s1 is not None:
             theme(M, s1, 0.32)
-        theme(M, s2, 0.3, octave=12 if s1 is not None else 0, seed=60, last=62, last_len=end - (s2 + L1 - THEME[-1][1] * BEAT) - 0.3)
+        theme(M, s2, 0.3, octave=12 if s1 is not None else 0, seed=60, last=62, last_len=end - (s2 + L1 - THEME[-1][1] * BEAT) - 2.0)
         t0 = tsu + 1.0
-        chords(M, t0, end - 0.3, ['Dm', 'Bb', 'F', 'C', 'Gm', 'Asus'], 2, 0.26, seed=95, final='Dm')
+        chords(M, t0, end - 1.2, ['Dm', 'Bb', 'F', 'C', 'Gm', 'Asus'], 2, 0.26, seed=95, final='Dm')
     log(f'  score: {sum(1 for e in M.ev if e["bus"].startswith("m_"))} music events')

@@ -163,5 +163,20 @@ python tools/sound_lab/soundtracks/pc_duel.py --video <render.mp4> [--markers <j
   release before the shot and at the hole before the strike.
 - The master: a 300 Hz dip on the beds and the music, +2 dB above 6 kHz on the whole, -14 LUFS, -1.5 dBTP (before
   AAC); the film ends on the score's own tail (a 0.4 s guard fade).
+- The cut (2026-10-16, 233.2 s, 15 stretches joined by 0.8 s dissolves): each change of place crossfades its bed
+  across the dissolve (in from a-0.4 to a+0.8, out from b-0.4 over 1.6 s); scenes in short chapters are scaled to
+  them and end with them. The orbital act voices `furrow_end`, `energy_release`, every `burst_<n>_<part>_<GJ>GJ`
+  (a thump sized by its energy), the V-break (`hull_break` before the strike), the rebuild from `rings_split`, the rod
+  line (`fab_line rod_lift rod_load round_seated`) and the orbital shot's accelerating coil thumps into a 0.3 s hole;
+  the `hullm` bus carries the orbital hits' mids (to 3.5 kHz) so they read on a phone. The strike: `deck_breach` (a
+  shriek per deck), `magazine_1..9` growing (size 0.9 -> 1.3, -16 -> -12.5 dB; `secondary_blasts` then only a
+  muffled shock if under the water), `mount_thrown lens_under rod_gone lens_up column_rise mount_splash cook_off
+  bubbles_rise` (whitewater if above the water) `bow_under stern_under`; bubbles are a real boil slowed (`bubbles`),
+  not synthesis. `climax_clip` soft-clips the strike's first 2.6 s by `CLIMAX_CLIP_DB` before the master, so the
+  limiter holds it >= 4 dB over every other moment. The score: the pedal from the sea, the power room into the coils,
+  the aim keeping a quiet ostinato into the charge build, a brass groan under the V-break, the rebuild growing to the
+  orbital shot (violins, brass under its charge, a held breath), the climax build capped at -10 dB and dipping 7 dB
+  over its last 3 s, the surface theme's last note landing 7.5 s before the end; the fire and the wreck settle to the
+  sea bed over the last 6 s (the loop's start).
 - A part (`--from/--to`) is mastered on its own unless `--gain` gives the whole film's master gain (printed in
   `report.json`).

@@ -87,7 +87,7 @@ def parse_cue(name):
     le = legacy_event(n)
     if le:
         return le[0], le[1], False
-    if re.fullmatch(r'[a-z][a-z0-9_]*', n) and n not in ('clunk', 'clack', 'tick', 'whirr'):
+    if re.fullmatch(r'[a-z][A-Za-z0-9_]*', n) and n not in ('clunk', 'clack', 'tick', 'whirr'):
         return n, [], True                       # a named function: the film's own sound cue (fire, hit_orbital ...)
     return None
 
