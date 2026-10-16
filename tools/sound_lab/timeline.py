@@ -20,6 +20,8 @@ clack, whirr ...) are read as mechanical events so the existing films get foley 
 import json
 import re
 
+import numpy as np
+
 
 class Beat:
     def __init__(self, id, titles, cue=None, offset=0.0, optional=False):
@@ -223,3 +225,97 @@ class Timeline:
         stray = [c['title'] for j, c in enumerate(self.chapters) if j not in used_titles]
         if stray:
             log('  chapters not in the story (no sound of their own): ' + ', '.join(dict.fromkeys(stray)))
+
+
+# ---------------------------------------------------------------- the picture's own log: the time rate and the lens
+
+
+class FilmLog:
+    """The film page's camera log (reference/films/common/camlog.js, every 0.1 s: the eye, the HUD readout) read for
+    sound: the on-screen time rate (the readout's 'x8', 'x0.003') and the eye's height (under the water below 0).
+
+        L = FilmLog.find(T, video)          # None when there is no log that matches this render's chapters
+        L.rate(t)                            # the time rate shown at film time t (1 = real time)
+        L.crossings(t0, t1)                  # [(t, 'under' | 'up')]: the lens going under / coming up
+
+    A log is used only if its chapters match the render's (titles in order, times within 0.25 s), so a re-timed
+    film never takes its timing from a stale log."""
+
+    def __init__(self, data):
+        s = data.get('samples') or []
+        self.t = np.array([float(q['t']) for q in s])
+        self.eye_y = np.array([float(q['eye'][1]) if q.get('eye') else np.nan for q in s])
+        self.r = np.array([_rate_of(q.get('ro', '')) for q in s])
+        if len(self.r):
+            ok = ~np.isnan(self.r)
+            self.r = np.interp(self.t, self.t[ok], self.r[ok]) if ok.any() else np.ones_like(self.t)
+        self.chapters = [(float(c['t']), norm(c['title'])) for c in data.get('chapters', [])]
+        self.path = None
+
+    def rate(self, t):
+        if not len(self.t):
+            return np.ones_like(np.asarray(t, float)) if np.ndim(t) else 1.0
+        return np.interp(t, self.t, self.r)
+
+    def crossings(self, t0=None, t1=None):
+        y = self.eye_y
+        out = []
+        for i in range(1, len(y)):
+            if np.isnan(y[i]) or np.isnan(y[i - 1]):
+                continue
+            if (y[i - 1] >= 0) != (y[i] >= 0):
+                tc = self.t[i - 1] + (self.t[i] - self.t[i - 1]) * y[i - 1] / (y[i - 1] - y[i])
+                if (t0 is None or tc >= t0) and (t1 is None or tc <= t1):
+                    out.append((float(tc), 'under' if y[i] < 0 else 'up'))
+        return out
+
+    def matches(self, T, tol=0.25):
+        a = [(c['t'], norm(c['title'])) for c in T.chapters]
+        b = self.chapters
+        if len(a) != len(b):
+            return False
+        return all(x[1] == y[1] and abs(x[0] - y[0]) <= tol for x, y in zip(a, b))
+
+    @classmethod
+    def find(cls, T, video=None, paths=(), log=print):
+        """The first log among `paths`, the render's review folders (<render dir>/review_*/camlog.json) and
+        reference/films/shots/camlog/<film>.json whose chapters match T's."""
+        import glob
+        import os
+        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        cand = list(paths)
+        if video:
+            cand += sorted(glob.glob(os.path.join(os.path.dirname(os.path.abspath(video)), 'review*', 'camlog.json')), reverse=True)
+        if T.film:
+            cand.append(os.path.join(root, 'reference', 'films', 'shots', 'camlog', f'{T.film}.json'))
+        for p in cand:
+            if not p or not os.path.exists(p):
+                continue
+            try:
+                with open(p, encoding='utf-8') as f:
+                    L = cls(json.load(f))
+            except (OSError, ValueError, KeyError):
+                continue
+            if L.matches(T):
+                L.path = p
+                if log:
+                    log(f'  film log: {p} (time rate and lens height)')
+                return L
+            if log:
+                log(f'  film log {p}: chapters do not match this render; not used')
+        return None
+
+
+_RATE = re.compile(r'[×x]\s?(\d+(?:[.,]\d+)?|\d+\s?/\s?\d+)\s*$')
+
+
+def _rate_of(ro):
+    """The time rate at the end of a HUD readout ('... T-62:03.0 · ×0.003' -> 0.003; '×1/100' -> 0.01)."""
+    m = _RATE.search(fix_text(ro or '').strip())
+    if not m:
+        return np.nan
+    v = m.group(1).replace(',', '.').replace(' ', '')
+    if '/' in v:
+        a, b = v.split('/')
+        return float(a) / max(float(b), 1e-9)
+    return float(v)

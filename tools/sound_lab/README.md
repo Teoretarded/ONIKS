@@ -98,8 +98,10 @@ The user asked for soundtracks on real recordings (2026-10-16). These modules ma
 |---|---|
 | `samples.py` | the layer engine: `load` / `find` (any unique part of a ref's path; decoded once to 48 kHz stereo, cached in `refs/_cache/`), `analyse` (10 ms envelope, onsets, cached), `seg`, `hit` / `hits` (the N-th strongest strike, cut to its decay), `steady` (the steadiest stretch), `bed` (a loop-free bed: random chunks, long equal-power crossfades), `loop`, `granular` (a smooth smear of any texture), `vari` (tape varispeed with a rate curve: spin-ups, run-downs), `stretch` (phase vocoder, peak-locked), `shift`, `eq`, `fir_curve`, `distance` (1/r, ISO 9613 air absorption, ground dip, travel delay), `space` (convolution: engine_room, power_room, compartment, hangar, deck, open_sea, sky, water, hull), `underwater`, `through_hull` (structure-borne), `dewhistle` (pulls gliding whistles, whines and relay buzz out frame by frame), `detone`, `level` (active RMS), `stack` + `punch` (a big composite saturated as a whole: shots, blasts) |
 | `mixer.py` | `Mixer` (buses with filters and reverb sends convolved once per space, lazy events rendered only inside the window, level automation, ducking one bus under others, per-event stats), `lufs` (BS.1770-4 integrated, short-term, LRA), `true_peak` (4x), `limiter` (true-peak brickwall, iterated until under the ceiling), `glue`, `master` (to -14 LUFS, <= -1 dBTP), `write_wav`, `mux` |
-| `timeline.py` | a film's timing from its render's `markers.json`: story beats matched to chapter titles in order (longest common subsequence, so repeated titles land on the right beat and a missing one does not derail the rest), named cues (`fire`, `hit_orbital`, `snd:servo:2.5` ...) as exact moments, the kit's old synth cues (`clunk`, `clack`, `whirr`, tone sweeps, noise) read as mechanical events; `report()` lists what it could not place |
-| `orchestra.py` | acoustic-style score instruments: `felt_piano` (inharmonic partials, three detuned strings, felt hammer), `section` (a string section of bowed voices with body resonances, seated violins left / celli right), `tremolo`, `low_brass`, `timpani` + `timp_roll`, `bass_drum` |
+| `timeline.py` | a film's timing from its render's `markers.json`: story beats matched to chapter titles in order (longest common subsequence, so repeated titles land on the right beat and a missing one does not derail the rest), named cues (`fire`, `hit_orbital`, `snd:servo:2.5` ...) as exact moments, the kit's old synth cues (`clunk`, `clack`, `whirr`, tone sweeps, noise) read as mechanical events; `report()` lists what it could not place. `FilmLog` reads the film page's camera log (`camlog.json`) for the on-screen time rate (`x8`, `x0.003`) and the lens height (under the water below 0), used only when its chapters match the render's |
+| `sampler.py` | real recorded instruments (VSCO 2 Community Edition, CC0, in `reference/sounds/instruments/vsco2ce/`, fetched by `fetch_vsco.py`) through their own `.sfz` maps: `inst('CelloEnsSpic').note(m, vel, dur, seed)` (multi-sample repitched by polyphase resampling, the two velocity layers either side crossfaded, round robins from the map's seq groups plus a few cents and ms of scatter, the recording's own decay for short articulations, a release for sustains, long notes looped on their steady middle), `.swell(m, dur, [(t, vel)])` (a held note whose layers and level follow a dynamics curve), `.legato([(t, m, dur, vel)])` (joined notes: the next enters past its attack with a crossfade and a short slide), `kit('giant_drum' / 'bass_drum' / 'cymbal_roll' ...).hit(vel, seed)` (the unmapped VSCO 1 percussion by file name); every sample levelled by its active RMS (peak held within `CREST` dB), velocity then sets the level |
+| `fetch_vsco.py` | downloads the instruments the scores use from the official VSCO 2 CE repository (samples, `.sfz` maps and text files only; the LICENSE checked to be CC0 first; resumable) |
+| `orchestra.py` | (superseded by `sampler.py` for scores: synthesized, it reads as synthetic) acoustic-style score instruments: `felt_piano` (inharmonic partials, three detuned strings, felt hammer), `section` (a string section of bowed voices with body resonances, seated violins left / celli right), `tremolo`, `low_brass`, `timpani` + `timp_roll`, `bass_drum` |
 | `inventory.py` | the refs listed with length, level, onsets, and how tonal (beep-like) each is (`sound_make.py refs`) |
 | `mixcheck.py` | a listen-check by numbers of a soundtrack folder: loudness, true peak, clipping, each stem per window, tonal lines (beeps) left in the foley |
 
@@ -138,7 +140,28 @@ python tools/sound_lab/soundtracks/pc_duel.py --video <render.mp4> [--markers <j
   Hydraulics, Sensors / Track / Director / Radar, Lay, Magazine, Fabrication, Load, Charge, Fire, Flight, Exit /
   Coast, Strike, Debris, Orbit, Rings / Breach / Split / Build, Charge, Fire, Fall, Strike, Under / Underwater,
   Surface. Without `fire`, the shot is the kit's crack-and-rumble cue after the Fire chapter, else the chapter + 1.3 s.
-- The score (`soundtracks/pc_duel_score.py`): D minor, 76 bpm, cues starting on the beats; ducked under the foley and
-  kept out of 2-5 kHz; it stops dead at the release before the shot and before the strike.
+- The picture's clock and lens (`film_timing`): from the film log (`--camlog`, else `<render dir>/review*/camlog.json`,
+  else `reference/films/shots/camlog/<film>.json`, each used only if its chapters match): `T.rate(t)` (the on-screen
+  time rate), the lens going under the water and coming up (the eye's height crossing 0 inside the underwater beat).
+  Without a log: the strike's slow-down across the Terminal chapter to x0.003, the lens under 1.5 s after the
+  underwater beat starts (`LENS_UNDER_AFTER`). Slow motion slows the sound (`sound_rate`: x0.05 plays at 0.43, x0.003
+  at 0.22, time compression at 1): the fall's roar slows and falls away across the Terminal into a 0.38 s hole (every
+  bus out), the strike's body and the blasts after it are slowed and deepened, their cracks stay at speed.
+- The strike's sequence (`strike_chain`): the strike composite at `rod_impact`, a blast at `hull_break` and at every cue
+  whose name starts with `magazine` or `blast`, a rolling chain of blasts from `secondary_blasts` (if that cue falls
+  while the lens is under the water: deep muffled shocks there, and the chain the picture shows above the water in
+  the 3 s after the impact), over a swelling rumble; debris raining after each. Each blast (`blast`) is a composite of
+  real recordings (howitzer report, distant explosion crack, a huge explosion's body, a thump, steel) placed at a
+  distance over the sea. The splash is at `water_entry`; the fire has its own bus, muffled with the rest under water.
+- The score (`soundtracks/pc_duel_score.py`): real sampled instruments (`sampler.py`): a breathing low string pedal and
+  sparse upright piano in the machinery, a spiccato ostinato (a 3+3+2 cell with its answer, hairpins per two-bar
+  phrase, alternate bows, scatter; eighths with rests in the power room, sixteenths in the coils and the builds), a
+  giant frame drum, timpani, horns / trombones / tuba swelling in the builds, timpani and cymbal rolls into each stop,
+  the theme in the horns over the fall and on the piano at the end (landing ~5 s before the end and ringing out).
+  D minor, 76 bpm, cues starting on the beats; space has no music; ducked under the foley (-10 dB) and capped
+  `MUSIC_UNDER` dB under it in the machinery places (`music_under_foley`); it stops dead (its reverb too) at the
+  release before the shot and at the hole before the strike.
+- The master: a 300 Hz dip on the beds and the music, +2 dB above 6 kHz on the whole, -14 LUFS, -1.5 dBTP (before
+  AAC); the film ends on the score's own tail (a 0.4 s guard fade).
 - A part (`--from/--to`) is mastered on its own unless `--gain` gives the whole film's master gain (printed in
   `report.json`).

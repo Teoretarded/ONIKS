@@ -499,6 +499,7 @@ SPACES = {  # t60 (s), predelay, early spread (s), brightness 0..1, early level,
     'sky': (6.5, 0.080, 0.600, 0.30, 0.35, 0.120, 1.8, 1.0),             # a big report rolling round the horizon
     'water': (0.9, 0.003, 0.012, 0.12, 0.6, 0.003, 1.3, 0.7),            # under the water
     'hull': (1.3, 0.002, 0.010, 0.30, 1.0, 0.002, 1.5, 0.6),             # inside steel structure (structure-borne)
+    'hall': (2.3, 0.022, 0.060, 0.62, 0.50, 0.020, 1.2, 1.0),            # a scoring stage (the score's sampled orchestra)
 }
 
 
