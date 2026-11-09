@@ -19,7 +19,7 @@ export const WATCH = ['pc_anatomy', 'pc_anatomy_ship', 'pc_anatomy_battery', 'pd
 /* the menu picks one of these at random unless Settings pins a film */
 export const MENU_POOL = ['pc_anatomy', 'pc_anatomy_ship', 'pc_anatomy_battery', 'pd_engagement', 'pe_aegis'];
 
-export const filmUrl = id => `../reference/films/${id}.html?clean`;
+export const filmUrl = id => `../reference/films/${id}/${id}.html?clean`;
 
 /* the wordmark's small mark, as drawn in each film */
 export const MARKS = {

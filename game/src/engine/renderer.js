@@ -295,6 +295,8 @@ export class Renderer {
     const cam = this.camera, M = this.models;
     for (const d of this.queue) M.prepare(d, cam, this.frameInfo);
     if (M.occlude) for (const d of this.queue) M.drawDepth(d, cam, this.frameInfo);
+    // (extra point passes: { depth(), color() }, e.g. src/vox's lattice ships; depth with the models' splats)
+    if (this.extra) for (const x of this.extra) if (x.depth) x.depth();
     gl.colorMask(true, true, true, true); gl.depthMask(false);
     gl.enable(gl.BLEND); gl.blendEquation(gl.MAX);
     this.terrain.drawSky(this.skyBright);
@@ -311,6 +313,7 @@ export class Renderer {
         this.fx.dot(d.T, 1, c, (d.alpha === undefined ? 1 : d.alpha) * .9);
       }
     }
+    if (this.extra) for (const x of this.extra) if (x.color) x.color();
     // what is left of the sampling budget goes to the levels queued by warm()
     this.models.idle();
     this.fx.drawMax();

@@ -12,7 +12,15 @@
         { type: 'fail', id, err } · { type: 'stats', ... } */
 import { createRunner } from './runner.js';
 
-let runner = null, gl = null, fence = null, shell = null, shellP = null;
+let runner = null, gl = null, fence = null, shell = null, shellP = null, fast = null, fastP = null;
+/* the fast damage model (fast/: rules on a texel grid, no GPU solve); its core in WebAssembly when it loads (fast/wasm.js) */
+async function fastRunner() {
+  if (fast) return fast;
+  if (!fastP) fastP = (async () => { const m = await import('./fast/runner.js'); let core = null;
+    if (cfg.wasm !== false) try { core = await (await import('./fast/wasm.js')).loadCore(); } catch (e) { perf.wasmErr = String(e && e.message || e); }
+    fast = m.createFastRunner({ core }); return fast; })();
+  return fastP;
+}
 const owner = new Map(), pendingShell = new Set();   // (a shell patch dropped before its runner came up is never started)                // patch id -> the runner solving it
 /* the shell solver (bench e00312c), loaded when a patch asks for it: on WebGPU where the worker has it (its own queue,
    many steps a command buffer, read backs that never stall), else on this WebGL2 context */
@@ -21,7 +29,11 @@ async function shellRunner() {
   if (!shellP) shellP = (async () => {
     let wg = null;
     if (cfg.webgpu !== false && self.navigator && navigator.gpu) {
-      try { const w = await import('./shell/gpu_wgpu.js'); wg = await w.initWebGPU(); } catch (e) { wg = null; perf.wgErr = String(e && e.message || e); }
+      try { const w = await import('./shell/gpu_wgpu.js'); wg = await w.initWebGPU();
+        // (every pipeline a hit can ask for, compiled now and asynchronously: a first hit no longer compiles them in
+        // place, which held the browser's whole GPU queue for 0.4-0.7 s, the game's frames too)
+        if (wg && w.prewarm) { const t0 = performance.now(); w.prewarm(wg).then(n => { perf.prewarmed = n; perf.prewarmMs = Math.round(performance.now() - t0); }, e => { perf.prewarmErr = String(e && e.message || e); }); } }
+      catch (e) { wg = null; perf.wgErr = String(e && e.message || e); }
     }
     const m = await import('./shell/runner.js');
     const sh = shell = m.createShellRunner(gl, { wg, batch: 200, depth: cfg.wgDepth || 8 });
@@ -62,6 +74,7 @@ function watchFence() {
   sent.done = true;
 }
 function slice(ms, msShell) {
+  if (fast && fast.busy) { try { for (const m of fast.pump()) post(m); } catch (e) { post({ type: 'error', err: String(e && e.stack || e) }); } }
   // the shell solver on WebGPU: its own queue, paced by what it has in flight (one command buffer: a slice a frame); a
   // step ~10 us + 3 ns a node of GPU (the bench's timer queries: 97 us on its 31k-cell patch, GPU-bound)
   if (shell && shell.busy && shell.stats.backend === 'webgpu') {
@@ -119,11 +132,14 @@ self.onmessage = ev => {
     switch (m.type) {
       case 'tick': slice(m.ms || 3, m.msShell); break;
       case 'hit':
+        if (m.spec.solver === 'fast') { fastRunner().then(R => { try { const info = R.submit(m.id, m.spec); owner.set(m.id, R); post({ type: 'built', id: m.id, info }); } catch (e) { post({ type: 'fail', id: m.id, err: String(e && e.stack || e) }); } }); break; }
         if (m.spec.solver === 'shell') { pendingShell.add(m.id); shellRunner().then(R => { if (!pendingShell.delete(m.id)) return; try { const info = R.submit(m.id, m.spec); owner.set(m.id, R); post({ type: 'built', id: m.id, info }); } catch (e) { post({ type: 'fail', id: m.id, err: String(e && e.stack || e) }); } }); break; }
         { const info = runner.submit(m.id, m.spec); owner.set(m.id, runner); post({ type: 'built', id: m.id, info }); break; }
       case 'targets': for (const k in m.t) { const v = m.t[k], R = owner.get(+k) || runner; if (Array.isArray(v)) R.target(+k, v[0], v[1]); else R.target(+k, v); } break;
       case 'drop': { if (pendingShell.delete(m.id)) break; const R = owner.get(m.id) || runner; R.drop(m.id); owner.delete(m.id); break; }
       case 'cfg': Object.assign(cfg, m.cfg || {}); break;
+      // (brought up ahead of the first hit: the device, and the pipelines compiled in the background)
+      case 'warm': if (cfg.webgpu !== false) shellRunner().catch(() => {}); fastRunner().catch(() => {}); break;
       case 'stats': try { post({ type: 'stats', cfg, perf, stats: runner.stats, shell: shell && shell.stats, backend: shell && shell.stats.backend,
         pats: [...runner.pats.values()].map(R => ({ id: R.id, state: R.state, t: R.P.sim.t, T1: R.P.sim.T1, N: R.P.N, steps: R.steps, runMs: R.runMs }))
           .concat(shell ? [...shell.pats.values()].map(R => ({ id: R.id, solver: 'shell', state: R.state, t: R.M.sim.t, T1: R.M.sim.T1, N: R.M.N, steps: R.steps, runMs: R.runMs, watch: R.watch, target: R.target, snapT: R.lastSnapT, ke: R.M.sim.keLast, kp: R.M.sim.kepeak, gas: R.M.sim.gasLast, quiet: R.M.sim.quietLast, relax: R.M.sim.relax, F: R.M.sim.srcs.map(q => q.F) })) : []) }); } catch (e) { post({ type: 'stats', cfg, perf, err: String(e && e.message || e) }); } break;

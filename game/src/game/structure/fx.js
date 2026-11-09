@@ -143,8 +143,8 @@ export function createBreakFx(game) {
       const h = heat * (.6 + .4 * hsh(i, seed));
       // (decks and frames read clearly from the usual angles: deck edges brightest, the frames close under them, the
       // shell a step down; lit warm by the break's fire, flickering; QA D10)
-      const g = kind === 1 ? 232 : kind === 2 ? 212 : 190, k = .82 + .18 * hsh(i, seed + 1);
-      let r = (g + (255 - g) * h) * k, gg = (g + (190 - g) * h) * k, bb = (g * (1 - h) + 110 * h) * k;
+      const g = kind === 1 ? 232 : kind === 2 ? 212 : 190, kv = .82 + .18 * hsh(i, seed + 1);
+      let r = (g + (255 - g) * h) * kv, gg = (g + (190 - g) * h) * kv, bb = (g * (1 - h) + 110 * h) * kv;
       if (fire > .02) {
         const fl = fire * (.45 + .35 * hsh(i >> 3, tq + seed)) * (kind === 0 ? .6 : 1);
         r = r + (255 - r) * fl; gg = gg + (176 - gg) * fl; bb = bb + (104 - bb) * fl;

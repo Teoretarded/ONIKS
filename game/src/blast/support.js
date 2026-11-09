@@ -19,6 +19,28 @@ const DOTS = new Map();                          // model key -> dots
 export function modelDots(ent) {
   let M = DOTS.get(ent.key);
   if (M && M.n) return M.ins ? growInside(ent, M) : M;
+  // (a build begun in slices: finished here at once)
+  const SB = SLICED.get(ent.key);
+  if (SB) { while (SB.ui < SB.use.length) fillOne(SB); SLICED.delete(ent.key); return growInside(ent, finishDots(ent, SB)); }
+  const { use, n } = partsOf(ent);
+  if (!n) return { n: 0 };
+  const B = { use, n, D: new Float32Array(n * 7), col: new Map(), lo: [1e9, 1e9, 1e9], hi: [-1e9, -1e9, -1e9], m: 0, ui: 0 };
+  while (B.ui < B.use.length) fillOne(B);
+  return growInside(ent, finishDots(ent, B));
+}
+const SLICED = new Map();
+/* the same build a few ms at a time (one part's cloud a call at most past the budget): true once the class's dots are
+   built. The blast system calls it from idle frames, so no frame pays a whole class (~30 ms a cruiser) at once */
+export function modelDotsStep(ent, ms) {
+  if (DOTS.has(ent.key)) return true;
+  let B = SLICED.get(ent.key);
+  if (!B) { const { use, n } = partsOf(ent); if (!n) return false; B = { use, n, D: new Float32Array(n * 7), col: new Map(), lo: [1e9, 1e9, 1e9], hi: [-1e9, -1e9, -1e9], m: 0, ui: 0 }; SLICED.set(ent.key, B); }
+  const t0 = performance.now();
+  while (B.ui < B.use.length) { fillOne(B); if (performance.now() - t0 > ms) return false; }
+  SLICED.delete(ent.key); finishDots(ent, B); return true;
+}
+function fillOne(B) { const u = B.use[B.ui++]; B.m = fill(B.D, B.m, [u], B.col, B.lo, B.hi); }
+function partsOf(ent) {
   const use = [];
   let n = 0;
   ent.parts.forEach((P, pi) => {
@@ -33,12 +55,12 @@ export function modelDots(ent) {
     if (!shown) return;
     use.push([c, X, pi]); n += c.n;
   });
-  if (!n) return { n: 0 };
-  const D = new Float32Array(n * 7), col = new Map();
-  let lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9];
-  const m = fill(D, 0, use, col, lo, hi);
+  return { use, n };
+}
+function finishDots(ent, B) {
+  const D = B.D, col = B.col, lo = B.lo, hi = B.hi, m = B.m;
   const colI = new Map(); for (const [k, l] of col) colI.set(k, Int32Array.from(l));
-  M = { n: m, D, col: colI, lo, hi, parts: ent.parts.map(P => P.name), ins: new Uint8Array(ent.parts.length), seen: 0 };
+  const M = { n: m, D, col: colI, lo, hi, parts: ent.parts.map(P => P.name), ins: new Uint8Array(ent.parts.length), seen: 0 };
   ent.parts.forEach((P, pi) => { if (P.part.inside) M.ins[pi] = 1; });
   // the top surface: the highest up-facing dot a cell (the dyn parts too: a gun's roof is a surface)
   const nx = Math.ceil((hi[0] - lo[0]) / HF) + 1, nz = Math.ceil((hi[2] - lo[2]) / HF) + 1, top = new Float32Array(nx * nz).fill(-1e9);
@@ -50,7 +72,7 @@ export function modelDots(ent) {
     if (a > -1e8 && b > -1e8) t2[k] = Math.min(a, b); }
   M.hf = { lo, nx, nz, top: t2 };
   DOTS.set(ent.key, M);
-  return growInside(ent, M);
+  return M;
 }
 /* ready to be built: every outside part the dots would take has a cloud sampled (built earlier, a part not yet
    sampled would be left out for good) */
@@ -421,8 +443,14 @@ export function createBodies() {
    floating: [[idx...]], n } */
 const ck3 = (a, b, c) => ((a + 2048) * 4096 + (b + 2048)) * 4096 + (c + 2048);
 export function connectivity(Md, patches, T) {
+  const g = connectivitySteps(Md, patches, T, Infinity); let r = g.next(); while (!r.done) r = g.next(); return r.value;
+}
+/* the same, in slices: yields whenever budgetMs has passed (settleSupport runs one slice a frame: no frame pays the whole
+   ~10-25 ms of a destroyer's dots) */
+export function* connectivitySteps(Md, patches, T, budgetMs = 3) {
   if (!Md || !Md.n || !patches.length) return { dropped: [], orphan: [], floating: [], n: 0 };
-  const D = Md.D;
+  const D = Md.D, now = () => performance.now();
+  let t0 = now();
   let lo = [1e9, 1e9], hi = [-1e9, -1e9];
   for (const B of patches) {
     const F = B.spec.frame, b = B.spec.box;
@@ -432,23 +460,31 @@ export function connectivity(Md, patches, T) {
     }
   }
   const idx = [], cls = [], over = [], info = {};
-  eachInColumns(Md, lo[0] - 4, lo[1] - 4, hi[0] + 4, hi[1] + 4, i => {
+  const one = i => {
     const o = 7 * i; let c = K.NONE, anch = false, dead = 0;
     const ins = Md.ins && Md.ins[D[o + 6]];
     for (const B of patches) { c = classify(B, D[o], D[o + 1], D[o + 2], D[o + 3], D[o + 4], D[o + 5], info, ins); if (c !== K.NONE) { anch = (c === K.COL || c === K.BEHIND) && (Math.abs(info.off) < .8 || (ins && c === K.BEHIND));
       if (info.up && (c === K.COL || c === K.BEHIND)) { const r = info.r, t = Math.max(0, Math.min(r.nv, info.j)) * (r.nu + 1) + Math.max(0, Math.min(r.nu, info.i)); dead = (r.cpu[4 * t + 3] | 0) & 3 ? 1 : 0; } break; } }
     if (c === K.HIDDEN) return;
     idx.push(i); over.push(dead); cls.push(c === K.NONE || c === K.PLATE || c === K.TORN || anch ? 1 : c === K.COLDROP || c === K.BEHINDDROP ? 2 : 0);
-  });
+  };
+  { const x0 = lo[0] - 4, z0 = lo[1] - 4, x1 = hi[0] + 4, z1 = hi[1] + 4;
+    for (let i = Math.floor(x0 / COL); i <= Math.floor(x1 / COL); i++) for (let j = Math.floor(z0 / COL); j <= Math.floor(z1 / COL); j++) {
+      const l = Md.col.get(i * 65536 + j); if (l) for (let q = 0; q < l.length; q++) one(l[q]);
+      if (now() - t0 > budgetMs) { yield; t0 = now(); }
+    } }
   const n = idx.length, par = new Int32Array(n); for (let q = 0; q < n; q++) par[q] = q;
   const fd = q => { while (par[q] !== q) { par[q] = par[par[q]]; q = par[q]; } return q; };
   const cell = new Map(), CL = .6, dropped = [], orphan = [];
   for (let q = 0; q < n; q++) {
+    if ((q & 4095) === 4095 && now() - t0 > budgetMs) { yield; t0 = now(); }
     if (cls[q] === 2) { dropped.push(idx[q]); if (T && !T[idx[q]]) orphan.push(idx[q]); continue; }
     const o = 7 * idx[q], k = ck3(Math.floor(D[o] / CL), Math.floor(D[o + 1] / CL), Math.floor(D[o + 2] / CL));
     const l = cell.get(k); if (l) { const a = fd(l), b = fd(q); if (a !== b) par[a] = b; } else cell.set(k, q);
   }
+  let nk = 0;
   for (const [k, q] of cell) {
+    if ((++nk & 2047) === 0 && now() - t0 > budgetMs) { yield; t0 = now(); }
     for (let dx = 0; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
       if (!dx && (dy < 0 || (!dy && dz <= 0))) continue;
       const m = cell.get(k + dx * 16777216 + dy * 4096 + dz); if (m === undefined) continue; const ra = fd(q), rb = fd(m); if (ra !== rb) par[ra] = rb; }

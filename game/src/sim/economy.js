@@ -173,7 +173,8 @@ export function spreadOut(sim, units) {
 }
 
 export function checkResult(sim) {
-  if (sim.result) return;
+  // (the blast lab's range, ?mode=lab: targets come and go, nobody wins)
+  if (sim.result || sim.opts.mode === 'lab') return;
   const t = sim.t, o = sim.opts;
   let winner = null, reason = null;
   for (const side of SIDES) {

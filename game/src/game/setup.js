@@ -17,14 +17,14 @@ const SEA = { calm: .2, haze: .3, rain: .55, storm: .85 };
 
 export function parseParams(search) {
   const Q = new URLSearchParams(search || '');
-  const mode = ['sandbox', 'combat', 'campaign', 'museum'].includes(Q.get('mode')) ? Q.get('mode') : 'sandbox';
+  const mode = ['sandbox', 'combat', 'campaign', 'museum', 'lab'].includes(Q.get('mode')) ? Q.get('mode') : 'sandbox';
   const side = Q.get('side') === 'fleet' ? 'fleet' : 'coast';
   const num = (k, d) => Q.has(k) && Q.get(k) !== '' && isFinite(+Q.get(k)) ? +Q.get(k) : d;
   return {
     mode, side,
     map: Q.get('map') || '',
     mission: num('mission', 1),
-    fog: mode === 'combat' ? num('fog', 1) !== 0 : mode === 'campaign' ? true : mode === 'museum' ? false : num('fog', 0) !== 0,
+    fog: mode === 'combat' ? num('fog', 1) !== 0 : mode === 'campaign' ? true : mode === 'museum' || mode === 'lab' ? false : num('fog', 0) !== 0,
     weather: WEATHERS.includes(Q.get('weather')) ? Q.get('weather') : null,
     ai: ['easy', 'normal', 'hard'].includes(Q.get('ai')) ? Q.get('ai') : 'normal',
     win: Q.get('win') === 'obj' ? 'obj' : 'hq',
@@ -46,6 +46,8 @@ export function createMatch(map, P, mission) {
   const weather = weatherOf(map, mission ? mission.weather : P.weather);
   const opts = { seed: P.seed, fog: P.fog, mode: P.mode, weather, difficulty: mission ? mission.ai : P.ai };
   // the museum: no forces, no AI, nothing fires (the exhibits are Inspect's own, far above the map)
+  // the blast lab (lab.html, src/dev/lab): the same, a calm sea unless asked; the lab spawns its own target
+  if (P.mode === 'lab') { const w = weatherOf(map, P.weather || 'calm'); return { sim: new Sim(map, Object.assign(opts, { aiSides: [], weather: w })), side: 'coast', enemy: 'fleet', weather: w, spawned: { coast: [], fleet: [] } }; }
   if (P.mode === 'museum') return { sim: new Sim(map, Object.assign(opts, { aiSides: [] })), side: 'coast', enemy: 'fleet', weather, spawned: { coast: [], fleet: [] } };
   if (P.mode === 'combat') { opts.aiSides = [enemy]; if (P.win === 'obj') opts.timeLimit = P.timer; }
   else if (P.mode === 'campaign') opts.aiSides = [enemy];

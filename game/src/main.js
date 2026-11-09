@@ -54,7 +54,9 @@ const OPTIONAL = [
   [['./game/debris.js'], 'createDebris', 'debris'],
   [['./blast/system.js'], 'createBlast', 'blast'],               // ship hits solved on the GPU (the blast bench's structural model)
   [['./game/scars.js'], 'createScars', 'scars'],                 // hits marked in the models' dots, fires at the holes
+  [['./game/damage_scan.js'], 'createDamageScan', 'dscan'],      // after a ship hit, the lime scan reads out what it knocked out
   [['./game/structure/index.js'], 'createStructure', 'structure'],   // hulls break, float and sink as rigid pieces
+  [['./game/craters.js'], 'createCraters', 'craters'],             // warheads on the ground leave craters (engine/terrain.js)
   [['./game/perfguard.js'], 'createPerfGuard', 'perfguard'],   // last: it wraps game.frame after the debrief's host
 ];
 
@@ -114,8 +116,12 @@ async function boot() {
   const perf = $('perf');
   const skip = new Set((Q.get('nosys') || '').split(',').filter(Boolean));
   // ?mode=museum: the Anatomy walk alone (ui/inspect/museum.js): Inspect, none of the match's systems
-  const MU = P.mode === 'museum' ? MUSEUM_MODE : null, own = MU ? [] : OWN;
+  const MU = P.mode === 'museum' ? MUSEUM_MODE : null; let own = MU ? [] : OWN;
   if (MU) for (const [, , key] of OPTIONAL) if (!MU.systems.includes(key)) skip.add(key);
+  // ?mode=lab (lab.html): the blast lab (src/dev/lab) on an empty range: no save, objectives, HUD, sensors or civilian
+  // traffic; the lab's own panels instead
+  const LAB = P.mode === 'lab';
+  if (LAB) { own = OWN.filter(([p]) => !/save|objectives|sonar|orders|sandbox/.test(p)); for (const k of ['hud', 'sensors', 'debrief', 'editor', 'filmmaker', 'landmarks']) skip.add(k); }
   // fetch the systems' code while the map loads (module by module the waves of imports add up); registered in order below
   const code = async paths => { for (const p of paths) if (await exists(p)) return import(new URL(p, import.meta.url).href).catch(() => null); };
   for (const [p] of own) code([p]);
@@ -166,6 +172,11 @@ async function boot() {
   const firstOf = async (paths, exp) => { for (const p of paths) if (await exists(p)) return optional(p, exp, game, ctx); return null; };
   const opt = await Promise.all(OPTIONAL.map(([paths, exp, key]) => (skip.has(key) ? Promise.resolve(null) : firstOf(paths, exp)).then(s => { load.count('Systems', ++nSys, allSys); return s; })));
   opt.forEach((s, i) => { if (s) { game.addSystem(s); console.log(`ONIKS: system ${OPTIONAL[i][2]} on`); } });
+  if (LAB) {
+    // (the voxel ship prototype, src/vox: the lab's Voxel mode)
+    const v = await optional('./vox/index.js', 'createVox', game, ctx); if (v) game.addSystem(v);
+    const s = await optional('./dev/lab/index.js', 'createLab', game, ctx); if (s) game.addSystem(s);
+  }
   game.attachInput($('gl'));
   game.bus.emit('ready', game);
   onSettings(s => { game.settings = Object.assign(game.settings, s); cam.edge = s.edgePan !== false; cam.invert = !!s.invertRotate; perf.style.display = s.showFps || Q.get('fps') === '1' ? '' : 'none'; });
@@ -177,7 +188,7 @@ async function boot() {
   console.log(`ONIKS: ${P.mode} on ${map.id} as ${game.side}; map ${Math.round(tMap)} ms, setup ${Math.round(performance.now() - t0 - tMap)} ms; ${sim.list().length} units`);
 
   // camera: close on the command post / the carrier, looking toward the enemy (the pull-out starts with the reveal)
-  const open = MU ? null : openingShot(game, !Q.get('cam') && Q.get('bench') !== '1' && Q.get('ui') !== '0' && Q.get('intro') !== '0');
+  const open = MU || LAB ? null : openingShot(game, !Q.get('cam') && Q.get('bench') !== '1' && Q.get('ui') !== '0' && Q.get('intro') !== '0');
   if (Q.get('cam')) {
     const [x, z, d, y, p] = Q.get('cam').split(',').map(Number);
     cam.set({ target: [x, R.terrain.heightAt(x, z), z], dist: d || 500, yaw: (y || 0) * DEG, pitch: (p || 30) * DEG });

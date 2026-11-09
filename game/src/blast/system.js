@@ -28,7 +28,7 @@ import { tntOf, S_GRID } from './phys.js';
 import { CASING } from './shell/model.js';
 import { attitudeM } from '../game/debris/math.js';
 import { interiorZones } from '../data/models_interior.js';
-import { modelDots, dotsReady, dotsBuilt, topAt, eachInColumns, classify, connectivity, K as CK, createBodies } from './support.js';
+import { modelDots, modelDotsStep, dotsReady, dotsBuilt, topAt, eachInColumns, classify, connectivity, connectivitySteps, K as CK, createBodies } from './support.js';
 
 const AW = 2048, AH = 2048;             // the skin atlas (RGBA16F texels: local displacement, flags + soot)
 const MAXU = 6;                          // patches drawn per unit (engine/models.js BTMAX)
@@ -50,7 +50,7 @@ export async function createBlast(game) {
   const DEFAULT_SOLVER = typeof navigator !== 'undefined' && navigator.gpu ? 'shell' : 'lattice';
   const q0 = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('blast') : null;
   const cfg = { watchDist: 4000, upTexels: 6000, maxDots: 5000, on: q0 !== 'off', gpuMs: 3, gpuMsSlow: 5, gpuMsShell: 8, gpuMsShellSlow: 10, detachMs: 1.5, shellS: .25, scatter: .05, latMs: 5, fastEnd: true, petals: true,
-    solver: q0 === 'shell' || q0 === 'lattice' ? q0 : DEFAULT_SOLVER };
+    solver: q0 === 'shell' || q0 === 'lattice' || q0 === 'fast' ? q0 : DEFAULT_SOLVER };
 
   /* ------------------------------------------------------------ the atlas */
   let tex = null;
@@ -83,7 +83,7 @@ export async function createBlast(game) {
     client = c; mode = c.mode; err = c.err;
     if (!c.mode) { console.warn('blast: no GPU solver (' + c.err + '): the analytic marks stand'); for (const B of pending) fail(B, 'no solver'); pending.length = 0; return; }
     console.log('ONIKS: blast solver on (' + c.mode + (c.err ? '; ' + c.err : '') + ')');
-    c.on(onMsg);
+    c.on(m => { const a = performance.now(); onMsg(m); const d = performance.now() - a; (stats.msgLog || (stats.msgLog = [])).push([m.type, m.final ? 'final' : '', +d.toFixed(1)]); if (stats.msgLog.length > 40) stats.msgLog.shift(); });
     for (const B of pending) c.submit(B.id, B.spec);
     pending.length = 0;
   }).catch(e => { mode = null; err = String(e); console.warn('blast: client', e); });
@@ -101,7 +101,7 @@ export async function createBlast(game) {
     const H = hullOf(u); if (!H) return null;
     const W = tntOf(o.kind, o.whKg);
     if (!(W > .02)) return null;
-    const spec = hitSpec({ u, H, a: o.a, n: o.n, din: o.din, zone: o.zone, tmm: o.tmm, fz: o.fz, standoff: o.standoff, W: o.fz === 'frag' ? W * .8 : W, deckY: o.deckY, halfB: o.halfB, big: bigPatch(), wall: bigPatch() ? wallNear(u, o) : null });
+    const spec = hitSpec({ u, H, a: o.a, n: o.n, din: o.din, zone: o.zone, tmm: o.tmm, fz: o.fz, standoff: o.standoff, W: o.fz === 'frag' ? W * .8 : W, delay: cfg.delay, deckY: o.deckY, halfB: o.halfB, big: bigPatch(), wall: bigPatch() ? wallNear(u, o) : null });
     if (!spec) return null;
     if (o.band > 0) spec.band = o.band;
     // (the sim's hole for this hit (sim/ship.js, what floods her) centred elsewhere on the plating: the charge moves half
@@ -146,16 +146,16 @@ export async function createBlast(game) {
     return start(u, spec, o.S, { kind: 'cookoff:' + mod.id, W, Wgas, vapour: c.vapour || 0, deckY: o.deckY, halfB: o.halfB });
   }
   // the shell solver's patch: sized as the bench's (the compartment round the charge, a graded grid)
-  const bigPatch = () => cfg.solver === 'shell' && !(client && client.mode === 'main');
+  const bigPatch = () => (cfg.solver === 'shell' || cfg.solver === 'fast') && !(client && client.mode === 'main');
   function start(u, spec, S, meta) {
     const id = nextId++;
     spec.watch = true;
     spec.solver = client && client.mode === 'main' ? 'lattice' : cfg.solver;
-    spec.gridS = spec.solver === 'shell' ? (spec.shellS = cfg.shellS) : S_GRID;
+    spec.gridS = spec.solver === 'shell' || spec.solver === 'fast' ? (spec.shellS = cfg.shellS) : S_GRID;
     // (the steel's scatter seeded by the impact's geometry: the same hit on the same class tears the same way)
     // (a ship with an interior (data/models_interior.js) shows it through the hole: no dark far wall in the pocket)
     spec.farWall = !Object.keys(interiorZones(u.def.model, [0, 0, 0], 1e4)).length;
-    if (spec.solver === 'shell') { spec.petals = !!cfg.petals; spec.fastEnd = cfg.fastEnd; spec.latMs = cfg.latMs; spec.scatter = cfg.scatter; let h = 2166136261; for (const v of [...String(u.type)].map(c => c.charCodeAt(0)).concat(spec.frame.O.map(x => Math.round(x * 4)), spec.charge.C.map(x => Math.round(x * 4)))) h = Math.imul(h ^ (v & 0xffff), 16777619); spec.seed = h | 0; }
+    if (spec.solver === 'shell' || spec.solver === 'fast') { spec.petals = !!cfg.petals; spec.fastEnd = cfg.fastEnd; spec.latMs = cfg.latMs; spec.scatter = cfg.scatter; let h = 2166136261; for (const v of [...String(u.type)].map(c => c.charCodeAt(0)).concat(spec.frame.O.map(x => Math.round(x * 4)), spec.charge.C.map(x => Math.round(x * 4)))) h = Math.imul(h ^ (v & 0xffff), 16777619); spec.seed = h | 0; }
     const B = { id, uid: u.id, S, spec, meta, t0: sim.t, state: 'wait', rects: [], inner: null, nIn: 0, tShow: 0, tSolve: 0, tearT: -1, final: null, res: null,
       depth: spec.depth || 4, heat: 0, lastT: -1, lastW: null, seed: (u.id * 131 + id * 7) % 997, info: null, ej: false };
     patches.set(id, B);
@@ -217,11 +217,18 @@ export async function createBlast(game) {
       }
     }
     if (m.inner) { B.inner = m.inner; B.nIn = m.nIn; }
+    if (m.frags) B.frags = m.frags;
     B.tSolve = m.t; B.torn = m.tornSkin; B.openM2 = m.openM2 || 0; B.below = m.tornBelow; B.setMax = m.setMax; B.byPlate = m.byPlate; B.runMs = m.runMs; B.wallMs = m.wallMs; B.steps = m.steps;
     if (m.tornSkin > 0 && B.tearT < 0) B.tearT = sim.t;
     { const td = performance.now(); try { detachScan(B); } catch (e) { console.error('blast: detach', e); } const dd = performance.now() - td; stats.detachMs = Math.max(stats.detachMs || 0, dd); }
-    if (m.final) { B.state = 'done'; B.final = m; B.res = m.results; B.doneT = sim.t; try { simHoles(B); } catch (e) { console.error('blast: sim holes', e); } if (m.debris && m.debris.length) bodies.dotsOf(B.uid, B, m.debris, 1); settle(B); setTimeout(() => { try { settleSupport(B); } catch (e) { console.error('blast: support', e); } }, 0); }
-    else if (m.tornSkin > .05 && !B.ej) ejecta(B, m);
+    if (m.final) { const T = [performance.now()]; B.state = 'done'; B.final = m; B.res = m.results; B.doneT = sim.t;
+      // (the sim's holes on the plating: a task of its own, after this one: ~9 ms a destroyer)
+      { const ch = new MessageChannel(); ch.port1.onmessage = () => { if (patches.get(B.id) !== B) return; try { simHoles(B); } catch (e) { console.error('blast: sim holes', e); } }; ch.port2.postMessage(0); }
+      T.push(performance.now());
+      if (m.debris && m.debris.length) bodies.dotsOf(B.uid, B, m.debris, 1); settle(B); T.push(performance.now());
+      { const t = performance.now(); settleSupport(B).catch(e => console.error('blast: support', e)).then(() => { stats.supportMs = performance.now() - t; }); }
+      stats.finalMs = [T[1] - T[0], T[2] - T[1]].map(v => Math.round(v * 10) / 10); }
+    else if (m.tornSkin > .05 && !B.ej) { const a = performance.now(); ejecta(B, m); stats.ejectaMs = performance.now() - a; }
   }
 
   /* the result: the scar's bookkeeping, fires on the torn rim and inside, the girder and flooding */
@@ -443,15 +450,30 @@ export async function createBlast(game) {
   }
   /* after the solve: whatever of the model is left standing with nothing under it (an overhang whose foot went, a mast
      top over sound plating whose base did not) goes too: its columns are cut (bit 8) and it flies as pieces */
-  function settleSupport(B) {
+  // (the work spread over tasks: each pass of the connectivity (~10 ms a destroyer's dots) its own, so the end of a
+  // solve no longer holds one frame ~50 ms; nothing is drawn wrong meanwhile, the pieces join a few frames later)
+  // (one piece a frame: after the next frame is drawn (rAF, then a task); a page not drawing frames (hidden, a folded
+  // pane) goes on after 100 ms anyway)
+  const nextTask = () => new Promise(r => {
+    let done = false; const go = () => { if (done) return; done = true; const ch = new MessageChannel(); ch.port1.onmessage = () => r(); ch.port2.postMessage(0); };
+    if (typeof requestAnimationFrame === 'function' && !document.hidden) requestAnimationFrame(go); else go();
+    setTimeout(go, 100);
+  });
+  // (a generator's work one slice a frame; the slices' longest kept in the stats)
+  async function sliced(gen, alive) { let r = gen.next(); while (!r.done) { await nextTask(); if (!alive()) return null; const a = performance.now(); r = gen.next(); stats.sliceMax = Math.max(stats.sliceMax || 0, performance.now() - a); } return r.value; }
+  async function drainDetach(b, alive) { while (b.pendCols && b.pendCols.size) { detachWork(b, cfg.detachMs * 2); if (!b.pendCols.size) break; await nextTask(); if (!alive()) return false; } return true; }
+  async function settleSupport(B) {
     const u = sim.units.get(B.uid); if (!u || B.state !== 'done') return;
     const ent = entOf(u); if (!ent) return;
     const Md = modelDots(ent); if (!Md.n) return;
     const L = (byUnit.get(B.uid) || []).filter(b => b.state === 'done' && b.rects.some(r => r.cpu));
     const t0 = performance.now(), info = {};
-    for (const b of L) detachWork(b, Infinity);
+    const alive = () => sim.units.has(B.uid) && patches.get(B.id) === B && B.state === 'done';
+    await nextTask(); if (!alive()) return;
+    for (const b of L) if (!(await drainDetach(b, alive))) return;
     for (let it = 0; it < 4; it++) {
-      const C = connectivity(Md, L, takenOf(B.uid, Md));
+      await nextTask(); if (!alive()) return;
+      const C = await sliced(connectivitySteps(Md, L, takenOf(B.uid, Md), 3), alive); if (!C) return;
       const fl = C.floating;   // (single dots too: nothing left hanging in the air)
       if (!fl.length) break;
       const D = Md.D, touched = new Set();
@@ -466,13 +488,14 @@ export async function createBlast(game) {
       if (!touched.size) break;
       for (const r of touched) { const rows = Math.max(1, Math.floor(cfg.upTexels / (r.nu + 1)));
         for (let j = 0; j <= r.nv; j += rows) { const h = Math.min(rows, r.nv + 1 - j); upQ.push({ r, k: { i0: 0, j0: j, w: r.nu + 1, h, data: r.cpu.subarray(4 * j * (r.nu + 1), 4 * (j + h) * (r.nu + 1)) } }); } }
-      for (const b of L) detachScan(b, Infinity);
+      for (const b of L) { detachScan(b); if (!(await drainDetach(b, alive))) return; }
     }
     // (dots the drawing leaves out that no piece carries yet (orphans: a rule dropped them whose column no flag change
     // queued): their columns queued and looked at now, so they fly as pieces instead of vanishing)
-    { const C = connectivity(Md, L, takenOf(B.uid, Md)), D = Md.D;
+    await nextTask(); if (!alive()) return;
+    { const C = await sliced(connectivitySteps(Md, L, takenOf(B.uid, Md), 3), alive); if (!C) return; const D = Md.D;
       if (C.orphan.length) { const cols = new Set(); for (const i of C.orphan) cols.add((Math.floor(D[7 * i]) + 32768) * 65536 + Math.floor(D[7 * i + 2]) + 32768);
-        for (const b of L) { const P = b.pendCols || (b.pendCols = new Set()); for (const c of cols) P.add(c); detachWork(b, Infinity); }
+        for (const b of L) { const P = b.pendCols || (b.pendCols = new Set()); for (const c of cols) P.add(c); if (!(await drainDetach(b, alive))) return; }
         stats.orphansFlown = (stats.orphansFlown || 0) + C.orphan.length; } }
     stats.supportMs = performance.now() - t0;
   }
@@ -623,8 +646,9 @@ export async function createBlast(game) {
     stats.running = run; stats.shellRunning = runS;
     // (each ship class's CPU dot cloud built ahead, once its model is sampled, one class a second on a frame with no
     // solve running: the first hit on a class does not pay for it (~30 ms a cruiser))
-    if (!run && ++preTick % 60 === 0) { for (const u of sim.units.values()) { if (!u.alive || !u.def || u.def.domain !== 'sea' || !u.ship) continue;
-      const ent = entOf(u); if (!ent || !ent.key || dotsBuilt(ent.key)) continue; if (dotsReady(ent)) { const t = performance.now(); modelDots(ent); stats.prebuiltMs = performance.now() - t; stats.prebuilt = (stats.prebuilt || 0) + 1; break; } } }
+    // (in slices of ~2 ms a frame (modelDotsStep), every frame with no solve running: no frame pays a class at once)
+    if (!run && ++preTick % 4 === 0) { for (const u of sim.units.values()) { if (!u.alive || !u.def || u.def.domain !== 'sea' || !u.ship) continue;
+      const ent = entOf(u); if (!ent || !ent.key || dotsBuilt(ent.key)) continue; if (dotsReady(ent)) { const t = performance.now(); if (modelDotsStep(ent, 2)) stats.prebuilt = (stats.prebuilt || 0) + 1; stats.prebuiltMs = performance.now() - t; break; } } }
     for (const uid of gone) if (!(game.structure && game.structure.draws && game.structure.draws(uid))) { gone.delete(uid); dropUnit(uid); }
     if (any && client && client.mode) { client.targets(TG); for (const k in TG) delete TG[k]; lastSent = game.realT; }
     // (the sim's holes grow as she floods and as later hits land: looked at again every ~second)
@@ -817,6 +841,45 @@ export async function createBlast(game) {
   /* the pieces that came loose: dots flying on from where the solver left them (linear drag, gravity), landing on the
      deck when over the hull, sinking when they reach the sea; hot at first, then charred. Model frame, the unit's pose */
   const DK = .6, GR = 9.81, FLK = Float32Array.from({ length: 256 }, (_, k) => Math.sin(k / 256 * 2 * Math.PI));
+  /* the casing's fragments: streaks from the charge to where each struck (fast solver: B.frags, model frame), white-hot
+     cooling to amber, ~1.4 km/s slowing; a strike throws a spray of sparks off the plating (more where it got through),
+     all a pure function of the time since the hit */
+  const FM = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  function drawFrags(frame) {
+    const sink = frame.sink; if (!sink || !sink.add || R.style === 'orbital') return 0;
+    let n = 0;
+    for (const [uid, L] of byUnit) {
+      const u = sim.units.get(uid); if (!u) continue;
+      for (const B of L) {
+        const Fg = B.frags; if (!Fg) continue;
+        const tp = game.t - B.t0; if (tp < 0 || tp > .6) continue;
+        const pose = game.unitPose(u); attitudeM(pose.hdg, pose.pitch || 0, pose.roll || 0, FM); const P0 = pose.pos, M = FM;
+        const W = (x, y, z, o) => { o[0] = P0[0] + M[0] * x + M[1] * y + M[2] * z; o[1] = P0[1] + M[3] * x + M[4] * y + M[5] * z; o[2] = P0[2] + M[6] * x + M[7] * y + M[8] * z; return o; };
+        const c = W(Fg[0], Fg[1], Fg[2], [0, 0, 0]), e = [0, 0, 0];
+        for (let k = 3; k + 3 < Fg.length; k += 4) {
+          W(Fg[k], Fg[k + 1], Fg[k + 2], e);
+          const dx = e[0] - c[0], dy = e[1] - c[1], dz = e[2] - c[2], Lr = Math.hypot(dx, dy, dz) || 1, h = ((k * 2654435761) >>> 0) / 4294967296;
+          const v0 = 1100 + 600 * h, s = v0 * tp * (1 - .25 * Math.min(1, tp / .05)), ta = Lr / v0;
+          // the streak: the head and the way it came in one shown frame (a motion trail: at x1 a fragment crosses ~20 m a
+          // frame, in bullet time a short hot dash), white-hot at the head, amber behind
+          if (s < Lr) { const tl = Math.max(1.5, Math.min(25, v0 * (game.timeRate || 1) / 60, s)), nq = Math.max(4, Math.min(28, Math.round(tl / .4)));
+            for (let q = 0; q < nq; q++) { const u = q / nq, f = Math.max(0, s - u * tl) / Lr, a = (1 - u) * .95;
+              sink.add(c[0] + dx * f, c[1] + dy * f, c[2] + dz * f, q ? 2 : 4, 255, 244 - 70 * u, 214 - 150 * u, a); n++; } continue; }
+          // the strike: sparks thrown back off the plating, falling, cooling
+          const age = tp - ta; if (age > .35) continue;
+          const nS = Fg[k + 3] > .5 ? 7 : 4;
+          for (let q = 0; q < nS; q++) {
+            const r1 = ((k * 97 + q * 131) * 2654435761 >>> 0) / 4294967296, r2 = ((k * 53 + q * 71) * 2246822519 >>> 0) / 4294967296, r3 = ((k * 29 + q * 17) * 3266489917 >>> 0) / 4294967296;
+            const sp = 8 + 30 * r1, bx = -dx / Lr + (r2 - .5) * 1.6, by = -dy / Lr + (r3 - .5) * 1.6 + .3, bz = -dz / Lr + (r1 - .5) * 1.6;
+            const x = e[0] + bx * sp * age, y = e[1] + by * sp * age - 4.9 * age * age, z = e[2] + bz * sp * age, k2 = 1 - age / .35;
+            sink.add(x, y, z, 2, 255, 150 + 90 * k2, 60 + 120 * k2 * k2, .85 * k2); n++;
+          }
+          if (age < .05) { sink.add(e[0], e[1], e[2], 4, 255, 244, 214, 1 - age / .05); n++; }
+        }
+      }
+    }
+    return n;
+  }
   function drawBodies(frame) {
     const sink = frame.sink;
     if (!sink || !sink.cam || R.pcOff || R.style === 'orbital' || !bodies.list.length) return 0;
@@ -852,7 +915,9 @@ export async function createBlast(game) {
       const wx = p0[0] + M[0] * x + M[1] * y + M[2] * z, wy = p0[1] + M[3] * x + M[4] * y + M[5] * z, wz = p0[2] + M[6] * x + M[7] * y + M[8] * z;
       const hs = (Math.imul(i + 7, 0x9E3779B1) >>> 0) / 4294967296, g = heat * (.6 + .4 * hs), bb = b * (.8 + .4 * hs);
       const size = P.pxm * .2 > 3 ? 3 : P.pxm * .2 > 1.4 ? 2 : 1;
-      const cr = 255 * Math.min(1, bb * .95 + 1.1 * g), cg = 255 * Math.min(1, bb * .9 + .55 * g), cb = 255 * Math.min(1, bb * .84 + .15 * g);
+      let cr = 255 * Math.min(1, bb * .95 + 1.1 * g), cg = 255 * Math.min(1, bb * .9 + .55 * g), cb = 255 * Math.min(1, bb * .84 + .15 * g);
+      // (the lab's deformation view: a loose piece is coral, as the voxel prototype draws it)
+      if (R.models.defo) { const k = .6 + .4 * hs; cr = 255 * k; cg = 106 * k; cb = 61 * k; }
       sink.dot(wx, wy, wz, size, cr, cg, cb, fade);
       drawn++;
       // (close up a piece's dots (~0.3 m apart) are filled in round each one, so it reads as a solid torn piece and not
@@ -881,7 +946,7 @@ export async function createBlast(game) {
     update,
     draw3d(frame) {
       const t0 = performance.now();
-      stats.dots = (byUnit.size ? drawInner(frame) : 0) + drawBodies(frame);
+      stats.dots = (byUnit.size ? drawInner(frame) + drawFrags(frame) : 0) + drawBodies(frame);
       stats.drawMs = performance.now() - t0;
     },
     dispose() {

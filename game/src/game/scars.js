@@ -71,7 +71,7 @@ export const WH = { oniks: 250, kalibr: 200, tlam: 450, slam: 360, uran: 145, he
   shell57: .4, sm6: 64, pdms: 39, sam: 20, sam48: 180, ram: 11, aam: 18, mk48: 290, mk54: 44, t53: 300, ciws: .05, gun30: .1, rws: .05,
   mk84: 430 };
 /* how the charge meets the plating: 'in' a delayed fuze inside the hull, 'out' contact, 'frag' blast-frag, 'gun' rounds */
-const FUZE = { oniks: 'in', kalibr: 'in', uran: 'in', tlam: 'in', slam: 'in', mk84: 'in', hellfire: 'out', kornet: 'out',
+export const FUZE = { oniks: 'in', kalibr: 'in', uran: 'in', tlam: 'in', slam: 'in', mk84: 'in', hellfire: 'out', kornet: 'out',
   shell: 'out', shell130: 'out', shell57: 'out', sm6: 'frag', pdms: 'frag', sam: 'frag', sam48: 'frag', ram: 'frag', aam: 'frag',
   ciws: 'gun', gun30: 'gun', rws: 'gun' };
 const KE = { ciws: 1, rws: 1 };           // kinetic rounds: a clean small hole, no charge
@@ -156,6 +156,7 @@ export function createScars(game) {
   const ck = (i, j, k) => ((i + 512) * 1024 + (j + 512)) * 1024 + (k + 512);
   function gridOf(ent, st) {
     const want = Math.max(.15, ent.L / 300);
+    { const SB = GSL.get(ent.key); if (SB) { while (SB.ui < SB.use.length) gridPart(SB); GSL.delete(ent.key); gridFinish(ent, SB); } }
     let G = GRIDS.get(ent.key);
     if (G && (G.sp <= want * 1.01 || G.tries > 3)) return G;
     let sp = 0, n = 0;
@@ -172,9 +173,15 @@ export function createScars(game) {
     }
     if (!n) return G || null;
     if (G && sp >= G.sp) { G.tries++; return G; }
-    const D = new Float32Array(n * 6), cells = new Map(), hist = new Map(), env = new Map();
-    let m = 0;
-    for (const [cl, X] of use) {
+    const B = { use, n, sp, ui: 0, m: 0, D: new Float32Array(n * 6), cells: new Map(), hist: new Map(), env: new Map(), tries: G ? G.tries + 1 : 0 };
+    while (B.ui < B.use.length) gridPart(B);
+    return gridFinish(ent, B);
+  }
+  /* a part's cloud into a grid being built (B) */
+  function gridPart(B) {
+    const D = B.D, cells = B.cells, hist = B.hist, env = B.env;
+    let m = B.m;
+    { const [cl, X] = B.use[B.ui++];
       const f = cl.pts, by = new Int8Array(f.buffer, f.byteOffset, cl.n * 16);
       for (let i = 0; i < cl.n; i++, m++) {
         let x = f[i * 4], y = f[i * 4 + 1], z = f[i * 4 + 2], nx = by[i * 16 + 12] / 127, ny = by[i * 16 + 13] / 127, nz = by[i * 16 + 14] / 127;
@@ -192,13 +199,44 @@ export function createScars(game) {
         if (!(env.get(ek) >= ax)) env.set(ek, ax);
       }
     }
+    B.m = m;
+  }
+  function gridFinish(ent, B) {
+    const D = B.D, cells = B.cells, hist = B.hist, env = B.env, sp = B.sp;
     const idx = new Map();
     for (const [k, a] of cells) idx.set(k, Int32Array.from(a));
     let deckY = 0, best = 0;
     for (const [b, c] of hist) if (c > best) { best = c; deckY = b / 2; }
-    G = { sp, D, idx, deckY, env, tries: G ? G.tries + 1 : 0 };
+    const G = { sp, D, idx, deckY, env, tries: B.tries };
     GRIDS.set(ent.key, G);
     return G;
+  }
+  /* the same build a few ms a frame (prep, below): a part's cloud at a time, so no frame pays a class's grid at once
+     (~20 ms a destroyer); a hit before it is done finishes it */
+  const GSL = new Map();
+  function gridStep(ent, st, ms) {
+    let B = GSL.get(ent.key);
+    if (!B) {
+      const want = Math.max(.15, ent.L / 300), G = GRIDS.get(ent.key);
+      if (G && (G.sp <= want * 1.01 || G.tries > 3)) return true;
+      let sp = 0, n = 0; const use = [];
+      for (const P of ent.parts) {
+        if (P.dyn) continue;
+        let shown = true; try { shown = !P.part.show || !!P.part.show(st); } catch (e) { shown = true; }
+        if (!shown) continue;
+        let cl = null;
+        for (let k = P.clouds.length - 1; k >= 0; k--) { const c = P.clouds[k]; if (c && c.pts && c.n) { cl = c; if (c.sp <= want) break; } }
+        if (!cl) continue;
+        let X = null; try { X = P.part.xf ? P.part.xf(st) : null; } catch (e) { X = null; }
+        use.push([cl, X]); n += cl.n; sp = Math.max(sp, cl.sp);
+      }
+      if (!n || (G && sp >= G.sp)) { if (G) G.tries++; return true; }
+      B = { use, n, sp, ui: 0, m: 0, D: new Float32Array(n * 6), cells: new Map(), hist: new Map(), env: new Map(), tries: G ? G.tries + 1 : 0 };
+      GSL.set(ent.key, B);
+    }
+    const t0 = performance.now();
+    while (B.ui < B.use.length) { gridPart(B); if (performance.now() - t0 > ms) return false; }
+    GSL.delete(ent.key); gridFinish(ent, B); return true;
   }
   /* the dots within rad of (cx, cy, cz), model frame -> cb(x, y, z, nx, ny, nz) */
   function eachDot(ent, st, cb, cx, cy, cz, rad) {
@@ -288,7 +326,9 @@ export function createScars(game) {
       const l = Math.hypot(h[0], h[2] * .3) || 1;
       din = [-h[0] / l, 0, -h[2] * .3 / l];
     }
+    const tg = performance.now();
     const G = gridOf(ent, st), deckY = G ? G.deckY : def.size[2] * .3, sea = def.domain === 'sea';
+    stats.gridMs = performance.now() - tg;
     const guess = Math.cbrt(Wk) * .6;
     const o = new Array(6), ts = performance.now();
     if (!snap(ent, st, h, din, e.under ? .8 : Math.max(1.2, guess * .55), o)) return;          // nothing of the model there: no mark
@@ -319,14 +359,18 @@ export function createScars(game) {
     // a blast charge on a ship: solved on the GPU (game/src/blast); this mark keeps the bookkeeping and the fire
     const bl = !!(game.blast && game.blast.accepts(u, e.under ? 'under' : fz, e));
     if (bl) S.bl = true;
+    const ta = performance.now();
     const P = addScar(u, S, ent, st);
+    stats.addMs = performance.now() - ta;
     if (bl && P === S) {
       let B = null;
       // the deck over a hit in the side at that station (the forecastle stands higher than the main deck amidships)
       const dk = ny > .7 ? S.y : deckAbove(ent, st, S.x, S.y, S.z, nx, nz, deckY);
       const band = skinBand(ent, st, S.x, S.y, S.z, nx, ny, nz, Math.max(3, Math.min(10, 2.5 * Math.cbrt(Math.max(1, Wk * .5)))));
+      const tb = performance.now();
       try { B = game.blast.hit(u, { a: [S.x, S.y, S.z], n: [nx, ny, nz], din, zone, tmm: t, fz, standoff, kind, whKg: Wk, deckY: dk, band, halfB: halfBFn(u, G), S }); }
       catch (err) { console.error('scars: blast', err); }
+      stats.handMs = performance.now() - tb;
       if (!B) { S.bl = false; S.blast = null; build(u, S, ent, st); if (holeLike(S.kind)) ejecta(u, ent, st, S, M, pose); }
     }
     // a blast-frag warhead also peppers the plating round its burst
@@ -817,6 +861,8 @@ export function createScars(game) {
   /* ------------------------------------------------------------ per frame */
   let prepN = 0;
   function prep() {
+    // (a grid in slices of ~2 ms a frame until it is done; then the next class 45 frames on)
+    for (const k of GSL.keys()) { const ent = R.models.entries.get(k); if (!ent) { GSL.delete(k); break; } gridStep(ent, {}, 2); return; }
     if (++prepN % 45) return;
     for (const u of sim.units.values()) {
       const m = u.def.model;
@@ -824,7 +870,7 @@ export function createScars(game) {
       const G = GRIDS.get(m), ent = R.models.entries.get(m);
       if (!ent || (G && (G.sp <= Math.max(.15, ent.L / 300) * 1.01 || G.tries > 3))) continue;
       if (!game.drawn.has(u.id)) continue;
-      gridOf(ent, stOf(u));
+      gridStep(ent, stOf(u), 2);
       return;
     }
   }

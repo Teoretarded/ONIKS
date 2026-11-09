@@ -107,7 +107,7 @@ flash (`fx.lift`) lights the returns (mostly multiplicative) instead of greying 
 | `samplerFor(e)` | hook (null by default): a replacement for the engine's sampler for entry `e`, or null. Set by `engine/lattice.js`. |
 
 **Model dot density** (`engine/lattice.js`, `setModelDots(R, 'standard' | 'high' | 'ultra')`, Settings > Graphics, live):
-Standard is the above. High and Ultra sample the models as the films' lattice does (`reference/films/pc_scan_railgun_parts.js`
+Standard is the above. High and Ultra sample the models as the films' lattice does (`reference/films/pc_scan_railgun/pc_scan_railgun_parts.js`
 sampleLat): regular grids with no jitter, each sample's cell its own local grid step (sub-dots tile across tapering
 plates), lathes in staggered rows with their cone normals, and edges as two-sided dotted hairlines at ~0.6 of the face
 spacing (a box's twelve edges, lathe stations as rings, panel and blade outlines, and the wire-only feature lines the

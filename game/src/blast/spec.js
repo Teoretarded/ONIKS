@@ -86,7 +86,7 @@ export function hitSpec(o) {
   const W0 = o.W || 0, rc0 = chargeR(W0);
   let Cp;
   if (o.C) Cp = toL(o.C);
-  else if (o.fz === 'in') { const d = o.din, l = Math.hypot(d[0], d[1], d[2]) || 1; Cp = toL([a[0] + d[0] / l * 1.6, a[1] + d[1] / l * 1.6, a[2] + d[2] / l * 1.6]); if (Cp[2] > -.6) Cp[2] = -.6; }
+  else if (o.fz === 'in') { const d = o.din, l = Math.hypot(d[0], d[1], d[2]) || 1; const dl = o.delay > 0 ? o.delay : 1.6; Cp = toL([a[0] + d[0] / l * dl, a[1] + d[1] / l * dl, a[2] + d[2] / l * dl]); if (Cp[2] > -.6) Cp[2] = -.6; }
   else Cp = [0, 0, Math.max(rc0 + .05, o.standoff || 0)];
   const Lb = clamp(3 + 1.5 * Math.cbrt(Wm), 3, 14), Rf = clamp(1.5 + .6 * Math.cbrt(Wm), 2, 6);
   const Cq = [Cp[0], Cp[1], Math.min(Cp[2], -.3)];                 // (an outside burst: the space behind the plating)
@@ -185,7 +185,8 @@ export function hitSpec(o) {
   if (o.C) C = toL(o.C);
   else if (o.fz === 'in') {
     const d = o.din, l = Math.hypot(d[0], d[1], d[2]) || 1;
-    C = toL([a[0] + d[0] / l * 1.6, a[1] + d[1] / l * 1.6, a[2] + d[2] / l * 1.6]);
+    const dl = o.delay > 0 ? o.delay : 1.6;   // (the fuze's delay as a run in, m: the lab can set it, cfg.delay)
+    C = toL([a[0] + d[0] / l * dl, a[1] + d[1] / l * dl, a[2] + d[2] / l * dl]);
     if (C[2] > -.6) C[2] = -.6;
   } else C = [0, 0, Math.max(rc + .05, o.standoff || 0)];
   C[0] = clamp(C[0], box[0] + .5, box[3] - .5);

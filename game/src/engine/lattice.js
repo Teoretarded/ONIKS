@@ -4,7 +4,7 @@
    setModelDots(R, 'standard' | 'high' | 'ultra')      live: call it again whenever the setting changes
 
    Standard is the engine as it is (engine/models.js: jittered grids, its own knobs). High and Ultra draw the models the
-   way reference/films/pc_scan_railgun_parts.js (sampleLat, drawX) does:
+   way reference/films/pc_scan_railgun/pc_scan_railgun_parts.js (sampleLat, drawX) does:
    - surfaces sampled on regular lattices, no jitter (faces, lathes in staggered rows with their true cone normals, caps,
      panels, blades), so a hull reads as rows and files of returns, never speckle;
    - edges as dotted hairlines at ~0.6 of the face spacing, two-sided: a box's twelve edges, a lathe's stations as

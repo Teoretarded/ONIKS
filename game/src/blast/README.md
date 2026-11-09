@@ -8,6 +8,7 @@ like and feeds game/structure's flooding and girder.
 | Solver | Bench commit | Model | Cost (RX 9070 XT) | In game |
 |---|---|---|---|---|
 | `shell` (`shell/`) | 03813d8, petals v2 from 3f115d5 | shell FE (CST membranes, J2 + strain-dependent Cowper-Symonds, hinges; stiffeners as shear-limited beams on their own line with web-end ties into the plates they meet; GL mesh-scaled erosion, absorbing edges, water backing and a waterline burst's water shock, products inflow through openings, hole/image sources that cannot focus, contact, fragments), 0.25 m, dt ~12 us (9 us on a carrier's plating), no mass scaling | WebGPU (`gpu_wgpu.js`, in the worker: 200 steps a command buffer, mapAsync read backs) or WebGL2 (`gpu.js`, ~30 calls a step). Bench box: P-800 contact 13.6k steps 1.1 s, inside 32.6k steps 1.9 s of full GPU | **default** where the browser has WebGPU: a 6 ms slice a frame (`cfg.gpuMsShell`, 8 in slow motion), ~80-150 steps a frame. In play (60 Hz frames, the GPU shared with another game tab): 5-inch 0.9 s, SM-6 1.4-2.4 s, Kh-35 / Oniks side inside 3.8-4.2 s, waterline 4.9 s, LCS 3.3 s, a carrier 4.6 s, a deck hit 3.3-6.8 s (10.8 under heavy load), a VLS cook-off 6.4 s; the synced frame p50 +5-6 ms, p95 16-21 ms while a hit solves |
+| `fast` (`fast/`, prototype) | none | rules on the 0.25 m texel grid (Kinney-Graham impulse + the space's gas as a membrane load; tear by membrane stretch or punch speed; flaps, debris, a seeded fragment fan), worked out once at the hit, then a pure function of time | the whole hit in ~3.5 ms (Rust/WebAssembly, `fast/rs` -> `fast/fast_core.wasm`) or ~5.7 ms (JS `fast/core.js`, same output) in the worker; done 35 ms after the hit | `?blast=fast`: same messages as the shell runner (`fast/runner.js`), so the drawing, debris, fires, sim holes and structure are unchanged |
 | `lattice` (`patch.js`, `gpu.js`, `runner.js`) | 1596bde | elastic-plastic lattice, velocity tear-out, running cracks, x64 mass scaling once only gas acts | ~52 us a step for 36k nodes; Oniks contact 3.6k steps, inside 8.2k | without WebGPU, the main-thread fallback, `?blast=lattice`: an outside hit settles in 0.2-1 s, an inside one in 2-4 s at 3 ms of GPU a frame |
 
 The shell port matches the bench (e00312c) on its own test box at 0.25 m (`shell/check.js` beside the bench's
@@ -122,6 +123,10 @@ hole (D49): the sim hole is the minimum shown, not a cap.
   not.
 
 ### QA tools
+- `game/lab.html` (`src/dev/lab`): one hit at a time, by hand or from the console (`window.LAB`): any target, any round,
+  overrides (TNT, fuze, delay, standoff, speed), frame steps held until the solve reaches the time shown, step back by
+  a re-run, the patch / charge / shock front / sim holes / pieces over the view, the plates' texels as maps, captures
+  to contact sheets and `report.json`. The battery's cases load as aim presets (`lab.html?case=ddg_mid`).
 - `dev/blast_qa.js`: the battery (31 cases: DDG side / deck / sheer / waterline / superstructure / VLS cook-off /
   break-up / doors / flooding, CG, CVN, LCS, LHD). In the game page console:
   `(await import('/game/src/dev/blast_qa.js')).start(ONIKS, { only, dir, keep })`, results in `window.QA.rows`

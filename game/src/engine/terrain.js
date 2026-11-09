@@ -53,6 +53,48 @@ function vnoise(px, pz, out) {
   return (a + k1 * ux + k2 * uz + k3 * ux * uz) * 2 - 1;
 }
 const DET = { a1: .7, l1: 47, a2: .16, l2: 9.3, h0: 1.5, h1: 14 };   // detail relief (m), fades in above the shore
+/* craters (game/craters.js: a warhead on the ground): a bowl of radius R and depth D under a raised, ragged rim of
+   height H that falls off over ~R outside, the ground scorched round it. Up to NCR at once; the land's dots and the
+   ground the game reads (heightAt / groundAt) both carry them, the depth envelope dips under them */
+export const NCR = 24;
+const CRATER_U = `
+uniform vec4 uCrA[${NCR}];   // x, z (world), R (m), D (m)
+uniform vec4 uCrB[${NCR}];   // x rim height H (m), y seed, z scorch 0..1
+uniform int uCrN;
+`;
+const CRATER_GLSL = CRATER_U + `
+/* the craters at w (world xz): height added (m), its gradient g, the scorch sc (0..1) */
+float craterDy(vec2 w, out vec2 g, out float sc) {
+  float dy = 0.0; g = vec2(0.0); sc = 0.0;
+  for (int i = 0; i < ${NCR}; i++) {
+    if (i >= uCrN) break;
+    vec4 A = uCrA[i]; vec2 d = w - A.xy; float R = A.z, dd = dot(d, d);
+    if (dd > 16.0 * R * R) continue;
+    float l = sqrt(dd) + 1e-4;
+    vec2 dn; float wob = vnoise(vec2(atan(d.y, d.x) * 2.2 + uCrB[i].y, uCrB[i].y * 1.7), dn);
+    float Rr = R * (1.0 + 0.13 * wob), r = l / Rr, D = A.w, H = uCrB[i].x, y, dr;
+    if (r < 1.0) { float r2 = r * r; y = D * (r2 - 1.0) + H * r2 * r2 * r2; dr = 2.0 * D * r + 6.0 * H * r2 * r2 * r; }
+    else { float e = exp(-3.0 * (r - 1.0)); y = H * e; dr = -3.0 * H * e; }
+    // clods: the bowl and the blanket broken up a little
+    vec2 dc; float cl = vnoise(w / max(0.4, 0.18 * R) + uCrB[i].y * 3.1, dc) * 0.03 * R * (1.0 - smoothstep(1.0, 2.0, r));
+    dy += y + cl; g += dr / Rr * (d / l) + dc * 0.03 * R / max(0.4, 0.18 * R) * (1.0 - smoothstep(1.0, 2.0, r));
+    sc = max(sc, uCrB[i].z * (1.0 - smoothstep(0.6, 2.4, r)));
+  }
+  return dy;
+}
+`;
+const CRATER_DEPTH = CRATER_U + `
+/* the depth envelope under the craters: down by their depth over R plus a cell (ms) round them */
+float craterDip(vec2 w, float ms) {
+  float dip = 0.0;
+  for (int i = 0; i < ${NCR}; i++) {
+    if (i >= uCrN) break;
+    vec4 A = uCrA[i]; float d = length(w - A.xy);
+    dip = max(dip, (A.w + 0.3) * (1.0 - smoothstep(1.1 * A.z, 1.1 * A.z + 1.5 * ms + 2.0, d)));
+  }
+  return dip;
+}
+`;
 const D1 = [0, 0], D2 = [0, 0];      // detail(): noise gradients (scratch: heightAt runs many times a frame)
 const ss = (a, b, v) => { const t = Math.max(0, Math.min(1, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
 
@@ -281,7 +323,7 @@ float swell(vec2 p, out vec2 g) {
 }
 `;
 
-const VS_SURF = HEAD + FRAME + COMMON + LATTICE + SEA_GLSL + `
+const VS_SURF = HEAD + FRAME + COMMON + LATTICE + SEA_GLSL + CRATER_GLSL + `
 out vec3 vCol;
 void main() {
   float s, vis; uint hs;
@@ -303,8 +345,8 @@ void main() {
   float pxs = s * uCam.x / length(p0);
   float fg = abs(p0.y) * inversesqrt(dot(p0, p0));      // flat ground's facing: sine of the view's elevation
   vec3 col = WH;
-  float b, y, big = 0.0, kd = 0.0, land = 0.0, sea = 0.0, glint = 0.0, glowH = 0.0, foam = 0.0;
-  vec3 n = vec3(0.0, 1.0, 0.0);
+  float b, y, big = 0.0, kd = 0.0, land = 0.0, sea = 0.0, glint = 0.0, glowH = 0.0, foam = 0.0, crSt = 1.0;
+  vec3 n = vec3(0.0, 1.0, 0.0), nE = n;    // nE: the ground's normal without a crater (the near field's dimming below)
   float wl = max(0.75 * s, 2.0);
   if (dsh < wl && dout <= 0.0) {
     // the waterline: the returns either side of it snapped onto the h = 0 contour (a Newton step along the
@@ -342,21 +384,32 @@ void main() {
     if (vis < 0.02) { ${CULL} return; }
     vec2 dg;
     y = h + detail(w, h, dg);
-    vec2 g = N.xy + dg;
+    vec2 g = N.xy + dg, crG = vec2(0.0);
+    float crS = 0.0, crY = 0.0;
+    if (uCrN > 0) { crY = craterDy(w, crG, crS); y += crY; g += crG; }
     // the metre relief shades only where the returns resolve it (else it is noise between the dots)
     float kept0 = s * exp2(0.5 * max(kd, 0.0));
     dg *= 1.0 - smoothstep(${(DET.l2 * .35).toFixed(2)}, ${(DET.l1 * .45).toFixed(2)}, kept0);
     n = normalize(vec3(-g.x, 1.0, -g.y));
+    nE = crS > 0.0 || crY != 0.0 ? normalize(vec3(-(g.x - crG.x), 1.0, -(g.y - crG.y))) : n;
+    // (the land is sampled on a level grid: a crater's wall turned to the lens spreads the same returns over more of the
+    // screen; they are drawn larger and brighter by that stretch, so the bowl reads as dense as the ground round it)
+    if (crS > 0.0 || crY != 0.0) { vec3 v0 = normalize(p0); crSt = clamp(abs(dot(n, v0)) / max(abs(dot(nE, v0)), 0.06), 1.0, 4.0); }
     float slope = sqrt(g2);
     if (big > 0.25) { xz -= N.xy * (dhc / g2); y -= dhc; }
     // shading from an exaggerated normal: the relief reads like the films' survey at true height; the light is
     // the view's (behind the lens, to the left, like a map's hillshade) blended with the moon, so the faces the
     // camera sees are the lit ones from any heading. The relief is taken at the scale the returns resolve
     vec4 Ns = mapNs(w, 1.4 * kept0);
-    vec2 gs = Ns.xy * (uRelief * uDot2.y) + dg * 4.0;
+    vec2 gs = Ns.xy * (uRelief * uDot2.y) + dg * 4.0 + crG * 1.2;
     vec3 ns = normalize(vec3(-gs.x, 1.0, -gs.y));
     vec3 Lk = normalize(mix(uSun.xyz, uLit.xyz, uLit.w));
     float sh = clamp((dot(ns, Lk) + 0.25) / 1.25, 0.0, 1.0);      // wrapped: faces turned away stay faintly lit
+    // (a crater shaded against the flat ground round it: the fresh soil of its bowl returns more than the ground round
+    // it (LiDAR intensity), its lit wall up to 2.3 x, its shadowed one never under 0.75 x, so it reads in any light,
+    // even the night's dim land)
+    float crK = 1.0;
+    if (crS > 0.0 || crY != 0.0) { vec2 gs0 = gs - crG * 1.2; float sh0 = clamp((dot(normalize(vec3(-gs0.x, 1.0, -gs0.y)), Lk) + 0.25) / 1.25, 0.0, 1.0); crK = clamp((crY < 0.0 ? 1.25 : 1.0) + 1.8 * (sh - sh0), 0.75, 2.3); sh = sh0; }
     b = 0.06 + 0.84 * pow(sh, 1.8);
     b += 0.07 * clamp(h / 500.0, 0.0, 1.0);
     b += clamp(Ns.z * uLand.z * clamp(1.4 * kept0 * uMap.z, 1.0, 6.0), -0.12, 0.4);   // crests bright, gullies dark
@@ -398,6 +451,14 @@ void main() {
       b *= 1.0 - 0.3 * pool;
     }
     b = min(1.0, b * uLand.x);
+    // a crater: its raised rim and the thrown-out soil catch the light (a ring that reads from afar), clods speckle the
+    // blanket, the ground round it scorched a little darker; the bowl's walls are shaded by their slope (crG above)
+    if (crS > 0.0 || crY != 0.0) {
+      b *= crK;
+      b += 0.22 * clamp(crY * 1.2, 0.0, 1.0) * crS;
+      if (crY > 0.02 && u01(hash1(hs ^ 0x3243f6a8u)) < 0.35 * crS) b += 0.25;
+      b *= 1.0 - 0.3 * crS * (1.0 - clamp(crY * 2.0, 0.0, 1.0));
+    }
     b *= mix(1.0, uLand.w, smoothstep(0.0, 3000.0, dout));
     b = envShoulder(b, uEnvL.w);
   } else {
@@ -504,10 +565,10 @@ void main() {
   gl_Position = c;
   // spacing of the kept dots on screen (1080 px): it sets the dot size (and dims the sparse near field a little)
   float pk = s * exp2(0.5 * max(kd, 0.0)) * uCam.x / c.w;
-  float eff = land > 0.5 ? pk * sqrt(max(0.05, abs(dot(n, normalize(p))))) : pk * sqrt(max(0.02, fg));
+  float eff = land > 0.5 ? pk * sqrt(max(0.05, abs(dot(nE, normalize(p))))) : pk * sqrt(max(0.02, fg));
   if (eff > uDot.z) b *= mix(1.0, uDot.z / eff, 0.6);
   // the sea keeps its brightness out to the horizon (the films'), the land fades with the view
-  b = max(b * (sea > 0.5 ? max(0.33, 1.0 - c.w / uDot2.z) : depthFade(c.w)), glowH) * vis * uFade.z;
+  b = max(b * (sea > 0.5 ? max(0.33, 1.0 - c.w / uDot2.z) : depthFade(c.w)), glowH) * vis * uFade.z * sqrt(crSt);
   // haze: the returns fade with the range (the near sea and ground as they are, the far field and the horizon's band
   // going out toward a floor)
   if (uSea3.y > 0.0) b *= mix(uSea3.z, 1.0, exp(-c.w / uSea3.y));
@@ -529,7 +590,63 @@ void main() {
   if (sea > 0.5) ps = (eff > uSea2.w * dth && c.w < uCoast.w * dth) || glint > 0.5 ? 2.0 : 1.0;
   else ps = c.w > uDot2.x * dth ? 1.0 : eff > uDot.y * dth ? 3.0 : (eff > uDot.x * dth ? 2.0 : 1.0);
   if (big > 0.75 && c.w < uWl2) ps = max(ps, 2.0);
+  if (crSt > 1.5) ps = max(ps, crSt > 2.6 ? 3.0 : 2.0);
   gl_PointSize = max(1.0, floor(ps * uCam.y + 0.5));
+}
+`;
+
+/* the craters' own returns: the land's lattice is a level grid, too coarse for a bowl's steep walls (they would show
+   as a dark hole); each crater draws a fine disc of returns of its own over its bowl and blanket (instance = the crater,
+   vertex = a cell of a G x G grid over 2.2 R round it), on the land and its craters, shaded as the land is with the
+   crater's light (its fresh soil returns more), thinned to ~1.4 px on screen */
+const VS_CRATER = HEAD + FRAME + COMMON + LATTICE + CRATER_GLSL + `
+uniform vec4 uLand;
+uniform vec4 uLit;
+uniform vec4 uEnvL;
+uniform int uCrG;
+out vec3 vCol;
+void main() {
+  int ci = gl_InstanceID, k = gl_VertexID, G = uCrG;
+  vec4 A = uCrA[ci]; float R = A.z, ext = 2.2 * R;
+  uint hs = hash1(uint(k) * 2654435761u + uint(ci) * 2246822519u + 0x165667b1u);
+  vec2 jt = vec2(u01(hs), u01(hash1(hs ^ 0x27d4eb2fu))) - 0.5;
+  vec2 uv = (vec2(float(k % G), float(k / G)) + 0.5 + 0.8 * jt) / float(G) * 2.0 - 1.0;
+  float rr = length(uv);
+  if (rr > 1.0) { ${CULL} return; }
+  vec2 w = A.xy + uv * ext;
+  float dout; float h = mapH(w, dout);
+  if (h <= 0.3) { ${CULL} return; }
+  vec2 dg; float y = h + detail(w, h, dg);
+  vec2 crG; float crS; float crY = craterDy(w, crG, crS);
+  y += crY;
+  // (outside the bowl the crater's own returns thin out into the land's (its lattice carries the blanket too): no
+  // bright disc round a crater, the rim the last of them)
+  float rR = rr * 2.2, tf = 1.0 - smoothstep(1.0, 1.75, rR);
+  if (u01(hash1(hs ^ 0x6a09e667u)) > tf) { ${CULL} return; }
+  vec3 p = vec3(w.x - uEyeW.x, y - uEyeW.y, w.y - uEyeW.z);
+  vec4 N = mapN(w);
+  vec2 g0 = N.xy + dg, g = g0 + crG;
+  vec3 n = normalize(vec3(-g.x, 1.0, -g.y)), n0 = normalize(vec3(-g0.x, 1.0, -g0.y));
+  float cw = dot(uCamF.xyz, p);
+  if (cw < uCam.w) { ${CULL} return; }
+  // thinned to ~1.4 px on screen (the facing counts: a wall turned to the lens keeps more)
+  float sp = 2.0 * ext / float(G), px = sp * uCam.x / length(p);
+  float keep = px * px * max(abs(dot(n, normalize(p))), 0.15) / (1.4 * 1.4);
+  if (keep < 1.0 && u01(hash1(hs ^ 0x9e3779b9u)) > keep) { ${CULL} return; }
+  vec3 Lk = normalize(mix(uSun.xyz, uLit.xyz, uLit.w));
+  float sh = clamp((dot(n, Lk) + 0.25) / 1.25, 0.0, 1.0), sh0 = clamp((dot(n0, Lk) + 0.25) / 1.25, 0.0, 1.0);
+  float b = 0.06 + 0.84 * pow(sh0, 1.8);
+  b *= clamp((crY < 0.0 ? 1.3 : 1.0) + 1.8 * (sh - sh0), 0.75, 2.4);
+  b += 0.22 * clamp(crY * 1.2, 0.0, 1.0) * crS;
+  if (crY > 0.02 && u01(hash1(hs ^ 0x3243f6a8u)) < 0.35 * crS) b += 0.25;
+  b *= 1.0 - 0.3 * crS * (1.0 - clamp(crY * 2.0, 0.0, 1.0));
+  b = min(1.0, b * uLand.x);
+  b *= depthFade(cw);
+  vec3 rgb = uEnvL.rgb * min(b, 1.0) * uFade.z + lightsAt(p, n) * 0.9;
+  vCol = min(rgb, vec3(1.0));
+  vec3 pc = p; pc.y -= curveDrop(pc);
+  gl_Position = toClip(pc);
+  gl_PointSize = max(1.0, floor((px > 3.0 ? 2.0 : 1.0) * uCam.y + 0.5));
 }
 `;
 
@@ -565,7 +682,7 @@ void main() {
 `;
 
 /* the invisible occluder: a coarse mesh per block, below the drawn surface */
-const VS_DEPTH = HEAD + FRAME + COMMON + `
+const VS_DEPTH = HEAD + FRAME + COMMON + CRATER_DEPTH + `
 layout(location = 0) in ivec3 aBlk;
 uniform int uB;
 uniform vec4 uLv[${MAXL}];
@@ -611,6 +728,7 @@ void main() {
   }
   if (dout > 0.0) h = mix(h, -80.0, smoothstep(0.0, 12000.0, dout));
   h -= ${(DET.a1 + DET.a2 + .25).toFixed(2)};
+  if (uCrN > 0) h -= craterDip(w, ms);
   if (uSeaY > -1e5) h = max(h, uSeaY);
   vec3 p = vec3(q.x, h - uEyeW.y, q.y);
   p.y -= curveDrop(p);
@@ -691,6 +809,7 @@ export class Terrain {
   constructor(G, map, opts) {
     opts = opts || {};
     this.G = G; this.gl = G.gl; this.map = map;
+    this.craters = []; this._crA = new Float32Array(NCR * 4); this._crB = new Float32Array(NCR * 4);
     this.N = opts.grid || 640;                 // dots per level side (multiple of 64)
     this.densNear = opts.densNear || 140;      // lens height / finest spacing, near the ground ...
     this.densFar = opts.densFar || 380;        // ... and from high up
@@ -840,6 +959,7 @@ export class Terrain {
     this.pSurf = program(gl, VS_SURF, FS_POINT, 'terrain.surface');
     this.pBed = program(gl, VS_SEABED, FS_POINT, 'terrain.seabed');
     this.pDepth = program(gl, VS_DEPTH, FS_DEPTH, 'terrain.depth');
+    this.pCrater = program(gl, VS_CRATER, FS_POINT, 'terrain.craters');
     this.pSky = program(gl, VS_SKY, FS_POINT, 'terrain.sky');
 
     // instance buffer: (level, i0, j0) as int16
@@ -941,10 +1061,38 @@ export class Terrain {
     if (g) { g[0] = k * (DET.a1 * d1[0] / DET.l1 + DET.a2 * d2[0] / DET.l2); g[1] = k * (DET.a1 * d1[1] / DET.l1 + DET.a2 * d2[1] / DET.l2); }
     return k * (DET.a1 * n1 + DET.a2 * n2);
   }
-  /* the drawn ground height: land with its relief, the mean sea surface (0) over water */
-  heightAt(x, z) { const h = this.mapH(x, z); return h > 0 ? h + this.detail(x, z, h) : 0; }
+  /* the drawn ground height: land with its relief (and its craters), the mean sea surface (0) over water */
+  heightAt(x, z) { const h = this.mapH(x, z); return h > 0 ? h + this.detail(x, z, h) + this.craterDy(x, z) : 0; }
   /* the ground under water too (seabed) */
-  groundAt(x, z) { const h = this.mapH(x, z); return h > 0 ? h + this.detail(x, z, h) : h; }
+  groundAt(x, z) { const h = this.mapH(x, z); return h > 0 ? h + this.detail(x, z, h) + this.craterDy(x, z) : h; }
+  /* a crater: { x, z (world), R, D, H (m), seed, scorch }; the oldest of the smallest goes when there are NCR */
+  addCrater(c) {
+    const C = this.craters;
+    // (a crater over an earlier one: the larger of the two, deeper)
+    for (const o of C) if (Math.hypot(o.x - c.x, o.z - c.z) < .5 * Math.max(o.R, c.R)) { o.R = Math.max(o.R, c.R) * 1.08; o.D = Math.max(o.D, c.D) * 1.1; o.H = Math.max(o.H, c.H); o.scorch = Math.max(o.scorch, c.scorch); this._crPack(); return o; }
+    if (C.length >= NCR) { let k = 0; for (let i = 1; i < C.length; i++) if (C[i].R < C[k].R * .7 || (C[i].R < C[k].R * 1.3 && C[i].n < C[k].n)) k = i; C.splice(k, 1); }
+    c.n = (this._crN = (this._crN || 0) + 1);
+    C.push(Object.assign({ H: c.R * .12, seed: (c.seed || 0) % 97, scorch: .9 }, c));
+    this._crPack();
+    return c;
+  }
+  clearCraters() { this.craters.length = 0; this._crPack(); }
+  _crPack() {
+    const C = this.craters;
+    for (let i = 0; i < NCR; i++) { const c = C[i];
+      this._crA[4 * i] = c ? c.x : 0; this._crA[4 * i + 1] = c ? c.z : 0; this._crA[4 * i + 2] = c ? c.R : 1; this._crA[4 * i + 3] = c ? c.D : 0;
+      this._crB[4 * i] = c ? c.H : 0; this._crB[4 * i + 1] = c ? c.seed : 0; this._crB[4 * i + 2] = c ? c.scorch : 0; this._crB[4 * i + 3] = 0; }
+  }
+  /* the craters' height at (x, z) (the shader's craterDy) */
+  craterDy(x, z) {
+    let dy = 0;
+    for (const c of this.craters) {
+      const dx = x - c.x, dz = z - c.z, dd = dx * dx + dz * dz; if (dd > 16 * c.R * c.R) continue;
+      const l = Math.sqrt(dd) + 1e-4, wob = vnoise(Math.atan2(dz, dx) * 2.2 + c.seed, c.seed * 1.7, null), Rr = c.R * (1 + .13 * wob), r = l / Rr;
+      dy += r < 1 ? c.D * (r * r - 1) + c.H * r ** 6 : c.H * Math.exp(-3 * (r - 1));
+    }
+    return dy;
+  }
   /* surface normal of the drawn ground ([0,1,0] at sea) */
   normalAt(x, z) {
     const h = this.mapH(x, z); if (h <= 0) return [0, 1, 0];
@@ -1108,6 +1256,7 @@ export class Terrain {
     if (u.uB) gl.uniform1i(u.uB, B);
     if (u.uMB) gl.uniform1i(u.uMB, MB);
     if (u.uMinLv) gl.uniform1i(u.uMinLv, this.pyr.mins.length);
+    if (u.uCrN !== undefined) { const n = this.craters.length; gl.uniform1i(u.uCrN, n); if (n) { gl.uniform4fv(u.uCrA, this._crA); gl.uniform4fv(u.uCrB, this._crB); } }
     if (u.uBand) gl.uniform1f(u.uBand, this.N / 8);
     if (u.uJit) gl.uniform2f(u.uJit, this.jitter, this.rowJitter);
     if (u.uRowK) gl.uniform1i(u.uRowK, this.rowK);
@@ -1170,6 +1319,18 @@ export class Terrain {
     gl.uniform4fv(u.uSubA, this.subA); gl.uniform4fv(u.uSubB, this.subB); if (u.uSubC) gl.uniform4fv(u.uSubC, this.subC);
     gl.uniform4f(u.uSubP, this.nSub, this.subjectDim, this.G.W / Math.max(1, this.G.H), this.subjectBack);
     gl.drawArraysInstanced(gl.POINTS, 0, B * B, this.nInst);
+    if (this.craters.length) this.drawCraters(o);
+  }
+  /* the craters' own returns (VS_CRATER) */
+  drawCraters(o) {
+    const gl = this.gl, P = this.pCrater, u = P.u, E = this.tone, CG = 256;
+    this._bindCommon(P);
+    gl.uniform4f(u.uLand, (o.landBright || this.landBright) * (1 + this.landHigh * (this.altK || 0)), 0, 1, .45);
+    gl.uniform4f(u.uLit, this.litCam[0], this.litCam[1], this.litCam[2], this.lightFollow);
+    if (u.uEnvL) gl.uniform4f(u.uEnvL, E.land ? E.land[0] : 1, E.land ? E.land[1] : 1, E.land ? E.land[2] : 1, 0);
+    gl.uniform1i(u.uCrG, CG);
+    gl.bindVertexArray(null);
+    gl.drawArraysInstanced(gl.POINTS, 0, CG * CG, this.craters.length);
   }
   drawSky(k) {
     const gl = this.gl, P = this.pSky, S = this.sky;

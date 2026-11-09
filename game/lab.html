@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>ONIKS · Lab</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="styles/game.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: #fff; font-family: var(--sans); -webkit-font-smoothing: antialiased; user-select: none; }
+  #view { position: fixed; inset: 0; }
+  #gl, #ov { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: block; }
+  /* #gl: crisp (pixelated) upscaling only in an integer ratio; engine/gl.js sets it with the backing store's size */
+  #gl { image-rendering: pixelated; }
+  #ov { pointer-events: none; }
+  /* #ui: DOM layer for the systems (HUD, menus, palettes); children opt in to pointer events */
+  #ui { position: absolute; inset: 0; pointer-events: none; }
+  #ui .hit { pointer-events: auto; }
+  body.ui-off #ui > :not(.always) { display: none; }
+  #perf { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); font: 400 11px/1.6 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); text-align: center; font-variant-numeric: tabular-nums; white-space: pre; }
+  #perf b { font-weight: 400; color: #fff; }
+  /* #boot: the loading screen (styles/game.css "loading", src/ui/loading) */
+</style><script>/* ONIKS LAB (src/dev/lab): play.html on an empty range, ?mode=lab (the URL keeps the lab's own params: target, kind,
+   aim, view, fire, case, weather, map) */
+(function () { var q = new URLSearchParams(location.search); if (q.get('mode') !== 'lab') { q.set('mode', 'lab'); q.set('intro', '0'); history.replaceState(null, '', location.pathname + '?' + q.toString()); } })();</script>
+</head>
+<body>
+<div id="view">
+  <canvas id="gl"></canvas>
+  <canvas id="ov"></canvas>
+  <div id="ui"><div id="perf"></div></div>
+  <div id="boot" class="oniks-load"><div class="ld-mark"><svg viewBox="0 0 24 24"><path d="M12 2 20.5 22h-4.1L12 11.4 7.6 22H3.5z" fill="#fff"/><circle cx="12" cy="18.2" r="1.7" fill="#C6F432"/></svg><span>ONIKS</span></div>
+    <div class="ld-mid"><div class="ld-line"><i></i><span class="ld-t"></span></div><div class="ld-bar"></div></div></div>
+</div>
+<script>/* the loading screen from the first paint: its scale and its dotted bar (src/ui/loading takes it over) */
+(function () { var b = document.getElementById('boot'), s = Math.max(.8, Math.min(1.6, Math.min(innerWidth / 1920, innerHeight / 1080)));
+  b.style.setProperty('--ls', s); b.style.setProperty('--ld', Math.max(2, Math.round(3 * s)) + 'px'); b.querySelector('.ld-bar').innerHTML = new Array(57).join('<i></i>'); })();</script>
+<script type="module">import { createLoading } from './src/ui/loading/index.js'; createLoading(document.getElementById('boot'));</script>
+<script src="../reference/menus/common/m3.js"></script>
+<script src="../reference/menus/common/geo.js"></script>
+<script src="../reference/films/common/hd_land.js"></script>
+<script src="../reference/films/common/hd_sea_air.js"></script>
+<script type="module" src="src/main.js"></script>
+</body></html>

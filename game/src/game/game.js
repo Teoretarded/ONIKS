@@ -233,7 +233,10 @@ export function createGame(o) {
       } else if (e.type === 'detect' && e.side === game.side && sim.fog && sim.t > 10 && e.unit !== undefined && sim.units.has(e.unit)) autoSlow('contact', e);
       for (let k = 0; k < systems.length; k++) {
         const s = systems[k];
-        if (s.onEvent) { try { s.onEvent(e); } catch (err) { console.error(`system ${s.name} onEvent`, err); } }
+        if (!s.onEvent) continue;
+        const t0 = game.profRaw ? performance.now() : 0;
+        try { s.onEvent(e); } catch (err) { console.error(`system ${s.name} onEvent`, err); }
+        if (game.profRaw) { const kk = s.name + '.onEvent'; game.profRaw[kk] = (game.profRaw[kk] || 0) + performance.now() - t0; }
       }
       bus.emit('event', e);
     }
@@ -270,7 +273,8 @@ export function createGame(o) {
   /* game.profile = true: CPU ms per system and phase, smoothed, in game.prof (console: ONIKS.game.prof) */
   game.profile = false; game.prof = {};
   const now = () => performance.now();
-  function prof(k, ms) { const p = game.prof; p[k] = p[k] === undefined ? ms : p[k] * .9 + ms * .1; }
+  // (game.profRaw = {}: also this frame's own ms per key, summed, for a frame-by-frame look: dev/hit_bench.js)
+  function prof(k, ms) { const p = game.prof; p[k] = p[k] === undefined ? ms : p[k] * .9 + ms * .1; if (game.profRaw) game.profRaw[k] = (game.profRaw[k] || 0) + ms; }
   function call(s, fn, where, a, b) {
     if (!game.profile) { try { fn.call(s, a, b); } catch (e) { report(s, where, e); } return; }
     const t0 = now();

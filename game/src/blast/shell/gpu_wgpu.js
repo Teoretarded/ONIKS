@@ -44,6 +44,64 @@ ${dyn.map((k, i) => `  ${k} = SZ.v[${i >> 2}][${i & 3}];`).join('\n')}
 const szData = (c) => { const dyn = dynOf(c), a = new Int32Array(40); if (dyn.length > 40) throw new Error('blast: too many sizes'); dyn.forEach((k, i) => { a[i] = c[k] | 0; }); return a; };
 // (per device: one bind group layout and the compiled pipelines by their source)
 const PCACHE = new WeakMap();
+function pcOf(dev) {
+  let PC = PCACHE.get(dev);
+  if (PC) return PC;
+  PC = { pipes: new Map(), pend: new Set() }; PCACHE.set(dev, PC);
+  PC.bgl = dev.createBindGroupLayout({ entries: [
+    { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
+    { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+    { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+    { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+    { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: 32 } },
+    { binding: 5, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+    { binding: 6, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+    { binding: 7, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } }] });
+  PC.layout = dev.createPipelineLayout({ bindGroupLayouts: [PC.bgl] });
+  return PC;
+}
+/* the patch's sizes and offsets by name (createWGPU's CONST without the switches): the WGSL's text needs only the names */
+const SZ_KEYS = ['N', 'NC', 'NH', 'NT', 'OUT', 'O_NS', 'O_CS', 'O_HS', 'O_TS', 'O_PAN', 'O_CMAP', 'O_ADJ', 'O_AUX', 'O_NLH', 'O_NL', 'O_ND', 'O_CL', 'O_HT', 'O_MB', 'O_CON', 'O_FRC', 'O_CF', 'O_HF', 'O_MF', 'O_DMG', 'O_IMP', 'O_PK', 'O_CRK', 'O_CRK2'];
+function codesOf(c) {
+  const head = HEAD(c) + SCV;
+  const out = [['hinges', head + HINGE], ['cells', head + CELL], ['members', head + TRUSS], ['gather', head + GATHER], ['link', LINK(c)], ['impulses', IMPULSE(c)], ['nodes', head + NODE], ['pack', PACK(c)]];
+  if (c.PETALS) out.push(['crack', head + ADJF + CRACK]);
+  return out;
+}
+/* every pipeline the game's hits use, compiled ahead and off the GPU process's queue (createComputePipelineAsync): a
+   first hit of a kind used to compile ~9 pipelines in place, synchronously, and the whole browser's GPU work (the
+   game's own frames) waited 0.4-0.7 s for it: the first-hit stutter. Resolves when all are in the cache.
+   variants: [{ PETALS, UPAX }] (PRAD 0, PKEEP 1 as model.js sets them); default: petals on and off, side (1) and deck
+   (2) and the x axis (0) up */
+export function prewarm(dev, variants) {
+  const PC = pcOf(dev), jobs = [];
+  variants = variants || [[1, 1], [1, 2], [0, 1], [0, 2], [1, 0], [0, 0]].map(([PETALS, UPAX]) => ({ PETALS, UPAX }));
+  for (const v of variants) {
+    const c = { PRAD: 0, PKEEP: 1, ...v }; for (const k of SZ_KEYS) c[k] = 1;
+    for (const [name, code] of codesOf(c)) {
+      if (PC.pipes.has(code) || PC.pend.has(code)) continue;
+      PC.pend.add(code);
+      const m = dev.createShaderModule({ code, label: name });
+      jobs.push(dev.createComputePipelineAsync({ layout: PC.layout, compute: { module: m, entryPoint: 'main' }, label: name })
+        .then(pl => { if (!PC.pipes.has(code)) PC.pipes.set(code, pl); }, e => console.warn('blast: prewarm', name, e && e.message))
+        .finally(() => PC.pend.delete(code)));
+    }
+  }
+  // (then each run once, empty (its sizes all 0: every thread returns): some drivers finish a pipeline on its first
+  // dispatch, which would otherwise land on the first hit)
+  return Promise.all(jobs).then(async () => {
+    const U = GPUBufferUsage, mk = (size, usage) => dev.createBuffer({ size, usage });
+    const B = [mk(4096, U.STORAGE), mk(4096, U.STORAGE), mk(4096, U.STORAGE), mk(512, U.UNIFORM), mk(512, U.UNIFORM), mk(4096, U.UNIFORM), mk(4096, U.STORAGE), mk(160, U.UNIFORM)];
+    const bg = dev.createBindGroup({ layout: PC.bgl, entries: B.map((b, i) => ({ binding: i, resource: i === 4 ? { buffer: b, size: 32 } : { buffer: b } })) });
+    const enc = dev.createCommandEncoder(), pass = enc.beginComputePass();
+    pass.setBindGroup(0, bg, [0]);
+    for (const pl of PC.pipes.values()) { pass.setPipeline(pl); pass.dispatchWorkgroups(1); }
+    pass.end(); dev.queue.submit([enc.finish()]);
+    await dev.queue.onSubmittedWorkDone();
+    for (const b of B) b.destroy();
+    return jobs.length;
+  });
+}
 const HEAD = (c) => `
 struct Kc { matA: array<vec4f, 8>, matB: array<vec4f, 8>, matC: array<vec4f, 8>, s0: vec4f, s1: vec4f, s2: vec4f, s3: vec4f }
 struct Pp { t: f32, h: f32, alpha: f32, nimp: u32, par: u32, q0: u32, q1: u32, q2: u32 }
@@ -702,18 +760,7 @@ export function createWGPU(dev, M, opt = {}) {
     k.set([M.BETA(), M.U_MAX, M.RHO_W * M.C_W, M.P0, M.RHO_W * M.G, M.K_SHEAR, M.S, M.G], 96);
     const C = M.C || [0, 0, 0]; k.set([C[0] - O[0], C[1] - O[1], C[2] - O[2], M.PETK || 1.5, M.PETK2 || 1e30, 0, 0, 0], 104); dev.queue.writeBuffer(bK, 0, k); }
   // ---- pipelines (one layout for all)
-  let PC = PCACHE.get(dev);
-  if (!PC) { PC = { pipes: new Map() }; PCACHE.set(dev, PC);
-  PC.bgl = dev.createBindGroupLayout({ entries: [
-    { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
-    { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
-    { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
-    { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
-    { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: 32 } },
-    { binding: 5, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
-    { binding: 6, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
-    { binding: 7, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } }] });
-  PC.layout = dev.createPipelineLayout({ bindGroupLayouts: [PC.bgl] }); }
+  const PC = pcOf(dev);
   const bgl = PC.bgl, layout = PC.layout;
   const errs = [];
   const pipe = (name, code) => { const hit = PC.pipes.get(code); if (hit) return hit; const m = dev.createShaderModule({ code, label: name });

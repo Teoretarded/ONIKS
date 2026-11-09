@@ -455,3 +455,61 @@ its tearing petals) tears, dents and curls the steel round each hit in a few sec
   the reviewers' list and every run are in `game/src/blast/QA.md`; how it all works in `game/src/blast/README.md`.
 - Still open (QA.md): the solved hole is often larger than the sim's (D49), a few close-up rendering items owned by
   the close-up agent.
+
+## 2026-10-13 night · hits: voxel prototype, lab data, stutter, craters, close-up rows
+
+Not committed (another session is editing the camera / director, settings and shell files at the same time).
+
+- **Voxel ship prototype** (`src/vox/`, its README): the DDG as ~350k cells of 0.25 m. One lattice is both the
+  solver's structure and the picture, so plating cannot vanish, float or move without a load reaching it. Lab only:
+  Target → Voxels.
+  - The solve runs on WebGPU in a worker: about 0.7-0.9 s for 120 ms of physics, posted at FIRE, ahead of the impact.
+  - Playback is a pure function of time.
+- **Lab**:
+  - Clean view on by default (no smoke, fire or fireball).
+  - Deformation colours (key B; both pictures): out lime > white > coral, in blue, loose coral, untouched grey.
+  - Vectors overlay.
+  - Damage check: Probe / Record / Compare.
+  - `data.json` + `field_<ms>.json` (every moved cell's displacement vector), read with `tools/lab_analyze.py`.
+- **Stutter**:
+  - The blast solver's ~51 WebGPU pipelines now compile asynchronously at page load. A first hit used to compile them
+    in place and stall the GPU 0.4-0.7 s.
+  - The class's dot cloud and the scars grid are built in 2 ms slices on idle frames (first hit 30 → 8.6 ms of CPU).
+  - The solve-end work (`settleSupport` ~50-70 ms, `simHoles` ~9 ms) is split into one piece a frame.
+  - Bench: `dev/hit_bench.js`.
+- **Craters** (`game/craters.js`, `engine/terrain.js`): a warhead on the ground leaves a bowl with a raised rim, drawn
+  by the land and by a fine dot pass of its own. `heightAt` / `groundAt` carry it.
+- **Close-up hulls**: a plate's sub-dots on world-fixed scan rows (`R.models.rowPx`, 0 off).
+- **Measured**:
+  - Current system, side hits from outside: no far-side damage.
+  - ddg_kh35's 5 m² "far side" is interior bulkhead dots past the centreline (an inside hit, legitimate).
+  - Deck and VLS hits move the far side (inside the hull, by design).
+
+## 2026-11-09 · hits: the fast damage model, smooth hits, read-outs
+
+- **Fast damage model** (`src/blast/fast/`, `?blast=fast`): War Thunder-style rules instead of the live GPU shell solve.
+  Blast impulse + the space's gas give each 0.25 m texel a dent; plating tears when stretched past its failure strain or
+  punched; petals, debris, a seeded shrapnel fan that pocks or holes what it reaches; the plates meeting the struck one
+  buckle along the joint. Worked out once at the hit (3.5 ms Rust/WebAssembly, 5.7 ms JS, identical output), then a pure
+  function of time. A hit is done 35 ms after impact (GPU solver: 0.8-1.2 s). Same messages as the shell solver, so
+  drawing, debris, fires, flooding holes and break-up are unchanged. 10 battery cases (DDG, CG, CVN, LCS, LHD; side,
+  deck, waterline, VLS, SM-6) clean in the QA checker.
+- **Rust**: rustup (GNU host, wasm32 target, `~/.cargo/bin`); `cd game/src/blast/fast/rs && cargo build --release
+  --target wasm32-unknown-unknown`, copy `target/wasm32-unknown-unknown/release/fast_core.wasm` to `fast/`.
+- **Stutter**: the post-hit support check (`settleSupport`: connectivity 13-25 ms a pass) now runs in ~3 ms slices a
+  frame (`support.js connectivitySteps`); FX explosion code warmed on idle frames at start (`fx warmStep`). Warm hits:
+  0 frames over 16.7 ms (worst ~10-11 ms); the first hit of a session ~18 ms.
+- **Looks**: shrapnel streaks and strike sparks (`blast/system.js drawFrags`); `game/damage_scan.js` (shock sweep, lime
+  front, X-ray, coral system boxes with decoding placards).
+- **Fix**: `structure/fx.js drawFace` threw every frame while a broken hull was drawn (a shadowed `k`).
+- **Native app** (`app/`, Rust + Tauri 2 over WebView2, `run_app.bat`): a Rust exe (8 MB) that serves game/ and
+  reference/ from disk through its own `oniks://` protocol (no Python server) and keeps the `/save` sink; the menu's
+  Quit closes it. Build: MSVC Build Tools 2022 (VC tools + Windows 11 SDK, via winget) and the Rust MSVC toolchain
+  (`app/rust-toolchain.toml`); `cd app && cargo build --release`. Drive it like a tab with
+  `ONIKS_DEBUG_PORT=9333` + `tools/app_cdp.py` (eval, wait, shot, console).
+- **App vs browser** (`tools/app_bench.py`, `src/dev/app_bench.js`; 1600 x 900, RX 9070 XT, two alternating rounds
+  against Chrome 156, the same Chromium as WebView2 156): the same speed within ~1 ms on every number (warm-hit p50 16.9
+  vs 16.9 ms, p95 21.9 vs 20.9). The app is for shipping (Steam, no browser, native file access), not for frame rate.
+- **Repeat hits** in hit_bench grow 11 -> 18 ms p50 (each hit's fire and smoke stay): that is the bench forcing a GPU
+  sync per frame. Live in the app (the page's own loop, four Oniks hits 3 s apart, auto quality on) no frame over
+  17 ms, worst 16.7 ms, fx at most ~85k dots / 7 ms.

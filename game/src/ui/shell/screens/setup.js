@@ -1,7 +1,8 @@
 /* SANDBOX and COMBAT setup: rows of choices on the left, the live map preview on the right, Start below.
    Sandbox -> play.html?mode=sandbox&map=<id>&side=<coast|fleet>&fog=<0|1>&weather=<kind>
    Combat  -> play.html?mode=combat&map=<id>&side=<coast|fleet>&ai=<easy|normal|hard>&win=<hq|obj>&fog=1[&timer=<s>]
-   Sandbox also has Anatomy under Start: every model in dark space -> play.html?mode=museum&from=sandbox */
+   Sandbox also has Anatomy under Start: every model in dark space -> play.html?mode=museum&from=sandbox, and the Lab:
+   any model struck by any round, frame by frame -> lab.html?map=<id>&weather=<kind> (src/dev/lab) */
 import { h, esc, keysHtml, fmtTime, takeFocus, keepFocus } from '../dom.js';
 import { sfx } from '../sfx.js';
 import { Form } from '../form.js';
@@ -84,6 +85,7 @@ export function setupScreen(app, mode) {
     slotSeen = slotKey();
     if (sv) rows.push(continueRow(sv));
     if (!combat) rows.push({ id: 'anatomy', label: 'Anatomy', action: true, aside: 'All models', blurb: 'Every model, one at a time, in dark space.' });
+    if (!combat) rows.push({ id: 'lab', label: 'Lab', action: true, aside: 'Any model, any round', blurb: 'Strike a model and step through the hit frame by frame.' });
     form = new Form(formEl, {
       rows, blurb, enter: 'start',
       onChange(id, v, user) {
@@ -92,7 +94,7 @@ export function setupScreen(app, mode) {
         if (id === 'win') form.refresh();
         remember(mode, form.values());
       },
-      onAction: id => (id === 'anatomy' ? museum() : id === 'continue' ? resume() : start()),
+      onAction: id => (id === 'anatomy' ? museum() : id === 'lab' ? lab() : id === 'continue' ? resume() : start()),
     });
     blurb.style.top = (250 + formEl.offsetHeight + 34) + 'px';
     showMap(form.value('map'));
@@ -117,6 +119,13 @@ export function setupScreen(app, mode) {
     const sv = savedGame(mode);
     if (!sv || sv.stale) { sfx.deny(); return; }
     app.launch(sv.url, sv.mapName);
+  }
+  /* the blast lab (lab.html, src/dev/lab) on the chosen map and weather */
+  function lab() {
+    const v = form.values();
+    remember(mode, v);
+    keepFocus(mode, 'lab');
+    app.launch('lab.html?' + new URLSearchParams({ map: v.map, weather: v.weather || 'calm' }).toString(), 'Lab');
   }
   function museum() {
     remember(mode, form.values());

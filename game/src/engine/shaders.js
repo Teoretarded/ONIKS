@@ -94,6 +94,18 @@ vec2 scanAt(vec3 p) {
   }
   return vec2(k, rv);
 }
+/* the deformation view (the lab's Deformation display): a dot coloured by how far the damage moved it from where it
+   was built (d, world m) and which way (n: its rest normal, outward): pushed out lime -> warm white -> coral (0.03, 0.25,
+   1, 3 m), pushed in a cold blue -> white; untouched plating dimmed grey so what moved stands out */
+vec3 defoCol(vec3 d, vec3 n, vec3 rgb, float b) {
+  float m = length(d);
+  if (m < 0.03) return rgb * 0.45;
+  float sg = dot(d, n) >= 0.0 ? 1.0 : -1.0;
+  float k1 = clamp(log2(m / 0.03) / log2(0.25 / 0.03), 0.0, 1.0), k2 = clamp(log2(m / 0.25) / 2.0, 0.0, 1.0), k3 = clamp(log2(m / 1.0) / log2(3.0), 0.0, 1.0);
+  vec3 c = sg > 0.0 ? mix(mix(mix(vec3(0.35, 0.45, 0.1), LIME, k1), vec3(1.0, 0.96, 0.7), k2), CORAL, k3)
+                    : mix(mix(mix(vec3(0.1, 0.25, 0.45), vec3(0.35, 0.7, 1.0), k1), vec3(0.85, 0.95, 1.0), k2), CORAL, k3);
+  return c * (0.55 + 0.45 * clamp(b * 1.6, 0.0, 1.0));
+}
 vec3 scanColor() { return uScanA[0].w > 0.5 ? uScanC[0].rgb : uScanC[1].rgb; }
 /* the radar sweep painting the world: a thin edge, then the afterglow of the paint */
 vec2 sweepAt(vec3 p) {

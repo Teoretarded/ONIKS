@@ -73,7 +73,9 @@ ${blastGLSL()}
 uniform vec4 uSub;        // sub-dots: x on-screen spacing of the level they fill to (1080 px; 0 off), y their jitter (of
                           // their lattice's spacing), z largest dot (as an on-screen spacing, 1080 px), w least spacing of
                           // the sub-dots of a finer cell (a stripe, a detail: the per-pixel cap close up)
-uniform vec4 uX;          // level cross-fade: x dissolve 0..1, y +1 coming in / -1 going out / 0 none
+uniform vec4 uX;          // level cross-fade: x dissolve 0..1, y +1 coming in / -1 going out / 0 none, z inside, w the deformation view (1)
+uniform vec4 uRow;        // close-up scan rows: x row pitch on screen (1080 px; 0 off), y strength 0..1, z on-screen sample
+                          // spacing (1080 px) they start from, w the spacing they are full at
 out vec3 vCol;
 ${SLAB_GLSL}
 /* the sub-lattice: rank r (0..255) of a 16 x 16 Bayer order (every prefix is stratified), rank 0 at the centre */
@@ -123,6 +125,25 @@ void main() {
     else o = vec2(subAt1(inst) + h2.x * uSub.y * exp2(-floor(log2(float(inst))) - 1.0), j.y);
     p += (uR * (aCU.xyz * (1.0 / 127.0))) * (su * (o.x - j.x)) + (uR * (aCV.xyz * (1.0 / 127.0))) * (sv * (o.y - j.y));
   }
+  // close up, a plate's returns on scan rows (the films' hulls: a LiDAR's lines, not an even grain): the rows fixed in
+  // the world along the plate (level on a side, across a deck), their pitch a power of two of metres near uRow.x px on
+  // screen, the odd rows fading out as the view widens toward the next octave (no swimming, no pops)
+  if (uRow.x > 0.0 && !two0 && sv > 0.0) {
+    float cw0 = max(dot(uCamF.xyz, p), uCam.w), kpx = uCam.x / cw0;
+    float wR = uRow.y * smoothstep(uRow.z, uRow.w, uP.w * kpx);
+    if (wR > 0.0) {
+      vec3 nn = normalize(uR * aNrm.xyz), up = abs(nn.y) < 0.7 ? vec3(0.0, 1.0, 0.0) : normalize(uR * vec3(1.0, 0.0, 0.0));
+      vec3 ax = up - nn * dot(up, nn); float la = length(ax);
+      if (la > 0.2) {
+        ax /= la;
+        float lp = log2(uRow.x / kpx), pitch = exp2(floor(lp)), fo = fract(lp);
+        float sy = dot(p + uEyeW.xyz, ax) / pitch, row = floor(sy + 0.5);
+        // (the odd rows go as the next octave nears: their returns move onto the even rows round them)
+        if (mod(row, 2.0) > 0.5 && u01(hash1(hid ^ 0x2545f491u)) < smoothstep(0.35, 1.0, fo)) row += (sy - row > 0.0 ? 1.0 : -1.0);
+        p += ax * ((row - sy) * pitch * wR);
+      }
+    }
+  }
   // a hull broken into sections (game/structure, d.slab): this instance keeps its slab of the model between two torn
   // cuts across its length (jagged; the two sides of a break share the same tear), the plating at the tear peeled out
   float tk = 0.0, th = 0.0;
@@ -156,6 +177,7 @@ void main() {
   // scars (game/scars.js): the plating dished, bulged, bent, holed, charred where hits struck; the model's own dots in
   // the pocket behind a hole gone (scars.js draws what is inside)
   float burn = 0.0, hot = 0.0, edge = 0.0, heatN = 0.0; gIn = uX.z;
+  vec3 pRest = p;          // (the deformation view, uX.w: how far the scar and the blast patch moved this dot)
   if (uScN > 0 && scarAt(p, uR * aNrm.xyz, hid, false, burn, hot, edge, heatN) == 1) { ${CULL} return; }
   // blast patches (game/src/blast): the plating as the solver left it
   vec3 btTilt = vec3(0.0);
@@ -264,6 +286,7 @@ void main() {
   // charred plating takes little of the light (the fire lights the hull round the hole, the hole stays black); under
   // the water hardly any
   rgb += lightsAt(p, two ? vec3(0.0) : n) * (0.35 + 0.65 * lit) * uP.x * (1.0 - 0.8 * burn * (1.0 - edge)) * (yw < 0.0 && !holeWet ? 0.15 : 1.0);
+  if (uX.w > 0.5) rgb = defoCol(p - pRest, uR * aNrm.xyz, rgb, b);
   vCol = min(rgb * sub, vec3(1.0));
   // the dot's size from the spacing it keeps on screen (the sub-dots' own), capped (never a blob close up)
   float pe = pxs / (sv > 0.0 ? sqrt(max(need, 1.0)) : max(need, 1.0));
@@ -1228,6 +1251,9 @@ export class ModelLib {
     // guard) widens both; subJitter: their jitter (of their lattice's spacing); dotCap: the largest dot, as the
     // on-screen spacing it would stand for (7.4: 2 px at 1080)
     this.subPx = 3.6; this.subCap = 2.5; this.subScale = 1; this.subJitter = .2; this.dotCap = 7.4;
+    // close up: a plate's returns drawn on world-fixed scan rows (the films' hulls) rowPx apart on screen (1080 px; 0
+    // off), rowK of the way, from where its samples sit rowFrom px apart on screen to rowFull (sub-dots only)
+    this.rowPx = 4.5; this.rowK = .85; this.rowFrom = 4; this.rowFull = 9;
     // occlusion: the depth splats of instances over occPx of radius on screen (1080 px), of cells over occMinPx on
     // screen; occBias: push back (cells)
     this.occlude = true; this.occPx = 40; this.occBias = .2; this.occMinPx = 1;
@@ -1728,6 +1754,7 @@ export class ModelLib {
       gl.uniform4f(u.uFill, ce * Math.sin(az), Math.sin(this.fillEl), ce * Math.cos(az), this.fill); }
     const sub = this.subPx > 0 && !d.noSub;
     gl.uniform4f(u.uSub, sub ? this.subPx * this.subScale : 0, this.subJitter, this.dotCap, this.subCap * this.subScale);
+    gl.uniform4f(u.uRow, sub && this.rowPx > 0 ? this.rowPx : 0, this.rowK, this.rowFrom, this.rowFull);
     // Inspect x-ray gate: d.gate = { n: world unit normal, d: n.p of the front (world), w: band (m), g: afterglow (m),
     // mode: default per part }, d.partGate = { part: mode } (0 off, 1 shell, 2 hidden, 3 part; see the shader)
     const G = d.gate || null;
@@ -1750,7 +1777,7 @@ export class ModelLib {
         const fl = Math.min(1, (cl.sp / spMax) * (cl.sp / spMax));
         gl.uniform4f(u.uP, r.pa, r.xr, r.dm, cl.sp);
         gl.uniform4f(u.uDen, r.den[0], r.den[1], Math.max(r.den[2], fl), r.den[3]);
-        gl.uniform4f(u.uX, r.k, r.k < 1 ? (c ? -1 : 1) : 0, r.inside ? 1 : 0, 0);
+        gl.uniform4f(u.uX, r.k, r.k < 1 ? (c ? -1 : 1) : 0, r.inside ? 1 : 0, this.defo ? 1 : 0);
         this._ns = !sub;
         drawn += this._drawCloud(cl, r, frame, false);
         this._ns = false;

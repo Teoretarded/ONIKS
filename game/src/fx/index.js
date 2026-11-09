@@ -652,6 +652,29 @@ class FxSystem {
     } : null;
   }
 
+  /* warm-up: the first explosion of a session ran its code cold (the JIT compiling it mid-frame: a 15-30 ms hitch on the
+     first hit). Each kind is drawn once at several ages into a sink that keeps nothing, one kind a frame, from the 60th
+     frame on (after the view is bound) */
+  warmStep() {
+    if (this._warmed || !this._sink || this.stats.ms > 6) return;
+    const k = this._warmK = (this._warmK || 0) + 1;
+    if (k < 60) return;
+    const P = [0, -5e4, 0], mk = [
+      () => new HullBlast({ t0: 0, pos: P, n: [1, 0, 0], kg: 120, seed: 3, sea: true, gy: 0 }),
+      () => new HullBlast({ t0: 0, pos: P, n: [0, 1, 0], kg: 20, seed: 4, sea: false, gy: 0 }),
+      () => new Blast({ t0: 0, pos: P, sc: 1, seed: 5, sea: true, gy: 0 }),
+      () => new Burst({ t0: 0, pos: P, sc: 1, seed: 6 }),
+      () => new Splash({ t0: 0, pos: P, size: 25, seed: 7 }),
+      () => new Dirt({ t0: 0, pos: P, size: 20, seed: 8 }),
+    ], i = k - 60;
+    if (i >= mk.length) { this._warmed = true; return; }
+    const C = this.C, keep = this._sink, RR = this._RR, nop = () => {};
+    const disc = { dot: nop, add: nop, glow: nop, over: nop, light: nop, lift: nop, cam: keep.cam };
+    try { const e = mk[i](); this.bind(disc, null); for (const a of [.005, .03, .1, .3, 1, 3, 8]) { C.n = 0; C.nl = 0; e.draw(C, a); } }
+    catch (err) { /* (a kind that wants more than a bare position is skipped) */ }
+    this.bind(keep, RR); C.n = 0; C.nl = 0;
+  }
+
   /* ---------- draw ---------- */
   draw3d(frame) {
     const t0 = performance.now();
@@ -789,6 +812,7 @@ class FxSystem {
     else if (n < aim * .8) this.q = Math.min(this.qMax, this.q * 1.04 + .005);
     this.lastN = n;
     this.stats.dots = n; this.stats.q = this.q; this.stats.effects = this.fx.length; this.stats.trails = this.trk.size + this.ghost.length; this.stats.ms = performance.now() - t0;
+    if (!this._warmed && !orb) this.warmStep();
   }
 }
 /* ignition envelope of the flame (the booster lighting, the ramjet catching) */

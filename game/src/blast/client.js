@@ -20,6 +20,8 @@ export async function createClient(o = {}) {
       });
       if (ok.ok) {
         let statsRes = null;
+        // (the WebGPU device and every pipeline a hit can use brought up now, in the background: no first-hit stutter)
+        if (!o.noWarm) w.postMessage({ type: 'warm' });
         w.onmessage = ev => { const m = ev.data; if (m.type === 'stats' && statsRes) { statsRes(m); statsRes = null; return; } emit(m); };
         w.onerror = ev => { console.error('blast: worker', ev.message); emit({ type: 'dead', err: ev.message }); };
         return Object.assign(base, {

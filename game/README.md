@@ -13,6 +13,8 @@ python tools/serve_game.py
 
 then open http://localhost:8771/game/index.html (Chrome or Edge; WebGL2).
 
+Or as a native app: `run_app.bat` (Rust + Tauri over WebView2, no server; `app/src/main.rs` header).
+
 ## Modes
 
 - **Sandbox**: any map, both sides, place anything (P), wake the enemy (K), fog (Shift+G), weather (N), switch the side
@@ -45,5 +47,5 @@ then open http://localhost:8771/game/index.html (Chrome or Edge; WebGL2).
 
 Design: `DESIGN.md` · contracts: `ARCHITECTURE.md` · systems: `src/game/README.md` · engine: `src/engine/README.md`
 · sim: `src/sim/README.md` · maps: `src/world/README.md` · tests: `tests.html` · balance runs: `balance.html` ·
-viewers: `maps.html`, `models.html`, `fx.html`, `audio.html` · what happened overnight: `NIGHT_LOG.md` · reviews:
+hits taken apart frame by frame: `lab.html` (`src/dev/lab/README.md`) · viewers: `maps.html`, `models.html`, `fx.html`, `audio.html` · what happened overnight: `NIGHT_LOG.md` · reviews:
 `reviews/`.
