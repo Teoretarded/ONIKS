@@ -107,15 +107,20 @@
     { id: 'I2', cell: 44, tL: 67.6, rnd: 1, tI: 83.2 },
     { id: 'I3', cell: 13, tL: 75.6, rnd: 3, tI: 89.3, miss: true },   // round 44 is at the top of its weave
   ];
-  /* straight up out of the cell for the first second of the boost, then a pitch-over that eases in and blends into
-     one long gentle arc over the top and down onto the meeting point. In the vertical plane through the cell and the
-     meeting point the flight-path angle runs gamma(u) = 90 - A smoothstep(u / UP) - (90 - A - GE) u over the arc
-     after the vertical (u: its arc-length fraction); A is solved so the arc lands on the point. Arc-length tabled,
-     flown with a boost-then-coast speed law scaled to the flight time. */
-  const NP = 480, NV = 24, UP = .1;
-  const gam = (u, a, ge) => { const v = Math.min(1, u / UP); return (90 - a * v * v * (3 - 2 * v) - (90 - a - ge) * u) * DEG; };
-  function arcInt(a, ge) { let cx = 0, sy = 0; const n = 400; for (let i = 0; i < n; i++) { const g = gam((i + .5) / n, a, ge); cx += Math.cos(g) / n; sy += Math.sin(g) / n; } return [cx, sy]; }
-  const v0 = t => (1 - Math.exp(-t / 1.35)) * (1 - .018 * t);
+  /* Shaped by eye, for the imager that watches them: straight up out of the cell for the first second of the boost,
+     then a bend that eases in and runs into one long gentle arc over and down onto the meeting point. The arc is
+     drawn in the imager's own angles (the eye barely moves, so it reads the same through every slew and zoom):
+     elevation over azimuth progress t, eps(t) = e1 + (eEnd - e1) t^1.3 + B t^.38 (1 - t)^1.5, B set by the apex
+     elevation EMAX; then carried back into the world along the vertical plane through the cell and the meeting point.
+     t^.38 leaves the vertical with no kink and the curvature building from zero; (1 - t)^1.5 lays the long tail down
+     flat onto the meeting point. Seen from the side it is a steep
+     climb to a few hundred metres and a long shallow descent. Arc-length tabled, flown with a boost (a linear ramp to
+     full speed over TB s: ~100-150 m in the first second) and coast speed law scaled to the flight time. */
+  const NP = 600, TB = 5.5;
+  const v0 = t => t < TB ? t / TB : 1 - .02 * (t - TB);
+  const EY = [0, 0, 0];
+  const angAt = (x, y, z, o) => { const dx = x - EY[0], dz = z - EY[2], r = Math.hypot(dx, dz); o[0] = Math.atan2(dx, dz); o[1] = Math.atan2(y - EY[1] - r * r / (2 * PG.RE), r); o[2] = r; return o; };
+  const AG = [0, 0, 0];
   for (const s of PG.SHOTS) {
     const P0 = A.vls(s.cell); P0[1] += .6;
     const P3 = [0, 0, 0];
@@ -126,26 +131,28 @@
     const NT = 600, ST = new Float64Array(NT + 1);
     for (let i = 1; i <= NT; i++) { const t0 = (i - 1) / NT * dur, t1 = i / NT * dur; ST[i] = ST[i - 1] + (v0(t0) + v0(t1)) * .5 * (t1 - t0); }
     const f1 = ST[Math.round(NT / dur)] / ST[NT];                      // share of the path flown in the first second
-    const GE = s.miss ? -9 : -16;
-    let s0 = 350, aS = 60, L2 = hz;
-    for (let it = 0; it < 5; it++) {
-      const ratio = (P3[1] - P0[1] - s0) / hz;
-      let lo = 0, hi = 90 - GE;
-      for (let b = 0; b < 50; b++) { aS = (lo + hi) / 2; const c = arcInt(aS, GE); if (c[1] / c[0] > ratio) lo = aS; else hi = aS; }
-      L2 = hz / arcInt(aS, GE)[0];
-      s0 = f1 * (s0 + L2);
-    }
+    PG.eye(s.tL + 4, EY);
+    const a0 = angAt(P0[0], 0, P0[2], AG)[0], aE = angAt(P3[0], P3[1], P3[2], AG)[0], eE = AG[1];
+    const EMAX = (s.id === 'I1' ? 6.5 : s.id === 'I2' ? 5.6 : 4.2) * DEG;
     const pts = new Float64Array((NP + 1) * 3), S = new Float64Array(NP + 1);
-    let hx = 0, hy = s0, px = 0, py = s0;
-    for (let i = 0; i <= NP; i++) {
-      if (i <= NV) { hx = 0; hy = s0 * i / NV; }
-      else { const u0 = (i - 1 - NV) / (NP - NV), u1 = (i - NV) / (NP - NV), g = gam((u0 + u1) / 2, aS, GE), dl = L2 / (NP - NV); px += Math.cos(g) * dl; py += Math.sin(g) * dl; hx = px; hy = py; }
-      pts[i * 3] = P0[0] + dir[0] * hx; pts[i * 3 + 1] = P0[1] + hy; pts[i * 3 + 2] = P0[2] + dir[2] * hx;
-      if (i) S[i] = S[i - 1] + Math.hypot(pts[i * 3] - pts[i * 3 - 3], pts[i * 3 + 1] - pts[i * 3 - 2], pts[i * 3 + 2] - pts[i * 3 - 1]);
+    let s0 = 120;
+    for (let it = 0; it < 4; it++) {
+      const e1 = angAt(P0[0], P0[1] + s0, P0[2], AG)[1];
+      const eps = (t, B) => e1 + (eE - e1) * Math.pow(t, 1.3) + B * Math.pow(t, .38) * Math.pow(1 - t, 1.5);
+      let lo = 0, hi = 1, B = 0;
+      for (let b = 0; b < 40; b++) { B = (lo + hi) / 2; let mx = -1; for (let i = 0; i <= 200; i++) mx = Math.max(mx, eps(i / 200, B)); if (mx > EMAX) hi = B; else lo = B; }
+      pts[0] = P0[0]; pts[1] = P0[1]; pts[2] = P0[2];
+      pts[3] = P0[0]; pts[4] = P0[1] + s0; pts[5] = P0[2];
+      for (let i = 2; i <= NP; i++) {
+        const h = hz * Math.pow((i - 1) / (NP - 1), 1.8), x = P0[0] + dir[0] * h, z = P0[2] + dir[2] * h;
+        angAt(x, 0, z, AG);
+        const t = E.sat((AG[0] - a0) / (aE - a0)), r = AG[2];
+        pts[i * 3] = x; pts[i * 3 + 1] = EY[1] + r * r / (2 * PG.RE) + Math.tan(eps(t, B)) * r; pts[i * 3 + 2] = z;
+      }
+      for (let i = 1; i <= NP; i++) S[i] = S[i - 1] + Math.hypot(pts[i * 3] - pts[i * 3 - 3], pts[i * 3 + 1] - pts[i * 3 - 2], pts[i * 3 + 2] - pts[i * 3 - 1]);
+      s0 = f1 * S[NP];
     }
-    // the midpoint rule leaves the end a few metres off: close it onto the meeting point along the arc
-    const ex = P3[0] - pts[NP * 3], ey = P3[1] - pts[NP * 3 + 1], ez = P3[2] - pts[NP * 3 + 2];
-    for (let i = NV + 1; i <= NP; i++) { const w = (i - NV) / (NP - NV); pts[i * 3] += ex * w; pts[i * 3 + 1] += ey * w; pts[i * 3 + 2] += ez * w; }
+    pts[NP * 3] = P3[0]; pts[NP * 3 + 1] = P3[1]; pts[NP * 3 + 2] = P3[2];
     for (let i = 1; i <= NP; i++) S[i] = S[i - 1] + Math.hypot(pts[i * 3] - pts[i * 3 - 3], pts[i * 3 + 1] - pts[i * 3 - 2], pts[i * 3 + 2] - pts[i * 3 - 1]);
     const L = S[NP];
     const k = L / ST[NT];
@@ -155,14 +162,14 @@
     s.vEnd = k * v0(dur);
     s.tEnd = s.miss ? s.tI + 1.6 : s.tI;              // a miss flies on 1.6 s past the round, then ends (stage B)
     if (s.miss) {
-      // past the round it pulls out of the glide at ~25 g into a 3° climb: a table every 8 m
+      // past the round it eases out of the glide at ~8 g into a shallow climb: a table every 8 m
       const hl = Math.hypot(s.tan[0], s.tan[2]), hx = s.tan[0] / hl, hzz = s.tan[2] / hl;
-      const g0 = Math.atan2(s.tan[1], hl), g1 = 3 * DEG, Rt = s.vEnd * s.vEnd / 245, Lp = Math.max(1, (g1 - g0) * Rt);
+      const g0 = Math.atan2(s.tan[1], hl), g1 = 1.2 * DEG, Rt = s.vEnd * s.vEnd / 80, Lp = Math.max(1, (g1 - g0) * Rt);
       const n = Math.ceil(((s.tEnd - s.tI) * s.vEnd + 400) / 8), post = new Float64Array((n + 1) * 3);
       let x = P3[0], y = P3[1], z = P3[2];
       post[0] = x; post[1] = y; post[2] = z;
       for (let i = 1; i <= n; i++) {
-        const g = g0 + (g1 - g0) * Math.min(1, (i - .5) * 8 / Lp);
+        const w = Math.min(1, (i - .5) * 8 / Lp), g = g0 + (g1 - g0) * w * w * (3 - 2 * w);
         x += hx * Math.cos(g) * 8; y += Math.sin(g) * 8; z += hzz * Math.cos(g) * 8;
         post[i * 3] = x; post[i * 3 + 1] = y; post[i * 3 + 2] = z;
       }

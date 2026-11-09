@@ -53,6 +53,8 @@
   /* per-dot temporal noise: a fixed gaussian table walked from a per-frame offset (30 Hz) */
   const GN = 8192, GM = GN - 1, GT = new Float32Array(GN);
   for (let i = 0; i < GN; i++) GT[i] = PG.gH(i, 7331);
+  const GH = new Float32Array(GN);
+  for (let i = 0; i < GN; i++) GH[i] = hsh(i, 9);
   DW.GT = GT; DW.GM = GM;
   const NZ = new Float32Array(4096); let nzi = 0, nzAmp = -1;
   DW.frame = function (fr) {
@@ -124,7 +126,17 @@
   /* ---------- occlusion tiles (4x4 px): nearest depth + kind (1 hero dot, 2 closed gap, 3 hot-thing halo) ---------- */
   const OW = 480, OH = 270, OZ = new Float32Array(OW * OH), OC = new Uint8Array(OW * OH), OTOL = 3;
   let occOn = false;
-  DW.occReset = () => { OZ.fill(1e9); OC.fill(0); occOn = false; };
+  const BKW = 60, BKH = 34, BF = new Uint8Array(BKW * BKH), BZ = new Float32Array(BKW * BKH);
+  let BON = 0;
+  DW.occReset = () => { OZ.fill(1e9); OC.fill(0); occOn = false; BF.fill(0); BON = 0; };
+  /* is the screen rect (clamped to the frame) wholly behind the hero's covered blocks, at depths beyond zmin */
+  function hidden(x0, y0, x1, y1, zmin) {
+    if (x0 < 0) x0 = 0; if (y0 < 0) y0 = 0; if (x1 > PW - 1) x1 = PW - 1; if (y1 > PH - 1) y1 = PH - 1;
+    if (x0 > x1 || y0 > y1) return true;
+    const a0 = (x0 | 0) >> 5, a1 = (x1 | 0) >> 5, b0 = (y0 | 0) >> 5, b1 = (y1 | 0) >> 5;
+    for (let b = b0; b <= b1; b++) for (let a = a0; a <= a1; a++) { const k = b * BKW + a; if (!BF[k] || zmin < BZ[k] + OTOL) return false; }
+    return true;
+  }
   function occ(x, y, z) {
     if (!occOn) return false;
     const t = ((y | 0) >> 2) * OW + ((x | 0) >> 2);
@@ -153,6 +165,13 @@
         if (l && r) { OC[k] = 2; OZ[k] = Math.max(OZ[k - 1], OZ[k + 1]); }
         else if (u && d) { OC[k] = 2; OZ[k] = Math.max(OZ[k - OW], OZ[k + OW]); }
       }
+    }
+    // 32 px blocks wholly covered by the hero, with their farthest depth: the sea and the sky skip what lies behind
+    BON = 0;
+    for (let by = y0 >> 3; by <= y1 >> 3; by++) for (let bx = x0 >> 3; bx <= x1 >> 3; bx++) {
+      const k = by * BKW + bx; let full = 1, zm = 0;
+      for (let ty = by * 8, te = Math.min(OH, ty + 8); ty < te && full; ty++) for (let tx = bx * 8, r = ty * OW; tx < bx * 8 + 8; tx++) { const t = r + tx; if (!OC[t]) { full = 0; break; } if (OZ[t] > zm) zm = OZ[t]; }
+      BF[k] = full; BZ[k] = zm; if (full) BON = 1;
     }
   };
   Object.assign(DW, { hput, put, dset, P3, P3v, hglow, occ, occMark });
@@ -362,18 +381,35 @@
     return Math.max(1, zc);
   }
   DW.shipN = 0;
+  const CZ = new Float64Array(CELLS.length);
+  /* the dots drawShip would draw at the current TG (the cells' depths in CZ) */
+  function shipEst() {
+    let n = 0;
+    for (let ci = 0; ci < CELLS.length; ci++) {
+      const c = CELLS[ci], zc = CZ[ci]; if (zc < 0) continue;
+      const pxm = FL / zc, spB = SP_B * pxm;
+      if (c.L[1] && spB > TG * .8) {
+        const w = E.ss(TG * .8, TG * 1.25, spB), spP = SP_P * pxm;
+        n += c.n[0] * Math.min(1, (spB / TG) ** 2) * (1 - w) + c.n[1] * Math.min(1, (spP / TG) ** 2) * w;
+      } else n += c.n[0] * Math.min(1, (spB / TG) ** 2);
+    }
+    return n;
+  }
   /* the hero at state st, alpha a. Draw it first: it writes the occlusion the sea and the sky test. */
   DW.drawShip = function (T, st, a) {
     occOn = true;
     // in black-hot the hull is a dark shape: fewer, dimmer dots carry it
-    TG = 2.5 * ((S.wipe >= 0 ? (S.wipe > .5 ? S.pol : S.from) : S.pol) ? DW.field.kShip : 1);
+    TG = 2.5 * ((S.wipe >= 0 ? (S.wipe > .5 ? S.pol : S.from) : S.pol) ? DW.field.kShip : DW.field.wShip);
     const cd = Math.hypot(E0, E2);
     SDROP = cd * cd * IRE2;
     TAU_S = Math.exp(-cd / 28000); PATH_S = .25 * (1 - TAU_S);
     BX0 = BY0 = 1e9; BX1 = BY1 = -1e9;
+    // a budget of dots for the hull: past it the spacing opens up evenly (the prefixes keep this continuous)
+    for (let ci = 0; ci < CELLS.length; ci++) CZ[ci] = sphereZ(CELLS[ci].c, CELLS[ci].r, SDROP);
+    for (let it = 0; it < 2; it++) { const n = shipEst(); if (n > DW.field.shipBudget) TG *= Math.sqrt(n / DW.field.shipBudget); }
     let cnt = 0;
-    for (const c of CELLS) {
-      const zc = sphereZ(c.c, c.r, SDROP); if (zc < 0) continue;
+    for (let ci = 0; ci < CELLS.length; ci++) {
+      const c = CELLS[ci], zc = CZ[ci]; if (zc < 0) continue;
       const pxm = FL / zc, spB = SP_B * pxm, nh = hotFor(c.c, c.r);
       if (c.L[1] && spB > TG * .8) {
         const w = E.ss(TG * .8, TG * 1.25, spB), spP = SP_P * pxm;
@@ -415,6 +451,14 @@
   const WREL = [-2.4, 0, -12.4];                     // the air past the ship: its own 16 kn and a breeze off the bow
   DW.WREL = WREL;
   const PLIFE = 8;
+  /* the plume's functions of age, tabled (linear between entries): rise, drift, spread, the two cooling terms, fade */
+  const XN = 2048, XK = XN / PLIFE, XR = new Float32Array(XN + 2), XW = new Float32Array(XN + 2), XS = new Float32Array(XN + 2), XE1 = new Float32Array(XN + 2), XE2 = new Float32Array(XN + 2), XF = new Float32Array(XN + 2);
+  for (let i = 0; i <= XN + 1; i++) {
+    const age = Math.min(PLIFE, i / XK);
+    // the gas leaves the mouth at ~20 m/s, is bent over by the wind within a second, keeps rising on its heat
+    XR[i] = 4.6 * (1 - Math.exp(-age / .5)) + 1.5 * age; XW[i] = age - .55 * (1 - Math.exp(-age / .55)); XS[i] = .72 * Math.pow(age, .85);
+    XE1[i] = Math.exp(-age / .55); XE2[i] = .15 * Math.exp(-age / 2.5); XF[i] = Math.pow(1 - age / PLIFE, 1.3);
+  }
   DW.drawExhaust = function (T, a) {
     if (a <= .01) return;
     const cd = Math.hypot(E0, E2), pxm = FL / Math.max(1, cd);
@@ -423,16 +467,15 @@
       const M = MOUTHS[m], rate = M[4], N = rate * D;
       const k1 = Math.floor(T * rate), k0 = Math.ceil((T - PLIFE) * rate);
       for (let k = k0; k <= k1; k++) {
-        const age = T - k / rate; if (age < 0) continue;
+        const age = T - k / rate; if (age < 0 || age >= PLIFE) continue;
         const id = ((k % N) + N) % N, sd = m * 100003 + id * 3;
-        // the gas leaves the mouth at ~20 m/s, is bent over by the wind within a second, keeps rising on its heat
-        const rise = 4.6 * (1 - Math.exp(-age / .5)) + 1.5 * age;
-        const wk = age - .55 * (1 - Math.exp(-age / .55));
-        const sig = M[3] * .6 + .72 * Math.pow(age, .85);
+        const ax = age * XK, ai = ax | 0, af = ax - ai;
+        const rise = XR[ai] + (XR[ai + 1] - XR[ai]) * af, wk = XW[ai] + (XW[ai + 1] - XW[ai]) * af;
+        const sig = M[3] * .6 + XS[ai] + (XS[ai + 1] - XS[ai]) * af;
         const x = M[0] + WREL[0] * wk + GT[sd & GM] * sig, y = M[1] + rise + GT[(sd + 1) & GM] * sig * .7, z = M[2] + WREL[2] * wk + GT[(sd + 2) & GM] * sig;
         if (!P3(x, y, z)) continue;
-        const h = .28 + (M[5] - .28) * Math.exp(-age / .55) + .15 * Math.exp(-age / 2.5);
-        const al = a * Math.pow(1 - age / PLIFE, 1.3) * (.55 + .45 * hsh(sd, 9));
+        const h = .28 + (M[5] - .28) * (XE1[ai] + (XE1[ai + 1] - XE1[ai]) * af) + XE2[ai] + (XE2[ai + 1] - XE2[ai]) * af;
+        const al = a * (XF[ai] + (XF[ai + 1] - XF[ai]) * af) * (.55 + .45 * GH[sd & GM]);
         // hot gas hides what is behind it; in black-hot this is what draws the plume dark against the field
         if (h > ((q.y < WIPEY ? S.pol : S.from) ? .31 : .42)) occMark(q.x, q.y, q.z, 0);
         hput(q.x, q.y, age < .9 ? dot2 : 1, h * TAU_S + PATH_S, al);
@@ -527,7 +570,7 @@
     if (G > ((PU[k + PW] >>> 8) & 255)) PU[k + PW] = col; if (G > ((PU[k + PW + 1] >>> 8) & 255)) PU[k + PW + 1] = col;
   }
   /* the field's density and dot per polarity: black-hot packs the cold field closer (target spacing x FK) */
-  DW.field = { kSea: 1, kSky: .6, kShip: 1.25 };
+  DW.field = { kSea: 1, kSky: .6, kShip: 1.25, wSea: 1.12, wSky: 1.1, wShip: 1, shipBudget: 112000 };
   /* runs pass(y0, y1, mode) over the rows each polarity holds this frame (two bands while a wipe runs) */
   function byPolarity(pass) {
     if (WIPEY >= PH) pass(0, PH, S.pol);
@@ -555,7 +598,7 @@
     if (ratio > 1.7) ratio = 1.7;
     let h = .205 + .07 * (r > 1500 ? (r > 17000 ? 1 : (r - 1500) / 15500) : 0) + .05 * ratio + ((Math.imul(hv, 0x9E3779B1) >>> 24) / 256 - .5) * .045;
     // the hero's wake: warmer water churned up from below
-    if (z < -60 && z > -1250) { const wd = -60 - z, hw = 13 + wd * .085, ax = xs < 0 ? -xs : xs; if (ax < hw) h += .09 * (1 - wd / 1190) * (1 - ax / hw); }
+    if (z < -60 && z > -1250) { const wd = -60 - z, hw = 13 + wd * .085, ax = xs < 0 ? -xs : xs; if (ax < hw) h += .13 * (1 - wd / 1190) * (1 - ax / hw); }
     const tr = TRL[(r * .01) | 0]; h = h * tr + .29 * (1 - tr);
     SN++;
     dotF(sx, sy, h, SEA_A);
@@ -599,7 +642,21 @@
     const s = SZ[k], x0 = i * s, z0 = j * s - FLOW;
     const cx = x0 + s * .5 - E0, cz = z0 + s * .5 - E2, rc = Math.sqrt(cx * cx + cz * cz);
     if (rc - s * .71 > RH) return;
-    if (!inside) { const c = cellClass(x0, z0, s); if (c === 0) return; inside = c === 2 ? 1 : 0; }
+    if (!inside || BON) {
+      // first the cell's bounding sphere (swell included) on screen: one division settles most cells; only those
+      // across the frame's edge take the exact corner test
+      const r = s * .71 + 1.5, dy = -rc * rc * IRE2 - E1, zc = cx * F0 + dy * F1 + cz * F2;
+      let done = 0;
+      if (zc - r > NEAR) {
+        const iz = FL / zc, sx = CX + (cx * R0 + dy * R1 + cz * R2) * iz, sy = CY - (cx * U0 + dy * U1 + cz * U2) * iz, rp = r * FL / (zc - r) + 2;
+        // wholly behind the hero
+        if (BON && hidden(sx - rp, sy - rp, sx + rp, sy + rp, zc - r)) return;
+        if (inside) done = 1;
+        else if (sx + rp < -36 || sx - rp > PW + 36 || sy + rp < CLIP0 - 36 || sy - rp > CLIP1 + 36) return;
+        else if (sx - rp >= 8 && sx + rp < PW - 8 && sy - rp >= CLIP0 + 8 && sy + rp < CLIP1 - 8) { inside = 1; done = 1; }
+      }
+      if (!done) { const c = cellClass(x0, z0, s); if (c === 0) return; inside = c === 2 ? 1 : 0; }
+    }
     const rr = rc > s * .5 ? rc : s * .5, g = E1 / rr - rr * IRE2;
     let u = (rc - RHA) / (RHB - RHA); u = u < 0 ? 0 : u > 1 ? 1 : u;
     const tg = TGN - TGD * u * u * (3 - 2 * u);
@@ -639,7 +696,7 @@
   };
   function seaPass(ya, yb, mode) {
     CLIP0 = ya; CLIP1 = yb; FS = mode ? 2 : 1;
-    const kf = mode ? DW.field.kSea : 1; TGN = 5.4 * kf; TGD = 2.7 * kf;
+    const kf = mode ? DW.field.kSea : DW.field.wSea; TGN = 5.4 * kf; TGD = 2.7 * kf;
     // the patch of sea the band can see: rays through its border, clamped at the horizon
     let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
     for (let m = 0; m < 32; m++) {
@@ -653,7 +710,15 @@
     }
     if (x0 > x1) return;
     const i0 = Math.floor(x0 / S0) - 1, i1 = Math.floor(x1 / S0) + 1, j0 = Math.floor((z0 + FLOW) / S0) - 1, j1 = Math.floor((z1 + FLOW) / S0) + 1;
-    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) seaVisit(0, i, j, 0, i, j, 0);
+    // blocks of 8 x 8 roots are culled whole first: a narrow lens on the horizon sees a thin wedge of a large box
+    const SB = S0 * 8;
+    for (let jb = Math.floor(j0 / 8); jb <= Math.floor(j1 / 8); jb++) for (let ib = Math.floor(i0 / 8); ib <= Math.floor(i1 / 8); ib++) {
+      const bx = ib * SB, bz = jb * SB - FLOW, bcx = bx + SB * .5 - E0, bcz = bz + SB * .5 - E2;
+      if (Math.sqrt(bcx * bcx + bcz * bcz) - SB * .71 > RH) continue;
+      const c = cellClass(bx, bz, SB); if (c === 0) continue;
+      const ja = Math.max(j0, jb * 8), jz = Math.min(j1, jb * 8 + 7), ia = Math.max(i0, ib * 8), iz = Math.min(i1, ib * 8 + 7);
+      for (let j = ja; j <= jz; j++) for (let i = ia; i <= iz; i++) seaVisit(0, i, j, 0, i, j, c === 2 ? 1 : 0);
+    }
   }
 
   /* ================= the sky: a hierarchical lattice in azimuth x elevation (dots at infinity) =================
@@ -668,7 +733,7 @@
     const az = ii / CLW * TAU, el = CLE0 + (CLE1 - CLE0) * jj / (CLH - 1);
     // a broken stratocumulus deck: cells ~1-2° across, flattened by the grazing view into streets along the horizon
     const f = M3.fbm(Math.cos(az) * 5.2, Math.sin(az) * 5.2, el * 34 + 3.3, 3) * .55 + M3.fbm(Math.cos(az) * 26, Math.sin(az) * 26, el * 95 + 7.1, 4) + .4 * M3.fbm(Math.cos(az) * 70, Math.sin(az) * 70, el * 240 + 1.9, 2);
-    CLOUD[jj * CLW + ii] = E.ss(.02, .42, f) * E.ss(-.02, .012, el);
+    CLOUD[jj * CLW + ii] = E.ss(-.06, .38, f) * E.ss(-.02, .012, el);
   }
   function cloudAt(az, el) {
     let u = az / TAU * CLW; u -= Math.floor(u / CLW) * CLW;
@@ -711,13 +776,26 @@
     SPF[0] = (i + ((h & 2047) + .5) / 2048) * s; SPF[1] = (j + (((h >>> 11) & 2047) + .5) / 2048) * s;
     return h;
   }
+  /* sine by table, linear between entries (error ~1e-7 rad, far under a pixel at the longest focal length) */
+  const TSN = 16384, TSK = TSN / TAU, TST = new Float64Array(TSN + 1), HPI = Math.PI / 2;
+  for (let i = 0; i <= TSN; i++) TST[i] = Math.sin(i / TSK);
+  const tsin = a => { let x = a * TSK; x -= Math.floor(x / TSN) * TSN; const i = x | 0; return TST[i] + (TST[i + 1] - TST[i]) * (x - i); };
   function skyVisit(k, i, j, kb, ib, jb) {
     const s = SKZ[k];
     if ((i + 1) * s < AZ0 || i * s > AZ1 || (j + 1) * s < EL0 || j * s > EL1) return;
+    if (BON) {
+      // a node wholly behind the hero (the sky is at infinity: any covered block hides it)
+      const ca = (i + .5) * s, ce = (j + .5) * s, sa = tsin(ca), co = tsin(ca + HPI), se = tsin(ce), cc = tsin(ce + HPI);
+      const dx = sa * cc, dy = se, dz = co * cc, zc = dx * F0 + dy * F1 + dz * F2;
+      if (zc > .5) {
+        const iz = FL / zc, sx = CX + (dx * R0 + dy * R1 + dz * R2) * iz, sy = CY - (dx * U0 + dy * U1 + dz * U2) * iz, hw = s * .58 * iz + 3;
+        if (hidden(sx - hw, sy - hw, sx + hw, sy + hw, 1e9)) return;
+      }
+    }
     // the wanted spacing: sparse in the clear sky, closer in cloud, close in the band over the horizon
     const e = (j + .5) * s + DIP, cl = cloudAt((i + .5) * s, (j + .5) * s);
     let ex = (e > 0 ? e : 0) * EXK * BANDK; if (ex > EXN - 1) ex = EXN - 1;
-    const tv = (12 - 6.8 * cl) * SKK, tg = tv - (tv - 2.9) * EXB[ex | 0], q = (s * FL / tg) * (s * FL / tg);
+    const tv = (12 - (FS === 2 ? 2.5 : 6.8) * cl) * SKK, tg = tv - (tv - 2.9) * EXB[ex | 0], q = (s * FL / tg) * (s * FL / tg);
     const hv = skyPt(kb, ib, jb), pa = SPF[0], pe = SPF[1];
     const hs = s * .5, ci = pa >= i * s + hs ? 1 : 0, cj = pe >= j * s + hs ? 1 : 0;
     if (q >= 4 && k < 22) {
@@ -729,7 +807,7 @@
       return;
     }
     const az = (i + .5) * s, el = (j + .5) * s;
-    NF[0] = az; NF[1] = el; NF[2] = Math.sin(az); NF[3] = Math.cos(az); NF[4] = Math.sin(el); NF[5] = Math.cos(el);
+    NF[0] = az; NF[1] = el; NF[2] = tsin(az); NF[3] = tsin(az + HPI); NF[4] = tsin(el); NF[5] = tsin(el + HPI);
     NF[6] = cl;
     if (q <= 1) { if ((hv >>> 22) < q * 256) { SPF[0] = pa; SPF[1] = pe; skyDot(hv); } return; }
     SPF[0] = pa; SPF[1] = pe; skyDot(hv);
@@ -751,7 +829,7 @@
   };
   let SKK = 1;
   function skyPass(ya, yb, mode) {
-    CLIP0 = ya; CLIP1 = yb; FS = mode ? 2 : 1; SKK = mode ? DW.field.kSky : 1;
+    CLIP0 = ya; CLIP1 = yb; FS = mode ? 2 : 1; SKK = mode ? DW.field.kSky : DW.field.wSky;
     const yaw = Math.atan2(F0, F2), pitch = Math.asin(E.clamp(F1, -1, 1));
     const aL = Math.atan(CX / FL), aR = Math.atan((PW - CX) / FL), eU = Math.atan((CY - ya) / FL), eD = Math.atan((yb - CY) / FL);
     // rows map to elevations exactly only on the vertical through the boresight: pad the band
@@ -884,11 +962,25 @@
   DW.drawShotPath = function (s, T, a) {
     if (T < s.tL || a <= .01) return;
     const fade = T > s.tEnd ? 1 - E.sat((T - s.tEnd) / 9) : 1; if (fade <= 0) return;
-    const sl = PG.shotSl(s, Math.min(T, s.tEnd));
-    let len = 0, px = 0, py = 0, ok = false;
-    for (let i = 0; i <= 24; i++) { PG.shotPath(s, sl * i / 24, SP); if (P3(SP[0], SP[1], SP[2])) { if (ok) len += Math.hypot(q.x - px, q.y - py); px = q.x; py = q.y; ok = true; } else ok = false; }
-    const N = E.clamp(Math.round(len / 3), 6, 2400), al = .62 * a * fade;
-    for (let i = 0; i <= N; i++) { PG.shotPath(s, sl * i / N, SP); if (P3(SP[0], SP[1], SP[2])) put(q.x, q.y, 1, 198, 244, 50, al); }
+    const sl = PG.shotSl(s, Math.min(T, s.tEnd)), L = s.L + 1200, al = .8 * a * fade, GAP = 5;
+    // a fixed grid along the path, fine at the cell (the vertical is ~1% of the length), a dot every GAP px of
+    // screen distance counted from the cell, so the dots stay put as the flown portion grows
+    let acc = GAP, px = 0, py = 0, ok = false;
+    for (let k = 0; k <= 200; k++) {
+      let u = k / 200, at = L * u * u, last = false;
+      if (at >= sl) { at = sl; last = true; }
+      PG.shotPath(s, at, SP);
+      if (!P3(SP[0], SP[1], SP[2])) { ok = false; if (last) break; continue; }
+      const x = q.x, y = q.y;
+      if (ok) {
+        const dx = x - px, dy = y - py, d = Math.hypot(dx, dy);
+        let t = GAP - acc;
+        for (; t <= d; t += GAP) { const f = t / d; dset(px + dx * f, py + dy * f, 2, PG.LIME, al); }
+        acc = d - (t - GAP);
+      } else dset(x, y, 2, PG.LIME, al);
+      px = x; py = y; ok = true;
+      if (last) break;
+    }
   };
 
   /* ---------- the sensor's grain, and a veil for the glare of something very hot (stage B) ---------- */
