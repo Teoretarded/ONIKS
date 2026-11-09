@@ -513,3 +513,20 @@ Not committed (another session is editing the camera / director, settings and sh
 - **Repeat hits** in hit_bench grow 11 -> 18 ms p50 (each hit's fire and smoke stay): that is the bench forcing a GPU
   sync per frame. Live in the app (the page's own loop, four Oniks hits 3 s apart, auto quality on) no frame over
   17 ms, worst 16.7 ms, fx at most ~85k dots / 7 ms.
+
+## 2026-11-09 (evening) · Steam-ready build, branches merged
+
+- **Branches**: no open PRs; every side branch (cloud/audit, simperf, units3, validate, code-review-2026-09-25) was
+  already in game-v1. main's one extra commit (Thermal film) merged into game-v1 (one `_thumbs.py` conflict: both
+  sides' entries kept). game-v1 -> main by PR.
+- **Data checks clean** (`node tools/validate.mjs`, Node 26 installed): validate's film path updated to per-film
+  folders; interior anatomy placards number on from each ship's own (CVN, LHD, CG had duplicate ids); fjord's
+  replenish point moved into the fleet's sea when set in an enclosed sound (`world/gen.js joinSea`); arctic ports keep
+  a basin open in the fast ice (`gens/arctic.js`).
+- **Offline**: Geist, Geist Mono, Inter, DM Mono (OFL) bundled in `reference/menus/common/fonts/`; all 66 pages link the
+  local `fonts.css`; no Google Fonts.
+- **Fast hit model is the default** (`blast/system.js`; `?blast=shell` for the GPU solver).
+- **Release**: `tools/build_release.py` (shipped exe without dev tools/browser keys/`/save`, game files in
+  `resources/`, verified from a temp copy outside the repo: 12 pages clean, no network); `tools/steam_upload.py`
+  (SteamCMD, VDFs from `steam/config.json`); `steam/README.md`. Open: App ID (Steam Direct fee), store page, repo
+  visibility (public), Steam Overlay over WebView2, Steamworks API.

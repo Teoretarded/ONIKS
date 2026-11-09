@@ -7,8 +7,12 @@
 //   ONIKS_SIZE=1600x900                 window inner size
 //   ONIKS_DEBUG_PORT=9333               Chrome DevTools Protocol on that port (tools/app_cdp.py drives it)
 //   ONIKS_ROOT=<dir>                    where game/ and reference/ are (default: found above the exe, else the cwd)
+//   ONIKS_FULLSCREEN=1                  start fullscreen (F11 toggles in the shipped build)
+//   ONIKS_LOG=<file>                    append every missing file (404) to it
 //
-// POST /save?path=... is the same PNG/JSON sink as tools/serve_game.py, so ONIKS.still() and the lab work here too.
+// POST /save?path=... is the same PNG/JSON sink as tools/serve_game.py, so ONIKS.still() and the lab work here too
+// (dev builds only). The shipped build: cargo build --release --no-default-features (tools/build_release.py), with
+// the game files in resources/ beside the exe.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::{
@@ -50,18 +54,45 @@ fn main() {
             if let Ok(p) = std::env::var("ONIKS_DEBUG_PORT") {
                 args.push_str(&format!(" --remote-debugging-port={p}"));
             }
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::CustomProtocol(url.parse().expect("page url")))
+            let mut b = WebviewWindowBuilder::new(app, "main", WebviewUrl::CustomProtocol(url.parse().expect("page url")))
                 .title("ONIKS")
                 .inner_size(w, h)
+                .min_inner_size(1024.0, 600.0)
                 .background_color(tauri::window::Color(11, 12, 10, 255))
-                .additional_browser_args(&args)
-                .build()?;
+                .additional_browser_args(&args);
+            if !cfg!(feature = "dev") {
+                b = b.initialization_script(SHIPPED_JS);
+            }
+            if std::env::var("ONIKS_FULLSCREEN").is_ok_and(|v| v == "1") {
+                b = b.fullscreen(true);
+            }
+            b.build()?;
             eprintln!("ONIKS: serving {} -> {url}", root.display());
             Ok(())
         })
         .run(tauri::generate_context!())
         .expect("ONIKS failed to start");
 }
+
+/// The shipped build (no `dev` feature): the browser's own keys and menus are not the game's. Reload, print, find,
+/// view source, dev tools, page zoom and the right-click menu are off; the game's keys (F1, F2, F8-F10, Ctrl 1-9...)
+/// are untouched. F11 toggles fullscreen (the game's own handler, if any, runs first).
+const SHIPPED_JS: &str = r#"
+(() => {
+  const block = e => {
+    const k = e.key, c = e.ctrlKey || e.metaKey;
+    if (k === 'F5' || k === 'F7' || k === 'F12' || k === 'BrowserRefresh' ||
+        (c && /^[rpfugjs]$/i.test(k)) ||
+        (c && e.shiftKey && /^[ijc]$/i.test(k)) || (c && /^[-+=0]$/.test(k))) { e.preventDefault(); e.stopImmediatePropagation(); }
+  };
+  addEventListener('keydown', block, true);
+  addEventListener('wheel', e => { if (e.ctrlKey) e.preventDefault(); }, { capture: true, passive: false });
+  addEventListener('contextmenu', e => e.preventDefault(), true);
+  addEventListener('keydown', e => {
+    if (e.key === 'F11' && !e.defaultPrevented) { e.preventDefault(); document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen().catch(() => {}); }
+  });
+})();
+"#;
 
 /// The menu's Quit (game/src/ui/shell/screens/menu.js): close the app.
 #[tauri::command]
@@ -107,7 +138,7 @@ fn serve(root: &Path, req: Request<Vec<u8>>) -> Response<Vec<u8>> {
         return reply(StatusCode::FORBIDDEN, "text/plain", b"no".to_vec());
     }
     if req.method() == "POST" {
-        return if rel == "save" { save(root, req.uri().query().unwrap_or(""), req.body()) } else { reply(StatusCode::NOT_FOUND, "text/plain", vec![]) };
+        return if rel == "save" && cfg!(feature = "dev") { save(root, req.uri().query().unwrap_or(""), req.body()) } else { reply(StatusCode::NOT_FOUND, "text/plain", vec![]) };
     }
     let mut file = root.join(if rel.is_empty() { "game/index.html" } else { rel });
     if file.is_dir() {
@@ -115,11 +146,24 @@ fn serve(root: &Path, req: Request<Vec<u8>>) -> Response<Vec<u8>> {
     }
     match fs::read(&file) {
         Ok(b) => reply(StatusCode::OK, mime(&file), b),
-        Err(_) => reply(StatusCode::NOT_FOUND, "text/plain", format!("not found: {rel}").into_bytes()),
+        Err(_) => {
+            // (ONIKS_LOG=<file>: every request and miss, so a release copy that left a file out is caught)
+            log(&format!("404 {rel}"));
+            reply(StatusCode::NOT_FOUND, "text/plain", format!("not found: {rel}").into_bytes())
+        }
     }
 }
 
-/// The PNG/JPEG/JSON sink (tools/serve_game.py's rules: .png anywhere; .jpg and .json under game/shots/ only).
+fn log(line: &str) {
+    if let Ok(p) = std::env::var("ONIKS_LOG") {
+        use std::io::Write;
+        if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(p) {
+            let _ = writeln!(f, "{line}");
+        }
+    }
+}
+
+/// The PNG/JPEG/JSON/CSV/OBJ sink (tools/serve_game.py's rules: .png anywhere; .jpg, .json, .csv, .obj under game/shots/ only).
 fn save(root: &Path, query: &str, body: &[u8]) -> Response<Vec<u8>> {
     let rel = query
         .split('&')
@@ -136,6 +180,9 @@ fn save(root: &Path, query: &str, body: &[u8]) -> Response<Vec<u8>> {
     } else if rel.starts_with("game/shots/") && rel.ends_with(".jpg") {
         b64("data:image/jpeg;base64,")
     } else if rel.starts_with("game/shots/") && rel.ends_with(".json") && matches!(body.first(), Some(b'{' | b'[')) {
+        Some(body.to_vec())
+    } else if rel.starts_with("game/shots/") && (rel.ends_with(".csv") || rel.ends_with(".obj")) {
+        // the lab's hit data (game/src/dev/lab/export.js)
         Some(body.to_vec())
     } else {
         None

@@ -38,6 +38,7 @@ PATH; call it from PowerShell by full path).
 | `game/` | **the game** (browser, plain JS ES modules + WebGL2, no build step). Start with `game/README.md`, `game/DESIGN.md`, `game/ARCHITECTURE.md`, `game/src/game/README.md` (systems); overnight history in `game/NIGHT_LOG.md`, scored reviews in `game/reviews/` |
 | `game/src/` | `engine/` (WebGL point renderer, clipmap terrain/sea, models, camera, overlay, Orbital hairlines), `sim/` (deterministic headless sim + AI), `world/` (six maps, landmarks), `game/` (the match: systems), `ui/` (HUD, sensors + scan, inspect, shell menus, help), `fx/`, `audio/`, `data/` (units, models, anatomy, campaign, settings) |
 | `tools/serve_game.py` | server for the repo root (game + reference), port 8771, PNG sink; `run_game.bat` starts it and opens the game |
+| `steam/` | Steam release: `README.md` (setup, every-release steps, gaps), `config.json` (App/Depot IDs); builds go to `dist/` (gitignored) |
 | `app/` | the game as a native app: Rust + Tauri 2 over WebView2, serves game/ + reference/ from disk (`oniks://`), same `/save` sink; `run_app.bat`; needs MSVC Build Tools 2022 + the Rust MSVC toolchain (both installed 2026-11-09) |
 | `reference/films/` | the films, one folder each (`<id>/<id>.html` + `<id>_*.js`), gallery `index.html`, briefs `_brief/`, stills `_shoot.html`; `pc_duel/` is the railgun-vs-orbit film (from 2026-10-15; `proto/` holds its prototypes) |
 | `reference/films/common/` | `film.js` (film runtime), `hd_land.js`, `hd_sea_air.js` (detailed models) |
@@ -50,6 +51,7 @@ PATH; call it from PowerShell by full path).
 | Task | Command |
 |---|---|
 | Play the game | `run_game.bat`, or `python tools/serve_game.py` and open http://localhost:8771/game/index.html |
+| Release build (Steam) | `python tools/build_release.py [--zip]` → `dist/ONIKS/` (ONIKS.exe + resources/, ~22 MB, zip 7.5 MB), verified from a temp copy (menu, Sandbox, lab, menu films: no missing file, error or network); upload `python tools/steam_upload.py --user <login> --live beta` (`steam/README.md`) |
 | Native app | `run_app.bat`, or `cd app && cargo build --release` (cargo in `~/.cargo/bin`) then `app/target/release/oniks.exe`; env `ONIKS_PAGE` (e.g. `game/lab.html?style=pointcloud&blast=fast`), `ONIKS_SIZE=1600x900`, `ONIKS_DEBUG_PORT=9333` → drive it with `python tools/app_cdp.py eval\|wait\|shot\|console`; app vs Chrome: `python tools/app_bench.py` |
 | Game tests / balance | http://localhost:8771/game/tests.html · `game/balance.html` (AI-vs-AI batches per map) |
 | Blast lab (hits frame by frame) | http://localhost:8771/game/lab.html (Sandbox → Lab in the menu; add `&style=pointcloud` if the stored setting is Orbital); console `window.LAB` (`LAB.target`, `aim`, `munition`, `fire`, `step`, `to`, `still`, `capture`, `report`); sheets and `report.json` → `game/shots/lab/<name>/`; `game/src/dev/lab/README.md` |
