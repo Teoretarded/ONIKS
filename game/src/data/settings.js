@@ -11,7 +11,7 @@
 
    Keys (the shell's Settings screen edits all of them; the in-game panel (ui/help, pause menu > Settings) the ones
    marked *, applied live):
-     renderStyle * 'pointcloud' | 'orbital'     the look: Point Cloud (graphite, white dots) or Orbital (black, hairlines)
+     renderStyle * 'pointcloud' | 'orbital' | 'debug'     the look: Point Cloud (graphite, white dots) or Orbital (black, hairlines)
      renderScale * 0.5 | 0.67 | 0.75 | 1        fraction of the device-pixel canvas size
      dotDensity  * 'low' | 'medium' | 'high' | 'ultra'
      modelDots   * 'standard' | 'high' | 'ultra'  the models' dots: Standard as before, High / Ultra the films' lattice (regular
@@ -67,7 +67,7 @@ const expOff = s => !(s && s.cineExperimental === true);
 
 /* The settings table: order, grouping, labels and allowed values (multi: a comma list of any of the choices). */
 export const SETTINGS = [
-  { key: 'renderStyle', group: 'Graphics', label: 'Render style', def: 'pointcloud', choices: [['pointcloud', 'Point Cloud'], ['orbital', 'Orbital']] },
+  { key: 'renderStyle', group: 'Graphics', label: 'Render style', def: 'pointcloud', choices: [['pointcloud', 'Point Cloud'], ['orbital', 'Orbital'], ['debug', 'Debug (solid)']] },
   { key: 'renderScale', group: 'Graphics', label: 'Render scale', def: 1, choices: [[.5, '50%'], [.67, '67%'], [.75, '75%'], [1, '100%']] },
   { key: 'dotDensity', group: 'Graphics', label: 'Dot density', def: 'high', choices: [['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['ultra', 'Ultra']] },
   { key: 'modelDots', group: 'Graphics', label: 'Model dot density', def: 'standard', choices: [['standard', 'Standard'], ['high', 'High'], ['ultra', 'Ultra']] },
@@ -112,7 +112,7 @@ export const tabOf = d => d.tab || 'general';
 
 /* One true line per setting, for the value it has (the Settings screen and the in-game panel show it). */
 export const NOTES = {
-  renderStyle: v => v === 'orbital' ? 'Black, white hairline wireframe, one yellow. The Orbital films.' : 'Graphite, white LiDAR dots, lime and coral. The Point Cloud films.',
+  renderStyle: v => v === 'orbital' ? 'Black, white hairline wireframe, one yellow. The Orbital films.' : v === 'debug' ? 'Solid lit models on grey: damage, dents and bare metal easy to see.' : 'Graphite, white LiDAR dots, lime and coral. The Point Cloud films.',
   renderScale: v => v < 1 ? `Draws at ${Math.round(v * 100)}% of the screen's pixels and scales up. Faster.` : 'Draws at the full resolution of the screen.',
   dotDensity: v => ({ low: 'Fewer dots per square of ground and sea. Fastest.', medium: 'A lighter ground and sea.', high: "The films' density on the ground and the sea.", ultra: 'Ground and sea denser than the films. Needs a strong GPU.' }[v]),
   modelDots: v => ({ standard: 'Models as before: scattered returns. Applies at once.', high: "Models on the films' regular lattice, their edges as dotted hairlines. Applies at once.", ultra: "The films' lattice, denser close up and at mid range. Needs a strong GPU. Applies at once." }[v]),

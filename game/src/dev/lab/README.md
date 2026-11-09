@@ -82,3 +82,12 @@ URL: `lab.html?target=cg&kind=uran&aim=qa:cg_side&view=detail&fire=1`, or `lab.h
 
 Keep the page visible while the solver runs: a hidden page's GPU work stalls (the lab still steps, slowly: ~4 s a
 frame). JSON and JPEG saves need `tools/serve_game.py` from this commit or later (PNG works with any).
+
+## Debug style and hit data
+
+- `lab.html?style=debug`, or key **M**: the models as solid lit surfaces (engine/solid.js); **N** cycles its mode
+  (shaded, deformation, parts, normals, damage flags); B (Deformation) also switches it to the deformation colours.
+  `LAB.solid({ on, mode, grid, key })`.
+- **J** or `await LAB.export(name)`: `game/shots/lab/<name>/` gets `report.json`, `plates.csv` (per solver plate),
+  `texels.csv` (every moved or flagged texel: rest point and displacement in the model frame, flags, soot),
+  `pieces.csv` (loose pieces), `mesh.obj` (the target's rest mesh). `LAB.tables()` returns the CSV text.

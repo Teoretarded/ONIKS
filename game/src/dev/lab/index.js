@@ -38,6 +38,7 @@ import { createDraw } from './draw.js';
 import { createCapture, tauTxt } from './capture.js';
 import { munitions } from '../../ui/inspect/impact.js';
 import { CASES } from '../blast_qa.js';
+import { exportHit, hitTables } from './export.js';
 import { probe as probeNow, record as recordRun, drawVectors, field as fieldNow, deformStats } from './probe.js';
 
 const STEPS = [[.00025, '0.25 MS'], [.001, '1 MS'], [1 / 240, '1/240'], [1 / 60, '1/60'], [.01, '10 MS'], [.05, '50 MS'], [.1, '0.1 S'], [1, '1 S']];
@@ -631,7 +632,7 @@ export async function createLab(game, ctx) {
     },
     onKey(e) {
       const c = codeOf(e), down = e.type === 'keydown';
-      const K = ['Space', 'Period', 'Comma', 'BracketLeft', 'BracketRight', 'KeyF', 'KeyR', 'KeyT', 'KeyV', 'KeyH', 'KeyC', 'KeyP', 'KeyK', 'KeyX', 'KeyG', 'KeyB', 'Home', 'ArrowLeft', 'ArrowRight'];
+      const K = ['Space', 'Period', 'Comma', 'BracketLeft', 'BracketRight', 'KeyF', 'KeyR', 'KeyT', 'KeyV', 'KeyH', 'KeyC', 'KeyP', 'KeyK', 'KeyX', 'KeyG', 'KeyB', 'KeyM', 'KeyN', 'KeyJ', 'Home', 'ArrowLeft', 'ArrowRight'];
       const camK = cams.C.on && ['KeyW', 'KeyS', 'KeyA', 'KeyD', 'KeyQ', 'KeyE'].includes(c);
       const view = /^Digit[1-8]$/.test(c);
       if (c === 'Escape') { if (!down) return st.aimMode || st.play; if (st.aimMode) { setAimMode(false); return true; } if (st.play || st.still) { leavePlayback(); return true; } return false; }
@@ -656,6 +657,10 @@ export async function createLab(game, ctx) {
         case 'KeyX': toggleDisp('xray'); break;
         case 'KeyG': toggleDisp('ghost'); break;
         case 'KeyB': toggleDisp('defo'); break;
+        // the debug render style (engine/solid.js): M solid on / off, N its mode, J export the hit's data
+        case 'KeyM': { const r = LAB.solid({ on: game.R.style !== 'debug' }); say(r && r.style === 'debug' ? 'SOLID · ' + SOLID_MODES[r.mode] : 'DOTS'); break; }
+        case 'KeyN': { const S = game.R._solid && game.R._solid(); if (S) { if (game.R.style !== 'debug') game.R.style = 'debug'; S.mode = (S.mode + 1) % SOLID_MODES.length; say('SOLID · ' + SOLID_MODES[S.mode]); } break; }
+        case 'KeyJ': guard(async () => { const r = await LAB.export(); say('EXPORTED · ' + r.dir); }, 'export'); break;
         case 'Home': guard(() => core.to(0), 't0'); break;
         case 'ArrowLeft': case 'ArrowRight': if (st.play) showFrame((st.playI || 0) + (c === 'ArrowLeft' ? -1 : 1)); else if (c === 'ArrowLeft') back(STEPS[st.step][0]); else step(STEPS[st.step][0]); break;
         default: break;
@@ -716,8 +721,14 @@ export async function createLab(game, ctx) {
     report: o => core.report(o), qa: () => core.qa(),
     save: name => cap.saveReport(name || `${L.type}_${L.kind}_${Date.now().toString(36)}`),
     plates() { return core.patches().map(B => ({ id: B.id, state: B.state, plates: B.rects.map(r => { let mx = 0, torn = 0, gone = 0; for (let i = 0; i < r.cpu.length; i += 4) { mx = Math.max(mx, Math.hypot(r.cpu[i], r.cpu[i + 1], r.cpu[i + 2])); const f = Math.floor(r.cpu[i + 3]); if (f & 1) torn++; if (f & 2) gone++; } return { p: r.p, ax: r.ax, nu: r.nu, nv: r.nv, maxMm: Math.round(mx * 1000), tornTexels: torn, goneTexels: gone }; }) })); },
+    // hit data as files (report.json, plates.csv, texels.csv, pieces.csv, mesh.obj): dev/lab/export.js
+    export: name => { const un = core.unit(); return exportHit(core, game, name || `${L.type}_${L.kind}_${Date.now().toString(36)}`, un && un.def ? un.def.model : null); },
+    tables: () => hitTables(core, game),
+    // the debug render style (engine/solid.js): mode 0 shaded, 1 deformation, 2 parts, 3 normals, 4 damage flags; grid 0..1
+    solid(o) { const R = game.R; if (o && o.on !== undefined) R.style = o.on ? 'debug' : 'pointcloud'; const S = R._solid ? R._solid() : null; if (S && o) { if (o.mode !== undefined) S.mode = o.mode; if (o.grid !== undefined) S.grid = o.grid; if (o.key !== undefined) S.key = o.key; } return S ? { style: R.style, mode: S.mode, grid: S.grid, stats: S.stats } : null; },
     presets: () => core.presets(L.type).map(p => p.id), types: () => types, munitions: () => MUN.map(m => m.key), shooters: k => core.shootersOf(k || L.kind),
   };
+  const SOLID_MODES = ['SHADED', 'DEFORMATION', 'PARTS', 'NORMALS', 'DAMAGE FLAGS'];
   const HELP = 'ONIKS LAB · window.LAB: ' + Object.keys(LAB).join(', ') + ' · usage in game/src/dev/lab/index.js (header) and game/src/dev/lab/README.md';
 
   // the first target, and the URL's shot

@@ -20,10 +20,10 @@ const LIN_STEP = 1 / 40;
 const LRU_MAX = 64;
 const CELL_K = 48;          // cell size code: (c + 128) / CELL_K of the level spacing (0 .. 5.3 x)
 const JIT_K = 254;          // jitter code: c / JIT_K cells
-const BTMAX = 6;            // blast patches drawn per instance (game/src/blast)
+export const BTMAX = 6;            // blast patches drawn per instance (game/src/blast)
 /* sections (game/structure, d.slab): the slab of the model an instance keeps, z0..z1 along the model's +Z, each cut torn
    (jagK: a ragged tear, the same function of the cross-section point on both sides of a break) */
-const SLAB_GLSL = `
+export const SLAB_GLSL = `
 uniform vec4 uK0;         // the section's lower cut: z (model m), tear amplitude (m), tear seed, heat of the torn edge
 uniform vec4 uK1;         // its upper cut (same)
 uniform vec4 uKb;         // x torn band (m), y on, z tear wavelength (m), w the hull's axis height (model y, m)
@@ -451,7 +451,7 @@ void main() {
 /* scars (game/scars.js, d.scars: its rule and kinds there): the uniforms and scarAt(), shared by the dots and the
    occlusion splats (the splats follow the bent plating; a hole's are pushed back into a plug) */
 const SC0 = new Float32Array(32);
-function scarGLSL() {
+export function scarGLSL() {
   return `
 float gIn = 0.0;                   // this part is inside the hull (an interior part, data/models_interior.js: part.inside)
 float gHole = 0.0;                 // (set by blastAt) an interior dot seen through a hole: lit from either side
@@ -593,7 +593,7 @@ int scarAt(inout vec3 p, vec3 n, uint hid, bool dp, inout float burn, inout floa
    the skin plates' grids: local displacement xyz, flags + soot in w: 1 cell torn, 2 node gone, 4 node on a torn edge),
    the dots of a torn cell riding their corner (petals), torn edges hot then charred, the model's surfaces across the
    pocket behind a hole gone and the hole's splats pushed back into a plug */
-function blastGLSL() {
+export function blastGLSL() {
   return `
 uniform int uBtN;
 uniform vec4 uBtO[${BTMAX}];     // xyz: the patch's origin (RTE), w: the pocket's depth behind a hole (m; < 0: the ship has no interior)
@@ -1608,6 +1608,7 @@ export class ModelLib {
       m[0] = Rp[0]; m[1] = Rp[3]; m[2] = Rp[6]; m[3] = Rp[1]; m[4] = Rp[4]; m[5] = Rp[7]; m[6] = Rp[2]; m[7] = Rp[5]; m[8] = Rp[8];
       r.t[0] = Tp[0] - eye[0]; r.t[1] = Tp[1] - eye[1]; r.t[2] = Tp[2] - eye[2];
       r.cl = cl; r.cl2 = cl2; r.k = k; r.pa = pa; r.pd = pd; r.rad = Pt.rad; r.dyn = Pt.dyn; r.inside = !!part.inside;
+      r.Pt = Pt; r.st = st; r.e = e;           // (engine/solid.js: the solid debug style meshes the part itself)
       slabRec(r, K, R0, T0, eye);
       r.xr = d.partXray && d.partXray[Pt.name] !== undefined ? d.partXray[Pt.name] : (d.xray || 0);
       // the coral part tint only in a cutaway (Inspect, the hit replay: a cue there), and never on a unit with hit marks:

@@ -265,3 +265,12 @@ methods (`ctx.probe(R.terrain, 'T', ['prepare'])`). Budget: 16.7 ms p99 and max,
 (`game/perfguard.js`) is held at full quality while it runs. Costs to know: a 2D canvas resize goes through the GPU
 process (up to ~0.9 s behind a busy GPU: size canvases once, clear them with `ctx.reset()`); a hidden page runs its
 timers once a second (the suite yields through messages).
+
+## Debug style (`engine/solid.js`)
+
+`R.style = 'debug'` (`?style=debug`, Settings > Graphics > Render style > Debug (solid)): every model as solid, lit
+triangles over a lighter grey, for reading damage. Meshed from the same primitives as the dots (tessellated ~L/500,
+0.12-0.5 m), with the same damage GLSL (`scarGLSL`, `blastGLSL`, `SLAB_GLSL` from models.js): vertices displaced as
+the solver left the plating, holes cut per pixel at the dots' ragged outline. Painted steel, bare metal at tears,
+soot, hot rims, a 1 m grid in part space that bends with dents. `R.solid.mode`: 0 shaded, 1 deformation, 2 parts,
+3 normals, 4 damage flags; `R.solid.grid`; `R.solid.exportOBJ(key)`, `meshData(key)`. Effects stay dots.

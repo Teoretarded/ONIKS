@@ -5,7 +5,7 @@
 Game:      http://localhost:8771/game/index.html
 Films:     http://localhost:8771/reference/films/index.html
 PNG sink:  POST /save?path=<repo-relative .png> with a PNG data URL body (and, under game/shots/, .jpg with a JPEG
-           data URL, .json with the JSON as the body: the blast lab's frames and reports).
+           data URL, .json with the JSON as the body: the blast lab's frames and reports; .csv / .obj text: its hit data).
 """
 import base64
 import http.server
@@ -40,6 +40,9 @@ class H(http.server.SimpleHTTPRequestHandler):
             elif rel.startswith('game/shots/') and rel.endswith('.jpg') and body.startswith('data:image/jpeg;base64,'):
                 data = base64.b64decode(body.split(',', 1)[1])
             elif rel.startswith('game/shots/') and rel.endswith('.json') and body[:1] in '{[':
+                data = body.encode('utf-8')
+            # hit data tables and meshes (game/src/dev/lab/export.js): plain text, under game/shots/ only
+            elif rel.startswith('game/shots/') and (rel.endswith('.csv') or rel.endswith('.obj')):
                 data = body.encode('utf-8')
         if data is None:
             self.send_response(400)

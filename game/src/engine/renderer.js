@@ -10,6 +10,7 @@ import { createGL, program } from './gl.js';
 import { HEAD } from './shaders.js';
 import { RTSCamera } from './camera.js';
 import { Terrain } from './terrain.js';
+import { Solid } from './solid.js';
 import { ModelLib, attitude } from './models.js';
 import { FX, LIME, CORAL, WH } from './fx.js';
 import { Overlay } from './overlay.js';
@@ -269,9 +270,12 @@ export class Renderer {
     gl.disable(gl.CULL_FACE);
     // background (pure black under a hairline picture)
     const orb = this.style === 'orbital' && this.wire;
+    // the debug style (engine/solid.js): the models as solid lit surfaces over a lighter grey
+    const dbg = this.style === 'debug' && !orb && this._solid();
     gl.disable(gl.DEPTH_TEST); gl.depthMask(false); gl.disable(gl.BLEND);
     gl.useProgram(this.pBg.p);
     if (this.pcOff || orb) gl.uniform4f(this.pBg.u.uBg, 0, 0, 0, 0);
+    else if (dbg) gl.uniform4f(this.pBg.u.uBg, dbg.bg[0], dbg.bg[1], dbg.bg[2], .35);
     else gl.uniform4f(this.pBg.u.uBg, this.bg[0], this.bg[1], this.bg[2], this.vignette);
     gl.bindVertexArray(null);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -294,7 +298,13 @@ export class Renderer {
     // hide the sea, the sky and the far side behind them (models.drawDepth)
     const cam = this.camera, M = this.models;
     for (const d of this.queue) M.prepare(d, cam, this.frameInfo);
-    if (M.occlude) for (const d of this.queue) M.drawDepth(d, cam, this.frameInfo);
+    if (dbg) {
+      // solid surfaces: opaque, depth written (the sea, the sky and every effect dot are then hidden behind them)
+      gl.colorMask(true, true, true, true); gl.depthMask(true); gl.disable(gl.BLEND);
+      dbg.stats.drawn = 0;
+      for (const d of this.queue) dbg.draw(d, cam);
+      gl.colorMask(false, false, false, false);
+    } else if (M.occlude) for (const d of this.queue) M.drawDepth(d, cam, this.frameInfo);
     // (extra point passes: { depth(), color() }, e.g. src/vox's lattice ships; depth with the models' splats)
     if (this.extra) for (const x of this.extra) if (x.depth) x.depth();
     gl.colorMask(true, true, true, true); gl.depthMask(false);
@@ -305,7 +315,7 @@ export class Renderer {
     // models
     let pts = 0, draws = 0;
     for (const d of this.queue) {
-      const n = M.drawColor(d, cam, this.frameInfo);
+      const n = dbg ? 0 : M.drawColor(d, cam, this.frameInfo);
       pts += n; if (n) draws++;
       if (d.speck) {
         // too small to resolve: one return, tinted
@@ -329,6 +339,11 @@ export class Renderer {
     gl.bindVertexArray(null);
     this.stats.draws = draws; this.stats.points = pts;
     this._endWire(t0);
+  }
+  /* the debug style's solid renderer (engine/solid.js), made on first use; null if it cannot be (the point frame then) */
+  _solid() {
+    if (this.solid === undefined) { try { this.solid = new Solid(this); } catch (e) { console.error('renderer: solid style unavailable', e); this.solid = null; } }
+    return this.solid;
   }
   /* the full-frame flash (fx.lift). In a cutaway frame (Inspect, the hit replay: an instance with a gate is queued) a
      flash lights the returns, as the films' flashes lift every return, instead of greying the black: most of it

@@ -52,7 +52,7 @@ export function createOrbital(game) {
   if (!W) { console.warn('orbital: the renderer has no hairlines; the strategic layer is off'); return null; }
   const OM = R.orbitalMap();
   /* the full Orbital render style (Settings: renderStyle 'pointcloud' | 'orbital'; ?style=orbital overrides) */
-  const styleOf = s => { const q = new URLSearchParams(location.search).get('style'); return q === 'orbital' || q === 'pointcloud' ? q : (s && s.renderStyle) || 'pointcloud'; };
+  const styleOf = s => { const q = new URLSearchParams(location.search).get('style'); return q === 'orbital' || q === 'pointcloud' || q === 'debug' ? q : (s && s.renderStyle) || 'pointcloud'; };
   R.style = styleOf(getSettings());
   onSettings(s => { const v = styleOf(s); if (v !== R.style) { R.style = v; console.log('ONIKS: render style ' + v); } });
   // mapFrom: the map's hairlines (coast first, then the contours) come in from here, over the dots, before the veil
