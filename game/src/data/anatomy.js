@@ -730,7 +730,13 @@ for (const k of ['destroyer', 'carrier', 'cg', 'lcs', 'lhd']) {
   const own = A.parts;
   let all = null;
   Object.defineProperty(A, 'parts', { configurable: true, enumerable: true,
-    get() { return all || (all = own.concat(INTERIOR.anatomy(k, CUT_MODELS[A.model]().parts))); } });
+    get() {
+      if (all) return all;
+      // (the interior's placards number on from the ship's own: 17-23 on the destroyer, after 22 on the carrier)
+      const inner = INTERIOR.anatomy(k, CUT_MODELS[A.model]().parts), base = own.reduce((m, en) => Math.max(m, +en.id || 0), 0);
+      const ids = [...new Set(inner.map(en => en.id).filter(Boolean))].sort((a, b) => a - b), to = new Map(ids.map((id, i) => [id, String(base + 1 + i).padStart(2, '0')]));
+      return (all = own.concat(inner.map(en => en.id ? Object.assign({}, en, { id: to.get(en.id) }) : en)));
+    } });
 }
 
 /* the transloader's TLC frames (parts tlcR / tlcL / tlcHook), as its model defines them */

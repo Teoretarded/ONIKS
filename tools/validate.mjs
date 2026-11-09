@@ -92,7 +92,7 @@ function model(key) {
   if (!models.has(key)) { let m = null, err = null; try { m = makeModel(key); } catch (e) { err = e; } models.set(key, { m, err }); }
   return models.get(key);
 }
-const filmExists = id => exists(`reference/films/${id}.html`);
+const filmExists = id => exists(`reference/films/${id}/${id}.html`) || exists(`reference/films/${id}.html`);
 
 /* ---------------------------------------------------------------- units */
 if (want('units')) {
