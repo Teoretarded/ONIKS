@@ -40,6 +40,9 @@ export async function generate(def, gen, opts) {
   ctx.A = A;
   // 2. layout
   const L = gen.layout(ctx, A);
+  // ships must be able to sail from their spawn to the replenishment point: a point set down in an enclosed sound
+  // moves to the nearest water joined to the fleet's
+  if (L.replenish && L.spawns && L.spawns.fleet) L.replenish = joinSea(A, W, H, L.spawns.fleet, L.replenish);
   const pads = L.pads || [];
   if (!L.roads) {
     const nodes = [...L.places.filter(p => p.road !== false && A.isLand(p.x, p.z)), ...L.objectives.filter(o => A.isLand(o.x, o.z))];
@@ -125,6 +128,38 @@ export async function generate(def, gen, opts) {
   // generator-specific plan data for the landmarks (structured-clone safe), e.g. the harbour city's districts
   if (L.extra) r.extra = L.extra;
   return r;
+}
+
+/* p, or the nearest point to it in the sea the fleet spawn f sails: open-sea cells as the sim's nav grid lays them
+   (sim/nav.js: its cell size, nine samples a cell all deeper than the draught), read on the plan with a margin for
+   the fine relief (skerries, knobs), 4-connected from f's cell. The point lands inside the cell, 50 m in. */
+const SEA_JOIN_DEPTH = 24;   // m: nav's 16 m draught plus what the fine pass may raise the bed
+function joinSea(A, W, H, f, p) {
+  const c = Math.max(W, H) > 120000 ? 500 : 400, cols = Math.ceil(W / c), rows = Math.ceil(H / c), N = cols * rows;
+  const x0 = -W / 2, z0 = -H / 2, q = c * .32, open = new Uint8Array(N), comp = new Uint8Array(N), st = new Int32Array(N);
+  for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+    const x = x0 + (i + .5) * c, z = z0 + (j + .5) * c; let ok = 1;
+    for (let s = 0; s < 9 && ok; s++) if (A.h(x + ((s % 3) - 1) * q, z + (((s / 3) | 0) - 1) * q) > -SEA_JOIN_DEPTH) ok = 0;
+    open[j * cols + i] = ok;
+  }
+  const cellOf = (x, z) => Math.max(0, Math.min(rows - 1, Math.floor((z - z0) / c))) * cols + Math.max(0, Math.min(cols - 1, Math.floor((x - x0) / c)));
+  const k0 = cellOf(f.x, f.z);
+  if (!open[k0]) return p;
+  let sp = 0; st[sp++] = k0; comp[k0] = 1;
+  while (sp) {
+    const k = st[--sp], i = k % cols;
+    for (const kk of [i > 0 ? k - 1 : -1, i < cols - 1 ? k + 1 : -1, k - cols, k + cols]) if (kk >= 0 && kk < N && open[kk] && !comp[kk]) { comp[kk] = 1; st[sp++] = kk; }
+  }
+  if (comp[cellOf(p.x, p.z)]) return p;
+  let best = null, bd = Infinity;
+  for (let k = 0; k < N; k++) {
+    if (!comp[k]) continue;
+    const i = k % cols, j = (k / cols) | 0, e = 50;
+    const x = Math.max(x0 + i * c + e, Math.min(x0 + (i + 1) * c - e, p.x)), z = Math.max(z0 + j * c + e, Math.min(z0 + (j + 1) * c - e, p.z));
+    const d = Math.hypot(x - p.x, z - p.z);
+    if (d < bd) { bd = d; best = { x: Math.round(x), z: Math.round(z) }; }
+  }
+  return best ? { ...p, ...best } : p;
 }
 
 function clean(p) { const o = {}; for (const k in p) if (k[0] !== '_' && k !== 'road') o[k] = p[k]; return o; }

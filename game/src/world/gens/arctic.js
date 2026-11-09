@@ -268,6 +268,21 @@ export default {
         basins.push([best.x + ox * 200, best.z + oz * 200, 560]);
       }
     }
+    // every other harbour keeps its own small basin open (a port has water at its quay): off the nearest shore, in
+    // water at least 4 m deep
+    for (const o of L.objectives) {
+      if (o.kind !== 'port' || basins.some(B => Math.hypot(B[0] - o.x, B[1] - o.z) < o.r + B[2])) continue;
+      let sea = null;
+      for (let a = 0; a < 32; a++) {
+        const dx = Math.sin(a / 32 * Math.PI * 2), dz = Math.cos(a / 32 * Math.PI * 2);
+        for (let d = 0; d <= o.r && (!sea || d < sea.d); d += 25) if (hRaw(o.x + dx * d, o.z + dz * d) < 0) { sea = { d, dx, dz }; break; }
+      }
+      if (!sea) continue;
+      let d = sea.d;
+      while (d < sea.d + 600 && hRaw(o.x + sea.dx * d, o.z + sea.dz * d) > -4) d += 25;
+      const r = 380, c = Math.min(d + 150, o.r * .5 + 150);
+      basins.push([o.x + sea.dx * c, o.z + sea.dz * c, r]);
+    }
     const spec = buildIceSpec(W, H, heights, cols, rows, cell, { seed: ctx.seed, zone, S, leads, channel, chW: 620, walk: 1500, basins });
     const cls = classGrid(spec, hRaw, W, H, 200);
     return { spec, cls };
