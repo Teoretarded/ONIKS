@@ -75,6 +75,9 @@ export function quitScreen(app) {
       msg.querySelector('span').textContent = app.theme === 'orb' ? 'Stand the battery down.' : 'Standing the battery down';
       msg.classList.add('on'); keys.classList.remove('on');
       tm.push(setTimeout(() => msg.classList.remove('on'), 1700));
+      // (in the app, app/: the window closes once the line has faded; in a browser tab the screen stays)
+      const T = window.__TAURI_INTERNALS__;
+      if (T) tm.push(setTimeout(() => T.invoke('quit').catch(() => {}), 2000));
       tm.push(setTimeout(() => keys.classList.add('on'), 2300));
       tm.push(setTimeout(() => keys.classList.remove('on'), 6500));
       el.style.pointerEvents = 'auto';
