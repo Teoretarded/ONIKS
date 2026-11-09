@@ -16,7 +16,7 @@
   for (const [page, t] of jobs) {
     const f = document.createElement('iframe');
     const tag = 't' + t.replace('.', '_');
-    f.src = `${page}.html?t=${t}&capture=1&tag=${tag}`;
+    f.src = `${page}/${page}.html?t=${t}&capture=1&tag=${tag}`;
     document.body.appendChild(f);
     const t0 = performance.now();
     await new Promise(res => {

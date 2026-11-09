@@ -4,7 +4,8 @@
 
 Game:      http://localhost:8771/game/index.html
 Films:     http://localhost:8771/reference/films/index.html
-PNG sink:  POST /save?path=<repo-relative .png> with a PNG data URL body.
+PNG sink:  POST /save?path=<repo-relative .png> with a PNG data URL body (and, under game/shots/, .jpg with a JPEG
+           data URL, .json with the JSON as the body: the blast lab's frames and reports).
 """
 import base64
 import http.server
@@ -30,15 +31,24 @@ class H(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
         rel = q.get('path', [''])[0].replace('\\', '/')
-        body = self.rfile.read(int(self.headers.get('Content-Length', '0'))).decode('ascii')
-        if not rel.endswith('.png') or '..' in rel or not body.startswith('data:image/png;base64,'):
+        body = self.rfile.read(int(self.headers.get('Content-Length', '0'))).decode('utf-8')
+        data = None
+        if '..' not in rel:
+            if rel.endswith('.png') and body.startswith('data:image/png;base64,'):
+                data = base64.b64decode(body.split(',', 1)[1])
+            # the blast lab's frames and reports (game/src/dev/lab): JPEG frames and JSON, under game/shots/ only
+            elif rel.startswith('game/shots/') and rel.endswith('.jpg') and body.startswith('data:image/jpeg;base64,'):
+                data = base64.b64decode(body.split(',', 1)[1])
+            elif rel.startswith('game/shots/') and rel.endswith('.json') and body[:1] in '{[':
+                data = body.encode('utf-8')
+        if data is None:
             self.send_response(400)
             self.end_headers()
             return
         out = os.path.join(ROOT, rel)
         os.makedirs(os.path.dirname(out), exist_ok=True)
         with open(out, 'wb') as f:
-            f.write(base64.b64decode(body.split(',', 1)[1]))
+            f.write(data)
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b'ok')

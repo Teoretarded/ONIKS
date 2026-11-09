@@ -4,9 +4,9 @@
      python tools/render_film.py pc_scan_railgun                  (1440p60, max quality, the whole film)
      python tools/render_film.py pc_scan_railgun --from 150 --to 160    (a 10 s test)
    starts (or finds) the render server (tools/serve.py, port 8772), opens the page below in the browser and follows
-   the job: progress in the page title and the server log, the MP4 in reference/films/renders/<film>_1440p60.mp4
+   the job: progress in the page title and the server log, the MP4 in reference/films/renders/<film>/<film>_1440p60.mp4
    (a part: <film>_1440p60_<from>-<to>s.mp4). Or open the page yourself (from serve.py's port):
-     /films/<film>.html?render=1&res=1440&fps=60&hq=1[&from=s&to=s][&ui=menu|none][&audio=0][&chunk=600]
+     /films/<film>/<film>.html?render=1&res=1440&fps=60&hq=1[&from=s&to=s][&ui=menu|none][&audio=0][&chunk=600]
    (&crf=14 the x264 quality, &maxrate=120M an optional cap on the densest scenes' bitrate)
    res 1080 | 1440 | 2160 (the dot raster's height; the framing is the same at each), hq=1 the max-quality mode (a
    fixed high dot density, no governor, every LOD level crossfaded), ui=menu adds the menu and its blurb, ui=none
@@ -191,6 +191,13 @@ const RENDER = {
         const buf = await STAGE.SFX.offline(cues, TO - FROM, 48000);
         await post(`/render/audio?id=${encodeURIComponent(js.id)}`, wav(buf));
       }
+      try {   // chapters + sound cues in video time, saved next to the MP4 as <name>.markers.json for tools/audio_analyze.py
+        const nm = fn => fn.name || String(fn).replace(/\s+/g, ' ').replace(/^\(\)\s*=>\s*/, '').slice(0, 90);
+        const inR = t => t >= FROM - 1e-6 && t <= TO + 1e-6;
+        await post(`/render/markers?id=${encodeURIComponent(js.id)}`, JSON.stringify({ film: STAGE.PAGE, from: FROM, to: TO,
+          chapters: FILM.chapters.filter(c => inR(c.t)).map(c => ({ t: +(c.t - FROM).toFixed(3), title: c.title })),
+          cues: (FILM.cues || []).filter(([t]) => inR(t)).map(([t, fn]) => [+(t - FROM).toFixed(3), nm(fn)]).sort((a, b) => a[0] - b[0]) }));
+      } catch (e) { console.warn('markers not saved', e); }
       const i0 = js.next;
       // pre-roll (not sent): the tags' fades settle as if the film had played into the first frame
       for (let i = i0 - Math.round(.3 * FPS); i < i0; i++) FILM.seek(FROM + i / FPS);

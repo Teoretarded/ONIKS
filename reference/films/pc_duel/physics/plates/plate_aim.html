@@ -1,0 +1,98 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Oniks — Aim</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=block">
+<link rel="stylesheet" href="../../../../menus/common/pc.css">
+<link rel="stylesheet" href="plate.css">
+</head>
+<body><div id="stage">
+  <canvas id="c" class="px"></canvas>
+  <canvas id="o"></canvas>
+  <div class="ui" id="ui">
+    <div class="logo abs"><svg viewBox="0 0 24 24"><path d="M12 2 20.5 22h-4.1L12 11.4 7.6 22H3.5z" fill="#fff"/><circle cx="12" cy="18.2" r="1.7" fill="#C6F432"/></svg>Oniks</div>
+    <div class="kick abs"><i></i><span id="kick"></span></div>
+    <div class="ro abs" id="ro"></div>
+    <div class="eq abs" id="eq"></div>
+  </div>
+</div>
+<script src="../../../../menus/common/m3.js"></script>
+<script src="../../../../menus/common/dots.js"></script>
+<script src="../../../../menus/common/geo.js"></script>
+<script src="plate_kit.js"></script>
+<script>
+/* PLATE 03 · AIM: the orbital ship 380 km up fires its rod at 5.0 km/s. The film draws the fall as a straight line onto
+   the destroyer; the rod keeps the ship's 7.68 km/s, so its real paths (two-body, fired straight down, 30 deg below
+   straight back, straight back) curve far down-range and none comes in steeper than ~44 deg. Frame: km, the orbit
+   plane z = 0, the Earth's centre at (0, -R, 0), +X the direction of flight. */
+(() => {
+const { V } = M3;
+const { cam, LIME, CORAL, WH, pts, cloud, hair, arrow, tag, label, readout, stars } = PL;
+const DEG = Math.PI / 180, R = 6371, MU = 398600.4, H0 = 380, VM = 5.0;
+const gy = x => Math.sqrt(R * R - x * x) - R;             // the ground under the orbit plane
+
+cam.fov = 38 * DEG;
+cam.orbit([380, 150, 0], 0, 11 * DEG, 1180);
+stars(2200, 60000, .3, 5);
+
+// the Earth: dots on the sphere round the ground track, fading with distance; the ground track; the air (100 km)
+{
+  const g = M3.rng(9), L = [];
+  for (let i = 0; i < 60000; i++) { const x = -500 + g() * 1800, z = -350 + g() * 1500, y = Math.sqrt(R * R - x * x - z * z) - R; L.push([x, y, z]); }
+  cloud(pts(L), WH, .55, { fade: [700, 2200], fadeTo: 0 });
+  const T = [], A = [], O = [];
+  for (let x = -500; x <= 1300; x += 1.5) { T.push([x, gy(x), 0]); }
+  for (let x = -500; x <= 1300; x += 4) { A.push([x, Math.sqrt((R + 100) ** 2 - x * x) - R, 0]); O.push([x, Math.sqrt((R + H0) ** 2 - x * x) - R, 0]); }
+  cloud(pts(T), WH, .7);
+  cloud(pts(A), WH, .16);
+  cloud(pts(O), WH, .3);
+  label([-470, Math.sqrt((R + 100) ** 2 - 470 * 470) - R, 0], 'AIR · 100 KM', 0, -12);
+}
+
+// the rod's real paths: two-body from the platform, the gun's 5.0 km/s at an angle below straight back
+function fly(th) {
+  let x = 0, y = R + H0, vx = Math.sqrt(MU / (R + H0)) - VM * Math.cos(th * DEG), vy = -VM * Math.sin(th * DEG);
+  const P = [[0, H0, 0]], dt = .25;
+  while (Math.hypot(x, y) > R) {
+    let r = Math.hypot(x, y), a = -MU / (r * r * r); vx += a * x * dt; vy += a * y * dt; x += vx * dt; y += vy * dt;
+    P.push([x, y - R, 0]);
+  }
+  const r = Math.hypot(x, y), v = Math.hypot(vx, vy), ang = Math.asin(-(x * vx + y * vy) / r / v) / DEG, d = Math.atan2(x, y) * R;
+  return { P, v, ang, d, end: [x, y - R, 0] };
+}
+const RUNS = [[90, 'DOWN'], [30, '30° BACK'], [0, 'BACK']].map(([th, n]) => Object.assign(fly(th), { th, n }));
+for (const r of RUNS) {
+  const D = []; for (let i = 0; i < r.P.length - 1; i++) for (let k = 0; k < 4; k++) D.push(V.lerp(r.P[i], r.P[i + 1], k / 4));
+  cloud(pts(D), CORAL, r.th === 30 ? 1 : .6, { size: r.th === 30 ? 1.5 : 1 });
+}
+
+// the film's path: a straight line onto the destroyer
+const DDG = [90, gy(90), 0];
+hair([[0, H0, 0], DDG], LIME, .95, { dash: [7, 5], w: 1.4 });
+
+// the platform and its velocities (1 km/s = 22 km)
+const K = 22, v0 = Math.sqrt(MU / (R + H0)), c30 = Math.cos(30 * DEG), s30 = Math.sin(30 * DEG);
+arrow([0, H0, 0], [v0 * K, H0, 0], WH, .8);
+arrow([0, H0, 0], [-VM * c30 * K, H0 - VM * s30 * K, 0], WH, .55);
+arrow([0, H0, 0], [(v0 - VM * c30) * K, H0 - VM * s30 * K, 0], CORAL, 1);
+label([v0 * K, H0, 0], 'ORBIT 7.68 KM/S', 12, 0);
+label([-VM * c30 * K, H0 - VM * s30 * K, 0], 'GUN 5.0 KM/S', -12, 10);
+cloud(pts([[0, H0, 0]]), WH, 1, { size: 5 });
+cloud(pts([DDG]), LIME, 1, { size: 5 });
+
+tag([0, H0, 0], 'PLATFORM', 'ORBIT · 380 KM', '', 50, -80, 'sm');
+tag(V.lerp([0, H0, 0], DDG, .55), 'FILM', 'STRAIGHT LINE', '', -150, 30, 'lime');
+tag(DDG, 'DDG', '', '', -60, 70, 'lime sm');
+const fmt = n => Math.round(n).toLocaleString('en-US');
+const off = { 90: [-30, 120], 30: [30, -150], 0: [40, 80] };
+for (const r of RUNS) tag(r.end, r.n, `${fmt(r.d)} KM AHEAD · ${r.ang.toFixed(0)}°`, `${r.v.toFixed(2)} KM/S`, off[r.th][0], off[r.th][1], 'coral' + (r.th === 30 ? '' : ' sm'));
+
+readout(3, 'Aim', [
+  'PLATFORM · <b>380 KM</b> · <b>7.68 KM/S</b>',
+  'GUN · <b>5.0 KM/S</b>',
+  'LEFT OVER · <span class="c">2.68 KM/S FORWARD</span>',
+  'STEEPEST · <span class="c">44°</span>',
+]);
+document.getElementById('eq').innerHTML = 'v = √(μ / r) = √(3.986×10¹⁴ / 6.751×10⁶) = <b>7,684 m/s</b>';
+PL.done();
+})();
+</script>
+</body></html>

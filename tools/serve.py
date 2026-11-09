@@ -13,7 +13,7 @@ Video renders (reference/films/common/render.js, started by tools/render_film.py
   /render/fail    ?id=  the page's error
 and GET /render/status[?id=] reports the jobs. Frames are piped into ffmpeg (H.264 High, yuv420p, BT.709, CRF 14,
 preset slow, +faststart) in chunks of `chunk` frames under reference/films/renders/.parts/<id>/; a job restarted with
-the same parameters resumes at its first unfinished chunk. The MP4: reference/films/renders/<id>.mp4.
+the same parameters resumes at its first unfinished chunk. The MP4: reference/films/renders/<film>/<id>.mp4.
 ffmpeg: $FFMPEG, else the WinGet Gyan.FFmpeg build, else ffmpeg on the PATH.
 """
 import base64
@@ -32,6 +32,11 @@ import zlib
 
 ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'reference')
 RENDERS = os.path.join(ROOT, 'films', 'renders')
+
+
+def film_dir(film):
+    """renders/<film>/ (the renders made before the per-film folders stay at the top of renders/)"""
+    return ''.join(ch for ch in str(film) if ch.isalnum() or ch in '_-') or 'misc'
 
 
 def find_ffmpeg():
@@ -89,7 +94,8 @@ class Job:
                 for f in glob.glob(os.path.join(self.dir, 'c*')):
                     os.remove(f)
                 log(f'{self.id}: stale chunks cleared (the film or the job changed)')
-        self.out = os.path.join(RENDERS, self.id + '.mp4')
+        self.out = os.path.join(RENDERS, film_dir(spec['film']), self.id + '.mp4')   # (each film's renders in renders/<film>/)
+        os.makedirs(os.path.dirname(self.out), exist_ok=True)
         self.lock = threading.Lock()
         self.q = queue.Queue(maxsize=90)        # (deflated frames ~1 MB: a backlog while the encoder is behind)
         self.pending = {}
@@ -226,6 +232,9 @@ class Job:
         if r.returncode != 0:
             raise RuntimeError('concat: ' + r.stderr[-800:])
         os.replace(tmp, self.out)
+        mk = os.path.join(self.dir, 'markers.json')
+        if os.path.exists(mk):                          # chapters + cues for tools/audio_analyze.py
+            shutil.copyfile(mk, self.out[:-4] + '.markers.json')
         self.state = 'done'
         log(f'{self.id}: DONE {self.out} ({os.path.getsize(self.out) / 1e6:.1f} MB, {time.time() - self.t0:.0f} s)')
         return self.out
@@ -263,6 +272,52 @@ class H(http.server.SimpleHTTPRequestHandler):
         self.send_header('Cache-Control', 'no-store')
         super().end_headers()
 
+    def send_head(self):
+        """HTTP Range (206) so <video>/<audio> can seek in big renders; plain requests go to the stock handler."""
+        rng = self.headers.get('Range', '')
+        path = self.translate_path(self.path)
+        if not rng.startswith('bytes=') or os.path.isdir(path):
+            return super().send_head()
+        try:
+            f = open(path, 'rb')
+        except OSError:
+            self.send_error(404)
+            return None
+        size = os.fstat(f.fileno()).st_size
+        a, _, b = rng[6:].split(',')[0].strip().partition('-')
+        try:
+            start = int(a) if a else max(0, size - int(b))
+            end = min(size - 1, int(b) if a and b else size - 1)
+        except ValueError:
+            f.close()
+            return super().send_head()
+        if start >= size or start > end:
+            f.close()
+            self.send_response(416)
+            self.send_header('Content-Range', f'bytes */{size}')
+            self.end_headers()
+            return None
+        self.send_response(206)
+        self.send_header('Content-Type', self.guess_type(path))
+        self.send_header('Accept-Ranges', 'bytes')
+        self.send_header('Content-Range', f'bytes {start}-{end}/{size}')
+        self.send_header('Content-Length', str(end - start + 1))
+        self.end_headers()
+        f.seek(start)
+        self._left = end - start + 1
+        return f
+
+    def copyfile(self, src, dst):
+        left, self._left = getattr(self, '_left', None), None
+        if left is None:
+            return super().copyfile(src, dst)
+        while left > 0:
+            buf = src.read(min(1 << 20, left))
+            if not buf:
+                break
+            dst.write(buf)
+            left -= len(buf)
+
     def reply(self, code, obj):
         b = json.dumps(obj).encode()
         self.send_response(code)
@@ -293,7 +348,17 @@ class H(http.server.SimpleHTTPRequestHandler):
                 log('error', u.path, e)
                 return self.reply(500, {'error': str(e)})
         rel = q.get('path', [''])[0].replace('\\', '/')
-        body = self.rfile.read(int(self.headers.get('Content-Length', '0'))).decode('ascii')
+        raw = self.rfile.read(int(self.headers.get('Content-Length', '0')))
+        if rel.endswith('.json') and '..' not in rel and rel.startswith('films/'):     # data a page measured (common/camlog.js)
+            out = os.path.join(ROOT, rel)
+            os.makedirs(os.path.dirname(out), exist_ok=True)
+            with open(out, 'wb') as f:
+                f.write(raw)
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'ok')
+            return
+        body = raw.decode('ascii', 'replace')
         if not rel.endswith('.png') or '..' in rel or not body.startswith('data:image/png;base64,'):
             self.send_response(400)
             self.end_headers()
@@ -331,6 +396,10 @@ class H(http.server.SimpleHTTPRequestHandler):
             with open(os.path.join(j.dir, 'audio.wav'), 'wb') as f:
                 f.write(body)
             log(f'{j.id}: audio {len(body) / 1e6:.1f} MB')
+            return self.reply(200, {'ok': True})
+        if path == '/render/markers':
+            with open(os.path.join(j.dir, 'markers.json'), 'wb') as f:
+                f.write(body)
             return self.reply(200, {'ok': True})
         if path == '/render/finish':
             out = j.finish()

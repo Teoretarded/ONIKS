@@ -164,7 +164,7 @@
   }
 
   async function capture() {
-    const dir = location.pathname.split('/').slice(-2, -1)[0] || 'menus';
+    const dirs = location.pathname.split('/').filter(Boolean), dir = dirs.includes('films') ? 'films' : dirs.slice(-2, -1)[0] || 'menus';   // (each film sits in films/<id>/; stills go to films/shots/)
     const out = Q.get('out') || `${dir}/shots/${PAGE}${Q.has('tag') ? '_' + Q.get('tag') : ''}.png`;
     try {
       await document.fonts.ready;

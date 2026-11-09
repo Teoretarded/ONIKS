@@ -1,0 +1,18 @@
+/* the plates' HUD: the Duel's (pc_duel.html), plus axis labels */
+.logo { left: 72px; top: 58px; }
+.kick { left: 74px; top: 98px; }
+.ro { left: 74px; top: 132px; font: 400 11.5px/1.9 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); font-variant-numeric: tabular-nums; }
+.ro b { font-weight: 400; color: #fff; }
+.ro .l { color: var(--lime); }
+.ro .c { color: var(--coral); }
+.tag.sm { font-size: 10.5px; }
+.tag.sm b, .tag.sm i, .tag.sm .v { padding: 4px 6px 3px; }
+.tag .v { font-variant-numeric: tabular-nums; }
+.tag i { white-space: pre; }
+.tag.coral b { background: var(--coral); }
+.tag.coral .v { color: var(--coral); }
+.ax { position: absolute; left: 0; top: 0; font: 400 10.5px/1 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); white-space: nowrap; }
+.ax.l { color: var(--lime); }
+.ax.c { color: var(--coral); }
+.eq { left: 74px; bottom: 58px; font: 400 11.5px/1.9 var(--mono); letter-spacing: .05em; color: var(--faint); }
+.eq b { font-weight: 400; color: #fff; }

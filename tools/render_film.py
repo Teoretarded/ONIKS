@@ -3,7 +3,7 @@
     python tools/render_film.py <film> [--res 1440] [--fps 60] [--from s] [--to s] [--ui hud|menu|none]
                                        [--std] [--no-audio] [--crf 14] [--maxrate 120M] [--port 8772] [--no-open] [--no-wait]
 
-    python tools/render_film.py pc_scan_railgun                   the whole film -> reference/films/renders/pc_scan_railgun_1440p60.mp4
+    python tools/render_film.py pc_scan_railgun                   the whole film -> reference/films/renders/pc_scan_railgun/pc_scan_railgun_1440p60.mp4
     python tools/render_film.py pc_scan_railgun --from 150 --to 160    a 10 s part -> ..._1440p60_150-160s.mp4
 
 Starts the render server (tools/serve.py on --port) unless one is up, opens the film's render page in the default
@@ -47,9 +47,13 @@ def main():
     ap.add_argument('--no-wait', action='store_true', help='do not follow the job')
     a = ap.parse_args()
 
-    film = a.film.replace('.html', '')
-    if not os.path.exists(os.path.join(HERE, '..', 'reference', 'films', film + '.html')):
-        sys.exit(f'no such film: reference/films/{film}.html')
+    # a film id (films/<id>/<id>.html) or a page's path under films/ (e.g. pc_duel/proto/intercept)
+    rel = a.film.replace(chr(92), '/').replace('.html', '').strip('/')
+    film = rel.split('/')[-1]
+    if '/' not in rel:
+        rel = f'{film}/{film}'
+    if not os.path.exists(os.path.join(HERE, '..', 'reference', 'films', *rel.split('/')) + '.html'):
+        sys.exit(f'no such film: reference/films/{rel}.html')
     try:
         st = status(a.port)
         if not st.get('render'):
@@ -88,7 +92,7 @@ def main():
         q['crf'] = f'{a.crf:g}'
     if a.maxrate:
         q['maxrate'] = a.maxrate
-    url = f'http://127.0.0.1:{a.port}/films/{film}.html?' + urllib.parse.urlencode(q)
+    url = f'http://127.0.0.1:{a.port}/films/{rel}.html?' + urllib.parse.urlencode(q)
     print('render page:', url)
     print('  (keep the tab open; the title shows the progress; re-open it to resume)')
     if not a.no_open:

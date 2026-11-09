@@ -37,6 +37,7 @@
     ['pc_anatomy_battery', 'Anatomy', 'Battery'],
     ['pc_scan_railgun', 'Scan', 'Railgun'],
     ['pc_orbital_railgun', 'Orbital', 'Railgun'],
+    ['pc_duel', 'Railgun', 'Duel'],
   ];
   const Q = STAGE.Q, PAGE = STAGE.PAGE;
   const FROZEN = Q.has('t'), RENDER = STAGE.RENDER, CLEAN = Q.has('clean') || Q.has('capture') || RENDER;
@@ -141,6 +142,8 @@
 
     // a video render (common/render.js) steps the frames itself: FILM.seek at each frame time, nothing on the clock
     if (RENDER) { FILM.playing = false; STAGE.ready = true; if (window.RENDER) window.RENDER.begin(); return; }
+    // the camera log for reviews (common/camlog.js, ?camlog=1): steps the film itself
+    if (Q.has('camlog') && window.CAMLOG) { FILM.playing = false; STAGE.ready = true; window.CAMLOG.begin(); return; }
     if (FROZEN) {
       FILM.playing = false; FILM.seek(parseFloat(Q.get('t')));
       STAGE.ready = true;
@@ -183,7 +186,7 @@
     else if (k === 't' || k === 'T') { barPinned = !barPinned; if (bar) bar.classList.toggle('on', barPinned); }
     else if ((k === ']' || k === '[') && window === top) {
       const i = FILMS.findIndex(f => f[0] === PAGE);
-      if (i >= 0) location.href = FILMS[(i + (k === ']' ? 1 : FILMS.length - 1)) % FILMS.length][0] + '.html';
+      if (i >= 0) { const id = FILMS[(i + (k === ']' ? 1 : FILMS.length - 1)) % FILMS.length][0]; location.href = '../' + id + '/' + id + '.html'; }
     } else return;
     if (bar && k !== 't' && k !== 'T') { bar.classList.add('on'); barTimer = performance.now(); }
   });

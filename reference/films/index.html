@@ -100,6 +100,7 @@ const V = [
   ['a', 'pc_anatomy_battery', 'A·3', 'Anatomy · Battery', 'X-ray dots through the Pantsir and the radar truck: turret, guns, radars and mast float apart and back together, and a reload vehicle swings fresh missile packs onto the turret.'],
   ['s', 'pc_scan_railgun', 'S·1', 'Scan · Railgun', 'An Arleigh Burke at night with a railgun in the gun’s seat. The X-ray opens the ship amidships: the gas-turbine generators start and close onto the switchboards, the four LM2500s light off and the reduction gears mesh, and power and data run forward along the cable trays. The mount deploys, the power room charges, a robot arm assembles the round in the magazine, a scan plane runs the barrel, and the round crosses the bore at ×0.01; the lens rides with the probe to the burst over the headland, the lightning comes down and the chain leaps from vehicle to vehicle, each identified part by part.'],
   ['k', 'pc_orbital_railgun', 'K·1', 'Orbital · Railgun', 'A 1.7 km orbital railgun wakes on its thermoelectric reactor, unfolds its 1 km hexagonal gun in six concertina segments, latches and spins up its gyro ring, moves into position on four vectored engines and calibrates itself along a laser line. On board it forges a tungsten rod and prints the payload’s chip in a lithography scanner; the gun’s flaps open in stages, its rings charge and discharge into the round, and the rod falls through a plasma trail into a forest on the coast: shock domes, a crater and a rolling mushroom cloud. It folds back to sleep.'],
+  ['s', 'pc_duel', 'S·2', 'Duel', 'The railgun destroyer against the orbital railgun ship, one take. The power room comes up under liquid helium, the coils go cold, the director and the radar lock onto a ship 380 km up and the mount lays on the intercept point; the round climbs through its plasma sheath and tears through the orbital ship’s hull. The damaged ship turns onto the destroyer, builds its barrel with its rings and fires a tungsten rod back: it splits the destroyer, dives in a cavity of steam, and the two halves sink.'],
 ];
 const src = (id, k) => `thumbs/${id}_${k}.jpg`;
 const ready = {};
@@ -108,7 +109,7 @@ function tile([, id, n, t, d], idx) {
   return `<div class="tile pending" data-i="${idx}" id="tile-${id}">
     <div class="shot hero"><img src="${src(id, 0)}" alt="" onload="mark('${id}')" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'pend',innerHTML:'<i></i>being built — reload in a bit'}))"><span class="zoom">click to view big</span></div>
     <div class="strip">${[1, 2, 3].map(k => `<div class="shot"><img src="${src(id, k)}" alt="" data-k="${k}" onerror="this.style.visibility='hidden'"></div>`).join('')}</div>
-    <div class="meta"><span class="n">${n}</span><span class="t">${t}</span><a class="go" href="${id}.html" onclick="event.stopPropagation()">play ↗</a><span class="d">${d}</span></div></div>`;
+    <div class="meta"><span class="n">${n}</span><span class="t">${t}</span><a class="go" href="${id}/${id}.html" onclick="event.stopPropagation()">play ↗</a><span class="d">${d}</span></div></div>`;
 }
 function mark(id) { ready[id] = true; document.getElementById('tile-' + id).classList.remove('pending'); }
 const sec = (cls, title, sub) => `<section class="${cls}"><h2><i></i>${title}<span>${sub}</span></h2><div class="grid">` +
@@ -135,7 +136,7 @@ document.getElementById('g').addEventListener('click', e => {
   const im = e.target.closest('.strip img'); show(+t.dataset.i, im ? +im.dataset.k : 0);
 });
 lbm.addEventListener('click', e => { const im = e.target.closest('img'); if (!im) return; mom = +im.dataset.q; lbf.innerHTML = `<img src="${im.src}" alt="">`; lbm.querySelectorAll('img').forEach(x => x.classList.toggle('on', x === im)); });
-document.getElementById('lbplay').onclick = () => { if (cur < 0) return; const id = V[cur][1]; lbf.innerHTML = `<iframe src="${id}.html?embed" allow="autoplay"></iframe>`; lbf.querySelector('iframe').focus(); };
+document.getElementById('lbplay').onclick = () => { if (cur < 0) return; const id = V[cur][1]; lbf.innerHTML = `<iframe src="${id}/${id}.html?embed" allow="autoplay"></iframe>`; lbf.querySelector('iframe').focus(); };
 document.getElementById('lbprev').onclick = () => step(-1);
 document.getElementById('lbnext').onclick = () => step(1);
 document.getElementById('lbx').onclick = close;

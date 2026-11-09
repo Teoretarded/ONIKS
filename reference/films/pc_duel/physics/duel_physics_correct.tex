@@ -1,0 +1,146 @@
+\documentclass[11pt]{article}
+\usepackage[a4paper,margin=2.2cm]{geometry}
+\usepackage{amsmath}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+\newcommand{\un}[1]{\,\mathrm{#1}}
+
+\begin{document}
+
+{\Large\bfseries the duel, the maths behind what does work}
+
+\vspace{4pt}
+numbers are the films own unless i say its a guess
+
+\section*{1. the reactor charging the flywheels}
+
+the orbital ship has a 14 MW reactor that fills the flywheels over a day
+
+\begin{align*}
+E = P t = 14\times10^6 \times 24 \times 3600 = 14\times10^6 \times 86{,}400 = 1.21\times10^{12}\un{J} = 1.2\un{TJ}
+\end{align*}
+
+matches the films 1.2 TJ exactly. the reactor makes 140 MW of heat for 14 MW of power so 126 MW has to go out the radiators. $\varepsilon$ is emissivity, $\sigma$ is the Stefan Boltzmann constant, fins radiate off both sides
+
+\begin{align*}
+q &= 2\varepsilon\sigma T^4\\
+\text{at } 800\un{K}: \quad q &= 2 \times 0.9 \times 5.67\times10^{-8} \times 800^4 = 41{,}800\un{W/m^2}\\
+A &= \frac{126\times10^6}{41{,}800} = 3010\un{m^2}\\
+\text{at } 600\un{K}: \quad A &= \frac{126\times10^6}{13{,}200} = 9530\un{m^2}
+\end{align*}
+
+so 55 by 55 m up to about 100 by 100 m of fins, easy on a 1.7 km ship. only thing a bit high is 10\% conversion, real thermoelectrics do 5 to 8\%
+
+\section*{2. the flywheels}
+
+56 wheels at 3000 rpm. radius is my guess, 3 m
+
+\begin{align*}
+E_{\text{wheel}} &= 1.2\times10^{12}/56 = 21.4\un{GJ}\\
+\omega &= 3000 \times 2\pi/60 = 314\un{rad/s}, \qquad v_{\text{rim}} = \omega r = 314 \times 3 = 942\un{m/s}\\
+m &= \frac{2E}{v^2} = \frac{2 \times 21.4\times10^9}{942^2} = 48{,}300\un{kg}
+\end{align*}
+
+hoop stress in a spinning rim, carbon fibre at 1600 kg/m$^3$
+
+\begin{align*}
+\sigma = \rho v^2 = 1600 \times 942^2 = 1.42\un{GPa}
+\end{align*}
+
+carbon fibre composite holds 2 to 3 GPa round the hoop so thats a real safety margin. half spin one way half the other so the spin cancels, $I$ is moment of inertia, $L$ angular momentum
+
+\begin{align*}
+I &= m r^2 = 48{,}300 \times 9 = 434{,}700\un{kg\,m^2}\\
+L_{\text{one}} &= I\omega = 434{,}700 \times 314 = 1.37\times10^8\\
+L_{\text{total}} &= 28 L - 28 L = 0
+\end{align*}
+
+if they all spun the same way thats $56 \times 1.37\times10^8 = 7.7\times10^9$ and turning the ship at 0.01 rad/s would take $\tau = L\Omega = 7.7\times10^7\un{N\,m}$ fighting it the whole time. the film got that right
+
+\section*{3. the orbital gun shot}
+
+rod is tungsten, 0.3 m across and 18 m long, barrel about 1016 m
+
+\begin{align*}
+m &= \rho \pi r^2 L = 19300 \times \pi \times 0.15^2 \times 18 = 24{,}560\un{kg}\\
+KE &= \tfrac12 m v^2 = 0.5 \times 24{,}560 \times 5000^2 = 307\un{GJ} = 73\un{t\ TNT}\\
+\eta &= 307/600 = 51\%
+\end{align*}
+
+all match the film. the long barrel keeps it gentle
+
+\begin{align*}
+a &= \frac{v^2}{2L} = \frac{5000^2}{2 \times 1016} = 12{,}300\un{m/s^2} = 1250\,g\\
+t &= \frac{2L}{v} = \frac{2032}{5000} = 0.41\un{s}\\
+P &= \frac{0.6\times10^{12}}{0.41} = 1.5\un{TW}
+\end{align*}
+
+the sabot grips the rod down its whole length so the load goes in as shear
+
+\begin{align*}
+F = m a = 24{,}560 \times 12{,}300 = 3.0\times10^8\un{N}, \qquad
+\tau = \frac{F}{\pi d L} = \frac{3.0\times10^8}{\pi \times 0.3 \times 18} = 17.8\un{MPa}
+\end{align*}
+
+tungsten wont even notice that, compare 26 GPa on the destroyers round
+
+\section*{4. the destroyers round going up}
+
+to coast up to 380 km in a vacuum it needs
+
+\begin{align*}
+\tfrac12 v^2 = \mu\left(\tfrac1R - \tfrac1r\right) = 3.986\times10^{14} \times 8.835\times10^{-9} = 3.52\times10^6
+\quad\Rightarrow\quad v = 2650\un{m/s}
+\end{align*}
+
+it has 7800 so its got plenty. leaving the air at 6.9 km/s at 80 km it gets to 380 km at
+
+\begin{align*}
+v^2 = 6900^2 - 2\mu\left(\tfrac{1}{6451\un{km}} - \tfrac{1}{6751\un{km}}\right) = 4.76\times10^7 - 5.49\times10^6 \quad\Rightarrow\quad v = 6490\un{m/s}
+\end{align*}
+
+nose heating at sea level (Sutton Graves), $r_n$ is nose radius, guess 3 mm
+
+\begin{align*}
+q = k\sqrt{\rho/r_n}\,v^3 = 1.74\times10^{-4} \times \sqrt{1.225/0.003} \times 7800^3 = 1.7\times10^{9}\un{W/m^2}
+\end{align*}
+
+tungsten has to be heated to 3695 K and melted before it comes off
+
+\begin{align*}
+H = c\Delta T + L_f = 134 \times 3400 + 192{,}000 = 0.65\un{MJ/kg}
+\end{align*}
+
+air density falls off with height ($H_s = 8.5$ km) and it climbs at $7800\sin70^\circ = 7330$ m/s, so the air it goes through adds up to
+
+\begin{align*}
+\int\!\sqrt{\rho}\,dt = \sqrt{\rho_0}\,\frac{2H_s}{v_z} = 1.107 \times \frac{17{,}000}{7330} = 2.57\\
+\text{nose lost} = \frac{k v^3}{\sqrt{r_n}} \times \frac{2.57}{\rho_w H} = \frac{1.51\times10^9 \times 2.57}{19300 \times 0.65\times10^6} = 0.31\un{m}
+\end{align*}
+
+thats the worst case, the nose blunts as it melts which cuts the heating, so 10 to 30 cm off a 2 m rod. it survives and the white hot sheath in the film is right. nothing burns once its out of the air
+
+\section*{5. the rod coming down and going in}
+
+$\beta$ is ballistic coefficient, $C_d$ about 0.15
+
+\begin{align*}
+\beta = \frac{m}{C_d A} = \frac{24{,}560}{0.15 \times \pi \times 0.15^2} = 2.3\times10^6\un{kg/m^2}
+\end{align*}
+
+thats so heavy for its size the air barely touches it. same heating sum as above with a blunter 5 cm nose at 5 km/s
+
+\begin{align*}
+\int\!\sqrt{\rho}\,dt = 1.107 \times \frac{17{,}000}{5000\sin44^\circ} = 1.107 \times \frac{17{,}000}{3473} = 5.42\\
+\text{nose lost} = \frac{1.74\times10^{-4} \times 5000^3}{\sqrt{0.05}} \times \frac{5.42}{19300 \times 0.65\times10^6} = 0.04\un{m}
+\end{align*}
+
+4 cm off 18 m so it hits whole. then in the water a long rod wears away as it goes, $L$ is rod length
+
+\begin{align*}
+P = L\sqrt{\rho_{\text{rod}}/\rho_{\text{water}}} = 18 \times \sqrt{19.3/1.025} = 18 \times 4.34 = 78\un{m}
+\end{align*}
+
+so it really does dive about 80 m and eat itself to nothing like the film shows, and dumping 73 t of TNT worth of energy right under the keel breaks the destroyer
+
+\end{document}
