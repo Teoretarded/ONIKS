@@ -43,11 +43,12 @@ export async function createBlast(game) {
   let nextId = 1, client = null, mode = 'boot', err = null;
   const pending = [];                    // specs before the client is up
   const upQ = [];                        // atlas uploads to do in the frame
-  // solver: 'shell' (the audited bench, e00312c: shell FE at 0.25 m on WebGPU in the worker; the default where the
-  // browser has WebGPU: an outside hit settles in ~1-2.5 s of play, an inside one in ~3-5 s at a 6 ms slice a frame) or
-  // 'lattice' (the bench at 1596bde: without WebGPU, and the main-thread fallback). ?blast=shell / ?blast=lattice, or
+  // solver: 'fast' (the default from 2026-11-09: the rule-based hit model, blast/fast, Rust/WebAssembly in the worker,
+  // done ~35 ms after impact, no WebGPU needed), 'shell' (the audited bench, e00312c: shell FE at 0.25 m on WebGPU in
+  // the worker: an outside hit settles in ~1-2.5 s of play, an inside one in ~3-5 s at a 6 ms slice a frame) or
+  // 'lattice' (the bench at 1596bde, and the main-thread fallback). ?blast=fast / shell / lattice / off, or
   // ONIKS.game.blast.cfg.solver
-  const DEFAULT_SOLVER = typeof navigator !== 'undefined' && navigator.gpu ? 'shell' : 'lattice';
+  const DEFAULT_SOLVER = 'fast';
   const q0 = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('blast') : null;
   const cfg = { watchDist: 4000, upTexels: 6000, maxDots: 5000, on: q0 !== 'off', gpuMs: 3, gpuMsSlow: 5, gpuMsShell: 8, gpuMsShellSlow: 10, detachMs: 1.5, shellS: .25, scatter: .05, latMs: 5, fastEnd: true, petals: true,
     solver: q0 === 'shell' || q0 === 'lattice' || q0 === 'fast' ? q0 : DEFAULT_SOLVER };
