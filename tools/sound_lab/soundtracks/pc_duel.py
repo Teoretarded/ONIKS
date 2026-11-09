@@ -1,0 +1,1480 @@
+"""THE DUEL (reference/films/pc_duel/): the soundtrack, built on real recordings and timed by the render's markers.
+
+    python tools/sound_lab/soundtracks/pc_duel.py --video <render.mp4> [--markers <json>] [--from s --to s]
+        -> <render>_sound.mp4 (whole film: video stream copied; a part: cut exactly, 1080p) and the WAVs in
+           reference/films/renders/pc_duel/sound/ (mix, music, foley stems by family; float stems sum to the mix
+           before the limiter)
+
+The story, in order (each beat: the chapter titles it may come under; a cue named snd:<beat> wins over the chapter,
+see BEATS and README 'Sample layers'): night at sea; the engine rooms and the reactor; the power room, its banks
+charging under liquid-helium cooling; the coils, the hydraulics, the mount training; the director and the radar on
+a ship in orbit; the charge and the shot (the crack, the round climbing through plasma, the boom rolling back);
+the silence of space; the hit on the orbital ship (a thud and a groan through its hull, no boom); the orbital ship
+re-forming its barrel (machinery heard through the hull); its shot; the rod's fall (a rising roar, plasma tearing);
+the strike on the destroyer (the crack, the rolling blast, tearing metal, secondaries, fire); the rod into the sea
+(under the water: a muffled roar, boiling, bubbles); back at the surface (fire, steam, bubbles, groaning steel,
+waves).
+
+Every sound is a real recording (reference/sounds/refs, MANIFEST.md) cut, looped, varispeeded, stretched,
+filtered, placed at a distance and in a space by sound_lab.samples; only a few small things stay physical models
+(bubbles, frost, a sub thump). No beeps: the tags and the film's UI tones stay silent; the film's mechanical cues
+(clunk, clack, whirr) become real contactors, clanks and motors.
+"""
+import argparse
+import json
+import os
+import sys
+import time as _time
+
+import numpy as np
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
+sys.path.insert(0, HERE)
+
+from sound_lab import dsp, foley as F, mixer as MX, samples as S, timeline as TL  # noqa: E402
+from sound_lab.dsp import SR, n_of  # noqa: E402
+import pc_duel_score as SC  # noqa: E402
+
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
+OUT = os.path.join(ROOT, 'reference', 'films', 'renders', 'pc_duel', 'sound')
+B = TL.Beat
+
+# ---------------------------------------------------------------- the story
+
+BEATS = [   # (id, chapter titles, the film's named cue that marks it exactly)
+    B('station', ['Station', 'Night', 'Sea']),
+    B('machinery', ['Machinery', 'X-ray']),
+    B('engines', ['Main engines', 'Engines', 'Engine room', 'Gas turbines']),
+    B('gear', ['Reduction gear', 'Gear', 'Shafts']),
+    B('reactor', ['Reactor']),
+    B('steamgen', ['Steam generator', 'Boiler']),
+    B('turbine', ['Steam turbine', 'Turbine']),
+    B('condenser', ['Condenser']),
+    B('generator', ['Generator']),
+    B('powerrun', ['Power run', 'Feeders', 'Switchboard']),
+    B('helium', ['Helium'], cue='helium_start'),
+    B('powerroom', ['Power room', 'Banks', 'Capacitors']),
+    B('alternators', ['Alternators'], cue='alternator_spinup'),
+    B('coolant', ['Coolant']),
+    B('bankcharge', ['Banks charge'], cue='bank_charge'),
+    B('cryo', ['Cryo', 'Cryogenics']),
+    B('coils', ['Coils']),
+    B('hydraulics', ['Hydraulics']),
+    B('sensors', ['Sensors', 'Director', 'Track', 'Radar']),
+    B('lay', ['Lay', 'Train', 'Mount']),
+    B('magazine', ['Magazine']),
+    B('fab', ['Fabrication', 'Circuit', 'Lattice', 'Armature', 'Tolerance', 'Round']),
+    B('load', ['Load']),
+    B('heatsink', ['Heat sink', 'Heat sink · out']),
+    B('charge', ['Charge'], cue='rail_charge'),
+    B('fire', ['Fire', 'Shot'], cue='fire'),
+    B('flight', ['Flight', 'Climb']),
+    B('space', ['Exit', 'Coast', 'Space', 'Burst'], cue='exit_atmosphere'),
+    B('hit', ['Strike', 'Hit', 'Impact'], cue='hit_orbital'),
+    B('debris', ['Debris', 'Scan'], cue='fragments'),
+    B('orbit', ['Orbit', 'Wake', 'Reactor', 'Radiators', 'Thrust', 'Detach']),
+    B('rings', ['Rings', 'Breach', 'Ring', 'Split', 'Build', 'Calibrate', 'Reroute', 'Reconfigure', 'Breech', 'Chamber'],
+      cue='barrel_build'),
+    B('orb_charge', ['Charge'], cue='orbital_charge'),
+    B('orb_fire', ['Fire'], cue='orbital_fire'),
+    B('fall', ['Fall', 'Entry', 'Re-entry'], cue='entry_glow'),
+    B('strike', ['Strike', 'Impact'], cue='rod_impact'),
+    B('underwater', ['Under', 'Underwater', 'Sea floor', 'Sink', 'Dive'], cue='water_entry'),
+    B('surface', ['Surface', 'Aftermath', 'Wreck', 'Return', 'Stow', 'Heat to sea', 'Heat sink · stow'], cue='surface'),
+]
+
+# where each beat is heard from (the ambience bed under it); chapters not in the story keep the previous place
+PLACE = {
+    'station': 'sea', 'machinery': 'engine', 'engines': 'engine', 'gear': 'engine', 'reactor': 'plant', 'steamgen': 'plant',
+    'turbine': 'plant', 'condenser': 'plant', 'generator': 'plant', 'powerrun': 'power', 'helium': 'cryo', 'powerroom': 'power', 'alternators': 'power',
+    'bankcharge': 'power', 'coolant': 'power', 'cryo': 'cryo', 'coils': 'deck', 'hydraulics': 'power', 'sensors': 'deck', 'lay': 'deck',
+    'magazine': 'hangar', 'fab': 'hangar', 'load': 'hangar', 'heatsink': 'power', 'charge': 'deck', 'fire': 'deck',
+    'flight': 'sky', 'space': 'space', 'hit': 'space', 'debris': 'space', 'orbit': 'space_in', 'rings': 'space_in',
+    'orb_charge': 'space_in', 'orb_fire': 'space_in', 'fall': 'fall', 'strike': 'aftermath', 'underwater': 'underwater',
+    'surface': 'aftermath',
+}
+SPACE_OF = {'engine': 'engine_room', 'plant': 'engine_room', 'power': 'power_room', 'cryo': 'power_room', 'hangar': 'hangar',
+            'deck': 'deck', 'sea': 'open_sea', 'sky': 'sky', 'space': None, 'space_in': 'hull', 'fall': 'sky',
+            'aftermath': 'open_sea', 'underwater': 'water'}
+
+
+# ---------------------------------------------------------------- layer helpers
+
+
+def lv(x, db, crest=15.0):
+    """At db dBFS active RMS, its peaks held within `crest` dB of that (a stray click in a recording must not set
+    the level of the whole mix)."""
+    y = S.level(x, db)
+    if np.abs(y).max() > 10 ** ((db + crest) / 20):
+        y = dsp.limit(y, db + crest, 0.003, 0.05)
+    return y
+
+
+def pk(x, db):
+    """Peak-normalise to db dBFS."""
+    m = np.abs(x).max()
+    return x * (10 ** (db / 20) / m) if m > 0 else x
+
+
+class Kit:
+    """The scene helpers, bound to the mixer and the timeline."""
+
+    def __init__(self, M, T):
+        self.M, self.T = M, T
+        self.place_at = None
+
+    # beds ---------------------------------------------------------------
+    def bed(self, bus, t0, t1, key, db, seed=0, fin=2.0, fout=3.0, rate=None, eq=None, post=None, send=False, dw=None, **kw):
+        """A recording's texture from t0 to t1 (faded in before t0, out after t1), at db dBFS RMS."""
+        if t1 - t0 < 0.3:
+            return
+        L = t1 - t0 + fin + fout
+
+        def fn():
+            x = S.bed(key, L * (rate or 1.0) + 0.1, seed, fin=fin, fout=fout, **kw)
+            if rate is not None and np.isscalar(rate):
+                x = S.vari(x, rate)
+            if dw:
+                x = S.dewhistle(x, dw)
+            if eq:
+                x = S.eq(x, **eq)
+            if post:
+                x = post(x)
+            return lv(x, db)
+        self.M.add(bus, t0 - fin, fn, dur=L, send=send, why='bed ' + key)
+
+    # one-shots ----------------------------------------------------------
+    def hit(self, bus, t, key, i, db, semis=0.0, eq=None, top=40, pan=None, send=None, post=None, length=None, t0=0.0, t1=None,
+            dw=None):
+        def fn():
+            x = S.hit(key, i, top=top, length=length, t0=t0, t1=t1)
+            if semis:
+                x = S.vari(x, 2 ** (semis / 12))
+            if dw:
+                x = S.dewhistle(x, dw)
+            if eq:
+                x = S.eq(x, **eq)
+            if post:
+                x = post(x)
+            return pk(x, db)
+        self.M.add(bus, t, fn, dur=6, pan=pan, send=send, why=f'hit {key}[{i}]')
+
+    def seg(self, bus, t, key, start, length, db, rate=None, eq=None, pan=None, send=None, post=None, fin=0.02, fout=0.2,
+            peak=False, env=None, dw=None):
+        """length s of a recording from `start` s, optionally varispeeded (rate: scalar or [(t, rate)]), filtered,
+        shaped by a dB envelope [(t, dB)], at db dBFS RMS (or peak)."""
+        def fn():
+            if rate is None:
+                x = S.seg(key, start, length, fin, fout)
+            elif np.isscalar(rate):
+                x = S.vari(S.seg(key, start, length * rate + 0.05, fin, fout), rate)
+            else:
+                top = max(r for _, r in rate)
+                x = dsp.fade(S.vari(S.seg(key, start, length * top + 0.1, 0.005, 0.005), rate, length=length), fin, fout)
+            if dw:
+                x = S.dewhistle(x, dw)
+            if eq:
+                x = S.eq(x, **eq)
+            if env:
+                x = S.envelope(x, env)
+            if post:
+                x = post(x)
+            return pk(x, db) if peak else lv(x, db)
+        self.M.add(bus, t, fn, dur=length + 4, pan=pan, send=send, why=f'seg {key}@{start:g}')
+
+    def fn(self, bus, t, f, dur, db=0.0, pan=None, send=None, why=''):
+        self.M.add(bus, t, f, dur=dur, db=db, pan=pan, send=send, why=why)
+
+    # the mechanical vocabulary (the film's own cues land here) ---------
+    def contactor(self, t, db=-16, send=None, seed=0, big=False):
+        """A contactor / relay pulling in: a real one (two recordings, many strikes)."""
+        if big or seed % 3 == 0:
+            self.hit('mech', t, 'circuit_breaker_handling', seed % 23, db - 2 + (3 if big else 0), eq={'hp': 120}, top=30,
+                     pan=((seed * 0.37) % 1.2) - 0.6, send=send, dw=900)
+        else:
+            self.hit('mech', t, 'contactor_overload_relay', seed % 29, db, eq={'hp': 150}, top=40,
+                     pan=((seed * 0.53) % 1.2) - 0.6, send=send, dw=700)
+
+    def clank(self, t, db=-12, send=None, seed=0, size=1.0, semis=None, dw=None):
+        """Heavy steel seating: a real metal door's clangs, pitched down for bigger parts."""
+        sm = semis if semis is not None else -3.0 - 4.0 * (size - 1.0) - (seed % 3)
+        self.hit('mech', t, 'metal_shed_door_hits', 3 + (seed * 7) % 37, db, semis=sm, eq={'hp': 35, 'lp': 9000}, top=60,
+                 pan=((seed * 0.41) % 1.0) - 0.5, send=send, dw=dw)
+
+    def motor(self, t, d, db=-20, send=None, seed=0, up=True, size=1.0):
+        """A drive moving a part: a real electric actuator under load, its speed eased in and out; a big part
+        (size > 1) moves slower and lower, with a travelling crane's rumble under it."""
+        d = max(0.4, float(d))
+        st = 1.0 + (seed % 5) * 2.0
+        r0, r1 = (0.75, 1.0) if up else (1.0, 0.8)
+        r0, r1 = r0 / size, r1 / size
+        if size > 1.15:
+            self.seg('mech', t, 'overhead_crane_factory', 52.0 + (seed % 6) * 4.0, d + 0.4, db - 3, rate=0.85 / size,
+                     eq={'hp': 35, 'lp': 4000}, send=send, fin=0.15, fout=0.4)
+        ramp = [(0, r0 * 0.6), (min(0.25, d * 0.2), r0), (d * 0.8, r1), (d, r1 * 0.7)]
+        self.seg('mech', t, 'electric_actuator_load', st, d, db, rate=ramp, eq={'hp': 60, 'lp': 7000}, send=send,
+                 fin=0.06, fout=min(0.3, d * 0.3), env=[(0, -20), (min(0.15, d * 0.2), 0), (max(0.2, d - 0.2), 0), (d, -30)],
+                 pan=((seed * 0.29) % 1.0) - 0.5)
+
+    def spin(self, t, d, db=-21, send=None, seed=0, key='electric_motor_fs', top=1.0, low=0.3, hold=4.0, eq=None):
+        """A rotor spinning up: a running machine slowed down then brought to speed (varispeed), held, faded."""
+        d = max(0.6, float(d))
+        L = d + hold
+        ramp = [(0, low), (d, top), (L, top)]
+        e = [(0, -30), (d * 0.5, -6), (d, 0), (L - min(1.5, hold * 0.5), 0), (L, -40)]
+        a0 = S.steady(key, 10.0)
+        self.seg('mech', t, key, a0, L, db, rate=ramp, eq=eq or {'hp': 40, 'lp': 8000}, send=send, env=e, fin=0.1, fout=0.6,
+                 dw=1500)
+
+    def spindown(self, t, d, db=-22, send=None, seed=0, key='electric_motor_fs'):
+        """A rotor running down: a running machine slowed to a stop (varispeed), fading as it goes."""
+        d = max(0.6, float(d))
+        a0 = S.steady(key, 10.0)
+        self.seg('mech', t, key, a0, d, db, rate=[(0, 1.0), (d, 0.25)], eq={'hp': 40, 'lp': 7000}, send=send,
+                 env=[(0, 0), (d * 0.6, -6), (d, -40)], fin=0.05, fout=0.3, dw=1500)
+
+    def hiss(self, t, d, db=-24, send=None, seed=0, kind='gas'):
+        """Gas or steam escaping (kind gas/steam/helium) or water running (water)."""
+        d = max(0.5, float(d))
+        if kind == 'water':
+            st = 6.0 + (seed % 7) * 11.0
+            ff = min(1.0, d * 0.3)
+            self.seg('water', t, 'waves_lap_boat_hull', st, d, db, rate=0.8, eq={'hp': 120, 'lp': 3200}, send=send,
+                     fin=0.3, fout=ff)
+            self.seg('water', t, 'liquid_nitrogen_dispensing', 4.0 + (seed % 4) * 6.0, d, db - 4, rate=0.7, dw=600,
+                     eq={'hp': 80, 'lp': 2500}, send=send, fin=0.3, fout=ff)
+            self.seg('water', t, 'underwater_rumble', 3.0 + (seed % 5) * 8.0, d, db - 5, eq={'hp': 40, 'lp': 700},
+                     fin=0.4, fout=ff)
+        elif kind == 'helium':
+            st = 10.0 + (seed % 5) * 7.0
+            self.seg('mech', t, 'liquid_nitrogen_fs', st, d, db, eq={'hp': 900, 'lp': 9000}, send=send, fin=0.4,
+                     fout=min(1.2, d * 0.3), dw=1000)
+        else:
+            self.seg('mech', t, 'air_pressure_release', 11.6 + (seed % 3) * 0.6, min(d, 5.0), db,
+                     eq={'hp': 300 if kind == 'gas' else 150, 'lp': 9000 if kind == 'gas' else 6000}, send=send,
+                     fin=0.08, fout=min(1.0, d * 0.3))
+
+    def hum(self, t, d, db=-22, send=None, seed=0, rise=1.0, env=None):
+        """Electrical machinery energising: a transformer's hum swelling (rise > 1: the pitch creeping up with load)."""
+        d = max(1.0, float(d))
+        a0 = S.steady('transformer_hum_large_room', 8.0)
+        ramp = [(0, 1.0), (d, rise)]
+        self.seg('elec', t, 'transformer_hum_large_room', a0, d, db, rate=ramp, eq={'hp': 50, 'lp': 2500,
+                 'peaks': [(240, 2, 1.0)]}, send=send, env=env or [(0, -24), (min(1.0, d * 0.4), 0), (d - 0.6, 0), (d, -30)],
+                 fin=0.2, fout=0.5 if env is None else 0.01, dw=1000)
+
+
+# ---------------------------------------------------------------- the beds by place
+
+
+def beds(K, T):
+    """The ambience of each place, crossfaded at the chapter changes (the place map PLACE)."""
+    segs = []
+    cur = None
+    j2b = {j: b for b, j in T.match.items()}
+    for j, c in enumerate(T.chapters):
+        b = j2b.get(j)
+        pl = PLACE.get(b, cur) if b else cur
+        if pl is None:
+            pl = 'sea'
+        if not segs or segs[-1][0] != pl:
+            segs.append([pl, c['t'], None])
+        cur = pl
+    for k in range(len(segs)):
+        segs[k][2] = segs[k + 1][1] if k + 1 < len(segs) else T.duration
+    lu, lup = getattr(T, 'lens_under', None), getattr(T, 'lens_up', None)
+    for k, sg in enumerate(segs):      # under the water means the lens under the water, not the chapter
+        if sg[0] == 'underwater' and lu is not None and lup is not None:
+            sg[1], sg[2] = lu, lup
+            if k > 0:
+                segs[k - 1][2] = lu
+            if k + 1 < len(segs):
+                segs[k + 1][1] = lup
+    for k, (pl, a, b) in enumerate(segs):
+        s = 100 + k * 7
+        # each change of place is a crossfade centred on the picture's dissolve (a .. a + 0.8): the new bed rises from
+        # a - 0.4 to a + 0.8 while the old one falls from b - 0.4 over 1.6 s; into and out of the water it is quick
+        prev_uw = k > 0 and segs[k - 1][0] == 'underwater'
+        next_uw = k + 1 < len(segs) and segs[k + 1][0] == 'underwater'
+        if a <= 0.5:
+            fi = 0.3
+        elif prev_uw or pl == 'underwater':
+            fi = 0.6 if prev_uw else 0.15
+        else:
+            fi, a = 1.2, a + 0.8
+        if next_uw:
+            fo = 0.3
+        elif pl == 'underwater':
+            fo = 1.0
+        elif k + 1 < len(segs):
+            fo, b = 1.6, b - 0.4
+        else:
+            fo = 1.0
+        if pl == 'sea':
+            K.bed('amb', a, b, 'waves_lap_boat_hull', -30, s, fi, fo, eq={'hp': 60})
+            K.bed('amb', a, b, 'waves_breaking_groyne', -34, s + 1, fi, fo, post=lambda x: S.distance(x, 300, ground=0.4))
+            K.bed('amb', a, b, 'deep_ocean_rumble', -36, s + 2, fi, fo, eq={'lp': 220})
+            K.fn('amb', a - fi, lambda L=b - a + fi + fo, s=s, fi=fi, fo=fo: lv(dsp.fade(dsp.stereo(F.wind(L, 0.3, s)), fi, fo), -40), b - a + fi + fo)
+        elif pl == 'engine':
+            K.bed('amb', a, b, 'ferry_engine_room_1', -27, s, fi, fo)
+            K.bed('amb', a, b, 'ferry_below_deck', -32, s + 1, fi, fo, eq={'lp': 4000})
+        elif pl == 'plant':
+            K.bed('amb', a, b, 'coal_power_plant_interior', -28, s, fi, fo, eq={'hp': 30})
+            K.bed('amb', a, b, 'ferry_engine_room_2', -32, s + 1, fi, fo, eq={'lp': 1800})
+        elif pl == 'power':
+            K.bed('amb', a, b, 'control_room_tone', -32, s, fi, fo, eq={'hp': 25})
+            K.bed('amb', a, b, 'large_ventilation_fan', -36, s + 1, fi, fo, eq={'lp': 5000})
+            K.bed('amb', a, b, 'transformer_hum_large_room', -38, s + 2, fi, fo, eq={'lp': 1500}, dw=1000)
+        elif pl == 'cryo':
+            K.bed('amb', a, b, 'dry_scroll_pump', -32, s, fi, fo, eq={'hp': 40, 'lp': 9000}, dw=1200)
+            K.bed('amb', a, b, 'liquid_air_plant', -33, s + 1, fi, fo, eq={'lp': 7000}, dw=1200)
+            K.bed('amb', a, b, 'control_room_tone', -36, s + 2, fi, fo)
+        elif pl == 'deck':
+            K.bed('amb', a, b, 'waves_lap_boat_hull', -34, s, fi, fo, eq={'hp': 60})
+            K.bed('amb', a, b, 'waves_breaking_groyne', -36, s + 1, fi, fo, post=lambda x: S.distance(x, 500, ground=0.4))
+            K.bed('amb', a, b, 'industrial_fan_3', -42, s + 2, fi, fo, eq={'lp': 2500})
+            K.fn('amb', a - fi, lambda L=b - a + fi + fo, s=s, fi=fi, fo=fo: lv(dsp.fade(dsp.stereo(F.wind(L, 0.35, s)), fi, fo), -38), b - a + fi + fo)
+        elif pl == 'hangar':
+            K.bed('amb', a, b, 'industrial_workshop_ambience', -32, s, fi, fo, eq={'lp': 6000}, dw=900)
+            K.bed('amb', a, b, 'large_ventilation_fan', -36, s + 1, fi, fo)
+        elif pl == 'space':
+            K.bed('amb', a, b, 'deep_ocean_rumble', -50, s, fi, fo, eq={'lp': 140})
+        elif pl == 'space_in':
+            K.bed('amb', a, b, 'electric_ferry_motor', -33, s, fi, fo, post=S.through_hull)
+            K.bed('amb', a, b, 'liquid_air_plant', -37, s + 1, fi, fo, post=S.through_hull, dw=1200)
+        elif pl == 'underwater':
+            K.bed('amb', a, b, 'underwater_ambience', -26, s, fi, fo, eq={'lp': 1500})
+            K.bed('amb', a, b, 'underwater_rumble', -28, s + 1, fi, fo)
+        elif pl == 'aftermath':
+            K.bed('amb', a, b, 'waves_breaking_groyne', -33, s, fi, fo, post=lambda x: S.distance(x, 120))
+            K.bed('amb', a, b, 'waves_lap_boat_hull', -35, s + 1, fi, fo)
+            K.bed('amb', a, b, 'deep_ocean_rumble', -36, s + 2, fi, fo, eq={'lp': 220})
+        # 'space', 'sky', 'fall': no bed (silence, or the event itself is the sound)
+    return segs
+
+
+# ---------------------------------------------------------------- scenes
+
+
+def fire_bed(L, seed=0):
+    """A ship burning: arc-welding crackle slowed an octave (the pops of a fire), a low roar, a few louder pops."""
+    a = S.bed('welding_continuous', L / 0.5 + 0.2, seed, fin=0.5, fout=1.0)
+    a = S.eq(S.vari(a, 0.5)[:n_of(L)], hp=120, lp=5000)
+    r = S.bed('rocket_launch_rumble_canaveral', L, seed + 1, fin=1.0, fout=1.5, t0=40, t1=120)
+    r = S.eq(r, lp=260, hp=25)
+    y = lv(a, -31)[:n_of(L)]
+    y = y + lv(r, -31)[:len(y)]
+    return y
+
+
+def scenes(K, T, log=print):
+    at, span = T.at, T.span
+    M = K.M
+
+    # ---- the engines: gas turbines lighting off and running up (real gas-turbine starts), the engine room
+    s = span('engines', note=False)
+    if s:
+        a, b = s
+        K.seg('mech', a + 3.0, 'm1a1_gas_turbine_startup', 1.6, 26.0, -22, eq={'hp': 40, 'lp': 6000}, send=('engine_room', 0.25),
+              env=[(0, -40), (0.8, 0), (22, 0), (26, -40)])
+        K.seg('mech', a + 9.0, 'jet_engine_start_cart', 8.0, 18.0, -28, rate=0.8, eq={'hp': 50, 'lp': 3500}, pan=0.4,
+              send=('engine_room', 0.3), env=[(0, -40), (2, 0), (14, -2), (18, -40)])
+        K.bed('mech', a + 12, b + 2, 'jet_turbine_noise', -31, 7, rate=0.62, eq={'hp': 40, 'lp': 2200}, fin=4.0, fout=4.0)
+    # ---- the reduction gear: the train's whine, clutches seated
+    s = span('gear', note=False)
+    if s:
+        a, b = s
+        K.bed('mech', a, b, 'electric_ferry_motor', -26, 11, fin=1.5, fout=2.0, eq={'hp': 60})
+        K.seg('mech', a + 1.5, 'overhead_crane_factory', 52.0, 4.5, -22, eq={'hp': 60}, send=('engine_room', 0.3))
+    # ---- the reactor: coolant pumps spinning up, the rod drives stepping, the power rising
+    s = span('reactor', note=False)
+    if s:
+        a, b = s
+        K.spin(a + 3.0, 3.0, -20, ('engine_room', 0.3), 1, key='electric_ferry_motor', low=0.25, hold=b - a - 4, eq={'hp': 40, 'lp': 4000})
+        K.hiss(a + 4.0, b - a - 3, -28, ('engine_room', 0.2), 2, 'water')
+        K.hum(a + 10.0, b - a - 9, -26, ('engine_room', 0.2), 3, rise=1.06)
+    # ---- the steam generator: boiling, steam
+    s = span('steamgen', note=False)
+    if s:
+        a, b = s
+        K.seg('water', a + 0.5, 'liquid_nitrogen_fs', 18.0, b - a + 1, -26, rate=0.7, eq={'hp': 80, 'lp': 5000},
+              send=('engine_room', 0.25), env=[(0, -30), (3, 0), (b - a - 1, 0), (b - a + 1, -40)])
+        K.bed('mech', a + 3, b + 1, 'steam_release_factory', -30, 21, fin=1.5, fout=1.5, eq={'hp': 200})
+    # ---- the steam turbine: admission and the spin-up to speed
+    s = span('turbine', note=False)
+    if s:
+        a, b = s
+        K.spin(a + 1.0, min(8.0, b - a - 2), -26, ('engine_room', 0.25), 4, key='jet_turbine_noise', low=0.18, top=0.55,
+               hold=max(2.0, b - a - 8), eq={'hp': 40, 'lp': 5000})
+        K.hiss(a + 0.6, 3.0, -26, ('engine_room', 0.3), 5, 'steam')
+    # ---- the condenser: seawater through it
+    s = span('condenser', note=False)
+    if s:
+        a, b = s
+        K.hiss(a + 1.2, b - a + 1, -26, ('engine_room', 0.25), 6, 'water')
+        K.bed('water', a + 1.0, b + 1, 'underwater_rumble', -32, 61, fin=1.0, fout=1.5, eq={'hp': 50, 'lp': 700})
+    # ---- the generator: the field comes on, the machine hums
+    s = span('generator', note=False)
+    if s:
+        a, b = s
+        K.hum(a + 1.2, b - a + 1.5, -25, ('engine_room', 0.25), 7, rise=1.02)
+        K.spin(a + 1.0, 2.0, -27, ('engine_room', 0.2), 8, key='electric_ferry_motor', low=0.7, hold=b - a, eq={'hp': 50})
+    # ---- the power run: breakers rack in and close; the current goes forward
+    s = span('powerrun', note=False)
+    if s:
+        a, b = s
+        K.hum(a + 6.0, 8.0, -26, ('power_room', 0.25), 9, rise=1.03)
+    # ---- the power room: coolant pumps, an alternator drawn out and seated, the spin-up, the banks charging
+    s = span('powerroom', note=False)
+    if s:
+        a, b = s
+        K.hiss(a + 3.2, min(36.0, b - a - 2), -28, ('power_room', 0.2), 10, 'water')
+        K.bed('elec', a + 29.0, b + 2, 'power_station_buzz', -30, 12, fin=4.0, fout=2.0, eq={'hp': 60, 'lp': 3000}, dw=1100)
+        K.bed('elec', a + 30.0, b + 2, 'hv_substation', -34, 13, fin=5.0, fout=2.0, eq={'hp': 80, 'lp': 2500}, dw=1100)
+    # ---- the banks charging (the duel's own chapter): a rising charge hum under the contactors
+    s = span('bankcharge', note=False)
+    if s:
+        a, b = s
+        K.hum(a + 0.5, b - a, -24, ('power_room', 0.25), 14, rise=1.12)
+    # ---- coolant up the power column: a valve, the pipe filling, the flow settling
+    s = span('coolant', note=False)
+    if s:
+        a, b = s
+        K.seg('water', a + 0.6, 'liquid_nitrogen_dispensing', 2.0, min(9.0, b - a), -22, rate=0.6, eq={'hp': 60, 'lp': 3000}, dw=600,
+              send=('power_room', 0.3), env=[(0, -30), (1.0, 0), (6.0, -2), (min(9.0, b - a), -30)], fin=0.3, fout=1.5)
+        K.bed('water', a + 5.0, b, 'underwater_rumble', -36, 71, fin=2.0, fout=1.5, eq={'hp': 60, 'lp': 600})
+    # ---- the cryo plant: compressors chuffing (the cold heads' 1 Hz breath), helium hiss, frost
+    s = span('cryo', note=False)
+    if s:
+        a, b = s
+        K.bed('mech', a + 0.2, b, 'hydraulic_pump_system', -24, 15, fin=0.8, fout=2.0, chunk=(6.0, 10.0), xfade=0.25,
+              eq={'hp': 60, 'lp': 8000}, dw=900)
+        K.seg('mech', a + 0.5, 'air_compressor', 2.0, min(20.0, b - a), -30, eq={'hp': 80, 'lp': 6000}, send=('power_room', 0.2), dw=500,
+              env=[(0, -30), (1, 0), (min(20.0, b - a) - 2, 0), (min(20.0, b - a), -40)])
+        K.hiss(a + 1.0, b - a - 1.0, -34, ('power_room', 0.2), 16, 'helium')
+        K.fn('mech', a + 2.0, lambda L=b - a - 2: lv(dsp.stereo(F.ice(L, [(0, 2), (L, 28)], 17, big=0.1)), -36), b - a)
+    # ---- the coils: current into the magnets, station by station
+    s = span('coils', note=False)
+    if s:
+        a, b = s
+        K.hum(a + 2.5, b - a - 2.0, -24, ('deck', 0.2), 18, rise=1.05)
+        for k in range(10):
+            if a + 3.5 + 1.0 * k < b - 0.6:        # (the picture leaves at b: nothing runs on past the dissolve)
+                K.contactor(a + 3.5 + 1.0 * k, -22, ('deck', 0.15), 18 + k)
+    # ---- the hydraulics: the power unit starts, pressure builds
+    s = span('hydraulics', note=False)
+    if s:
+        a, b = s
+        if T.cue('hpu_start') is None:     # (the named cue voices the power unit itself)
+            K.seg('mech', a + 1.0, 'hydraulic_ramp_motors', 0.0, 12.0, -20, eq={'hp': 50}, send=('power_room', 0.2))
+        K.bed('mech', a + 2.0, b, 'hydraulic_pump_system', -28, 19, fin=1.0, fout=1.5, eq={'hp': 80})
+        K.clank(a + 1.0, -16, ('power_room', 0.25), 19, 1.2)
+    # ---- the sensors: the director slews and locks (servos), the radar
+    s = span('sensors', note=False)
+    if s:
+        a, b = s
+        K.motor(a + 1.0, 1.6, -24, ('deck', 0.2), 20)
+        K.motor(a + 6.0, 2.2, -26, ('deck', 0.2), 21, up=False)
+        K.bed('mech', a + 3, b, 'industrial_fan', -38, 22, fin=2.0, fout=2.0, eq={'hp': 150, 'lp': 4000})
+    # ---- the lay: the mount trains and elevates (hydraulic motors round the ring gear), laid
+    s = span('lay', note=False)
+    if s:
+        a, b = s
+        L = min(9.0, b - a - 1)
+        if T.cue('mount_train') is None:   # (the named cue voices the training motors itself)
+            K.seg('mech', a + 0.4, 'hydraulic_ramp_motors', 2.0, 10.5, -19, rate=0.85, eq={'hp': 40}, send=('deck', 0.25))
+        K.seg('mech', a + 0.4, 'overhead_crane_factory', 52.0, L, -22, rate=0.8, eq={'hp': 40, 'lp': 5000}, send=('deck', 0.25),
+              env=[(0, -30), (0.8, 0), (L - 1, 0), (L, -40)])
+        K.clank(a + L + 0.3, -12, ('deck', 0.3), 23, 1.8)
+    # ---- the magazine and the fabrication bay: cranes, chains, welding, the round lifted
+    s = T.run('magazine', 'fab')
+    if s:
+        a, b = s
+        K.seg('mech', a + 1.0, 'overhead_crane_factory', 6.0, min(12.0, b - a), -24, eq={'hp': 40}, send=('hangar', 0.35))
+        K.seg('mech', a + 3.0, 'hoist_chains_rattle', 10.0, 8.0, -26, send=('hangar', 0.35))
+        t = a + 14.0
+        k = 0
+        while t < b - 6:
+            if k % 2 == 0:
+                K.seg('mech', t, 'spot_welding_raceway', 4.0 + 3 * (k % 5), 3.0, -30, eq={'hp': 200}, send=('hangar', 0.4), pan=0.3, dw=1500)
+            else:
+                K.seg('mech', t, 'mig_welding', 1.0 + (k % 4), 2.5, -32, eq={'hp': 300}, send=('hangar', 0.4), pan=-0.3, dw=1500)
+            t += 7.0
+            k += 1
+    # ---- the load: the rammer, the breech, the clamps
+    s = span('load', note=False)
+    if s:
+        a, b = s
+        q = min(1.0, (b - a) / 9.0)             # (a cut chapter: the rammer, the breech and the clamps closer together)
+        K.seg('mech', a + 0.5 * q, 'electric_actuator_load', 1.0, 4.0 * q, -20, send=('hangar', 0.3), fout=0.3)
+        K.seg('mech', a + 5.0 * q, 'hydraulic_ramp_motors', 9.5, 3.0 * q, -18, send=('hangar', 0.3), fout=0.3)
+        K.clank(a + 8.0 * q, -10, ('hangar', 0.35), 24, 2.2)
+
+    charge_fire(K, T)
+    space_and_orbit(K, T)
+    fall_and_strike(K, T)
+
+
+def charge_fire(K, T):
+    """The charge (a rising hum, arcs crawling, contactors) and the shot (the real railgun's report, a big gun's body,
+    the crack, the round climbing, the boom rolling back off the sky)."""
+    at = T.at
+    tf = shot_time(T)
+    tc = at('charge', note=False)
+    if tf is None:
+        return
+    if tc is None or tc >= tf:
+        tc = tf - 12.0
+    c = T.chapter('fire')
+    tr = c['t'] + 0.3 if c and tf - 3.0 < c['t'] + 0.3 < tf - 0.3 else tf - 0.6      # the release (the banks let go)
+    T.release = tr
+    L = tr - tc
+    # the charge: transformer hum climbing in pitch with load, the station's buzz, arcs crawling at the top; all of
+    # it cut at the release, so the shot comes out of a held breath
+    K.hum(tc, L + 0.05, -27, ('deck', 0.2), 30, rise=1.35, env=[(0, -30), (1.5, -16), (L * 0.85, -7), (L, -5)])
+    K.seg('elec', tc + L * 0.3, 'power_station_buzz', 40.0, L * 0.7 + 0.05, -33, rate=[(0, 1.0), (L * 0.7, 1.25)],
+          eq={'hp': 80, 'lp': 3500}, env=[(0, -30), (L * 0.6, -3), (L * 0.7, 0)], fout=0.01)
+    K.seg('elec', tc + L * 0.55, 'jacobs_ladder', 4.0, L * 0.45 + 0.05, -35, eq={'hp': 150, 'lp': 4500},
+          env=[(0, -30), (L * 0.45, 0)], fout=0.01)
+    for k in range(4):
+        K.contactor(tc + L * (0.15 + 0.2 * k), -22, ('deck', 0.2), 31 + k, big=k == 3)
+    K.contactor(tr, -10, ('deck', 0.3), 40, big=True)
+    K.clank(tr + 0.02, -12, ('deck', 0.3), 41, 2.4)
+    # the shot: one composite (the BAE railgun's own report, a tank gun's body, the cannon, the measured blast, the
+    # 'umf', the N-wave crack), saturated as a whole so it is the loudest thing in the film without limiter pumping
+    K.fn('big', tf - 0.004, lambda: shot_sound(301), 9, db=-4.5, why='the shot')
+    # the round climbing through its plasma, and the boom rolling back
+    sf_ = T.cue('sheath_fade', tf)                 # the plasma sheath fading: the climbing roar goes with it
+    Lr = min(14.0, max(4.0, sf_ - tf - 0.6 + 1.5)) if sf_ else 7.0
+    K.seg('big', tf + 0.6, 'rocket_launch_rumble_canaveral', 30.0, Lr, -27, eq={'hp': 30, 'lp': 2500}, send=('sky', 0.35),
+          env=[(0, -12), (0.6, 0), (Lr * 0.35, -6), (Lr, -40)], fin=0.2, fout=2.0)
+    K.seg('big', tf + 0.3, 'air_pressure_release', 12.0, 3.0, -30, rate=0.7, eq={'hp': 500, 'lp': 8000},
+          env=[(0, 0), (3, -30)], fin=0.05)
+    tb = T.cue('sonic_boom', tf) or tf + 2.4
+    K.seg('big', tb, 'sonic_boom_fs', 0.7, 8.0, -17, eq={'hp': 30}, send=('sky', 0.5), peak=True,
+          post=lambda x: S.distance(x, 900, ref=100, ground=0.5))
+    K.seg('big', tb + 1.0, 'thunder_loud', 1.8, 12.0, -31, eq={'hp': 30, 'lp': 3000}, send=('sky', 0.5), fin=0.8, fout=4.0)
+
+
+def shot_sound(seed=301):
+    rg = S.eq(S.hit('railgun_bae_test', 0, length=3.5, t0=20.0, t1=23.0), hp=25)
+    tank = S.eq(S.seg('tank_fire', 0.0, 4.2, 0.0005, 0.6), hp=25, lp=9000)
+    can = S.eq(S.vari(S.seg('cannon_ship', 0.25, 3.0, 0.001, 0.5), 0.8), hp=25, lp=5000)
+    boom = S.eq(S.hit('falcon9_landing_sonic_boom', 0, length=1.5, t0=1.5, t1=2.2), hp=40)
+    x = S.stack([(0.0, pk(rg, 0), 0.0), (0.004, pk(tank, 0), -1.0), (0.014, pk(can, 0), -5.0),
+                 (0.004, pk(F.railgun_blast(seed), 0), -4.0), (0.004, pk(dsp.stereo(F.thump(150.0, 44.0, 0.03, 0.3, 2.4, 1.6)), 0), -2.0),
+                 (0.024, pk(boom, 0), -4.0)])
+    x = S.space(x, 'sky', 0.3, 1.0)
+    x = S.envelope(x, [(0, 0), (0.8, 0), (2.5, -5), (8, -8), (20, -10)])
+    return S.punch(x, 3.4, -3.5, lows=2.5)
+
+
+def strike_sound(seed=71, slow=1.0):
+    """The strike: the N-wave crack at speed (its onset and top end), the blast's body (a distant nuclear test's
+    roll, a huge explosion, a big gun's punch) slowed with the picture's clock (slow: the sound rate), the 'umf'."""
+    sb = max(0.55, slow ** 0.45)
+    boom = S.eq(S.hit('falcon9_landing_sonic_boom', 0, length=2.0, t0=1.5, t1=2.2), hp=30)
+    crack = S.eq(S.hit('falcon9_landing_sonic_boom', 0, length=0.5, t0=1.5, t1=2.2), hp=1500, high=(6000, 4.0))
+    nuc = S.eq(S.vari(S.seg('nuclear_distant', 0.4, 30.0 * sb, 0.001, 6.0), sb), hp=22)
+    huge = S.eq(S.vari(S.seg('huge_distant_explosion', 0.15, 14.0 * sb, 0.001, 4.0), sb), hp=25)
+    tank = S.eq(S.vari(S.seg('tank_fire', 0.0, 4.2, 0.0005, 0.6), max(0.7, sb)), hp=25)
+    rep = S.eq(S.hit('howitzer_155mm', 3, top=30, length=2.0), hp=800, high=(4000, 2.0))      # the 2-6 kHz crack on top
+    x = S.stack([(0.0, pk(boom, 0), 0.0), (0.0, pk(crack, 0), -6.0), (0.003, pk(nuc, 0), -2.0),
+                 (0.05, pk(huge, 0), -3.0), (0.08, pk(tank, 0), -5.0),
+                 (0.003, pk(dsp.stereo(F.thump(120.0 * sb, 32.0, 0.04, 0.5, 2.6 / sb, 2.4)), 0), -1.0)])
+    x = S.space(x, 'open_sea', 0.3, 1.0)
+    x = S.envelope(x, [(0, 0), (1.2 / sb, 0), (3.5 / sb, -6), (12, -9), (40, -12)])     # the blast first, then its roll
+    y = S.punch(x, 5.5, -3.0, lows=2.0)
+    # the crack on top, outside the saturation (so the drive does not swallow it): the N-wave's top and a howitzer's
+    # report high-passed, 2-6 kHz, so the climax has the bright edge the orbital thuds lack
+    top = S.stack([(0.0, pk(crack, 0), 0.0), (0.002, pk(rep, 0), -2.0)])
+    top = S.eq(top, hp=1200, peaks=[(3500, 4.0, 0.8)])
+    return S.stack([(0.0, y, 0.0), (0.0, pk(top, -6.0), 0.0)])
+
+
+def shot_time(T):
+    """The muzzle moment: a cue snd:fire; else the kit's shot cue (crack + rumble) in the 8 s after the Fire
+    chapter; else the chapter + 1.3 s (the kit puts the chapter on the release, the round leaves 1.3 s later)."""
+    if 'fire' in T.named:
+        return T.named['fire'][0]
+    c = T.chapter('fire')
+    if c is None:
+        T.at('fire')
+        return None
+    ev = [t for t, _ in T.events('shot') if c['t'] - 0.5 <= t <= c['t'] + 8]
+    return ev[0] if ev else c['t'] + 1.3
+
+
+def _silence_before(L):
+    return np.zeros((n_of(0.1), 2))
+
+
+def metal_body(seed=0, rate=0.75, thick=1.0):
+    """The mid band of a hit carried through steel (lp ~2.5 kHz, not the sub-only hull): a heavy door's clang slowed,
+    a 300-800 Hz groan under it, so the orbital events still read on a phone."""
+    hi = S.vari(S.hit('metal_shed_door_hits', 1 + seed % 9, top=60), rate)
+    gr = S.eq(S.vari(S.seg('metallic_groan', 0.0, 4.0, 0.01, 1.5), 0.85), hp=280, lp=900)
+    x = S.stack([(0.0, pk(hi, 0), 0.0), (0.03, pk(gr, 0), -6.0)])
+    x = S.eq(S.dewhistle(x, 900), hp=180, lp=2500 / thick, peaks=[(600, 3.0, 1.0)])     # (the clang's ringing lines out)
+    return S.space(x, 'hull', 0.35, 1.0)
+
+
+def space_and_orbit(K, T):
+    """Space: silence; the hit on the orbital ship felt as a thud and a groan through its structure, with a metal
+    body in the mids; the furrow stopping on a wrench; its energy release (a deep exhale through the frame, the
+    bursts as thumps sized by their energy); the hull breaking into a V (a long torn-steel wrench over a sub swell);
+    its barrel re-formed by rings from the split on (machinery through the hull); the rod line; its shot (coil
+    thumps accelerating, a held breath, a deep thud with a metal crack)."""
+    at = T.at
+    hull = S.through_hull
+    th = at('hit', note=False)
+    ts_ = at('strike', note=False)
+    if th is not None and at('space', note=False) is not None and th > at('space'):
+        K.fn('hull', th, lambda: pk(hull(S.seg('huge_distant_explosion', 0.15, 6.0, 0.001, 1.5)), -10), 8)
+        K.fn('hull', th, lambda: pk(dsp.stereo(F.thump(80.0, 30.0, 0.05, 0.6, 2.0, 2.5)), -10), 3)
+        K.fn('hullm', th, lambda: pk(metal_body(3, 0.7), -11), 6, why='hit metal body')
+        K.fn('hull', th + 0.6, lambda: pk(hull(S.seg('metallic_groan', 0.0, 9.0, 0.3, 2.0)), -12), 12)
+        K.fn('hullm', th + 0.4, lambda: pk(S.eq(S.seg('steel_girders_tear_creak', 22.0, 3.0, 0.05, 1.0), hp=300, lp=3000), -16), 4,
+             why='furrow tearing')
+        tfr = T.cue('fragments', th - 0.1) or th + 1.2
+        for k in range(4):
+            K.fn('hull', tfr + 1.1 * k, lambda k=k: pk(hull(S.hit('metal_shed_door_hits', 10 + k * 3, top=60)), -20 - 2 * k), 4)
+    t = T.cue('furrow_end', th - 0.1 if th else None)
+    if t is not None:          # the tearing along the hull stops on a wrench
+        K.fn('hullm', t, lambda: pk(S.eq(S.vari(S.seg('steel_girders_tear_creak', 4.0, 2.5, 0.01, 0.8), 0.7), hp=200, lp=2800), -12), 4,
+             why='furrow_end')
+        K.fn('hull', t, lambda: pk(hull(S.vari(S.hit('metal_shed_door_hits', 2, top=60), 0.55)), -10), 5)
+    te = T.cue('energy_release', th - 0.1 if th else None)
+    if te is not None:         # the ship letting go: a long deep exhale through its frame
+        K.fn('hull', te, lambda: lv(hull(S.vari(S.seg('rocket_launch_rumble_canaveral', 30.0, 7.0, 0.4, 2.5), 0.7)), -18), 10,
+             why='energy_release')
+        K.fn('hullm', te + 0.1, lambda: lv(S.eq(S.vari(S.seg('air_pressure_release', 11.6, 4.0, 0.3, 1.5), 0.6), hp=250, lp=2200), -26), 6)
+    for name, times in sorted(T.named.items()):
+        if not name.startswith('burst_'):
+            continue
+        T.used.add('cue:' + name)
+        try:
+            gj = float(name.rsplit('_', 1)[-1].replace('GJ', ''))
+        except ValueError:
+            gj = 20.0
+        db = -21.0 + 9.0 * min(1.0, max(0.0, (gj - 10.0) / 40.0))
+        for t in times:
+            if ts_ is not None and t > ts_:
+                continue
+            sd = int(gj * 7 + t * 10)
+            K.fn('hull', t, lambda db=db, gj=gj: pk(dsp.stereo(F.thump(90.0 - gj * 0.4, 30.0, 0.04, 0.4, 1.4, 1.8)), db + 1), 3, why=name)
+            K.fn('hullm', t + 0.01, lambda db=db, sd=sd: pk(metal_body(sd, 0.85, 1.3), db - 4), 4)
+    hbs = [t for t in T.cues_named('hull_break') if th is not None and th < t and (ts_ is None or t < ts_)]
+    for t in hbs:              # the hull breaking into a V: a long torn-steel wrench through the hull, a sub swell
+        K.fn('hull', t, lambda: pk(hull(S.vari(S.seg('steel_girders_tear_creak', 0.0, 9.0, 0.05, 2.0), 0.6)), -12), 18,
+             why='hull_break (orbital)')
+        K.fn('hullm', t + 0.05, lambda: pk(S.eq(S.vari(S.dewhistle(S.seg('metallic_groan', 0.0, 9.0, 0.05, 2.5), 900), 0.6), hp=150, lp=2200), -14), 18)
+        K.fn('hull', t, lambda: pk(dsp.stereo(F.thump(55.0, 24.0, 0.6, 1.5, 5.0, 4.0)), -13), 8)
+    # the rebuild: servo whine and structural clanks heard through the hull, from the split on (not under the break)
+    rs = T.cue('rings_split')
+    toc0 = at('orb_charge', note=False)
+    a = rs if rs is not None else at('rings', note=False)
+    t = T.cue('ring_crack')
+    if t is not None and (not hbs or abs(t - hbs[0]) > 1.0):     # the ring cracking free: a deep crack and a groan
+        K.fn('hull', t, lambda: pk(hull(S.vari(S.hit('metal_shed_door_hits', 1, top=60), 0.5)), -10), 5, why='ring_crack')
+    if a is not None and toc0 is not None and toc0 > a:
+        b = toc0
+        if rs is not None:     # the rings splitting: latches letting go one after another, then the drives
+            for k in range(5):
+                K.fn('hull', rs + 0.18 * k, lambda k=k: pk(hull(S.vari(S.hit('circuit_breaker_handling', 4 + k, top=30), 0.6)), -14 - k), 3)
+                K.fn('hullm', rs + 0.18 * k, lambda k=k: pk(S.vari(S.hit('circuit_breaker_handling', 4 + k, top=30), 0.7), -22 - k), 3)
+            K.fn('hull', rs + 0.8, lambda: lv(hull(S.vari(S.seg('electric_actuator_load', 2, 4.0, 0.1, 0.8), 0.7)), -22), 5)
+        K.bed('hull', a + 0.6, b, 'electric_motor_2', -28, 41, fin=1.5, fout=1.5, rate=0.6, post=hull)
+        line = next((c['t'] for c in T.chapters if TL.norm(c['title']) == 'line' and c['t'] > a), None)
+        t = a + 1.5
+        k = 0
+        while t < b - 1:
+            if line is None or not (line - 0.5 < t < b):     # (the rod line has its own sounds)
+                K.fn('hull', t, lambda k=k: pk(hull(S.vari(S.hit('metal_shed_door_hits', 20 + (k * 5) % 30, top=60), 0.7)), -16 - (k % 3) * 2), 5)
+                K.fn('hullm', t, lambda k=k: pk(S.vari(S.hit('metal_shed_door_hits', 20 + (k * 5) % 30, top=60), 0.75), -26 - (k % 3) * 2), 4)
+                if k % 3 == 1:
+                    K.fn('hull', t + 0.4, lambda k=k: lv(hull(S.vari(S.seg('electric_actuator_load', 1 + k % 8, 2.5, 0.05, 0.3), 0.8)), -26), 4)
+            t += 2.4 + 0.6 * ((k * 7) % 3)
+            k += 1
+    # the rod line (inside the orbital ship, heard in its bay): the press, the arm, the slide, the round seated
+    bay = ('hull', 0.25)
+    t = T.cue('fab_line')
+    if t is not None:
+        K.seg('mech', t, 'hydraulic_ramp_motors', 9.5, 3.2, -21, eq={'hp': 60, 'lp': 4000}, send=bay, fout=0.6)
+        K.clank(t + 2.6, -14, bay, 801, 2.0)
+    t = T.cue('rod_lift')
+    if t is not None:
+        K.seg('mech', t, 'electric_actuator_load', 3.0, 2.6, -21, rate=0.8, eq={'hp': 60, 'lp': 5000}, send=bay, fout=0.5)
+    t = T.cue('rod_load')
+    if t is not None:
+        K.seg('mech', t, 'overhead_crane_factory', 58.0, 2.8, -22, rate=0.8, eq={'hp': 50, 'lp': 4500}, send=bay, fout=0.5)
+    t = T.cue('round_seated')
+    if t is not None:          # a deep lock clunk, the lock ring's clanks
+        K.clank(t, -10, bay, 803, 2.6, dw=1500)
+        for k in range(3):
+            K.contactor(t + 0.22 + 0.13 * k, -17, bay, 804 + k, big=True)
+    # the orbital charge and shot: a hum climbing through the hull, the coils' thumps accelerating, a held breath,
+    # the shot (a deep thud, a tank gun through the hull, a metal crack in the mids)
+    toc = at('orb_charge', note=False)
+    to = at('orb_fire', note=False)
+    if toc is not None and to is not None and to > toc:
+        K.fn('hull', toc, lambda L=to - toc: lv(S.through_hull(S.vari(S.bed('transformer_hum_large_room', L / 1.15 + 0.5, 42), [(0, 1.0), (L, 1.3)], length=L)), -26), to - toc)
+        L = min(4.0, to - toc - 0.5)
+        if L > 1.0:
+            t0 = to - 0.3 - L
+            u = np.linspace(0, 1, 11)
+            for k, x in enumerate(t0 + L * (1 - (1 - u) ** 1.8)):   # accelerating towards the release
+                if x < to - 0.32:
+                    K.fn('hull', x, lambda k=k: pk(dsp.stereo(F.thump(85.0 + 3 * k, 32.0, 0.03, 0.25, 1.2, 1.5)), -18 + 0.8 * k), 2,
+                         why='orbital coil thump')
+                    K.fn('hullm', x, lambda k=k: pk(S.vari(S.hit('circuit_breaker_handling', 2 + k, top=30), 0.6), -24 + 0.6 * k), 2)
+            for b_ in ('hull', 'hullm', 'amb', 'mech'):
+                K.M.auto(b_, [(to - 0.33, 0.0), (to - 0.3, -40.0), (to - 0.004, -40.0), (to, 0.0)])
+    if to is not None:
+        K.fn('hull', to, lambda: pk(dsp.stereo(F.thump(70.0, 28.0, 0.05, 0.7, 2.2, 3.0)), -9), 3)
+        K.fn('hull', to, lambda: pk(S.through_hull(S.seg('tank_fire', 0.0, 4.0, 0.001, 1.0)), -12), 5)
+        K.fn('hullm', to, lambda: pk(S.stack([(0, pk(metal_body(5, 0.8), 0), 0.0),
+                                              (0, pk(S.eq(S.seg('tank_fire', 0.0, 2.0, 0.0005, 0.5), hp=700, lp=4500), 0), -3.0)]), -11), 5,
+             why='orbital shot crack')
+
+
+def sound_rate(r):
+    """The picture's time rate as a playback rate for the sound: slow motion slows (and deepens) it, but only so far
+    (x0.003 plays at 0.22: a sound slowed 300 times is no longer a sound); time compression (x8) plays at 1."""
+    r = np.asarray(r, np.float64)
+    return np.where(r >= 1.0, 1.0, np.maximum(0.22, np.abs(r) ** 0.28))
+
+
+def rate_curve(T, a, b, step=0.05):
+    """[(t - a, sound rate)] over [a, b] from the picture's time rate."""
+    t = np.arange(a, b + step, step)
+    return [(float(x - a), float(r)) for x, r in zip(t, sound_rate(T.rate(t)))]
+
+
+def fall_and_strike(K, T):
+    """The rod's fall (a roar rising out of nothing, plasma tearing) slowing with the picture's clock across the
+    Terminal and falling away into a held breath; the strike (the crack, the blast slowed with the clock, tearing
+    steel, debris, the hull's secondaries, the splash, fire); under the water from the moment the lens goes under;
+    the surface."""
+    at, span = T.at, T.span
+    ta = at('fall', note=False)
+    ts = at('strike', note=False)
+    hole = getattr(T, 'strike_hole', None)
+    if ta is not None and ts is not None and ts > ta:
+        tq = getattr(T, 'terminal', None) or ts - 2.3          # the picture starts slowing here
+        e = (hole or ts - 0.4) - ta                              # the roar is gone by the hole
+        q = max(0.5, tq - ta)
+        rc = rate_curve(T, ta, ta + e)
+        env = [(0, -50), (q * 0.35, -32), (q * 0.7, -16), (q * 0.85, -11), (q, -15), (q + (e - q) * 0.45, -22), (e, -38)]
+        K.seg('big', ta, 'rocket_launch_rumble_canaveral', 20.0, e, -20, rate=rc, eq={'hp': 30}, env=env, fin=0.5, fout=0.08)
+        K.seg('big', ta + q * 0.3, 'jet_engine', 10.0, e - q * 0.3, -24,
+              rate=[(x, r * (0.6 + 0.55 * min(1.0, x / max(q * 0.7, 0.1)))) for x, r in rate_curve(T, ta + q * 0.3, ta + e)],
+              eq={'hp': 60, 'lp': 12000}, env=[(0, -50), (q * 0.35, -22), (q * 0.7, -8), (e - q * 0.3, -40)], fout=0.08)
+        K.seg('big', ta + q * 0.5, 'welding_continuous', 3.0, e - q * 0.5, -25,
+              rate=[(x, 0.6 * r) for x, r in rate_curve(T, ta + q * 0.5, ta + e)],
+              eq={'hp': 400, 'lp': 12000}, env=[(0, -45), (q * 0.3, -15), (q * 0.5, -6), (e - q * 0.5, -40)], fout=0.08, dw=1200)
+    if ts is not None:
+        sea = ('open_sea', 0.35)
+        slow = float(sound_rate(T.rate(ts + 0.05)))
+        if hole is not None and hole < ts:      # the held breath: the beds and the machines out too, back after the hit
+            for b in ('amb', 'fire', 'mech', 'elec', 'water'):
+                K.M.auto(b, [(hole - 0.25, 0.0), (hole, -45.0), (ts - 0.004, -45.0), (ts, -12.0), (ts + 1.2, 0.0)])
+        # the strike: one composite (the N-wave crack at speed, the blast's body slowed with the clock), saturated
+        K.fn('big', ts - 0.003, lambda: strike_sound(71, slow), 32, db=3.0, why='the strike')
+        # debris: steel fragments raining back, bright and close, thinning out
+        K.fn('mech', ts + 0.25, lambda: debris_rain(5.5, 81, slow), 8, send=sea, why='debris')
+        # tearing steel, under the blast's tail
+        hb = T.cue('hull_break', ts - 0.1) or ts + 1.0
+        K.seg('mech', hb, 'steel_girders_tear_creak', 0.0, 14.0, -27, rate=max(0.6, slow ** 0.5), send=sea, fin=0.3, fout=3.0)
+        K.seg('mech', hb + 0.6, 'demolition_tearing', 3.5, 10.0, -29, send=sea, fin=0.3, fout=3.0)
+        K.seg('mech', hb + 1.2, 'building_demolition_aachen', 33.0, 8.0, -31, send=sea, fin=0.5, fout=3.0)
+        # the blasts after the impact: the keel, the magazines, the rolling chain (keyed to the film's cues)
+        strike_chain(K, T, ts, slow, sea)
+        # the rod into the sea: the splash where it enters the water (slowed with the clock)
+        tw = T.cue('water_entry', ts - 0.1)
+        if tw is not None:
+            K.seg('water', tw, 'water_splashes', 19.6, 2.4, -9, rate=max(0.6, slow ** 0.4), peak=True, eq={'hp': 60}, fin=0.002,
+                  fout=0.8, send=sea)
+        # the ship burning (its own bus: muffled with everything else under the water)
+        K.fn('fire', ts + 2.0, lambda L=max(10.0, T.duration - ts - 2): fire_bed(L, 51), T.duration - ts)
+    # the decks cut in turn under the strike's slow clock: a torn-plate shriek per deck (deck_breach, then the readout)
+    t = T.cue('deck_breach', ts - 0.1) if ts is not None else None
+    if t is not None:
+        for k, dt in enumerate((0.0, 1.42, 3.22, 4.82)):
+            K.fn('mech', t + dt, lambda k=k: pk(S.eq(S.vari(S.hit('metal_shed_door_hits', 5 + 4 * k, top=60), 0.5), hp=800, high=(4000, 2.0)),
+                                                 -13 - 1.5 * k), 6, send=('open_sea', 0.25), why='deck_breach')
+    t = T.cue('mount_thrown', ts - 0.1) if ts is not None else None
+    if t is not None:          # the mount torn off its ring: a heavy wrench and a clang
+        K.seg('mech', t, 'steel_girders_tear_creak', 4.0, 3.0, -16, rate=0.8, eq={'hp': 80, 'lp': 7000}, send=('open_sea', 0.3), fout=1.0)
+        K.clank(t + 0.15, -12, ('open_sea', 0.3), 820, 2.6)
+    # under the water: from the moment the lens goes under
+    s = span('underwater', note=False)
+    lu, lup = getattr(T, 'lens_under', None), getattr(T, 'lens_up', None)
+    if s:
+        a = lu or s[0]
+        b = lup or s[1]
+        uw = S.underwater
+        K.fn('water', a - 0.05, lambda: pk(S.eq(S.seg('water_splashes', 19.55, 0.9, 0.005, 0.4), hp=80, lp=1200), -12), 2, why='lens_under (plunge)')
+        K.fn('water', a, lambda: pk(uw(S.seg('nuclear_distant', 2.0, min(14.0, b - a + 4), 0.05, 4.0)), -9), b - a + 6)
+        K.fn('water', a + 0.3, lambda L=b - a: lv(uw(S.bed('boiling_water', L, 52)), -24), b - a + 2)
+        K.fn('water', a, lambda L=b - a: bubbles(L, 53, -30, under=True), b - a)
+        K.fn('water', a + 0.5, lambda: pk(uw(S.seg('steel_girders_tear_creak', 30.0, 10.0, 0.3, 3.0)), -16), 12)
+        t = T.cue('rod_gone', a - 1)
+        if t is not None and t < b:    # the rod gone: a muffled burst of vapour, a crackle
+            K.fn('water', t, lambda: pk(uw(S.seg('huge_distant_explosion', 0.15, 3.0, 0.001, 1.2)), -12), 5, why='rod_gone')
+            K.fn('water', t + 0.05, lambda: lv(S.eq(S.vari(S.bed('boiling_water', 2.5, 57, fin=0.05, fout=1.0), 0.8), hp=300, lp=2500), -24), 4)
+        t = T.cue('cavity_collapse', a - 5)
+        if t is not None:      # the cavity the rod tore open slamming shut: a deep, muffled thud
+            K.fn('water', t, lambda: pk(uw(S.stack([(0, pk(dsp.stereo(F.thump(70.0, 26.0, 0.05, 0.6, 2.4, 2.5)), 0), 0.0),
+                                                   (0.01, pk(S.seg('huge_distant_explosion', 0.15, 6.0, 0.001, 2.0), 0), -4.0)])), -5), 8,
+                 why='cavity_collapse')
+    under = lambda t: lu is not None and lup is not None and lu <= t < lup  # noqa: E731
+    t = T.cue('bubbles_rise', (lu or 0) - 5)
+    if t is not None:
+        if under(t):           # the air rising, heard from under it
+            K.fn('water', t, lambda: lv(S.underwater(S.bed('boiling_water', 9.0, 54)), -22), 10, why='bubbles_rise')
+            K.fn('water', t, lambda: bubbles(8.0, 55, -27, under=True), 9)
+        else:                  # above the water: the cloud breaking the surface as boiling whitewater
+            K.fn('water', t, lambda: lv(S.eq(S.vari(S.bed('boiling_water', 8.0, 54, fin=0.6, fout=2.5), 0.7), hp=120, lp=7000), -22), 9,
+                 send=('open_sea', 0.3), why='bubbles_rise (whitewater)')
+            K.seg('water', t + 0.3, 'waves_breaking_groyne', 152.0, 7.0, -24, eq={'hp': 80}, send=('open_sea', 0.3), fin=0.5, fout=2.5)
+    t = T.cue('lens_up', (lu or 0) - 1)
+    if t is not None:          # breaking the surface: the water running off, air
+        K.fn('water', t - 0.05, lambda: pk(S.eq(S.seg('water_splashes', 26.8, 1.4, 0.01, 0.6), hp=200), -15), 3, why='lens_up')
+        K.seg('amb', t, 'waves_breaking_groyne', 0.3, 2.5, -28, eq={'hp': 300}, fin=0.05, fout=1.2)
+    t = T.cue('column_rise', (lup or 0) - 1)
+    if t is not None:          # the column rising (a rising water roar), then falling back as heavy rain on the sea
+        K.seg('water', t, 'waves_breaking_groyne', 152.5, 5.0, -15, rate=0.8, eq={'hp': 40}, send=('open_sea', 0.35),
+              env=[(0, -24), (1.5, -8), (3.8, 0), (5.0, -6)], fin=0.2, fout=1.0)
+        K.seg('big', t, 'rocket_launch_rumble_canaveral', 45.0, 6.0, -22, eq={'hp': 30, 'lp': 900},
+              env=[(0, -20), (3.0, 0), (6.0, -30)], fin=0.3, fout=1.5)
+        K.bed('water', t + 4.8, t + 11.0, 'rain_by_the_sea', -22, 64, fin=0.8, fout=3.0, eq={'hp': 150})
+        K.seg('water', t + 5.0, 'waves_breaking_groyne', 159.0, 4.0, -22, eq={'hp': 100}, send=('open_sea', 0.3), fin=0.3, fout=2.0)
+    t = T.cue('mount_splash', (lup or 0) - 1)
+    if t is not None:          # the thrown mount coming down in the sea
+        K.fn('water', t, lambda: pk(S.stack([(0, pk(S.eq(S.seg('water_splashes', 19.55, 2.2, 0.003, 0.8), hp=60), 0), 0.0),
+                                             (0, pk(dsp.stereo(F.thump(75.0, 30.0, 0.03, 0.4, 1.6, 2.0)), 0), -6.0)]), -12), 4,
+             send=('open_sea', 0.35), why='mount_splash')
+    t = T.cue('cook_off', (lup or 0) - 1)
+    if t is not None:          # a round cooking off in the wreck
+        K.fn('big', t - 0.003, lambda: pk(blast(830, 0.7, 1.0, 300.0), -17), 20, send=('open_sea', 0.35), why='cook_off')
+    t = T.cue('sinking')
+    if t is not None:          # the wreck going down: long groans of steel, air escaping, bubbles
+        K.seg('mech', t, 'metallic_groan', 0.0, 9.0, -26, rate=0.6, eq={'hp': 40, 'lp': 5000}, send=('open_sea', 0.3), fin=0.5, fout=2.0)
+        K.seg('mech', t + 3.0, 'ship_creak', 126.0, 8.0, -28, rate=0.7, eq={'hp': 40, 'lp': 6000}, send=('open_sea', 0.3), fin=0.5, fout=2.0)
+        K.fn('water', t + 1.0, lambda: bubbles(10.0, 63, -31, under=False), 11)
+    for nm, db in (('bow_under', -22.0), ('stern_under', -26.0)):
+        t = T.cue(nm, (lup or 0) - 1)
+        if t is not None:      # an end going under: air venting through the hull, foam closing over it
+            K.seg('water', t, 'air_pressure_release', 11.6, 3.5, db, eq={'hp': 200, 'lp': 2000}, send=('open_sea', 0.3), fin=0.08, fout=1.5)
+            K.seg('water', t + 0.2, 'waves_breaking_groyne', 159.0, 3.5, db - 2, eq={'hp': 100}, send=('open_sea', 0.3), fin=0.2, fout=1.8)
+            K.fn('water', t + 0.3, lambda db=db: bubbles(4.0, 70 + int(-db), db - 6, under=False), 5, why=nm)
+    # back at the surface: steam, groaning steel, bubbles, waves (the fire bed runs on from the strike)
+    s = span('surface', note=False)
+    if s:
+        a = max(s[0], lup or s[0])
+        b = s[1]
+        K.bed('water', a, b, 'steam_release_factory', -32, 61, fin=1.5, fout=3.0, eq={'hp': 150})
+        K.seg('water', a + 0.8, 'air_pressure_release', 11.5, 6.0, -28, eq={'hp': 400}, fin=0.3, fout=2.0)
+        K.fn('water', a, lambda L=min(30.0, b - a): bubbles(L, 62, -36, under=False), b - a)
+        t = a + 3.0
+        k = 0
+        while t < b - 6:
+            K.seg('mech', t, 'ship_creak', 3.0 + 41.0 * (k % 4), 5.0, -31, rate=0.75, eq={'hp': 50, 'lp': 6000},
+                  send=('open_sea', 0.3), fin=0.4, fout=1.5)
+            if k % 2:
+                K.fn('mech', t + 2.0, lambda: pk(S.vari(S.seg('metallic_groan', 0, 9.0, 0.3, 2.0), 0.7), -26), 14, send=('open_sea', 0.3))
+            t += 9.0
+            k += 1
+    # the end: the fire, the wreck and the water settle into the opening's sea (the loop's start), over the last 6 s
+    e = T.duration
+    for b_ in ('fire', 'mech', 'water', 'big'):
+        K.M.auto(b_, [(e - 7.0, 0.0), (e - 1.0, -22.0), (e + 1.0, -22.0)])
+
+
+def bubbles(L, seed=0, db=-30.0, under=True):
+    """Bubbles from a real recording (a pot boiling hard, slowed: big bubbles breaking), thinning out over L s;
+    from under the water they are dark and close, above it they break on the surface."""
+    x = S.vari(S.bed('boiling_water', L * 0.62 + 0.3, seed, fin=0.3, fout=min(2.0, L * 0.3)), 0.62)[:n_of(L)]
+    x = S.envelope(x, [(0, 0), (L * 0.4, -4), (L, -14)])
+    if under:
+        x = S.space(S.eq(x, hp=70, lp=1600, peaks=[(350, 3.0, 1.0)]), 'water', 0.4, 0.8)
+    else:
+        x = S.eq(x, hp=150, lp=6000)
+    return lv(x, db)
+
+
+def blast(seed=0, size=1.0, slow=1.0, dist=250.0):
+    """One big explosion as a composite of real recordings: a howitzer's or a cannon's report for the onset, a
+    distant explosion's crack, a huge explosion's body slowed with the picture's clock and deepened with size, a
+    pitch-dropping thump, steel thrown (bright metal strikes); placed at `dist` m over the sea and saturated as a
+    whole (samples.punch)."""
+    r = np.random.default_rng(seed)
+    sb = max(0.55, slow ** 0.4) / max(0.6, size) ** 0.35
+    on = S.eq(S.hit('howitzer_155mm', int(r.integers(0, 12)), top=30, length=2.5), hp=30)
+    cr = S.eq(S.hit('distant_explosions', int(r.integers(0, 30)), top=60, length=4.0), hp=25)
+    body = S.eq(S.vari(S.seg('huge_distant_explosion', float(r.uniform(0.1, 2.0)), 9.0 * sb, 0.001, 3.0), sb), hp=22)
+    roll = S.eq(S.vari(S.seg('nuclear_distant', float(r.uniform(0.4, 6.0)), 14.0 * sb, 0.01, 5.0), sb), hp=22, lp=3000)
+    thump = dsp.stereo(F.thump(110.0 * sb, 30.0, 0.04, 0.5, 2.2 / sb, 2.2))
+    steel = S.eq(S.vari(S.hit('metal_shed_door_hits', int(r.integers(0, 60)), top=80, length=1.5), float(r.uniform(0.7, 1.1))),
+                 hp=500, high=(5000, 3.0))
+    x = S.stack([(0.0, pk(on, 0), -1.0), (0.004, pk(cr, 0), -2.0), (0.01, pk(body, 0), -1.0), (0.03, pk(roll, 0), -5.0),
+                 (0.0, pk(thump, 0), -2.0), (0.06 + float(r.uniform(0, 0.08)), pk(steel, 0), -12.0)])
+    x = S.distance(x, dist, ref=150, ground=0.3)
+    x = S.space(x, 'open_sea', 0.35, 1.0)
+    x = S.envelope(x, [(0, 0), (0.8 / sb, 0), (2.5 / sb, -6), (10, -12), (30, -20)])
+    return S.punch(x, 2.2, -1.0, lows=1.0)
+
+
+def blast_cues(T, t0, t1):
+    """The named cues in (t0, t1) that mark blasts: secondary_blasts, and any cue whose name starts with
+    'magazine' or 'blast' (magazine_chain, blast_2 ...), as [(t, name)]."""
+    out = []
+    for name, times in T.named.items():
+        if name == 'secondary_blasts' or name.startswith('magazine') or name.startswith('blast'):
+            for t in times:
+                if t0 < t < t1:
+                    out.append((t, name))
+                    T.used.add('cue:' + name)
+    return sorted(out)
+
+
+def strike_chain(K, T, ts, slow, sea):
+    """The strike's sequence of blasts after the impact, keyed to the film's cues: the keel breaking (hull_break), a
+    blast at every magazine* / blast* cue, and a rolling chain of magazines going up from secondary_blasts, over a
+    low rumble that swells under the whole sequence. A chain whose cue falls while the lens is under the water is
+    heard as it would be from there (deep, muffled shocks); the hull's own flashes above the water (between the
+    break and the lens going under) then get the chain above the water."""
+    lu, lup = getattr(T, 'lens_under', None), getattr(T, 'lens_up', None)
+    under = lambda t: lu is not None and lup is not None and lu <= t < lup  # noqa: E731
+    hb = T.cue('hull_break', ts - 0.1, ts + 30)
+    cues = blast_cues(T, ts - 0.1, ts + 60)
+    shots = []                     # (t, size, dist, seed, under, magazine order 0..1 or None)
+    mags = sorted((t, n) for t, n in cues if n.startswith('magazine_') and n[9:].isdigit())
+    nm = max([int(n[9:]) for _, n in mags] + [1])
+    k = 0
+    for t, name in cues:
+        if name == 'secondary_blasts':
+            continue
+        if name.startswith('magazine_') and name[9:].isdigit():      # the magazines in turn, growing to the last
+            q = (int(name[9:]) - 1) / max(1, nm - 1)
+            shots.append((t, 0.9 + 0.4 * q, 260.0 - 80.0 * q, 910 + int(name[9:]), under(t), q))
+            continue
+        if mags and name == 'magazine_chain' and abs(t - mags[0][0]) < 0.5:
+            continue
+        shots.append((t, 1.05, 200.0 + 60 * (k % 4), 940 + k, under(t), None))
+        k += 1
+    sec = [t for t, n in cues if n == 'secondary_blasts']
+
+    def chain(t0, span, n, seed, uw):
+        g = np.cumsum([0] + [1.0 / (1 + 0.6 * np.sin(1.3 * i + seed)) for i in range(n - 1)])
+        g = g / max(g[-1], 1e-6) * span
+        return [(t0 + float(x), 0.9 + 0.25 * ((i * 5 + seed) % 3) / 2, 160.0 + 110 * ((i * 7 + seed) % 5), seed + i, uw, None)
+                for i, x in enumerate(g)]
+    nxt = lambda t: min([u for u, _ in cues if u > t + 0.5] + [t + 6.0])  # noqa: E731
+    for i, t in enumerate(sec):
+        if mags:                   # the magazines carry the chain themselves; only a muffled shock if under the water
+            if under(t):
+                shots += chain(t, 2.0, 2, 960 + 10 * i, True)
+            continue
+        if under(t):
+            a = ts + 0.5
+            b = min(lu - 0.35, ts + 3.6)
+            if b - a > 0.8:
+                shots += chain(a, b - a, 5, 930 + 10 * i, False)
+            shots += chain(t, min(3.0, nxt(t) - t - 0.5), 3, 960 + 10 * i, True)
+        else:
+            shots += chain(t, min(4.5, max(1.5, nxt(t) - t - 0.6)), 6, 930 + 10 * i, False)
+    if hb is not None:
+        shots.append((hb, 1.15, 180.0, 900, under(hb), None))
+    if not sec and not cues:       # no cue at all: the hull's flashes after the impact
+        a = ts + 0.5
+        b = min((lu or ts + 5.0) - 0.35, ts + 3.6)
+        if b - a > 0.8:
+            shots += chain(a, b - a, 5, 930, False)
+    shots.sort(key=lambda q: q[0])
+    keep = []
+    for q in shots:                # two blasts closer than 0.25 s are one
+        if keep and q[0] - keep[-1][0] < 0.25 and q[4] == keep[-1][4]:
+            if q[1] > keep[-1][1]:
+                keep[-1] = q
+            continue
+        keep.append(q)
+    shots = keep
+    for j, (t, size, dist, seed, uw, mq) in enumerate(shots):
+        if uw:
+            K.fn('water', t, lambda seed=seed, size=size: pk(S.underwater(S.stack([
+                (0, pk(dsp.stereo(F.thump(80.0, 26.0, 0.05, 0.6, 2.2, 2.5)), 0), 0.0),
+                (0.01, pk(S.seg('huge_distant_explosion', 0.15 + (seed % 5) * 0.4, 6.0, 0.001, 2.0), 0), -3.0)])), -7 - 1.5 * (seed % 3)),
+                 8, why='blast (under water)')
+        else:
+            if mq is not None:     # the magazines: -16 growing to -12.5 (the strike stays the loudest)
+                db = -16.0 + 3.5 * mq
+            else:
+                db = -13.0 - 1.0 * min(j, 4) if size > 1.0 else -16.0 - 0.8 * (j % 4)
+            K.fn('big', t - 0.003, lambda seed=seed, size=size, dist=dist, db=db: pk(blast(seed, size, slow, dist), db), 30, send=sea,
+                 why=f'blast {seed}')
+            K.fn('mech', t + 0.15, lambda seed=seed: debris_rain(2.5, seed, slow) * 0.6, 4, send=sea, why='blast debris')
+    above = [s[0] for s in shots if not s[4]]
+    if above:                      # the rolling rumble under the sequence
+        a, b = min(above), max(above) + 5.0
+        L = b - a
+        K.seg('big', a, 'rocket_launch_rumble_canaveral', 60.0, L, -27, rate=max(0.7, slow ** 0.3), eq={'hp': 25, 'lp': 1800},
+              env=[(0, -12), (min(1.0, L * 0.2), 0), (L - 4.0, -2), (L, -30)], fin=0.1, fout=2.0, send=sea)
+    return shots
+
+
+def debris_rain(L, seed=0, slow=1.0):
+    """Steel fragments falling back: many small strikes (a metal door's lighter clangs, pitched up, high-passed),
+    dense at first and thinning out, scattered across the stereo field, over the rattle of a demolition's debris."""
+    r = np.random.default_rng(seed)
+    n = n_of(L)
+    out = np.zeros((n + n_of(2.0), 2))
+    t = 0.0
+    k = 0
+    while t < L:
+        x = S.hit('metal_shed_door_hits', 60 + (k * 7) % 140, top=220, length=0.9)
+        x = S.vari(x, float(r.uniform(1.3, 2.2)) * max(0.75, slow ** 0.3))
+        x = S.eq(x, hp=900, high=(6000, 3.0))
+        x = S.pan(pk(x, float(-20 - 14 * t / L + r.normal(0, 3))), float(r.uniform(-0.8, 0.8)))
+        i = n_of(t)
+        m = min(len(x), len(out) - i)
+        out[i:i + m] += x[:m]
+        t += float(r.exponential(0.05 + 0.5 * (t / L) ** 1.5))
+        k += 1
+    rat = S.eq(S.seg('building_demolition_aachen', 40.0, L, 0.01, 1.5), hp=1200)
+    out[:len(rat)] += lv(rat, -30)[:len(out)]
+    return out
+
+
+# ---------------------------------------------------------------- the film's named cues (pc_duel)
+
+
+def named_cues(K, T):
+    """The duel's own cue names, each voiced where it happens (repeatable ones at every occurrence)."""
+    n = 0
+    for k, t in enumerate(T.cues_named('contactor_close')):
+        K.contactor(t, -14, ('power_room', 0.25), 700 + k, big=k % 4 == 3)
+        n += 1
+    t = T.cue('helium_start')
+    if t is not None:          # the helium lines open: a valve, the cold gas rushing, the boil-off hiss
+        K.clank(t, -16, ('power_room', 0.25), 710, 1.0)
+        K.hiss(t + 0.2, 10.0, -32, ('power_room', 0.2), 711, 'helium')
+        K.seg('mech', t + 0.1, 'air_pressure_release', 0.0, 3.0, -26, eq={'hp': 400, 'lp': 8000}, fin=0.02, fout=1.5)
+        n += 1
+    t = T.cue('cold_front')
+    if t is not None:          # the cold front running down the lines: frost crackling, steel ticking as it contracts
+        K.fn('mech', t, lambda: lv(dsp.stereo(F.ice(6.0, [(0, 60), (2, 30), (6, 4)], 712, big=0.25)), -26), 7, why='cold_front')
+        K.hiss(t, 5.0, -36, ('power_room', 0.2), 713, 'helium')
+        n += 1
+    t = T.cue('bank_charge')
+    if t is not None:          # the banks taking charge: a hum rising with the current
+        K.hum(t, 10.0, -24, ('power_room', 0.25), 714, rise=1.15, env=[(0, -30), (1.0, -10), (8.0, -2), (10.0, -30)])
+        n += 1
+    for k, t in enumerate(T.cues_named('alternator_spinup')):
+        K.spin(t, 5.0, -21, ('power_room', 0.25), 720 + k, key='electric_ferry_motor', low=0.15, hold=8.0, eq={'hp': 40, 'lp': 5000})
+        n += 1
+    for k, t in enumerate(T.cues_named('coil_energise')):
+        K.contactor(t, -15, ('deck', 0.2), 730 + k, big=True)
+        K.hum(t + 0.05, 4.0, -26, ('deck', 0.2), 731 + k, rise=1.03)
+        n += 1
+    t = T.cue('hpu_start')
+    if t is not None:          # the hydraulic power unit: the motor's starter, the pump coming up to pressure
+        K.contactor(t, -14, ('power_room', 0.25), 740, big=True)
+        K.seg('mech', t + 0.1, 'hydraulic_ramp_motors', 0.0, 10.0, -20, eq={'hp': 50}, send=('power_room', 0.2))
+        n += 1
+    for k, t in enumerate(T.cues_named('director_lock')):
+        K.motor(t - 0.6, 0.6, -24, ('deck', 0.2), 750 + k, up=False)
+        K.hit('mech', t, 'circuit_breaker_handling', 9 + k, -18, eq={'hp': 200}, top=30, dw=900, send=('deck', 0.2))
+        n += 1
+    for k, t in enumerate(T.cues_named('radar_lock')):
+        K.hit('mech', t, 'contactor_overload_relay', 11 + k, -22, eq={'hp': 250}, top=40, dw=700, send=('deck', 0.2))
+        n += 1
+    t = T.cue('mount_train')
+    if t is not None:          # the mount training round: hydraulic motors on the ring gear (ending with its chapter)
+        sl = T.span('lay', note=False)
+        L = min(10.5, (sl[1] - t + 0.6) if sl and sl[1] > t + 2 else 10.5)
+        K.seg('mech', t, 'hydraulic_ramp_motors', 2.0, L, -20, rate=0.85, eq={'hp': 40}, send=('deck', 0.25), fout=min(1.2, L * 0.3))
+        n += 1
+    return n
+
+
+# ---------------------------------------------------------------- the film's own mechanical cues
+
+
+def kit_cues(K, T):
+    """The kit's cues (clunk, clack, whirr, sweeps, hisses) as real mechanics, voiced by the place they happen in."""
+    j2b = {j: b for b, j in T.match.items()}
+    ch = T.chapters
+
+    def place(t):
+        pl = 'sea'
+        for j, c in enumerate(ch):
+            if c['t'] > t + 1e-6:
+                break
+            b = j2b.get(j)
+            if b:
+                pl = PLACE.get(b, pl)
+        return pl
+
+    # the beats that voice everything themselves: the kit's cues inside them stay silent
+    own = [T.span(b, note=False) for b in ('charge', 'fire', 'flight', 'space', 'hit', 'orb_charge', 'orb_fire', 'fall',
+                                           'strike', 'underwater')]
+    own = [s for s in own if s]
+    quiet = lambda t: any(a <= t < b for a, b in own)  # noqa: E731
+    have = [(e['t'], e['bus']) for e in K.M.ev]
+    near = lambda t, bus, tol=0.6: any(abs(t - u) < tol and b == bus for u, b in have)  # noqa: E731  (a scene already voices it)
+    n = 0
+    for k, (t, args) in enumerate(T.events('contactor')):
+        pl = place(t)
+        if quiet(t):
+            continue
+        if pl in ('space', 'sky', 'fall'):
+            continue
+        K.contactor(t, -16, (SPACE_OF[pl], 0.25) if SPACE_OF.get(pl) else None, 200 + k)
+        n += 1
+    for k, (t, args) in enumerate(T.events('clank')):
+        pl = place(t)
+        if quiet(t):
+            continue
+        if pl in ('space', 'sky', 'fall'):
+            continue
+        K.clank(t, -11, (SPACE_OF[pl], 0.3) if SPACE_OF.get(pl) else None, 300 + k, 1.6)
+        n += 1
+    for k, (t, args) in enumerate(T.events('motor') + T.events('servo')):
+        pl = place(t)
+        if quiet(t):
+            continue
+        if pl in ('space', 'sky', 'fall'):
+            continue
+        d = float(args[0]) if isinstance(args, list) and args else 1.2
+        K.motor(t, d, -22, (SPACE_OF[pl], 0.2) if SPACE_OF.get(pl) else None, 400 + k,
+                size={'power': 1.4, 'hangar': 1.3, 'deck': 1.2}.get(pl, 1.0))
+        n += 1
+    for k, (t, args) in enumerate(T.events('spin')):
+        pl = place(t)
+        if quiet(t):
+            continue
+        if pl in ('space', 'sky', 'fall', 'sea'):
+            continue
+        d = min(float(args.get('dur', 1.5)) if isinstance(args, dict) else 1.5, 6.0)
+        if pl in ('engine', 'plant') or near(t, 'mech'):
+            continue                          # the engine-room scenes voice their own spin-ups
+        sp = (SPACE_OF[pl], 0.25) if SPACE_OF.get(pl) else None
+        if pl == 'power' and d >= 2.5:        # an alternator: a big electric machine coming up to speed and running on
+            K.spin(t, d, -22, sp, 500 + k, key='electric_ferry_motor', low=0.2, hold=8.0, eq={'hp': 40, 'lp': 5000})
+        else:
+            K.spin(t, d, -22, sp, 500 + k, hold=1.5)
+        n += 1
+    for k, (t, args) in enumerate(T.events('spindown')):
+        pl = place(t)
+        if quiet(t) or pl in ('space', 'sky', 'fall', 'sea', 'engine', 'plant') or near(t, 'mech'):
+            continue
+        d = min(float(args.get('dur', 1.5)) if isinstance(args, dict) else 1.5, 6.0)
+        K.spindown(t, d, -23, (SPACE_OF[pl], 0.25) if SPACE_OF.get(pl) else None, 550 + k)
+        n += 1
+    for k, (t, args) in enumerate(T.events('hum')):
+        pl = place(t)
+        if quiet(t) or pl in ('space', 'sky', 'fall', 'sea', 'engine', 'plant') or near(t, 'elec', 1.0):
+            continue
+        d = min(float(args.get('dur', 3.0)) if isinstance(args, dict) else 3.0, 10.0)
+        K.hum(t, d, -26, (SPACE_OF[pl], 0.2) if SPACE_OF.get(pl) else None, 580 + k, rise=1.04)
+        n += 1
+    for k, (t, args) in enumerate(T.events('hiss')):
+        pl = place(t)
+        if quiet(t):
+            continue
+        if pl in ('space', 'sky', 'fall', 'sea', 'engine', 'plant'):
+            continue
+        d = min(float(args.get('dur', 2.0)) if isinstance(args, dict) else 2.0, 8.0)
+        f = float(args.get('f', 1000)) if isinstance(args, dict) else 1000
+        kind = 'water' if f < 1500 else 'helium' if pl == 'cryo' else 'gas'
+        if near(t, 'water' if kind == 'water' else 'mech'):
+            continue
+        K.hiss(t, d, -33 if kind == 'helium' else -28, (SPACE_OF[pl], 0.2) if SPACE_OF.get(pl) else None, 600 + k, kind)
+        n += 1
+    return n
+
+
+# ---------------------------------------------------------------- the mix
+
+
+FOLEY = ('amb', 'fire', 'mech', 'elec', 'water', 'big', 'hull', 'hullm')
+MUSIC = ('m_str', 'm_ost', 'm_pno', 'm_low', 'm_perc')
+STEMS = {'ambience': ('amb', 'fire'), 'machinery': ('mech', 'elec'), 'water': ('water',), 'impacts': ('big', 'hull', 'hullm'), 'music': MUSIC}
+
+
+def underwater_windows(T):
+    """While the lens is under the water: from the film log's eye height (the crossing inside the underwater beat),
+    else from the beat (the Dive chapter + LENS_UNDER_AFTER, to the surface)."""
+    a, b = getattr(T, 'lens_under', None), getattr(T, 'lens_up', None)
+    return [(a, b)] if a is not None and b is not None and b > a else []
+
+
+LENS_UNDER_AFTER = 1.5          # without a film log: the lens goes under this long after the underwater beat starts
+
+
+def film_timing(T, L=None, log=print):
+    """What the picture's own clock and camera say (from the film log L, else from the chapters): T.rate(t) (the
+    on-screen time rate), T.terminal (the picture starts slowing into the strike), T.strike_hole (the held
+    breath before it), T.lens_under / T.lens_up (the lens going under the water and coming up)."""
+    ts = T.at('strike', note=False)
+    c = next((c for c in T.chapters if TL.norm(c['title']) == 'terminal' and ts is not None and ts - 8 < c['t'] < ts), None)
+    T.terminal = c['t'] if c else (ts - 2.3 if ts is not None else None)
+    if L is not None:
+        T.rate = L.rate
+    else:
+        pts = [(0.0, 1.0)]
+        if ts is not None:      # without a log: slowing across the Terminal into x0.003 at the strike, held a while
+            pts += [(T.terminal, 1.0), (T.terminal + 0.6 * (ts - T.terminal), 0.003), (ts + 13.0, 0.003), (ts + 14.5, 0.05)]
+        P = np.array(pts)
+        T.rate = lambda t, P=P: np.interp(t, P[:, 0], P[:, 1])
+    T.strike_hole = ts - 0.38 if ts is not None else None
+    s = T.span('underwater', note=False)
+    T.lens_under = T.lens_up = None
+    if s:
+        sf = T.span('surface', note=False)
+        end = sf[0] if sf else s[1]
+        if L is not None:
+            cr = L.crossings(s[0] - 3.0, end + 3.0)
+            dn = [t for t, k in cr if k == 'under']
+            up = [t for t, k in cr if k == 'up' and dn and t > dn[0]]
+            if dn and up:
+                T.lens_under, T.lens_up = dn[0], up[0]
+        cu, cp = T.cue('lens_under', s[0] - 3.0), T.cue('lens_up', s[0] - 3.0)     # the film's own cues win
+        if cu is not None and cp is not None and cp > cu:
+            T.lens_under, T.lens_up = cu, cp
+        if T.lens_under is None:
+            T.lens_under, T.lens_up = s[0] + LENS_UNDER_AFTER, end + 0.1
+    if log:
+        log(f'  picture: terminal {T.terminal}, hole {T.strike_hole}, lens under {T.lens_under} - up {T.lens_up}; '
+            f'rate {"from the film log" if L is not None else "from the chapters (no film log)"}')
+
+
+def muffle(win, cut=500.0):
+    """A bus post-process: a low-pass that closes inside the under-water windows."""
+    def post(y, t0):
+        if not win:
+            return y
+        n = len(y)
+        pts = [(0.0, 20000.0)]
+        for a, b in win:
+            pts += [(a - t0 - 0.05, 20000.0), (a - t0 + 0.15, cut), (b - t0 - 0.1, cut), (b - t0 + 0.6, 20000.0)]
+        pts.append((n / SR + 1, 20000.0))
+        pts = sorted((max(0.0, t), v) for t, v in pts)
+        fc = F.curve(pts, n)
+        if fc.min() > 15000:
+            return y
+        return dsp.filt(y, 'lp', fc, 0.6, order=2, block=256)
+    return post
+
+
+def build_mixer(T, music=True, log=print):
+    M = MX.Mixer()
+    win = underwater_windows(T)
+    # real machinery recordings are bass-heavy: the beds thinned under 200 Hz and around 300 Hz (the mud), the
+    # machines given presence and air
+    M.bus('amb', hp=45, eq={'low': (200, -6.0), 'high': (3000, 2.5), 'peaks': [(300, -3.0, 1.0)]})
+    M.bus('mech', hp=35, eq={'low': (160, -4.0), 'high': (3500, 4.0), 'peaks': [(320, -2.0, 1.0)]})
+    M.bus('elec', hp=40, eq={'low': (150, -2.0), 'high': (3000, 2.0), 'peaks': [(300, -2.0, 1.0)]})
+    M.bus('water', hp=45, eq={'low': (200, -3.0), 'peaks': [(300, -2.0, 1.0)]})
+    M.bus('fire', hp=40, eq={'peaks': [(300, -2.0, 1.0)], 'high': (4000, 1.5)})
+    M.bus('big', hp=22, eq={'low': (90, -3.0), 'high': (5000, 2.5)})
+    M.bus('hull', hp=20, lp=900)
+    M.bus('hullm', hp=150, lp=3500)          # the mid band of the hits carried through steel (readable on a phone)
+    for b in ('mech', 'elec', 'big', 'fire'):
+        M.buses[b]['post'] = muffle(win)
+    # the music: real instruments in a hall, a little air, the mud at 300 Hz taken out, ducked under the foley
+    for b, sp in (('m_str', ('hall', 0.3)), ('m_ost', ('hall', 0.22)), ('m_pno', ('hall', 0.3)), ('m_low', ('hall', 0.3)),
+                  ('m_perc', ('hall', 0.3))):
+        M.bus(b, hp=35, eq={'low': (140, -3.0), 'peaks': [(300, -3.0, 1.0)], 'high': (5000, 3.5)}, send=sp, post=muffle(win, 400.0))
+        # ducked when a foley event speaks (the beds and the running machines set the cap, music_under_foley)
+        M.duck(b, ['mech', 'elec', 'big', 'hull', 'hullm', 'water'], depth=-10.0, thresh=-30.0, attack=0.03, release=0.8)
+    T.shot = shot_time(T)
+    K = Kit(M, T)
+    beds(K, T)
+    scenes(K, T, log)
+    n0 = named_cues(K, T)
+    n = kit_cues(K, T)
+    log(f'  the film\'s named cues voiced: {n0}; its kit cues (clunk, clack, whirr ...) voiced: {n}')
+    if music:
+        SC.compose(M, T, log)
+    return M
+
+
+BUS_DB = {'amb': -4.0, 'mech': -2.5, 'elec': -2.0, 'water': -3.0, 'fire': -4.0, 'big': 0.0, 'hull': -3.5, 'hullm': -1.0,
+          'm_str': 2.0, 'm_ost': 1.0, 'm_pno': 3.0, 'm_low': 2.0, 'm_perc': 1.0}
+
+# the music kept under the foley by at least this many dB (1 s windows, where the foley is playing), by place;
+# places not listed (the builds, space, the surface's theme) are not capped
+MUSIC_UNDER = {'engine': 6.0, 'plant': 6.0, 'power': 5.0, 'cryo': 5.0, 'deck': 5.0, 'hangar': 5.0, 'space_in': 3.0}
+MUSIC_FREE = ('charge', 'fire', 'orb_fire', 'fall')     # beats where the music may ride over the foley (the builds)
+
+
+def place_curve(T, t):
+    """The place (PLACE) of each time in t, and whether it is a free (build) beat."""
+    j2b = {j: b for b, j in T.match.items()}
+    pl, free = [], []
+    cur, fr = 'sea', False
+    marks = []
+    for j, c in enumerate(T.chapters):
+        b = j2b.get(j)
+        if b:
+            cur = PLACE.get(b, cur)
+            fr = b in MUSIC_FREE
+        marks.append((c['t'], cur, fr))
+    k = 0
+    for x in t:
+        while k + 1 < len(marks) and marks[k + 1][0] <= x:
+            k += 1
+        pl.append(marks[k][1] if marks and marks[k][0] <= x else 'sea')
+        free.append(marks[k][2] if marks and marks[k][0] <= x else False)
+    return pl, free
+
+
+def music_under_foley(buses, T, t0, log=print):
+    """Cap the music under the foley (MUSIC_UNDER, per place): a slow gain (1 s RMS windows, smoothed) that only
+    ever lowers the music, by at most 12 dB, where the foley is actually playing."""
+    mus = [b for b in buses if b.startswith('m_')]
+    fol = [b for b in buses if not b.startswith('m_')]
+    if not mus or not fol:
+        return buses
+    n = len(next(iter(buses.values())))
+    h = n_of(0.1)
+    k = n // h
+
+    def db(x):
+        p = (x[:k * h] ** 2).mean(1).reshape(k, h).mean(1)
+        p = np.convolve(p, np.ones(10) / 10, mode='same')          # 1 s windows
+        return 10 * np.log10(p + 1e-12)
+    fm = db(sum(buses[b] for b in fol))
+    mm = db(sum(buses[b] for b in mus))
+    tt = t0 + (np.arange(k) + 0.5) * h / SR
+    pl, free = place_curve(T, tt)
+    marg = np.array([np.nan if f else MUSIC_UNDER.get(p, np.nan) for p, f in zip(pl, free)])
+    want = fm - marg - mm
+    g = np.where(np.isnan(marg) | (fm < -50), 0.0, np.clip(np.minimum(0.0, want), -12.0, 0.0))
+    # smooth: falls in 0.5 s, recovers in 1.5 s
+    out = np.empty_like(g)
+    acc = 0.0
+    for i, v in enumerate(g):
+        acc += (v - acc) * (0.1 / (0.5 if v < acc else 1.5))
+        out[i] = acc
+    out = np.convolve(out, np.ones(5) / 5, mode='same')
+    gs = np.interp(np.arange(n), (np.arange(k) + 0.5) * h, out)
+    lin = (10 ** (gs / 20))[:, None]
+    if log:
+        log(f'  music under the foley: lowered {np.mean(out < -0.5) * 100:.0f} % of the time, at most {out.min():.1f} dB')
+    return {b: (y * lin if b in mus else y) for b, y in buses.items()}
+
+
+CLIMAX_CLIP_DB = 10.0    # the strike's first seconds soft-clipped by this much before the master: the loudest moment
+
+
+def climax_clip(mix, T, t0, log=print, db=CLIMAX_CLIP_DB, length=2.6):
+    """The strike made the loudest moment of the film: a limiter can only hold every big moment at the same ceiling,
+    so the strike's own crest is taken down instead (a tanh soft clip over its first seconds, eased in over 5 ms and
+    out over 0.8 s): the same peak, `db` dB less crest, so it plays louder than the shot and the orbital events.
+    (Applied to the mix only; the stems stay unclipped.)"""
+    ts = T.at('strike', note=False)
+    if ts is None or not db:
+        return mix
+    i0, i1 = n_of(max(0.0, ts - 0.01 - t0)), n_of(max(0.0, ts + length - t0))
+    if i1 <= 0 or i0 >= len(mix):
+        return mix
+    i1 = min(i1, len(mix))
+    seg = mix[i0:i1]
+    p = np.abs(seg).max()
+    if p <= 0:
+        return mix
+    thr = p * 10 ** (-db / 20)
+    c = thr * np.tanh(seg / thr) * (p / (thr * np.tanh(p / thr)))      # (same peak as before)
+    w = np.ones(len(seg))
+    a, b = n_of(0.005), min(len(seg), n_of(0.8))
+    w[:a] = np.linspace(0, 1, a)
+    w[-b:] = np.minimum(w[-b:], np.linspace(1, 0, b))
+    out = mix.copy()
+    out[i0:i1] = seg * (1 - w[:, None]) + c * w[:, None]
+    log(f'  climax: the strike soft-clipped {db:.1f} dB over {length:.1f} s')
+    return out
+
+
+def render(T, t0, t1, out_dir, music=True, gain_db=None, target=-14.0, tp=-1.5, log=print, debug=0):
+    T0 = _time.time()
+    M = build_mixer(T, music, log)
+    for b, d in BUS_DB.items():
+        if b in M.buses:
+            M.buses[b]['db'] += d
+    log(f'  {len(M.ev)} events; rendering {t0:.1f}-{t1:.1f} s')
+    if debug:
+        M.stats = []
+    buses = M.render(t0, t1, log)
+    if debug:
+        top = sorted(M.stats, key=lambda q: -(q[3] + M.buses[q[1]]['db']))[:debug]
+        log('  loudest events (peak dBFS incl. bus gain, before the master):')
+        for t, b, w, p, r, L in top:
+            log(f'    {t:8.2f} s {b:6s} peak {p + M.buses[b]["db"]:6.1f} rms {r + M.buses[b]["db"]:6.1f} len {L:5.1f}  {w}')
+    n = n_of(t1 - t0)
+    buses = {b: y[:n] for b, y in buses.items()}
+    buses = music_under_foley(buses, T, t0, log)
+    edge = np.minimum(1, np.arange(n) / SR / 0.5)[:, None] if t0 > 0 else 1.0
+    stems = {s: sum(buses[b] for b in bs if b in buses) * edge for s, bs in STEMS.items()}
+    # the master: a little less boom under 110 Hz, a little air above 5 kHz, on the whole (each stem, so the stems still sum to the mix)
+    stems = {s: S.eq(x, low=(110, -1.5), high=(5000, 2.5)) if not np.isscalar(x) else x for s, x in stems.items()}
+    mix = sum(stems.values())
+    mix = climax_clip(mix, T, t0, log)
+    log(f'  rendered ({_time.time() - T0:.0f} s); mastering')
+    y, rep = MX.master(mix, target, tp, gain_db=gain_db, log=log)
+    if t1 >= T.duration - 0.01:      # the end: the score's last note rings out on its own; only a guard fade
+        f = n_of(0.4)
+        y[-f:] *= np.linspace(1, 0, f)[:, None]
+    tag = '' if (t0 <= 0 and t1 >= T.duration - 0.01) else f'_{t0:g}-{t1:g}s'
+    os.makedirs(out_dir, exist_ok=True)
+    g = 10 ** (rep['gain_db'] / 20)
+    MX.write_wav(os.path.join(out_dir, f'mix{tag}.wav'), y)
+    for s, x in stems.items():
+        MX.write_wav(os.path.join(out_dir, f'stem_{s}{tag}.wav'), x * g, float32=True)
+    MX.write_wav(os.path.join(out_dir, f'foley{tag}.wav'), sum(v for k, v in stems.items() if k != 'music') * g, float32=True)
+    rep.update({'from': t0, 'to': t1, 'stems': list(stems), 'render_s': round(_time.time() - T0, 1)})
+    with open(os.path.join(out_dir, f'report{tag}.json'), 'w') as f:
+        json.dump(rep, f, indent=1)
+    return os.path.join(out_dir, f'mix{tag}.wav'), rep
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('--video', help='the silent render (its <stem>.markers.json gives the timing)')
+    ap.add_argument('--markers', help='markers.json (default: next to the video)')
+    ap.add_argument('--camlog', help='the film page\'s camera log (default: <render dir>/review*/camlog.json, then '
+                                     'reference/films/shots/camlog/<film>.json; used only if its chapters match)')
+    ap.add_argument('--from', dest='frm', type=float, default=0.0)
+    ap.add_argument('--to', type=float, default=None)
+    ap.add_argument('--out', default=OUT)
+    ap.add_argument('--no-music', action='store_true')
+    ap.add_argument('--gain', type=float, default=None, help='force the master gain (dB): a part mastered like the whole')
+    ap.add_argument('--lufs', type=float, default=-14.0)
+    ap.add_argument('--tp', type=float, default=-1.5, help='true-peak ceiling before AAC (dBTP)')
+    ap.add_argument('--debug', type=int, default=0, help='list the N loudest events')
+    ap.add_argument('--height', type=int, default=1080, help='a part is re-encoded at this height (default 1080)')
+    a = ap.parse_args()
+    mk = a.markers or (os.path.splitext(a.video)[0] + '.markers.json' if a.video else None)
+    if not mk or not os.path.exists(mk):
+        sys.exit(f'no markers file ({mk}); pass --markers')
+    T = TL.Timeline.load(mk, BEATS)
+    print(f'{T.film}: {T.duration:.1f} s')
+    film_timing(T, TL.FilmLog.find(T, a.video, [a.camlog] if a.camlog else []))
+    t1 = min(a.to if a.to is not None else T.duration, T.duration)
+    wav, rep = render(T, a.frm, t1, a.out, not a.no_music, a.gain, a.lufs, a.tp, debug=a.debug)
+    T.report()
+    print('  ->', wav)
+    if a.video:
+        stem = os.path.splitext(a.video)[0]
+        part = not (a.frm <= 0 and t1 >= T.duration - 0.01)
+        out = stem + ('_sound.mp4' if not part else f'_sound_{a.frm:g}-{t1:g}s.mp4')
+        MX.mux(a.video, wav, out, a.frm if part else 0.0, (t1 - a.frm) if part else None, a.height if part else None)
+        print('  ->', out)
+
+
+if __name__ == '__main__':
+    main()

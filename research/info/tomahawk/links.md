@@ -1,0 +1,28 @@
+# Tomahawk — video and photo links
+
+## Videos
+- [DVIDS: Tomahawk Launch (USS Philippine Sea CG 58)](https://www.dvidshub.net/video/362338/tomahawk-launch) — full vertical launch, good for the booster-phase smoke column and tip-over.
+- [NAVAIR: Block IV Tomahawk missile completes vertical launch test](https://www.navair.navy.mil/node/9031) — official description of the launch/wing-deploy/turbofan-transition sequence, plus video.
+- [DVIDS: search "Tomahawk launch"](https://www.dvidshub.net/search/?q=Tomahawk+launch) — many more clips; look for night launches (Operation Odyssey Dawn era) to see the flame-dominant look.
+
+## Photo pages
+- [Wikimedia Commons: Category:Launches of BGM-109 Tomahawk missiles](https://commons.wikimedia.org/wiki/Category:Launches_of_BGM-109_Tomahawk_missiles) — source category for both images in images/; large collection covering day and night launches from multiple ships.
+- [Wikimedia Commons: File:US Navy 100623-N-0775Y-030 ... USS Sterett tip-over phase.jpg](https://commons.wikimedia.org/wiki/File:US_Navy_100623-N-0775Y-030_A_Tomahawk_missile_begins_its_tip-over_phase_of_flight_after_being_launched_from_the_guided-missile_destroyer_USS_Sterett_(DDG_104).jpg) — explicitly captioned "tip-over phase," the clearest single reference for the pitch-over moment.
+- [Wikimedia Commons: File:US Navy 030320-N-6141B-001 ... USS Donald Cook launches three TLAM.jpg](https://commons.wikimedia.org/wiki/File:US_Navy_030320-N-6141B-001_The_Arleigh_Burke_class_guided_missile_destroyer_USS_Donald_Cook_(DDG_75)_launches_three_of_its_Tomahawk_Land_Attack_Missiles_(TLAM)_at_military_targets_in_Iraq.jpg) — multi-launch shot, good for smoke-column density/scale.
+- [DVIDS: Tomahawk Missile Launch image set](https://www.dvidshub.net/image/293588/tomahawk-missile-launch) — 7-image sequence, browse related images for more angles.
+
+## Images
+| file | what it shows | source URL | licence |
+|---|---|---|---|
+| launch_uss_donald_cook_tlam_2003.jpg | USS Donald Cook fires three TLAM at Iraq targets, 2003 — dense multi-launch smoke column | [Commons](https://commons.wikimedia.org/wiki/File:US_Navy_030320-N-6141B-001_The_Arleigh_Burke_class_guided_missile_destroyer_USS_Donald_Cook_(DDG_75)_launches_three_of_its_Tomahawk_Land_Attack_Missiles_(TLAM)_at_military_targets_in_Iraq.jpg) | Public domain (US Navy) |
+| launch_uss_sterett_tipover_2010.jpg | USS Sterett Tomahawk mid tip-over phase, 2010 — captioned pitch-over moment | [Commons](https://commons.wikimedia.org/wiki/File:US_Navy_100623-N-0775Y-030_A_Tomahawk_missile_begins_its_tip-over_phase_of_flight_after_being_launched_from_the_guided-missile_destroyer_USS_Sterett_(DDG_104).jpg) | Public domain (US Navy) |
+| launch_sterett_hatch_flame_2010.jpg | USS Sterett Tomahawk launch, same sequence as the tip-over shot — hatch/first-flame moment | [Commons](https://commons.wikimedia.org/wiki/File:100623-N-0775Y-028_(20222168818).jpg) | Public domain (US Navy) |
+| launch_ddg_180414_2018.jpg | Arleigh Burke-class destroyer Tomahawk launch, 2018 | [Commons](https://commons.wikimedia.org/wiki/File:180414-N-DO281-1123_(27586984458).jpg) | Public domain (US Navy) |
+| launch_hms_astute_submarine_test.jpg | HMS Astute (submarine) fires a TLAM during a test near the USA — submarine launch, breaking the surface | [Commons](https://commons.wikimedia.org/wiki/File:Royal_Navy_Submarine_HMS_Astute_Fires_a_Tomahawk_Cruise_Missile_(TLAM)_During_Testing_Near_the_USA_MOD_45153387.jpg) | OGL v1.0 (UK MOD) |
+| static_bowfin_museum_display.jpg | Tomahawk round on display, USS Bowfin Submarine Museum, Pearl Harbor — full side profile | [Commons](https://commons.wikimedia.org/wiki/File:2021-10-11_09_14_41_Missile_on_display_at_the_USS_Bowfin_Submarine_Museum_and_Park_at_Pearl_Harbor,_Oahu,_Hawaii.jpg) | CC BY-SA 4.0 |
+| static_missouri_bgm109_display.jpg | BGM-109 Tomahawk static display aboard/near USS Missouri | [Commons](https://commons.wikimedia.org/wiki/File:Missouri_missile_BGM-109_Tomahawk.JPG) | Public domain (US Navy) |
+| static_convair_section_closeup.jpg | Convair factory closeup of a Tomahawk airframe section on a stand — body shape detail | [Commons](https://commons.wikimedia.org/wiki/File:23_0053322_Convair_Negative_Image_-_Tomahawk_missile_section_on_stand_-_closeup_(53903943386).jpg) | Public domain (SDASM) |
+| static_convair_section_end_closeup.jpg | Convair factory closeup of a Tomahawk airframe section end — tail/fin structure detail | [Commons](https://commons.wikimedia.org/wiki/File:23_0053323_Convair_Negative_Image_-_Tomahawk_missile_section_end_closeup_(53903045042).jpg) | Public domain (SDASM) |
+| flight_tlam_royal_navy_2000.jpg | TLAM in flight, wings deployed, low over water, 2000 | [Commons](https://commons.wikimedia.org/wiki/File:Tomahawk_Land_Attack_Missile_(_Cruise_Missile)_(TLAM)_flying_through_the_air._12-04-2000_MOD_45138116.jpg) | OGL v1.0 (UK MOD) |
+| flight_glcm_test_san_nicolas_2019.jpg | Ground-launched cruise missile (Tomahawk-derived airframe) mid-flight test, San Nicolas Island, 2019 | [Commons](https://commons.wikimedia.org/wiki/File:United_States_Department_of_Defense_conducted_a_flight_test_of_a_conventionally_configured_ground-launched_cruise_missile_at_San_Nicolas_Island_on_18_August_2019.jpg) | Public domain (US DoD) |
+| flight_industrial_complex_test.jpg | Navy Tomahawk cruise missile low-level flight past an isolated industrial complex during a flight test | [Commons](https://commons.wikimedia.org/wiki/File:A_U.S._Navy_Tomahawk_cruise_missile_flies_by_an_isolated_industrial_complex_during_a_flight_test_-_DPLA_-_1a6a16602c21ee7d921844583b149b55.jpeg) | Public domain (US DoD) |

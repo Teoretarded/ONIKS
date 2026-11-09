@@ -1,0 +1,332 @@
+{
+ "railgun_bae": {
+  "umf_db": -4.5,
+  "crack_db": -8.5,
+  "body_db": -3.5,
+  "tail_db": -0.2,
+  "rise_ms": 2,
+  "crest50_db": 9.2,
+  "t30_all": 2.98,
+  "low_pitch_hz": {
+   "0ms": 158.2,
+   "20ms": 153.8,
+   "60ms": 58.6,
+   "150ms": 60.1
+  },
+  "centroid_hz": {
+   "10ms": 347,
+   "50ms": 829,
+   "200ms": 466,
+   "800ms": 555
+  },
+  "source": "railgun_bae_test.mp4"
+ },
+ "howitzer_155": {
+  "umf_db": -3.5,
+  "crack_db": -13.6,
+  "body_db": -2.7,
+  "tail_db": 4.5,
+  "rise_ms": 14,
+  "crest50_db": 8.7,
+  "t30_all": 3.996,
+  "low_pitch_hz": {
+   "0ms": 137.7,
+   "20ms": 127.4,
+   "60ms": 167.0,
+   "150ms": 200.7
+  },
+  "centroid_hz": {
+   "10ms": 287,
+   "50ms": 265,
+   "200ms": 747,
+   "800ms": 275
+  },
+  "source": "howitzer_155mm.mp3"
+ },
+ "tank_gun": {
+  "umf_db": -2.0,
+  "crack_db": -14.8,
+  "body_db": -7.6,
+  "tail_db": -4.0,
+  "rise_ms": 5,
+  "crest50_db": 5.2,
+  "t30_all": 4.554,
+  "low_pitch_hz": {
+   "0ms": 96.7,
+   "20ms": 60.1,
+   "60ms": 52.7,
+   "150ms": 156.7
+  },
+  "centroid_hz": {
+   "10ms": 229,
+   "50ms": 117,
+   "200ms": 281,
+   "800ms": 284
+  },
+  "source": "tank_fire.mp3"
+ },
+ "cannon_6pdr": {
+  "umf_db": -2.3,
+  "crack_db": -14.2,
+  "body_db": -11.6,
+  "tail_db": 0.7,
+  "rise_ms": 3,
+  "crest50_db": 1.6,
+  "t30_all": 4.178,
+  "low_pitch_hz": {
+   "0ms": 64.5,
+   "20ms": 51.3,
+   "60ms": 48.3,
+   "150ms": 139.2
+  },
+  "centroid_hz": {
+   "10ms": 146,
+   "50ms": 195,
+   "200ms": 75,
+   "800ms": 69
+  },
+  "source": "cannon_6pdr.mp3"
+ },
+ "cannon_salute": {
+  "umf_db": -1.3,
+  "crack_db": -13.4,
+  "body_db": -6.2,
+  "tail_db": -3.7,
+  "rise_ms": 40,
+  "crest50_db": 9.5,
+  "t30_all": 5.422,
+  "low_pitch_hz": {
+   "0ms": 155.3,
+   "20ms": 111.3,
+   "60ms": 86.4,
+   "150ms": 108.4
+  },
+  "centroid_hz": {
+   "10ms": 307,
+   "50ms": 219,
+   "200ms": 377,
+   "800ms": 208
+  },
+  "source": "cannon_salute.ogg"
+ },
+ "rifle_mosin": {
+  "umf_db": -15.9,
+  "crack_db": -1.2,
+  "body_db": -3.7,
+  "tail_db": -6.5,
+  "rise_ms": 17,
+  "crest50_db": 8.7,
+  "t30_all": 5.6,
+  "low_pitch_hz": {
+   "0ms": 124.5,
+   "20ms": 149.4,
+   "60ms": 238.8,
+   "150ms": 177.2
+  },
+  "centroid_hz": {
+   "10ms": 2886,
+   "50ms": 2128,
+   "200ms": 1916,
+   "800ms": 1162
+  },
+  "source": "gunshots/mosin.wav"
+ },
+ "rifle_sks": {
+  "umf_db": -17.3,
+  "crack_db": -1.9,
+  "body_db": -3.6,
+  "tail_db": 6.8,
+  "rise_ms": 29,
+  "crest50_db": 9.4,
+  "t30_all": 2.552,
+  "low_pitch_hz": {
+   "0ms": 83.5,
+   "20ms": 168.5,
+   "60ms": 238.8,
+   "150ms": 249.0
+  },
+  "centroid_hz": {
+   "10ms": 2079,
+   "50ms": 2253,
+   "200ms": 1699,
+   "800ms": 923
+  },
+  "source": "gunshots/sks.wav"
+ },
+ "shotgun": {
+  "umf_db": -13.8,
+  "crack_db": -4.3,
+  "body_db": -1.8,
+  "tail_db": -11.5,
+  "rise_ms": 22,
+  "crest50_db": 8.2,
+  "t30_all": 0.836,
+  "low_pitch_hz": {
+   "0ms": 222.7,
+   "20ms": 249.0,
+   "60ms": 222.7,
+   "150ms": 232.9
+  },
+  "centroid_hz": {
+   "10ms": 1210,
+   "50ms": 1347,
+   "200ms": 981,
+   "800ms": null
+  },
+  "source": "gunshots/shotty.wav"
+ },
+ "spark_gap_1": {
+  "umf_db": -26.0,
+  "crack_db": -1.5,
+  "body_db": -13.3,
+  "tail_db": 8.3,
+  "rise_ms": 2,
+  "crest50_db": 13.7,
+  "t30_all": 2.102,
+  "low_pitch_hz": {
+   "0ms": 186.0,
+   "20ms": 29.3,
+   "60ms": 49.8,
+   "150ms": 82.0
+  },
+  "centroid_hz": {
+   "10ms": 5390,
+   "50ms": 5606,
+   "200ms": 6075,
+   "800ms": 4144
+  },
+  "source": "hv_discharge_1.mp3"
+ },
+ "spark_gap_2": {
+  "umf_db": -24.2,
+  "crack_db": -0.8,
+  "body_db": -12.2,
+  "tail_db": 11.5,
+  "rise_ms": 42,
+  "crest50_db": 14.8,
+  "t30_all": 2.838,
+  "low_pitch_hz": {
+   "0ms": 30.8,
+   "20ms": 98.1,
+   "60ms": 26.4,
+   "150ms": 98.1
+  },
+  "centroid_hz": {
+   "10ms": 5204,
+   "50ms": 4928,
+   "200ms": 4845,
+   "800ms": 4658
+  },
+  "source": "hv_discharge_2.mp3"
+ },
+ "cap_discharge": {
+  "umf_db": -1.5,
+  "crack_db": -39.7,
+  "body_db": -25.1,
+  "tail_db": -35.5,
+  "rise_ms": 12,
+  "crest50_db": 9.5,
+  "t30_all": 0.486,
+  "low_pitch_hz": {
+   "0ms": 60.1,
+   "20ms": 27.8,
+   "60ms": 90.8,
+   "150ms": 98.1
+  },
+  "centroid_hz": {
+   "10ms": 58,
+   "50ms": 32,
+   "200ms": 29,
+   "800ms": 37
+  },
+  "source": "capacitor_discharge.mp3"
+ },
+ "hv_sparks": {
+  "umf_db": -11.9,
+  "crack_db": -12.7,
+  "body_db": -3.8,
+  "tail_db": 13.7,
+  "rise_ms": 39,
+  "crest50_db": 17.4,
+  "t30_all": 2.184,
+  "low_pitch_hz": {
+   "0ms": 205.1,
+   "20ms": 152.3,
+   "60ms": 238.8,
+   "150ms": 180.2
+  },
+  "centroid_hz": {
+   "10ms": 547,
+   "50ms": 3043,
+   "200ms": 1454,
+   "800ms": 2757
+  },
+  "source": "hv_sparks.mp3"
+ },
+ "jacobs_ladder": {
+  "umf_db": -7.9,
+  "crack_db": -14.4,
+  "body_db": -1.1,
+  "tail_db": 9.8,
+  "rise_ms": 2,
+  "crest50_db": 8.9,
+  "t30_all": 2.012,
+  "low_pitch_hz": {
+   "0ms": 199.2,
+   "20ms": 202.1,
+   "60ms": 200.7,
+   "150ms": 200.7
+  },
+  "centroid_hz": {
+   "10ms": 331,
+   "50ms": 384,
+   "200ms": 262,
+   "800ms": 212
+  },
+  "source": "jacobs_ladder.mp3"
+ },
+ "lightning": {
+  "umf_db": -3.6,
+  "crack_db": -23.7,
+  "body_db": -3.6,
+  "tail_db": 4.9,
+  "rise_ms": 8,
+  "crest50_db": 2.4,
+  "t30_all": 2.954,
+  "low_pitch_hz": {
+   "0ms": 93.8,
+   "20ms": 80.6,
+   "60ms": 136.2,
+   "150ms": 137.7
+  },
+  "centroid_hz": {
+   "10ms": 140,
+   "50ms": 357,
+   "200ms": 251,
+   "800ms": 850
+  },
+  "source": "lightning_big.mp3"
+ },
+ "thunder": {
+  "umf_db": -1.9,
+  "crack_db": -35.7,
+  "body_db": -4.2,
+  "tail_db": -3.8,
+  "rise_ms": 8,
+  "crest50_db": 8.7,
+  "t30_all": 5.314,
+  "low_pitch_hz": {
+   "0ms": 109.9,
+   "20ms": 128.9,
+   "60ms": 159.7,
+   "150ms": 118.7
+  },
+  "centroid_hz": {
+   "10ms": 111,
+   "50ms": 294,
+   "200ms": 376,
+   "800ms": 600
+  },
+  "source": "thunder_loud.mp3"
+ }
+}

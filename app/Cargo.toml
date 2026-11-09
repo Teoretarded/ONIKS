@@ -1,0 +1,23 @@
+[package]
+name = "oniks"
+version = "0.1.0"
+edition = "2021"
+description = "ONIKS"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+
+[features]
+# dev: right-click Inspect, the /save sink for stills and reports, ONIKS_DEBUG_PORT. The shipped build
+# (tools/build_release.py) is --no-default-features.
+default = ["dev"]
+dev = ["tauri/devtools"]
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true

@@ -5,3 +5,12 @@ node_modules/
 dist/
 .DS_Store
 Thumbs.db
+game/shots/
+.claude/worktrees/
+reference/films/renders/
+reference/sounds/
+photos i the user have saved for research/
+p.out
+dist/
+steam/steamcmd/
+steam/build/

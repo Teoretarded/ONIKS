@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>ONIKS · Environment tone</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="../../reference/menus/common/fonts/fonts.css">
+<link rel="stylesheet" href="concepts.css">
+<style>
+  .split { position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; background: rgba(255,255,255,.18); display: none; }
+  .t2 { position: absolute; left: calc(50% + 40px); top: 38px; font: 500 15px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: rgba(255,255,255,.85); display: none; }
+  body.splitv .split, body.splitv .t2 { display: block; }
+  .noui .split { display: none; }
+</style>
+</head>
+<body>
+<div id="view">
+  <canvas id="gl"></canvas>
+  <canvas id="ov"></canvas>
+  <div class="split"></div>
+  <div class="t" id="look"></div>
+  <div class="t2" id="look2"></div>
+  <div class="row" id="row"></div>
+  <div class="read" id="read"></div>
+  <div class="keys"><span><b>V</b>split</span><span><b>N</b><b>M</b><b>F</b>near mid far</span><span><b>J</b>jet</span><span><b>B</b>beach</span><span><b>P</b>pause</span><span><b>S</b>still</span><span><b>H</b>hide</span></div>
+</div>
+<script src="../../reference/menus/common/m3.js"></script>
+<script src="../../reference/menus/common/geo.js"></script>
+<script src="../../reference/films/common/hd_land.js"></script>
+<script src="../../reference/films/common/hd_sea_air.js"></script>
+<script type="module">import { boot } from './env_tone.js'; boot();</script>
+</body></html>

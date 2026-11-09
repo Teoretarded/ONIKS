@@ -1,0 +1,569 @@
+/* Impacts and what they leave.
+   Splash    a water column (the crown thrown up and falling back), its ring on the water, a mist, foam.
+   Dirt      a land impact: dust and clods thrown up in a cone, a ground ring of dust, the cloud drifting off.
+   ShipHit   pc_anatomy_film drawStrike: the fireball swells, lifts off the hull and cools white -> lime -> smoke;
+             sparks, hot debris arcing into the sea with splashes, water thrown off the waterline.
+   Fire      persistent on a unit: flames flickering along the struck part (in real time, so time compression
+             never strobes them), their glow on the hull, and a smoke column rising, spreading under its ceiling
+             and leaning downwind as it climbs. Puff emission times are an index, not state.
+   Sinking   bubbles, a sheen spreading on the water, steam where the hot hull goes under.
+   TorpedoHit  a torpedo under the keel: no fireball; a shock ring flicks across the sea, the water heaves up along
+             the hull and a white column climbs on both sides of it, tall and slow, its heads cauliflowering, then
+             comes down in curtains; a base surge of spray rolls out, mist hangs and drifts, foam lies round the hull.
+             Under a submerged boat: a dome of spray and a boil, smaller the deeper it went off. */
+import { WH, LIME, HOT, GREY, SMOKE, TAU, G, G2, GT, GM, BALL, NB, sat, ss, clamp, hsh, rng, noise, dragH, yDrag, dropTime, landTime, dotHalo, streak } from './core.js';
+import { heatCol } from './burst.js';
+
+/* ---------------- water splash ---------------- */
+/* o: { t0, pos (on the water), size (column height, m: fragment 4, shell 25, missile 40), seed, ring (0..1 lime) } */
+export class Splash {
+  constructor(o) {
+    const r = rng(o.seed || 808), H = o.size || 25, n = Math.round(clamp(180 + H * 16, 120, 900)), D = new Float32Array(n * 4);
+    this.t0 = o.t0; this.p = o.pos.slice(); this.H = H; this.seed = o.seed || 808; this.ring = o.ring === undefined ? .35 : o.ring;
+    const v0 = Math.sqrt(2 * 9.81 * H);
+    for (let i = 0; i < n; i++) {
+      // most of the water goes up in a hollow column; the rest is a crown sheet thrown out
+      const crown = r() < .28, a = r() * TAU, s = r();
+      const vr = crown ? v0 * (.25 + .35 * r()) : v0 * (.04 + .1 * s), vy = crown ? v0 * (.35 + .35 * r()) : v0 * (.45 + .55 * Math.pow(r(), .6)) * (1 - .35 * s);
+      D[i * 4] = Math.cos(a) * vr; D[i * 4 + 1] = vy; D[i * 4 + 2] = Math.sin(a) * vr; D[i * 4 + 3] = .3 + .7 * r();
+    }
+    this.D = D; this.n = n; this.T = 2 * v0 / 9.81; this.dur = this.T + 9;
+  }
+  draw(C, age) {
+    if (age < 0 || age > this.dur) return;
+    const V = C.V, dot = C.dot, p = this.p, H = this.H, y0 = p[1];
+    if (!V.vis(p[0], y0 + H / 2, p[2], H * 1.5 + 20)) return;
+    const pxm = V.pxm(p[0], y0 + H / 2, p[2]); if (pxm <= 0) return;
+    // far off a splash is a few px: its column only, fewer dots
+    const stp = Math.max(1, Math.round((H * pxm > 60 ? 1 : H * pxm > 20 ? 2 : H * pxm > 6 ? 4 : 9) / C.q));
+    const D = this.D, fall = 1 - ss(this.T * .6, this.T * 1.15, age);
+    if (fall > 0) for (let i = 0; i < this.n; i += stp) {
+      const t = age * (.9 + .1 * D[i * 4 + 3]), vy = D[i * 4 + 1], y = vy * t - G2 * t * t;
+      if (y < 0 && t > .2) continue;
+      // spray lags: a short vertical smear while it flies fast
+      const x = p[0] + D[i * 4] * t, z = p[2] + D[i * 4 + 2] * t, al = .85 * fall * (.55 + .45 * D[i * 4 + 3]) * (stp > 2 ? 1.3 : 1);
+      dot(x, y0 + Math.max(0, y), z, pxm > 3 ? 2 : 1, WH[0], WH[1], WH[2], al > 1 ? 1 : al);
+      if (pxm > 1.5 && Math.abs(vy - 9.81 * t) > 6) dot(x, y0 + Math.max(0, y) - (vy - 9.81 * t) * .02, z, 1, WH[0], WH[1], WH[2], al * .5);
+    }
+    // the ring running out on the water, lime for a moment, then white foam
+    if (age < 7) {
+      const R = H * .25 + 2 + age * (3 + H * .18), w = 1 - age / 7, n = Math.round(clamp(R * pxm * 2.5, 12, 260) * C.q), lm = this.ring * Math.exp(-age * .8);
+      for (let k = 0; k < n; k++) {
+        const th = k / n * TAU, rr = R * (.95 + .1 * hsh(k, this.seed));
+        dot(p[0] + Math.cos(th) * rr, y0 + .3, p[2] + Math.sin(th) * rr, 1, WH[0] + (LIME[0] - WH[0]) * lm, WH[1] + (LIME[1] - WH[1]) * lm, WH[2] + (LIME[2] - WH[2]) * lm, .75 * w);
+      }
+    }
+    // mist hanging where the column stood, drifting off
+    if (age > this.T * .4) {
+      const b = age - this.T * .4, life = 7, w = 1 - b / life;
+      if (w > 0) {
+        const n = Math.round(clamp(H * 3, 20, 140) * C.q * (pxm > .5 ? 1 : .5)), rad = H * .25 + 1.2 * Math.sqrt(b) + .4 * b;
+        for (let k = 0; k < n; k++) {
+          const j = (k * 5 + this.seed) & GM;
+          const y = y0 + H * (.15 + .5 * hsh(k, this.seed + 2)) * (1 - .2 * b / life) + GT[(j + 1) & GM] * rad * .4;
+          dot(p[0] + GT[j] * rad + C.wind[0] * b, Math.max(y0 + .3, y), p[2] + GT[(j + 2) & GM] * rad + C.wind[2] * b, 1, GREY[0], GREY[1], GREY[2], .35 * w * w * (.5 + hsh(k, 1)));
+        }
+      }
+    }
+    // foam left on the water
+    if (age > .3) {
+      const w = 1 - age / this.dur, R = H * .35 + 3, n = Math.round(clamp(R * R * pxm * .5, 10, 200) * C.q);
+      for (let k = 0; k < n; k++) { const th = hsh(k, this.seed + 7) * TAU, rr = R * Math.sqrt(hsh(k, this.seed + 8)); dot(p[0] + Math.cos(th) * rr, y0 + .25, p[2] + Math.sin(th) * rr, 1, WH[0], WH[1], WH[2], .45 * w * (.4 + .6 * hsh(k, 3))); }
+    }
+  }
+}
+
+/* ---------------- land impact ---------------- */
+/* o: { t0, pos, size (m, the height the dust goes: shell 18, missile 35), seed } */
+const DUST = [196, 194, 184];
+export class Dirt {
+  constructor(o) {
+    const r = rng(o.seed || 919), H = o.size || 20, n = Math.round(clamp(160 + H * 14, 120, 700)), D = new Float32Array(n * 5);
+    this.t0 = o.t0; this.p = o.pos.slice(); this.H = H; this.seed = o.seed || 919;
+    const v0 = Math.sqrt(2 * 9.81 * H);
+    for (let i = 0; i < n; i++) {
+      // a cone of dust and clods: steep, fast in the middle; clods heavy (low drag), dust light
+      const a = r() * TAU, el = (45 + 43 * Math.pow(r(), .7)) * Math.PI / 180, clod = i % 5 === 0, sp = v0 * (clod ? .5 + .6 * r() : .6 + .8 * r());
+      D[i * 5] = Math.cos(a) * Math.cos(el) * sp; D[i * 5 + 1] = Math.sin(el) * sp; D[i * 5 + 2] = Math.sin(a) * Math.cos(el) * sp;
+      D[i * 5 + 3] = clod ? .15 + .2 * r() : 1 + 2.2 * r(); D[i * 5 + 4] = clod ? 1 : 0;
+    }
+    this.D = D; this.n = n; this.dur = 22;
+    this.AW = new Float32Array(n);
+    for (let i = 0; i < n; i++) this.AW[i] = landTime(0, D[i * 5 + 1], D[i * 5 + 3], 0, 14);
+  }
+  draw(C, age) {
+    if (age < 0 || age > this.dur) return;
+    const V = C.V, dot = C.dot, p = this.p, H = this.H;
+    if (!V.vis(p[0], p[1] + H / 2, p[2], H * 2 + 40)) return;
+    const pxm = V.pxm(p[0], p[1] + H / 2, p[2]); if (pxm <= 0) return;
+    const stp = Math.max(1, Math.round((H * pxm > 60 ? 1 : H * pxm > 20 ? 2 : H * pxm > 6 ? 4 : 8) / C.q)), D = this.D, AW = this.AW;
+    for (let i = 0; i < this.n; i += stp) {
+      const kd = D[i * 5 + 3], clod = D[i * 5 + 4], aw = AW[i];
+      if (age > aw + (clod ? 12 : 0)) continue;
+      const t = Math.min(age, aw), h = dragH(kd, t), y = D[i * 5 + 1] * h - G2 * t * t;
+      const x = p[0] + D[i * 5] * h + (clod ? 0 : C.wind[0] * t * .5), z = p[2] + D[i * 5 + 2] * h + (clod ? 0 : C.wind[2] * t * .5);
+      const al = clod ? (age > aw ? .5 * (1 - (age - aw) / 12) : .9) : .7 * (1 - age / aw);
+      if (al < .02) continue;
+      dot(x, p[1] + Math.max(.1, y), z, clod && pxm > 2 ? 2 : 1, DUST[0] + 20 * clod, DUST[1] + 20 * clod, DUST[2] + 20 * clod, al);
+    }
+    // the dust cloud: a column thrown up by the blast, then its puffs roll out, rise, drift and thin
+    const nP = Math.round(46 * C.q);
+    for (let k = 0; k < nP; k++) {
+      const tb = .03 + .35 * hsh(k, this.seed), b = age - tb; if (b < 0) continue;
+      const life = 9 + 11 * hsh(k, this.seed + 1); if (b > life) continue;
+      const th = hsh(k, this.seed + 2) * TAU, u = hsh(k, this.seed + 3), sp = H * (.15 + .45 * u), hh = dragH(1.2, b);
+      // high puffs go up fast and slow (the column), low ones roll out along the ground (the base surge)
+      const up = H * (1.1 - .9 * u) * (1 - Math.exp(-b * 1.6)) + .5 * b;
+      const x = p[0] + Math.cos(th) * sp * hh + C.wind[0] * b * .8, z = p[2] + Math.sin(th) * sp * hh + C.wind[2] * b * .8, y = p[1] + 1 + up;
+      const rad = H * (.1 + .12 * u) + 1.8 * Math.sqrt(b) + .15 * b, pm = V.pxm(x, y, z), rp = rad * pm; if (rp <= 0) continue;
+      const nd = Math.max(1, Math.round(Math.min(90, 3 + rp * rp * .035) * C.q));
+      const al = .75 * Math.min(1, b * 5) * Math.pow(1 - b / life, .8) * Math.min(1, 2.6 / Math.sqrt(nd / 3)) * (.6 + .4 * hsh(k, this.seed + 5));
+      const hot = Math.exp(-b * 3) * .6, cr = DUST[0] + (250 - DUST[0]) * hot, cg = DUST[1] + (255 - DUST[1]) * hot, cb = DUST[2] + (220 - DUST[2]) * hot;
+      const g0 = (k * 97 + this.seed) | 0;
+      for (let m = 0; m < nd; m++) { const j = (g0 + m * 1733) & GM, yy = y + GT[(j + 1) & GM] * .6 * rad; if (yy < p[1] + .1) continue; dot(x + GT[j] * rad, yy, z + GT[(j + 2) & GM] * rad, rp > 25 ? 2 : 1, cr, cg, cb, al * (.6 + .8 * ((j * .618034) % 1))); }
+    }
+    // the ground ring of dust running out
+    if (age < 2.5) {
+      const R = 2 + H * 1.4 * Math.sqrt(age / 2.5), w = 1 - age / 2.5, n = Math.round(clamp(R * pxm * 2, 12, 220) * C.q);
+      for (let k = 0; k < n; k++) { const th = k / n * TAU, rr = R * (.9 + .2 * hsh(k, this.seed + 4)); dot(p[0] + Math.cos(th) * rr, p[1] + .4 + .8 * hsh(k, 6), p[2] + Math.sin(th) * rr, 1, DUST[0], DUST[1], DUST[2], .6 * w); }
+    }
+  }
+}
+
+/* ---------------- the fireball of a hit (ship or land): swells, lifts, cools white -> lime -> smoke ---------------- */
+/* o: { t0, pos, sc (1 = an Oniks on a destroyer), seed, gy (surface under it), sea (spray off the waterline) } */
+export class Blast {
+  constructor(o) {
+    const r = rng(o.seed || 4242), sc = o.sc || 1, n = Math.round(360 * Math.sqrt(sc)), m = o.sea ? Math.round(620 * Math.sqrt(sc)) : 0;
+    this.t0 = o.t0; this.p = o.pos.slice(); this.sc = sc; this.seed = o.seed || 4242; this.gy = o.gy || 0; this.sea = !!o.sea;
+    // spray: hot fragments (kind 1) and water thrown off the waterline (kind 0): vx vy vz life kind drag
+    const L = new Float32Array((n + m) * 6), s2 = Math.sqrt(sc);
+    for (let i = 0; i < n; i++) { const a = r() * TAU, el = (10 + r() * 74) * Math.PI / 180, s = (70 + r() * 200) * s2; L.set([Math.cos(el) * Math.sin(a) * s, Math.sin(el) * s, Math.cos(el) * Math.cos(a) * s, 1.6 + r() * 3.4, 1, .4 + r() * .45], i * 6); }
+    for (let i = 0; i < m; i++) { const a = r() * TAU, el = (55 + r() * 33) * Math.PI / 180, s = (35 + r() * 95) * s2; L.set([Math.cos(el) * Math.sin(a) * s, Math.sin(el) * s, Math.cos(el) * Math.cos(a) * s, 2.8 + r() * 3.8, 0, .6 + r() * .5], (n + i) * 6); }
+    this.S = L; this.nS = n + m; this.dur = 9; this.HC = [0, 0, 0, 0];
+  }
+  draw(C, sa) {
+    if (sa < 0 || sa > this.dur) return;
+    const V = C.V, dot = C.dot, P = this.p, sc = this.sc, s2 = Math.sqrt(sc);
+    if (!V.vis(P[0], P[1] + 20 * s2, P[2], 300 * s2)) return;
+    const zc = V.depth(P[0], P[1], P[2]); if (zc < V.near) return;
+    const pxm = V.fl / zc, I = sa < .05 ? sa / .05 : Math.exp(-(sa - .05) * 1.6);
+    // the light: the flash lights the hull, the water, the smoke round it
+    C.light(P[0], P[1] + 8 * s2, P[2], 245, 255, 215, 1.1 * I * s2, 420 * s2);
+    if (sa < .15) C.lift(.1 * (1 - sa / .15) * Math.min(1, 2500 * s2 / zc), 240, 255, 220);
+    // the fireball swells, lifts off the hull and cools from white through lime to smoke
+    if (sa < 3.5) {
+      const rf = s2 * (4.5 + 12 * (1 - Math.exp(-sa * 3.5))), lift = 4.5 * s2 * sa, heat = Math.exp(-sa / .8);
+      const If = Math.min(1, sa / .04) * (1 - ss(1.2, 3.4, sa)), rp = rf * pxm;
+      const nf = Math.round(Math.min(8000, 80 + rp * rp * .5) * C.q), boost = Math.min(1.6, Math.sqrt(1600 / Math.max(80, nf)));
+      if (If > .01) for (let k = 0; k < nf; k++) {
+        const j = ((k * 61 + this.seed) % NB) * 4, s = .25 + .75 * ((k * .618034) % 1), g = (k * 3 + this.seed) & GM;
+        const ox = BALL[j] * s + GT[g] * .03, oy = BALL[j + 1] * s + GT[(g + 1) & GM] * .03, oz = BALL[j + 2] * s + GT[(g + 2) & GM] * .03, d2 = ox * ox + oy * oy + oz * oz, hh = heat * (1 - .6 * d2);
+        // white-hot inside, lime at the cooling skin, smoke grey as it goes
+        const lm = (1 - heat) * Math.exp(-sa * .9) * d2;
+        dot(P[0] + ox * rf, P[1] + (oy * .8 + .3) * rf + lift, P[2] + oz * rf, pxm * rf > 30 ? 2 : 1,
+          200 + 52 * hh - (200 - LIME[0]) * lm * .6, 202 + 53 * hh + 30 * lm, 196 + 40 * hh - (196 - LIME[2]) * lm, Math.min(1, If * (1 - .45 * d2) * (.45 + .55 * hh) * boost));
+      }
+      // a halo of lime light round it (dots, as the anatomy draws it), a white core, the streak across the lens
+      const hy = P[1] + rf * .3 + lift;
+      dotHalo(C, P[0], hy, P[2], Math.max(90, pxm * 110 * s2) * (.55 + .45 * (1 - Math.exp(-sa * 5))), 1400, LIME[0], LIME[1], LIME[2], .3 * I);
+      C.halo(P[0], hy, P[2], Math.min(60, Math.max(8, pxm * 10 * s2)), 255, 255, 236, .7 * I);
+      if (sa < 1.5) streak(C, P[0], hy, P[2], Math.max(520, pxm * 1600 * s2), 250, 255, 220, I * Math.exp(-sa * 1.8));
+    }
+    // spray and fragments
+    if (sa < 7) {
+      const S = this.S, far = pxm * s2 < .15, q = C.q, nS = this.nS;
+      for (let j = 0; j < nS; j++) {
+        if (far && (j & 3)) continue;
+        if (q < 1 && hsh(j, 7) > q) continue;
+        const o = j * 6, life = S[o + 3]; if (sa > life) continue;
+        const k = S[o + 5], hot = S[o + 4] > 0, tails = hot ? (far ? 2 : 9) : 1, x0 = P[0], z0 = P[2], yb = hot ? P[1] + 3 * s2 : this.gy + 1;
+        for (let t = 0; t < tails; t++) {
+          const a = sa - t * .035; if (a <= 0) break;
+          const m = (1 - Math.exp(-k * a)) / k, y = yb + (S[o + 1] + 9.81 / k) * m - 9.81 * a / k; if (y < this.gy) break;
+          const fade = Math.pow(1 - sa / life, 1.3) * (1 - t / tails);
+          if (hot) { const ht = Math.exp(-sa / .8); dot(x0 + S[o] * m, y, z0 + S[o + 2] * m, ht > .4 && !t && pxm > .5 ? 2 : 1, 238 + 12 * ht, 238 + 17 * ht, 228 - 40 * ht, fade); }
+          else dot(x0 + S[o] * m, y, z0 + S[o + 2] * m, 1, 236, 238, 230, .85 * fade);
+        }
+      }
+    }
+  }
+}
+
+/* ---------------- fire on a unit, with its smoke column ---------------- */
+/* o: { t0, seed, size (1 = a destroyer fire; .25 a truck), local [along, up, across] (m, where it burns, in the
+   unit frame), spread [along, up, across] (m), ceiling (m), dtE (s between smoke puffs), life (s a puff lives),
+   flame (0..1: how much of it is flame; a hole at the waterline vents smoke with hardly a flame), embers (0..1),
+   lightR (m) / lightI (x) / lightRgb the flicker's light on what is near, dense (the smoke's opacity: 3.4 default, a thick
+   column ~7) }
+   Each frame the system calls follow(t, pos, hdg, k) (k: how hard it burns now, 0..1); stop(t) lets it burn out.
+   Embers: sparks lifted off the flames by the heat, drifting downwind, flickering out (real time, as the flames).
+   Seats (game/scars.js): seat(n), then every frame before follow() the owner fills SW (n x [x y z spread tx ty tz],
+   world: where the fire stands on the burning surface, how far it spreads there and the surface's horizontal tangent):
+   the flames rise from those seats (spread along the surface, not out into the air), the embers leave them, the
+   light stays local (over the sea it never reaches the water: sea true), a seat under the water burns no flame and
+   only steams; follow()'s pos is then where the smoke leaves (the highest seat). */
+export class Fire {
+  constructor(o) {
+    const r = rng(o.seed || 5150), sz = o.size || 1;
+    this.t0 = o.t0; this.seed = o.seed || 5150; this.size = sz;
+    this.loc = (o.local || [0, 4, 0]).slice(); this.spr = (o.spread || [26 * sz, 16 * sz, 6 * sz]).slice();
+    this.ceil = o.ceiling || 500 * Math.sqrt(sz); this.dtE = o.dtE || (sz > .6 ? .35 : .5); this.life = o.life || (sz > .6 ? 200 : 110);
+    this.cap = Math.ceil(this.life / this.dtE) + 4;
+    this.R = new Float32Array(this.cap * 5);  // birth, x, y, z, k (emission record: where the fire was)
+    this.nE = 0; this.pos = [0, 0, 0]; this.hdg = 0; this.k = 0; this.kT = 0; this.end = 1e18; this.dur = 1e18;
+    this.fl = o.flame === undefined ? 1 : o.flame; this.emb = o.embers === undefined ? 1 : o.embers;
+    this.lR = o.lightR || 26 * Math.sqrt(sz) + 14; this.lI = o.lightI === undefined ? 1 : o.lightI;
+    this.dense = o.dense || 3.4;
+    this.lc = o.lightRgb || [255, 190, 120];
+    // the flame points, in the unit frame round the fire's centre
+    const nF = Math.round(120 + 160 * Math.min(1, sz));
+    this.FP = new Float32Array(nF * 4);
+    for (let i = 0; i < nF; i++) { this.FP[i * 4] = (r() - .5) * 2 * this.spr[0]; this.FP[i * 4 + 1] = Math.pow(r(), 1.8) * this.spr[1]; this.FP[i * 4 + 2] = (r() - .5) * 2 * this.spr[2]; this.FP[i * 4 + 3] = r() * 40; }
+    this.nF = nF;
+    this.nS = 0; this.SW = null; this.sea = false;
+  }
+  /* n seats on the burning surface (the owner fills SW every frame, world) */
+  seat(n) { this.nS = n | 0; this.SW = new Float32Array(Math.max(1, this.nS) * 7); }
+  /* the flames on their seats (see seat()): tongues standing on the burning surface, rising (world up, leaning
+     downwind), white-hot at the root through amber to a dull coral at the tip; steam where a seat is under the sea */
+  drawSeats(C, kNow, fx, fy, fz) {
+    const V = C.V, dot = C.dot, sz = this.size, q = C.q, tr = C.tr, sd = this.seed, SW = this.SW, nS = this.nS;
+    const W0 = C.wind[0], W2 = C.wind[2], S1 = this.spr[1];
+    const zc = V.depth(fx, fy, fz), pxm = zc > V.near ? V.fl / zc : 0;
+    const flick = .75 + .25 * noise(tr * 3.1, sd * .1, 0);
+    // the light: over the flames, local (never down to the water)
+    const ly = fy + S1 * .35;
+    let lR = this.lR; if (this.sea) lR = Math.min(lR, Math.max(1.5, (ly - .3) * 1.05));
+    C.light(fx, ly, fz, this.lc[0], this.lc[1], this.lc[2], .3 * kNow * flick * Math.sqrt(sz) * this.lI, lR);
+    if (pxm * S1 < 3) {
+      // far: a flickering amber point (it still reads as a fire from kilometres)
+      dot(fx, fy + S1 * .3, fz, 2, 255, 214, 150, Math.min(1, kNow * flick * 1.4));
+      C.glow(fx, fy + S1 * .3, fz, 3, 255, 150, 70, .25 * kNow * flick);
+      return;
+    }
+    const big = pxm > .5 ? 2 : 1, lean = .04;
+    let nTot = Math.max(nS * 2, Math.min(44, Math.round(4 + S1 * pxm / 5)));
+    const per = Math.max(1, Math.round(nTot / nS));
+    const hpx = S1 * pxm, mT = Math.max(4, Math.round(Math.min(90, 5 + hpx * .55) * q));
+    for (let s = 0; s < nS; s++) {
+      const o = s * 7, X = SW[o], Y = SW[o + 1], Z = SW[o + 2], w = SW[o + 3], tx = SW[o + 4], tz = SW[o + 6];
+      if (this.sea && Y < .25) {
+        // under the water: steam where the sea meets the hot plating
+        if (Y > -3) for (let j = 0, nj = Math.round(18 * q); j < nj; j++) {
+          const Tj = 2.5 + 2 * hsh(j, sd + s * 13 + 40), ph = tr / Tj + hsh(j, sd + s * 13 + 41), cyc = Math.floor(ph), a = (ph - cyc) * Tj;
+          const ex = X + (hsh(j + cyc, sd + s + 42) - .5) * w * 2 + W0 * a * .5, ez = Z + (hsh(j + cyc, sd + s + 43) - .5) * w * 2 + W2 * a * .5;
+          dot(ex, .3 + a * 1.4, ez, pxm > 3 ? 2 : 1, 236, 240, 234, .35 * kNow * (1 - a / Tj) * Math.min(1, a * 3));
+        }
+        continue;
+      }
+      const hk = s < 1 ? 1 : .8 + .2 * hsh(s, sd + 3);
+      for (let i = 0; i < per; i++) {
+        const ii = s * per + i, u = (hsh(ii, sd + 1) - .5) * 2 * w, cr = (hsh(ii, sd + 2) - .5) * .25 * w;
+        const rx = X + tx * u + tz * cr, rz = Z + tz * u - tx * cr;
+        const fl = .7 + .2 * Math.sin(tr * (5 + 3 * hsh(ii, sd + 3)) + ii * 1.7) + .15 * noise(tr * 2.2, ii * .37, sd * .01);
+        const Hi = S1 * (.35 + .65 * hsh(ii, sd + 4)) * (.45 + .55 * kNow) * fl * hk;
+        const Wi = Math.max(.2, w * .85) * (.7 + .5 * hsh(ii, sd + 5));
+        const ph0 = tr * (1.4 + 1.2 * hsh(ii, sd + 6)), swx = Math.sin(tr * 2.1 + ii * 2.3) * .12 * Hi;
+        for (let j = 0; j < mT; j++) {
+          let v = hsh(j, sd + 7 + ii * 13) + ph0; v -= Math.floor(v); v = Math.pow(v, 1.25);
+          const wd = Wi * Math.pow(1 - v, .7), off = (hsh(j, sd + 8 + ii * 7) - .5) * 2 * wd, off2 = (hsh(j, sd + 9 + ii * 5) - .5) * wd * .5;
+          const bend = v * v, lw = lean * Hi * bend;
+          const wx = rx + tx * (off + swx * bend) + tz * off2 + W0 * lw, wz = rz + tz * (off + swx * bend) - tx * off2 + W2 * lw, wy = Y + v * Hi;
+          const hot = 1 - v, al = Math.min(1, 2.4 * kNow) * Math.pow(1 - v, .55) * (.7 + .3 * hsh(j + Math.floor(tr * 20), sd + 10));
+          if (al < .03) continue;
+          dot(wx, wy, wz, big, 255, 106 + 146 * Math.pow(hot, .8), 61 + 175 * hot * hot, al > 1 ? 1 : al);
+        }
+      }
+      C.glow(X, Y + S1 * .2, Z, Math.min(24, Math.max(2, w * pxm)), 255, 176, 92, .08 * kNow * flick);
+    }
+    // embers off the seats
+    const nEm = Math.round(Math.min(200, 10 + 60 * sz) * q * this.emb * Math.min(1, kNow * 1.4));
+    for (let j = 0; j < nEm; j++) {
+      const sd2 = sd + 31, Tj = 2 + 3 * hsh(j, sd2), ph = tr / Tj + hsh(j, sd2 + 1), cyc = Math.floor(ph), a = (ph - cyc) * Tj;
+      const s = Math.floor(hsh(j + cyc * 11, sd2 + 9) * nS), o = s * 7;
+      if (this.sea && SW[o + 1] < .25) continue;
+      const vu = (4 + 7 * hsh(j + cyc * 7, sd2 + 2)) * Math.sqrt(sz + .2), up = vu * 1.6 * (1 - Math.exp(-a / 1.6));
+      const u = (hsh(j + cyc * 3, sd2 + 3) - .5) * 2 * SW[o + 3];
+      const dr = a * (.35 + .5 * hsh(j, sd2 + 5)), sw = Math.sin(tr * (1.3 + hsh(j, sd2 + 6)) + j) * .6 * a;
+      const ex = SW[o] + SW[o + 4] * u + W0 * dr + sw, ez = SW[o + 2] + SW[o + 6] * u + W2 * dr + sw * .7, ey = SW[o + 1] + S1 * .3 + up;
+      const blink = hsh(j + Math.floor(tr * 14), sd2 + 7) < .8 ? 1 : .25, al = Math.pow(1 - a / Tj, 1.6) * blink * Math.min(1, kNow * 1.5);
+      if (al < .04) continue;
+      const hot = 1 - a / Tj;
+      dot(ex, ey, ez, pxm > 3 ? 2 : 1, 255, 150 + 95 * hot, 70 + 120 * hot * hot, al);
+    }
+  }
+  /* the unit's pose now and how hard it burns; lays the smoke puffs due since the last call */
+  follow(t, pos, hdg, k) {
+    this.pos[0] = pos[0]; this.pos[1] = pos[1]; this.pos[2] = pos[2]; this.hdg = hdg || 0; this.k = k;
+    if (t >= this.end) k = 0;
+    const s = Math.sin(this.hdg), c = Math.cos(this.hdg), L = this.loc;
+    const fx = pos[0] + s * L[0] + c * L[2], fz = pos[2] + c * L[0] - s * L[2], fy = pos[1] + L[1];
+    const due = Math.floor((t - this.t0) / this.dtE);
+    if (due - this.nE > this.cap) this.nE = due - this.cap;
+    while (this.nE <= due) {
+      const i = this.nE % this.cap, o = i * 5;
+      this.R[o] = this.t0 + this.nE * this.dtE; this.R[o + 1] = fx; this.R[o + 2] = fy; this.R[o + 3] = fz; this.R[o + 4] = k;
+      this.nE++;
+    }
+  }
+  /* stop burning at time t: flames out, the smoke already up lives on */
+  stop(t) { if (this.end > t) { this.end = t; this.dur = t - this.t0 + this.life; } }
+  done(t) { return t > this.end + this.life; }
+  draw(C, age) {
+    const t = this.t0 + age, V = C.V, dot = C.dot, sz = this.size, q = C.q;
+    const W0 = C.wind[0], W2 = C.wind[2], ceil = this.ceil, R = this.R;
+    // flames along the struck part, flickering in real time; their glow lights the hull and the smoke
+    const kNow = t < this.end ? this.k * sat(age / .5) * this.fl : 0;
+    const s = Math.sin(this.hdg), c = Math.cos(this.hdg), L = this.loc, P = this.pos;
+    const fx = P[0] + s * L[0] + c * L[2], fz = P[2] + c * L[0] - s * L[2], fy = P[1] + L[1];
+    if (this.nS && kNow > .02 && V.vis(fx, fy, fz, 60 * sz + 10)) this.drawSeats(C, kNow, fx, fy, fz);
+    else if (kNow > .02 && V.vis(fx, fy, fz, 60 * sz + 10)) {
+      const zc = V.depth(fx, fy, fz), pxm = zc > V.near ? V.fl / zc : 0, tr = C.tr, FP = this.FP;
+      const flick = .75 + .25 * noise(tr * 3.1, this.seed * .1, 0);
+      C.light(fx, fy + this.spr[1] * .5, fz, this.lc[0], this.lc[1], this.lc[2], .3 * kNow * flick * Math.sqrt(sz) * this.lI, this.lR);
+      // embers: each rises off the flames on its own cycle, slowing, drifting downwind, flickering out
+      const nEm = pxm * this.spr[0] < 1.5 ? 0 : Math.round(Math.min(220, 14 + 70 * sz) * q * this.emb * Math.min(1, kNow * 1.4));
+      for (let j = 0; j < nEm; j++) {
+        const sd = this.seed + 31, Tj = 2 + 3 * hsh(j, sd), ph = tr / Tj + hsh(j, sd + 1), cyc = Math.floor(ph), a = (ph - cyc) * Tj;
+        const vu = (4 + 7 * hsh(j + cyc * 7, sd + 2)) * Math.sqrt(sz + .2), up = vu * 1.6 * (1 - Math.exp(-a / 1.6));
+        const lx = (hsh(j + cyc * 3, sd + 3) - .5) * 2 * this.spr[0], lz = (hsh(j + cyc * 5, sd + 4) - .5) * 2 * this.spr[2];
+        const dr = a * (.35 + .5 * hsh(j, sd + 5)), sw = Math.sin(tr * (1.3 + hsh(j, sd + 6)) + j) * .6 * a;
+        const ex = fx + s * lx + c * lz + W0 * dr + sw, ez = fz + c * lx - s * lz + W2 * dr + sw * .7, ey = fy + this.spr[1] * .3 + up;
+        const blink = hsh(j + Math.floor(tr * 14), sd + 7) < .8 ? 1 : .25, al = Math.pow(1 - a / Tj, 1.6) * blink * Math.min(1, kNow * 1.5);
+        if (al < .04) continue;
+        const hot = 1 - a / Tj;
+        dot(ex, ey, ez, pxm > 3 ? 2 : 1, 255, 150 + 95 * hot, 70 + 120 * hot * hot, al);
+      }
+      if (pxm * this.spr[0] < 3) {
+        // far: a flickering amber point with a warm glow round it (it still reads as a fire from kilometres)
+        dot(fx, fy + 2, fz, 2, 255, 214, 150, Math.min(1, kNow * flick * 1.4));
+        C.glow(fx, fy + 2, fz, 4, 255, 150, 70, .3 * kNow * flick);
+        if (this.fl > .5) dotHalo(C, fx, fy + 2, fz, 16, 60, 255, 150, 70, .2 * kNow * flick, 2);
+      } else {
+        // tongues of flame: licks standing on their seats along the fire, wide and white-hot at the root, narrowing
+        // and cooling through amber to a dull coral at the tip, each flickering in height and swaying (the dots flow up inside it); leaning
+        // downwind. Real time, so a time-lapse never strobes them; as many as the fire's size on screen needs
+        const S0 = this.spr[0], S1 = this.spr[1], S2 = this.spr[2], sd = this.seed;
+        const nT = Math.max(6, Math.min(60, Math.round(6 + S0 * pxm / 3))), big = pxm > .5 ? 2 : 1;
+        const hpx = S1 * pxm, mT = Math.max(6, Math.round(Math.min(150, 8 + hpx * .9) * q));
+        const lean = .04;                                  // the tips lean downwind: m per m/s of wind per m of height
+        // the fire's own glow round its seat (it reads as a fire from far off)
+        dotHalo(C, fx, fy + S1 * .35, fz, Math.max(24, Math.min(260, S1 * pxm * 1.3)), 260, 255, 150, 70, .16 * kNow * flick, 2);
+        for (let i = 0; i < nT; i++) {
+          const hs = hsh(i, sd + 1), lx = (hs - .5) * 2 * S0 * .9, lz = (hsh(i, sd + 2) - .5) * 2 * S2 * .8;
+          const fl = .7 + .2 * Math.sin(tr * (5 + 3 * hsh(i, sd + 3)) + i * 1.7) + .15 * noise(tr * 2.2, i * .37, sd * .01);
+          const Hi = S1 * (.35 + .65 * hsh(i, sd + 4)) * (1 - .45 * Math.abs(hs - .5) * 2) * (.45 + .55 * kNow) * fl;
+          const Wi = Math.max(.25, S0 / nT * 2.6) * (.7 + .5 * hsh(i, sd + 5));
+          const sp = 1.4 + 1.2 * hsh(i, sd + 6), ph0 = tr * sp;
+          const swx = Math.sin(tr * 2.1 + i * 2.3) * .12 * Hi, top = Hi, fy0 = fy + (hsh(i, sd + 11) - .5) * S1 * .22;
+          for (let j = 0; j < mT; j++) {
+            let v = hsh(j, sd + 7 + i * 13) + ph0; v -= Math.floor(v); v = Math.pow(v, 1.25);
+            const w = Wi * Math.pow(1 - v, .7), off = (hsh(j, sd + 8 + i * 7) - .5) * 2 * w;
+            const bend = v * v, dx = lx + off + swx * bend, dz = lz + (hsh(j, sd + 9 + i * 5) - .5) * w * .6, lw = lean * top * bend;
+            const wx = fx + s * dx + c * dz + W0 * lw, wz = fz + c * dx - s * dz + W2 * lw, wy = fy0 + v * top;
+            const hot = 1 - v, al = Math.min(1, 2.4 * kNow) * Math.pow(1 - v, .55) * (.7 + .3 * hsh(j + Math.floor(tr * 20), sd + 10));
+            if (al < .03) continue;
+            // white-hot at the root, amber, a dull coral at the tip
+            dot(wx, wy, wz, big, 255, 106 + 146 * Math.pow(hot, .8), 61 + 175 * hot * hot, al > 1 ? 1 : al);
+          }
+          C.glow(fx + s * lx + c * lz, fy + top * .3, fz + c * lx - s * lz, Math.max(3, Wi * pxm * 1.8), 255, 176, 92, .09 * kNow * fl);
+        }
+      }
+    }
+    // the smoke column: every puff from its emission record
+    const n = Math.min(this.nE, this.cap), life = this.life;
+    for (let c2 = 0; c2 < n; c2++) {
+      const idx = this.nE - 1 - c2, i = idx % this.cap, o = i * 5, a = t - R[o];
+      if (a <= 0) continue; if (a > life) break;
+      const kk = R[o + 4]; if (kk < .03) continue;
+      const hm = ceil * (.45 + .55 * hsh(idx, this.seed)), tr0 = (32 + 34 * hsh(idx, this.seed + 1)) * Math.sqrt(sz + .2), ea = Math.exp(-a / tr0);
+      // the heat carries the smoke up fast (the first seconds faster still), then it slows under its ceiling;
+      // the wind grows with height, so the column leans over as it climbs
+      const h = hm * (1 - ea) + 40 * Math.sqrt(sz) * (1 - Math.exp(-a / 2.5));
+      const dr = .4 * a + hm / 420 * (a - tr0 * (1 - ea)), tb = 5 * Math.sqrt(a) * Math.sqrt(sz), sd = (idx * 7.3 + this.seed) % 97;
+      const bx = R[o + 1] + W0 * dr + tb * noise(sd, a * .02, 1.3), by = R[o + 2] + 3 * sz + h + tb * .4 * noise(sd + 3, a * .03, 8.2), bz = R[o + 3] + W2 * dr + tb * noise(sd + 7, a * .02, 4.1);
+      const rad = (4 + 6 * hsh(idx, this.seed + 2)) * sz + 3.5 * Math.sqrt(a) * Math.sqrt(sz) + .1 * h + 110 * sz * (1 - ea) * (1 - ea);
+      const zc = (bx - V.eye[0]) * V.f[0] + (by - V.eye[1]) * V.f[1] + (bz - V.eye[2]) * V.f[2];
+      if (zc < V.near + rad * .3) continue;
+      const pxm = V.fl / zc, rp = rad * pxm;
+      // far: puffs half a second apart stack up; skip some and brighten the rest
+      const thin = rp < 3 ? 3 : rp < 8 ? 1 : 0; if (idx & thin) continue;
+      if (!V.vis(bx, by, bz, rad * 2)) continue;
+      const nd = Math.max(1, Math.round(Math.min(260, 3 + rp * rp * .045) * q));
+      const heat = Math.max(Math.exp(-a / 2.4), .55 * kk * Math.exp(-h / (140 * Math.sqrt(sz))));
+      const al = kk * Math.min(1, a * 1.5) * Math.pow(1 - a / life, .7) * (.55 + .45 * heat) * Math.min(1, this.dense / Math.sqrt(nd / 3)) * (.55 + .9 * hsh(idx, this.seed + 3)) * (thin ? 1.4 : 1) * ss(rad * .3, rad * 1.8, zc);
+      if (al < .01) continue;
+      // lit warm from the fire under it while low and hot, grey above
+      const cr = 196 + (255 - 196) * heat, cg = 198 + (176 - 198) * heat, cb = 192 + (112 - 192) * heat;
+      const g0 = (idx * 37 + this.seed) | 0;
+      for (let m = 0; m < nd; m++) {
+        const j = (g0 + m * 1733) & GM, ox = GT[j] * rad * .7, oy = GT[(j + 1) & GM] * rad * .55, oz = GT[(j + 2) & GM] * rad * .7;
+        const d2 = (ox * ox + oy * oy + oz * oz) / (rad * rad);
+        dot(bx + ox, by + oy, bz + oz, rp > 30 ? 2 : 1, cr, cg, cb, al * (1 - .35 * Math.min(1, d2)));
+      }
+    }
+  }
+}
+
+/* ---------------- sinking ---------------- */
+/* o: { t0, pos, hdg, L, B, seed, dur (s), steam (false: a boat lost under the water) } ; follow(pos, hdg, dying 0..1)
+   each frame while the hull is there */
+export class Sinking {
+  constructor(o) {
+    this.t0 = o.t0; this.p = o.pos.slice(); this.hdg = o.hdg || 0; this.L = o.L || 155; this.B = o.B || 20; this.seed = o.seed || 77;
+    this.dying = 0; this.dur = (o.dur || 60) + 120; this.steam = o.steam !== false;
+  }
+  follow(pos, hdg, dying) { this.p[0] = pos[0]; this.p[2] = pos[2]; this.hdg = hdg; this.dying = dying; }
+  draw(C, age) {
+    if (age < 0 || age > this.dur) return;
+    const V = C.V, dot = C.dot, P = this.p, L = this.L, B = this.B, s = Math.sin(this.hdg), c = Math.cos(this.hdg);
+    if (!V.vis(P[0], 0, P[2], L * 1.5 + 60)) return;
+    const pxm = V.pxm(P[0], 0, P[2]); if (pxm <= 0) return;
+    const q = C.q, sd = this.seed, dy = this.dying, gone = 1 - ss(this.dur - 40, this.dur, age);
+    // bubbles boiling up round the hull: each lives a moment, then is born again elsewhere (periodic in time)
+    const nb = Math.round(Math.min(900, 60 + L * 3) * q * (pxm * L > 40 ? 1 : .3) * (.3 + dy)) ;
+    for (let i = 0; i < nb; i++) {
+      const per = .8 + 1.2 * hsh(i, sd), ph = (age / per + hsh(i, sd + 1)), cyc = Math.floor(ph), f = ph - cyc;
+      const u = hsh(i * 31 + cyc, sd + 2) - .5, v = hsh(i * 17 + cyc, sd + 3) - .5;
+      const al = u * L * 1.05, ac = v * B * 1.4 * (1 + age * .01);
+      dot(P[0] + s * al + c * ac, .25 + .5 * f, P[2] + c * al - s * ac, pxm > 4 ? 2 : 1, WH[0], WH[1], WH[2], .8 * Math.sin(f * Math.PI) * gone);
+    }
+    // the sheen: a slick of faint dots spreading out on the water, drifting downwind
+    const Rs = L * (.3 + .9 * sat(age / 150)), ns = Math.round(Math.min(1400, 200 + Rs * pxm * 12) * q * (pxm * L > 30 ? 1 : .3));
+    for (let i = 0; i < ns; i++) {
+      const th = hsh(i, sd + 4) * TAU, rr = Math.sqrt(hsh(i, sd + 5)), ex = 1 + .5 * hsh(i, sd + 6);
+      const al = (i & 1 ? 1 : -1) * rr * Rs * .6 * ex, ac = Math.sin(th) * rr * Rs * .35;
+      dot(P[0] + s * al + c * ac + C.wind[0] * age * .3, .2, P[2] + c * al - s * ac + C.wind[2] * age * .3, 1, 222, 228, 214, .38 * (1 - rr * .5) * gone * sat(age / 5) * (.6 + .4 * hsh(i, sd + 13)));
+    }
+    // steam where the hot hull goes under
+    if (this.steam && dy > .1 && dy < .95) {
+      const k = Math.sin((dy - .1) / .85 * Math.PI), np = Math.round(90 * q * k);
+      for (let i = 0; i < np; i++) {
+        const per = 3 + 3 * hsh(i, sd + 9), ph = age / per + hsh(i, sd + 10), cyc = Math.floor(ph), f = ph - cyc;
+        const u = hsh(i * 13 + cyc, sd + 11) - .5, al = u * L * .9, ac = (hsh(i * 7 + cyc, sd + 12) > .5 ? 1 : -1) * B * .5;
+        const rad = 1 + 5 * f, j = (i * 3 + cyc * 7) & GM;
+        dot(P[0] + s * al + c * ac + GT[j] * rad + C.wind[0] * f * per, 1 + 18 * f + GT[(j + 1) & GM] * rad * .5, P[2] + c * al - s * ac + GT[(j + 2) & GM] * rad + C.wind[2] * f * per, pxm > 3 ? 2 : 1, 236, 240, 232, .5 * k * (1 - f) * Math.min(1, f * 5));
+      }
+    }
+  }
+}
+
+/* ---------------- a torpedo under the keel ---------------- */
+/* o: { t0, pos (on the water over the charge), hdg (the hull's heading), L, B (m), H (column height, m: a 533 mm
+   heavyweight ~110, a 324 mm Mk 54 ~55), seed, sub (under a submerged boat), depth (m the charge went off under the
+   surface: a boat's depth) } */
+const CS = 9;   // column dot stride: along, across, v along, v across, vy, k (drag), delay, tLand, kind (0 water, 1 head, 2 mist)
+const SPRAY = [232, 234, 228];
+export class TorpedoHit {
+  constructor(o) {
+    const r = rng(o.seed || 9191), L = o.L || 155, B = o.B || 20, sub = !!o.sub, depth = o.depth || 0;
+    const H = sub ? Math.max(3, (o.H || 110) * .5 * Math.exp(-depth / 38)) : (o.H || 110);
+    this.t0 = o.t0; this.p = [o.pos[0], 0, o.pos[2]]; this.hdg = o.hdg || 0; this.L = L; this.B = B; this.H = H; this.sub = sub;
+    this.seed = o.seed || 9191; this.depth = depth; this.dur = 75; this.s2 = Math.sqrt(H / 110);
+    const n = Math.round(clamp(4400 * Math.sqrt(H / 110), 700, 4800)), T = new Float32Array(n * CS);
+    const v0 = Math.sqrt(2 * G * H) * 1.22, span = sub ? clamp(H * .6, 8, 45) : Math.min(L * .34, 55);
+    this.span = span;
+    for (let i = 0; i < n; i++) {
+      const o9 = i * CS, kind = i % 7 === 0 ? 1 : i % 5 === 0 ? 2 : 0;
+      let al, ac, va, vc;
+      if (sub) {
+        const th = r() * TAU, rr = span * Math.sqrt(r()), sp = 1 + 4 * r();
+        al = Math.cos(th) * rr; ac = Math.sin(th) * rr; va = Math.cos(th) * sp * rr / span; vc = Math.sin(th) * sp * rr / span;
+      } else {
+        // along the hull round the charge; across it on both sides and over the deck, thrown outboard
+        al = clamp(GT[(i * 3 + 11) & GM] * .45, -1, 1) * span; ac = (r() * 2 - 1) * (B * .55 + 3);
+        va = al / span * (1 + 3 * r()); vc = (ac < 0 ? -1 : 1) * (1 + 7 * r() * r());
+      }
+      const e = sub ? Math.hypot(al, ac) / span : Math.abs(al) / span;   // 0 over the charge .. 1 at the edge
+      const vy = v0 * (kind === 1 ? .78 + .25 * r() : .18 + .82 * Math.pow(r(), .55)) * (1 - .55 * e * e) * (kind === 2 ? .7 : 1);
+      const k = kind === 2 ? .45 + .7 * r() : .08 + .12 * r();
+      T[o9] = al; T[o9 + 1] = ac; T[o9 + 2] = va; T[o9 + 3] = vc; T[o9 + 4] = vy; T[o9 + 5] = k;
+      T[o9 + 6] = .03 + .32 * e + .1 * r(); T[o9 + 7] = dropTime(0, vy, k, 0, 40); T[o9 + 8] = kind;
+    }
+    this.T = T; this.n = n;
+  }
+  draw(C, age) {
+    if (age < 0 || age > this.dur) return;
+    const V = C.V, dot = C.dot, P = this.p, H = this.H, L = this.L, B = this.B, sd = this.seed, q = C.q, s2 = this.s2;
+    if (!V.vis(P[0], H * .5, P[2], H + L + 120)) return;
+    const pxm = V.pxm(P[0], H * .35, P[2]); if (pxm <= 0) return;
+    const s = Math.sin(this.hdg), c = Math.cos(this.hdg), wx = C.wind[0], wz = C.wind[2], sub = this.sub;
+    // the charge going off under the water: a pale light over the sea and the hull, a shock ring flicking out
+    if (age < 1) {
+      const w = Math.exp(-age * 5), kk = sub ? Math.exp(-this.depth / 60) : 1;
+      C.light(P[0], 2, P[2], 235, 250, 228, .45 * w * kk * s2, 100 + H * .8);
+      if (age < .25) C.halo(P[0], 1, P[2], Math.min(40, Math.max(6, pxm * 8 * s2)), 245, 250, 236, .45 * (1 - age / .25) * kk);
+    }
+    if (age < .4) {
+      const R = 12 + 1000 * age, n = Math.round(Math.min(420, 40 + R * pxm * 1.2) * q), al = .5 * (1 - age / .4) * (sub ? Math.exp(-this.depth / 80) : 1);
+      for (let m = 0; m < n; m++) { const th = m / n * TAU, rr = R * (.97 + .06 * hsh(m, sd)); dot(P[0] + Math.cos(th) * rr, .3, P[2] + Math.sin(th) * rr, 1, WH[0], WH[1], WH[2], al); }
+    }
+    // the column: heaving up along the hull, climbing slowly, the heads cauliflowering, coming down in curtains
+    if (age < 32) {
+      const T = this.T, n = this.n, hp = H * pxm;
+      const stp = Math.max(1, Math.round((hp > 150 ? 1 : hp > 60 ? 2 : hp > 20 ? 4 : hp > 7 ? 8 : 16) / q));
+      const sz = pxm > 1.4 ? 2 : 1;
+      for (let i = 0; i < n; i += stp) {
+        const o9 = i * CS, t = age - T[o9 + 6]; if (t <= 0) continue;
+        const tl = T[o9 + 7]; if (t >= tl) continue;
+        const k = T[o9 + 5], h = dragH(k, t), y = yDrag(T[o9 + 4], k, t), kind = T[o9 + 8];
+        const la = T[o9] + T[o9 + 2] * h, lc = T[o9 + 1] + T[o9 + 3] * h, dr = kind === 2 ? t * .9 : t * .2;
+        const x = P[0] + s * la + c * lc + wx * dr, z = P[2] + c * la - s * lc + wz * dr;
+        // coming down, the curtains thin; the mist is fainter than the water
+        const fall = 1 - .55 * ss(tl * .55, tl, t), al = (kind === 2 ? .5 : .85) * fall * (.6 + .4 * hsh(i, sd)) * (stp > 2 ? 1.25 : 1);
+        if (kind === 1 && t < tl * .75) {
+          // a head: a clump of spray swelling as it climbs
+          const rad = (1.2 + .5 * t) * s2 * (1 + .4 * hsh(i, sd + 1)), rp = rad * pxm;
+          const nd = rp < 1.2 ? 1 : Math.max(2, Math.round(Math.min(18, 2 + rp * .9) * q)), aa = al * Math.min(1, 2.2 / Math.sqrt(nd));
+          for (let m = 0; m < nd; m++) { const j = (i * 13 + m * 1733 + sd) & GM; dot(x + GT[j] * rad, Math.max(.3, y + GT[(j + 1) & GM] * rad * .8), z + GT[(j + 2) & GM] * rad, sz, WH[0], WH[1], WH[2], aa * 1.1 > 1 ? 1 : aa * 1.1); }
+        } else dot(x, Math.max(.3, y), z, sz, WH[0], WH[1], WH[2], al > 1 ? 1 : al);
+      }
+    }
+    // the base surge: spray rolling out low over the sea from the foot of the column
+    if (age > 2) {
+      const nB = Math.round((sub ? 30 : 60) * q), el = sub ? 1 : 1.6;
+      for (let k = 0; k < nB; k++) {
+        const tb = 2 + 3 * hsh(k, sd + 3), b = age - tb; if (b < 0) continue;
+        const life = 14 + 12 * hsh(k, sd + 4); if (b > life) continue;
+        const th = hsh(k, sd + 5) * TAU, ca = Math.cos(th), sa = Math.sin(th);
+        const r0a = sub ? this.span * .6 : this.span * .8, r0c = sub ? this.span * .6 : B * .6, go = (10 + 12 * hsh(k, sd + 6)) * s2 * dragH(.2, b) + 1.2 * b;
+        const la = ca * (r0a + go * (sub ? 1 : .55)), lc = sa * (r0c + go * el);
+        const x = P[0] + s * la + c * lc + wx * b * .8, z = P[2] + c * la - s * lc + wz * b * .8;
+        const y = (2 + 12 * hsh(k, sd + 7)) * s2 * (1 - Math.exp(-b / 1.5)) + .35 * b;
+        const rad = (5 + 5 * hsh(k, sd + 8)) * s2 + 2.4 * Math.sqrt(b) + .25 * b, pm = V.pxm(x, y, z), rp = rad * pm; if (rp <= 0) continue;
+        const nd = Math.max(1, Math.round(Math.min(90, 3 + rp * rp * .035) * q));
+        const al = .75 * Math.min(1, b * 2) * Math.pow(1 - b / life, .8) * Math.min(1, 2.8 / Math.sqrt(nd / 3)) * (.6 + .4 * hsh(k, sd + 9));
+        const g0 = (k * 97 + sd) | 0;
+        for (let m = 0; m < nd; m++) { const j = (g0 + m * 1733) & GM, yy = y + GT[(j + 1) & GM] * .5 * rad; if (yy < .2) continue; dot(x + GT[j] * rad, yy, z + GT[(j + 2) & GM] * rad, rp > 30 ? 2 : 1, SPRAY[0], SPRAY[1], SPRAY[2], al * GWt(j)); }
+      }
+    }
+    // mist left hanging where the column stood, drifting downwind and thinning
+    if (age > 3.5 && !sub) {
+      const nM = Math.round(40 * q);
+      for (let k = 0; k < nM; k++) {
+        const tb = 3.5 + 3 * hsh(k, sd + 11), b = age - tb; if (b < 0) continue;
+        const life = 18 + 16 * hsh(k, sd + 12); if (b > life) continue;
+        const la = (hsh(k, sd + 13) - .5) * this.span * 1.4, lc = (hsh(k, sd + 14) - .5) * B * 1.6;
+        const y = H * (.2 + .6 * hsh(k, sd + 15)) * (1 - .35 * sat(b / life)), wsh = 1 + y / 300;
+        const x = P[0] + s * la + c * lc + wx * b * wsh, z = P[2] + c * la - s * lc + wz * b * wsh;
+        const rad = (6 + 6 * hsh(k, sd + 16)) * s2 + 2 * Math.sqrt(b), pm = V.pxm(x, y, z), rp = rad * pm; if (rp <= 0) continue;
+        const nd = Math.max(1, Math.round(Math.min(70, 3 + rp * rp * .03) * q));
+        const al = .32 * Math.min(1, b * .8) * Math.pow(1 - b / life, 1.2) * Math.min(1, 2.6 / Math.sqrt(nd / 3));
+        const g0 = (k * 71 + sd * 3) | 0;
+        for (let m = 0; m < nd; m++) { const j = (g0 + m * 1733) & GM; dot(x + GT[j] * rad, y + GT[(j + 1) & GM] * rad * .6, z + GT[(j + 2) & GM] * rad, 1, SPRAY[0], SPRAY[1], SPRAY[2], al * GWt(j)); }
+      }
+    }
+    // foam round the hull (a boil over a boat), growing, then lying there and fading
+    if (age > .3) {
+      const g = sat(age / 5), w = 1 - ss(this.dur * .5, this.dur, age), Ra = sub ? this.span * (.6 + .8 * g) : this.span * (.7 + .6 * g), Rc = sub ? Ra : B * (.9 + 1.4 * g);
+      const n = Math.round(Math.min(900, 60 + Ra * Rc * pxm * pxm * .5) * q), fr = Math.floor(C.tr * 6);
+      for (let m = 0; m < n; m++) {
+        const th = hsh(m, sd + 21) * TAU, rr = Math.sqrt(hsh(m, sd + 22)), la = Math.cos(th) * rr * Ra, lc = Math.sin(th) * rr * Rc;
+        const boil = age < 12 ? .5 + .5 * hsh(m, fr) : 1;
+        dot(P[0] + s * la + c * lc + wx * age * .15, .25, P[2] + c * la - s * lc + wz * age * .15, 1, WH[0], WH[1], WH[2], .45 * w * (1 - .5 * rr) * boil * (.4 + .6 * hsh(m, 3)));
+      }
+    }
+  }
+}
+const GWt = j => .6 + .8 * ((j * .618034) % 1);

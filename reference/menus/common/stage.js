@@ -25,8 +25,13 @@
   ];
   const Q = new URLSearchParams(location.search);
   const PAGE = (location.pathname.split('/').pop() || '').replace('.html', '');
-  // frozen frames: no CSS fades, so a still shows every label at full strength
-  if (Q.has('t')) { const s = document.createElement('style'); s.textContent = '*,*::after,*::before{transition:none!important;animation:none!important}'; document.head.appendChild(s); }
+  /* raster resolution: ?res=1080|1440|2160 (frame height; 16:9). Scenes that support it draw their pixel buffers at
+     RES.W x RES.H and convert to the 1920x1080 stage (where the HTML UI lives) by RES.S */
+  const RES = (() => { let h = parseInt(Q.get('res'), 10); if (!(h >= 360 && h <= 4320)) h = 1080; const S = h / 1080; return { W: Math.round(1920 * S), H: h, S }; })();
+  // video render (?render=1, common/render.js): frames stepped from script, never from the clock
+  const RENDER = Q.has('render') && Q.get('render') !== '0';
+  // frozen frames and renders: no CSS fades, so a still shows every label at full strength (renders fade tags in JS)
+  if (Q.has('t') || RENDER) { const s = document.createElement('style'); s.textContent = '*,*::after,*::before{transition:none!important;animation:none!important}'; document.head.appendChild(s); }
 
   /* ---------- stage fit ---------- */
   function fit() {
@@ -39,21 +44,33 @@
 
   /* ---------- sound ---------- */
   const SFX = {
-    ac: null, on: true, kind: 'orb', master: null,
+    ac: null, on: true, kind: 'orb', master: null, t0: null,
     unlock() {
-      if (this.ac) return;
+      if (this.ac || RENDER) return;
       try { this.ac = new (window.AudioContext || window.webkitAudioContext)(); this.master = this.ac.createGain(); this.master.gain.value = .9; this.master.connect(this.ac.destination); } catch (e) { this.ac = null; }
     },
+    /* offline mix (video renders): cues = [[t s, fn]] played into an OfflineAudioContext of dur s -> AudioBuffer.
+       Each cue's sounds start at its t (SFX.t0 stands in for currentTime while the cue runs) */
+    async offline(cues, dur, sr) {
+      sr = sr || 48000;
+      const keep = [this.ac, this.master, this.on, this.t0];
+      const ac = new OfflineAudioContext(2, Math.max(1, Math.ceil(dur * sr)), sr);
+      this.ac = ac; this.master = ac.createGain(); this.master.gain.value = .9; this.master.connect(ac.destination); this.on = true;
+      try { for (const [t, fn] of cues) { if (t < 0 || t >= dur) continue; this.t0 = t; try { fn(); } catch (e) { console.error(e); } } }
+      finally { [this.ac, this.master, this.on, this.t0] = keep; }
+      return ac.startRendering();
+    },
+    now() { return this.t0 !== null ? this.t0 : this.ac.currentTime; },
     tone(f0, f1, dur, type, gain, when) {
       if (!this.ac || !this.on) return;
-      const t = this.ac.currentTime + (when || 0), o = this.ac.createOscillator(), g = this.ac.createGain();
+      const t = this.now() + (when || 0), o = this.ac.createOscillator(), g = this.ac.createGain();
       o.type = type || 'sine'; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1 || f0, t + dur);
       g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(gain || .05, t + .004); g.gain.exponentialRampToValueAtTime(.0001, t + dur);
       o.connect(g); g.connect(this.master); o.start(t); o.stop(t + dur + .02);
     },
     noise(dur, f, q, gain, attack, when) {
       if (!this.ac || !this.on) return;
-      const t = this.ac.currentTime + (when || 0), n = Math.floor(this.ac.sampleRate * dur), b = this.ac.createBuffer(1, n, this.ac.sampleRate), d = b.getChannelData(0);
+      const t = this.now() + (when || 0), n = Math.floor(this.ac.sampleRate * dur), b = this.ac.createBuffer(1, n, this.ac.sampleRate), d = b.getChannelData(0);
       for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
       const s = this.ac.createBufferSource(); s.buffer = b;
       const fl = this.ac.createBiquadFilter(); fl.type = 'lowpass'; fl.frequency.value = f || 400; fl.Q.value = q || .7;
@@ -147,7 +164,7 @@
   }
 
   async function capture() {
-    const dir = location.pathname.split('/').slice(-2, -1)[0] || 'menus';
+    const dirs = location.pathname.split('/').filter(Boolean), dir = dirs.includes('films') ? 'films' : dirs.slice(-2, -1)[0] || 'menus';   // (each film sits in films/<id>/; stills go to films/shots/)
     const out = Q.get('out') || `${dir}/shots/${PAGE}${Q.has('tag') ? '_' + Q.get('tag') : ''}.png`;
     try {
       await document.fonts.ready;
@@ -164,13 +181,14 @@
     } catch (e) { console.error(e); document.title = 'CAPTURE FAILED ' + e; }
   }
   async function embedFonts() {
-    const urls = [...document.querySelectorAll('link[href*="fonts.googleapis.com"]')].map(l => l.href);
+    // (the local fonts.css, menus/common/fonts: its url()s are relative to it, made absolute here)
+    const urls = [...document.querySelectorAll('link[href*="fonts.css"]')].map(l => l.href);
     let css = '';
-    for (const u of urls) css += await (await fetch(u)).text() + '\n';
-    const found = [...new Set([...css.matchAll(/url\((https:[^)]+)\)/g)].map(m => m[1]))];
+    for (const u of urls) css += (await (await fetch(u)).text()).replace(/url\(([^)'"]+)\)/g, (m, f) => `url(${new URL(f, u).href})`) + '\n';
+    const found = [...new Set([...css.matchAll(/url\((https?:[^)]+)\)/g)].map(m => m[1]))];
     const map = {};
     await Promise.all(found.map(async u => { const b = await (await fetch(u)).blob(); map[u] = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(b); }); }));
-    return css.replace(/url\((https:[^)]+)\)/g, (m, u) => `url(${map[u]})`);
+    return css.replace(/url\((https?:[^)]+)\)/g, (m, u) => `url(${map[u]})`);
   }
 
   /* ---------- version flip + label ---------- */
@@ -186,7 +204,7 @@
     else if (e.key === 'Backspace') location.href = 'index.html';
   });
   function tagVersion() {
-    if (Q.has('t') || Q.has('clean')) return;
+    if (Q.has('t') || Q.has('clean') || RENDER) return;
     const v = VERSIONS.find(v => v[0] === PAGE); if (!v) return;
     const d = document.createElement('div');
     d.style.cssText = 'position:fixed;left:50%;top:14px;transform:translateX(-50%);font:500 11px/1 Consolas,monospace;letter-spacing:.08em;text-transform:uppercase;color:rgba(255,255,255,.42);z-index:99;pointer-events:none;transition:opacity 1.2s;white-space:nowrap';
@@ -195,7 +213,7 @@
     setTimeout(() => d.style.opacity = '0', 4500);
   }
 
-  const STAGE = { VERSIONS, ITEMS, BLURBS, Q, PAGE, fit, menu, run, SFX, capture, scale: 1, time: 0, ready: false };
+  const STAGE = { VERSIONS, ITEMS, BLURBS, Q, PAGE, RES, RENDER, fit, menu, run, SFX, capture, scale: 1, time: 0, ready: false };
   window.STAGE = STAGE;
   addEventListener('DOMContentLoaded', () => { fit(); tagVersion(); });
 })();

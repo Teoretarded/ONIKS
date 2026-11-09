@@ -1,0 +1,82 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Oniks — Bore</title>
+<link rel="stylesheet" href="../../../../menus/common/fonts/fonts.css">
+<link rel="stylesheet" href="../../../../menus/common/pc.css">
+<link rel="stylesheet" href="plate.css">
+</head>
+<body><div id="stage">
+  <canvas id="c" class="px"></canvas>
+  <canvas id="o"></canvas>
+  <div class="ui" id="ui">
+    <div class="logo abs"><svg viewBox="0 0 24 24"><path d="M12 2 20.5 22h-4.1L12 11.4 7.6 22H3.5z" fill="#fff"/><circle cx="12" cy="18.2" r="1.7" fill="#C6F432"/></svg>Oniks</div>
+    <div class="kick abs"><i></i><span id="kick"></span></div>
+    <div class="ro abs" id="ro"></div>
+    <div class="eq abs" id="eq"></div>
+  </div>
+</div>
+<script src="../../../../menus/common/m3.js"></script>
+<script src="../../../../menus/common/dots.js"></script>
+<script src="../../../../menus/common/geo.js"></script>
+<script src="plate_kit.js"></script>
+<script>
+/* PLATE 02 · BORE: the round seated in the barrel (pc_duel_round.js: a tungsten rod 25 mm x 2 m, the sabot gripping
+   z -0.62 .. 0.48, the armature behind it), the near sidewall cut away, the rod's dots coloured by the stress the shot
+   puts in it (white under tungsten alloy's ~1.5 GPa, coral over), and the stress along the rod plotted above it.
+   Bore frame: metres, +Z toward the muzzle, rails top and bottom. */
+(() => {
+const { cam, LIME, CORAL, WH, pts, sample, cloud, dline, hair, arrow, tag, label, readout } = PL;
+const G = GEO, DEG = Math.PI / 180;
+const RHO = 19300, A = 2.62e6, LIM = 1.5;
+/* signed stress (GPa, + squashed, - pulled) along the rod */
+const sig = z => z >= .48 ? RHO * A * (1 - z) / 1e9 : z <= -.62 ? -RHO * A * (z + 1) / 1e9 : -19.2 + (z + .62) / 1.1 * 45.5;
+
+cam.fov = 24 * DEG;
+cam.orbit([.05, .3, .12], -83 * DEG, 9 * DEG, 4.6);
+
+// rails (copper) top and bottom, the far sidewall; the near sidewall cut away (its outline)
+const Z0 = -1.55, Z1 = 1.55;
+cloud(sample([G.box([-.13, .14, Z0], [.13, .24, Z1]), G.box([-.13, -.24, Z0], [.13, -.14, Z1])], .012, 3), WH, .5, { back: .3 });
+cloud(sample([G.box([-.2, -.14, Z0], [-.14, .14, Z1])], .03, 4), WH, .14, { back: .5 });
+hair([[.17, .14, Z0], [.17, .14, Z1], [.17, -.14, Z1], [.17, -.14, Z0], [.17, .14, Z0]], WH, .25, { dash: [3, 5] });
+
+// the sabot (three lattice petals) and the armature
+cloud(sample([G.lathe([0, 0, -.62], [0, 0, 1], [[0, .09], [.04, .14], [.96, .14], [1.1, .05]], {})], .016, 5), CORAL, .5, { back: .3 });
+for (const a of [60, 180, 300]) { const c = Math.cos(a * DEG) * .141, s = Math.sin(a * DEG) * .141; dline([c, s, -.58], [c, s, .34], .006, CORAL, .55); }
+cloud(sample([G.box([-.12, .02, -.7], [.12, .14, -.62]), G.box([-.12, -.14, -.7], [.12, -.02, -.62])], .012, 6), WH, .55);
+
+// the rod, coloured by its stress
+const rod = [G.lathe([0, 0, -1], [0, 0, 1], [[0, .0125], [1.88, .0125], [1.94, .009], [1.98, .004], [2, 0]], { caps: true })];
+for (let k = 0; k < 6; k++) { const a = k * 60 * DEG, c = Math.cos(a), s = Math.sin(a); rod.push(G.panel([[c * .0125, s * .0125, -1], [c * .0825, s * .0825, -.97], [c * .0825, s * .0825, -.92], [c * .0125, s * .0125, -.86]])); }
+cloud(sample(rod, .0035, 7), (x, y, z) => Math.abs(sig(z)) <= LIM ? WH : CORAL, 1, { back: .55 });
+
+// the stress plot above the bore: |sigma| along the rod, the alloy's limit
+const Y0 = .36, K = .02, curve = [], fill = [];
+for (let z = -1; z <= 1.0001; z += .0025) curve.push([0, Y0 + Math.abs(sig(z)) * K, z]);
+for (let z = -1; z <= 1.0001; z += .02) { const h = Math.abs(sig(z)) * K; for (let y = 0; y < h; y += .008) fill.push([0, Y0 + y, z]); }
+cloud(pts(curve), CORAL, 1, { size: 1.5 });
+cloud(pts(fill), CORAL, .3);
+hair([[0, Y0, -1.1], [0, Y0, 1.1]], WH, .35);
+hair([[0, Y0 + LIM * K, -1.1], [0, Y0 + LIM * K, 1.1]], LIME, .95, { dash: [5, 4], w: 1.3 });
+for (const g of [0, 10, 20]) { hair([[0, Y0 + g * K, -1.12], [0, Y0 + g * K, -1.1]], WH, .5); label([0, Y0 + g * K, -1.13], g + ' GPA', -6, 0); }
+hair([[0, Y0, -1.1], [0, Y0 + 27 * K, -1.1]], WH, .25);
+
+// the push on the armature
+arrow([0, 0, -1.5], [0, 0, -.74], LIME, .9, 14);
+label([0, 0, -1.5], 'F = 80 MN', 0, -16, 'l');
+
+tag([0, Y0 + 26.3 * K, .48], 'NOSE', '26.3 GPA · SQUASHED', '×18–26', 60, -40, 'coral');
+tag([0, Y0 + 19.2 * K, -.62], 'TAIL', '19.2 GPA · PULLED', '×13–19', -70, -40, 'coral');
+tag([0, -.14, -.1], 'SABOT', 'LATTICE · 1.15 GPA', '×11–23', 30, 150, 'coral');
+tag([0, Y0 + LIM * K, 1.1], 'LIMIT', 'TUNGSTEN ALLOY', '1.5 GPA', 40, -30, 'lime');
+
+readout(2, 'Bore', [
+  'ROUND · <b>19.4 KG</b> · <b>7.8 KM/S</b>',
+  'BORE · <b>11.6 M</b> · <b>3.0 MS</b>',
+  'ACCEL · <span class="c">267,000 G</span>',
+  'LIMIT · <span class="l">1.5 GPA</span>',
+]);
+document.getElementById('eq').innerHTML = 'σ = ρ L a = 19,300 × 0.52 × 2.62×10⁶ = <b>26.3 GPa</b>';
+PL.done();
+})();
+</script>
+</body></html>

@@ -1,0 +1,77 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Oniks — Banks</title>
+<link rel="stylesheet" href="../../../../menus/common/fonts/fonts.css">
+<link rel="stylesheet" href="../../../../menus/common/pc.css">
+<link rel="stylesheet" href="plate.css">
+</head>
+<body><div id="stage">
+  <canvas id="c" class="px"></canvas>
+  <canvas id="o"></canvas>
+  <div class="ui" id="ui">
+    <div class="logo abs"><svg viewBox="0 0 24 24"><path d="M12 2 20.5 22h-4.1L12 11.4 7.6 22H3.5z" fill="#fff"/><circle cx="12" cy="18.2" r="1.7" fill="#C6F432"/></svg>Oniks</div>
+    <div class="kick abs"><i></i><span id="kick"></span></div>
+    <div class="ro abs" id="ro"></div>
+    <div class="eq abs" id="eq"></div>
+  </div>
+</div>
+<script src="../../../../menus/common/m3.js"></script>
+<script src="../../../../menus/common/dots.js"></script>
+<script src="../../../../menus/common/geo.js"></script>
+<script src="../../../common/hd_sea_air.js"></script>
+<script src="plate_kit.js"></script>
+<script>
+/* PLATE 01 · BANKS: the film's pulse-forming network (4 racks x 20 modules, 160 MJ) in place under the mount, seen
+   through the hull, and beside the ship at the same scale the bank the shot needs at real capacitor density
+   (2.3-3.0 GJ: ~1,500 modules of 2 MJ at ~1.6 m3 each). Ship frame: metres, +Z the bow, origin midships on the
+   waterline (pc_duel_parts.js). */
+(() => {
+const { cam, LIME, CORAL, WH, pts, sample, cloud, hair, tag, readout, sea } = PL;
+const G = GEO;
+
+cam.fov = 30 * Math.PI / 180;
+cam.orbit([0, 4, 66], 124 * Math.PI / 180, 25 * Math.PI / 180, 150);
+
+sea(-90, 60, -40, 150, 2.2, .3, [110, 300]);
+
+// the destroyer, X-ray (the Mk 45 left out: the railgun takes its seat)
+const ship = HD.destroyer();
+for (const part of GEO.sample(ship, .22, 7, {})) {
+  if (part.name === 'gun' || part.name === 'rails') continue;
+  cloud(part.pts, WH, part.name === 'hull' ? .6 : .45, { back: .35, fade: [90, 240], fadeTo: .3 });
+}
+
+// the film's bank: 4 racks of 20 modules (0.8 x 0.52 x 0.52 m) under the mount
+const FL = 1.3, film = [];
+for (const s of [1, -1]) for (const z0 of [47.9, 51.6]) for (let k = 0; k < 4; k++) for (let q = 0; q < 5; q++) {
+  const c = [s * 2.36, FL + .43 + k * 1.12, z0 + .38 + q * .64];
+  film.push(G.box([c[0] - .4, c[1] - .26, c[2] - .26], [c[0] + .4, c[1] + .26, c[2] + .26]));
+}
+cloud(sample(film, .06), LIME, .95, { back: .7 });
+
+// the bank it needs: ~1,500 real 2 MJ modules (1.0 x 1.0 x 1.6 m), stacked on the water ahead of the bow at the same scale
+const NX = 12, NY = 10, NZ = 13, BX = 6, BZ = 88, need = [], edges = [];
+for (let i = 0; i < NX; i++) for (let j = 0; j < NY; j++) for (let k = 0; k < NZ; k++) {
+  const a = [BX - (i + 1) * 1.0 + .04, j * 1.0 + .04, BZ + k * 1.6 + .04], b = [BX - i * 1.0 - .04, (j + 1) * 1.0 - .04, BZ + (k + 1) * 1.6 - .04];
+  const outer = i === NX - 1 || i === 0 || j === NY - 1 || k === 0 || k === NZ - 1;
+  (outer ? need : edges).push(G.box(a, b, outer ? {} : { edgeOnly: true }));
+}
+cloud(sample(need, .16, 11), CORAL, .8, { back: .3 });
+cloud(sample(edges, .5, 12), CORAL, .18);
+// its footprint on the water
+hair([[BX, 0, BZ], [BX - NX, 0, BZ], [BX - NX, 0, BZ + NZ * 1.6], [BX, 0, BZ + NZ * 1.6], [BX, 0, BZ]], CORAL, .5, { dash: [3, 4] });
+
+tag([-2.36, FL + 4.2, 53.2], 'BANK', 'FILM · 80 × 2 MJ', '160 MJ', 120, -170, 'lime');
+tag([BX - NX, NY, BZ + NZ * 1.6], 'NEEDED', '≈1,500 MODULES · ≈2,000 T', '×14–19', 60, -170, 'coral');
+tag(HD.destroyer.A.bridge, 'DDG-51', 'FLIGHT IIA · 9,200 T', '', 90, -110, 'sm');
+
+readout(1, 'Banks', [
+  'BANK · <b>80 MODULES</b> · <span class="l">160 MJ</span>',
+  'NEEDED · <span class="c">2.3–3.0 GJ</span>',
+  'SHORT · <span class="c">×14–19</span>',
+  'MODULE · FILM <b>0.22 M³</b> · REAL <b>1.6 M³</b>',
+]);
+document.getElementById('eq').innerHTML = 'E = ½ m v² / η = <b>913 MJ</b> / 0.3–0.4 = <b>2.3–3.0 GJ</b>';
+PL.done();
+})();
+</script>
+</body></html>

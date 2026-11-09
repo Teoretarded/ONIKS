@@ -1,0 +1,852 @@
+/* ONIKS effects system: the game-trailer spectacle driven by sim events and sim state, drawn into a sink.
+
+   import { createFx } from './fx/index.js';
+   game.addSystem(createFx(game));        // system { name: 'fx', onEvent, update, draw3d }
+
+   Renderer-agnostic: draw3d(frame) draws into frame.sink (see README.md), or, when the frame has none, into the
+   engine through engineSink(renderer).
+   Quality: the Effects setting (game.settings.effects, read every frame so a change applies live; setLevel(l) by
+   hand) sets the dot budget, the ceiling of the thinning factor q and which dynamic lights are cast:
+   high = the films (every light), medium = lighter smoke and debris and fewer, stronger lights, low = sparse smoke
+   and debris and only the strongest flashes lighting the world. Every particle is an analytic function of its age plus a seeded index;
+   the only records kept are emission data (where a puff, a wake row or a smoke parcel was laid, and when).
+   The Orbital render style (R.style === 'orbital'): every effect is drawn from the same state in the Orbital films'
+   hairlines instead (lib/orbital.js: billows, great circles, streaks, jets, restrained bloom); no dots. */
+import { View, TAU, dirOf, norm3, hsh, sat, ss, clamp, LIME } from './lib/core.js';
+import { Trail, STAGE } from './lib/smoke.js';
+import { drawPlume, drawHead, PLUME } from './lib/plume.js';
+import { ColdLaunch, VlsLaunch, HotLaunch, GunBlast, BalLaunch, SubLaunch, TorpLaunch } from './lib/launch.js';
+import { Burst, BoosterSep, FragBelt } from './lib/burst.js';
+import { Splash, Dirt, Blast, Fire, Sinking, TorpedoHit } from './lib/impact.js';
+import { HullBlast } from './lib/hullblast.js';
+import { Scorch, SCORCH_MAX } from './lib/scorch.js';
+import { TracerStream, GunStream, Muzzle } from './lib/guns.js';
+import { Wake, Downwash, Bubbles, SubWater } from './lib/water.js';
+import { drawJet, drawProps } from './lib/air.js';
+import { Lightning, drawRain } from './lib/weather.js';
+import { orbBegin, orbEnd, orbDraw, orbTrail, orbPlume, orbHead, orbWake, orbDownwash, orbBubbles, orbSubWater, orbJet, orbProps, orbRain, orbStats } from './lib/orbital.js';
+
+export { engineSink };
+
+/* ---------------- flight profiles: which smoke and which flame, by kind and age ---------------- */
+/* returns [trail stage | null, plume spec | null, head glow 0..1]; p: the projectile (the Kalibr's dash: p.dash).
+   The phases follow the sim's own motor timings (PROJ: ign, boost, sepAt, sus, drop; sim/weapons.js motorOf), so the
+   flame and the smoke change exactly when the model state does (booster off at sepAt) */
+const NONE = [null, null, 0];
+const R_SM6B = [null, null, 0], R_GLIDE = [null, null, .15], R_DART = [null, null, .2];
+function profile(kind, age, P, p) {
+  switch (kind) {
+    case 'oniks': {
+      const ig = (P && P.ign) || .38, sep = (P && P.sepAt) || 7;
+      if (age < ig) return [null, null, 0];
+      if (age < sep) return [STAGE.boost, PLUME.oniksBoost, 0];
+      if (age < sep + .35) return [null, null, 0];
+      return [STAGE.air, PLUME.ramjet, 0];
+    }
+    case 'sm6': {
+      // Mk 72 (thick column, long flame) -> it drops, a beat of nothing -> the Mk 104 (its own smaller flame at the
+      // sustainer's nozzle, a thinner trail) -> burnout: the coast, a white point in a lime halo
+      const B = (P && P.boost) || 6, S = (P && P.sus) || [6.4, 9.5, 18];
+      if (age < B) return [STAGE.boost, PLUME.mk72, 1];
+      if (age < S[0]) return R_SM6B;
+      if (age < S[2]) return [STAGE.sustain, PLUME.mk104, .55];
+      return R_GLIDE;
+    }
+    case 'sam48': {
+      // 48N6: thrown up cold (the ColdLaunch pop, no flame), lit half a second up, one long burn, then the coast
+      const ig = (P && P.ign) || .5, B = (P && P.boost) || 8;
+      if (age < ig) return NONE;
+      if (age < ig + B) return [STAGE.boost, PLUME.s400, 1];
+      return R_GLIDE;
+    }
+    case 'tlam': {
+      // the booster's column through the tip-over, it drops at burnout (wings out), then the turbofan: all but invisible
+      const b = (P && P.sepAt) || (P && P.boost) || 10;
+      if (age < b) return [STAGE.boost, PLUME.tlamBoost, 0];
+      if (age < b + .4) return NONE;
+      return [STAGE.heat, PLUME.turbojet, 0];
+    }
+    case 'slam': {
+      // dropped off the pylon unpowered, the wings snapping out as it falls; the turbojet spools up after
+      const d = (P && P.drop) || 0;
+      if (age < d + .35) return NONE;
+      return [STAGE.heat, PLUME.turbojet, 0];
+    }
+    case 'uran': {
+      // Kh-35U: a 2 s solid booster out of the pack, dropped; then the turbofan, no flame at all
+      const sep = (P && P.sepAt) || 2;
+      if (age < sep) return [STAGE.kh, PLUME.khBoost, 0];
+      if (age < sep + .25) return NONE;
+      return [STAGE.fan, PLUME.fanKh, 0];
+    }
+    case 'kalibr': {
+      // 3M-54: the booster out of the sea (lit just over it: the tracker's ig), the turbofan; the supersonic
+      // terminal stage's rocket only when the sim flies the dash (p.dash / phase 'dash')
+      const sep = (P && P.sepAt) || 5;
+      if (age < sep) return [STAGE.boost, PLUME.kalBoost, 0];
+      if (age < sep + .3) return NONE;
+      if (p && (p.dash || p.phase === 'dash')) return [STAGE.sustain, PLUME.dash, 0];
+      return [STAGE.fan, PLUME.fanKal, 0];
+    }
+    // ESSM: one bright, tight burn (the Mk 134), then the coast
+    case 'pdms': return age < ((P && P.boost) || 3.5) ? [STAGE.sustain, PLUME.essm, 1] : age < ((P && P.boost) || 3.5) + 3 ? [STAGE.glide, null, .3] : R_GLIDE;
+    // RAM: a short hot burn off the box launcher
+    case 'ram': return age < ((P && P.boost) || 2) ? [STAGE.small, PLUME.small, .9] : R_GLIDE;
+    // 57E6: the booster's 2.4 s, then the unpowered dart
+    case 'sam': return age < ((P && P.boost) || 2.4) ? [STAGE.small, PLUME.small, 1] : age < ((P && P.boost) || 2.4) + 2 ? [STAGE.glide, null, .2] : R_DART;
+    // AIM-120: reduced-smoke propellant: a compact flame and a thin thread, then nothing but the point
+    case 'aam': return age < ((P && P.boost) || 4) ? [STAGE.thin, PLUME.thin, .8] : [null, null, .15];
+    case 'hellfire': return age < 2.5 ? [STAGE.thin, PLUME.tiny, .6] : [null, null, .1];
+    case 'kornet': return age < 1.2 ? [STAGE.small, PLUME.tiny, .5] : [null, null, .08];      // 9M133: a short sustainer burn
+    default: return NONE;
+  }
+}
+/* the third wave's rounds look like their nearest kin: gun rounds like the 5-inch; the 48N6 and RAM have their own
+   phases above but launch like their kin (the 48N6 with the ColdLaunch pop) */
+const FXK = { shell57: 'shell', shell130: 'shell' };
+const fk = k => FXK[k] || k;
+const BOOSTER = { oniks: 'oniks', sm6: 'mk72', tlam: 'tlam', sam: 'small', pdms: 'small', uran: 'kh35', kalibr: 'kalibr' };
+/* kinds that launch like a kin (their flights have their own phases in profile) */
+const LAUNCH_AS = { sam48: 'sm6', ram: 'pdms' };
+const SPLASH_H = { sam48: 16, ram: 12, kornet: 9, shell: 26, oniks: 46, tlam: 36, slam: 34, hellfire: 12, sm6: 16, pdms: 14, sam: 12, aam: 12, crash: 30, uran: 30, kalibr: 40 };
+const HIT_SC = { sam48: .35, ram: .3, kornet: .22, oniks: 1, tlam: .7, slam: .65, hellfire: .3, shell: .2, sm6: .35, pdms: .3, sam: .3, aam: .3, ciws: .05, gun30: .06, uran: .55, kalibr: .75 };
+const THREAT = { kornet: 1, oniks: 1, tlam: 1, slam: 1, hellfire: 1, shell: 1, crash: 1, uran: 1, kalibr: 1 };
+/* warhead charge (kg, as game/scars.js WH) for the crater a round leaves on land (lib/scorch.js); crash: scorched ground */
+const CRATER_KG = { oniks: 250, kalibr: 200, tlam: 450, slam: 360, uran: 145, hellfire: 9, kornet: 7, shell: 3.6, sm6: 64, pdms: 39, sam: 20, sam48: 180, ram: 11, aam: 18, mk84: 430, crash: 0 };
+const GUNS = { ciws: 1, gun30: 1 };
+const NOZ = { sam48: 3.8, ram: 1.4, kornet: .6, oniks: 4.5, sm6: 3.3, tlam: 3.1, slam: 2.2, pdms: 1.8, sam: 1.7, aam: 1.8, hellfire: .85, uran: 2.25, kalibr: 4.15 };
+/* torpedoes: the round's length (m) and the height of the column its charge throws up under a keel */
+const TORP = { mk48: { len: 5.8, H: 115 }, t53: { len: 7.2, H: 105 }, mk54: { len: 2.72, H: 45 } };
+/* the boats (data/models.js SUBS: VA, KL): the sail [z0, z1, half width, top], the casing's top over the waterline,
+   the pressure hull [axis height, radius] (m, boat frame), where the masts stand (z) */
+const SUBG = { ssn: { sail: [22.6, 32.6, 1.3, 7.9], deck: 1.1, mast: 30.5, hull: [-4.1, 5.2] }, ssk: { sail: [-5, 8.3, 1.2, 7.75], deck: 2.7, mast: 6, hull: [-1.9, 4.4] } };
+/* a boat under the water (sim/subs.js submerged) */
+const subUnder = u => !!(u && u.def && u.def.sub) && (u.depth || 0) > u.def.draught + 2.5;
+/* Effects quality (data/settings.js `effects`): budget share, q ceiling, dynamic lights (min intensity, max a frame) */
+export const FX_LEVELS = {
+  low: { budget: .35, q: .4, lightMin: .45, lights: 4 },
+  medium: { budget: .65, q: .7, lightMin: .12, lights: 10 },
+  high: { budget: 1, q: 1, lightMin: .01, lights: 99 },
+};
+
+class FxSystem {
+  constructor(game, o) {
+    o = o || {};
+    this.name = 'fx'; this.priority = 5;
+    this.game = game;
+    this.baseBudget = this.budget = o.budget || 150000;
+    this.level = null; this.qMax = 1;
+    this.wakes = o.wakes !== false;
+    this.fog = o.fog !== false;
+    this.q = 1; this.lastN = 0; this.tr = 0; this.stats = { dots: 0, q: 1, effects: 0, trails: 0, ms: 0 };
+    this.fx = [];                 // live effect instances: { e, t0, dur, layer }
+    this.trk = new Map();         // projectile id -> tracker
+    this.gone = new Map();        // trackers of rounds that just ended (their last velocity, for the bursts)
+    this.ghost = [];              // trails whose round is gone, still hanging in the air
+    this.wk = new Map();          // unit id -> Wake
+    this.wkM = new Map();         // boat id -> Wake of its masts at periscope depth (feather)
+    this.subw = new Map();        // boat id -> SubWater (surfacing, diving)
+    this.bubGhost = [];           // bubble lines of torpedoes that ended, fading on the water
+    this.lnch = new Map();        // projectile id -> seconds after launch its motor lights (rounds out of the sea)
+    this.P3 = [0, 0, 0];
+    /* FX draws the Kh-35U / Kalibr plumes and smoke (the render system's stop-gap trail can go) */
+    this.ownTrails = true;
+    this.fires = new Map();       // unit id -> Fire
+    this.sinks = new Map();       // unit id -> Sinking
+    this.falls = new Map();       // unit id -> Trail (aircraft going down / trailing smoke)
+    this.hitAt = new Map();       // unit id -> last hit, unit frame [along, up, across]
+    this.abUntil = new Map();     // unit id -> sim time the afterburner stays lit to (takeoffs)
+    this.bolts = [];              // natural lightning (real time: this.wclk, which stops while the game is paused)
+    this.wclk = 0; this.lastBig = -9; this.lastBigIc = -9; this.lastCg = -9;
+    this.groundFires = [];
+    this.scorches = [];           // craters and scorched ground left by rounds on land (lib/scorch.js), newest last
+    this.down = new Downwash({});
+    this.skirt = new Downwash({ D: 15 });      // an LCAC on cushion: the spray (dust over land) from under its skirt
+    this.V = new View();
+    this.lastT = 0;
+    const self = this;
+    // the frame context every effect draws through (dot counting and the hard cap live here)
+    this.C = {
+      V: this.V, t: 0, tr: 0, q: 1, wind: [0, 0, 0], n: 0, cap: this.budget, sink: null, nl: 0, lmin: .01, lmax: 99,
+      ground: (x, z) => self.groundAt(x, z),
+      dot: null, glow: null, halo: null, light: null, lift: null,
+    };
+  }
+  init(game) { if (game) this.game = game; }
+  /* the Effects quality: 'low' | 'medium' | 'high' (FX_LEVELS) */
+  setLevel(l) {
+    const P = FX_LEVELS[l] || FX_LEVELS.high;
+    this.level = FX_LEVELS[l] ? l : 'high';
+    this.budget = Math.round(this.baseBudget * P.budget);
+    this.qMax = P.q; this.q = Math.min(this.q, P.q);
+    this.C.lmin = P.lightMin; this.C.lmax = P.lights;
+    this.stats.level = this.level;
+  }
+
+  /* ---------- helpers onto the game ---------- */
+  get sim() { return this.game && this.game.sim; }
+  groundAt(x, z) {
+    const g = this.game, m = g && (g.map || (g.sim && g.sim.map));
+    if (g && g.ground) return g.ground(x, z);
+    // the drawn ground when there is a renderer (land with its metre-scale relief; 0 over water)
+    const T = g && g.renderer && g.renderer.terrain;
+    if (T && T.heightAt) { const h = T.heightAt(x, z); return h > 0 ? h : 0; }
+    if (m && m.h) { const h = m.h(x, z); return h > 0 ? h : 0; }
+    return 0;
+  }
+  wet(x, z) { const g = this.game, m = g && (g.map || (g.sim && g.sim.map)); return m && m.h ? m.h(x, z) < 0 : true; }
+  seeUnit(u) {
+    const g = this.game, sim = this.sim;
+    if (!this.fog || !g || !g.side || !sim || !sim.visible || !u) return true;
+    return !!sim.visible(g.side, u);
+  }
+  seeProj(p) {
+    const g = this.game, sim = this.sim;
+    if (!this.fog || !g || !g.side || !sim || !sim.projVisible || !p) return true;
+    return sim.projVisible(g.side, p);
+  }
+  add(e, layer) { e.layer = layer || 0; this.fx.push(e); return e; }
+  /* an interceptor's warhead: its fragment belt at the burst point (sim: ev.burst, ev.belt { ax, cone, R }) */
+  belt(ev, t, seed, vel) {
+    const B = ev.belt, at = ev.burst || ev.pos;
+    if (!B || !at) return;
+    this.add(new FragBelt({ t0: t, pos: at, ax: B.ax, lo: B.cone[0], hi: B.cone[1], R: B.R, seed: seed + 11, mom: vel || [0, 0, 0] }), 3);
+  }
+  tracker(id) { return this.trk.get(id) || this.gone.get(id); }
+  /* a trail another system feeds itself (game/debris.js: burning pieces): drawn with the others until it is done */
+  addTrail(tr) { this.ghost.push(tr); return tr; }
+  /* a round the debris system draws tumbling: its origin and forward axis at t, k the flame left (null: not one) */
+  headOf(p, t) {
+    const D = this.game && this.game.debris;
+    return D && D.head && D.spins && D.spins.size ? D.head(p, t, this._hd || (this._hd = { x: 0, y: 0, z: 0, ax: 0, ay: 0, az: 1, k: 1 })) : null;
+  }
+
+  /* ---------- sim events ---------- */
+  onEvent(ev) {
+    const sim = this.sim, t = ev.t !== undefined ? ev.t : (sim ? sim.t : 0), seed = ((ev.proj || ev.unit || 0) * 131 + Math.floor(t * 20)) | 0;
+    switch (ev.type) {
+      case 'launch': {
+        const u = sim && sim.units.get(ev.from);
+        if (u && !this.seeUnit(u)) return;
+        const axis = dirOf(ev.hdg, ev.pitch), pos = ev.pos, k0 = ev.kind, k = LAUNCH_AS[k0] || fk(k0);
+        if (TORP[k]) return this.onTorpLaunch(ev, u, t, seed);
+        const boat = !!(u && u.def.sub);
+        if (k0 === 'sam48') { this.lnch.set(ev.proj, .5); this.add(new ColdLaunch({ t0: t, pos, axis, ground: this.C.ground, seed }), 1); }
+        else if (k === 'oniks') this.add(new ColdLaunch({ t0: t, pos, axis, ground: this.C.ground, seed }), 1);
+        else if (k === 'kalibr' || (boat && subUnder(u))) {
+          // out of a boat: the round breaches, its booster lights a few metres over the sea
+          this.lnch.set(ev.proj, .15);
+          this.add(new SubLaunch({ t0: t, pos, seed, ign: .15, rise: 25, s: k === 'kalibr' ? 1 : .9 }), 1);
+        }
+        else if (k === 'uran') this.add(new BalLaunch({ t0: t, pos, axis, len: 6.5, ground: this.C.ground, seed }), 1);
+        else if ((k === 'sm6' || k === 'tlam') && (!u || u.def.domain === 'sea')) this.add(new VlsLaunch({ t0: t, pos, seed, big: k === 'tlam' && !boat }), 1);
+        else if (k === 'shell') this.add(new GunBlast({ t0: t, pos, axis, seed, sea: this.wet(pos[0], pos[2]) }), 1);
+        else if (k === 'sam') this.add(new HotLaunch({ t0: t, pos, axis, seed, scale: 1, ground: this.C.ground }), 1);
+        else if (k === 'pdms') this.add(new HotLaunch({ t0: t, pos, axis, seed, scale: .8 }), 1);
+        else if (k === 'hellfire' || k === 'kornet') this.add(new HotLaunch({ t0: t, pos, axis, seed, scale: k === 'kornet' ? .3 : .35 }), 1);
+        else this.add(new HotLaunch({ t0: t, pos, axis, seed, scale: .45 }), 1);
+        return;
+      }
+      case 'booster_sep': {
+        const tr = this.tracker(ev.proj); if (tr && !tr.seen) return;
+        const v = ev.vel || [0, 1, 0], axis = norm3(v), kind = BOOSTER[ev.kind] || 'small';
+        const b = this.add(new BoosterSep({ t0: t, pos: ev.pos, vel: v, axis, kind, ground: this.C.ground, seed }), 2);
+        if (b.fly.wet && b.fly.landed < 60) {
+          const lp = b.fly.at(b.fly.landed, [0, 0, 0]);
+          this.add(new Splash({ t0: t + b.fly.landed, pos: [lp[0], 0, lp[2]], size: kind === 'oniks' ? 14 : kind === 'kh35' ? 5 : 9, seed: seed + 1, ring: .5 }), 2);
+        }
+        return;
+      }
+      case 'intercept': {
+        const tr = this.tracker(ev.proj), vel = tr ? tr.vel : [0, 0, 0], pos = ev.pos, gy = this.groundAt(pos[0], pos[2]);
+        if (tr) tr.killed = true;
+        if (GUNS[ev.byKind]) {
+          // stopped by a gun close in: the round's own momentum carries its debris on
+          this.add(new Burst({ t0: t, pos, mom: [vel[0] * .9, vel[1] * .9, vel[2] * .9], sc: 1.1, nF: 300, ns: 130, heavy: true, big: true, fire: 1.25, smoke: 34, life: 10, gy, seed, kind: 'gun' }), 3);
+        } else {
+          const by = this.tracker(ev.by), bv = by ? by.vel : [0, 0, 0];
+          const mom = [vel[0] * .5 + bv[0] * .3, vel[1] * .5 + bv[1] * .3, vel[2] * .5 + bv[2] * .3];
+          this.add(new Burst({ t0: t, pos, mom, sc: 1.25, nF: 220, ns: 90, fire: 1.6, smoke: 55, life: 9, gy, seed, kind: 'kill' }), 3);
+          this.belt(ev, t, seed, bv);
+        }
+        return;
+      }
+      case 'hit': if (ev.belt) this.belt(ev, t, seed, null); return this.onHit(ev, t, seed);
+      case 'splash': {
+        const pos = ev.pos, k = fk(ev.kind), gy = this.groundAt(pos[0], pos[2]);
+        const tr = this.tracker(ev.proj); if (tr) tr.killed = true;
+        if (ev.air) {
+          const v = tr ? tr.vel : [0, 0, 0];
+          // a warhead's burst (it went off by the target, 'burst' / 'wide'): smaller than a kill, its fragment belt
+          const wh = !!ev.belt;
+          this.add(new Burst({ t0: t, pos, mom: [v[0] * .35, v[1] * .35, v[2] * .35], sc: wh ? .45 + .02 * ev.belt.R : .8, nF: wh ? 110 : 150, ns: wh ? 90 : 70, fire: wh ? .7 + .045 * ev.belt.R : 1.1, smoke: wh ? 18 + ev.belt.R : 40, life: 7, gy, seed, kind: 'destruct' }), 3);
+          if (wh) this.belt(ev, t, seed, v);
+          return;
+        }
+        const wet = ev.water !== undefined ? ev.water : this.wet(pos[0], pos[2]);
+        const H = SPLASH_H[k] || 14, threat = !!THREAT[k];
+        if (wet) {
+          this.add(new Splash({ t0: t, pos: [pos[0], 0, pos[2]], size: H, seed, ring: .35 }), 2);
+          if (threat && k !== 'shell') this.add(new Blast({ t0: t, pos: [pos[0], 1, pos[2]], sc: k === 'crash' ? .35 : .45, sea: true, gy: 0, seed: seed + 3 }), 3);
+          if (k === 'shell') this.add(new Blast({ t0: t, pos: [pos[0], .5, pos[2]], sc: .06, sea: false, gy: 0, seed: seed + 3 }), 3);
+        } else {
+          this.add(new Dirt({ t0: t, pos: [pos[0], gy, pos[2]], size: H * .7, seed }), 2);
+          if (threat) this.add(new Blast({ t0: t, pos: [pos[0], gy + 1, pos[2]], sc: k === 'shell' ? .15 : .4, sea: false, gy, seed: seed + 3 }), 3);
+          if (k === 'crash') this.startFire(null, t, [pos[0], gy, pos[2]], .22, seed);
+          if (CRATER_KG[k] !== undefined) this.scorch(pos[0], gy, pos[2], CRATER_KG[k], t, seed + 7);
+        }
+        return;
+      }
+      case 'destroyed': {
+        const u = sim && sim.units.get(ev.unit), pos = ev.pos, dom = u ? u.def.domain : (this.wet(pos[0], pos[2]) ? 'none' : 'land');
+        if (dom === 'none') return;
+        if (dom === 'sea') {
+          const L = u.def.size[0], B = u.def.size[1];
+          if (subUnder(u)) {
+            // a boat lost under the water: no fire; the air of the hull coming up in a boil, the slick
+            this.add(new TorpedoHit({ t0: t + 2.5, pos, hdg: u.hdg, L, B, H: 36, sub: true, depth: Math.max(0, (u.depth || 0) - u.def.draught), seed: seed + 5 }), 2);
+            this.sinks.set(ev.unit, this.add(new Sinking({ t0: t, pos, hdg: u.hdg, L, B, seed, dur: u.def.dieTime, steam: false }), 0));
+            const f0 = this.fires.get(ev.unit); if (f0) f0.stop(t);
+            return;
+          }
+          this.add(new Blast({ t0: t + .3, pos: [pos[0], pos[1] + 6, pos[2]], sc: 1.4, sea: true, gy: 0, seed: seed + 5 }), 3);
+          // with the scars system her fires stand on her holes (a ship lost with none burning gets one there, or on her deck)
+          const SC = this.game && this.game.scars;
+          const f = this.fires.get(ev.unit) || (SC && (SC.burning(ev.unit) || (SC.ignite && SC.ignite(ev.unit))) ? null : this.startFire(u, t, null, L > 200 ? 1.5 : 1, seed));
+          if (f) f.k = 1;
+          this.sinks.set(ev.unit, this.add(new Sinking({ t0: t, pos, hdg: u.hdg, L, B, seed, dur: u.def.dieTime }), 0));
+        } else if (dom === 'air') {
+          const v = u ? [Math.sin(u.hdg) * u.speed, 0, Math.cos(u.hdg) * u.speed] : [0, 0, 0];
+          this.add(new Burst({ t0: t, pos, mom: v, sc: .9, nF: 200, ns: 90, fire: 1.3, smoke: 40, life: 9, gy: this.groundAt(pos[0], pos[2]), seed, kind: 'air' }), 3);
+          if (u) this.falls.set(ev.unit, new Trail(1600, seed, this.C.ground));
+        } else {
+          const gy = this.groundAt(pos[0], pos[2]);
+          this.add(new Blast({ t0: t, pos: [pos[0], gy + 2, pos[2]], sc: .45, sea: false, gy, seed: seed + 5 }), 3);
+          const f = u ? (this.fires.get(ev.unit) || this.startFire(u, t, null, .3, seed)) : this.startFire(null, t, [pos[0], gy, pos[2]], .3, seed);
+          f.k = 1;
+        }
+        return;
+      }
+      case 'cookoff': {
+        // a magazine / a load going up (sim/damage.js): a huge blast venting up through the deck over it (the scars
+        // system opens the hole there), then the rounds in it going off for a few seconds
+        const u = sim && sim.units.get(ev.unit);
+        if (!u || !ev.pos || u.def.domain === 'air') return;
+        const SC = this.game && this.game.scars, sp = SC && SC.surface(ev), p = sp ? sp.slice() : ev.pos.slice();
+        const sz = Math.max(3, ev.size || 8), kg = Math.min(4000, (sz / 1.25) ** 3), wet = u.def.domain === 'sea' || this.wet(p[0], p[2]);
+        const gy = u.def.domain === 'sea' ? 0 : this.groundAt(p[0], p[2]);
+        p[1] = Math.max(p[1], gy + .5);
+        this.add(new HullBlast({ t0: t, pos: p, n: [0, 1, 0], kg, seed, sea: wet, gy }), 3);
+        this.add(new HullBlast({ t0: t + .12, pos: [p[0], p[1] + sz * .15, p[2]], n: [0, 1, 0], kg: kg * .35, seed: seed + 1, sea: wet, gy }), 3);
+        // what was in it going off after: a few pops for a vehicle's load ('kill'), a long rolling series for a big ship's
+        // magazine ('heavy')
+        const heavy = ev.out === 'heavy', nP = heavy ? Math.round(8 + Math.min(14, sz / 1.2)) : Math.round(2 + Math.min(4, sz / 5)), span = heavy ? 8 : 2.5;
+        for (let i = 0; i < nP; i++) {
+          const a = hsh(i, seed + 3) * TAU, d = sz * .35 * hsh(i, seed + 4), up = [Math.sin(a) * .6, 1, Math.cos(a) * .6];
+          this.add(new HullBlast({ t0: t + .4 + span * Math.pow(hsh(i, seed + 5), 1.4), pos: [p[0] + Math.sin(a) * d, p[1] + .5 + sz * .15 * hsh(i, seed + 6), p[2] + Math.cos(a) * d], n: up,
+            kg: 6 + 45 * hsh(i, seed + 7), seed: seed + 11 + i, sea: wet, gy }), 3);
+        }
+        if (u.def.domain === 'sea' && p[1] < 10) this.add(new Splash({ t0: t + .05, pos: [p[0], 0, p[2]], size: 10 * Math.cbrt(kg), seed: seed + 2, ring: 0 }), 2);
+        if (this.game && this.game.scars && u.def.domain !== 'sea') { const f = this.fires.get(u.id) || this.startFire(u, t, null, .45, seed); f.k = 1; }
+        return;
+      }
+      case 'gunfire': {
+        const u = sim && sim.units.get(ev.unit);
+        if (u && !this.seeUnit(u)) return;
+        const w = ev.weapon === 'gun30' ? 'gun30' : 'ciws';
+        // the sim flies every round of the burst (sim.bursts): the stream is drawn from them, so the rounds that strike
+        // are the ones seen to reach the target; the analytic stream only without them (the bench, older saves)
+        let B = null;
+        if (sim && sim.bursts && ev.burst !== undefined) for (let i = sim.bursts.length - 1; i >= 0; i--) if (sim.bursts[i].id === ev.burst) { B = sim.bursts[i]; break; }
+        if (B) {
+          this.add(new GunStream({ t0: t, B, sim, weapon: w, seed }), 2);
+          const d = [ev.aim[0] - ev.pos[0], ev.aim[1] - ev.pos[1], ev.aim[2] - ev.pos[2]], l = Math.hypot(d[0], d[1], d[2]) || 1;
+          this.add(new Muzzle({ t0: t, mz: ev.pos, dir: [d[0] / l, d[1] / l, d[2] / l], dur: B.dur, seed, weapon: w }), 2);
+          return;
+        }
+        const s = new TracerStream({ t0: t, mz: ev.pos, to: ev.to, weapon: w, dur: ev.dur || 1, hit: ev.hit, seed, gy: 0 });
+        this.add(s, 2);
+        this.add(new Muzzle({ t0: t, mz: ev.pos, dir: s.D, dur: s.a1, seed, weapon: w }), 2);
+        return;
+      }
+      case 'lightning':
+      case 'lightning_ic': return this.onLightning(ev, seed);
+      case 'takeoff': {
+        if (ev.type === 'takeoff' && (ev.unit !== undefined)) {
+          const u = sim && sim.units.get(ev.unit);
+          if (u && u.type === 'fighter') this.abUntil.set(ev.unit, t + 7);
+          // the catapult's breath of steam / the drone's launch puff (the E-2D: steam only, no afterburner)
+          if (ev.pos) this.add(new HotLaunch({ t0: t, pos: ev.pos, axis: u ? dirOf(u.hdg, 0) : [0, 0, 1], seed, scale: u && (u.type === 'fighter' || u.type === 'aew') ? .9 : .3, steam: !!(u && u.type === 'aew') }), 1);
+        }
+        return;
+      }
+      default: return;
+    }
+  }
+  /* natural lightning: white, drawn in real time. A flash that comes too soon after the last one (high time rates)
+     is drawn without the frame lift and with a weaker light (no strobing); past six at once it is only heard. */
+  onLightning(ev, seed) {
+    const ic = ev.type === 'lightning_ic', now = this.wclk;
+    if (this.bolts.length >= 6 || !ev.pos) return;
+    // at high time rates the flashes come faster than the eye takes them: at most ~5 bolts a second, the frame lift
+    // at most every .7 s; the rest are only heard (the sim's events and their reveals are untouched)
+    let big = false;
+    if (ic) { if (now - this.lastBigIc > .5 && now - this.lastBig > .35) { big = true; this.lastBigIc = now; } }
+    else { if (now - this.lastCg < .2) return; this.lastCg = now; if (now - this.lastBig > .7) { big = true; this.lastBig = now; } }
+    if (ic && !big) return;
+    const cell = this.cellOf(ev.cell);
+    this.bolts.push(new Lightning({ t0: now, pos: ev.pos, top: ic ? ev.pos : ev.top, base: cell ? cell.base : 1250, seed: ev.seed !== undefined ? ev.seed : seed, s: ev.s || 1, kind: ic ? 'ic' : 'cg', big }));
+  }
+  cellOf(id) {
+    const W = this.sim && this.sim.weather;
+    if (id === undefined || !W || !W.cells) return null;
+    for (const c of W.cells()) if (c.id === id) return c;
+    return null;
+  }
+  /* a torpedo leaving its tube / its aircraft */
+  onTorpLaunch(ev, u, t, seed) {
+    const pos = ev.pos, T = TORP[ev.kind], len = T.len;
+    if (u && u.def.domain === 'air') this.add(new TorpLaunch({ t0: t, mode: 'air', pos, hdg: u.hdg, len, fall: 18, seed }), 2);
+    else if (u && u.def.sub) this.add(new TorpLaunch({ t0: t, mode: 'sub', pos, depth: Math.max(0, -pos[1]), len, seed }), 2);
+    else if (u) {
+      // the deck tubes: the round leaves outboard of the side they stand on, trained a little aft
+      const s = Math.sin(u.hdg), c = Math.cos(u.hdg), dx = pos[0] - u.pos[0], dz = pos[2] - u.pos[2];
+      const side = dx * c - dz * s < 0 ? -1 : 1, al = dx * s + dz * c, B = u.def.size[1], lc = side * (B / 2 - 1.3);
+      const mouth = [u.pos[0] + s * al + c * lc, (u.pos[1] || 0) + Math.min(7, B * .33), u.pos[2] + c * al - s * lc];
+      const ca = Math.cos(.35), sa = Math.sin(.35);
+      const sp = u.speed || 0;
+      this.add(new TorpLaunch({ t0: t, mode: 'ship', pos: mouth, out: [side * c * ca - s * sa, 0, -side * s * ca - c * sa], vel: [s * sp, 0, c * sp], len, seed }), 2);
+    }
+  }
+  /* a torpedo's charge under a keel (or under a boat) */
+  onTorpHit(ev, u, t, seed) {
+    const pos = ev.pos, T = TORP[ev.kind] || TORP.mk48;
+    if (u && subUnder(u)) {
+      this.add(new TorpedoHit({ t0: t, pos, hdg: u.hdg, L: u.def.size[0], B: u.def.size[1], H: T.H, sub: true, depth: Math.max(0, (u.depth || 0) - u.def.draught * .5), seed }), 2);
+      return;
+    }
+    const L = u ? u.def.size[0] : 120, B = u ? u.def.size[1] : 16;
+    this.add(new TorpedoHit({ t0: t, pos, hdg: u ? u.hdg : 0, L, B, H: T.H, seed }), 2);
+    if (u) {
+      // the hull broken low amidships: fire and smoke from the damage once the water has come down
+      const al = (hsh(seed, 3) - .5) * L * .25;
+      this.hitAt.set(u.id, [al, Math.max(2, u.def.size[2] * .12), 0]);
+      if (this.scarred()) return;              // the hole at the waterline and its smoke: the scars system
+      const heavy = T.H > 80, f = this.fires.get(u.id) || this.startFire(u, t + 3, null, (L > 200 ? 1.4 : L < 90 ? .6 : 1) * (heavy ? 1 : .75), seed);
+      f.k = Math.min(1, (f.k || 0) + (heavy ? .7 : .45));
+    }
+  }
+  /* a crater (kg > 0) or scorched ground (kg 0, a crash) on land; the oldest goes past SCORCH_MAX */
+  scorch(x, gy, z, kg, t, seed) {
+    if (this.wet(x, z)) return null;
+    const s = new Scorch({ t0: t, pos: [x, gy, z], kg, seed, ground: this.C.ground });
+    this.scorches.push(s);
+    if (this.scorches.length > SCORCH_MAX) this.scorches.shift();
+    return s;
+  }
+  /* the scars system (game/scars.js) seats fires at the hit points of units it has marked */
+  scarred() { const g = this.game; return !!(g && g.scars); }
+  onHit(ev, t, seed) {
+    const sim = this.sim, u = sim && sim.units.get(ev.target), k = fk(ev.kind), sc = HIT_SC[k] || .3;
+    // where it struck the model's surface (the scars system carries the sim's hit point onto the dots)
+    const sp = this.game && this.game.scars && this.game.scars.surface(ev), pos = sp ? sp.slice() : ev.pos;
+    if (ev.under || TORP[k]) return this.onTorpHit(ev, u, t, seed);
+    const dom = u ? u.def.domain : (this.wet(pos[0], pos[2]) ? 'sea' : 'land');
+    if (u) {
+      // where it struck, in the unit's frame (the fire burns there as the ship turns)
+      const s = Math.sin(u.hdg), c = Math.cos(u.hdg), dx = pos[0] - u.pos[0], dz = pos[2] - u.pos[2];
+      this.hitAt.set(u.id, [dx * s + dz * c, Math.max(.5, pos[1] - u.pos[1]), dx * c - dz * s]);
+    }
+    if (dom === 'air') {
+      const v = u ? [Math.sin(u.hdg) * u.speed, 0, Math.cos(u.hdg) * u.speed] : [0, 0, 0];
+      this.add(new Burst({ t0: t, pos, mom: v, sc: GUNS[k] ? .25 : .6, nF: GUNS[k] ? 40 : 120, ns: GUNS[k] ? 40 : 70, fire: GUNS[k] ? .4 : 1, smoke: GUNS[k] ? 10 : 30, life: 7, gy: this.groundAt(pos[0], pos[2]), seed, kind: 'air' }), 3);
+      if (u && !GUNS[k] && !this.falls.has(u.id)) this.falls.set(u.id, new Trail(1200, seed, this.C.ground));
+      return;
+    }
+    const sea = dom === 'sea', gy = sea ? 0 : this.groundAt(pos[0], pos[2]);
+    const SC = this.game && this.game.scars, nrm = sp && SC.normal ? SC.normal(ev) : null, kg = sp && SC.charge ? SC.charge(ev) : 0;
+    if (u && nrm && kg >= 1) {
+      // a warhead on a hull / vehicle / site: the violent point-cloud blast at the surface, scaled by its charge
+      const wet = sea || this.wet(pos[0], pos[2]);
+      this.add(new HullBlast({ t0: t, pos, n: nrm, kg, seed, sea: wet, gy }), 3);
+      // near the waterline: the sea thrown up in a column
+      if (wet && pos[1] < 6 + Math.cbrt(kg)) this.add(new Splash({ t0: t + .03, pos: [pos[0] + nrm[0] * 3, 0, pos[2] + nrm[2] * 3], size: 14 * Math.cbrt(kg), seed: seed + 3, ring: 0 }), 2);
+    } else this.add(new Blast({ t0: t, pos, sc, sea, gy, seed }), 3);
+    if (!sea && sc >= .15) this.add(new Dirt({ t0: t, pos: [pos[0], gy, pos[2]], size: 10 + 22 * sc, seed: seed + 1 }), 2);
+    // a warhead going off on (or just over) the ground by a vehicle or a site leaves its crater there
+    if (dom === 'land' && CRATER_KG[k] > 0 && pos[1] - gy < 2 + Math.cbrt(CRATER_KG[k])) this.scorch(pos[0], gy, pos[2], CRATER_KG[k], t, seed + 7);
+    // a missile or a shell sets it burning (at the hole, by the scars system, when it runs)
+    if (u && sc >= .15 && !this.scarred()) {
+      const big = sea ? (u.def.size[0] > 200 ? 1.4 : 1) : .3;
+      const f = this.fires.get(u.id) || this.startFire(u, t, null, big * Math.min(1, .45 + sc), seed);
+      f.k = Math.min(1, (f.k || 0) + .35 + sc * .5);
+    }
+  }
+  /* a boat's marks on the sea: its wake only as strong as it is near the surface (a slight scar at periscope depth,
+     nothing deep), the feather of its masts at periscope depth, the water off it as it surfaces or dives */
+  boatWater(u, w, t) {
+    const d = u.def, S = d.sub, G = SUBG[u.type] || SUBG.ssk, under = Math.max(0, (u.depth || 0) - d.draught), vis = this.seeUnit(u);
+    const sK = 1 - ss(.5, 4, under), pdU = (S ? S.pd : 16) - d.draught;
+    if (w) w.update(u.pos, u.hdg, u.speed || 0, t, u.alive ? sK + (1 - sK) * .15 * (1 - ss(pdU + 3, pdU + 12, under)) : 0);
+    const kM = u.alive && this.wakes ? .6 * (u.mastUp || 0) * (1 - sK) * (under < pdU + 4 ? 1 : 0) : 0;
+    let m = this.wkM.get(u.id);
+    if (!m && kM > .01) { m = new Wake({ L: 1, B: .7, len: 170, rate: 10, seed: u.id * 3 + 1, feather: true }); this.wkM.set(u.id, m); }
+    if (m) {
+      const s = Math.sin(u.hdg), c = Math.cos(u.hdg), P = this.P3;
+      P[0] = u.pos[0] + s * G.mast; P[1] = 0; P[2] = u.pos[2] + c * G.mast;
+      m.update(P, u.hdg, u.speed || 0, t, kM); m.vis = vis;
+    }
+    let sw = this.subw.get(u.id);
+    if (!sw) { sw = new SubWater({ L: d.size[0], B: d.size[1], sail: G.sail, deck: G.deck, hull: G.hull, seed: u.id }); sw.prev = under; this.subw.set(u.id, sw); }
+    const pu = sw.prev, top = G.sail[3] * .92;
+    if (u.alive) {
+      if (pu >= top && under < top) sw.mark('sail', t);
+      if (pu >= 1.2 && under < 1.2) sw.mark('hull', t);
+      if (pu <= .6 && under > .6) sw.mark('vent', t);
+      if (pu <= 2 && under > 2) sw.mark('awash', t);
+      if (pu <= top && under > top) sw.mark('sailDown', t);
+    }
+    // drawn where the renderer draws the hull: at its depth once submerged, riding the surface until then
+    sw.prev = under; sw.follow(u.pos, u.hdg, under > 2.5 ? under : 0); sw.vis = vis;
+  }
+  /* a fire on a unit (or on the ground where a wreck fell) */
+  startFire(u, t, at, size, seed) {
+    const loc = u ? (this.hitAt.get(u.id) || [0, 3, 0]) : [0, 1, 0];
+    const f = new Fire({ t0: t, seed: seed + 11, size, local: [loc[0], Math.max(.5, loc[1]), loc[2]],
+      spread: u && u.def.domain === 'sea' ? [Math.min(u.def.size[0] * .17, 30) * size, 14 * size, Math.min(u.def.size[1] * .3, 8)] : [3.5, 3, 1.6],
+      ceiling: u && u.def.domain === 'sea' ? 900 * size : 220 });
+    f.k = .6; f.unit = u ? u.id : 0; f.land = !u || u.def.domain === 'land';
+    if (u) this.fires.set(u.id, f);
+    else { f.at = at.slice(); f.stopAt = t + 90; f.follow(t, f.at, 0, f.k); this.groundFires.push(f); }
+    this.add(f, 0);
+    return f;
+  }
+
+  /* ---------- per frame: feed the persistent effects from the sim ---------- */
+  update(dtReal, dtSim) {
+    this.tr += dtReal || 0;
+    if (!(this.game && this.game.paused)) this.wclk += dtReal || 0;
+    const sim = this.sim; if (!sim) return;
+    const t = sim.t;
+    // projectiles: puffs laid along the flight since the last frame
+    for (const p of sim.projectiles.values()) {
+      let tr = this.trk.get(p.id);
+      if (!tr) {
+        if (!p.alive) { this.lnch.delete(p.id); continue; }   // killed after this tick's collection (sim/weapons.js): its tracker is already gone
+        const torp = !!TORP[p.kind] || !!(p.P && p.P.torpedo);
+        tr = { id: p.id, kind: p.kind, t0: p.t0 !== undefined ? p.t0 : t, trail: new Trail(torp ? 4 : (p.kind === 'sm6' || p.kind === 'sam48') ? 14000 : p.kind === 'oniks' ? 8000 : 6000, p.id, this.C.ground), vel: [0, 0, 0], pos: p.pos.slice(), seen: false, killed: false, P: p.P,
+          ig: this.lnch.get(p.id) || 0, bub: torp ? new Bubbles(p.id) : null };
+        this.lnch.delete(p.id);
+        this.trk.set(p.id, tr);
+      }
+      tr.vel[0] = p.vel[0]; tr.vel[1] = p.vel[1]; tr.vel[2] = p.vel[2];
+      tr.pos[0] = p.pos[0]; tr.pos[1] = p.pos[1]; tr.pos[2] = p.pos[2];
+      tr.alive = p.alive; tr.p = p;
+      const age = t - tr.t0, vis = this.seeProj(p);
+      tr.seen = tr.seen || vis;
+      if (tr.bub) { if (vis && p.pos[1] < -1) tr.bub.feed(t, p.pos[0], p.pos[2], -p.pos[1]); continue; }
+      const pr = age < tr.ig ? NONE : profile(fk(p.kind), age, p.P, p);
+      // a round out of control (game/debris.js): the nozzle swings round with its tumble, so the smoke corkscrews
+      const hd = this.headOf(p, t);
+      if (pr[0] && vis && (!hd || hd.k > .05)) {
+        // puffs leave the nozzle, not the round's middle
+        const v = p.vel, l = Math.hypot(v[0], v[1], v[2]) || 1, nz = pr[1] ? pr[1].off : (NOZ[fk(p.kind)] || 2);
+        const ax = hd ? hd.ax : v[0] / l, ay = hd ? hd.ay : v[1] / l, az = hd ? hd.az : v[2] / l, hx = hd ? hd.x : p.pos[0], hy = hd ? hd.y : p.pos[1], hz = hd ? hd.z : p.pos[2];
+        tr.trail.feed(t, hx - ax * nz, hy - ay * nz, hz - az * nz, pr[0], ax, ay, az);
+      } else tr.trail.lx = NaN;
+    }
+    // rounds gone this frame: their smoke hangs on; the tracker is kept a moment for the events that follow
+    for (const [id, tr] of this.trk) {
+      if (!sim.projectiles.has(id) || !tr.alive) { this.trk.delete(id); tr.goneT = t; this.gone.set(id, tr); if (tr.trail.n) this.ghost.push(tr.trail); if (tr.bub && tr.bub.n) this.bubGhost.push(tr.bub); }
+    }
+    for (let i = this.bubGhost.length - 1; i >= 0; i--) if (this.bubGhost[i].done(t)) this.bubGhost.splice(i, 1);
+    for (const [id, tr] of this.gone) if (t - tr.goneT > 2) this.gone.delete(id);
+    for (let i = this.ghost.length - 1; i >= 0; i--) if (this.ghost[i].done(t)) this.ghost.splice(i, 1);
+    // units: wakes, fires, sinking, falling aircraft
+    for (const u of sim.units.values()) {
+      const dom = u.def.domain, drown = subUnder(u);
+      if (dom === 'sea') {
+        let w = null;
+        if (this.wakes) {
+          w = this.wk.get(u.id);
+          if (!w) { w = new Wake({ L: u.def.size[0], B: u.def.size[1], seed: u.id, len: u.def.size[0] > 200 ? 1800 : 1400 }); this.wk.set(u.id, w); }
+          w.vis = this.seeUnit(u);
+        }
+        if (u.def.sub) this.boatWater(u, w, t);
+        else if (w) w.update(u.pos, u.hdg, u.def.hover && (u.aboard || this.groundAt(u.pos[0], u.pos[2]) > 0) ? 0 : u.speed || 0, t);   // no wake over the beach
+      }
+      const f = this.fires.get(u.id);
+      if (f) {
+        let k = f.k;
+        if (u.alive) { const hp = u.hp / u.hpMax; k = Math.max(k * .9995, sat((.85 - hp) * 1.4)); }
+        else if (dom === 'sea') k = u.dying < .8 ? 1 : Math.max(0, 1 - (u.dying - .8) / .17);
+        // (a broken hull (game/structure): the fire rides the piece its seat is on, out where there is none)
+        const gs = this.game && this.game.structure, brk = gs && gs.draws && gs.draws(u.id) && gs.poseAt;
+        let fp = u.pos, fk = k;
+        if (brk) { const L0 = f.loc || [0, 0, 0], mx = L0[2], my = L0[1], mz = L0[0], q = gs.poseAt(u.id, Math.round(mz));   // (loc: along, up, across)
+          if (!q) fk = 0; else { const c = Math.cos(u.hdg), sn = Math.sin(u.hdg), R = q.R, T = q.T;
+            const wx = T[0] + R[0] * mx + R[1] * my + R[2] * mz, wy = T[1] + R[3] * mx + R[4] * my + R[5] * mz, wz = T[2] + R[6] * mx + R[7] * my + R[8] * mz;
+            fp = [wx - (sn * L0[0] + c * L0[2]), wy - L0[1], wz - (c * L0[0] - sn * L0[2])]; } }
+        f.k = k; f.follow(t, fp, u.hdg, this.seeUnit(u) && !drown ? fk : 0);
+        if (dom === 'sea' && !u.alive && u.dying > .97) f.stop(t);
+      } else if (u.alive && u.hp < u.hpMax * .55 && dom !== 'air' && !drown && this.hitAt.has(u.id) && !this.scarred()) {
+        this.startFire(u, t, null, dom === 'sea' ? (u.def.size[0] > 200 ? 1.2 : .8) : .25, u.id * 17);
+      }
+      const s = this.sinks.get(u.id); if (s) s.follow(u.pos, u.hdg, u.dying || 0);
+      const fl = this.falls.get(u.id);
+      if (fl) {
+        if (u.alive && u.hp > u.hpMax * .6) { this.falls.delete(u.id); this.ghost.push(fl); }
+        else { const v = [Math.sin(u.hdg) * u.speed, u.vy || 0, Math.cos(u.hdg) * u.speed], l = Math.hypot(v[0], v[1], v[2]) || 1; fl.feed(t, u.pos[0], u.pos[1], u.pos[2], u.alive ? STAGE.damaged : STAGE.wreck, v[0] / l, v[1] / l, v[2] / l); }
+      }
+    }
+    // units gone: their wakes fade out in the water, fires burn out, the slick stays a while
+    for (const [id, w] of this.wk) if (!sim.units.has(id)) { w.alive = false; w.speed = 0; if (w.done(t)) this.wk.delete(id); }
+    for (const [id, w] of this.wkM) if (!sim.units.has(id)) { w.alive = false; w.speed = 0; if (w.done(t)) this.wkM.delete(id); }
+    for (const [id, sw] of this.subw) if (!sim.units.has(id) && !sw.busy(t)) this.subw.delete(id);
+    for (const [id, f] of this.fires) if (!sim.units.has(id)) {
+      this.fires.delete(id);
+      // a wreck on land burns on where it stood (the model is gone, the fire and its smoke are not)
+      if (f.land) { f.at = f.pos.slice(); f.stopAt = t + 75; this.groundFires.push(f); } else f.stop(t);
+    }
+    for (const [id, fl] of this.falls) if (!sim.units.has(id)) { this.falls.delete(id); this.ghost.push(fl); }
+    for (const [id] of this.sinks) if (!sim.units.has(id)) this.sinks.delete(id);
+    for (const id of this.hitAt.keys()) if (!sim.units.has(id)) this.hitAt.delete(id);
+    for (const id of this.abUntil.keys()) if (!sim.units.has(id)) this.abUntil.delete(id);
+    // a round launched and gone between two frames (x32, ONIKS.ff) never reached the tracker loop that clears it
+    for (const id of this.lnch.keys()) if (!sim.projectiles.has(id)) this.lnch.delete(id);
+    // wrecks burning on the ground: they lay their smoke until they burn out
+    for (let i = this.groundFires.length - 1; i >= 0; i--) {
+      const f = this.groundFires[i];
+      if (t >= f.stopAt) { f.stop(f.stopAt); this.groundFires.splice(i, 1); continue; }
+      f.follow(t, f.at, f.hdg, f.k * (1 - sat((t - f.stopAt + 30) / 30)));
+    }
+    // effects past their time
+    const fx = this.fx;
+    for (let i = fx.length - 1; i >= 0; i--) {
+      const e = fx[i];
+      const over = e instanceof Fire ? e.done(t) : t - e.t0 > (e.durAll || e.dur) + .5;
+      if (over) fx.splice(i, 1);
+    }
+    for (let i = this.bolts.length - 1; i >= 0; i--) if (this.wclk - this.bolts[i].t0 > this.bolts[i].dur) this.bolts.splice(i, 1);
+    this.lastT = t;
+  }
+
+  /* the frame context's draw calls over a sink (built once per sink: no allocation per frame) */
+  bind(sink, RR) {
+    const C = this.C, V = this.V;
+    this._sink = sink; this._RR = RR;
+    // the sink: dot (max), add (additive square dot), glow (soft additive disc) as the game's frame.sink has them;
+    // a minimal sink with only dot / glow (glow = additive dot) works too (the discs become additive dots)
+    const sdot = sink.dot, sadd = sink.add || sink.glow || sink.dot, sdisc = sink.add ? sink.glow : sink.halo;
+    C.dot = (x, y, z, s, r, gg, b, a) => { if (C.n < C.cap) { C.n++; sdot(x, y, z, s, r, gg, b, a); } };
+    C.glow = (x, y, z, s, r, gg, b, a) => { if (C.n < C.cap) { C.n++; sadd(x, y, z, s, r, gg, b, a); } };
+    // alpha over, depth tested (dark over bright returns: scorched ground); null when the sink has none
+    C.over = sink.over ? (x, y, z, s, r, gg, b, a) => { if (C.n < C.cap) { C.n++; sink.over(x, y, z, s, r, gg, b, a); } } : null;
+    C.halo = sdisc ? (x, y, z, s, r, gg, b, a) => { C.n++; sdisc(x, y, z, s, r, gg, b, a); } : (x, y, z, s, r, gg, b, a) => { C.n++; sadd(x, y, z, Math.max(2, Math.round((s > 0 ? s : -s * V.pxm(x, y, z)) * .9)), r, gg, b, a * .35); };
+    C.light = sink.light ? (x, y, z, r, gg, b, i, rad) => { if (i > C.lmin && C.nl < C.lmax) { C.nl++; sink.light(x, y, z, r, gg, b, i, rad); } } : () => {};
+    C.lift = sink.lift ? (v, r, gg, b) => { if (v > .002) sink.lift(v, r, gg, b); } : () => {};
+    C.model = sink.model ? sink.model : RR && RR.draw && RR.models ? (key, pos, R9, a) => {
+      if (!RR.models.has || !RR.models.has(key)) return false;
+      RR.draw({ key, T: [pos[0], pos[1], pos[2]], R: R9, tint: 'neutral', alpha: a === undefined ? 1 : a });
+      return true;
+    } : null;
+  }
+
+  /* warm-up: the first explosion of a session ran its code cold (the JIT compiling it mid-frame: a 15-30 ms hitch on the
+     first hit). Each kind is drawn once at several ages into a sink that keeps nothing, one kind a frame, from the 60th
+     frame on (after the view is bound) */
+  warmStep() {
+    if (this._warmed || !this._sink || this.stats.ms > 6) return;
+    const k = this._warmK = (this._warmK || 0) + 1;
+    if (k < 60) return;
+    const P = [0, -5e4, 0], mk = [
+      () => new HullBlast({ t0: 0, pos: P, n: [1, 0, 0], kg: 120, seed: 3, sea: true, gy: 0 }),
+      () => new HullBlast({ t0: 0, pos: P, n: [0, 1, 0], kg: 20, seed: 4, sea: false, gy: 0 }),
+      () => new Blast({ t0: 0, pos: P, sc: 1, seed: 5, sea: true, gy: 0 }),
+      () => new Burst({ t0: 0, pos: P, sc: 1, seed: 6 }),
+      () => new Splash({ t0: 0, pos: P, size: 25, seed: 7 }),
+      () => new Dirt({ t0: 0, pos: P, size: 20, seed: 8 }),
+    ], i = k - 60;
+    if (i >= mk.length) { this._warmed = true; return; }
+    const C = this.C, keep = this._sink, RR = this._RR, nop = () => {};
+    const disc = { dot: nop, add: nop, glow: nop, over: nop, light: nop, lift: nop, cam: keep.cam };
+    try { const e = mk[i](); this.bind(disc, null); for (const a of [.005, .03, .1, .3, 1, 3, 8]) { C.n = 0; C.nl = 0; e.draw(C, a); } }
+    catch (err) { /* (a kind that wants more than a bare position is skipped) */ }
+    this.bind(keep, RR); C.n = 0; C.nl = 0;
+  }
+
+  /* ---------- draw ---------- */
+  draw3d(frame) {
+    const t0 = performance.now();
+    const g = this.game, sim = this.sim;
+    let sink = frame && frame.sink;
+    if (!sink) {
+      const R = (frame && (frame.renderer || frame.R)) || (g && g.renderer);
+      if (!R) return;
+      if (!this._es || this._es.R !== R) this._es = engineSink(R);
+      sink = this._es.refresh();
+    }
+    const C = this.C, V = this.V;
+    // the Effects setting, live
+    const lvl = (g && g.settings && g.settings.effects) || 'high';
+    if (lvl !== this.level) this.setLevel(lvl);
+    V.set(sink.cam);
+    // render time: between the last two ticks, like the models
+    const DT = (sim && sim.DT) || .05;
+    const alpha = frame && frame.alpha !== undefined ? frame.alpha : g && g.alpha !== undefined ? g.alpha : 1;
+    const t = frame && frame.t !== undefined ? frame.t : sim ? sim.t - (1 - alpha) * DT : 0;
+    C.t = t; C.tr = frame && frame.tr !== undefined ? frame.tr : frame && frame.realT !== undefined ? frame.realT : this.tr; C.q = Math.min(this.q, this.qMax);
+    const wnd = sim && sim.weather ? sim.weather.wind : (g && g.wind) || [0, 0];
+    C.wind[0] = wnd[0] || 0; C.wind[1] = 0; C.wind[2] = wnd.length > 2 ? wnd[2] : (wnd[1] || 0);
+    C.n = 0; C.nl = 0; C.cap = this.budget; C.sink = sink;
+    // the sink: dot (max), add (additive square dot), glow (soft additive disc) as the game's frame.sink has them;
+    // a minimal sink with only dot / glow (glow = additive dot) works too (the discs become additive dots)
+    // models (a tumbling booster casing): the sink's own, or the engine's R.draw when it knows the key
+    const RR = (frame && frame.R) || (g && g.renderer);
+    if (sink !== this._sink || RR !== this._RR) this.bind(sink, RR);
+    // the Orbital style: the same effects as hairlines (lib/orbital.js), flushed by the orbital system
+    const orb = !!(RR && RR.style === 'orbital' && RR.wire);
+    if (orb) orbBegin(RR.wire, C, 1 - ss(.3, .9, (g && g.orbital && g.orbital.k) || 0));
+    const D = orb ? orbDraw : null;
+    // lightning in the air freezes the rain
+    let flash = 0;
+    for (const b of this.bolts) flash = Math.max(flash, b.level(this.wclk - b.t0));
+    C.flash = flash;
+    const P = this.prof ? (this.profD = this.profD || {}) : null;
+    let tp = P ? performance.now() : 0;
+    const mark = k => { if (!P) return; const n = performance.now(); P[k] = (P[k] || 0) * .9 + (n - tp) * .1; tp = n; };
+    // 1. flashes, heads and flames first: the budget never cuts them
+    for (const e of this.fx) if (e.layer >= 3 || e.layer === 1) { const a = t - e.t0; if (a >= -.001) { if (D) D(e, a); else e.draw(C, a); } }
+    for (const b of this.bolts) { if (D) D(b, this.wclk - b.t0); else b.draw(C, this.wclk - b.t0); }
+    mark('flash');
+    if (sim) {
+      const fr = Math.floor(C.tr * 60);
+      for (const tr of this.trk.values()) {
+        const p = tr.p; if (!p || !p.alive || !this.seeProj(p)) continue;
+        const age = t - tr.t0; if (tr.bub || age < tr.ig) continue;
+        const pr = profile(fk(p.kind), age, p.P, p); if (!pr[1] && !pr[2]) continue;
+        const x = p.prev[0] + (p.pos[0] - p.prev[0]) * alpha, y = p.prev[1] + (p.pos[1] - p.prev[1]) * alpha, z = p.prev[2] + (p.pos[2] - p.prev[2]) * alpha;
+        const v = p.vel, l = Math.hypot(v[0], v[1], v[2]) || 1;
+        if (orb) {
+          if (pr[1]) orbPlume(x, y, z, v[0] / l, v[1] / l, v[2] / l, pr[1], ignOf(fk(p.kind), age, tr.ig, p.P), p.id, fr);
+          if (pr[2] && V.pxm(x, y, z) < 3) orbHead(x, y, z, pr[2], 1);
+          continue;
+        }
+        // a round out of control: the plume swings round with its tumbling axis (and chokes if its ramjet does)
+        const hd = this.headOf(p, t);
+        if (hd) { if (pr[1] && hd.k > .01) drawPlume(C, hd.x, hd.y, hd.z, hd.ax, hd.ay, hd.az, pr[1], ignOf(fk(p.kind), age, tr.ig, p.P) * hd.k, p.id, fr); continue; }
+        if (pr[1]) drawPlume(C, x, y, z, v[0] / l, v[1] / l, v[2] / l, pr[1], ignOf(fk(p.kind), age, tr.ig, p.P), p.id, fr);
+        if (pr[2] && V.pxm(x, y, z) < 3) drawHead(C, x, y, z, pr[2], 1);
+      }
+      // jets and rotors
+      for (const u of sim.units.values()) {
+        if (u.def.domain !== 'air' || u.aboard || !this.seeUnit(u)) continue;
+        const ps = g && g.unitPose ? g.unitPose(u, alpha) : u, pos = ps.pos;
+        if (u.type === 'aew') { if (u.alive) { if (orb) orbProps(pos, ps.hdg, ps.pitch, ps.roll, 1, u.id); else drawProps(C, pos, ps.hdg, ps.pitch, ps.roll, 1, u.id); } }
+        // a destroyed aircraft's engines and rotor are gone with it (game/debris.js draws the airframe coming apart)
+        else if (!u.alive) continue;
+        else if (u.type === 'fighter') {
+          const ab = Math.max(u.ab || 0, (this.abUntil.get(u.id) || 0) > t ? 1 : 0);
+          if (orb) orbJet(pos, ps.hdg, ps.pitch, ps.roll, ab, PLUME.ab, u.id);
+          else drawJet(C, pos, ps.hdg, ps.pitch, ps.roll, ab, .6, u.id);
+        } else if (u.type === 'helo') {
+          const gy = this.groundAt(pos[0], pos[2]);
+          this.down.seed = u.id;
+          if (orb) orbDownwash(this.down, pos, gy, this.wet(pos[0], pos[2]), 1); else this.down.draw(C, pos, gy, this.wet(pos[0], pos[2]), 1);
+        }
+      }
+      // LCACs on cushion: spray thrown out from under the skirt (dust over the beach), stronger with speed
+      for (const u of sim.units.values()) {
+        if (!u.def.hover || u.aboard || !u.alive || (u.cushion || 0) < .3 || !this.seeUnit(u)) continue;
+        const ps = g && g.unitPose ? g.unitPose(u, alpha) : u, pos = ps.pos, gy = this.groundAt(pos[0], pos[2]);
+        const k = (u.cushion || 0) * (.45 + .55 * Math.min(1, (u.speed || 0) / 12));
+        this.skirt.seed = u.id;
+        if (orb) orbDownwash(this.skirt, pos, gy, this.wet(pos[0], pos[2]), k); else this.skirt.draw(C, pos, gy, this.wet(pos[0], pos[2]), k);
+      }
+    }
+    mark('heads');
+    // 2. craters and scorched ground; bursts' debris, splashes, casings, tracers
+    for (const e of this.scorches) { const a = t - e.t0; if (a >= -.001) { if (D) D(e, a); else e.draw(C, a); } }
+    for (const e of this.fx) if (e.layer === 2) { const a = t - e.t0; if (a >= -.001) { if (D) D(e, a); else e.draw(C, a); } }
+    mark('debris');
+    // 3. smoke: trails, columns, wakes, weather
+    if (orb) {
+      for (const tr of this.trk.values()) orbTrail(tr.trail, 1);
+      for (const tr of this.ghost) orbTrail(tr, 1);
+      for (const fl of this.falls.values()) orbTrail(fl, 1);
+      for (const tr of this.trk.values()) if (tr.bub) orbBubbles(tr.bub, 1);
+      for (const b of this.bubGhost) orbBubbles(b, 1);
+    } else {
+      for (const tr of this.trk.values()) tr.trail.draw(C, 1);
+      for (const tr of this.ghost) tr.draw(C, 1);
+      for (const fl of this.falls.values()) fl.draw(C, 1);
+      for (const tr of this.trk.values()) if (tr.bub) tr.bub.draw(C, 1);
+      for (const b of this.bubGhost) b.draw(C, 1);
+    }
+    mark('trails');
+    for (const e of this.fx) if (e.layer === 0) { const a = t - e.t0; if (a >= -.001) { if (D) D(e, a); else e.draw(C, a); } }
+    mark('fires');
+    if (this.wakes) {
+      for (const w of this.wk.values()) if (w.vis !== false) { if (orb) orbWake(w, 1); else w.draw(C, 1); }
+      for (const w of this.wkM.values()) if (w.vis !== false) { if (orb) orbWake(w, 1); else w.draw(C, 1); }
+    }
+    for (const sw of this.subw.values()) if (sw.vis !== false) { if (orb) orbSubWater(sw); else sw.draw(C); }
+    mark('wakes');
+    // the rain round the lens, only inside a cell (the shafts and the cloud are SENSORS', on the GPU)
+    if (sim && sim.weather) {
+      const W = sim.weather, ex = V.eye;
+      let inRain = 0, base = 1500;
+      if (W.rainAt) {
+        inRain = W.rainAt(ex[0], ex[2]);
+        if (inRain > .01) for (const c of W.cells()) { const d = Math.hypot(ex[0] - c.x, ex[2] - c.z); if (d < c.r * 1.05 && c.base < base) base = c.base; }
+      } else if (W.kind === 'storm' || W.kind === 'rain') {
+        for (const s of W.squalls || []) { const d = Math.hypot(ex[0] - s.x, ex[2] - s.z); inRain = Math.max(inRain, sat((s.r - d) / 800 + 1) * (d < s.r + 800 ? 1 : 0)); }
+      }
+      if (inRain > .01) { if (orb) orbRain((W.kind === 'rain' ? .75 : 1) * inRain, flash, base); else drawRain(C, (W.kind === 'rain' ? .75 : 1) * inRain, flash, base); }
+    }
+    if (orb) { orbEnd(); this.stats.segs = orbStats.segs; }
+    // the budget: thin everything next frame if this one ran over, recover slowly
+    // (the budget is also the hard cap: a spike frame loses its last-drawn smoke, never a flash or a head)
+    const n = C.n, aim = this.budget * .85;
+    if (n > aim) this.q = Math.max(.12, this.q * Math.max(.6, aim / n));
+    else if (n < aim * .8) this.q = Math.min(this.qMax, this.q * 1.04 + .005);
+    this.lastN = n;
+    this.stats.dots = n; this.stats.q = this.q; this.stats.effects = this.fx.length; this.stats.trails = this.trk.size + this.ghost.length; this.stats.ms = performance.now() - t0;
+    if (!this._warmed && !orb) this.warmStep();
+  }
+}
+/* ignition envelope of the flame (the booster lighting, the ramjet catching) */
+function ignOf(kind, age, ig, P) {
+  if (kind === 'oniks') return age < 7 ? sat((age - .38) / .12) : sat((age - 7.35) / .4);
+  // a second stage lights on its own (the SM-6's Mk 104 catching after the Mk 72 has dropped)
+  if (P && P.sus && age >= P.sus[0]) return sat((age - P.sus[0]) / .18);
+  if (P && P.ign && age >= P.ign) return sat((age - P.ign) / .12);
+  return sat((age - (ig || 0)) / .12);
+}
+
+/* ---------------- the engine's streaming API as a sink ---------------- */
+/* R: engine Renderer (R.fx.dotXYZ(x, y, z, size, r, g, b, a, mode), R.fx.glow, R.fx.lift, R.light, R.camera) */
+function engineSink(R) {
+  const fx = R.fx, cam0 = R.camera;
+  const P = [0, 0, 0], RGB = [0, 0, 0];
+  const s = {
+    R,
+    cam: { eye: [0, 0, 0], f: [0, 0, 1], r: [1, 0, 0], u: [0, 1, 0], fl: 1000, tanX: 1, tanY: .6, near: .5 },
+    dot: (x, y, z, sz, r, g, b, a) => fx.dotXYZ(x, y, z, sz, r, g, b, a, 'max'),
+    add: (x, y, z, sz, r, g, b, a) => fx.dotXYZ(x, y, z, sz, r, g, b, a, 'add'),
+    glow: (x, y, z, rad, r, g, b, a) => { P[0] = x; P[1] = y; P[2] = z; RGB[0] = r; RGB[1] = g; RGB[2] = b; fx.glow(P, rad, RGB, a); },
+    light: (x, y, z, r, g, b, i, rad) => R.light([x, y, z], rad, [r, g, b], Math.min(2, i)),
+    lift: (v, r, g, b) => fx.lift(v, [r, g, b]),
+    refresh() {
+      const c = R.camera || cam0, k = s.cam;
+      k.eye = c.eye; k.f = c.f; k.r = c.r; k.u = c.u;
+      k.fl = 540 / Math.tan(c.fov / 2);
+      k.tanX = (c.W / 2) / c.fl; k.tanY = (c.H / 2) / c.fl; k.near = c.near || .5;
+      return s;
+    },
+  };
+  return s;
+}
+
+export function createFx(game, opts) { return new FxSystem(game, opts); }
+export { FxSystem };

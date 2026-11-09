@@ -1,0 +1,224 @@
+/* The radar picture: every own radar that radiates paints its sweep. The main one (the selected radar, else
+   the surface-search radar nearest the view) drives the engine's sweep (the sea and the land light up behind a
+   lime edge and hold an afterglow); every radar also gets its dotted lime leading edge with a sparse curtain of
+   light above it (p2), the others a short dotted afterglow, and a faint ring at its reach.
+   Fixed-face radars (def faces: 4, the SPY-1 on the DDG and the CG) have no turning beam: the four arrays sit 45 deg
+   off the bow and quarters and hold their 90 deg sectors, fixed to the hull. The real array revisits its sector
+   far faster than a screen can show, so the picture is a legible stand-in (as the Aegis film): a soft steady fill
+   thinning with range, and each face's pencil beam dwelling and stepping across its sector and back (DWN dwells a
+   crossing, one crossing in FPS display seconds, each step eased: no strobing, the same at any frame rate; the four
+   faces a quarter cycle apart, so it never reads as a turning antenna), the paint behind the beam fading; on the
+   contacts in reach, track dwells: a brief lime brightening of the range cell, about once a second each.
+   The display clock is the sea's (game.seaT: real time, x2 at most, stopped when paused), so time compression
+   does not turn it into a flicker. The engine sweep's faces mode paints the same beams on the sea and the land.
+   All of it (engine sweep, beams, dwells) can be hidden: Shift+V, the radarSweep setting. */
+import { LIME, WH, TAU, sat, clamp, ss, hsh, wrap2 } from './core.js';
+import { radarWorks } from '../../sim/sensors.js';
+import { lineW } from './orb.js';
+import { getSettings, setSetting, onSettings } from '../../data/settings.js';
+
+const FPS = 3.2;                    // display seconds for a face's beam to cross its 90 deg sector
+const DWN = 16;                     // dwells a crossing (5.6 deg steps)
+const GLIDE = .45;                  // share of a dwell spent easing to the next (engine/shaders.js sweepAt: .55 / .45)
+const TRK_P = 1.1, TRK_L = .45;     // track dwell: period and glow length (display s)
+/* dwells elapsed at display time t (the engine sweep's uSweep2.z) */
+export const faceDwell = t => t / FPS * DWN;
+/* face fi's beam place in its sector (0..1) at display time t: dwell, an eased step to the next, out and back, the
+   faces a quarter cycle apart (the same function as the engine's faces sweep) */
+export function facePlace(t, fi) {
+  let q = faceDwell(t) + fi * .5 * DWN;
+  q -= Math.floor(q / (2 * DWN)) * 2 * DWN;
+  const i = Math.floor(q), f = q - i;
+  const g = f < 1 - GLIDE ? 0 : (f - (1 - GLIDE)) / GLIDE;
+  const d = (i + g * g * (3 - 2 * g)) / DWN;
+  return d <= 1 ? d : 2 - d;
+}
+
+export function createRadar(S) {
+  const { game } = S, sim = game.sim, R = game.R, map = game.map;
+  const list = [];                  // pooled { u, x, y, z, brg, w, range, surf, air, main }
+  const pool = [];
+  let lastSweep = false;
+  const sweep = { origin: [0, 0], bearing: 0, amp: .85, afterglow: 1.3, range: 60000, edge: .03, faces: false, dwells: DWN, dwell: 0 };
+  let shown = getSettings().radarSweep !== false;
+  onSettings(s => { shown = s.radarSweep !== false; });
+  /* Shift+V: hide / show every radar sweep painted on the world (saved with the settings) */
+  function toggleShown() {
+    shown = !shown;
+    setSetting('radarSweep', shown);
+    if (game.bus) game.bus.emit('toast', { text: shown ? 'RADAR SWEEPS ON' : 'RADAR SWEEPS OFF' });
+  }
+
+  /* the world bearing of a radar's beam at time t (the sim's antenna: hull heading + antenna angle) */
+  function beamAt(u, t, hdg) { return hdg + u.antA + u.antW * (t - u.antT); }
+
+  function collect() {
+    list.length = 0;
+    const side = game.side, t = game.t;
+    for (const u of sim.alive(side)) {
+      const Rd = u.def.sensors && u.def.sensors.radar;
+      if (!Rd || !radarWorks(u)) continue;
+      let o = pool[list.length];
+      if (!o) { o = { u: null, x: 0, y: 0, z: 0, brg: 0, w: 0, range: 0, surf: 0, air: 0, main: false, ph: 0, d: 0, faces: 0, hdg: 0 }; pool[list.length] = o; }
+      const p = game.unitPose(u);
+      o.u = u; o.x = p.pos[0]; o.y = p.pos[1]; o.z = p.pos[2];
+      o.ph = beamAt(u, t, p.hdg); o.brg = wrap2(o.ph); o.w = u.antW;
+      o.faces = Rd.faces || 0; o.hdg = p.hdg;
+      o.surf = Rd.surf || 0; o.air = Rd.air || 0; o.range = o.surf || o.air; o.main = false;
+      list.push(o);
+    }
+    return list;
+  }
+  /* the radar the engine sweep follows */
+  function pickMain() {
+    if (!list.length) return null;
+    let best = null;
+    for (const o of list) if (game.selection.has(o.u.id)) { best = o; break; }
+    if (!best && S.scopeRadar) for (const o of list) if (o.u === S.scopeRadar) { best = o; break; }
+    if (!best) {
+      const tg = game.camera.target; let bd = 1e18;
+      for (const o of list) {
+        const d = (o.x - tg[0]) ** 2 + (o.z - tg[2]) ** 2 + (o.surf ? 0 : 1e12) + (o.u.def.domain === 'air' ? 4e12 : 0);
+        if (d < bd) { bd = d; best = o; }
+      }
+    }
+    best.main = true;
+    return best;
+  }
+
+  function draw3d() {
+    collect();
+    const main = pickMain();
+    S.mainRadar = main;
+    const td = game.seaT || 0;
+    if (main && !S.inspecting && shown) {
+      const fast = Math.abs(main.w) * (game.paused ? 0 : game.timeRate) > 9;
+      sweep.origin[0] = main.x; sweep.origin[1] = main.z; sweep.bearing = main.brg;
+      sweep.amp = .85 + .15 * S.scopeK; sweep.afterglow = fast ? 5 : 1.3 + .5 * S.scopeK; sweep.range = main.range; sweep.edge = .03;
+      sweep.faces = !!main.faces; sweep.dwells = DWN; sweep.dwell = faceDwell(td);
+      if (main.faces) { sweep.bearing = main.hdg; sweep.afterglow = 2.6 - .8 * S.scopeK; }
+      R.setSweep(sweep); lastSweep = true;
+    } else if (lastSweep) { R.setSweep(null); lastSweep = false; }
+    const fx = R.fx, V = S.V, T = R.terrain, scope = S.scopeK;
+    // the nearest radars to the view get the full beam (edge, curtain, afterglow), the next few a plain edge
+    const tg = game.camera.target;
+    for (const o of list) o.d = o.main ? -1 : (o.x - tg[0]) ** 2 + (o.z - tg[2]) ** 2;
+    if (list.length > 1) list.sort(byD);
+    let nb = 0;
+    for (const o of list) {
+      const air = o.u.def.domain === 'air';
+      if (air && o.u.type !== 'helo') continue;                 // fighters: an array, no turning beam
+      if (nb >= 6) break;
+      const full = nb < 2; nb++;
+      const dAng = Math.abs(o.w) * (game.paused ? 0 : game.timeRate) * Math.max(1 / 60, game.dtReal);
+      const blur = o.faces ? 1 : clamp(.35 / Math.max(1e-3, dAng), .22, 1);
+      const a = (o.main ? .7 : o.surf ? .85 : .5) * blur * (1 - .2 * scope);
+      if (!shown) { /* sweeps hidden: the reach ring only */ }
+      else if (o.faces) {
+        // four fixed faces: each face's beam at its place in its sector, no afterglow fan
+        for (let fi = 0; fi < 4; fi++) {
+          const b = faceBeam(o.hdg, fi, td);
+          if (S.orb) { const b0 = o.brg; o.brg = wrap2(b); beamW(o, a * .7, false, false); o.brg = b0; }
+          else beam(fx, V, T, o, wrap2(b), a * .6, false);
+        }
+        if (full && !air) trackDwells(o, td, a);
+      } else if (S.orb) beamW(o, a, o.main, full);
+      else {
+        beam(fx, V, T, o, o.brg, a, full);
+        if (!o.main && full) for (let k = 1; k <= 3; k++) beam(fx, V, T, o, o.brg - k * .045, a * .32 * Math.exp(-k * .6), false);
+      }
+      // reach ring (only once the view is wide enough to show it as a ring, or for the selected radar)
+      const sel = game.selection.has(o.u.id);
+      const ra = (sel ? 1 : o.surf ? ss(o.range * .06, o.range * .25, game.camera.dist) : 0) * ss(.1, .35, game.camera.pitch) * (1 - scope);
+      if (ra > .02) S.ring(o.x, 0, o.z, o.range, S.dotOpt(LIME, (o.main ? .34 : .2) * ra, 6, 1, 'over', T, 3));
+    }
+  }
+  const byD = (a, b) => a.d - b.d;
+  /* face fi's beam bearing at display time td (facePlace; the engine's faces sweep draws the same) */
+  function faceBeam(hdg, fi, td) { return hdg + (fi + facePlace(td, fi)) * Math.PI / 2; }
+  /* track dwells: each contact in reach gets a pencil beam of its own about once a second (phase by its id): its
+     range cell brightens lime for a moment (a short arc across the bearing and a soft glow) */
+  const DW = [0, 0, 0];
+  function trackDwells(o, td, a) {
+    const C = S.contacts;
+    if (!C || !C.vis) return;
+    const r2 = o.range * o.range;
+    for (const cv of C.vis.values()) {
+      if (cv.state === 'lost' || cv.dom === 'sub') continue;
+      const dx = cv.ctr[0] - o.x, dz = cv.ctr[2] - o.z, rr = dx * dx + dz * dz;
+      if (rr > r2 || rr < 400 * 400) continue;
+      const since = td + hsh(cv.id, 37) * TRK_P, ph = since - Math.floor(since / TRK_P) * TRK_P;
+      if (ph > TRK_L) continue;
+      if (!S.V.vis(cv.ctr[0], cv.ctr[1], cv.ctr[2], cv.L * 3)) continue;
+      // the cell: at least ~250 m across the bearing (a pencil beam's width out there), at the contact's height
+      const k = Math.exp(-ph * 7) * sat(ph * 40), r = Math.sqrt(rr), b = Math.atan2(dx, dz);
+      const hw = Math.min(.02, Math.max(cv.L * 1.4, 120) / r), air = cv.dom === 'air';
+      const al = a * k * (cv.state === 'contact' ? 1 : .8);
+      S.arc(o.x, air ? cv.ctr[1] : 0, o.z, r, b - hw, b + hw, S.dotOpt(LIME, al, 3, air ? 1 : 2, 'over', air ? null : R.terrain, 2));
+      DW[0] = cv.ctr[0]; DW[1] = Math.max(2, cv.ctr[1]); DW[2] = cv.ctr[2];
+      if (!S.orb) R.fx.glow(DW, 16, LIME, .3 * al);
+    }
+  }
+  const P = [0, 0, 0];
+  /* the Orbital style: the beam as the films' hairlines, the leading edge draped on the ground and fading out along
+     its reach, a fan of fainter lines behind it (the afterglow; the main radar's longer), no curtain */
+  const EO = { rgb: WH, a: 1, step: 3, size: 2, drape: null, lift: 1.5 }, LO = { rgb: WH, a: 1, step: 3, size: 1, drape: null, lift: 0 };
+  function beamW(o, a, main, full) {
+    const W = S.W, V = S.V, range = o.range;
+    if (!R.wire) return;
+    const sb = Math.sin(o.brg), cb = Math.cos(o.brg);
+    if (!V.vis(o.x + sb * range / 2, 0, o.z + cb * range / 2, range / 2 + 2000)) return;
+    const a1 = Math.min(1, a * 1.15);
+    EO.drape = R.terrain; EO.a = t => a1 * (1 - .55 * t);
+    lineW(W, V, o.x, 0, o.z, o.x + sb * range, 0, o.z + cb * range, EO);
+    const n = main ? 14 : full ? 4 : 0, ag = main ? .9 : .16;
+    for (let i = 1; i <= n; i++) {
+      const db = i * ag / n, b = o.brg - db, al = a * (main ? .2 : .3) * Math.exp(-3.2 * db / ag);
+      if (al < .01) continue;
+      LO.a = al;
+      lineW(W, V, o.x, 1.5, o.z, o.x + Math.sin(b) * range, 1.5, o.z + Math.cos(b) * range, LO);
+    }
+  }
+  /* the leading edge (and its curtain) along bearing b */
+  function beam(fx, V, T, o, b, a, curtain) {
+    const sb = Math.sin(b), cb = Math.cos(b), range = o.range;
+    const e = V.e, f = V.f;
+    // cull: the beam's midpoint sphere
+    if (!V.vis(o.x + sb * range / 2, 0, o.z + cb * range / 2, range / 2)) return;
+    let r = 30, n = 0, it = 0;
+    const tx = V.W * .6 / V.fl, ty = V.H * .6 / V.fl;
+    while (r < range && n < 1200 && it++ < 6000) {
+      const x = o.x + sb * r, z = o.z + cb * r;
+      const dx = x - e[0], dz = z - e[2], dy0 = -e[1];
+      const zc0 = dx * f[0] + dy0 * f[1] + dz * f[2];
+      if (zc0 <= V.near * 6) { r += Math.max(8, (V.near * 6 - zc0) * .5); continue; }
+      const xc = dx * V.r[0] + dy0 * V.r[1] + dz * V.r[2], yc = dx * V.u[0] + dy0 * V.u[1] + dz * V.u[2];
+      const off = Math.max(Math.abs(xc) - zc0 * tx, Math.abs(yc) - zc0 * ty - 600);
+      if (off > 0) { r += Math.max(8, off * .5); continue; }
+      const y = Math.max(0, zc0 < 3000 ? T.heightAt(x, z) : map.h(x, z)) + 1.5;
+      const zc = zc0 + (y) * f[1];
+      const ds = Math.max(4, 3.2 * zc / V.fl);
+      const fa = a * (1 - .45 * r / range);
+      fx.dotXYZ(x, y, z, curtain ? 2 : 1, LIME[0], LIME[1], LIME[2], fa, 'over');
+      if (curtain && (n & 1) === 0) { P[0] = x; P[1] = y; P[2] = z; fx.glow(P, 7, LIME, .03 * fa); }
+      n++;
+      r += ds;
+    }
+    if (!curtain) return;
+    // the beam's vertical coverage as a thin sheet that thins out upward (fixed radial grid: no shimmer)
+    const h0 = range * .0022, cA = a * .8;
+    let k = 0;
+    for (let rr = range * .01; rr < range; rr += range * .002 + rr * .005, k++) {
+      const x = o.x + sb * rr, z = o.z + cb * rr, g = Math.max(0, map.h(x, z));
+      const hk = h0 * Math.pow(rr / (range * .156), .6);
+      for (let j = 1; j <= 5; j++) {
+        if (hsh(k, j + (o.u.id << 4)) > .55 - j * .06) continue;
+        const y = g + j * hk;
+        const zc = (x - e[0]) * f[0] + (y - e[1]) * f[1] + (z - e[2]) * f[2];
+        if (zc < V.near) continue;
+        fx.dotXYZ(x, y, z, 1, LIME[0], LIME[1], LIME[2], cA * (1 - j / 6.5) * (1 - .5 * rr / range), 'over');
+      }
+    }
+  }
+  return { list, draw3d, beamAt, faceBeam, collect, pickMain, toggleShown, get shown() { return shown; } };
+}

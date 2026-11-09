@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>ONIKS · perf</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="styles/game.css">
+<style>
+  /* the stress suite over every map (src/perf.js): each job loads play.html in a 1920 x 1080 frame and runs its
+     scenarios there; the table fills in on the right. Open at 1920 x 1080, device pixel ratio 1, nothing else busy.
+     ?maps=all (default) | id,id   ?only=battle,jumps (the first map's scenarios)   ?scale=.5 (fewer frames)
+     ?debrief=0 (skip the Debrief film; it needs a match record in localStorage 'oniks.lastRecord') */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: #fff; font-family: var(--mono); }
+  #frame { position: fixed; left: 0; top: 0; width: 1920px; height: 1080px; border: 0; }
+  #out { position: fixed; right: 16px; top: 16px; bottom: 16px; width: 900px; overflow: auto; padding: 14px 16px; background: rgba(11,12,10,.9);
+    font: 400 11px/1.55 var(--mono); letter-spacing: .02em; color: var(--dim); white-space: pre; font-variant-numeric: tabular-nums; }
+  #out b { font-weight: 400; color: #fff; }
+  #out .bad { color: var(--coral); }
+  #out .ok { color: var(--lime); }
+</style></head>
+<body>
+<iframe id="frame"></iframe>
+<div id="out"></div>
+<script type="module">
+import { run, table, ORDER } from './src/perf.js';
+import { MAPS } from './src/world/maps.js';
+
+const Q = new URLSearchParams(location.search);
+const out = document.getElementById('out'), frame = document.getElementById('frame');
+const say = (s, cls) => { const d = document.createElement('div'); if (cls) d.className = cls; d.textContent = s; out.appendChild(d); out.scrollTop = 1e9; };
+const scale = +Q.get('scale') || 1;
+const ids = !Q.get('maps') || Q.get('maps') === 'all' ? MAPS.map(m => m.id) : Q.get('maps').split(',');
+const only = Q.get('only') ? Q.get('only').split(',') : ORDER.filter(k => k !== 'debrief');
+
+/* the jobs: the first map gets every scenario, the others the three heights; then the Debrief film */
+const jobs = ids.map((id, i) => ({ url: `play.html?mode=sandbox&map=${id}&intro=0&seed=1337`, only: i ? ['heights'] : only, name: id }));
+if (Q.get('debrief') !== '0') {
+  try {
+    const rec = JSON.parse(localStorage.getItem('oniks.lastRecord') || 'null');
+    if (rec && rec.setup) { const { urlOf } = await import('./src/game/record.js'); jobs.push({ url: `play.html?${urlOf(rec)}&debrief=last`, only: ['debrief'], name: 'debrief' }); }
+    else say('no match record: the Debrief film is skipped (finish a Combat match first)');
+  } catch (e) { say('debrief: ' + e.message); }
+}
+
+/* wait without timers (a background tab holds them to one a second) */
+const ch = new MessageChannel(); let wake = null; ch.port1.onmessage = () => { const w = wake; wake = null; if (w) w(); };
+const tick = () => new Promise(r => { wake = r; ch.port2.postMessage(0); });
+async function until(f, ms) { const t0 = performance.now(); while (!f()) { if (performance.now() - t0 > ms) return false; await tick(); await new Promise(r => setTimeout(r, 30)); } return true; }
+
+const all = [], env = [];
+say(`ONIKS perf · ${jobs.length} jobs · ${innerWidth}x${innerHeight} @ ${devicePixelRatio} · scale ${scale}`);
+for (const job of jobs) {
+  say(`\n${job.name}: loading ${job.url}`);
+  frame.src = job.url;
+  const w = () => frame.contentWindow;
+  // (the frame still shows the last job's page for a moment: wait for this job's document)
+  const ok = await until(() => { try { if (!w().location.href.endsWith(job.url)) return false; const O = w().ONIKS; return O && O.game && (!job.only.includes('debrief') || (O.game.debrief && O.game.debrief.F)); } catch (e) { return false; } }, 90000);
+  if (!ok) { say(`${job.name}: did not load`, 'bad'); continue; }
+  await until(() => false, 1500);             // the loading screen's fade and the first samples
+  try {
+    const r = await run(w(), { only: job.only, scale, log: false });
+    env.push(r.env);
+    for (const row of r.rows) { row.map = job.name; all.push(row); }
+    say(table(r.rows));
+  } catch (e) { say(`${job.name}: ${e.stack || e}`, 'bad'); }
+}
+frame.src = 'about:blank';
+const over = all.filter(r => !r.error && (r.p99 > 16.7 || r.max > 16.7 || r.avg > 8));
+say(`\nALL · ${all.length} rows · ${over.length} over (p99 or max > 16.7 ms, or avg > 8 ms)`, over.length ? 'bad' : 'ok');
+say(table(all));
+window.PERF = { env, rows: all };
+console.log('PERF ' + JSON.stringify(window.PERF));
+</script>
+</body></html>

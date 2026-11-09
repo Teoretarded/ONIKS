@@ -6,6 +6,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["tools/serve.py", "8770"],
       "port": 8770
+    },
+    {
+      "name": "game",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["tools/serve_game.py", "8771"],
+      "port": 8771
     }
   ]
 }

@@ -1,0 +1,168 @@
+\documentclass[11pt]{article}
+\usepackage[a4paper,margin=2.2cm]{geometry}
+\usepackage{amsmath}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+\newcommand{\un}[1]{\,\mathrm{#1}}
+
+\begin{document}
+
+{\Large\bfseries the duel, the maths behind what doesnt work}
+
+\vspace{4pt}
+numbers are the films own unless i say its a guess
+
+\section*{1. destroyer gun, energy}
+
+$m$ is what moves, $v$ is muzzle speed. rod is 19.4 kg, sabot and armature are a guess at about 10 kg
+
+\begin{align*}
+KE_{\text{rod}} &= \tfrac12 m v^2 = 0.5 \times 19.4 \times 7800^2 = 590\un{MJ}\\
+KE_{\text{all}} &= 0.5 \times 30 \times 7800^2 = 913\un{MJ}
+\end{align*}
+
+railguns get about 30 to 40\% of the stored energy into the round ($\eta$)
+
+\begin{align*}
+E_{\text{stored}} &= KE/\eta = 913/0.4 \text{ to } 913/0.3 = 2280 \text{ to } 3040\un{MJ}\\
+\text{film bank} &= 80 \times 2\un{MJ} = 160\un{MJ}\\
+2280/160 &= 14\times \text{ short}, \qquad 3040/160 = 19\times \text{ short}
+\end{align*}
+
+even at 100\% its $913/160 = 5.7\times$ short. the real navy gun was about 32 MJ
+
+\section*{2. acceleration}
+
+$L$ is bore travel, 11.61 m
+
+\begin{align*}
+a &= \frac{v^2}{2L} = \frac{7800^2}{2 \times 11.61} = 2.62\times10^{6}\un{m/s^2} = 267{,}000\,g\\
+t &= \frac{2L}{v} = \frac{23.22}{7800} = 3\un{ms}
+\end{align*}
+
+a tank round is about 30,000 g so this is about 9 times that
+
+\section*{3. rod gets crushed}
+
+the sabot only holds the middle, the nose sticks out 0.52 m and the tail 0.38 m. $\rho$ is tungsten, 19300 kg/m$^3$
+
+\begin{align*}
+\sigma &= \rho L a\\
+\sigma_{\text{nose}} &= 19300 \times 0.52 \times 2.62\times10^6 = 26.3\un{GPa}\ \text{(squashed)}\\
+\sigma_{\text{tail}} &= 19300 \times 0.38 \times 2.62\times10^6 = 19.2\un{GPa}\ \text{(pulled)}
+\end{align*}
+
+tungsten alloy gives at 1 to 1.5 GPa so thats 18 to 26 times over
+
+the lattice sabot has the armature pushing its back face with the rod and itself on it, about 27 kg
+
+\begin{align*}
+p = \frac{F}{A} = \frac{27 \times 2.62\times10^6}{\pi \times 0.14^2} = \frac{70.7\times10^6}{0.0616} = 1.15\un{GPa}
+\end{align*}
+
+a big metal lattice holds maybe 50 to 100 MPa, so 11 to 23 times over
+
+\section*{4. field and current}
+
+bore is 0.28 by 0.28 m, $\mu_0 = 1.2566\times10^{-6}$
+
+\begin{align*}
+p &= \frac{F}{A} = \frac{30 \times 2.62\times10^6}{0.0784} = 1.0\un{GPa}\\
+B &= \sqrt{2\mu_0 p} = \sqrt{2 \times 1.2566\times10^{-6} \times 10^9} = 50\un{T}
+\end{align*}
+
+strongest steady magnet ever made is about 45 T. $L'$ is rail inductance per metre, about $0.45\un{\mu H/m}$, $w$ is bore width, 10 T from the coils
+
+\begin{align*}
+\text{rails only: } I &= \sqrt{2F/L'} = \sqrt{\frac{2\times78.6\times10^6}{0.45\times10^{-6}}} = 18.7\un{MA}\\
+\text{with coils: } F &= \tfrac12 L' I^2 + IBw \;\Rightarrow\; 78.6\times10^6 = 0.225\times10^{-6} I^2 + 2.8 I\\
+I &= \frac{-2.8 + \sqrt{2.8^2 + 4 \times 0.225\times10^{-6} \times 78.6\times10^6}}{2 \times 0.225\times10^{-6}} = 13.5\un{MA}
+\end{align*}
+
+so the coils do help, the problem is what the rails do to them. coil at $x = 0.51$, rails at $y = \pm0.19$
+
+\begin{align*}
+d &= \sqrt{0.51^2 + 0.19^2} = 0.544\un{m}\\
+B_{\text{coil}} &= 2 \times \frac{2\times10^{-7}\, I}{d} \times \frac{0.19}{0.544} = 4.96 \times 0.698 = 3.5\un{T}\\
+\frac{dB}{dt} &= \frac{3.5}{0.003} = 1150\un{T/s}
+\end{align*}
+
+fastest superconducting magnets ramp about 4 T/s, this is about 300 times that so they quench every shot
+
+\section*{5. rails melt}
+
+two copper rails, 0.26 wide, 0.10 thick, 12.7 m long. $c$ for copper is 385 J/kg K. lost energy is about $2280 - 913 = 1370$ MJ, say half goes in the rails
+
+\begin{align*}
+m &= 0.26 \times 0.10 \times 12.7 \times 2 \times 8960 = 5917\un{kg}\\
+\Delta T &= \frac{Q}{mc} = \frac{680\times10^6}{5917 \times 385} = 298\un{K}
+\end{align*}
+
+fine on average, but a 3 ms pulse only runs in a thin skin. $\rho_e$ is copper resistivity $1.7\times10^{-8}$
+
+\begin{align*}
+\delta &= \sqrt{\rho_e t/\mu_0} = \sqrt{\frac{1.7\times10^{-8}\times0.003}{1.2566\times10^{-6}}} = 6.4\un{mm}\\
+m_{\text{skin}} &= 0.26 \times 0.0064 \times 12.7 \times 2 \times 8960 = 379\un{kg}\\
+E_{\text{melt}} &= 379 \times \big(385 \times 1058 + 205{,}000\big) = 232\un{MJ}
+\end{align*}
+
+$232/680 = 0.34$ so a third of the heat melts the whole inner face. solid armatures also start arcing around 2.5 km/s and $7800/2500 = 3.1\times$ past that
+
+\section*{6. superconducting inductors in the modules}
+
+superconducting only saves resistive loss. copper inductor resistance is a guess, 0.1 m$\Omega$
+
+\begin{align*}
+I_{\text{module}} &= 18.7\times10^6/80 = 234\un{kA}\\
+\text{loss} &= I^2 R t = 234{,}000^2 \times 0.0001 \times 0.003 = 16.4\un{kJ}\\
+16.4\un{kJ}/2\un{MJ} &= 0.8\%
+\end{align*}
+
+saves under 1\% and quenches like the coils
+
+\section*{7. orbital ship capacitors}
+
+pulse capacitors hold about 1 to 2 kJ/kg
+
+\begin{align*}
+m = \frac{6\times10^{11}}{2000} \text{ to } \frac{6\times10^{11}}{1000} = 300{,}000 \text{ to } 600{,}000\un{t}
+\end{align*}
+
+thats 3 to 6 aircraft carriers. a 20 T magnet store would be
+
+\begin{align*}
+u = \frac{B^2}{2\mu_0} = \frac{400}{2.513\times10^{-6}} = 159\un{MJ/m^3}, \qquad V = \frac{6\times10^{11}}{1.59\times10^8} = 3770\un{m^3}
+\end{align*}
+
+\section*{8. orbital aiming}
+
+the rod keeps the ships orbital speed. $\mu = 3.986\times10^{14}$, $R = 6371$ km, $r = 6751$ km
+
+\begin{align*}
+v_{\text{orbit}} &= \sqrt{\mu/r} = \sqrt{3.986\times10^{14}/6.751\times10^6} = 7684\un{m/s}
+\end{align*}
+
+the gun adds 5000 so even fired straight back its still doing 2684 forward
+
+\begin{align*}
+v_{\text{imp}}^2 &= v_0^2 + 2\mu\left(\tfrac1R - \tfrac1r\right), \qquad 2\mu\left(\tfrac1R - \tfrac1r\right) = 7.04\times10^6\\
+h &= r\, v_{\text{horiz}}, \qquad v_h = h/R, \qquad \cos\gamma = v_h / v_{\text{imp}}
+\end{align*}
+
+$h$ is angular momentum per kg (stays the same), $\gamma$ is the angle down from the horizon at impact
+
+\begin{align*}
+\text{straight down: } v_0^2 &= 7684^2 + 5000^2 = 8.40\times10^7 & v_{\text{imp}} &= 9544, & \cos\gamma &= 8142/9544, & \gamma &= 31^\circ\\
+\text{30}^\circ\text{ below back: } v_0^2 &= 3354^2 + 2500^2 = 1.75\times10^7 & v_{\text{imp}} &= 4954, & \cos\gamma &= 3554/4954, & \gamma &= 44^\circ\\
+\text{straight back: } v_0^2 &= 2684^2 = 7.20\times10^6 & v_{\text{imp}} &= 3775, & \cos\gamma &= 2844/3775, & \gamma &= 41^\circ
+\end{align*}
+
+it cant come in steeper than about $45^\circ$, the film has it coming down steep in a straight line. the films formula leaves out the 7684
+
+\begin{align*}
+v_{\text{film}} = \sqrt{5000^2 + 2 \times 9.81 \times 380{,}000} \times 0.86 = 5697 \times 0.86 = 4900\un{m/s}
+\end{align*}
+
+close to 4954 by luck. a sim of the real fall lands it 400 to 800 km ahead of the point under the ship so it has to fire early and point mostly backwards, not at the destroyer
+
+\end{document}

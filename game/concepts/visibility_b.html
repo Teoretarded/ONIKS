@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>ONIKS · Contrast</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="../../reference/menus/common/fonts/fonts.css">
+<link rel="stylesheet" href="concepts.css">
+</head>
+<body>
+<div id="view">
+  <canvas id="gl"></canvas>
+  <canvas id="ov"></canvas>
+  <div class="t" id="look"></div>
+  <div class="read" id="read"></div>
+  <div class="keys"><span><b>N</b><b>M</b><b>F</b>near mid far</span><span><b>J</b>jet</span><span><b>T</b>follow</span><span><b>P</b>pause</span><span><b>[</b><b>]</b>time</span><span><b>S</b>still</span><span><b>H</b>hide</span></div>
+</div>
+<script src="../../reference/menus/common/m3.js"></script>
+<script src="../../reference/menus/common/geo.js"></script>
+<script src="../../reference/films/common/hd_land.js"></script>
+<script src="../../reference/films/common/hd_sea_air.js"></script>
+<script type="module">import { boot } from './vis.js'; boot('b');</script>
+</body></html>
