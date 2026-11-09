@@ -751,7 +751,8 @@ function addFonts() {
   if (document.getElementById('oniks-orbital-fonts')) return;
   const l = document.createElement('link');
   l.id = 'oniks-orbital-fonts'; l.rel = 'stylesheet';
-  l.href = 'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=DM+Mono:wght@400;500&display=swap';
+  // (the fonts ship with the game: reference/menus/common/fonts, no network)
+  l.href = new URL('../../../reference/menus/common/fonts/fonts.css', import.meta.url).href;
   document.head.appendChild(l);
   if (document.fonts && document.fonts.load) { document.fonts.load('12.5px "DM Mono"').catch(() => {}); document.fonts.load('13px Inter').catch(() => {}); }
 }

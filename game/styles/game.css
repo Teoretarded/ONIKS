@@ -1,6 +1,6 @@
 /* ONIKS: Point Cloud tokens and the shared UI classes (menus, setup screens, in-game HUD).
    Same look as reference/menus/common/pc.css. Fonts, in every page's <head>:
-   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=block">
+   <link rel="stylesheet" href="../reference/menus/common/fonts/fonts.css">   (local, no network; relative to the page)
 
    Classes
      .kick            lime square + mono caption            <div class="kick"><i></i>01 · Sandbox</div>

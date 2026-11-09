@@ -181,13 +181,14 @@
     } catch (e) { console.error(e); document.title = 'CAPTURE FAILED ' + e; }
   }
   async function embedFonts() {
-    const urls = [...document.querySelectorAll('link[href*="fonts.googleapis.com"]')].map(l => l.href);
+    // (the local fonts.css, menus/common/fonts: its url()s are relative to it, made absolute here)
+    const urls = [...document.querySelectorAll('link[href*="fonts.css"]')].map(l => l.href);
     let css = '';
-    for (const u of urls) css += await (await fetch(u)).text() + '\n';
-    const found = [...new Set([...css.matchAll(/url\((https:[^)]+)\)/g)].map(m => m[1]))];
+    for (const u of urls) css += (await (await fetch(u)).text()).replace(/url\(([^)'"]+)\)/g, (m, f) => `url(${new URL(f, u).href})`) + '\n';
+    const found = [...new Set([...css.matchAll(/url\((https?:[^)]+)\)/g)].map(m => m[1]))];
     const map = {};
     await Promise.all(found.map(async u => { const b = await (await fetch(u)).blob(); map[u] = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(b); }); }));
-    return css.replace(/url\((https:[^)]+)\)/g, (m, u) => `url(${map[u]})`);
+    return css.replace(/url\((https?:[^)]+)\)/g, (m, u) => `url(${map[u]})`);
   }
 
   /* ---------- version flip + label ---------- */
